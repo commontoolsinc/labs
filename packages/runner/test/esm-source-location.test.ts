@@ -42,6 +42,14 @@ interface HandlerIdentityProbe {
   verifiedLoadId: string | undefined;
   isVerifiedSourceInLoad: boolean | undefined;
   kind: string | undefined;
+  /**
+   * The scheduler's content-addressed implementation hash for this handler,
+   * derived from `fn.src` via `harness.implementationHashForSource`. This is the
+   * SECOND consumer of ESM source-location fidelity (the first is CFC
+   * verified-source above): the scheduler keys reload-stable action identity on
+   * it, so it must resolve flag-on for the loader to be default-on safe.
+   */
+  implHash: string | undefined;
 }
 
 function probeHandlerIdentity(
@@ -82,7 +90,16 @@ function probeHandlerIdentity(
     harness: runtime.harness,
     implementation: fn as never,
   });
-  return { src, verifiedLoadId, isVerifiedSourceInLoad, kind: identity?.kind };
+  const implHash = typeof src === "string"
+    ? runtime.harness.implementationHashForSource?.(src)
+    : undefined;
+  return {
+    src,
+    verifiedLoadId,
+    isVerifiedSourceInLoad,
+    kind: identity?.kind,
+    implHash,
+  };
 }
 
 describe("ESM loader: verified-source location resolution", () => {
@@ -118,6 +135,11 @@ describe("ESM loader: verified-source location resolution", () => {
     expect(r.verifiedLoadId).toBeDefined();
     expect(r.isVerifiedSourceInLoad).toBe(true);
     expect(r.kind).toBe("verified");
+    // The scheduler's content-addressed implementation hash also resolves
+    // flag-on: `fn.src` reduces to the pure per-module code identity
+    // `cf:module/<hash>:line:col` (no `/path` segment). This is the second
+    // default-on prerequisite — without it, reload-stable action identity breaks.
+    expect(r.implHash).toMatch(/^cf:module\/[^/]+:\d+:\d+$/);
   });
 
   it("matches AMD-path verified-source resolution (parity)", async () => {
@@ -129,5 +151,33 @@ describe("ESM loader: verified-source location resolution", () => {
     expect(r.src).toMatch(/^cf:module\//);
     expect(r.isVerifiedSourceInLoad).toBe(true);
     expect(r.kind).toBe("verified");
+    expect(r.implHash).toMatch(/^cf:module\/[^/]+:\d+:\d+$/);
+  });
+
+  it("resolves the same source-LOCATION suffix flag-on and flag-off", async () => {
+    // The scheduler's implementation hash has two parts: the per-module code
+    // identity (`cf:module/<hash>`) and the source-location suffix
+    // (`:line:col`). This PR is about the LATTER — source-location fidelity — and
+    // it must resolve to the SAME authored coordinate under either loader.
+    //
+    // The per-module `<hash>` deliberately DIFFERS across loaders (ESM uses the
+    // prefix-free per-module `computeModuleIdentities` hash; AMD uses its legacy
+    // whole-program scheme), so a default-on flip re-keys action identity once.
+    // That is a module-identity / state-migration concern tracked under Phase 5
+    // (AMD removal), NOT a source-location regression — assert only the suffix.
+    const suffixOf = (h: string | undefined) => h?.match(/(:\d+:\d+)$/)?.[1];
+
+    makeRuntime(true);
+    const esmCompiled = await runtime.patternManager.compilePattern(program);
+    const esmHash = probeHandlerIdentity(runtime, esmCompiled).implHash;
+    await runtime.dispose();
+    await storageManager.close();
+
+    makeRuntime(false);
+    const amdCompiled = await runtime.patternManager.compilePattern(program);
+    const amdHash = probeHandlerIdentity(runtime, amdCompiled).implHash;
+
+    expect(suffixOf(esmHash)).toMatch(/^:\d+:\d+$/);
+    expect(suffixOf(esmHash)).toBe(suffixOf(amdHash));
   });
 });

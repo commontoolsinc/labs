@@ -424,14 +424,24 @@ export function findAllWriteRedirectCells<T>(
   baseCell: AnyCell<T>,
 ): NormalizedFullLink[] {
   const seen: NormalizedFullLink[] = [];
-  function find(binding: unknown, baseCell: AnyCell<T>): void {
+  // `baseCell` is only used for link resolution (runtime/tx/parseLink), which
+  // does not depend on the cell's value type, so accept any cell. This lets the
+  // redirect-chain recursion re-base onto the resolved `linkCell` (a
+  // `Cell<unknown>`) rather than the original typed base.
+  function find(binding: unknown, baseCell: AnyCell<unknown>): void {
     if (isLegacyAlias(binding) && (binding.$alias.defer ?? 0) > 0) {
       return;
     } else if (isWriteRedirectLink(binding)) {
-      // If the binding is a write redirect, add the link to the seen list and
-      // recurse into the linked cell.
-      // TODO(@ubik2): Need to determine whether this baseCell can be the resultCell. If the binding's link is missing an id, this will
-      // turn into a link into the processCell, which I want to eliminate.
+      // Follow a *chain* of write redirects: record this redirect, then if its
+      // target value is ITSELF a write redirect, follow that too (one string of
+      // redirects). We stop as soon as the target is a non-redirect value — we
+      // do NOT recurse into it looking for further nested redirects.
+      //
+      // (Previously this recursed via `find(linkCell.getRaw(...))`, which walked
+      // the whole target value structurally — the transitive closure across
+      // documents — and was the dominant reload instantiation cost: resolving a
+      // cell + walking its entire value per link. Following only direct redirect
+      // chains keeps the cases that matter without the deep dive.)
       const link = parseLink(binding, baseCell);
       if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
       seen.push(link);
@@ -441,7 +451,11 @@ export function findAllWriteRedirectCells<T>(
         baseCell.tx,
       );
       if (!linkCell) throw new Error("Link cell not found");
-      find(linkCell.getRaw({ meta: ignoreReadForScheduling }), baseCell);
+      const target = linkCell.getRaw({ meta: ignoreReadForScheduling });
+      // Resolve the next redirect relative to `linkCell` (the cell the chained
+      // redirect lives in), not the original `baseCell`: a relative redirect in
+      // a cross-document target must resolve against its own document.
+      if (isWriteRedirectLink(target)) find(target, linkCell);
     } else if (isCellLink(binding)) {
       // Links that are not write redirects: Ignore them.
       return;

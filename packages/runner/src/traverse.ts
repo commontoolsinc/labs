@@ -77,6 +77,10 @@ import {
 import type { LastNode } from "./link-resolution.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 import { SigilLink } from "./sigil-types.ts";
+import {
+  recordTraverseInvocation,
+  wrapTxForTraverseCapture,
+} from "./traverse-recorder.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
@@ -758,7 +762,10 @@ export abstract class BaseObjectTraverser {
     protected context: TraversalContext = createDefaultTraversalContext(),
     public objectCreator: IObjectCreator<FabricValue> =
       new StandardObjectCreator(),
-  ) {}
+  ) {
+    // Identity passthrough unless CF_TRAVERSE_CAPTURE is recording a fixture.
+    this.tx = wrapTxForTraverseCapture(tx);
+  }
   protected dagMemo = new Map<string, Immutable<FabricValue>>();
   private coverageSelectorCache = new Map<string, SchemaPathSelector>();
   traverseDAGCalls = 0;
@@ -2151,6 +2158,14 @@ export class SchemaObjectTraverser<V extends FabricValue>
     doc: IMemorySpaceValueAttestation,
     link?: NormalizedFullLink,
   ): TraverseResult<Immutable<FabricValue>> {
+    // No-op unless CF_TRAVERSE_CAPTURE is recording a fixture.
+    recordTraverseInvocation(
+      doc,
+      this.selector,
+      link,
+      this.context,
+      this.sharedSchemaMemo,
+    );
     // Reset per-traverse stats (but NOT the shared memo)
     this.traverseWithSchemaCalls = 0;
     this.traversePointerCalls = 0;

@@ -1,31 +1,23 @@
 import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
 import {
-  DECONSTRUCT,
-  RECONSTRUCT,
+  CODEC,
+  type FabricCodec,
   type ReconstructionContext,
 } from "@/wire-common/interface.ts";
+import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import { FrozenMap } from "@/frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 
 /**
- * Wrapper for `Map` instances. Stub -- `[DECONSTRUCT]` and `[RECONSTRUCT]`
- * throw until `Map` support is fully implemented. Extra properties beyond the
- * wrapped collection are not supported on non-`Error` wrappers.
+ * Wrapper for `Map` instances. Stub -- the static `[CODEC]` (the source of
+ * truth) throws until `Map` support is fully implemented. Extra properties
+ * beyond the wrapped collection are not supported on non-`Error` wrappers.
  */
 export class FabricMap
   extends FabricNativeWrapper<Map<FabricValue, FabricValue>> {
   constructor(readonly map: Map<FabricValue, FabricValue>) {
     super();
-  }
-
-  /** @inheritDoc */
-  get wireTypeTag(): string {
-    return WIRE_TYPE_TAGS.Map;
-  }
-
-  [DECONSTRUCT](): FabricValue {
-    throw new Error("FabricMap: not yet implemented");
   }
 
   /**
@@ -69,10 +61,38 @@ export class FabricMap
     return new Map(this.map);
   }
 
-  static [RECONSTRUCT](
-    _state: FabricValue,
-    _context: ReconstructionContext,
-  ): FabricMap {
-    throw new Error("FabricMap: not yet implemented");
+  static #codec = Object.freeze(
+    new (class FabricMapCodec extends BaseFabricCodec {
+      constructor() {
+        super(WIRE_TYPE_TAGS.Map, FabricMap);
+      }
+
+      /**
+       * @inheritDoc
+       *
+       * Stub -- throws until `Map` support is implemented.
+       */
+      encode(_value: FabricMap): FabricValue {
+        throw new Error("FabricMap: not yet implemented");
+      }
+
+      /**
+       * @inheritDoc
+       *
+       * Stub -- throws until `Map` support is implemented.
+       */
+      decode(
+        _typeTag: string,
+        _state: FabricValue,
+        _context: ReconstructionContext,
+      ): FabricValue {
+        throw new Error("FabricMap: not yet implemented");
+      }
+    })(),
+  );
+
+  /** The codec for instances of this class. */
+  static get [CODEC](): FabricCodec {
+    return this.#codec;
   }
 }

@@ -50,6 +50,10 @@ const initializeRuntime = async () => {
 
     runtime = new Runtime({
       apiUrl: new URL(env.MEMORY_URL),
+      // Patterns running in this runtime (e.g. handlers doing `fetch`) target
+      // this toolshed's API base, not the hardcoded `localhost:<ports.toolshed>`
+      // default in builder/env.ts (wrong for any non-default port).
+      patternEnvironment: { apiUrl: new URL(env.API_URL) },
       storageManager: StorageManager.open({
         address: new URL("/api/storage/memory", env.MEMORY_URL),
         as: identity,

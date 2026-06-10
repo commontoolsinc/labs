@@ -183,3 +183,7 @@ export default pattern((state: State) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    handleClick,
+    __cfPattern_1
+});

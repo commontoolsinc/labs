@@ -7,7 +7,6 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
-import { DECONSTRUCT } from "@/wire-common/interface.ts";
 import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
 
 /**
@@ -29,10 +28,6 @@ class Probe extends BaseFabricInstance {
   }
 
   get wireTypeTag(): string {
-    return this.#tag;
-  }
-
-  [DECONSTRUCT](): FabricValue {
     return this.#tag;
   }
 

@@ -1,6 +1,9 @@
 import ts from "typescript";
 import { getPropertyNameText } from "@commonfabric/schema-generator/property-name";
-import { createRegisteredTypeLiteral } from "../ast/type-building.ts";
+import {
+  createRegisteredTypeLiteral,
+  typeToTypeNodeWithRegistry,
+} from "../ast/type-building.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 import { uniquePaths } from "../utils/path-serialization.ts";
 import {
@@ -769,10 +772,12 @@ function buildShrunkTypeNodeFromType(
     return undefined;
   }
   if (normalizedFullShapePaths.some((path) => path.length === 0)) {
-    const node = checker.typeToTypeNode(type, sourceFile, typeToNodeFlags) ??
-      factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-    typeRegistry?.set(node, type);
-    return node;
+    return typeToTypeNodeWithRegistry(
+      type,
+      { checker, factory, sourceFile },
+      typeRegistry,
+      typeToNodeFlags,
+    );
   }
 
   // Keep array-like roots as arrays. Narrowing `T[]` to `{ length: number }`
@@ -802,24 +807,32 @@ function buildShrunkTypeNodeFromType(
           typeRegistry,
           fullShapeItemPaths,
         ) ??
-          checker.typeToTypeNode(elementType, sourceFile, typeToNodeFlags) ??
-          factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+          typeToTypeNodeWithRegistry(
+            elementType,
+            { checker, factory, sourceFile },
+            typeRegistry,
+            typeToNodeFlags,
+          );
         const arrayNode = factory.createArrayTypeNode(elementNode);
         ensureTypeNodeRegistered(arrayNode, checker, typeRegistry);
         return arrayNode;
       }
     }
-    const node = checker.typeToTypeNode(type, sourceFile, typeToNodeFlags) ??
-      factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-    typeRegistry?.set(node, type);
-    return node;
+    return typeToTypeNodeWithRegistry(
+      type,
+      { checker, factory, sourceFile },
+      typeRegistry,
+      typeToNodeFlags,
+    );
   }
 
   if (normalized.some((path) => path.length === 0)) {
-    const node = checker.typeToTypeNode(type, sourceFile, typeToNodeFlags) ??
-      factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-    typeRegistry?.set(node, type);
-    return node;
+    return typeToTypeNodeWithRegistry(
+      type,
+      { checker, factory, sourceFile },
+      typeRegistry,
+      typeToNodeFlags,
+    );
   }
 
   // Strip nullish constituents from union types (e.g. `T | undefined`) so the
@@ -849,15 +862,14 @@ function buildShrunkTypeNodeFromType(
             constituent.flags &
             (ts.TypeFlags.Undefined | ts.TypeFlags.Null | ts.TypeFlags.Void)
           ) {
-            const node = checker.typeToTypeNode(
-              constituent,
-              sourceFile,
-              typeToNodeFlags,
+            nullishMembers.push(
+              typeToTypeNodeWithRegistry(
+                constituent,
+                { checker, factory, sourceFile },
+                typeRegistry,
+                typeToNodeFlags,
+              ),
             );
-            if (node) {
-              typeRegistry?.set(node, constituent);
-              nullishMembers.push(node);
-            }
           }
         }
       }
@@ -913,12 +925,12 @@ function buildShrunkTypeNodeFromType(
     // root-level primitive projections (e.g. `summary.length`) are still
     // handled by the recursive shrink above.
     if (!hasDirectAccess && isPrimitiveScalarLikeType(propType)) {
-      const propTypeNode = checker.typeToTypeNode(
+      const propTypeNode = typeToTypeNodeWithRegistry(
         propType,
-        sourceFile,
+        { checker, factory, sourceFile },
+        typeRegistry,
         typeToNodeFlags,
-      ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-      typeRegistry?.set(propTypeNode, propType);
+      );
       properties.push(
         factory.createPropertySignature(
           undefined,
@@ -953,11 +965,12 @@ function buildShrunkTypeNodeFromType(
     }
 
     const propTypeNode = shrunkChild ??
-      checker.typeToTypeNode(propType, sourceFile, typeToNodeFlags) ??
-      factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-    if (!shrunkChild) {
-      typeRegistry?.set(propTypeNode, propType);
-    }
+      typeToTypeNodeWithRegistry(
+        propType,
+        { checker, factory, sourceFile },
+        typeRegistry,
+        typeToNodeFlags,
+      );
 
     properties.push(
       factory.createPropertySignature(

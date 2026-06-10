@@ -1,5 +1,14 @@
+import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
+import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
+import {
+  CODEC,
+  type FabricCodec,
+  type ReconstructionContext,
+} from "@/wire-common/interface.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { isPlainObject } from "@commonfabric/utils/types";
 
 /** The only regex flavor currently representable as a native `RegExp`. */
 const DEFAULT_FLAVOR = "es2025";
@@ -82,11 +91,6 @@ export class FabricRegExp extends BaseFabricPrimitive {
     Object.freeze(this);
   }
 
-  /** @inheritDoc */
-  get wireTypeTag(): string {
-    return WIRE_TYPE_TAGS.RegExp;
-  }
-
   /** The pattern source text. */
   get source(): string {
     return this.#source;
@@ -115,6 +119,66 @@ export class FabricRegExp extends BaseFabricPrimitive {
       );
     }
     return new RegExp(this.#value);
+  }
+
+  //
+  // Static members
+  //
+
+  static #codec = Object.freeze(
+    new (class RegExpCodec extends BaseFabricCodec {
+      constructor() {
+        super(WIRE_TYPE_TAGS.RegExp, FabricRegExp);
+      }
+
+      /** @inheritDoc */
+      encode(value: FabricRegExp): FabricValue {
+        return {
+          source: value.#source,
+          flags: value.#flags,
+          flavor: value.#flavor,
+        };
+      }
+
+      /** @inheritDoc */
+      decode(
+        typeTag: string,
+        state: FabricValue,
+        _context: ReconstructionContext,
+      ): FabricValue {
+        if (!isPlainObject(state)) {
+          return new ProblematicValue(
+            typeTag,
+            state,
+            `RegExp: expected object state, got ${typeof state}`,
+          );
+        }
+        // Beyond requiring an object, this class does not enforce regex
+        // syntax as part of its wire participation: only the `es2025` flavor
+        // is validated (eagerly, by the constructor building a native
+        // `RegExp`); other flavors are stored faithfully and may carry
+        // arbitrary `source`/`flags`. So a malformed non-`es2025` wire object
+        // is accepted as-is rather than becoming a `ProblematicValue`.
+        const s = state as Record<string, unknown>;
+        const flavor = (s.flavor as string) ?? DEFAULT_FLAVOR;
+        const source = (s.source as string) ?? "";
+        const flags = (s.flags as string) ?? "";
+        try {
+          return new FabricRegExp(flavor, source, flags);
+        } catch (e) {
+          return new ProblematicValue(
+            typeTag,
+            state,
+            `RegExp: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+    })(),
+  );
+
+  /** The codec for instances of this class. */
+  static get [CODEC](): FabricCodec {
+    return this.#codec;
   }
 }
 

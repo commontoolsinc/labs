@@ -21,6 +21,7 @@ import {
   buildCaptureTypeElements,
   createRegisteredTypeLiteral,
   expressionToTypeNode,
+  typeToTypeNodeWithRegistry,
 } from "../../ast/type-building.ts";
 import { registerLiftAppliedCallType } from "../../ast/type-inference.ts";
 import type { TransformationContext } from "../../core/mod.ts";
@@ -347,22 +348,18 @@ function buildResultTypeNode(
     return factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
   }
 
-  // Convert to TypeNode, preserving Cell<T> if present
-  const resultTypeNode = checker.typeToTypeNode(
+  // Convert to TypeNode via the canonical chokepoint: it normalizes
+  // commonfabric refs to the always-resolvable `__cfHelpers.X` form (so the
+  // emitted result type arg doesn't print `import("commonfabric").X`),
+  // registers the Type for the SchemaGeneratorTransformer, and falls back to
+  // `unknown` if conversion fails.
+  return typeToTypeNodeWithRegistry(
     resultType,
-    context.sourceFile,
-    ts.NodeBuilderFlags.NoTruncation |
-      ts.NodeBuilderFlags.UseStructuralFallback,
+    {
+      checker,
+      factory,
+      sourceFile: context.sourceFile,
+    },
+    context.options.state?.typeRegistry,
   );
-
-  if (resultTypeNode) {
-    // Register the type in typeRegistry for SchemaGeneratorTransformer
-    if (context.options.state?.typeRegistry) {
-      context.options.state?.typeRegistry.set(resultTypeNode, resultType);
-    }
-    return resultTypeNode;
-  }
-
-  // Fallback to unknown if we can't infer
-  return factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 }

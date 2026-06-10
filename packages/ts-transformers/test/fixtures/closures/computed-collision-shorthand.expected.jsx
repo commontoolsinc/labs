@@ -13,7 +13,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     multiplier: __cfHelpers.ReadonlyCell<number>;
-}, { value: number; data: { multiplier: import("commonfabric").Cell<number>; }; }>({
+}, { value: number; data: { multiplier: __cfHelpers.Cell<number>; }; }>({
     type: "object",
     properties: {
         multiplier: {
@@ -77,3 +77,6 @@ export default pattern(() => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

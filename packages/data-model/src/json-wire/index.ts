@@ -14,23 +14,14 @@ export {
 export { JsonEncodingContext } from "./JsonEncodingContext.ts";
 
 // Shared wire-format vocabulary.
-export type {
-  JsonWireValue,
-  TypeHandler,
-  TypeHandlerCodec,
-} from "./interface.ts";
+export type { JsonWireValue } from "./interface.ts";
 
-// Type handler registry and factory.
-export { TypeHandlerRegistry } from "./TypeHandlerRegistry.ts";
+// Codec registry and factory.
+export { CodecRegistry } from "./CodecRegistry.ts";
 export { createDefaultRegistry } from "./createDefaultRegistry.ts";
 
-// Built-in type handlers.
-export { UndefinedHandler } from "./UndefinedHandler.ts";
-export { BigIntHandler } from "./BigIntHandler.ts";
-export { EpochNsecHandler } from "./EpochNsecHandler.ts";
-export { EpochDaysHandler } from "./EpochDaysHandler.ts";
-export { SpecialNumberHandler } from "./SpecialNumberHandler.ts";
-export { SymbolHandler } from "./SymbolHandler.ts";
-export { BytesHandler } from "./BytesHandler.ts";
-export { RegExpHandler } from "./RegExpHandler.ts";
-export { FabricInstanceHandler } from "./FabricInstanceHandler.ts";
+// Standalone codecs for JS primitives (no owned class to host a `[CODEC]`).
+export { UndefinedCodec } from "./UndefinedCodec.ts";
+export { BigIntCodec } from "./BigIntCodec.ts";
+export { SpecialNumberCodec } from "./SpecialNumberCodec.ts";
+export { SymbolCodec } from "./SymbolCodec.ts";

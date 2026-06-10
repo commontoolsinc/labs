@@ -7,7 +7,9 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
-import { DECONSTRUCT } from "@/wire-common/interface.ts";
+import { CODEC } from "@/wire-common/interface.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
@@ -16,20 +18,12 @@ import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 describe("FabricSet", () => {
   // Pure type-identity / supertype check: cross-cutting carve-out per the
   // rule (doesn't fit a single member, isn't construction mechanics).
-  it("implements `FabricInstance` with the expected `.wireTypeTag`", () => {
+  it("implements `FabricInstance`", () => {
     const ss = new FabricSet(new Set());
     expect(ss instanceof FabricInstance).toBe(true);
-    expect(ss.wireTypeTag).toBe("Set@1");
   });
 
   describe("instance members", () => {
-    describe("[DECONSTRUCT]", () => {
-      it("throws (stub)", () => {
-        const ss = new FabricSet(new Set());
-        expect(() => ss[DECONSTRUCT]()).toThrow("not yet implemented");
-      });
-    });
-
     describe("toNativeValue()", () => {
       it("returns a `FrozenSet` when `frozen` is `true`", () => {
         const set = new Set<FabricValue>([1, 2]);
@@ -93,6 +87,46 @@ describe("FabricSet", () => {
         expect(() => fs[IS_DEEP_FROZEN](subIsDeepFrozen)).toThrow(
           "FabricSet: not yet implemented",
         );
+      });
+    });
+  });
+
+  describe("static members", () => {
+    // Nominal coverage: the codec exists and reports its wire tag and claims
+    // its instances, but `encode()` / `decode()` are throwing stubs until
+    // `Set` support is implemented.
+    describe("[CODEC]", () => {
+      const codec = FabricSet[CODEC];
+      const expectedTag = WIRE_TYPE_TAGS.Set;
+      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+
+      describe("recognizedTypeTag", () => {
+        it("is the `Set` wire type tag", () => {
+          expect(codec.recognizedTypeTag).toBe(expectedTag);
+        });
+      });
+
+      describe("canEncode()", () => {
+        it("claims a `FabricSet`, rejecting other values", () => {
+          expect(codec.canEncode(new FabricSet(new Set()))).toBe(true);
+          expect(codec.canEncode("not a set")).toBe(false);
+        });
+      });
+
+      describe("encode()", () => {
+        it("throws (stub)", () => {
+          expect(() => codec.encode(new FabricSet(new Set()))).toThrow(
+            "not yet implemented",
+          );
+        });
+      });
+
+      describe("decode()", () => {
+        it("throws (stub)", () => {
+          expect(() => codec.decode(expectedTag, null, context)).toThrow(
+            "not yet implemented",
+          );
+        });
       });
     });
   });

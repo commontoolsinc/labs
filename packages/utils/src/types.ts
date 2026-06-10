@@ -133,3 +133,6 @@ export type Immutable<T> = T extends ReadonlyArray<infer U>
   ? ReadonlyArray<Immutable<U>>
   : T extends object ? ({ readonly [P in keyof T]: Immutable<T[P]> })
   : T;
+
+/** Standard type meaning constructor function, a/k/a "class object." */
+export type Constructor<T = unknown> = abstract new (...args: any[]) => T;

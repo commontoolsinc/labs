@@ -1,8 +1,9 @@
 import { assertEquals } from "@std/assert";
 import {
-  parseShard,
   selectRunnerTestFiles,
+  shardForRunnerTestFile,
 } from "./select-runner-test-files.ts";
+import { parseShard, stableShardForName } from "./shard-utils.ts";
 
 Deno.test("parseShard parses shard notation", () => {
   assertEquals(parseShard("2/4"), { index: 2, total: 4 });
@@ -20,71 +21,50 @@ Deno.test("parseShard rejects invalid shard notation", () => {
   }
 });
 
-Deno.test("selectRunnerTestFiles balances by estimated file weight", () => {
-  const files = [
-    { name: "large.test.ts", size: 100 },
-    { name: "medium.test.ts", size: 60 },
-    { name: "small-a.test.ts", size: 20 },
-    { name: "small-b.test.ts", size: 20 },
-  ];
-
-  assertEquals(selectRunnerTestFiles(files, { index: 1, total: 2 }), [
-    "large.test.ts",
-  ]);
-  assertEquals(selectRunnerTestFiles(files, { index: 2, total: 2 }), [
-    "medium.test.ts",
-    "small-a.test.ts",
-    "small-b.test.ts",
-  ]);
+Deno.test("runner test four-way shard keeps slow files balanced", () => {
+  // The heaviest files are spread one per shard so no shard dominates.
+  assertEquals(shardForRunnerTestFile("engine.test.ts", 4), 1);
+  assertEquals(shardForRunnerTestFile("piece-helpers.test.ts", 4), 2);
+  assertEquals(shardForRunnerTestFile("json-utils.test.ts", 4), 3);
+  assertEquals(shardForRunnerTestFile("reactive-dependencies.test.ts", 4), 4);
 });
 
-Deno.test("selectRunnerTestFiles honors explicit weights for slow small files", () => {
-  const files = [
-    { name: "large.test.ts", size: 100 },
-    { name: "slow-small.test.ts", size: 10, weight: 90 },
-    { name: "medium.test.ts", size: 50 },
-    { name: "small.test.ts", size: 40 },
+Deno.test("runner test sharding is stable when files are added or removed", () => {
+  const baseFiles = [
+    { name: "engine.test.ts" },
+    { name: "piece-helpers.test.ts" },
+    { name: "json-utils.test.ts" },
+    { name: "small-a.test.ts" },
+    { name: "small-b.test.ts" },
   ];
 
-  assertEquals(selectRunnerTestFiles(files, { index: 1, total: 2 }), [
-    "large.test.ts",
-    "small.test.ts",
-  ]);
-  assertEquals(selectRunnerTestFiles(files, { index: 2, total: 2 }), [
-    "medium.test.ts",
-    "slow-small.test.ts",
-  ]);
-});
-
-Deno.test("selectRunnerTestFiles spreads slow runner anchors across four shards", () => {
-  const files = [
-    { name: "engine.test.ts", size: 50_000 },
-    { name: "piece-helpers.test.ts", size: 4_000 },
-    { name: "json-utils.test.ts", size: 27_000 },
-    { name: "reactive-dependencies.test.ts", size: 68_000 },
-    { name: "pattern-manager.test.ts", size: 17_000 },
-    { name: "runner.test.ts", size: 56_000 },
-    { name: "wish.test.ts", size: 95_000 },
-    { name: "pattern-scope.test.ts", size: 72_000 },
-    { name: "small-a.test.ts", size: 20_000 },
-    { name: "small-b.test.ts", size: 20_000 },
-    { name: "small-c.test.ts", size: 20_000 },
-    { name: "small-d.test.ts", size: 20_000 },
-  ];
-
-  const shards = [1, 2, 3, 4].map((index) =>
-    selectRunnerTestFiles(files, { index, total: 4 })
+  const before = [1, 2, 3, 4].map((index) =>
+    selectRunnerTestFiles(baseFiles, { index, total: 4 })
   );
 
-  assertEquals(shards[0].includes("engine.test.ts"), true);
-  assertEquals(shards[1].includes("piece-helpers.test.ts"), true);
-  assertEquals(shards[2].includes("json-utils.test.ts"), true);
-  assertEquals(shards[3].includes("reactive-dependencies.test.ts"), true);
+  // Adding a new file should not move any existing file between shards.
+  const withNewFile = [
+    ...baseFiles,
+    { name: "new-feature.test.ts" },
+  ];
+  const after = [1, 2, 3, 4].map((index) =>
+    selectRunnerTestFiles(withNewFile, { index, total: 4 })
+  );
+
+  for (const file of baseFiles) {
+    const shardBefore = before.findIndex((s) => s.includes(file.name));
+    const shardAfter = after.findIndex((s) => s.includes(file.name));
+    assertEquals(
+      shardBefore,
+      shardAfter,
+      `${file.name} moved from shard ${shardBefore + 1} to ${shardAfter + 1}`,
+    );
+  }
+});
+
+Deno.test("unknown runner test files are assigned deterministically", () => {
   assertEquals(
-    shards.some((shard) =>
-      shard.includes("piece-helpers.test.ts") &&
-      shard.includes("json-utils.test.ts")
-    ),
-    false,
+    shardForRunnerTestFile("new-test-file.test.ts", 4),
+    stableShardForName("new-test-file.test.ts", 4),
   );
 });

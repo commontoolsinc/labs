@@ -6,8 +6,17 @@ import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
+import { isPlainObject } from "@commonfabric/utils/types";
 
+import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
+import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
+import {
+  CODEC,
+  type FabricCodec,
+  type ReconstructionContext,
+} from "@/wire-common/interface.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 
 /**
@@ -53,11 +62,6 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
     this.#justHashString = toUnpaddedBase64url(hash);
     this.#fullStringForm = `${tag}:${this.#justHashString}`;
     Object.freeze(this);
-  }
-
-  /** @inheritDoc */
-  get wireTypeTag(): string {
-    return WIRE_TYPE_TAGS.Hash;
   }
 
   /**
@@ -141,6 +145,56 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
     const tag = source.substring(0, colonIndex);
     const hashBase64url = source.substring(colonIndex + 1);
     return new FabricHash(fromBase64url(hashBase64url), tag);
+  }
+
+  static #codec = Object.freeze(
+    new (class HashCodec extends BaseFabricCodec {
+      constructor() {
+        super(WIRE_TYPE_TAGS.Hash, FabricHash);
+      }
+
+      /** @inheritDoc */
+      encode(value: FabricHash): FabricValue {
+        return { tag: value.tag, hash: value.hashString };
+      }
+
+      /** @inheritDoc */
+      decode(
+        typeTag: string,
+        state: FabricValue,
+        _context: ReconstructionContext,
+      ): FabricValue {
+        if (!isPlainObject(state)) {
+          return new ProblematicValue(
+            typeTag,
+            state,
+            `Hash: expected object state, got ${typeof state}`,
+          );
+        }
+        const { tag, hash } = state as Record<string, unknown>;
+        if (typeof tag !== "string" || typeof hash !== "string") {
+          return new ProblematicValue(
+            typeTag,
+            state,
+            "Hash: expected string `tag` and `hash`",
+          );
+        }
+        try {
+          return new FabricHash(fromBase64url(hash), tag);
+        } catch (e) {
+          return new ProblematicValue(
+            typeTag,
+            state,
+            `Hash: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+    })(),
+  );
+
+  /** The codec for instances of this class. */
+  static get [CODEC](): FabricCodec {
+    return this.#codec;
   }
 }
 

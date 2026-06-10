@@ -77,7 +77,7 @@ const __cfLift_1 = __cfHelpers.lift<{
 }));
 const __cfLift_2 = __cfHelpers.lift<{
     result: { tasks: Item[]; view: string; };
-}, import("commonfabric").JSXElement[]>({
+}, __cfHelpers.JSXElement[]>({
     type: "object",
     properties: {
         result: {
@@ -213,3 +213,7 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2
+});

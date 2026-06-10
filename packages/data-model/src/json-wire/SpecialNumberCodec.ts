@@ -1,15 +1,11 @@
 import type { FabricValue } from "@/interface.ts";
+import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
 import type { ReconstructionContext } from "@/wire-common/interface.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
-import type {
-  JsonWireValue,
-  TypeHandler,
-  TypeHandlerCodec,
-} from "./interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /**
- * Handler for the four "special" numeric values that JSON cannot represent
+ * Codec for the four "special" numeric values that JSON cannot represent
  * faithfully: `-0`, `NaN`, `+Infinity`, and `-Infinity`. Wire format:
  * `{ "/SpecialNumber@1": "<literal>" }`, where `<literal>` is one of `-0`,
  * `NaN`, `+Infinity`, or `-Infinity`.
@@ -21,53 +17,38 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
  * Any NaN bit pattern serializes as the literal `"NaN"` and round-trips
  * back to `Number.NaN`.
  */
-export const SpecialNumberHandler: TypeHandler = {
-  /** @inheritDoc */
-  get classSource() {
-    return Number;
-  },
+export class SpecialNumberCodec extends BaseFabricCodec {
+  constructor() {
+    super(WIRE_TYPE_TAGS.SpecialNumber, Number);
+  }
 
   /** @inheritDoc */
-  get wireTypeTag() {
-    return WIRE_TYPE_TAGS.SpecialNumber;
-  },
+  override canEncode(value: FabricValue): boolean {
+    return typeof value === "number" &&
+      (Number.isNaN(value) ||
+        value === Infinity ||
+        value === -Infinity ||
+        Object.is(value, -0));
+  }
 
-  canSerialize(value: FabricValue): boolean {
-    if (typeof value !== "number") return false;
-    return Number.isNaN(value) ||
-      value === Infinity ||
-      value === -Infinity ||
-      Object.is(value, -0);
-  },
+  /** @inheritDoc */
+  encode(value: number): FabricValue {
+    if (Number.isNaN(value)) return "NaN";
+    if (value === Infinity) return "+Infinity";
+    if (value === -Infinity) return "-Infinity";
+    // The remaining `canEncode` case is `Object.is(value, -0)`.
+    return "-0";
+  }
 
-  serialize(
-    value: FabricValue,
-    codec: TypeHandlerCodec,
-    _recurse: (v: FabricValue) => JsonWireValue,
-  ): JsonWireValue {
-    const num = value as number;
-    let state: string;
-    if (Number.isNaN(num)) {
-      state = "NaN";
-    } else if (num === Infinity) {
-      state = "+Infinity";
-    } else if (num === -Infinity) {
-      state = "-Infinity";
-    } else {
-      // The remaining canSerialize case is `Object.is(num, -0)`.
-      state = "-0";
-    }
-    return codec.wrapTag(WIRE_TYPE_TAGS.SpecialNumber, state);
-  },
-
-  deserialize(
-    state: JsonWireValue,
-    _runtime: ReconstructionContext,
-    _recurse: (v: JsonWireValue) => FabricValue,
+  /** @inheritDoc */
+  decode(
+    typeTag: string,
+    state: FabricValue,
+    _context: ReconstructionContext,
   ): FabricValue {
     if (typeof state !== "string") {
       return new ProblematicValue(
-        WIRE_TYPE_TAGS.SpecialNumber,
+        typeTag,
         state,
         `SpecialNumber: expected string state, got ${typeof state}`,
       );
@@ -83,10 +64,10 @@ export const SpecialNumberHandler: TypeHandler = {
         return NaN;
       default:
         return new ProblematicValue(
-          WIRE_TYPE_TAGS.SpecialNumber,
+          typeTag,
           state,
           `SpecialNumber: unknown literal ${JSON.stringify(state)}`,
         );
     }
-  },
-};
+  }
+}

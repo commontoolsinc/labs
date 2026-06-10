@@ -35,15 +35,15 @@ export function jsonFromValue(value: FabricValue): string {
 /**
  * Decodes a string in the `FabricValue` JSON-embedded encoding format, which is
  * expected to be a plain object. Throws if it turns out to be something else.
- * If `runtime` is omitted, a shared decode-framed empty context is
+ * If `context` is omitted, a shared decode-framed empty context is
  * substituted (via `valueFromJson()`), which throws if any reconstruction
  * is needed.
  */
 export function plainObjectFromJson<T extends object = object>(
   json: string,
-  runtime?: ReconstructionContext,
+  context?: ReconstructionContext,
 ): T {
-  const result = valueFromJson(json, runtime);
+  const result = valueFromJson(json, context);
 
   if ((result === null) || (typeof result !== "object")) {
     throw new Error(
@@ -72,16 +72,16 @@ export function seemsLikeJsonEncodedFabricValue(value: string): boolean {
 
 /**
  * Decodes a string in the `FabricValue` JSON-embedded encoding format. If
- * `runtime` is omitted, the shared decode-framed empty context
+ * `context` is omitted, the shared decode-framed empty context
  * (`JSON_DECODE_EMPTY_CONTEXT`) is substituted, which throws if any
  * reconstruction is needed.
  */
 export function valueFromJson(
   json: string,
-  runtime?: ReconstructionContext | undefined,
+  context?: ReconstructionContext | undefined,
 ): FabricValue {
   return jsonEncodingContext.decode(
     json,
-    runtime ?? JSON_DECODE_EMPTY_CONTEXT,
+    context ?? JSON_DECODE_EMPTY_CONTEXT,
   );
 }

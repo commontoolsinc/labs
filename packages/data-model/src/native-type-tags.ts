@@ -157,7 +157,7 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     // Exotic `Error` subclasses (e.g. `DOMException`).
     if (Error.isError(value)) return NATIVE_TAGS.Error;
 
-    // `FabricInstance` values (protocol types with `[DECONSTRUCT]`).
+    // `FabricInstance` values (object-like protocol types).
     if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;
 
     // Cross-realm arrays may have a different constructor.

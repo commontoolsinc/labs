@@ -494,6 +494,35 @@ compilation-cache tests pass under both loaders; no correctness regression.
 > `deno task integration` from the repo root), and benchmarks. The canary
 > PR (#3782) is the standing flag-on CI signal.
 
+> **Source-location fidelity: RESOLVED (no longer a default-on blocker).**
+> Earlier code comments in `module-record-compiler.ts` / `engine.ts` flagged
+> `fn.src` / source-location resolution under the ESM loader as "the remaining
+> item before the flag can be enabled by default." That is done. Both consumers
+> resolve flag-on to the canonical reload-stable `cf:module/<hash>/<path>` form:
+> CFC verified-source (`isVerifiedSourceInLoad` → `kind: "verified"`) and the
+> scheduler content-addressed implementation hash. Two mechanisms cover it —
+> Deno's `indexOf`-into-`script` fallback (`resolveLocationFromFunctionSource`)
+> and the per-module source maps the engine registers for browsers (whose stacks
+> surface the per-module eval frame). Covered by
+> `packages/runner/test/esm-source-location.test.ts` (CFC parity + scheduler
+> hash + source-location suffix parity flag-on/flag-off) and the browser
+> eval-frame resolution case in `module.test.ts`. The stale comments were
+> corrected. **Remaining verification (not a blocker):** a full browser
+> integration test under `packages/patterns/integration` driving the shell with
+> `CF_ESM_MODULE_LOADER=1` — the resolution logic + wiring are unit-covered, but
+> end-to-end browser stacks are only exercised by the canary, not a committed
+> assertion.
+
+> **Cross-loader action-identity re-key (state migration, discovered).** The
+> scheduler implementation hash is `cf:module/<hash>:line:col`. The `:line:col`
+> source-location suffix is identical flag-on/flag-off (asserted), but the
+> per-module `<hash>` DIFFERS across loaders: ESM uses the prefix-free
+> `computeModuleIdentities` hash, AMD its legacy whole-program scheme. So
+> flipping the default re-keys persisted scheduler action identity once. This is
+> acceptable (AMD removal below collapses to a single scheme) but the flip must
+> account for it — either accept a one-time re-run of persisted actions or stage
+> the rollout. Tracked here rather than as a source-location regression.
+
 - Flip `EXPERIMENTAL_ESM_MODULE_LOADER` default on after Phases 2–4 are green and
   benchmarks acceptable.
 - Remove the AMD bundler, `packages/js-compiler/typescript/bundler/amd-loader.ts`,
@@ -530,6 +559,7 @@ only loader.
 | Many-small-modules perf regression | 2/4 | Benchmarks; consider one compartment per load with shared map. |
 | Cycle hashing nondeterminism | 1 | SCC condensation with sorted members; determinism test. |
 | Hidden async load site | 0/2 | Synchronous-caller census in Phase 0. |
+| Action-identity re-key on default flip (ESM vs AMD module hash) | 5 | Source-location suffix parity asserted; accept one-time persisted-action re-run or stage rollout; AMD removal collapses to one scheme. |
 
 ## Suggested commit/PR sequence
 

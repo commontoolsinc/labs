@@ -166,6 +166,58 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("accepts a single trailing __cfReg({ … }) hoist registration", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const __cfLift_1 = (0, commonfabric_1.lift)(() => 42);
+    const __cfPattern_1 = (0, commonfabric_1.pattern)(() => ({}));
+    exports.default = (0, commonfabric_1.pattern)(() => ({}));
+    __cfReg({ __cfLift_1, __cfPattern_1 });
+  });
+});
+`;
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
+  it("rejects a second __cfReg() registration call", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const __cfPattern_1 = (0, commonfabric_1.pattern)(() => ({}));
+    exports.default = __cfPattern_1;
+    __cfReg({ __cfPattern_1 });
+    __cfReg({ __cfPattern_1 });
+  });
+});
+`;
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+      "at most one __cfReg() registration call",
+    );
+  });
+
+  it("rejects a __cfReg() referencing an undeclared binding", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.default = (0, commonfabric_1.pattern)(() => ({}));
+    __cfReg({ notDeclared });
+  });
+});
+`;
+    // Not the canonical shape (the name is not a top-level binding) → falls
+    // through to the generic unsupported-statement rejection.
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+      "unsupported top-level executable code",
+    );
+  });
+
   it("rejects default exports of trusted runtime helper references", () => {
     const bundle = `
 ((runtimeDeps = {}) => {

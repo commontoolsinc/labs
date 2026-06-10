@@ -2,16 +2,22 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { JsonEncodingContext } from "@/json-wire/JsonEncodingContext.ts";
-import type { FabricValue } from "@/interface.ts";
+import {
+  DEEP_FREEZE,
+  FabricInstance,
+  type FabricValue,
+  IS_DEEP_FROZEN,
+} from "@/interface.ts";
 import type { JsonWireValue } from "@/json-wire/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { BaseReconstructionContext } from "@/wire-common/BaseReconstructionContext.ts";
-import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
 
 /**
  * Shared test `ReconstructionContext`: `getCell()` always throws (no test
@@ -25,6 +31,36 @@ class TestReconstructionContext extends BaseReconstructionContext {
 
   override getCell(): never {
     throw new Error("getCell not implemented in test runtime");
+  }
+}
+
+/**
+ * A `FabricInstance` with no registered codec, for exercising the encode-side
+ * mandate guard (every wire form must be explicitly represented).
+ */
+class UnregisteredInstance extends BaseFabricInstance {
+  get wireTypeTag(): string {
+    return "Unregistered@1";
+  }
+
+  protected shallowUnfrozenClone(): FabricInstance {
+    return new UnregisteredInstance();
+  }
+
+  // The encode-side mandate guard fires before any of these are reached, so
+  // they are throwing stubs.
+  deepClone(_frozen: boolean): FabricInstance {
+    throw new Error("not implemented");
+  }
+
+  [DEEP_FREEZE](_subFreeze: (value: FabricValue) => FabricValue): FabricValue {
+    throw new Error("not implemented");
+  }
+
+  [IS_DEEP_FROZEN](
+    _subIsDeepFrozen: (value: FabricValue) => boolean,
+  ): boolean {
+    throw new Error("not implemented");
   }
 }
 
@@ -70,7 +106,7 @@ function fromWireFormat(data: JsonWireValue): FabricValue {
 }
 
 describe("JsonEncodingContext", () => {
-  describe("`Uint8Array` public API", () => {
+  describe("`encodeToBytes()` / `decodeFromBytes()` (bytes entry points)", () => {
     it("returns `Uint8Array` from `encodeToBytes()`", () => {
       const { context } = makeTestContext();
       const result = context.encodeToBytes(42);
@@ -202,431 +238,115 @@ describe("JsonEncodingContext", () => {
     });
   });
 
-  describe("undefined", () => {
-    it('serializes to `{ "/Undefined@1": null }`', () => {
-      const result = toWireFormat(undefined);
-      expect(result).toEqual({ "/Undefined@1": null });
-    });
+  describe("tagged-type round-trips through the full stack", () => {
+    // Representative coverage that the encode→tag-wrap→decode mechanism works
+    // for the standalone-codec and primitive Fabric types, including nesting in
+    // arrays and objects. Per-codec encode/decode detail lives in each type's
+    // own unit test (e.g. `BigIntCodec.test.ts`, `FabricEpochNsec.test.ts`).
 
-    it("round-trips at top level", () => {
+    it("round-trips `undefined` at top level, in arrays, and as object values", () => {
       expect(roundTrip(undefined)).toBe(undefined);
-    });
 
-    it("round-trips in arrays", () => {
       const arr = [1, undefined, 3] as FabricValue;
-      const result = roundTrip(arr) as FabricValue[];
-      expect(result[0]).toBe(1);
-      expect(result[1]).toBe(undefined);
-      expect(1 in result).toBe(true); // not a hole
-      expect(result[2]).toBe(3);
-    });
+      const arrResult = roundTrip(arr) as FabricValue[];
+      expect(arrResult[0]).toBe(1);
+      expect(arrResult[1]).toBe(undefined);
+      expect(1 in arrResult).toBe(true); // not a hole
+      expect(arrResult[2]).toBe(3);
 
-    it("round-trips as object values", () => {
       const obj = { a: 1, b: undefined } as unknown as FabricValue;
-      const result = roundTrip(obj) as Record<string, FabricValue>;
-      expect(result.a).toBe(1);
-      expect(result.b).toBe(undefined);
-      expect("b" in result).toBe(true); // key preserved
+      const objResult = roundTrip(obj) as Record<string, FabricValue>;
+      expect(objResult.a).toBe(1);
+      expect(objResult.b).toBe(undefined);
+      expect("b" in objResult).toBe(true); // key preserved
     });
 
-    it("is distinct from `null`", () => {
-      const serializedNull = toWireFormat(null);
-      const serializedUndef = toWireFormat(undefined);
-      expect(serializedNull).not.toEqual(serializedUndef);
-    });
-  });
+    it("round-trips `bigint` at top level, in arrays, and as object values", () => {
+      expect(roundTrip(42n as FabricValue)).toBe(42n);
 
-  describe("bigint", () => {
-    it("serializes `42n` to base64 of two's complement bytes", () => {
-      const result = toWireFormat(42n as FabricValue);
-      // 42n -> [0x2a] -> base64 "Kg"
-      expect(result).toEqual({ "/BigInt@1": "Kg" });
-    });
-
-    it('serializes `0n` to base64 `"AA"`', () => {
-      const result = toWireFormat(0n as FabricValue);
-      // 0n -> [0x00] -> base64 "AA"
-      expect(result).toEqual({ "/BigInt@1": "AA" });
-    });
-
-    it('serializes `-1n` to base64url `"_w"`', () => {
-      const result = toWireFormat(-1n as FabricValue);
-      // -1n -> [0xFF] -> base64url "_w"
-      expect(result).toEqual({ "/BigInt@1": "_w" });
-    });
-
-    it('serializes `1n` to base64 `"AQ"`', () => {
-      const result = toWireFormat(1n as FabricValue);
-      // 1n -> [0x01] -> base64 "AQ"
-      expect(result).toEqual({ "/BigInt@1": "AQ" });
-    });
-
-    it("serializes `128n` with sign-extension byte", () => {
-      const result = toWireFormat(128n as FabricValue);
-      // 128n -> [0x00, 0x80] -> base64 "AIA"
-      expect(result).toEqual({ "/BigInt@1": "AIA" });
-    });
-
-    it("produces unpadded base64 output (no trailing `=`)", () => {
-      // 42n produces 1 byte -> 2 base64 chars (would be "Kg==" with padding)
-      const result = toWireFormat(42n as FabricValue) as Record<
-        string,
-        string
-      >;
-      const b64 = result["/BigInt@1"];
-      expect(b64).toBe("Kg");
-      expect(b64).not.toContain("=");
-    });
-
-    it("round-trips at top level", () => {
-      const result = roundTrip(42n as FabricValue);
-      expect(result).toBe(42n);
-    });
-
-    it("round-trips negative bigint", () => {
-      const result = roundTrip(-999n as FabricValue);
-      expect(result).toBe(-999n);
-    });
-
-    it("round-trips zero bigint", () => {
-      const result = roundTrip(0n as FabricValue);
-      expect(result).toBe(0n);
-    });
-
-    it("round-trips `1n`", () => {
-      const result = roundTrip(1n as FabricValue);
-      expect(result).toBe(1n);
-    });
-
-    it("round-trips `-1n`", () => {
-      const result = roundTrip(-1n as FabricValue);
-      expect(result).toBe(-1n);
-    });
-
-    it("round-trips large bigint", () => {
-      const big = 2n ** 64n;
-      const result = roundTrip(big as FabricValue);
-      expect(result).toBe(big);
-    });
-
-    it("round-trips large negative bigint", () => {
-      const big = -(2n ** 64n);
-      const result = roundTrip(big as FabricValue);
-      expect(result).toBe(big);
-    });
-
-    it("round-trips boundary value `127n`", () => {
-      expect(roundTrip(127n as FabricValue)).toBe(127n);
-    });
-
-    it("round-trips boundary value `128n`", () => {
-      expect(roundTrip(128n as FabricValue)).toBe(128n);
-    });
-
-    it("round-trips boundary value `-128n`", () => {
-      expect(roundTrip(-128n as FabricValue)).toBe(-128n);
-    });
-
-    it("round-trips boundary value `-129n`", () => {
-      expect(roundTrip(-129n as FabricValue)).toBe(-129n);
-    });
-
-    it("round-trips in arrays", () => {
       const arr = [1, 42n, "hello"] as unknown as FabricValue;
-      const result = roundTrip(arr) as FabricValue[];
-      expect(result[0]).toBe(1);
-      expect(result[1]).toBe(42n);
-      expect(result[2]).toBe("hello");
-    });
+      const arrResult = roundTrip(arr) as FabricValue[];
+      expect(arrResult[0]).toBe(1);
+      expect(arrResult[1]).toBe(42n);
+      expect(arrResult[2]).toBe("hello");
 
-    it("round-trips as object values", () => {
       const obj = { a: 1, b: 42n } as unknown as FabricValue;
-      const result = roundTrip(obj) as Record<string, FabricValue>;
-      expect(result.a).toBe(1);
-      expect(result.b).toBe(42n);
+      const objResult = roundTrip(obj) as Record<string, FabricValue>;
+      expect(objResult.a).toBe(1);
+      expect(objResult.b).toBe(42n);
     });
 
-    it("is distinct from `number`", () => {
-      const serializedNum = toWireFormat(42);
-      const serializedBig = toWireFormat(42n as FabricValue);
-      expect(serializedNum).not.toEqual(serializedBig);
-    });
-
-    it("accepts unpadded base64url input", () => {
-      // "Kg" is the standard unpadded base64url encoding of 42n.
-      const data = { "/BigInt@1": "Kg" } as JsonWireValue;
-      const result = fromWireFormat(data);
-      expect(result).toBe(42n);
-    });
-
-    it("accepts padded base64 input", () => {
-      // "Kg==" is the padded form of "Kg" (42n) -- padding is accepted by the
-      // web-standard Uint8Array.fromBase64.
-      const data = { "/BigInt@1": "Kg==" } as JsonWireValue;
-      const result = fromWireFormat(data);
-      expect(result).toBe(42n);
-    });
-
-    it("deserializes non-string state to `ProblematicValue`", () => {
-      const data = { "/BigInt@1": 42 } as JsonWireValue;
-      const result = fromWireFormat(data);
-      expect(result).toBeInstanceOf(ProblematicValue);
-      const prob = result as unknown as ProblematicValue;
-      expect(prob.wireTypeTag).toBe("BigInt@1");
-      expect(prob.state).toBe(42);
-    });
-
-    it("deserializes `null` state to `ProblematicValue`", () => {
-      const data = { "/BigInt@1": null } as JsonWireValue;
-      const result = fromWireFormat(data);
-      expect(result).toBeInstanceOf(ProblematicValue);
-    });
-
-    it("deserializes object state to `ProblematicValue`", () => {
-      const data = { "/BigInt@1": { bad: true } } as JsonWireValue;
-      const result = fromWireFormat(data);
-      expect(result).toBeInstanceOf(ProblematicValue);
-    });
-
-    it("deserializes empty base64 string to `ProblematicValue`", () => {
-      const data = { "/BigInt@1": "" } as JsonWireValue;
-      const result = fromWireFormat(data);
-      expect(result).toBeInstanceOf(ProblematicValue);
-      const prob = result as unknown as ProblematicValue;
-      expect(prob.wireTypeTag).toBe("BigInt@1");
-    });
-  });
-
-  describe("SpecialNumber", () => {
-    it('serializes `-0` to `/SpecialNumber@1` with state `"-0"`', () => {
-      expect(toWireFormat(-0)).toEqual({ "/SpecialNumber@1": "-0" });
-    });
-
-    it('serializes `NaN` to `/SpecialNumber@1` with state `"NaN"`', () => {
-      expect(toWireFormat(NaN)).toEqual({ "/SpecialNumber@1": "NaN" });
-    });
-
-    it('serializes `+Infinity` to `/SpecialNumber@1` with state `"+Infinity"`', () => {
-      expect(toWireFormat(Infinity)).toEqual({
-        "/SpecialNumber@1": "+Infinity",
-      });
-    });
-
-    it('serializes `-Infinity` to `/SpecialNumber@1` with state `"-Infinity"`', () => {
-      expect(toWireFormat(-Infinity)).toEqual({
-        "/SpecialNumber@1": "-Infinity",
-      });
-    });
-
-    it("does not intercept `+0` (round-trips as a plain number)", () => {
-      expect(toWireFormat(0)).toBe(0);
+    it("round-trips special numbers (`-0`/`NaN`/`±Infinity`) at top level, in arrays, and as object values", () => {
+      // `+0` is not a special number; it round-trips as a plain JSON number.
       expect(roundTrip(0)).toBe(0);
-    });
-
-    it("round-trips `-0` (preserves sign of zero)", () => {
-      const result = roundTrip(-0);
-      expect(Object.is(result, -0)).toBe(true);
-    });
-
-    it("round-trips `NaN`", () => {
+      expect(Object.is(roundTrip(-0), -0)).toBe(true);
       expect(Number.isNaN(roundTrip(NaN))).toBe(true);
-    });
-
-    it("round-trips `+Infinity`", () => {
       expect(roundTrip(Infinity)).toBe(Infinity);
-    });
-
-    it("round-trips `-Infinity`", () => {
       expect(roundTrip(-Infinity)).toBe(-Infinity);
-    });
 
-    it('any `NaN` bit pattern serializes as the literal `"NaN"`', () => {
-      const view = new DataView(new ArrayBuffer(8));
-      view.setBigUint64(0, 0x7ff8000000000001n, false);
-      const nonCanonicalNaN = view.getFloat64(0, false);
-      expect(Number.isNaN(nonCanonicalNaN)).toBe(true);
-      expect(toWireFormat(nonCanonicalNaN)).toEqual({
-        "/SpecialNumber@1": "NaN",
-      });
-    });
-
-    it("round-trips inside arrays", () => {
       const arr = [1, NaN, -0, Infinity, -Infinity, 2] as FabricValue;
-      const result = roundTrip(arr) as number[];
-      expect(result[0]).toBe(1);
-      expect(Number.isNaN(result[1])).toBe(true);
-      expect(Object.is(result[2], -0)).toBe(true);
-      expect(result[3]).toBe(Infinity);
-      expect(result[4]).toBe(-Infinity);
-      expect(result[5]).toBe(2);
-    });
+      const arrResult = roundTrip(arr) as number[];
+      expect(arrResult[0]).toBe(1);
+      expect(Number.isNaN(arrResult[1])).toBe(true);
+      expect(Object.is(arrResult[2], -0)).toBe(true);
+      expect(arrResult[3]).toBe(Infinity);
+      expect(arrResult[4]).toBe(-Infinity);
+      expect(arrResult[5]).toBe(2);
 
-    it("round-trips as object values", () => {
       const obj = {
         nz: -0,
         nan: NaN,
         pinf: Infinity,
         ninf: -Infinity,
       } as unknown as FabricValue;
-      const result = roundTrip(obj) as Record<string, number>;
-      expect(Object.is(result.nz, -0)).toBe(true);
-      expect(Number.isNaN(result.nan)).toBe(true);
-      expect(result.pinf).toBe(Infinity);
-      expect(result.ninf).toBe(-Infinity);
+      const objResult = roundTrip(obj) as Record<string, number>;
+      expect(Object.is(objResult.nz, -0)).toBe(true);
+      expect(Number.isNaN(objResult.nan)).toBe(true);
+      expect(objResult.pinf).toBe(Infinity);
+      expect(objResult.ninf).toBe(-Infinity);
     });
 
-    it("non-string state -> `ProblematicValue` (lenient)", () => {
-      const ctx = new JsonEncodingContext({ lenient: true });
-      const runtime = new TestReconstructionContext();
-      const encoded = ENCODING_PREFIX +
-        JSON.stringify({ "/SpecialNumber@1": 0 });
-      const result = ctx.decode(encoded, runtime);
-      expect(result).toBeInstanceOf(ProblematicValue);
-      expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
-        "SpecialNumber@1",
-      );
-    });
+    it("round-trips interned symbols at top level, in arrays, and as object values", () => {
+      const top = roundTrip(Symbol.for("hello") as FabricValue);
+      expect(typeof top).toBe("symbol");
+      expect(top).toBe(Symbol.for("hello"));
 
-    it("unknown literal -> `ProblematicValue` (lenient)", () => {
-      const ctx = new JsonEncodingContext({ lenient: true });
-      const runtime = new TestReconstructionContext();
-      const encoded = ENCODING_PREFIX +
-        JSON.stringify({ "/SpecialNumber@1": "Infinity" }); // missing leading +
-      const result = ctx.decode(encoded, runtime);
-      expect(result).toBeInstanceOf(ProblematicValue);
-      expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
-        "SpecialNumber@1",
-      );
-    });
-  });
-
-  describe("Symbol", () => {
-    it('serializes `Symbol.for("foo")` to `/Symbol@1` with the key as state', () => {
-      expect(toWireFormat(Symbol.for("foo") as FabricValue)).toEqual({
-        "/Symbol@1": "foo",
-      });
-    });
-
-    it('serializes `Symbol.for("")` (empty key)', () => {
-      expect(toWireFormat(Symbol.for("") as FabricValue)).toEqual({
-        "/Symbol@1": "",
-      });
-    });
-
-    it("round-trips an interned symbol to the same registry instance", () => {
-      const result = roundTrip(Symbol.for("hello") as FabricValue);
-      expect(typeof result).toBe("symbol");
-      expect(result).toBe(Symbol.for("hello"));
-    });
-
-    it("round-trips a key with non-ASCII characters", () => {
-      const key = "café-☕-\u{1F600}";
-      const result = roundTrip(Symbol.for(key) as FabricValue);
-      expect(result).toBe(Symbol.for(key));
-    });
-
-    it("round-trips inside arrays", () => {
       const arr = [
         Symbol.for("a"),
         1,
         Symbol.for("b"),
       ] as unknown as FabricValue;
-      const result = roundTrip(arr) as unknown[];
-      expect(result[0]).toBe(Symbol.for("a"));
-      expect(result[1]).toBe(1);
-      expect(result[2]).toBe(Symbol.for("b"));
-    });
+      const arrResult = roundTrip(arr) as unknown[];
+      expect(arrResult[0]).toBe(Symbol.for("a"));
+      expect(arrResult[1]).toBe(1);
+      expect(arrResult[2]).toBe(Symbol.for("b"));
 
-    it("round-trips as object values", () => {
       const obj = {
         kind: Symbol.for("event"),
         flag: Symbol.for("ready"),
       } as unknown as FabricValue;
-      const result = roundTrip(obj) as Record<string, unknown>;
-      expect(result.kind).toBe(Symbol.for("event"));
-      expect(result.flag).toBe(Symbol.for("ready"));
+      const objResult = roundTrip(obj) as Record<string, unknown>;
+      expect(objResult.kind).toBe(Symbol.for("event"));
+      expect(objResult.flag).toBe(Symbol.for("ready"));
     });
 
-    it("does not intercept `Symbol(desc)` (unique / uninterned)", () => {
-      // canSerialize() returns false for unique symbols. The handler does not
-      // claim them, which means they fall through to the registry's default
-      // unhandled-value treatment rather than being silently coerced into a
-      // registry symbol.
-      const uniq = Symbol("nope") as FabricValue;
-      const wire = toWireFormat(uniq);
-      // The result should NOT be a Symbol@1 wrapping. (It will be an
-      // UnknownValue or similar; the precise shape isn't what matters here --
-      // what matters is that we didn't spuriously fabricate a registry key.)
-      expect(typeof wire === "object" && wire !== null && "/Symbol@1" in wire)
-        .toBe(false);
-    });
-
-    it("non-string state -> `ProblematicValue` (lenient)", () => {
-      const ctx = new JsonEncodingContext({ lenient: true });
-      const runtime = new TestReconstructionContext();
-      const encodedJson = ENCODING_PREFIX +
-        JSON.stringify({ "/Symbol@1": 42 });
-      const result = ctx.decode(encodedJson, runtime);
-      expect(result).toBeInstanceOf(ProblematicValue);
-      expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
-        "Symbol@1",
+    it("loudly fails to encode an unencodable value (unique / uninterned `Symbol`)", () => {
+      // `SymbolCodec.canEncode()` returns false for unique symbols (no
+      // registry key), so no codec claims them. A default-configured context
+      // must then fail loudly rather than silently flatten the symbol to `{}`.
+      const { context } = makeTestContext();
+      expect(() => context.encode(Symbol("nope") as FabricValue)).toThrow(
+        "no applicable codec",
       );
     });
-  });
 
-  describe("FabricEpochNsec", () => {
-    it("serializes to `/EpochNsec@1` with flat base64", () => {
-      const sn = new FabricEpochNsec(0n);
-      const result = toWireFormat(sn as FabricValue) as Record<
-        string,
-        unknown
-      >;
-      expect(Object.keys(result)).toEqual(["/EpochNsec@1"]);
-      // Flat format: base64 string directly, not nested {"/BigInt@1": ...}
-      expect(result["/EpochNsec@1"]).toBe("AA");
-    });
-
-    it("round-trips at top level (epoch zero)", () => {
-      const sn = new FabricEpochNsec(0n);
-      const result = roundTrip(
-        sn as FabricValue,
+    it("round-trips `FabricEpochNsec` at top level and in nested structures", () => {
+      const top = roundTrip(
+        new FabricEpochNsec(1704067200000000000n) as FabricValue,
       ) as unknown as FabricEpochNsec;
-      expect(result).toBeInstanceOf(FabricEpochNsec);
-      expect(result.value).toBe(0n);
-    });
+      expect(top).toBeInstanceOf(FabricEpochNsec);
+      expect(top.value).toBe(1704067200000000000n);
 
-    it("round-trips positive nanosecond timestamp", () => {
-      // 2024-01-01T00:00:00Z = 1704067200 seconds = 1704067200000000000 nsec
-      const nsec = 1704067200000000000n;
-      const sn = new FabricEpochNsec(nsec);
-      const result = roundTrip(
-        sn as FabricValue,
-      ) as unknown as FabricEpochNsec;
-      expect(result).toBeInstanceOf(FabricEpochNsec);
-      expect(result.value).toBe(nsec);
-    });
-
-    it("round-trips negative nanosecond timestamp (pre-epoch)", () => {
-      const nsec = -86400000000000n; // -1 day in nanoseconds
-      const sn = new FabricEpochNsec(nsec);
-      const result = roundTrip(
-        sn as FabricValue,
-      ) as unknown as FabricEpochNsec;
-      expect(result).toBeInstanceOf(FabricEpochNsec);
-      expect(result.value).toBe(nsec);
-    });
-
-    it("round-trips large future date", () => {
-      // Year 3000-ish
-      const nsec = 32503680000000000000n;
-      const sn = new FabricEpochNsec(nsec);
-      const result = roundTrip(
-        sn as FabricValue,
-      ) as unknown as FabricEpochNsec;
-      expect(result.value).toBe(nsec);
-    });
-
-    it("round-trips in nested structure", () => {
       const obj = {
         timestamp: new FabricEpochNsec(42000000000n),
         label: "test",
@@ -637,50 +357,14 @@ describe("JsonEncodingContext", () => {
       expect(ts).toBeInstanceOf(FabricEpochNsec);
       expect(ts.value).toBe(42000000000n);
     });
-  });
 
-  describe("FabricEpochDays", () => {
-    it("serializes to `/EpochDays@1` with flat base64", () => {
-      const sd = new FabricEpochDays(0n);
-      const result = toWireFormat(sd as FabricValue) as Record<
-        string,
-        unknown
-      >;
-      expect(Object.keys(result)).toEqual(["/EpochDays@1"]);
-      // Flat format: base64 string directly, not nested {"/BigInt@1": ...}
-      expect(result["/EpochDays@1"]).toBe("AA");
-    });
-
-    it("round-trips at top level (epoch zero)", () => {
-      const sd = new FabricEpochDays(0n);
-      const result = roundTrip(
-        sd as FabricValue,
+    it("round-trips `FabricEpochDays` at top level and in nested structures", () => {
+      const top = roundTrip(
+        new FabricEpochDays(19723n) as FabricValue,
       ) as unknown as FabricEpochDays;
-      expect(result).toBeInstanceOf(FabricEpochDays);
-      expect(result.value).toBe(0n);
-    });
+      expect(top).toBeInstanceOf(FabricEpochDays);
+      expect(top.value).toBe(19723n);
 
-    it("round-trips positive day count", () => {
-      const days = 19723n; // ~2024-01-01
-      const sd = new FabricEpochDays(days);
-      const result = roundTrip(
-        sd as FabricValue,
-      ) as unknown as FabricEpochDays;
-      expect(result).toBeInstanceOf(FabricEpochDays);
-      expect(result.value).toBe(days);
-    });
-
-    it("round-trips negative day count (pre-epoch)", () => {
-      const days = -365n;
-      const sd = new FabricEpochDays(days);
-      const result = roundTrip(
-        sd as FabricValue,
-      ) as unknown as FabricEpochDays;
-      expect(result).toBeInstanceOf(FabricEpochDays);
-      expect(result.value).toBe(days);
-    });
-
-    it("round-trips in nested structure", () => {
       const obj = {
         date: new FabricEpochDays(19723n),
         label: "birthday",
@@ -691,202 +375,42 @@ describe("JsonEncodingContext", () => {
       expect(d).toBeInstanceOf(FabricEpochDays);
       expect(d.value).toBe(19723n);
     });
-  });
 
-  describe("`Date` -> `FabricEpochNsec` conversion", () => {
-    it("converts `Date(0)` to `FabricEpochNsec(0n)`", () => {
-      const date = new Date(0);
-      const result = shallowFabricFromNativeValue(
-        date,
-      ) as unknown as FabricEpochNsec;
-      expect(result).toBeInstanceOf(FabricEpochNsec);
-      expect(result.value).toBe(0n);
-    });
+    it("round-trips `FabricRegExp` at top level and in nested structures", () => {
+      const top = roundTrip(
+        new FabricRegExp(/ab+c/gi) as FabricValue,
+      ) as unknown as FabricRegExp;
+      expect(top).toBeInstanceOf(FabricRegExp);
+      expect(top.source).toBe("ab+c");
+      expect(top.flags).toBe("gi");
+      expect(top.flavor).toBe("es2025");
 
-    it("converts `Date` to nanoseconds (`msec * 1_000_000`)", () => {
-      const date = new Date("2024-01-01T00:00:00.000Z");
-      const result = shallowFabricFromNativeValue(
-        date,
-      ) as unknown as FabricEpochNsec;
-      expect(result).toBeInstanceOf(FabricEpochNsec);
-      const expectedNsec = BigInt(date.getTime()) * 1_000_000n;
-      expect(result.value).toBe(expectedNsec);
-    });
-
-    it("converts negative `Date` to negative nanoseconds", () => {
-      const date = new Date(-86400000); // -1 day
-      const result = shallowFabricFromNativeValue(
-        date,
-      ) as unknown as FabricEpochNsec;
-      expect(result).toBeInstanceOf(FabricEpochNsec);
-      expect(result.value).toBe(-86400000000000n);
+      const obj = {
+        pattern: new FabricRegExp(/\d+/g),
+        label: "digits",
+      } as unknown as FabricValue;
+      const result = roundTrip(obj) as Record<string, FabricValue>;
+      expect(result.label).toBe("digits");
+      const re = result.pattern as unknown as FabricRegExp;
+      expect(re).toBeInstanceOf(FabricRegExp);
+      expect(re.source).toBe("\\d+");
+      expect(re.flags).toBe("g");
     });
   });
 
-  describe("FabricError", () => {
-    it("serializes basic `FabricError` to `/Error@1`", () => {
-      const se = FabricError.fromNativeError(new Error("test"));
-      const result = toWireFormat(
-        se as FabricValue,
-      ) as Record<string, unknown>;
-      expect(Object.keys(result)).toEqual(["/Error@1"]);
-      const state = result["/Error@1"] as Record<string, unknown>;
-      expect(state.type).toBe("Error");
-      expect(state.name).toBe(null); // null = same as type (common case)
-      expect(state.message).toBe("test");
+  describe("un-registered instance types", () => {
+    it("throws when encoding a `FabricInstance` with no registered codec", () => {
+      const { context } = makeTestContext();
+      expect(() => context.encode(new UnregisteredInstance() as FabricValue))
+        .toThrow("No codec registered");
     });
 
-    it("round-trips basic `Error` via `FabricError`", () => {
-      const se = FabricError.fromNativeError(new Error("hello"));
-      const result = roundTrip(
-        se as FabricValue,
-      ) as unknown as FabricError;
-      expect(result).toBeInstanceOf(FabricError);
-      expect(result.toNativeValue(true)).toBeInstanceOf(Error);
-      expect(result.name).toBe("Error");
-      expect(result.message).toBe("hello");
-    });
-
-    it("round-trips `TypeError`", () => {
-      const se = FabricError.fromNativeError(new TypeError("bad type"));
-      const result = roundTrip(
-        se as FabricValue,
-      ) as unknown as FabricError;
-      expect(result).toBeInstanceOf(FabricError);
-      expect(result.toNativeValue(true)).toBeInstanceOf(TypeError);
-      expect(result.name).toBe("TypeError");
-      expect(result.message).toBe("bad type");
-    });
-
-    it("round-trips `RangeError`", () => {
-      const se = FabricError.fromNativeError(new RangeError("out of range"));
-      const result = roundTrip(
-        se as FabricValue,
-      ) as unknown as FabricError;
-      expect(result).toBeInstanceOf(FabricError);
-      expect(result.toNativeValue(true)).toBeInstanceOf(RangeError);
-      expect(result.name).toBe("RangeError");
-    });
-
-    it("round-trips `Error` with cause", () => {
-      const inner = FabricError.fromNativeError(new Error("inner"));
-      const outer = FabricError.fromNativeError(
-        new Error("outer", { cause: inner }),
-      );
-      const result = roundTrip(
-        outer as FabricValue,
-      ) as unknown as FabricError;
-      expect(result.message).toBe("outer");
-      // The cause was serialized as a FabricError (the inner wrapper).
-      // After round-trip, the cause is a FabricError.
-      expect(result.cause).toBeInstanceOf(FabricError);
-      expect(
-        (result.cause as FabricError).message,
-      ).toBe("inner");
-    });
-
-    it("round-trips `Error` with custom properties", () => {
-      const err = new Error("oops");
-      (err as unknown as Record<string, unknown>).code = 42;
-      (err as unknown as Record<string, unknown>).detail = "more info";
-      const se = FabricError.fromNativeError(err);
-      const result = roundTrip(
-        se as FabricValue,
-      ) as unknown as FabricError;
-      expect(result.message).toBe("oops");
-      expect(
-        (result.toNativeValue(true) as unknown as Record<string, unknown>).code,
-      ).toBe(42);
-      expect(
-        (result.toNativeValue(true) as unknown as Record<string, unknown>)
-          .detail,
-      ).toBe("more info");
-    });
-
-    it("round-trips `Error` with custom `name`", () => {
-      const err = new Error("custom");
-      err.name = "MyCustomError";
-      const se = FabricError.fromNativeError(err);
-      const result = roundTrip(
-        se as FabricValue,
-      ) as unknown as FabricError;
-      expect(result.name).toBe("MyCustomError");
-      expect(result.message).toBe("custom");
-    });
-
-    it("emits `name: null` in the wire format when `name` matches `type` (`TypeError`)", () => {
-      // TypeError: name === constructor.name === "TypeError"
-      const se = FabricError.fromNativeError(new TypeError("type check"));
-      const result = toWireFormat(
-        se as FabricValue,
-      ) as Record<string, unknown>;
-      const state = result["/Error@1"] as Record<string, unknown>;
-      expect(state.type).toBe("TypeError");
-      expect(state.name).toBe(null); // null = same as type
-      expect(state.message).toBe("type check");
-    });
-
-    it("emits explicit `name` in the wire format when `name` differs from `type`", () => {
-      const err = new Error("custom");
-      err.name = "MyCustomError";
-      const se = FabricError.fromNativeError(err);
-      const result = toWireFormat(
-        se as FabricValue,
-      ) as Record<string, unknown>;
-      const state = result["/Error@1"] as Record<string, unknown>;
-      expect(state.type).toBe("Error");
-      expect(state.name).toBe("MyCustomError");
-      expect(state.message).toBe("custom");
-    });
-
-    it("round-trips `TypeError` preserving `name === type` identity", () => {
-      // After round-trip, name and type should both be "TypeError",
-      // and the Error should reconstruct as a TypeError instance.
-      const se = FabricError.fromNativeError(new TypeError("rt"));
-      const result = roundTrip(
-        se as FabricValue,
-      ) as unknown as FabricError;
-      expect(result.toNativeValue(true)).toBeInstanceOf(TypeError);
-      expect(result.name).toBe("TypeError");
-      expect(result.toNativeValue(true).constructor.name).toBe("TypeError");
-    });
-
-    it("round-trips `Error` with mismatched `name` and `type`", () => {
-      // Error constructor is "Error" but name is overridden.
-      const err = new Error("mismatch");
-      err.name = "CustomName";
-      const se = FabricError.fromNativeError(err);
-      const result = roundTrip(
-        se as FabricValue,
-      ) as unknown as FabricError;
-      expect(result.toNativeValue(true)).toBeInstanceOf(Error);
-      expect(result.name).toBe("CustomName");
-      expect(result.toNativeValue(true).constructor.name).toBe("Error");
-    });
-
-    it("has `.wireTypeTag` property", () => {
-      const se = FabricError.fromNativeError(new Error("test"));
-      expect(se.wireTypeTag).toBe("Error@1");
-    });
-
-    it("round-trips `FabricError` with pre-converted cause (raw `Error`)", () => {
-      // Simulates what fabricFromNativeValue produces: a FabricError
-      // wrapping an Error whose cause is itself a FabricError (not a
-      // raw Error). The serializer's recurse on [DECONSTRUCT] output
-      // must find FabricValue, not raw Error.
-      const innerSe = FabricError.fromNativeError(new Error("inner"));
-      const outerErr = new Error("outer");
-      outerErr.cause = innerSe;
-      const outerSe = FabricError.fromNativeError(outerErr);
-
-      const result = roundTrip(
-        outerSe as FabricValue,
-      ) as unknown as FabricError;
-      expect(result.message).toBe("outer");
-      expect(result.cause).toBeInstanceOf(FabricError);
-      expect(
-        (result.cause as FabricError).message,
-      ).toBe("inner");
+    it("throws on a non-plain object with no codec (e.g. a raw `Map`)", () => {
+      // A non-plain object that is neither a FabricInstance nor codec-handled
+      // must fail loudly, not be mis-encoded as a plain object.
+      const { context } = makeTestContext();
+      expect(() => context.encode(new Map() as unknown as FabricValue))
+        .toThrow("no applicable codec");
     });
   });
 
@@ -1487,7 +1011,7 @@ describe("JsonEncodingContext", () => {
       const context = new JsonEncodingContext({ lenient: true });
       const runtime = new TestReconstructionContext();
 
-      // Map@1 always throws on RECONSTRUCT ("not yet implemented"),
+      // Map@1's codec always throws on decode ("not yet implemented"),
       // triggering lenient wrapping.
       const data = {
         "/Map@1": [["key", "value"]],
@@ -1553,16 +1077,16 @@ describe("JsonEncodingContext", () => {
     });
   });
 
-  describe("`TypeHandler.deserialize()` deep-frozen contract", () => {
-    // The contract is scoped to the type-handler dispatch arm only: anything
-    // returned via a registered `TypeHandler` is guaranteed deep-frozen at
-    // the `deserialize()` boundary, so callers do not each have to freeze.
-    // The class-registry fallback arm is a separate sibling branch and is
-    // intentionally NOT covered by this contract.
+  describe("`FabricCodec.decode()` deep-frozen contract", () => {
+    // The contract is scoped to the codec dispatch arm: anything returned via
+    // a registered `FabricCodec` is guaranteed deep-frozen at the `decode()`
+    // boundary, so callers do not each have to freeze. The unknown-tag
+    // fallback (`UnknownValue`) is a separate arm and is intentionally NOT
+    // covered by this contract.
 
-    it("handler-produced value is deep-frozen at the boundary", () => {
-      // `/EpochNsec@1` dispatches through a registered TypeHandler (arm-1);
-      // the reconstructed FabricEpochNsec must be deep-frozen on return.
+    it("codec-produced value is deep-frozen at the boundary", () => {
+      // `/EpochNsec@1` dispatches through a registered codec; the
+      // reconstructed FabricEpochNsec must be deep-frozen on return.
       const result = fromWireFormat(
         { "/EpochNsec@1": "AA" } as JsonWireValue,
       );
@@ -1570,9 +1094,9 @@ describe("JsonEncodingContext", () => {
       expect(isDeepFrozen(result)).toBe(true);
     });
 
-    it("lenient-mode `ProblematicValue` from a handler is deep-frozen", () => {
-      // `/BigInt@1` with non-string state fails handler validation; the
-      // lenient catch produces a ProblematicValue -- still an arm-1 return,
+    it("lenient-mode `ProblematicValue` from a codec is deep-frozen", () => {
+      // `/BigInt@1` with non-string state fails codec validation; the
+      // lenient catch produces a ProblematicValue -- still a codec-arm return,
       // so the contract deep-freezes it (not a crash: it is the value
       // lenient mode produces precisely to avoid crashing).
       const ctx = new JsonEncodingContext({ lenient: true });
@@ -1585,7 +1109,7 @@ describe("JsonEncodingContext", () => {
       expect(isDeepFrozen(result)).toBe(true);
     });
 
-    it("handler round-trip yields a deep-frozen result", () => {
+    it("codec round-trip yields a deep-frozen result", () => {
       const result = roundTrip(
         new FabricEpochNsec(1704067200000000000n) as FabricValue,
       );
@@ -1691,39 +1215,6 @@ describe("JsonEncodingContext", () => {
       expect(() => {
         (result.outer.inner[0] as Record<string, unknown>).deep = 2;
       }).toThrow();
-    });
-
-    it("`serialize()` output for `/quote`-routed values is itself deep-frozen (flat and nested)", () => {
-      // White-box: the serialized /quote tree is transient -- encode() and
-      // encodeToBytes() immediately JSON.stringify it and discard it -- so
-      // its frozen-ness is not observable via the public API. Reach into the
-      // private serializer to pin the guarantee directly.
-      //
-      // It holds because `unquote()` rebuilds + recursively freezes every
-      // array/object, so each member handed to the container's shallow
-      // `Object.freeze` is itself already deep-frozen. A future change to
-      // `unquote()` that stopped rebuilding (or stopped freezing) would
-      // silently break this; this test is the guard. NOTE: the non-/quote
-      // serialize outputs (bare objects/arrays, /object-wrapped, handler
-      // state) are intentionally NOT asserted here -- that throwaway tree is
-      // out of scope and is not deep-frozen.
-      const { context } = makeTestContext();
-      const serialize = (context as unknown as {
-        serialize(v: FabricValue): JsonWireValue;
-      }).serialize.bind(context);
-
-      const flat = serialize(
-        { "/a": 1, "/b": { plain: [1, 2] } } as unknown as FabricValue,
-      );
-      const nested = serialize(
-        { "/a": { "/b": { c: [1, { d: 2 }] } } } as unknown as FabricValue,
-      );
-
-      expect(flat).toEqual({
-        "/quote": { "/a": 1, "/b": { plain: [1, 2] } },
-      });
-      expect(isDeepFrozen(flat)).toBe(true);
-      expect(isDeepFrozen(nested)).toBe(true);
     });
 
     it("`serialize()`→`/quote`→`decode()` round-trip is deep-frozen end-to-end", () => {

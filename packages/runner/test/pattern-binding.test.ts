@@ -463,29 +463,83 @@ describe("pattern-binding", () => {
       expect(links[0].space).toBe(space);
     });
 
-    it("should find nested legacy alias bindings", () => {
-      const testCell = runtime.getCell<{ a: Record<string, any> }>(
+    it("follows a chain of write redirects (redirect -> redirect)", () => {
+      const testCell = runtime.getCell<Record<string, unknown>>(
         space,
-        "nested legacy",
+        "redirect chain",
         undefined,
         tx,
       );
-      testCell.set({ a: { b: { c: 42 } } });
-      const binding = { $alias: { path: ["a"] } };
-      // Add a nested alias inside the value at path 'a'
-      testCell.key("a").set({
-        b: { c: 42 },
-        inner: { $alias: { path: ["b", "c"] } },
-      });
-      const nestedBinding = { $alias: { path: ["a", "inner"] } };
-      const links = findAllWriteRedirectCells(
-        [binding, nestedBinding],
-        testCell,
+      // Build p -> q -> r, where each of p and q HOLDS a write-redirect (a
+      // redirect whose target value is itself a redirect), and r is a plain
+      // value. A literal `$alias` in a set() value is resolved on write, so we
+      // store real sigil write-redirects via getAsWriteRedirectLink.
+      testCell.set({ r: 99 });
+      testCell.key("q").set(
+        testCell.key("r").getAsWriteRedirectLink({ base: testCell }),
       );
-      expect(links.length).toBe(3);
-      expect(links[0].path).toEqual(["a"]);
-      expect(links[1].path).toEqual(["b", "c"]);
-      expect(links[2].path).toEqual(["a", "inner"]);
+      testCell.key("p").set(
+        testCell.key("q").getAsWriteRedirectLink({ base: testCell }),
+      );
+      // The binding redirects to p; the chain p -> q -> r is followed, stopping
+      // at the non-redirect value 99.
+      const binding = testCell.key("p").getAsWriteRedirectLink({
+        base: testCell,
+      });
+      const links = findAllWriteRedirectCells(binding, testCell);
+      expect(links.map((l) => l.path)).toEqual([["p"], ["q"], ["r"]]);
+    });
+
+    it("does not dive into a non-redirect target to find nested redirects", () => {
+      const testCell = runtime.getCell<Record<string, unknown>>(
+        space,
+        "nested non-redirect target",
+        undefined,
+        tx,
+      );
+      testCell.set({ x: 7 });
+      // 'a' holds an OBJECT (a non-redirect) that CONTAINS a nested write
+      // redirect. Following the `a` redirect stops at that object — we do NOT
+      // walk into it, so the nested `inner` redirect is never discovered.
+      testCell.key("a").set({
+        inner: testCell.key("x").getAsWriteRedirectLink({ base: testCell }),
+        plain: 1,
+      });
+      const binding = testCell.key("a").getAsWriteRedirectLink({
+        base: testCell,
+      });
+      const links = findAllWriteRedirectCells(binding, testCell);
+      expect(links.map((l) => l.path)).toEqual([["a"]]);
+    });
+
+    it("resolves a chained redirect relative to its own document, not the base cell", () => {
+      // Cross-document chain: the binding (resolved against cellA) redirects to
+      // cellB's `mid`, whose value is a *relative* redirect to `x`. That nested
+      // redirect must resolve against cellB (the doc it lives in), not cellA. If
+      // the recursion re-based onto cellA, the second link would carry cellA's id.
+      const cellA = runtime.getCell<Record<string, unknown>>(
+        space,
+        "xdoc chain A",
+        undefined,
+        tx,
+      );
+      const cellB = runtime.getCell<Record<string, unknown>>(
+        space,
+        "xdoc chain B",
+        undefined,
+        tx,
+      );
+      cellB.set({ x: 55 });
+      cellB.key("mid").set(
+        cellB.key("x").getAsWriteRedirectLink({ base: cellB }),
+      );
+      const binding = cellB.key("mid").getAsWriteRedirectLink({ base: cellA });
+      const links = findAllWriteRedirectCells(binding, cellA);
+      const bId = cellB.getAsNormalizedFullLink().id;
+      expect(links.map((l) => ({ id: l.id, path: l.path }))).toEqual([
+        { id: bId, path: ["mid"] },
+        { id: bId, path: ["x"] },
+      ]);
     });
 
     it("should find all write redirect links in an array", () => {

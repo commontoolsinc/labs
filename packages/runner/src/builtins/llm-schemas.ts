@@ -168,6 +168,8 @@ export const LLMParamsSchema = internSchema(
         additionalProperties: LLMContextEntrySchema,
         default: {},
       },
+      search: { type: "boolean" },
+      nativeModelToolIds: { type: "array", items: { type: "string" } },
       resultSchema: JSONSchemaValueSchema,
     },
     required: ["messages"],
@@ -194,6 +196,8 @@ export const GenerateTextParamsSchema = internSchema(
         additionalProperties: LLMToolSchema,
         default: {},
       },
+      search: { type: "boolean" },
+      nativeModelToolIds: { type: "array", items: { type: "string" } },
     },
   },
 );
@@ -222,6 +226,8 @@ export const GenerateObjectParamsSchema = internSchema(
       cache: { type: "boolean" },
       metadata: { type: "object" },
       tools: { type: "object", additionalProperties: LLMToolSchema },
+      search: { type: "boolean" },
+      nativeModelToolIds: { type: "array", items: { type: "string" } },
     },
     required: ["schema"],
   },
@@ -242,6 +248,17 @@ export const LLMResultSchema = internSchema(
       error: {},
       partial: { type: "string" },
       requestHash: { type: "string" },
+      groundingSources: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            url: { type: "string" },
+            title: { type: "string" },
+            snippet: { type: "string" },
+          },
+        },
+      },
     },
     required: ["pending"],
   } as const,
@@ -257,6 +274,17 @@ export const GenerateTextResultSchema = internSchema(
       error: {},
       partial: { type: "string" },
       requestHash: { type: "string" },
+      groundingSources: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            url: { type: "string" },
+            title: { type: "string" },
+            snippet: { type: "string" },
+          },
+        },
+      },
     },
     required: ["pending"],
   } as const,
@@ -273,6 +301,8 @@ export const GenerateObjectResultSchema = internSchema(
       error: {},
       partial: { type: "string" },
       requestHash: { type: "string" },
+      // No `groundingSources` here — generateObject's JSON-mode path returns
+      // only the object, not the grounded response. Use generateText for sources.
     },
     required: ["pending"],
   } as const,

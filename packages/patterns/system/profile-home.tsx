@@ -260,9 +260,18 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       )
     );
     const initialNameApplied = applyInitialName({ initialName, name });
+    // A profile's display name is the person's name (falls back to "Profile"
+    // before one is set). This drives cf-cell-link labels in the picker and
+    // anywhere a profile link is rendered.
+    const displayName = computed(() => {
+      const applied = initialNameApplied;
+      return typeof applied === "string" && applied.trim().length > 0
+        ? applied
+        : "Profile";
+    });
 
     return {
-      [NAME]: "Profile",
+      [NAME]: displayName,
       name,
       avatar,
       elements,

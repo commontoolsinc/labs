@@ -408,9 +408,14 @@ export class Runtime {
     this.navigateCallback = options.navigateCallback;
     this.pieceCreatedCallback = options.pieceCreatedCallback;
 
-    // Handle pattern environment configuration
+    // Handle pattern environment configuration. Only set the (process-global)
+    // pattern environment when a host explicitly provides one — setting it
+    // unconditionally from every Runtime would let the last-constructed runtime
+    // clobber the apiUrl other runtimes' patterns see. Hosts that run patterns
+    // server-side (the toolshed) pass `patternEnvironment` so handler `fetch`es
+    // reach the right toolshed rather than the hardcoded `localhost:<port>`
+    // fallback in builder/env.ts. This is still a singleton. TODO(seefeld).
     if (options.patternEnvironment) {
-      // This is still a singleton. TODO(seefeld): Fix this.
       setPatternEnvironment(options.patternEnvironment);
     }
 
