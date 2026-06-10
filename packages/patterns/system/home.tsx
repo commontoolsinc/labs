@@ -26,7 +26,6 @@ type Favorite = {
   tag: string;
   userTags: string[];
   spaceName?: string;
-  spaceDid?: string;
 };
 
 type JournalEntry = {
@@ -71,7 +70,6 @@ const addFavorite = handler<
       .asSchemaFromLinks?.()?.schema;
     if (typeof schema !== "object") schema = "";
 
-    const spaceDid = (piece as any)?.space as string | undefined;
     const schemaTag = tag || JSON.stringify(schema) || "";
 
     favorites.push({
@@ -79,7 +77,6 @@ const addFavorite = handler<
       tag: schemaTag,
       userTags: [],
       spaceName,
-      spaceDid,
     });
   }
 });

@@ -18,7 +18,6 @@ type Favorite = {
   tag: string;
   userTags: string[];
   spaceName?: string;
-  spaceDid?: string;
 };
 
 type JournalSnapshot = {
@@ -118,9 +117,6 @@ const addFavorite = handler<
       .asSchemaFromLinks?.()?.schema;
     if (typeof schema !== "object") schema = ""; // schema can be true or false
 
-    // Get spaceDid from the piece cell
-    const spaceDid = (piece as any)?.space as string | undefined;
-
     const schemaTag = tag || JSON.stringify(schema) || "";
 
     favorites.push({
@@ -128,7 +124,6 @@ const addFavorite = handler<
       tag: schemaTag,
       userTags: [],
       spaceName,
-      spaceDid,
     });
 
     // Add journal entry for the favorite action
