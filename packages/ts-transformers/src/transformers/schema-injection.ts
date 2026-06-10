@@ -31,6 +31,7 @@ import {
 import { unwrapExpression } from "../utils/expression.ts";
 import {
   type CapabilityParamSummary,
+  type FunctionCapabilitySummary,
   HelpersOnlyTransformer,
   type SchemaHint,
   type SchemaHints,
@@ -193,6 +194,40 @@ function getSymbolTypeAtSource(
   return checker.getTypeOfSymbolAtLocation(symbol, declaration);
 }
 
+// Per-context memo for the capability analyses this transformer runs.
+// `analyzeFunctionCapabilities` consults `options.summaryCache` before
+// traversing, but defaults it to a fresh WeakMap per call — so without a
+// persistent cache every lookup re-walks the callback body (a single handler
+// site queries the same callback three times: event param, state param,
+// identity hints). Keyed by TransformationContext so entries live exactly one
+// (stage, source file) pass and can't leak across programs. The two analysis
+// variants used below produce different summaries, hence separate maps. No
+// invalidation wiring is needed: the analysis is a pure function of the
+// callback AST and checker (it reads no cross-stage registries), and
+// transformed nodes have fresh identities, so entries can't go stale.
+interface CapabilitySummaryMemo {
+  /** `{ checker, includeNestedCallbacks: true }` analyses. */
+  readonly nested: WeakMap<ts.Node, FunctionCapabilitySummary>;
+  /** Checker-less analyses (fallback after a recorded-summary miss). */
+  readonly bare: WeakMap<ts.Node, FunctionCapabilitySummary>;
+}
+
+const capabilitySummaryMemos = new WeakMap<
+  TransformationContext,
+  CapabilitySummaryMemo
+>();
+
+function capabilitySummaryMemoFor(
+  context: TransformationContext,
+): CapabilitySummaryMemo {
+  let memo = capabilitySummaryMemos.get(context);
+  if (!memo) {
+    memo = { nested: new WeakMap(), bare: new WeakMap() };
+    capabilitySummaryMemos.set(context, memo);
+  }
+  return memo;
+}
+
 function findCapabilitySummaryForParameter(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   index: number,
@@ -206,9 +241,15 @@ function findCapabilitySummaryForParameter(
     ? analyzeFunctionCapabilities(fn, {
       checker: options.checker,
       includeNestedCallbacks: true,
+      summaryCache: context
+        ? capabilitySummaryMemoFor(context).nested
+        : undefined,
     })
     : context
-    ? (context.lookupCapabilitySummary(fn) ?? analyzeFunctionCapabilities(fn))
+    ? (context.lookupCapabilitySummary(fn) ??
+      analyzeFunctionCapabilities(fn, {
+        summaryCache: capabilitySummaryMemoFor(context).bare,
+      }))
     : analyzeFunctionCapabilities(fn, {
       checker: options?.checker,
     });
