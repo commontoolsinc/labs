@@ -199,6 +199,7 @@ Deno.test("ts-transformers re-exports the canonical CFC alias set", () => {
     "FilteredFrom",
     "SubsetOf",
     "PermutationOf",
+    "SameAuthorAs",
   ]);
 });
 

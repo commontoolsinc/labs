@@ -35,6 +35,7 @@ import type {
   RefValue,
   RepresentsCurrentUser,
   RequiresIntegrity,
+  SameAuthorAs,
   SubsetOf,
   WriteAuthorizedBy,
 } from "@commonfabric/api/cfc";
@@ -73,6 +74,9 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
     {
       title: "zeta",
     };
+  const sameAuthorAs: SameAuthorAs<{ title: string }, "/member-profile"> = {
+    title: "zeta-author",
+  };
   const lengthPreserved: LengthPreservedFrom<
     { items: string[] },
     readonly ["source", "items"]
@@ -204,6 +208,7 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   assertEquals(requiresIntegrity, { title: "delta" });
   assertEquals(maxConfidentiality, { title: "epsilon" });
   assertEquals(exactCopy, { title: "zeta" });
+  assertEquals(sameAuthorAs, { title: "zeta-author" });
   assertEquals(lengthPreserved, { items: [] });
   assertEquals(filtered, { items: [] });
   assertEquals(subset, { items: [] });
@@ -244,5 +249,6 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
     "FilteredFrom",
     "SubsetOf",
     "PermutationOf",
+    "SameAuthorAs",
   ]);
 });
