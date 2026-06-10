@@ -76,4 +76,4 @@ interface Deck {
 
 - @common/concepts/identity.md - The `equals()` function
 - @common/concepts/reactivity.md - Why properties return Cells
-- @development/debugging/gotchas/computed-cell-object-object.md - Related Cell-to-string coercion issue
+- [quick.md#object-object-in-a-computed-string](./quick.md#object-object-in-a-computed-string) - Related Cell-to-string coercion issue
