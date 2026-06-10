@@ -168,8 +168,16 @@ const resolveProvenanceImplementationIdentity = (
     };
   }
 
+  // Mirror the legacy resolver's `getVerifiedBundleId(...) ?? verifiedLoadId`
+  // fallback: a stored legacy `writeAuthorizedBy` claim may carry the raw
+  // `verifiedLoadId` as its `bundleId` (when the bundle id wasn't registered at
+  // stamp time), and the `bundleId` verification arm in cfc/prepare.ts is an
+  // exact equality. Dropping the fallback here would leave `bundleId`
+  // `undefined` on a `getVerifiedBundleId` miss and fail those legacy claims
+  // closed. The `moduleIdentity` arm remains the primary; this only keeps the
+  // legacy arm symmetric with the path that produced those claims.
   const bundleId = typeof verifiedLoadId === "string" && verifiedLoadId.length
-    ? harness?.getVerifiedBundleId?.(verifiedLoadId)
+    ? harness?.getVerifiedBundleId?.(verifiedLoadId) ?? verifiedLoadId
     : undefined;
 
   return {

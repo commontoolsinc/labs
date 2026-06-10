@@ -169,3 +169,48 @@ describe("content-addressed action identity", () => {
     expect(missing).toBeUndefined();
   });
 });
+
+describe("provenance bundleId fallback (legacy claim compat)", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
+  let runtime: Runtime | undefined;
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+    runtime = undefined;
+    storageManager = undefined;
+  });
+
+  it("falls back to verifiedLoadId when the bundle id is unregistered", async () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "observe",
+    });
+    const pattern = await runtime.patternManager.compilePattern(PROGRAM);
+    await runtime.idle();
+    const node = pattern.nodes.find((n) =>
+      (n.module as Module).type === "javascript" &&
+      (n.module as Module).wrapper === "handler"
+    );
+    const module = node!.module as Module;
+    const fn = module.implementation as HarnessedFunction;
+
+    // A harness whose getVerifiedBundleId MISSES (legacy stamp-time scenario):
+    // the resolved identity's bundleId must mirror the legacy resolver and
+    // fall back to the raw verifiedLoadId, so a legacy bundleId-only
+    // writeAuthorizedBy claim stamped with that value still verifies.
+    const identity = resolvePolicyFacingImplementationIdentity(module, {
+      harness: {
+        getVerifiedBundleId: () => undefined,
+      } as never,
+      verifiedLoadId: "load:legacy-bundle",
+      implementation: fn,
+    });
+    expect(identity?.kind).toBe("verified");
+    expect((identity as { bundleId?: string }).bundleId).toBe(
+      "load:legacy-bundle",
+    );
+  });
+});
