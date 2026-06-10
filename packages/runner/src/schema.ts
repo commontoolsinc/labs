@@ -1078,6 +1078,21 @@ export function validateAndTransform(
   return val;
 }
 
+/**
+ * Memo for `TransformObjectCreator.mergeMatches`' combined anyOf/allOf cell
+ * schema, keyed per deep-frozen compound schema identity × the cell match's
+ * (tiny) `asCell` values. `mergeMatches` runs once per matched anyOf cell on
+ * the traverse path and the combined schema is deterministic from these two
+ * inputs; without the memo every call rebuilds the (large) combined schema
+ * and pays a full content hash to intern it onto the cell link. Mutable
+ * compound schemas are never cached (in-place edits must be observed).
+ * Module-level so the memo survives across traverser instances.
+ */
+const combinedCellSchemaCache = new WeakMap<
+  JSONSchemaObj,
+  Map<string, JSONSchema>
+>();
+
 class TransformObjectCreator
   implements IObjectCreator<AnyCellWrapping<FabricValue>> {
   constructor(
@@ -1138,17 +1153,34 @@ class TransformObjectCreator
           // wouldn't have a cell. We will use the asCell used for creating
           // this cell, but change the rest of the schema to be the logical
           // combination schema.
-          const allOfItems = (schema.allOf ?? []).map(removeAsCellFromSchema);
-          const anyOfItems = (schema.anyOf ?? []).map(removeAsCellFromSchema);
           const asCellValues = ContextualFlowControl.getAsCellValues(
             cellMatch.schema,
           );
-          const combinedSchema = {
+          const cacheKey = isDeepFrozen(schema)
+            ? JSON.stringify(asCellValues)
+            : undefined;
+          if (cacheKey !== undefined) {
+            const cached = combinedCellSchemaCache.get(schema)?.get(cacheKey);
+            if (cached !== undefined) return cellMatch.asSchema(cached) as any;
+          }
+          const allOfItems = (schema.allOf ?? []).map(removeAsCellFromSchema);
+          const anyOfItems = (schema.anyOf ?? []).map(removeAsCellFromSchema);
+          // Intern here so the memo holds the canonical instance and the
+          // `asSchema` interning below is an identity cache hit.
+          const combinedSchema = internSchema({
             ...schema,
             ...(allOfItems.length > 0) && { allOf: allOfItems },
             ...(anyOfItems.length > 0) && { anyOf: anyOfItems },
             ...(asCellValues.length > 0) && { asCell: asCellValues },
-          };
+          });
+          if (cacheKey !== undefined) {
+            let byKey = combinedCellSchemaCache.get(schema);
+            if (byKey === undefined) {
+              byKey = new Map();
+              combinedCellSchemaCache.set(schema, byKey);
+            }
+            byKey.set(cacheKey, combinedSchema);
+          }
           return cellMatch.asSchema(combinedSchema) as any;
         }
       }
