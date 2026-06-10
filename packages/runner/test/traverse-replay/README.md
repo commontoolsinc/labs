@@ -83,10 +83,12 @@ with a counter explanation.
   includes heavy fast-fail traffic.
 - `shopping-list-test` — small array/handler-heavy client load; fast inner-loop
   fixture (~14ms).
-- `piece-query-legacy` — the original captured server query dataset (36 docs),
-  converted by `convert-legacy-timing-data.ts`; server-shaped (`includeMeta`,
-  single big traversal). Note: the old `integration/traverse_timing.test.ts`
-  queries `selectedPiece` but this pre-rename dataset has `selectedCharm`, so
-  that test no longer traverses its own data; the converted fixture fixes the
-  selector (and keys the corpus by the capture space, which links carry
-  explicitly).
+- `piece-query-legacy` — a captured server query dataset (36 docs);
+  server-shaped (`includeMeta`, single big traversal). Converted from the old
+  `integration/traverse_timing.test.ts` dataset, which predated the charm→piece
+  rename: that test was mechanically renamed to query `selectedPiece` while its
+  data still had `selectedCharm`, so it stopped traversing its own data. The
+  fixture keeps the original `selectedCharm` selector and keys the corpus by the
+  capture space (which links in the docs carry explicitly). The timing test, its
+  JSON, and the one-off converter have been removed; this fixture is the
+  canonical copy of the dataset.
