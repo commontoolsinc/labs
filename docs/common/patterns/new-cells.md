@@ -50,10 +50,12 @@ export default pattern(({ items }) => {
   const searchQuery = new Writable("");
   const selectedItem = new Writable<Item | null>(null);
 
-  // Derived data: computed(), never a writable cell
-  const filteredItems = computed(() =>
-    items.filter((item) => item.title.includes(searchQuery))
-  );
+  // Derived data: computed(), never a writable cell.
+  // computed() bodies are plain JavaScript — read cells with .get()
+  const filteredItems = computed(() => {
+    const query = searchQuery.get();
+    return items.get().filter((item) => item.title.includes(query));
+  });
 
   return {
     [UI]: <div>...</div>,
