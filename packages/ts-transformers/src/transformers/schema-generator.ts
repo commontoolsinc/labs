@@ -176,7 +176,7 @@ function createSchemaAst(
   }
   if (schema === null) return factory.createNull();
   if (typeof schema === "string") return factory.createStringLiteral(schema);
-  if (typeof schema === "number") return factory.createNumericLiteral(schema);
+  if (typeof schema === "number") return createNumericAst(schema, factory);
   if (typeof schema === "boolean") {
     return schema ? factory.createTrue() : factory.createFalse();
   }
@@ -201,6 +201,30 @@ function createSchemaAst(
     return factory.createObjectLiteralExpression(properties, true);
   }
   return factory.createIdentifier("undefined");
+}
+
+// The TS factory rejects negative numbers in createNumericLiteral; they must
+// be emitted as a unary minus wrapping a positive literal. Non-finite values
+// have no literal form at all, so emit them as global identifiers.
+function createNumericAst(
+  value: number,
+  factory: ts.NodeFactory,
+): ts.Expression {
+  if (Number.isNaN(value)) return factory.createIdentifier("NaN");
+  if (value === Infinity) return factory.createIdentifier("Infinity");
+  if (value === -Infinity) {
+    return factory.createPrefixUnaryExpression(
+      ts.SyntaxKind.MinusToken,
+      factory.createIdentifier("Infinity"),
+    );
+  }
+  if (value < 0 || Object.is(value, -0)) {
+    return factory.createPrefixUnaryExpression(
+      ts.SyntaxKind.MinusToken,
+      factory.createNumericLiteral(-value),
+    );
+  }
+  return factory.createNumericLiteral(value);
 }
 
 function attachWriteAuthorizedByMarker(

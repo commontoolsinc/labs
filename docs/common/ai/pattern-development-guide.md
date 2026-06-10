@@ -224,10 +224,13 @@ callbacks.
 Do not use `computed()` to gate JSX sections. Use direct authored expressions
 instead, usually plain ternaries.
 
-Current main handles ordinary ternaries correctly in normal pattern code, not
-just in JSX children. If you're debugging a less common site, inspect the
-emitted output with `cf check --show-transformed` instead of reasoning from old
-transformer limitations.
+Prefer plain authored ternaries; they work in normal pattern code, not just in
+JSX children. If a site behaves unexpectedly, inspect the emitted output with
+`cf check --show-transformed` instead of guessing about the lowering. One
+caveat: ternary branches are evaluated eagerly (no short-circuiting), so
+property access on a nullable reactive value inside a branch needs `computed()`
+deferral — see
+`docs/development/debugging/gotchas/eager-ternary-branch-evaluation.md`.
 
 ```tsx
 // Wrong
@@ -337,8 +340,7 @@ left ephemeral.
 
 ## Documentation Priorities
 
-Start with `docs/common/patterns/`, especially the meta guidance under
-`docs/common/patterns/meta/`.
+Start with `docs/common/patterns/`.
 
 For Pattern Factory Build and other implementation work that creates or
 debugs stateful UI, read these foundational references before coding:

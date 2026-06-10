@@ -18,6 +18,10 @@ import type {
   TriggerTraceValueSummary,
 } from "./types.ts";
 import { getMetaLink, type NormalizedFullLink } from "../link-utils.ts";
+import {
+  isErrorStackMapped,
+  markErrorStackMapped,
+} from "../sandbox/ses-runtime.ts";
 import type { SchedulerActionInfo } from "../telemetry.ts";
 import { MAX_TRIGGER_TRACE_HISTORY } from "./constants.ts";
 
@@ -205,10 +209,15 @@ export function handleSchedulerError(
     (error as Error & { frame?: Frame }).frame,
   );
 
-  // Transform stack trace to show original source locations.
-  materializeHostVisibleStack(error);
-  if (error.stack) {
-    error.stack = state.parseStack(error.stack);
+  // Transform stack trace to show original source locations — unless the
+  // error already crossed a SES invoke seam that mapped it (`parseStack` is
+  // not idempotent; re-parsing a mapped stack corrupts the mapped frames).
+  if (!isErrorStackMapped(error)) {
+    materializeHostVisibleStack(error);
+    if (error.stack) {
+      error.stack = state.parseStack(error.stack);
+      markErrorStackMapped(error);
+    }
   }
 
   const errorWithContext = error as ErrorWithContext;

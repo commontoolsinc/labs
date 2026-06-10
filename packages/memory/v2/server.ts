@@ -5,7 +5,7 @@ import {
   type CellScope,
   type ClientCommit,
   type ClientMessage,
-  columnDeclaresIfc,
+  dbNeedsColumnProvenance,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
   type EntityDocument,
@@ -226,22 +226,6 @@ function missingTableName(error: unknown): string | undefined {
  *  full-Unicode `toLowerCase()` would over-match — SQLite treats e.g. `Ü` and
  *  `ü` as distinct tables, so folding them together here would mask a genuine
  *  "no such table" error as an empty result. */
-/** Whether any column of any declared table carries a non-empty `ifc` (so a
- *  read of this db needs sound column provenance for CFC labeling). */
-function declaresColumnIfc(
-  tables: Record<string, unknown> | undefined,
-): boolean {
-  if (tables === undefined) return false;
-  for (const table of Object.values(tables)) {
-    const props = (table as { properties?: Record<string, unknown> })
-      ?.properties;
-    if (!props) continue;
-    for (const col of Object.values(props)) {
-      if (columnDeclaresIfc((col as { ifc?: unknown })?.ifc)) return true;
-    }
-  }
-  return false;
-}
 
 function isDeclaredTable(
   tables: Record<string, unknown> | undefined,
@@ -1011,9 +995,10 @@ export class Server {
       // qualifies, per the session's principal / id).
       //
       // Capture per-column origin ONLY when the db declares per-column `ifc`
-      // (CFC read-labeling needs sound provenance). Unlabeled dbs — the common
-      // case, and all injected on-disk sources — pay nothing.
-      const wantColumns = declaresColumnIfc(message.db.tables);
+      // (Phase 2) or a per-row label rule (Phase 3 — rule inputs are located
+      // by TRUE origin, never output name). Unlabeled dbs — the common case,
+      // and all injected on-disk sources — pay nothing.
+      const wantColumns = dbNeedsColumnProvenance(message.db.tables);
       // Bind @db/sqlite's column-origin symbols before a labeled read; fail
       // loudly if they can't be bound rather than mislabeling the result.
       if (wantColumns && !(await ensureColumnOriginAvailable())) {

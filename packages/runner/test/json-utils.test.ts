@@ -858,8 +858,7 @@ describe("moduleToJSON", () => {
         repoRoot,
       ),
     );
-    const { jsScript, id } = await compileEngine.compile(program);
-    const { main } = await compileEngine.evaluate(id, jsScript, program.files);
+    const { main } = await compileEngine.compileAndEvaluateModules(program);
     const pattern = main?.default as any;
 
     const seen = new Set<unknown>();

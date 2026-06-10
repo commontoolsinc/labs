@@ -42,7 +42,6 @@ describe("load by identity — pattern-metadata bridge", () => {
     new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { esmModuleLoader: true },
     });
 
   beforeEach(() => {

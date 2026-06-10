@@ -96,12 +96,11 @@ async function bindingPathsResolvedDuring(
 describe("CT-1665: verified binding metadata for non-exported handlers", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
-  const newRuntime = (esm: boolean) =>
+  const newRuntime = () =>
     new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "observe",
-      ...(esm ? { experimental: { esmModuleLoader: true } } : {}),
     });
 
   beforeEach(() => {
@@ -111,55 +110,53 @@ describe("CT-1665: verified binding metadata for non-exported handlers", () => {
     await storageManager?.close();
   });
 
-  for (const esm of [false, true]) {
-    for (
-      const [label, src] of [["internal", INTERNAL_SRC], [
-        "exported",
-        EXPORTED_SRC,
-      ]] as const
-    ) {
-      it(`resolves the writer identity when ${label} handlers run (esm=${esm})`, async () => {
-        const rt = newRuntime(esm);
-        try {
-          const tx = rt.edit();
-          const pattern = await rt.patternManager.compilePattern(
-            programFor(src),
-            { space, tx },
-          );
-          const resultCell = rt.getCell<Record<string, unknown>>(
-            space,
-            `ct1665-${label}-${esm}`,
-            undefined,
-            tx,
-          );
-          const r = rt.run(tx, pattern, {}, resultCell);
-          await tx.commit();
-          await r.pull();
+  for (
+    const [label, src] of [["internal", INTERNAL_SRC], [
+      "exported",
+      EXPORTED_SRC,
+    ]] as const
+  ) {
+    it(`resolves the writer identity when ${label} handlers run`, async () => {
+      const rt = newRuntime();
+      try {
+        const tx = rt.edit();
+        const pattern = await rt.patternManager.compilePattern(
+          programFor(src),
+          { space, tx },
+        );
+        const resultCell = rt.getCell<Record<string, unknown>>(
+          space,
+          `ct1665-${label}`,
+          undefined,
+          tx,
+        );
+        const r = rt.run(tx, pattern, {}, resultCell);
+        await tx.commit();
+        await r.pull();
 
-          // The metadata is registered for both siblings...
-          const paths = recordedBindingPaths(rt);
-          expect(paths).toContainEqual(["setName"]);
-          expect(paths).toContainEqual(["setAvatar"]);
+        // The metadata is registered for both siblings...
+        const paths = recordedBindingPaths(rt);
+        expect(paths).toContainEqual(["setName"]);
+        expect(paths).toContainEqual(["setAvatar"]);
 
-          // ...and resolves through the verifier's lookup as each handler runs.
-          const onName = await bindingPathsResolvedDuring(rt, () => {
-            r.key("setName").send({ name: "Alice" });
-          });
-          expect(onName).toContainEqual(["setName"]);
+        // ...and resolves through the verifier's lookup as each handler runs.
+        const onName = await bindingPathsResolvedDuring(rt, () => {
+          r.key("setName").send({ name: "Alice" });
+        });
+        expect(onName).toContainEqual(["setName"]);
 
-          const onAvatar = await bindingPathsResolvedDuring(rt, () => {
-            r.key("setAvatar").send({ avatar: "🦊" });
-          });
-          expect(onAvatar).toContainEqual(["setAvatar"]);
-        } finally {
-          await rt.dispose();
-        }
-      });
-    }
+        const onAvatar = await bindingPathsResolvedDuring(rt, () => {
+          r.key("setAvatar").send({ avatar: "🦊" });
+        });
+        expect(onAvatar).toContainEqual(["setAvatar"]);
+      } finally {
+        await rt.dispose();
+      }
+    });
   }
 
   it("registers binding metadata for real profile-home setName/setAvatar/addElement", async () => {
-    const rt = newRuntime(true);
+    const rt = newRuntime();
     try {
       const tx = rt.edit();
       const pattern = await rt.patternManager.compilePattern(
@@ -186,8 +183,8 @@ describe("CT-1665: verified binding metadata for non-exported handlers", () => {
   });
 
   it("registers binding metadata after resume-by-identity (source-free reload)", async () => {
-    const rt1 = newRuntime(true);
-    const rt2 = newRuntime(true);
+    const rt1 = newRuntime();
+    const rt2 = newRuntime();
     try {
       const tx1 = rt1.edit();
       const pm1 = rt1.patternManager;

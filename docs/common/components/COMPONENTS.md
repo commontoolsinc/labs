@@ -1,15 +1,26 @@
-<!-- @reviewed 2025-12-11 docs-rationalization -->
+<!-- @reviewed 2026-06-10 docs-overhaul-phase-3 -->
 
 # UI Components Reference
 
-> **Living documentation:** [`packages/patterns/catalog/catalog.tsx`](../../../packages/patterns/catalog/catalog.tsx) is the authoritative, type-checked component catalog. Each component has a story file under [`packages/patterns/catalog/stories/`](../../../packages/patterns/catalog/stories/) showing usage. Refer to those files for the most accurate, up-to-date examples.
+This file is the **agent-facing index plus usage narrative** for the Common
+Fabric UI library. Division of labor:
 
-Common Fabric UI components with bidirectional binding support.
+- **This file** — complete component index (tag, purpose, bindable props) and
+  the usage narrative that is not derivable from source.
+- [`packages/patterns/catalog/catalog.tsx`](../../../packages/patterns/catalog/catalog.tsx)
+  and the story files under
+  [`packages/patterns/catalog/stories/`](../../../packages/patterns/catalog/stories/)
+  — authoritative, type-checked live usage.
+- Component source under
+  [`packages/ui/src/v2/components/`](../../../packages/ui/src/v2/components/)
+  — authoritative props, events, and JSDoc.
+- [`packages/ui/LLM-COMPONENT-INSTRUCTIONS.md`](../../../packages/ui/LLM-COMPONENT-INSTRUCTIONS.md)
+  — HTML attribute tables per component.
 
 ## Bidirectional Binding
 
-Use `$` prefix for explicit two-way sync. That is the normal authoring form for
-Common Fabric controls. No handler is needed for simple updates.
+Use the `$` prefix for explicit two-way sync. That is the normal authoring
+form for Common Fabric controls. No handler is needed for simple updates.
 
 ```tsx
 <cf-checkbox $checked={item.done} />    // Auto-syncs checkbox state
@@ -17,13 +28,11 @@ Common Fabric controls. No handler is needed for simple updates.
 <cf-select $value={category} items={[...]} />
 ```
 
-**Native HTML inputs are one-way only.** Always use the Common Fabric form components for inputs.
+**Native HTML inputs are one-way only.** Always use the Common Fabric form
+components for inputs.
 
-For when to use handlers vs binding, see [two-way-binding](../patterns/two-way-binding.md).
-
-## Property Names: Use CamelCase
-
-Use camelCase for Common Fabric component properties. Kebab-case JSX attributes don't map correctly:
+Use camelCase for component properties — kebab-case JSX attributes don't map
+correctly:
 
 ```tsx
 // ❌ Kebab-case won't work
@@ -33,262 +42,236 @@ Use camelCase for Common Fabric component properties. Kebab-case JSX attributes 
 <cf-autocomplete allowCustom={true} />  // Sets element.allowCustom correctly
 ```
 
-## Styling Affordances
+When a control is already bound to a cell via `$value`, treat that binding as
+the primary value path. Avoid `oncf-change` handlers that simply write the same
+value back into the same cell; use them only for dependent state or side
+effects.
 
-When you need to style Common Fabric components, look for these public
-affordances in this order:
+For when to use handlers vs binding — and the standard `equals()` idiom for
+removing array items by identity — see
+[two-way-binding](../patterns/two-way-binding.md).
 
-1. `cf-theme` and theme-level CSS custom properties
-2. documented component props and layout primitives
-3. component-specific CSS custom properties
-4. CSS parts
-5. current component stories and cookbook examples
+### Testing note: Playwright `fill()`
 
-Useful companion references:
-
-- `docs/common/patterns/style.md`
-- `docs/common/patterns/ui-cookbook.md`
-- `packages/ui/README.md`
-- `packages/ui/LLM-COMPONENT-INSTRUCTIONS.md`
-
-This ordering is intentional: Common Fabric components are meant to be restyled
-through ambient theme tokens and other public affordances, not by reaching into
-opaque subtree internals.
-
-This document does not yet enumerate every custom property or part for every
-component. When a component exposes those affordances, prefer them over
-guessing at unsupported shadow-internal structure.
-
----
-
-## cf-button
-
-```tsx
-// Simple inline handler
-<cf-button onClick={() => count.set(count.get() + 1)}>Increment</cf-button>
-
-// action() for more complex logic (preferred)
-const increment = action(() => {
-  count.set(count.get() + 1);
-  lastUpdated.set(safeDateNow());
-});
-<cf-button onClick={increment}>Increment</cf-button>
-```
-
-Use `safeDateNow()` rather than `Date.now()` when authored pattern code needs a
-timestamp snapshot.
-
-`cf-button` exposes `role="button"` and `aria-disabled` on the host. Agents and
-tests should find it by role and visible text:
+Playwright's `fill()` does not work on `cf-input` hosts (they are custom
+elements, not native inputs). Use `type @ref "text"` in agent-browser, or
+`locator.pressSequentially()` in Playwright tests:
 
 ```bash
-agent-browser find role button click --name "Increment"
-```
-
-Useful styling hooks include:
-
-- `--cf-button-color-primary`
-- `--cf-button-color-surface`
-- `--cf-button-color-text`
-- `--cf-button-border-radius`
-
----
-
-## cf-input
-
-```tsx
-// Bidirectional binding (preferred)
-<cf-input $value={title} />
-
-// With placeholder
-<cf-input $value={searchQuery} placeholder="Search..." />
-
-// Binding plus side effect
-<cf-input
-  $value={title}
-  oncf-input={(e) => {
-    console.log("Changed:", e.detail.value);
-  }}
-/>
-```
-
-`cf-input` exposes `role="textbox"` plus `aria-disabled`, `aria-readonly`,
-`aria-required`, and `aria-invalid` on the host. Give inputs an accessible name
-with a label, `aria-label`, or placeholder, then find them semantically:
-
-```bash
-# Use type with a ref — not bare type after click
 agent-browser snapshot -i              # → textbox "Title" [ref=e4]
 agent-browser type @e4 "Quarterly plan"
 ```
 
-> **Note:** Playwright's `fill()` does not work on `cf-input` hosts (they are
-> custom elements, not native inputs). Use `type @ref "text"` in agent-browser,
-> or `locator.pressSequentially()` in Playwright tests.
+## Component Index
 
-Useful styling hooks include:
+One row per component directory in `packages/ui/src/v2/components/`. "Bindable
+props" lists cell-bound (`$`-prefixed) properties verified in source; an empty
+cell means none confirmed — check the component source before assuming.
 
-- `--cf-input-color-border`
-- `--cf-input-color-primary`
-- `--cf-input-color-background`
-- `--cf-input-border-radius`
-
----
-
-## cf-checkbox
-
-```tsx
-// Bidirectional binding
-<cf-checkbox $checked={item.done}>{item.title}</cf-checkbox>
-
-// In array maps
-{items.map((item) => (
-  <cf-checkbox $checked={item.done}>{item.title}</cf-checkbox>
-))}
-```
-
----
-
-## cf-select
-
-Uses `items` attribute with `{ label, value }` objects. **Do not use `<option>` elements.**
-
-```tsx
-<cf-select
-  $value={category}
-  items={[
-    { label: "Produce", value: "Produce" },
-    { label: "Dairy", value: "Dairy" },
-    { label: "Other", value: "Other" },
-  ]}
-/>
-
-// Values can be any type
-<cf-select
-  $value={selectedId}
-  items={[
-    { label: "First", value: 1 },
-    { label: "Second", value: 2 },
-  ]}
-/>
-
-// Dynamic items from data
-<cf-select
-  $value={selectedUser}
-  items={users.map(u => ({ label: u.name, value: u }))}
-/>
-```
-
-When a control is already bound to a cell, usually via `$value`, treat that
-binding as the primary value path. Avoid `oncf-change` handlers that simply
-write the same value back into that same cell. Use `oncf-change` only for
-dependent state updates or other side effects.
-
----
-
-## cf-message-input
-
-Input + button combo for adding items.
-
-```tsx
-<cf-message-input
-  placeholder="New item"
-  oncf-send={(e) => {
-    const text = e.detail?.message?.trim();
-    if (text) items.push({ title: text, done: false });
-  }}
-/>
-```
-
----
-
-## cf-card
-
-Styled card with built-in padding (1rem). Don't add extra padding to children.
-
-```tsx
-// ✅ Let cf-card handle padding
-<cf-card>
-  <cf-vstack gap={1}>
-    <h3>Title</h3>
-    <p>Content</p>
-  </cf-vstack>
-</cf-card>
-
-// ❌ Double padding
-<cf-card>
-  <div style="padding: 1rem;">Content</div>
-</cf-card>
-```
-
-Useful styling hooks include:
-
-- `--cf-card-color-surface`
-- `--cf-card-color-border`
-- `--cf-card-color-hover-surface`
-- `--cf-card-border-radius`
-
-### Gradient and frosted-glass backgrounds
-
-Use `--cf-card-background` to apply a gradient or tinted background. Use `--cf-card-backdrop-blur` for a frosted-glass effect. Both default to the theme surface color and 0px blur, so existing usage is unaffected.
-
-```tsx
-// Gradient tint
-<cf-card style="--cf-card-background: linear-gradient(145deg, rgba(255,255,255,0.52), #ece9ff);">
-  <p>Tinted card</p>
-</cf-card>
-
-// Frosted glass (requires a background behind the card)
-<cf-card style="--cf-card-background: rgba(255,255,255,0.45); --cf-card-backdrop-blur: 8px;">
-  <p>Frosted card</p>
-</cf-card>
-
-// Combined: gradient + blur
-<cf-card style="--cf-card-background: linear-gradient(145deg, rgba(255,255,255,0.52), #ece9ff); --cf-card-backdrop-blur: 8px;">
-  <p>Gradient frosted card</p>
-</cf-card>
-```
-
-CSS custom properties:
-
-- `--cf-card-background` — card background (default: `var(--cf-card-color-surface)`). Accepts any CSS `background` value including gradients.
-- `--cf-card-backdrop-blur` — backdrop blur radius (default: `0px`). Use values like `8px` or `var(--cf-backdrop-blur-md)` for frosted-glass.
+| Tag | Purpose | Bindable props |
+|-----|---------|----------------|
+| `cf-accordion` | Container for collapsible content panels | |
+| `cf-accordion-item` | Individual accordion panel | |
+| `cf-alert` | Alert message with variants and dismissible option | |
+| `cf-area-mark` | Filled area mark rendered inside `cf-chart` | `$data` |
+| `cf-aspect-ratio` | Maintains a fixed aspect ratio for its content | |
+| `cf-attachments-bar` | Displays pinned cells as a horizontal list of chips | |
+| `cf-audio-visualizer` | Real-time audio waveform visualization | |
+| `cf-autocomplete` | Search input with filterable dropdown; single/multi select | `$value`, `$items` |
+| `cf-autolayout` | Responsive multi-panel layout | |
+| `cf-autostart` | Zero-UI element that emits a `start` event once on connect | |
+| `cf-avatar` | Avatar showing data-URI image, emoji glyph, or initials | |
+| `cf-badge` | Status indicator / label with visual variants | |
+| `cf-bar-mark` | Bar mark rendered inside `cf-chart` | `$data` |
+| `cf-button` | Interactive button with color/variant/size options | |
+| `cf-calendar` | Month-grid mini calendar | `$value`, `$markedDates` |
+| `cf-canvas` | Fixed-size canvas surface emitting `cf-canvas-click` with x/y | |
+| `cf-card` | Content container with header/content/footer (built-in 1rem padding) | |
+| `cf-cell-context` | Associates a page region with a cell for inspection (see [CELL_CONTEXT.md](CELL_CONTEXT.md)) | `$cell` |
+| `cf-cell-link` | Renders a link or cell as a clickable, draggable pill | |
+| `cf-cfc-authorship` | Shows trusted authorship state for CFC-labeled content | `$value`, `$author` |
+| `cf-cfc-label` | Renders the CFC label of a bound cell value | `$value` |
+| `cf-chart` | SVG charting container for line/area/bar/dot marks (see [cf-chart](#cf-chart)) | `$marks` (marks: `$data`) |
+| `cf-chat` | Chat container handling message flow and tool-call correlation | `$messages` |
+| `cf-chat-message` | Single chat message with markdown support | |
+| `cf-checkbox` | Binary selection input with indeterminate support | `$checked` |
+| `cf-chevron-button` | Minimal chevron button rotating between up/down | |
+| `cf-chip` | Compact pill/label for status, tags, and filters | |
+| `cf-code-editor` | Code/prose editor with highlighting and `[[`-mention completion | `$value`, `$mentionable`, `$mentioned` |
+| `cf-collapsible` | Single collapsible section with trigger and content | |
+| `cf-copy-button` | Copy-to-clipboard button with visual feedback | |
+| `cf-dot-mark` | Scatter/dot mark rendered inside `cf-chart` | `$data` |
+| `cf-drag-source` | Wraps draggable content; pairs with `cf-drop-zone` (see [drag-and-drop](../patterns/meta/drag-and-drop.md)) | `$cell` |
+| `cf-draggable` | Absolutely-positioned draggable container (x/y) | |
+| `cf-drop-zone` | Droppable region emitting `cf-drop` events (see [drag-and-drop](../patterns/meta/drag-and-drop.md)) | |
+| `cf-fab` | Morphing floating action button that expands into a panel | |
+| `cf-file-download` | File download button (encapsulates blob/anchor download) | `$data`, `$filename` |
+| `cf-file-input` | Generic file upload | |
+| `cf-form` | Transactional form wrapper buffering field writes until submit (see [cf-form](#cf-form)) | |
+| `cf-fragment` | Transparent wrapper element (`display: contents`) | |
+| `cf-google-oauth` | Google OAuth login (wrapper over `cf-oauth`) | `$auth` |
+| `cf-grid` | CSS Grid layout | |
+| `cf-heading` | Theme-compliant heading replacing `h1`–`h6` | |
+| `cf-hgroup` | Horizontal group with automatic gap management | |
+| `cf-hscroll` | Horizontal scroll container | |
+| `cf-hstack` | Horizontal stack layout (flexbox) | |
+| `cf-iframe` | Iframe for executing arbitrary scripts | |
+| `cf-image-input` | Image capture/upload with compression, EXIF, camera support | |
+| `cf-input` | Text input with validation and reactive binding | `$value` |
+| `cf-input-otp` | One-time-password input with individual digit fields | |
+| `cf-kbd` | Inline keyboard hint element | |
+| `cf-keybind` | Declarative keyboard shortcut listener | |
+| `cf-label` | Form field label with accessibility features | |
+| `cf-line-mark` | Line mark rendered inside `cf-chart` | `$data` |
+| `cf-link` | Navigation link that emits `cf-route-change` for `cf-router` | |
+| `cf-link-preview` | Rich link preview card for a URL | |
+| `cf-list-item` | Generic list row (SwiftUI-List inspired) | |
+| `cf-loader` | Inline spinner for pending async operations | |
+| `cf-location` | Geolocation capture (single or continuous) | `$location` |
+| `cf-map` | Interactive Leaflet/OpenStreetMap map (see [cf-map](#cf-map)) | `$value`, `$center`, `$zoom`, `$bounds` |
+| `cf-markdown` | Renders markdown with syntax highlighting and copy buttons | `$content` |
+| `cf-message-beads` | Compact bead visualization of a message history | `$messages` |
+| `cf-message-input` | Input + send button combo for chat-style item entry | |
+| `cf-modal` | Accessible modal dialog with bottom-sheet presentation mode | `$open` |
+| `cf-modal-provider` | Modal stack manager | |
+| `cf-oauth` | Generic OAuth authentication | `$auth` |
+| `cf-picker` | Carousel selection over cells with `[UI]` | `$items`, `$selectedIndex` |
+| `cf-piece` | Provides piece context to child components | |
+| `cf-plaid-link` | Plaid banking integration | `$auth` |
+| `cf-profile-badge` | Displays name + avatar from a subscribed profile cell | |
+| `cf-progress` | Progress bar, determinate or indeterminate | |
+| `cf-prompt-input` | Multiline prompt input with `@`-mentions, attachments, voice | `$mentionable`, `$model` |
+| `cf-question` | Asks a single question and collects the answer | |
+| `cf-radio` | Single radio button used within `cf-radio-group` | |
+| `cf-radio-group` | Radio group; declarative `items` or slotted `cf-radio` | `$value` |
+| `cf-render` | Renders a cell containing a piece pattern (see [cf-render](#cf-render)) | `$cell` |
+| `cf-resizable-handle` | Drag handle between resizable panels | |
+| `cf-resizable-panel` | Individual panel within a resizable panel group | |
+| `cf-resizable-panel-group` | Container managing resizable panels and handles | |
+| `cf-router` | Routes `cf-route-change` events into a path cell | `$path` |
+| `cf-screen` | Full-height layout with header/main/footer slots (see [cf-screen](#cf-screen)) | |
+| `cf-scroll-area` | Scrollable container with custom-styled scrollbars | |
+| `cf-secret-viewer` | Trusted UI for revealing secret strings | `$value` |
+| `cf-select` | Dropdown taking `{ label, value }` items — not `<option>` elements | `$value` |
+| `cf-separator` | Visual divider line between content sections | |
+| `cf-skeleton` | Animated loading placeholder | |
+| `cf-slider` | Range input slider | |
+| `cf-space-link` | Renders a space as a clickable navigation pill | |
+| `cf-svg` | Renders SVG content from a string | |
+| `cf-switch` | Toggle switch for binary on/off state | `$checked` |
+| `cf-tab` | Individual tab button used within `cf-tab-list` | |
+| `cf-tab-bar` | Fixed navigation bar for app-like UIs (with `cf-tab-bar-item`) | `$value` |
+| `cf-tab-bar-item` | Individual item within `cf-tab-bar` (value, label, icon) | |
+| `cf-tab-list` | Container for tab buttons | |
+| `cf-tab-panel` | Content panel associated with a tab | |
+| `cf-table` | Semantic table with striped/hover/bordered styling | |
+| `cf-tabs` | Container managing ARIA tab navigation and panels | `$value` |
+| `cf-tags` | Tag pills with add/remove functionality | |
+| `cf-text` | Generic text primitive for non-label typography | |
+| `cf-textarea` | Multi-line text input with auto-resize and reactive binding | `$value` |
+| `cf-theme` | Provides a theme to a subtree and applies CSS variables | |
+| `cf-tile` | Page/item preview tile with click handling | |
+| `cf-toast` | Floating ephemeral notification (inside `cf-toast-provider`) | |
+| `cf-toast-provider` | Region that hosts and displays `cf-toast` notifications | |
+| `cf-toggle` | Pressable toggle button with variants and sizes | |
+| `cf-toggle-group` | Toggle container with single or multiple selection | |
+| `cf-tool-call` | Expandable tool-call display | |
+| `cf-toolbar` | Horizontal toolbar for grouping controls | |
+| `cf-tools-chip` | Pill revealing a read-only tool list on hover/tap | `$tools` |
+| `cf-updater` | Button registering pieces for background updates | `$state` |
+| `cf-vgroup` | Vertical group with automatic gap management | |
+| `cf-voice-input` | Voice recording and transcription | `$transcription` |
+| `cf-vscroll` | Vertical scroll container (snap-to-bottom, fade edges) | |
+| `cf-vstack` | Vertical stack layout (flexbox) | |
+| `cf-webhook` | Webhook integration: receives payloads into a stream | `$inbox`, `$config` |
 
 ---
 
-## cf-chip
+## cf-form
 
-Compact label/tag element. Use for status indicators, categories, action pills, and filter chips.
+`cf-form` provides a "write gate" for transactional form submission:
+
+- Fields buffer writes locally instead of immediately writing to cells
+- On submit, all buffered values are validated and flushed atomically, then
+  `cf-submit` is emitted
+- On reset (`cf-button type="reset"` or `form.reset()`), buffered changes are
+  discarded and fields restore their initial cell values
+- Works for both "create" (fresh staging cell) and "edit" (existing cell) modes
+
+All form-compatible fields (`cf-input`, `cf-select`, `cf-checkbox`,
+`cf-textarea`) share the same behavior: **outside** `cf-form` they write to
+the bound cell immediately; **inside** `cf-form` they buffer until submit.
 
 ```tsx
-// Basic usage
-<cf-chip label="Draft" />
-
-// Sizes
-<cf-chip label="Small" size="sm" />
-<cf-chip label="Medium" size="md" />  {/* default */}
-<cf-chip label="Large" size="lg" />
-
-// Color overrides (per-instance)
-<cf-chip label="Review" size="sm"
-  style="--cf-chip-background: linear-gradient(135deg, #5f89ff, #4d77fb); --cf-chip-color: white;" />
-
-// Removable chip
-<cf-chip label="Tag" removable oncf-remove={() => tags.remove(tag)} />
+<cf-form oncf-submit={handleSubmit}>
+  <cf-input name="email" $value={data.key("email")} required />
+  <cf-button type="submit">Save</cf-button>
+</cf-form>
 ```
 
-Attributes:
+### Create mode
 
-- `label` — display text (string)
-- `size` — `"sm" | "md" | "lg"` (default `"md"`)
-- `removable` — boolean, shows an X button
-- `disabled` — boolean
+Bind fields to a staging cell, then copy to the collection on submit:
 
-CSS custom properties for per-instance color overrides:
+```tsx
+const formData = new Writable({ name: "", email: "" });
 
-- `--cf-chip-background` — chip background (default: theme chip surface)
-- `--cf-chip-color` — chip text color (default: theme chip text)
-- `--cf-chip-border-color` — chip border color (default: theme chip border)
+<cf-form
+  oncf-submit={handler((_, { formData, collection }) => {
+    // cf-form flushes buffers to cells before emitting cf-submit,
+    // so we can read the complete, typed object directly.
+    // IMPORTANT: Copy the object to avoid sharing references!
+    collection.push({ ...formData.get() });
+  }, { formData, collection })}
+>
+  <cf-input name="name" $value={formData.key("name")} required />
+  <cf-input name="email" $value={formData.key("email")} type="email" />
+  <cf-button type="submit">Create</cf-button>
+</cf-form>;
+```
+
+**The copy trap:** always copy with `{ ...formData.get() }` when adding to a
+collection. The staging cell is reused between submissions, so pushing the same
+object reference would make all items share the same data.
+
+### Edit mode
+
+Bind fields to a pointer (`Writable<Person>`) instead of using indices; on
+submit, values are flushed to the bound cell:
+
+```tsx
+export const EditPerson = pattern<{ person: Writable<Person> }, { [UI]: VNode }>(
+  ({ person }) => ({
+    [UI]: (
+      <cf-form oncf-submit={closeModal}>
+        <cf-input name="name" $value={person.key("name")} required />
+        <cf-input name="email" $value={person.key("email")} type="email" />
+        <cf-button type="submit">Save</cf-button>
+        <cf-button type="reset">Cancel</cf-button>
+      </cf-form>
+    ),
+  }),
+);
+```
+
+When choosing which item to edit from a list, store the pointer and find it
+with `equals()` (see [two-way-binding](../patterns/two-way-binding.md)), not
+array indices, which drift when lists change.
+
+### Events and best practices
+
+- `cf-submit` — emitted after validation passes and buffers are flushed.
+  Handlers should read from the bound cell directly (type-safe), not from
+  event detail.
+- `cf-form-invalid` — emitted when submit is attempted but validation fails;
+  detail carries `{ errors: Array<{ element, message? }> }`.
+- Fields use HTML5 constraint validation by default.
+- When using `cf-modal` around a form, bind `$open` to a `Writable<boolean>`
+  (not a `computed`) so the modal can update state.
+
+Contributor-facing internals (FormFieldController, file organization, design
+decisions) live in
+[`packages/ui/docs/forms-internals.md`](../../../packages/ui/docs/forms-internals.md).
 
 ---
 
@@ -324,172 +307,6 @@ const gridView = GridView({ items });
 
 See [composition](../patterns/composition.md) for more on pattern composition.
 
-## cf-cell-context
-
-Debugging tool for inspecting cell values. See [CELL_CONTEXT.md](CELL_CONTEXT.md).
-
-```tsx
-<cf-cell-context $cell={result} label="Result">
-  <div>{result.value}</div>
-</cf-cell-context>
-```
-
----
-
-## Removing Array Items
-
-Use `equals()` for identity comparison:
-
-```tsx
-import { equals, handler, Writable } from 'commonfabric';
-
-const removeItem = handler<unknown, { items: Writable<Item[]>; item: Item }>(
-  (_, { items, item }) => {
-    const current = items.get();
-    const index = current.findIndex((el) => equals(item, el));
-    if (index >= 0) items.set(current.toSpliced(index, 1));
-  }
-);
-```
-
----
-
-## cf-modal (Sheet Presentation)
-
-`cf-modal` supports a `presentation` attribute that switches between a centered dialog and a bottom sheet:
-
-```tsx
-// Centered dialog (default)
-<cf-modal $open={dialogOpen} presentation="dialog" size="md" dismissible>
-  <span slot="header">Confirm</span>
-  <p>Are you sure?</p>
-</cf-modal>
-
-// Bottom sheet
-<cf-modal $open={sheetOpen} presentation="sheet" grabber detent="half" dismissible>
-  <span slot="header">Options</span>
-  <p>Sheet content slides up from bottom.</p>
-</cf-modal>
-```
-
-Sheet-specific attributes:
-
-- `presentation` — `"dialog"` (default) or `"sheet"`
-- `grabber` — boolean, shows a drag-handle pill above the header
-- `detent` — `"auto"` (content-sized, max 90vh), `"half"` (50vh), `"full"` (92vh)
-
-Both modes share the same slots (header, default, footer, close-button), events, focus trap, Escape handling, and `ModalManager` stacking.
-
----
-
-## cf-tab-bar
-
-Fixed-position navigation bar for app-like UIs. Distinct from `cf-tabs` — fires selection events instead of managing ARIA tab panels.
-
-```tsx
-const activeTab = new Writable("home");
-
-<cf-tab-bar $value={activeTab} variant="inset">
-  <cf-tab-bar-item value="home" label="Home">
-    <span slot="icon">🏠</span>
-  </cf-tab-bar-item>
-  <cf-tab-bar-item value="search" label="Search">
-    <span slot="icon">🔍</span>
-  </cf-tab-bar-item>
-  <cf-tab-bar-item value="inbox" label="Inbox">
-    <span slot="icon">📬</span>
-  </cf-tab-bar-item>
-</cf-tab-bar>
-```
-
-- `$value` — Cell binding for the selected item value
-- `position` — `"bottom"` (default) or `"top"`
-- `variant` — `"default"` (full-width) or `"inset"` (floating pill)
-- `action` slot — optional primary action button (FAB) beside the nav pill
-- Events: `cf-change` with `{ value, oldValue }`
-- Keyboard: Arrow keys, Home/End, Enter/Space
-
-### Action slot (FAB)
-
-```tsx
-<cf-tab-bar $value={activeTab} variant="inset">
-  {/* ... tab items ... */}
-  <cf-button slot="action" color="primary" variant="solid" onClick={openSheet}
-    style="border-radius: var(--cf-border-radius-xl); width: 3.5rem; height: 100%; padding: 0;">
-    ＋
-  </cf-button>
-</cf-tab-bar>
-```
-
-The action button renders beside the nav pill, not inside it. Use a regular `cf-button` — no special FAB component needed.
-
-### View switching
-
-The parent pattern owns view-switching logic via `computed()`:
-
-```tsx
-const mainContent = computed(() => {
-  switch (activeTab.get()) {
-    case "home":    return <HomeView />;
-    case "search":  return <SearchView />;
-    default:        return <HomeView />;
-  }
-});
-```
-
----
-
-## cf-text
-
-Generic text primitive for captions, helper copy, metadata, descriptions, and
-other display text that does not label a specific control. Use `cf-label` for
-form/control labels.
-
-```tsx
-<cf-vstack gap="2">
-  <cf-text variant="caption" tone="muted">Updated just now</cf-text>
-  <cf-text>Default body copy.</cf-text>
-  <cf-text variant="body-large" tone="primary">Prominent supporting text.</cf-text>
-</cf-vstack>
-```
-
-- `variant` — `"caption"`, `"body-compact"`, `"body"`, `"body-large"`, `"heading-sm"`, `"heading-md"`, `"heading-lg"`
-- `tone` — `"default"`, `"muted"`, `"tertiary"`, `"disabled"`, `"primary"`, `"success"`, `"warning"`, `"error"`
-- `block` — render as block text instead of inline text
-
----
-
-## cf-toast
-
-Floating ephemeral notifications. Place a `cf-toast-provider` at the app root and `cf-toast` elements inside it.
-
-```tsx
-<cf-toast-provider position="bottom">
-  <cf-toast open={saved} status="success" duration={4000}
-    oncf-toast-dismiss={action(() => saved.set(false))}>
-    Changes saved.
-    <cf-button slot="action" color="neutral" variant="ghost" style="padding: 2px 8px; font-size: 13px;">
-      View
-    </cf-button>
-  </cf-toast>
-</cf-toast-provider>
-```
-
-### cf-toast-provider
-
-- `position` — `"top"`, `"bottom"`, `"top-left"`, `"top-right"`, `"bottom-left"`, `"bottom-right"`
-- `max` — maximum visible toasts (default 3), oldest dismissed on overflow
-
-### cf-toast
-
-- `status` — `"info"`, `"success"`, `"warning"`, `"error"`
-- `duration` — auto-dismiss in ms (default 5000, `0` for persistent)
-- `dismissible` — show X button (`dismissable` is a deprecated alias)
-- `open` — visibility
-- Slots: default (message), `action`, `icon`
-- Events: `cf-toast-dismiss` and `cf-dismiss` with `{ reason: "timeout" | "user" }`, `cf-toast-action`
-- ARIA: error variant uses `role="alert"` + `aria-live="assertive"`, others use `role="status"` + `aria-live="polite"`
-
 ---
 
 ## cf-screen
@@ -520,63 +337,6 @@ fade-edges, or a styled/hidden scrollbar.
   <cf-message-input slot="footer" />
 </cf-screen>
 ```
-
----
-
-## cf-image-input
-
-```tsx
-<cf-image-input
-  oncf-change={handleImageUpload}
-  maxSizeBytes={5000000}
->
-  📷 Add Photo
-</cf-image-input>
-```
-
-The component compresses images to fit within `maxSizeBytes`.
-
----
-
-## cf-code-editor
-
-Rich text editor with wiki-link mentions. **Uses `[[` for completions, not `@`.**
-
-```tsx
-<cf-code-editor
-  $value={inputText}
-  $mentionable={mentionable}
-  $mentioned={mentioned}
-  placeholder="Type [[ to mention items..."
-  language="text/markdown"
-/>
-```
-
-**To trigger completions:** Type `[[` (double brackets), not `@`.
-
-Mentions are inserted as wiki-links: `[[Name (entityId)]]` where `entityId`
-is the bare CID. For rendering in `cf-markdown`, convert to markdown links
-with `/of:` prefix (see [mentionable](../conventions/mentionable.md)).
-
----
-
-## cf-prompt-input
-
-Multiline textarea with `@`-mention autocomplete, attachments, and voice input.
-
-```tsx
-<cf-prompt-input
-  $mentionable={mentionable}
-  placeholder="Type @ to mention..."
-  buttonText="Send"
-  oncf-send={handleSend}
-/>
-```
-
-Mentions are inserted as markdown links: `[Name](/of:entityId)`. The entity
-ID is resolved to the stable piece cell ID at insertion time via
-`resolveAsCell()`. See [mentionable](../conventions/mentionable.md) for details
-on cell resolution and link formats.
 
 ---
 
@@ -808,76 +568,3 @@ SVG charting components. Compose mark elements inside a `cf-chart` container.
 - **Data auto-detection:** Number arrays auto-index. String x-values use band scale. Date/ISO strings use time scale.
 - **Responsive width:** Chart fills its container width. Use CSS to control.
 - **Crosshair:** Enabled by default. Shows nearest data point on hover.
-
----
-
-## CFC Authorship
-
-`cf-cfc-authorship` can enforce text-integrity policy for its children when
-`verifyTextIntegrity` is set. If `requiredTextIntegrity` or `requiredIntegrity`
-is provided, the renderer uses that explicit atom list.
-
-When no explicit requirement is provided and `$author`/`author` is a cell whose
-root CFC label contains `represents-principal`, the renderer infers a required
-`{ kind: "authored-by", subject }` atom from that author cell. This means a
-cell-backed author can make previously display-only text require matching
-authorship integrity. Use an explicit `requiredTextIntegrity` when a component
-needs a different policy, and avoid cell-backed `$author` for purely decorative
-author names.
-
----
-
-## Design Tokens
-
-The following CSS custom properties are defined globally (in `variables.ts`) and available throughout your patterns via `cf-theme` or direct `style` attributes.
-
-### Backdrop blur
-
-```css
---cf-backdrop-blur-sm: 4px;
---cf-backdrop-blur-md: 8px;
---cf-backdrop-blur-lg: 16px;
---cf-backdrop-blur-xl: 24px;
-```
-
-Use with `--cf-card-backdrop-blur` or any `backdrop-filter` CSS.
-
-### Translucent surfaces
-
-```css
---cf-surface-translucent: rgba(255, 255, 255, 0.72);
---cf-surface-translucent-strong: rgba(255, 255, 255, 0.88);
---cf-overlay-dim: rgba(0, 0, 0, 0.4);
-```
-
-Useful for frosted-glass cards, modal backdrops, and overlay tints.
-
-### Semantic z-index layers
-
-```css
---cf-z-layer-sticky:  10;
---cf-z-layer-fixed:   500;
---cf-z-layer-fab:     900;
---cf-z-layer-sheet:   950;
---cf-z-layer-overlay: 1000;
---cf-z-layer-toast:   1100;
-```
-
-`cf-fab` uses `--cf-z-layer-fab` internally. `cf-modal` and `cf-toast-provider` use their own z-index values (`1000+` and `1100` respectively) but do not yet reference these tokens. Reference the tokens in custom overlays to maintain correct stacking.
-
----
-
-## Limitations
-
-### SVG Not Supported
-
-SVG elements (`<svg>`, `<path>`, `<circle>`, etc.) are not in the JSX type definitions:
-
-```tsx
-// ❌ CompilerError: Property 'svg' does not exist on type 'JSX.IntrinsicElements'
-<svg width="100" height="100">
-  <circle cx="50" cy="50" r="40" />
-</svg>
-```
-
-**Workarounds:** Use `cf-chart` for data visualization, styled `<div>` elements for simple graphics, or text sparklines (`▁▂▃▄▅▆▇█`).

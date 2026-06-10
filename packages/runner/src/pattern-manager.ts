@@ -21,7 +21,6 @@ import { createRef } from "./create-ref.ts";
 import type {
   CacheableModule,
   CompiledModuleArtifact,
-  CompileResult,
   EvaluateResult,
   Exports,
 } from "./harness/types.ts";
@@ -249,15 +248,29 @@ export class PatternManager {
     return pattern;
   }
 
+  // Roots already fully seeded per verifiedLoadId. The walk is idempotent
+  // and pattern graphs are frozen after load, but it re-ran on every
+  // by-identity cache hit (i.e. every map/filter op resolve), paying a full
+  // Reflect.ownKeys recursion over the pattern graph each time — ~24% of the
+  // commit-callback phase in the default-app profile.
+  #seededVerifiedRoots = new WeakMap<object, Set<string>>();
+
   private seedVerifiedLoadIds(
     value: unknown,
     verifiedLoadId: string,
-    seen = new Map<unknown, boolean>(),
+    seen?: Map<unknown, boolean>,
     trusted = false,
   ): void {
     if (!value || (typeof value !== "object" && typeof value !== "function")) {
       return;
     }
+    const isRoot = seen === undefined;
+    if (
+      isRoot && this.#seededVerifiedRoots.get(value)?.has(verifiedLoadId)
+    ) {
+      return;
+    }
+    seen ??= new Map<unknown, boolean>();
 
     // Trust is rooted at a builder-produced (`isTrustedPattern`) value; nested
     // subpatterns within a trusted pattern's serialized node graph are legit
@@ -299,6 +312,15 @@ export class PatternManager {
         seen,
         subtreeTrusted,
       );
+    }
+
+    if (isRoot) {
+      let ids = this.#seededVerifiedRoots.get(value as object);
+      if (ids === undefined) {
+        ids = new Set();
+        this.#seededVerifiedRoots.set(value as object, ids);
+      }
+      ids.add(verifiedLoadId);
     }
   }
 
@@ -548,61 +570,22 @@ export class PatternManager {
       program = input;
     }
 
-    // ESM module-record loader path (experimental, default off).
-    if (
-      this.runtime.experimental.esmModuleLoader === true &&
-      this.runtime.harness.compileToRecordGraph &&
-      this.runtime.harness.evaluateRecordGraph
-    ) {
-      // Use the content-addressed cell cache when we have a target space and
-      // CFC is enforced (the compiled-set integrity label only persists — and
-      // is only trusted on read — under an enforcing mode; see cell-cache).
-      if (cacheCtx && this.runtime.cfcEnforcementMode !== "disabled") {
-        return await this.compileViaCellCache(program, cacheCtx);
-      }
-      const { id, graph, mainSpecifier, entryIdentity } = await this.runtime
-        .harness.compileToRecordGraph(program);
-      cacheCtx?.onEntryIdentity?.(entryIdentity);
-      const result = this.runtime.harness.evaluateRecordGraph(
-        id,
-        graph,
-        mainSpecifier,
-        program.files,
-      );
-      return this.patternFromEvaluation(result, program);
+    // Use the content-addressed cell cache when we have a target space and
+    // CFC is enforced (the compiled-set integrity label only persists — and
+    // is only trusted on read — under an enforcing mode; see cell-cache).
+    if (cacheCtx && this.runtime.cfcEnforcementMode !== "disabled") {
+      return await this.compileViaCellCache(program, cacheCtx);
     }
-
-    const { cachedCompiler } = this.runtime;
-    if (cachedCompiler) {
-      const programHash = createRef(
-        { src: program },
-        "pattern source",
-      ).toString();
-      let compileResult = await cachedCompiler.get(programHash);
-      let loadedFromCache = true;
-      if (!compileResult) {
-        loadedFromCache = false;
-        compileResult = await this.runtime.harness.compile(program);
-        // Fire-and-forget cache write — does not block the load. Tracked in
-        // compileCacheWrites so flushCompileCacheWrites() can await it (graceful
-        // shutdown / deterministic tests), matching the ESM-path write-backs.
-        // Without this, a subsequent load of the same program can read the cache
-        // before this write lands and recompile (the piece.test.ts
-        // "0 in-client compilations" flake).
-        const cacheWrite = cachedCompiler.set(programHash, compileResult).catch(
-          () => {},
-        );
-        this.compileCacheWrites.add(cacheWrite);
-        cacheWrite.finally(() => this.compileCacheWrites.delete(cacheWrite));
-      }
-      return this.evaluateToPattern(compileResult, program, {
-        skipBundleValidation: loadedFromCache,
-      });
-    }
-
-    // No persistent cache — compile and evaluate directly
-    const compileResult = await this.runtime.harness.compile(program);
-    return this.evaluateToPattern(compileResult, program);
+    const { id, graph, mainSpecifier, entryIdentity } = await this.runtime
+      .harness.compileToRecordGraph(program);
+    cacheCtx?.onEntryIdentity?.(entryIdentity);
+    const result = this.runtime.harness.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
+    return this.patternFromEvaluation(result, program);
   }
 
   /**
@@ -659,7 +642,7 @@ export class PatternManager {
     let warmHit = false;
     let compiled;
     try {
-      compiled = await harness.compileToRecordGraph!(program, {
+      compiled = await harness.compileToRecordGraph(program, {
         // The bodies returned below come from `loadCompiledClosure`, an
         // integrity-gated (`requiredIntegrity`, fail-closed) read of the
         // compiled set. On a full hit the CFC integrity label is the security
@@ -707,7 +690,7 @@ export class PatternManager {
     cacheCtx.onEntryIdentity?.(entryIdentity);
 
     const evalStart = performance.now();
-    const result = harness.evaluateRecordGraph!(
+    const result = harness.evaluateRecordGraph(
       id,
       graph,
       mainSpecifier,
@@ -782,7 +765,7 @@ export class PatternManager {
     );
 
     try {
-      const result = await harness.evaluateCachedModules!(
+      const result = await harness.evaluateCachedModules(
         cachedModules,
         entryIdentity,
         // Bodies came from the integrity-gated compiled-set read
@@ -809,8 +792,8 @@ export class PatternManager {
    * recovery, which the caller handles by falling back to the patternId load.
    *
    * Returns the pattern, or `undefined` when the by-identity load is
-   * unavailable (ESM loader off / CFC not enforcing / closure absent or
-   * incomplete / invalid) so the caller can fall back to `loadPattern`.
+   * unavailable (CFC not enforcing / closure absent or incomplete / invalid)
+   * so the caller can fall back to `loadPattern`.
    */
   async loadPatternByIdentity(
     entryIdentity: string,
@@ -818,11 +801,7 @@ export class PatternManager {
     space: MemorySpace,
   ): Promise<Pattern | undefined> {
     const harness = this.runtime.harness;
-    if (
-      this.runtime.experimental.esmModuleLoader !== true ||
-      !harness.evaluateCachedModules ||
-      this.runtime.cfcEnforcementMode === "disabled"
-    ) {
+    if (this.runtime.cfcEnforcementMode === "disabled") {
       return undefined;
     }
     // In-memory fast path (CT-1623): the module may already be live from a
@@ -1115,21 +1094,7 @@ export class PatternManager {
     }
   }
 
-  private async evaluateToPattern(
-    { id, jsScript }: CompileResult,
-    program: RuntimeProgram,
-    options?: { skipBundleValidation?: boolean },
-  ): Promise<Pattern> {
-    const result = await this.runtime.harness.evaluate(
-      id,
-      jsScript,
-      program.files,
-      options,
-    );
-    return this.patternFromEvaluation(result, program);
-  }
-
-  // Resolve a Pattern from an evaluate result (shared by the AMD and ESM paths).
+  // Resolve a Pattern from an evaluate result.
   private patternFromEvaluation(
     result: EvaluateResult,
     program: RuntimeProgram,

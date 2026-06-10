@@ -63,7 +63,8 @@ step, and we'll ratchet targets down as we improve.
 
 **What we don't have:**
 - No breakdown of "pattern load takes Xms: Y% compilation, Z% traversal, ..."
-- No profiling data from real usage
+- No profiling data from real production usage (the profiles below are from
+  the integration test flow on a dev stack)
 
 **First flow profiled:** steady-state note creation in the default-app shell
 integration test — see

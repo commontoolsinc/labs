@@ -320,8 +320,15 @@ describe("default-app flow test", () => {
     let cpuProfiler: CdpWorkerProfiler | undefined;
     if (CAPTURE_NOTE_CREATE_CPUPROFILE_SERIES > 0) {
       console.log("Connect CDP worker profiler...");
-      cpuProfiler = await CdpWorkerProfiler.connect(shell.wsEndpoint());
-      await cpuProfiler.waitForWorker("worker-runtime");
+      try {
+        cpuProfiler = await CdpWorkerProfiler.connect(shell.wsEndpoint());
+        await cpuProfiler.waitForWorker("worker-runtime");
+      } catch (error) {
+        // Profiling is best-effort instrumentation; never fail the test.
+        console.warn("Worker CPU profiler setup failed, disabling:", error);
+        cpuProfiler?.close();
+        cpuProfiler = undefined;
+      }
     }
 
     if (CAPTURE_HOME_LOAD_SERIES > 0) {

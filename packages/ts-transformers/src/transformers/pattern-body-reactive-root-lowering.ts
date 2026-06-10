@@ -84,7 +84,7 @@ const WRITE_METHODS = new Set([
 // triggering event and isn't lowerable; route it through a module-scope
 // handler<>. (Wrapping the write in computed() is not the fix either: a write in
 // a computed() re-triggers the computation and must be idempotent — see
-// docs/common/concepts/computed/side-effects.md.) Non-write unsupported calls
+// docs/common/concepts/computed/computed.md.) Non-write unsupported calls
 // still belong in computed()/lift().
 function notLowerableMethodRemedy(methodName: string | undefined): string {
   if (methodName && WRITE_METHODS.has(methodName)) {

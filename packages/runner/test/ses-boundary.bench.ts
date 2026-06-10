@@ -3,13 +3,8 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { Runtime } from "../src/runtime.ts";
-import { preflightCompiledBundle } from "../src/sandbox/bundle-preflight.ts";
 import { createCallbackCompartmentGlobals } from "../src/sandbox/compartment-globals.ts";
 import { hardenVerifiedFunction } from "../src/sandbox/function-hardening.ts";
-import {
-  verifyCompiledBundleModuleFactoriesWithParser
-    as verifyCompiledBundleModuleFactories,
-} from "../src/sandbox/compiled-bundle-verifier.ts";
 import { evaluateCallbackSourceInSES } from "../src/sandbox/mod.ts";
 import { evaluateFunctionSourceInSES } from "../src/sandbox/ses-runtime.ts";
 
@@ -50,43 +45,24 @@ function createBenchEngine() {
   return { engine, runtime, storageManager };
 }
 
-const compiledBundle = await (async () => {
-  const { engine, runtime, storageManager } = createBenchEngine();
-  try {
-    return await engine.compile(benchProgram);
-  } finally {
-    await runtime.dispose();
-    await storageManager.close();
-  }
-})();
-
 Deno.bench(
-  "SES bundle verification: parser preflight + factory verifier",
-  { group: "ses-verification" },
-  () => {
-    const filename = compiledBundle.jsScript.filename ?? "bench.js";
-    preflightCompiledBundle(compiledBundle.jsScript.js, filename);
-    verifyCompiledBundleModuleFactories(compiledBundle.jsScript.js, filename);
-  },
-);
-
-Deno.bench(
-  "SES Engine.evaluate: memoized bundle hash on repeated evaluates",
-  { group: "ses-verification" },
+  "SES ESM evaluate: repeated record-graph evaluates",
+  { group: "ses-evaluation" },
   async (b) => {
     const { engine, runtime, storageManager } = createBenchEngine();
     try {
-      await engine.evaluate(
-        compiledBundle.id,
-        compiledBundle.jsScript,
-        benchProgram.files,
+      const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+        benchProgram,
       );
+      // Warm once outside the timed region (first-load initialization).
+      engine.evaluateRecordGraph(id, graph, mainSpecifier, benchProgram.files);
 
       b.start();
       for (let i = 0; i < 25; i++) {
-        await engine.evaluate(
-          compiledBundle.id,
-          compiledBundle.jsScript,
+        engine.evaluateRecordGraph(
+          id,
+          graph,
+          mainSpecifier,
           benchProgram.files,
         );
       }

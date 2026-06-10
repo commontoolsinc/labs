@@ -1,3 +1,4 @@
+import { LRUCache } from "@commonfabric/utils/cache";
 import {
   type VNode,
   type WishParams,
@@ -1258,20 +1259,36 @@ function createWishCandidatesCell(
   return runtime.getImmutableCell(space, values, undefined, tx);
 }
 
+// asCell-wrapped schemas per serialized content. The stringify itself is one
+// unavoidable walk (through the query-result proxy when the input is one),
+// but parse + intern repeat for the same content on every wish send.
+const schemaAsCellCache = new LRUCache<string, JSONSchema>({ capacity: 256 });
+
 function schemaAsCell(schema: unknown): JSONSchema {
   if (schema && typeof schema === "object") {
-    return {
-      ...(JSON.parse(JSON.stringify(schema)) as Record<string, unknown>),
-      asCell: ["cell"],
-    };
+    const json = JSON.stringify(schema);
+    let result = schemaAsCellCache.get(json);
+    if (result === undefined) {
+      result = internSchema({
+        ...(JSON.parse(json) as Record<string, unknown>),
+        asCell: ["cell"],
+      });
+      schemaAsCellCache.put(json, result);
+    }
+    return result;
   }
   return { asCell: ["cell"] };
 }
 
 function wishStateSchemaForResult(schema: unknown): JSONSchema | undefined {
   if (schema === undefined) return undefined;
+  // schemaAsCell JSON-round-trips its input, and `schema` is typically a
+  // query-result proxy where every property access during stringify pays the
+  // full cell-read machinery (~7ms for a large search schema in profiles).
+  // Materialize once and share the instance for both slots — internSchema
+  // canonicalizes the wrapper, so the duplicate reference is fine.
   const resultSchema = schemaAsCell(schema);
-  const candidateSchema = schemaAsCell(schema);
+  const candidateSchema = resultSchema;
   return internSchema({
     type: "object",
     properties: {

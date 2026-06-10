@@ -169,7 +169,28 @@ When to use `handler()`:
 | empty and first-run states | zero-data flows are understandable and actionable |
 | theme/styling stance | theme hooks, custom properties, or parts are used intentionally when relevant |
 
-### 13. Regression Check
+### 13. Scoped State (PerSession / PerUser / PerSpace)
+
+Review whether each state field has the right sharing boundary. A useful test
+for UI state: if the user opens the same instance in a new tab, should this
+state carry over? If not, it is probably `PerSession<>`.
+
+| State | Expected scope |
+|-------|----------------|
+| shared records, rooms, documents, canonical task lists | `PerSpace<>` |
+| display name, user preference, personal draft, account-local setting | `PerUser<>` |
+| navigation, selected tab/item/room, modal state, local filter text, focused item | `PerSession<>` |
+
+| Violation | Fix |
+|-----------|-----|
+| transient UI state stored as unscoped or shared space state | Use `PerSession<>` |
+| user-owned state stored as shared space state | Use `PerUser<>` |
+| shared canonical content stored per-session | Use `PerSpace<>` unless isolation is intentional |
+| user ids or session ids embedded in data to simulate isolation | Use scope wrappers |
+| `PerAny<>` used where the inner scope is known | Replace with the known scope |
+| scope used as an authorization boundary | Keep CFC/IFC/security policy separate |
+
+### 14. Regression Check
 
 | Check | What to verify |
 |-------|----------------|
@@ -214,10 +235,16 @@ calls, for example:
 
 Use the shared severity taxonomy from the factory protocol:
 
-- `critical`
-- `major`
-- `minor`
-- `info`
+- `critical` - breaks correctness or reactivity, or loses data. Examples: a
+  reactive loop, `.get()` on a computed during render, `new Writable(reactiveValue)`,
+  a handler that never fires.
+- `major` - violates a documented rule with a user-visible effect. Examples:
+  wrong binding so edits don't persist, wrong state scope leaking per-user
+  state, SES/determinism violations.
+- `minor` - convention or maintainability issue with no user-visible effect.
+  Examples: `handler()` where `action()` suffices, helper defined inside the
+  pattern body that happens to work.
+- `info` - observation, no change required.
 
 For modify-mode pre-build reviews, findings should also be easy for an
 orchestrator to triage into:

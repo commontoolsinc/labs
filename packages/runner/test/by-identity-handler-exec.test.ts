@@ -39,7 +39,6 @@ describe("resume the fuse-exec piece by identity and invoke its handler", () => 
     new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { esmModuleLoader: true },
     });
 
   beforeEach(() => {

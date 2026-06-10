@@ -30,6 +30,12 @@ profile. The default allowlisted skill scripts are limited to
 workflows such as `scripts/authenticated-session.sh` require a separate,
 explicit credential grant and origin-binding design.
 
+Under the cf-harness profile, the manual-testing-guide's screenshots,
+`--session` workflows, state save/load, console reading, and the Import-CLI-Key
+identity flow are unavailable. Substitute `snapshot` + `get text` for
+screenshots; skip multi-identity checks and record them as not-runnable in the
+report.
+
 ## Core Workflow
 
 Every browser automation follows this pattern:
@@ -118,7 +124,10 @@ agent-browser state load auth.json
 agent-browser open https://app.example.com/dashboard
 ```
 
-### Common Fabric identity checks
+### Common Fabric identity checks (host/interactive runs only)
+
+This recipe needs `--session`, `upload`, and `console`, which the cf-harness
+profile does not allow — run it only in host or interactive sessions.
 
 For Common Fabric tests that touch `PerUser`, `PerSession`, favorites, drafts,
 or home-space state, import the same CLI key used by `deno task cf` into the
@@ -204,6 +213,24 @@ agent-browser snapshot -i
 agent-browser click @e1
 ```
 
+## When Things Break
+
+- **CDP endpoint unreachable**: verify with `agent-browser get url`. If
+  connection errors persist, record the failure in your notes/report and stop
+  rather than retrying blindly.
+- **A `wait` that never resolves**: bound every wait with a `wait <ms>`
+  fallback. Prefer `wait "<selector>" --state hidden` or `wait --fn "<expr>"`
+  for spinners and loading text.
+- **Element missing from snapshot**: `agent-browser scroll down 500` and
+  re-snapshot; then `agent-browser snapshot -s "<container-selector>"`; then
+  fall back to `find` semantic locators.
+- **Screenshot unavailable (restricted profiles)**: substitute
+  `agent-browser snapshot -i` + `agent-browser get text` and record evidence
+  textually.
+
+Verify each command against `agent-browser --help` (or
+`agent-browser <command> --help`) before writing it.
+
 ## Semantic Locators
 
 When refs are unavailable or unreliable, use semantic locators:
@@ -259,9 +286,11 @@ the `agent-browser` CLI to be available on `PATH` in the script execution
 environment.
 
 For cf-harness runs, pass a local CDP origin with `--cdp` or set
-`AGENT_BROWSER_CDP`. The scripts intentionally avoid browser state, screenshots,
-PDFs, uploads, downloads, and local file output; they print snapshots and
-extracted content to stdout for harness capture.
+`AGENT_BROWSER_CDP`. Note that `AGENT_BROWSER_CDP` is honored by these bundled
+scripts (as the fallback when their `--cdp` flag is omitted), not by the
+`agent-browser` CLI itself. The scripts intentionally avoid browser state,
+screenshots, PDFs, uploads, downloads, and local file output; they print
+snapshots and extracted content to stdout for harness capture.
 
 | Script                                                               | Description                                      |
 | -------------------------------------------------------------------- | ------------------------------------------------ |

@@ -10,11 +10,15 @@ Start with the shared testing guidance in:
 
 Read that guide first. It is the canonical reference.
 
-When working in a Pattern Factory Build workspace, also read:
+Run tests with:
 
-- `docs/common/ai/pattern-factory-build-guide.md`
+```bash
+deno task cf test <pattern>.test.tsx
+```
 
-It defines Pattern Factory's build completion gate and expected coverage shape.
+When working in a Pattern Factory Build workspace, also follow
+`docs/common/ai/pattern-factory-build-guide.md` (as mandated by pattern-dev). It
+defines Pattern Factory's build completion gate and expected coverage shape.
 
 For patterns that stamp timestamps or IDs, prefer deterministic assertions over
 recomputing time/random values inside the test itself.
@@ -25,10 +29,8 @@ not as a reason to guess at a new test shape. Before the next repair, read:
 - `docs/development/debugging/README.md`
 
 Then follow the linked gotcha or workflow for the exact error. For Cell,
-Writable, or reactive-value failures, also read:
-
-- `docs/common/concepts/reactivity.md`
-- `docs/common/patterns/new-cells.md`
+Writable, or reactive-value failures, re-consult `reactivity.md` and
+`new-cells.md` (as mandated by pattern-dev).
 
 Runtime notes:
 
@@ -36,3 +38,16 @@ Runtime notes:
   details.
 - The detailed workflow reference remains
   `docs/common/workflows/pattern-testing.md`.
+
+## Done When
+
+- `deno task cf test` exits 0 for every test file. A failing test is not a valid
+  done state unless a concrete external, tooling, or environment blocker
+  prevents further repair.
+- Coverage matches the testing guide's expected shape: the product contract, not
+  only the happy path (first-run/default states; primary add, remove, edit,
+  toggle, or submit flows; repeated actions; validation and edge-case branches
+  from the spec).
+- The test report explains what was covered and what was intentionally omitted.
+- The pattern still compiles after any interface changes made to support
+  testing.

@@ -40,7 +40,6 @@ describe("resume a result cell by {identity, symbol}", () => {
     new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { esmModuleLoader: true },
     });
 
   beforeEach(() => {

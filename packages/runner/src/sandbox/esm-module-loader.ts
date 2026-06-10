@@ -5,19 +5,15 @@ import { verifyModuleGraph } from "./module-record-verifier.ts";
  * SES module-graph loader (Phase 2 of docs/specs/module-loading.md).
  *
  * Loads a graph of per-module records through the SES Compartment module
- * system using synchronous `importNow`, instead of evaluating one flattened
- * AMD bundle. Modules are addressed by content-addressed specifiers
- * (`cf:module/<hash>`), and runtime modules (`commonfabric`, …) are ordinary
- * records in the same graph.
+ * system using synchronous `importNow`. Modules are addressed by
+ * content-addressed specifiers (`cf:module/<hash>`), and runtime modules
+ * (`commonfabric`, …) are ordinary records in the same graph.
  *
  * This version uses SES "virtual" (third-party) module records — `{ imports,
  * exports, execute }` — because this build of `ses` does not expose a
  * `ModuleSource`/`StaticModuleRecord` constructor. Records load synchronously,
  * preserving the scheduler's synchronous execution contract, and import cycles
  * resolve through lazy `compartment.importNow` inside `execute`.
- *
- * This is gated behind the `esmModuleLoader` experimental flag; the AMD bundle
- * path remains the default.
  */
 
 /** A SES third-party (virtual) module record. */
@@ -81,10 +77,9 @@ export interface SesModuleLoaderOptions {
  * returning the entry module's namespace.
  *
  * SECURITY: `verify` performs only *structural* validation. It is NOT a
- * security boundary — the SES_SANDBOXING module-item classification has not yet
- * been ported to records (see module-record-verifier.ts). Callers must treat
- * the module graph as trusted/already-classified. This is why the
- * `esmModuleLoader` flag is off and nothing in `src/` calls this yet.
+ * security boundary — the SES_SANDBOXING module-item classification lives in
+ * the per-module body verifier (see module-record-verifier.ts). Callers must
+ * treat the module graph as trusted/already-classified.
  */
 export function importModuleGraphNow(
   entrySpecifier: string,

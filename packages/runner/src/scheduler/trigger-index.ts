@@ -342,6 +342,44 @@ export function addTriggerPathsToIndex(
   return state.addActionReads(action, reads, shallowReads);
 }
 
+// Last-registered reads per (subscription state, action), so a re-run whose
+// read set is unchanged — the overwhelmingly common case for steady-state
+// sinks and settle re-runs — skips the O(read-entities) clear + re-add of
+// the trigger index. Keyed by the state's `cancels` map (stable identity per
+// scheduler) so actions never cross-contaminate between runtimes.
+const lastTriggerReadsByState = new WeakMap<
+  object,
+  WeakMap<Action, {
+    reads: IMemorySpaceAddress[];
+    shallowReads: IMemorySpaceAddress[];
+    result: {
+      entities: Set<SpaceScopeAndURI>;
+      triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
+    };
+  }>
+>();
+
+const addressesEqual = (
+  a: readonly IMemorySpaceAddress[],
+  b: readonly IMemorySpaceAddress[],
+): boolean => {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i], y = b[i];
+    if (
+      x.space !== y.space || x.id !== y.id || x.type !== y.type ||
+      x.scope !== y.scope || x.path.length !== y.path.length
+    ) {
+      return false;
+    }
+    for (let j = 0; j < x.path.length; j++) {
+      if (x.path[j] !== y.path[j]) return false;
+    }
+  }
+  return true;
+};
+
 export function replaceActionTriggerPaths(
   state: TriggerSubscriptionState,
   action: Action,
@@ -351,8 +389,26 @@ export function replaceActionTriggerPaths(
   entities: Set<SpaceScopeAndURI>;
   triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
 } {
+  let byAction = lastTriggerReadsByState.get(state.cancels);
+  // Only skip while the action is still registered: an unsubscribe runs the
+  // cancel (removing the action from the entity index), so a later
+  // re-subscribe must re-add even with identical reads.
+  const prev = state.cancels.has(action) ? byAction?.get(action) : undefined;
+  if (
+    prev !== undefined &&
+    addressesEqual(prev.reads, reads) &&
+    addressesEqual(prev.shallowReads, shallowReads)
+  ) {
+    return prev.result;
+  }
   clearActionTriggers(state, action);
-  return addTriggerPathsToIndex(state, action, reads, shallowReads);
+  const result = addTriggerPathsToIndex(state, action, reads, shallowReads);
+  if (byAction === undefined) {
+    byAction = new WeakMap();
+    lastTriggerReadsByState.set(state.cancels, byAction);
+  }
+  byAction.set(action, { reads, shallowReads, result });
+  return result;
 }
 
 export function clearActionTriggers(

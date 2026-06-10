@@ -71,13 +71,24 @@ class SESInternals {
     this.sourceMaps.clear();
   }
 
-  private mapThrownError(error: unknown): unknown {
+  mapThrownError(error: unknown): unknown {
     if (!(error instanceof Error)) {
+      return error;
+    }
+    // Source-map an error's stack at most once. `parseStack` is not idempotent:
+    // ESM per-module source maps are registered under the same module path that
+    // mapped frames carry as their source, so re-parsing an already-mapped
+    // stack would look the (now original-source) coordinates up in the map
+    // again and corrupt them (e.g. collapse the throw frame to <CF_INTERNAL>).
+    // Errors cross several mapping seams (nested SES invokes, the scheduler's
+    // handleSchedulerError), hence the explicit once-marker.
+    if (isErrorStackMapped(error)) {
       return error;
     }
     materializeHostVisibleStack(error);
     if (error.stack) {
       error.stack = this.parseStack(error.stack);
+      markErrorStackMapped(error);
     }
     return error;
   }
@@ -226,6 +237,15 @@ export class SESRuntime extends EventTarget {
 
   parseStack(stack: string): string {
     return this.internals.parseStack(stack);
+  }
+
+  /**
+   * Materialize + source-map a thrown error's stack (once — see
+   * `SESInternals.mapThrownError`). Used by the engine for errors that escape
+   * module evaluation outside an isolate `exec` (e.g. `loadModuleGraph`).
+   */
+  mapThrownError(error: unknown): unknown {
+    return this.internals.mapThrownError(error);
   }
 
   evaluateCallback(source: string): unknown {
@@ -414,6 +434,19 @@ function createCallbackCreatorSource(source: string): string {
       return fn;
     };
   })()`;
+}
+
+// Errors whose `stack` has already been source-mapped (see
+// `SESInternals.mapThrownError`). Keyed by the error object so the marker
+// survives rethrows across seams without mutating (possibly frozen) errors.
+const mappedErrorStacks = new WeakSet<Error>();
+
+export function markErrorStackMapped(error: Error): void {
+  mappedErrorStacks.add(error);
+}
+
+export function isErrorStackMapped(error: Error): boolean {
+  return mappedErrorStacks.has(error);
 }
 
 function materializeHostVisibleStack(error: Error): void {
