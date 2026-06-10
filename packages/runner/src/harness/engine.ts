@@ -1141,7 +1141,6 @@ export class Engine extends EventTarget implements Harness {
     }
     return this.sesRuntime;
   }
-
 }
 
 function normalizeVerifiedSource(source: string): string {

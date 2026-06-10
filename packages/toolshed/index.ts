@@ -10,7 +10,7 @@ let runtime: Runtime;
 
 // Initialize runtime with storage and signer
 // FIXME(ja): should we do this even on memory-only toolsheds?
-const initializeRuntime = async () => {
+const initializeRuntime = () => {
   try {
     console.log(`Initializing runtime with signer ${identity.did()}...`);
 
@@ -92,7 +92,7 @@ const handleShutdown = async () => {
 // Start server with the abort controller
 async function startServer() {
   console.log(`Server is starting on port http://${env.HOST}:${env.PORT}`);
-  await initializeRuntime();
+  initializeRuntime();
 
   const serverOptions = {
     hostname: env.HOST,
