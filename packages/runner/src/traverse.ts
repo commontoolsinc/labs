@@ -353,6 +353,185 @@ function combinatorRestSchema(
 }
 
 /**
+ * Per-branch precomputation for an anyOf schema. The per-node loop in
+ * `_traverseWithSchemaInner` previously re-did, on EVERY visited node, work
+ * that depends only on the schema: sorting branches (two `hasAsCell` filter
+ * passes), merging rest+option per branch, and `canBranchMatch`'s static
+ * derivations ($ref resolution, type-list normalization, required-props
+ * applicability). Tail-latency motivated: anyOf-heavy vnode docs evaluate
+ * thousands of branches per traversal, so the per-branch constant dominates
+ * p99/max traversal time. Prepared once per identity, the per-node check
+ * collapses to a few field reads.
+ *
+ * Semantics are exactly `canBranchMatch(mergeSchemaOption(rest, option))`
+ * in the exact pre-existing branch order, including counter accounting for
+ * `false` options.
+ */
+type PreparedAnyOfBranch = {
+  /** Original option was the `false` schema: counted, never matched. */
+  optionIsFalse: boolean;
+  merged: JSONSchema;
+  /** Prefilter verdict known statically (boolean merged / unresolved $ref). */
+  constant: boolean | undefined;
+  hasAsCell: boolean;
+  /** Normalized type list of the resolved merged schema, if constrained. */
+  types: readonly string[] | undefined;
+  /** Required property names, when the resolved type admits objects. */
+  required: readonly string[] | undefined;
+};
+
+const _preparedAnyOfCache = new WeakMap<
+  JSONSchemaObj,
+  readonly PreparedAnyOfBranch[]
+>();
+
+function prepareAnyOfBranch(
+  restSchema: JSONSchemaObj,
+  option: JSONSchema,
+): PreparedAnyOfBranch {
+  const rejected: PreparedAnyOfBranch = {
+    optionIsFalse: true,
+    merged: false,
+    constant: false,
+    hasAsCell: false,
+    types: undefined,
+    required: undefined,
+  };
+  if (ContextualFlowControl.isFalseSchema(option)) return rejected;
+  const merged = mergeSchemaOption(restSchema, option);
+  if (typeof merged === "boolean") {
+    // canBranchMatch's first check: boolean schemas decide immediately.
+    return {
+      optionIsFalse: false,
+      merged,
+      constant: merged,
+      hasAsCell: false,
+      types: undefined,
+      required: undefined,
+    };
+  }
+  const hasAsCell = SchemaObjectTraverser.hasAsCell(merged);
+  let resolved: JSONSchema | undefined = merged;
+  if ("$ref" in merged) {
+    resolved = resolveSchemaRefsCanonical(merged);
+    if (typeof resolved === "boolean") {
+      return {
+        optionIsFalse: false,
+        merged,
+        constant: resolved,
+        hasAsCell,
+        types: undefined,
+        required: undefined,
+      };
+    } else if (resolved === undefined) {
+      // Unresolved $ref: pass the prefilter; traversal complains properly.
+      return {
+        optionIsFalse: false,
+        merged,
+        constant: true,
+        hasAsCell,
+        types: undefined,
+        required: undefined,
+      };
+    }
+  }
+  const types = resolved.type !== undefined
+    ? (Array.isArray(resolved.type) ? resolved.type : [resolved.type])
+    : undefined;
+  const typeIncludesObject = resolved.type === undefined ||
+    resolved.type === "object" ||
+    (Array.isArray(resolved.type) && resolved.type.includes("object"));
+  const required = typeIncludesObject && Array.isArray(resolved.required)
+    ? resolved.required as readonly string[]
+    : undefined;
+  return {
+    optionIsFalse: false,
+    merged,
+    constant: undefined,
+    hasAsCell,
+    types,
+    required,
+  };
+}
+
+function prepareAnyOf(
+  resolved: JSONSchemaObj,
+  anyOf: readonly JSONSchema[],
+): readonly PreparedAnyOfBranch[] {
+  const memoizable = isMemoizableSchemaInput(resolved);
+  if (memoizable) {
+    const cached = _preparedAnyOfCache.get(resolved);
+    if (cached !== undefined) return cached;
+  }
+  const restSchema = combinatorRestSchema(resolved, "anyOf");
+  // Consider items without asCell or asStream first, since if we aren't
+  // traversing cells, we consider them a match.
+  const sortedAnyOf = [
+    ...anyOf.filter((option) => !SchemaObjectTraverser.hasAsCell(option)),
+    ...anyOf.filter(SchemaObjectTraverser.hasAsCell),
+  ];
+  const prepared = sortedAnyOf.map((option) =>
+    prepareAnyOfBranch(restSchema, option)
+  );
+  if (memoizable) _preparedAnyOfCache.set(resolved, prepared);
+  return prepared;
+}
+
+/**
+ * Per-call doc-visit/unique-path diagnostics in `traverseWithSchema` build a
+ * string and touch a Map+Set on EVERY schema visit — measurable in tail
+ * traversals (thousands of visits each). They only feed the slow-traverse
+ * log, so they are collected only when explicitly enabled.
+ */
+const TRAVERSE_DIAGNOSTICS: boolean = (() => {
+  try {
+    return typeof Deno !== "undefined" &&
+      typeof Deno.env?.get === "function" &&
+      Deno.env.get("CF_TRAVERSE_DIAGNOSTICS") === "1";
+  } catch {
+    return false;
+  }
+})();
+
+/**
+ * Memoized `createDataCellURI()` for inline array elements. Serializing the
+ * element subtree (JSON.stringify + encodeURIComponent + relative-link
+ * rebase + asCell schema stripping) on every visit was ~18% of the worst
+ * tail traversals. Deep-frozen values are identity-stable, so the URI is
+ * cached per (value identity, base address, base schema); mutable values
+ * fall back to the direct call.
+ */
+const _dataCellURICache = new WeakMap<
+  object,
+  Map<string, ReturnType<typeof createDataCellURI>>
+>();
+
+function dataCellURIForElement(
+  value: Immutable<FabricValue>,
+  elementLink: NormalizedFullLink,
+): ReturnType<typeof createDataCellURI> {
+  if (
+    !isRecord(value) || !isDeepFrozen(value) ||
+    !isMemoizableSchemaInput(elementLink.schema)
+  ) {
+    return createDataCellURI(value, elementLink);
+  }
+  let byBase = _dataCellURICache.get(value);
+  if (byBase === undefined) {
+    byBase = new Map();
+    _dataCellURICache.set(value, byBase);
+  }
+  const key = `${elementLink.space}|${elementLink.scope}|${elementLink.id}|${
+    pathKey(elementLink.path)
+  }|${schemaKeyPart(elementLink.schema)}`;
+  const cached = byBase.get(key);
+  if (cached !== undefined) return cached;
+  const uri = createDataCellURI(value, elementLink);
+  byBase.set(key, uri);
+  return uri;
+}
+
+/**
  * Identity-memoized `ContextualFlowControl.resolveSchemaRefs()` with an
  * interned result. `$ref` resolution mints a fresh schema per call, which
  * de-canonicalizes the whole subtree below it: every identity-keyed hash
@@ -2479,7 +2658,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
         `maxDepth=${this.maxDepth}`,
         `schemaMemo=${this.activeMemo.size}`,
         `schemaMemoHits=${this.schemaMemoHits}`,
-        `topDocs=${topDocs}`,
+        TRAVERSE_DIAGNOSTICS
+          ? `topDocs=${topDocs}`
+          : "topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)",
       ]);
     }
     if (error !== undefined) {
@@ -2584,11 +2765,13 @@ export class SchemaObjectTraverser<V extends FabricValue>
     this.traverseWithSchemaCalls++;
     this.currentDepth++;
     if (this.currentDepth > this.maxDepth) this.maxDepth = this.currentDepth;
-    // Track doc visits
     const docId = doc.address.id;
-    this.docVisits.set(docId, (this.docVisits.get(docId) ?? 0) + 1);
-    // Track unique doc+path combos
-    this.uniquePaths.add(docId + "/" + doc.address.path.join("/"));
+    if (TRAVERSE_DIAGNOSTICS) {
+      // Per-visit doc/path tracking for the slow-traverse log; the string
+      // building is too hot to leave on by default (see TRAVERSE_DIAGNOSTICS).
+      this.docVisits.set(docId, (this.docVisits.get(docId) ?? 0) + 1);
+      this.uniquePaths.add(docId + "/" + doc.address.path.join("/"));
+    }
     try {
       // Memoize by doc address + schema for the query path (traverseCells=true).
       // In the query path, StandardObjectCreator ignores the link param,
@@ -2641,32 +2824,50 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // There are a lot of valid logical schema flags, and we only handle
       // a very limited set here, with no support for combinations.
       if (resolved.anyOf) {
-        const anyOf = resolved.anyOf;
-        const restSchema = combinatorRestSchema(resolved, "anyOf");
-        // Consider items without asCell or asStream first, since if we aren't
-        // traversing cells, we consider them a match.
-        const sortedAnyOf = [
-          ...anyOf.filter((option) => !SchemaObjectTraverser.hasAsCell(option)),
-          ...anyOf.filter(SchemaObjectTraverser.hasAsCell),
-        ];
-
-        // Branch-by-branch traversal; fast-reject after merge so canBranchMatch
-        // sees the full merged constraints (type/required from restSchema too).
+        // Branch order, merges, and canBranchMatch's static derivations are
+        // precomputed per schema identity; the inlined prefilter below is
+        // semantically identical to canBranchMatch(merged, doc.value).
+        const prepared = prepareAnyOf(resolved, resolved.anyOf);
+        const valueIsLink = isPrimitiveCellLink(doc.value);
+        const actualType = getJsonType(doc.value);
+        const valueIsRecord = isRecord(doc.value);
         const matches: Immutable<FabricValue>[] = [];
-        for (const optionSchema of sortedAnyOf) {
+        for (const branch of prepared) {
           this.anyOfBranches++;
-          if (ContextualFlowControl.isFalseSchema(optionSchema)) {
+          if (branch.optionIsFalse) {
             continue;
           }
-          const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
-          if (!canBranchMatch(mergedSchema, doc.value)) {
+          let match: boolean;
+          if (branch.constant !== undefined) {
+            match = branch.constant;
+          } else if (branch.hasAsCell || valueIsLink) {
+            // Never reject asCell/asStream branches; link values reveal
+            // nothing until dereferenced during traversal.
+            match = true;
+          } else if (
+            branch.types !== undefined && actualType !== null &&
+            !branch.types.includes(actualType)
+          ) {
+            match = false;
+          } else if (branch.required !== undefined && valueIsRecord) {
+            match = true;
+            for (const req of branch.required) {
+              if (!(req in (doc.value as Record<string, unknown>))) {
+                match = false;
+                break;
+              }
+            }
+          } else {
+            match = true;
+          }
+          if (!match) {
             this.anyOfFastRejects++;
             continue;
           }
           // TODO(@ubik2): do i need to merge the link schema?
           const { ok: val, error } = this.traverseWithSchema(
             doc,
-            mergedSchema,
+            branch.merged,
             link,
           );
           if (error === undefined) {
@@ -2690,7 +2891,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
           () => [
             "No matching anyOf",
             doc,
-            sortedAnyOf,
+            prepared,
             this.getDebugValue(doc),
           ],
         );
@@ -3221,7 +3422,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
           ...curDoc,
           address: {
             ...curDoc.address,
-            id: createDataCellURI(curDoc.value, elementLink),
+            id: dataCellURIForElement(curDoc.value, elementLink),
             path: ["value"],
           },
         };
