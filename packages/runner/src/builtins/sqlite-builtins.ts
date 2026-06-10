@@ -304,7 +304,7 @@ export const growOnlyMergeDbTables = (
       (priorTableRaw as { properties?: Record<string, unknown> } | undefined)
         ?.properties;
     if (!priorProps || typeof priorProps !== "object") continue;
-    let resultTable = result[tableName] as
+    const resultTable = result[tableName] as
       | { properties?: Record<string, unknown> }
       | undefined;
     if (!resultTable || typeof resultTable !== "object") {
