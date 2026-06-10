@@ -1034,13 +1034,23 @@ const unsupportedTrustSensitiveReason = (
   if (!isRecord(schema) || !isRecord(schema.ifc)) {
     return undefined;
   }
+  // Claims the runner does not implement. A write to a path declaring one must
+  // fail closed rather than be silently ignored (and dropped by schema-merge),
+  // which would give an author no enforcement and no error (audit S10).
   const unsupportedKeys = [
     "projection",
     "collection",
+    "opaque",
+    "passThrough",
+    "recomposeProjections",
+    "combinedFrom",
+    "combinationType",
+    "transformation",
+    "addedIntegrity",
   ] as const;
+  const ifc = schema.ifc as Record<string, unknown>;
   for (const key of unsupportedKeys) {
-    const value = schema.ifc[key];
-    if (value !== undefined) {
+    if (ifc[key] !== undefined) {
       return `unsupported trust-sensitive claim ${key} at /${path.join("/")}`;
     }
   }
