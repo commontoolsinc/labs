@@ -149,6 +149,11 @@ export interface InitializationData {
     | "observe"
     | "enforce-explicit"
     | "enforce-strict";
+  // Whether author-supplied render-boundary declassification is honored.
+  // Defaults to "allow" (current behavior). "deny" ignores author-supplied
+  // `declassifyConfidentiality` so a pattern can't release a secret upward
+  // through a render boundary (audit S15).
+  renderDeclassificationPolicy?: "allow" | "deny";
   // Static trust snapshot applied to worker-owned transactions.
   trustSnapshot?: {
     id: string;

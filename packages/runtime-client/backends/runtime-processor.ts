@@ -112,7 +112,10 @@ import {
 } from "./utils.ts";
 import { cellRefToKey } from "../shared/utils.ts";
 import { RemoteResponse } from "@commonfabric/runtime-client";
-import { WorkerReconciler } from "@commonfabric/html/worker";
+import {
+  type RenderDeclassificationPolicy,
+  WorkerReconciler,
+} from "@commonfabric/html/worker";
 import type { VDomOp } from "../protocol/types.ts";
 import type { RuntimeOptions, URI } from "@commonfabric/runner";
 
@@ -288,6 +291,9 @@ export class RuntimeProcessor {
     { reconciler: WorkerReconciler; cancel: Cancel }
   >();
   private vdomBatchIdCounter = 0;
+  // Render-boundary declassification policy applied to every mount's
+  // reconciler. Set from InitializationData; "allow" preserves prior behavior.
+  private renderDeclassificationPolicy: RenderDeclassificationPolicy = "allow";
 
   private constructor(
     runtime: Runtime,
@@ -411,7 +417,7 @@ export class RuntimeProcessor {
     pieceManager = new PieceManager(session, runtime);
     const cc = new PiecesController(pieceManager);
 
-    return new RuntimeProcessor(
+    const processor = new RuntimeProcessor(
       runtime,
       pieceManager,
       cc,
@@ -420,6 +426,9 @@ export class RuntimeProcessor {
       identity,
       telemetry,
     );
+    processor.renderDeclassificationPolicy =
+      data.renderDeclassificationPolicy ?? "allow";
+    return processor;
   }
 
   dispose(): Promise<void> {
@@ -1170,6 +1179,7 @@ export class RuntimeProcessor {
 
     // Create a reconciler that sends ops to the main thread
     const reconciler = new WorkerReconciler({
+      renderDeclassificationPolicy: this.renderDeclassificationPolicy,
       onOps: (ops: VDomOp[]) => {
         const batchId = this.vdomBatchIdCounter++;
         self.postMessage({
