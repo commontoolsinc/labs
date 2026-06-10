@@ -334,7 +334,7 @@ C, not an afterthought.
 cd packages/runner && deno task test
 ENV=test deno test --no-check -A test/{map-op-by-identity,cfreg-*,cfc-*,action-fingerprint,resume-by-identity,load-by-identity*,esm-source-location,implementation-ref}.test.ts
 deno task check && deno fmt --check && deno lint
-deno task cf check packages/patterns/address.tsx   # pattern smoke
+cd ../.. && deno task cf check packages/patterns/address.tsx   # pattern smoke (from repo root)
 ```
 
 Plus per-PR items listed above. CI: shepherd each PR; perf-check per the
