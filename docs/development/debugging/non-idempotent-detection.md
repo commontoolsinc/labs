@@ -99,6 +99,25 @@ A cycle means two or more actions form a loop where each one's writes trigger
 the next. Even if each action is individually idempotent, a cycle prevents the
 system from settling.
 
+### 4. Inline Recheck (`cf test`)
+
+`cf test` enables an inline mode (`runtime.enableIdempotencyCheck()`): every
+computation run is immediately followed by a second synchronous run against
+post-commit state, and differing writes fail the test at the end
+(`✗ N non-idempotent computation(s)`, listing each action and its differing
+write keys). A test pattern can opt out by returning
+`expectNonIdempotent: true` — note this *tolerates* violations, it does not
+assert one is found.
+
+Because the second run executes against the latest state, a concurrent write
+landing between the first run and the recheck (another transaction's
+commit/rollback, or a cross-runtime sync apply in multi-user tests) would make
+a pure computation look non-idempotent. The recheck guards against this: when
+writes differ, it compares both runs' read invariants and skips the report if
+an input the action did not itself write moved between the runs. Self-caused
+input moves (reading what it writes — the accumulator anti-pattern) and
+equal-input nondeterminism (timestamps, random ordering) are still reported.
+
 ## Using the Console API
 
 ### Basic Usage
