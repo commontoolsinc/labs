@@ -56,10 +56,18 @@ const createRuntime = () => {
   return { runtime, storageManager };
 };
 
+// Handlers resolve their per-space piece context via getSpaceCtx
+// (federation PR2). The duck-typed processors below are single-space:
+// their context is always the home pieceManager/cc.
+function homeSpaceCtx(this: { pieceManager?: unknown; cc?: unknown }) {
+  return { pieceManager: this.pieceManager, cc: this.cc };
+}
+
 describe("page slug metadata", () => {
   it("reads slug metadata from the page document root", async () => {
     const reads: unknown[] = [];
     const processor = {
+      getSpaceCtx: homeSpaceCtx,
       runtime: {
         getCellFromEntityId: () => ({
           sync: () => Promise.resolve(),
@@ -96,6 +104,7 @@ describe("page slug metadata", () => {
 
   it("ignores non-string slug metadata", async () => {
     const processor = {
+      getSpaceCtx: homeSpaceCtx,
       runtime: {
         getCellFromEntityId: () => ({
           sync: () => Promise.resolve(),
@@ -185,6 +194,7 @@ describe("page slug redirects", () => {
       },
     };
     const processor = {
+      getSpaceCtx: homeSpaceCtx,
       pieceManager: { getSpace: () => space },
       runtime: {
         getCellFromEntityId: () => slugCell,
@@ -259,6 +269,7 @@ describe("page slug redirects", () => {
       },
     };
     const processor = {
+      getSpaceCtx: homeSpaceCtx,
       pieceManager: { getSpace: () => space },
       runtime: {
         getCellFromEntityId: () => slugCell,
@@ -317,6 +328,7 @@ describe("page slug redirects", () => {
       },
     };
     const processor = {
+      getSpaceCtx: homeSpaceCtx,
       pieceManager: { getSpace: () => space },
       runtime: {
         getCellFromEntityId: () => slugCell,
@@ -1602,5 +1614,90 @@ describe("runtimeOptionsFromInitializationData", () => {
       id: "principal:did:key:worker",
       actingPrincipal: "did:key:worker",
     });
+  });
+});
+
+// Federation PR2: one worker serves page operations for many spaces.
+// getSpaceCtx resolves the per-space PieceManager/PiecesController,
+// lazily for foreign spaces, over the shared runtime/storage.
+describe("RuntimeProcessor per-space piece contexts", () => {
+  const getSpaceCtx = (RuntimeProcessor.prototype as any).getSpaceCtx;
+
+  async function makeProcessorState() {
+    const { runtime } = createRuntime();
+    const { PieceManager } = await import("@commonfabric/piece");
+    const { PiecesController } = await import("@commonfabric/piece/ops");
+    const homeSpace = cfcSigner.did();
+    const pieceManager = new PieceManager(
+      { as: cfcSigner, space: homeSpace },
+      runtime,
+    );
+    const cc = new PiecesController(pieceManager);
+    const processor = {
+      runtime,
+      identity: cfcSigner,
+      space: homeSpace,
+      spaces: new Map([[homeSpace, { pieceManager, cc }]]),
+      pieceManager,
+      cc,
+      getSpaceCtx,
+    };
+    return { processor, runtime, homeSpace };
+  }
+
+  it("resolves no-space and the home space to the initialize-time context", async () => {
+    const { processor, runtime, homeSpace } = await makeProcessorState();
+    try {
+      expect(processor.getSpaceCtx()).toBe(processor.spaces.get(homeSpace));
+      expect(processor.getSpaceCtx(homeSpace).pieceManager).toBe(
+        processor.pieceManager,
+      );
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("lazily builds a distinct, cached context for a foreign space", async () => {
+    const { processor, runtime } = await makeProcessorState();
+    const spaceB = (await Identity.fromPassphrase(
+      "runtime-processor-space-b",
+    )).did();
+    try {
+      const ctxB = processor.getSpaceCtx(spaceB);
+      expect(ctxB.pieceManager).not.toBe(processor.pieceManager);
+      expect(ctxB.pieceManager.getSpace()).toBe(spaceB);
+      // Cached: the same context comes back, and the home context is intact.
+      expect(processor.getSpaceCtx(spaceB)).toBe(ctxB);
+      expect(processor.getSpaceCtx().pieceManager).toBe(
+        processor.pieceManager,
+      );
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("handlePageGet with a space resolves the page in that space", async () => {
+    const { processor, runtime, homeSpace } = await makeProcessorState();
+    const spaceB = (await Identity.fromPassphrase(
+      "runtime-processor-space-b",
+    )).did();
+    const handlePageGet = (RuntimeProcessor.prototype as any).handlePageGet;
+    try {
+      const resHome = await handlePageGet.call(processor, {
+        type: RequestType.PageGet,
+        pageId: "fid1-cross-space-probe",
+        runIt: false,
+      });
+      const resB = await handlePageGet.call(processor, {
+        type: RequestType.PageGet,
+        pageId: "fid1-cross-space-probe",
+        runIt: false,
+        space: spaceB,
+      });
+      expect(resHome.page.cell.space).toBe(homeSpace);
+      expect(resB.page.cell.space).toBe(spaceB);
+    } finally {
+      await runtime.dispose();
+    }
   });
 });
