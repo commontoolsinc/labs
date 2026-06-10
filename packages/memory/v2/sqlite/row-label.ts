@@ -1,6 +1,6 @@
 // CFC Phase 3: the per-row label rule — builder helpers, the serialized AST,
 // authoring/wire validation, and the shared evaluator.
-// (Design: docs/specs/sqlite-builtin/plans/cfc-phase3-per-row.md §4-§6.)
+// (Spec: docs/specs/sqlite-builtin/06-cfc.md, "Per-row labels".)
 //
 // A rule is a PURE declarative projection over (stored columns, fixed db
 // properties): the builders below return plain-JSON AST nodes, `table()`
@@ -156,7 +156,7 @@ export function intersect(...terms: unknown[]): { intersect: unknown[] } {
 /** Integrity claim: the row was authored by the extracted principal. Minted as
  *  a self-describing `claimed-authored-by` atom — content-derived provenance
  *  is forgeable by the row's writer, so it never lowers to the trusted
- *  `AuthoredBy` family directly (design §4; upgrade via provider trust). */
+ *  `AuthoredBy` family directly (see 06-cfc.md; upgrade via provider trust). */
 export function authoredBy(
   p: { principal: Record<string, unknown> },
 ): { authoredBy: unknown } {

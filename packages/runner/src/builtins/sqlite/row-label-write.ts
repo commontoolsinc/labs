@@ -5,7 +5,8 @@
 // under a weaker label and re-derived reads would under-protect it). Anything
 // the runner cannot attribute or evaluate on a rule-bearing table fails
 // closed; server-side commit evaluation (3.c) is the follow-up that lifts
-// this for the non-attributable shapes. Design §8, §9.6.
+// this for the non-attributable shapes.
+// Spec: docs/specs/sqlite-builtin/06-cfc.md ("Write — the runner gate").
 //
 // Zero cost when no table declares a rule.
 

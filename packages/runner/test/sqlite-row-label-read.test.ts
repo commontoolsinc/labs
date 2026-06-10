@@ -2,7 +2,8 @@
 // origins, the declared tables, and the rows, compute each row's per-row label
 // (or refuse), and apply a declared output ceiling with onExceed fail|skip.
 // No server, no FFI — the flush wires this to real results.
-// Design: docs/specs/sqlite-builtin/plans/cfc-phase3-per-row.md §7, §9.
+// Spec: docs/specs/sqlite-builtin/06-cfc.md ("Read — re-derive per row,
+// attach, ceiling"; "Fail-closed rules").
 
 import { describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";

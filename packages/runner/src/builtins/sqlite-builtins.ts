@@ -546,7 +546,7 @@ export function sqliteQuery(
             return;
           }
           // onExceed:"skip" — drop rows the declared ceiling does not admit
-          // (a declared, observable existence release; design §7b).
+          // (a declared, observable existence release; 06-cfc.md ceiling).
           const keep = rowLabels.keep;
           const keptRows = keep ? rows.filter((_, i) => keep[i]) : rows;
           const perRow = keep
@@ -585,7 +585,8 @@ export function sqliteQuery(
             // own id, root path) under a root-`ifc` schema. Keyed by the row
             // doc's id, so there is no collision with the array write's items
             // schema, and the per-row root label coexists with the per-column
-            // field labels on the same doc (design §7, spike 3.0).
+            // field labels on the same doc (06-cfc.md "Read — re-derive per
+            // row, attach, ceiling").
             if (anyPerRow) {
               const base = result.getAsNormalizedFullLink();
               for (let i = 0; i < resultRows.length; i++) {
