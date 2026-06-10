@@ -50,3 +50,41 @@ describe("SchedulerTriggerIndex", () => {
     expect(triggerIndex.hasRegisteredTriggers()).toBe(true);
   });
 });
+
+describe("replaceActionTriggerPaths unchanged-reads skip", () => {
+  it("re-registers triggers when only the read scope changes", async () => {
+    const { replaceActionTriggerPaths, setCancelForTriggerEntities } =
+      await import("../src/scheduler/trigger-index.ts");
+    const { SchedulerTriggerSubscriptions } = await import(
+      "../src/scheduler/trigger-index.ts"
+    );
+    const triggerIndex = new SchedulerTriggerIndex();
+    const state = new SchedulerTriggerSubscriptions({
+      triggerIndex,
+      cancels: new WeakMap(),
+      getActionId: () => "test-action",
+    });
+    const action: Action = () => {};
+    const base = {
+      space: "did:key:trigger-index-test",
+      id: "of:cell",
+      path: ["value"],
+    } as const;
+    const spaceRead = { ...base, scope: "space" } as IMemorySpaceAddress;
+    const userRead = { ...base, scope: "user" } as IMemorySpaceAddress;
+
+    const first = replaceActionTriggerPaths(state, action, [spaceRead], []);
+    setCancelForTriggerEntities(state, action, first.entities);
+
+    // Same space/id/path, different scope: must NOT be treated as unchanged.
+    const second = replaceActionTriggerPaths(state, action, [userRead], []);
+    setCancelForTriggerEntities(state, action, second.entities);
+
+    expect(triggerIndex.collectReadersForWrite(userRead).has(action)).toBe(
+      true,
+    );
+    expect(triggerIndex.collectReadersForWrite(spaceRead).has(action)).toBe(
+      false,
+    );
+  });
+});

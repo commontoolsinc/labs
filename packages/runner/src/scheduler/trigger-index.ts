@@ -369,7 +369,7 @@ const addressesEqual = (
     const x = a[i], y = b[i];
     if (
       x.space !== y.space || x.id !== y.id || x.type !== y.type ||
-      x.path.length !== y.path.length
+      x.scope !== y.scope || x.path.length !== y.path.length
     ) {
       return false;
     }
