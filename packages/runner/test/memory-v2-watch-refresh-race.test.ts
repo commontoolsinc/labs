@@ -359,7 +359,7 @@ Deno.test("memory v2 runner batches concurrent watch refreshes", async () => {
   const sessionFactory = new SingleSessionFactory(transport);
   const storageManager = TestStorageManager.create({
     as: signer,
-    address: new URL("memory://runner-v2-watch-refresh-batch"),
+    apiUrl: new URL("memory://runner-v2-watch-refresh-batch"),
   }, sessionFactory);
   const provider = storageManager.open(space) as TestProvider;
 
@@ -387,7 +387,7 @@ Deno.test("memory v2 runner compacts redundant selectors for the same doc", asyn
   const sessionFactory = new SingleSessionFactory(transport);
   const storageManager = TestStorageManager.create({
     as: signer,
-    address: new URL("memory://runner-v2-watch-refresh-compact"),
+    apiUrl: new URL("memory://runner-v2-watch-refresh-compact"),
   }, sessionFactory);
   const provider = storageManager.open(space) as TestProvider;
 
@@ -428,7 +428,7 @@ Deno.test("memory v2 runner deduplicates semantically identical selectors with r
   const sessionFactory = new SingleSessionFactory(transport);
   const storageManager = TestStorageManager.create({
     as: signer,
-    address: new URL("memory://runner-v2-watch-refresh-order"),
+    apiUrl: new URL("memory://runner-v2-watch-refresh-order"),
   }, sessionFactory);
   const provider = storageManager.open(space) as TestProvider;
 
@@ -472,7 +472,7 @@ Deno.test("memory v2 runner incrementally adds later watches after the initial s
   const sessionFactory = new SingleSessionFactory(transport);
   const storageManager = TestStorageManager.create({
     as: signer,
-    address: new URL("memory://runner-v2-watch-add"),
+    apiUrl: new URL("memory://runner-v2-watch-add"),
   }, sessionFactory);
   const provider = storageManager.open(space) as TestProvider;
 
@@ -497,7 +497,7 @@ Deno.test("memory v2 runner does not resend prior pending watches in later batch
   const sessionFactory = new SingleSessionFactory(transport);
   const storageManager = TestStorageManager.create({
     as: signer,
-    address: new URL("memory://runner-v2-watch-add-delta"),
+    apiUrl: new URL("memory://runner-v2-watch-add-delta"),
   }, sessionFactory);
   const provider = storageManager.open(space) as TestProvider;
 
@@ -524,7 +524,7 @@ Deno.test("memory v2 runner resolves synced on a microtask when idle", async () 
   const sessionFactory = new SingleSessionFactory(transport);
   const storageManager = TestStorageManager.create({
     as: signer,
-    address: new URL("memory://runner-v2-synced-microtask"),
+    apiUrl: new URL("memory://runner-v2-synced-microtask"),
   }, sessionFactory);
   using time = new FakeTime();
 
@@ -549,7 +549,7 @@ Deno.test(
     const sessionFactory = new SingleSessionFactory(transport);
     const storageManager = TestStorageManager.create({
       as: signer,
-      address: new URL("memory://runner-v2-synced-cross-space"),
+      apiUrl: new URL("memory://runner-v2-synced-cross-space"),
     }, sessionFactory);
     using time = new FakeTime();
 
@@ -597,7 +597,7 @@ Deno.test("memory v2 runner integrates watch deltas without re-diffing cold watc
   const sessionFactory = new SingleSessionFactory(transport);
   const storageManager = TestStorageManager.create({
     as: signer,
-    address: new URL("memory://runner-v2-watch-delta"),
+    apiUrl: new URL("memory://runner-v2-watch-delta"),
   }, sessionFactory);
   const provider = storageManager.open(space) as TestProvider;
 

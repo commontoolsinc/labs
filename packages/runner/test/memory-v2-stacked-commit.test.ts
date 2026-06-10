@@ -425,7 +425,7 @@ const createHarness = () => {
   const sessionFactory = new SingleSessionFactory(transport);
   const storageManager = TestStorageManager.create({
     as: signer,
-    address: new URL(`memory://runner-v2-stacked-${crypto.randomUUID()}`),
+    apiUrl: new URL(`memory://runner-v2-stacked-${crypto.randomUUID()}`),
   }, sessionFactory);
   const notifications = new NotificationRecorder();
   const provider = storageManager.open(space) as TestProvider;

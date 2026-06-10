@@ -271,7 +271,7 @@ Deno.test("memory v2 runner does not integrate its own replayed commit after rec
   const sessionFactory = new SingleSessionFactory(transport);
   const storageManager = TestStorageManager.create({
     as: signer,
-    address: new URL("memory://runner-v2-own-replay"),
+    apiUrl: new URL("memory://runner-v2-own-replay"),
   }, sessionFactory);
   const notifications = new NotificationRecorder();
   const writerClient = await MemoryV2Client.connect({
@@ -356,7 +356,7 @@ Deno.test("memory v2 runner deduplicates replayed stacked commits while integrat
   const sessionFactory = new SingleSessionFactory(transport);
   const storageManager = TestStorageManager.create({
     as: signer,
-    address: new URL("memory://runner-v2-stacked-replay"),
+    apiUrl: new URL("memory://runner-v2-stacked-replay"),
   }, sessionFactory);
   const notifications = new NotificationRecorder();
   const writerClient = await MemoryV2Client.connect({
@@ -443,7 +443,7 @@ Deno.test("memory v2 runner restores watched graph state after reconnect and kee
   const sessionFactory = new SingleSessionFactory(transport);
   const storageManager = TestStorageManager.create({
     as: signer,
-    address: new URL("memory://runner-v2-watch-reconnect"),
+    apiUrl: new URL("memory://runner-v2-watch-reconnect"),
   }, sessionFactory);
   const notifications = new NotificationRecorder();
   const writerClient = await MemoryV2Client.connect({
@@ -671,7 +671,7 @@ Deno.test("memory v2 runner keeps later independent pending commits after an ear
   const sessionFactory = new SingleSessionFactory(transport);
   const storageManager = TestStorageManager.create({
     as: signer,
-    address: new URL("memory://runner-v2-reject-then-succeed"),
+    apiUrl: new URL("memory://runner-v2-reject-then-succeed"),
   }, sessionFactory);
   const notifications = new NotificationRecorder();
   const provider = storageManager.open(space) as TestProvider;

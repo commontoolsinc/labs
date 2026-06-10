@@ -17,7 +17,7 @@ const space = signer.did();
 // than reading the first runtime's warm cache.
 class SharedServerStorageManager extends EmulatedStorageManager {
   constructor(as: Identity, server: MemoryV2Server.Server) {
-    super({ as, address: new URL("memory://") }, () => server);
+    super({ as, apiUrl: new URL("memory://") }, () => server);
   }
   // The shared server is owned by the test, not by either manager. Closing one
   // manager must not close the server out from under the other; close only this
