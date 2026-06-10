@@ -53,6 +53,8 @@ import {
   canonicalizeLogicalPath,
   type CfcDereferenceTrace,
   type CfcEnforcementMode,
+  CFC_ENFORCING_STRICTNESS,
+  cfcEnforcementStrictness,
   type CfcTxState,
   type ConsumedRead,
   DEFAULT_CFC_ENFORCEMENT_MODE,
@@ -103,6 +105,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   };
   private reportedCfcRelevant = false;
   private reportedCfcPrepared = false;
+  // Highest enforcing strictness ever set on this tx; mode cannot drop below it.
+  private cfcEnforcementFloor = 0;
   // Per-transaction cache of `Cell.get()` results, keyed by cell link identity.
   // Replaced wholesale on any write (see `invalidateReadResultCache`), so a hit
   // is only ever served when nothing has been written since the cached read.
@@ -121,7 +125,25 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   setCfcEnforcementMode(mode: CfcEnforcementMode): void {
+    // Enforcement may be raised but never weakened below the highest enforcing
+    // level set on this transaction (audit S3). The control surface is on the
+    // public transaction interface and cell.tx is reachable, so this prevents
+    // code holding a Cell from disabling enforcement mid-transaction to commit a
+    // policy violation. `disabled`/`observe` impose no floor (neither enforces),
+    // so they may still be juggled before any enforcing mode is set.
+    if (cfcEnforcementStrictness(mode) < this.cfcEnforcementFloor) {
+      throw new Error(
+        `CFC enforcement mode cannot be weakened to "${mode}": transaction is ` +
+          `pinned at strictness ${this.cfcEnforcementFloor} or higher`,
+      );
+    }
     this.cfcState.enforcementMode = mode;
+    if (cfcEnforcementStrictness(mode) >= CFC_ENFORCING_STRICTNESS) {
+      this.cfcEnforcementFloor = Math.max(
+        this.cfcEnforcementFloor,
+        cfcEnforcementStrictness(mode),
+      );
+    }
   }
 
   markCfcRelevant(reason?: string): void {
