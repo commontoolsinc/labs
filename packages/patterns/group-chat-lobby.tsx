@@ -1,6 +1,7 @@
 import {
   computed,
   Default,
+  equals,
   handler,
   ifElse,
   NAME,
@@ -12,7 +13,11 @@ import {
   wish,
   Writable,
 } from "commonfabric";
-import GroupChatRoom, { Message, User } from "./group-chat-room.tsx";
+import GroupChatRoom, {
+  Message,
+  ParticipantProfileCell,
+  User,
+} from "./group-chat-room.tsx";
 
 /**
  * Group Chat Lobby Pattern
@@ -63,20 +68,25 @@ const resetLobby = handler<
 
 // Handler for joining the chat. `name`/`avatar` arrive as plain strings
 // resolved from the viewer's shared profile (named `computed` values
-// auto-unwrap as handler state).
+// auto-unwrap as handler state); `profile` is the live profile cell — the
+// STABLE identity key. Display names are mutable and not unique across users
+// (two profiles can both be "Alex"), so re-join detection compares profile
+// cells with `equals()`, never names.
 const joinChat = handler<
   unknown,
   {
     messages: Writable<Message[]>;
     users: Writable<User[]>;
     sessionId: Writable<string>;
+    // May be undefined until the viewer's `#profile` wish resolves.
+    profile: ParticipantProfileCell | undefined;
     name: string;
     avatar: string;
   }
->((_event, { messages, users, sessionId, name, avatar }) => {
+>((_event, { messages, users, sessionId, profile, name, avatar }) => {
   const trimmed = (name ?? "").trim();
-  if (!trimmed) {
-    console.log("[joinChat] No profile name resolved yet, returning");
+  if (!trimmed || !profile) {
+    console.log("[joinChat] No resolved profile yet, returning");
     return;
   }
   console.log("[joinChat] Name:", trimmed);
@@ -91,34 +101,40 @@ const joinChat = handler<
     console.log("[joinChat] Initialized new session:", currentSessionId);
   }
 
-  // Get existing users
+  // Re-join check by profile-cell identity: the same user (even after a
+  // rename) navigates back in under their previously claimed display name.
   const existingUsers = users.get() || [];
-
-  // Check if user already exists
-  const existingUser = existingUsers.find((u) => u.name === trimmed);
-  if (!existingUser) {
-    // Create new user with a profile snapshot and add to list
-    const newUser: User = {
-      name: trimmed,
+  const mine = existingUsers.find(
+    (u) => u.profile && equals(u.profile, profile),
+  );
+  let displayName = trimmed;
+  if (mine) {
+    displayName = mine.name;
+  } else {
+    // The room keys messages/reactions on the display name, so it must stay
+    // unique within this roster — disambiguate when a DIFFERENT profile
+    // already claimed the same name.
+    let suffix = 2;
+    while (existingUsers.some((u) => u.name === displayName)) {
+      displayName = `${trimmed} ${suffix++}`;
+    }
+    users.push({
+      name: displayName,
       joinedAt: safeDateNow(),
       avatar: (avatar ?? "").trim(),
-    };
-    users.set([...existingUsers, newUser]);
-    console.log("[joinChat] User added:", trimmed);
+      profile,
+    });
+    console.log("[joinChat] User added:", displayName);
 
     // Add system message for join
-    const existingMessages = messages.get() || [];
-    messages.set([
-      ...existingMessages,
-      {
-        id: `msg-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2)}`,
-        author: "System",
-        content: `${trimmed} joined the chat`,
-        timestamp: safeDateNow(),
-        type: "system",
-        reactions: [],
-      },
-    ]);
+    messages.push({
+      id: `msg-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2)}`,
+      author: "System",
+      content: `${displayName} joined the chat`,
+      timestamp: safeDateNow(),
+      type: "system",
+      reactions: [],
+    });
   }
 
   // Create chat room instance and navigate
@@ -127,13 +143,15 @@ const joinChat = handler<
     "[joinChat] Navigating to chat room with session:",
     currentSessionId,
   );
+  // `as any`: the cell-link `profile` inside `User` defeats the Opaque<>
+  // input mapping (same workaround as battleship's lobby bindings).
   const roomInstance = GroupChatRoom({
     messages,
     users,
-    myName: trimmed,
+    myName: displayName,
     mySessionId: currentSessionId,
     currentSessionId: sessionId,
-  });
+  } as any);
 
   return navigateTo(roomInstance);
 });
@@ -161,13 +179,16 @@ export default pattern<LobbyInput, LobbyOutput>(
 
     const userCount = computed(() => users.get().length);
 
+    // `as any`: the cell-link `profile` inside `User` defeats the Opaque<>
+    // state mapping (same workaround as battleship's lobby bindings).
     const join = joinChat({
       messages,
       users,
       sessionId,
+      profile: profileWish.result,
       name: myName,
       avatar: myAvatar,
-    });
+    } as any);
 
     return {
       [NAME]: computed(() => `${chatName} - Lobby`),
@@ -333,7 +354,7 @@ export default pattern<LobbyInput, LobbyOutput>(
                 border: "none",
                 cursor: "pointer",
               }}
-              onClick={resetLobby({ messages, users, sessionId })}
+              onClick={resetLobby({ messages, users, sessionId } as any)}
             >
               Reset
             </button>

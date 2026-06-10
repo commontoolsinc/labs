@@ -1,4 +1,5 @@
 import {
+  type Cell,
   computed,
   Default,
   handler,
@@ -38,11 +39,28 @@ export interface Message {
   reactions: Reaction[];
 }
 
+/**
+ * Stable identity for a user: the joiner's own `#profile` cell. Display names
+ * are mutable and not unique across users, so they must not be the identity
+ * key — compare profile cells with `equals()` instead (see
+ * `docs/specs/shared-profile-rosters.md`).
+ */
+export type ParticipantProfileCell = Cell<{ name?: string; avatar?: string }>;
+
 export interface User {
+  /**
+   * Display name shown in the room. Unique within this roster (the lobby
+   * disambiguates collisions) because messages/reactions key on it.
+   */
   name: string;
   joinedAt: number;
   /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
   avatar?: string;
+  /**
+   * Link to the joiner's profile cell — the stable identity key (optional so
+   * rosters written before the profile migration still load).
+   */
+  profile?: ParticipantProfileCell;
 }
 
 interface RoomInput {
