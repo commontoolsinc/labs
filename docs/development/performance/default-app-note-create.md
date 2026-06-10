@@ -286,3 +286,49 @@ Remaining (smaller) hash consumers in the settle phase: `resolveLink` under
 query-proxy reads and `resolveSchema` under `validateAndTransform` — both
 downstream of read-path value materialization (the value-graph identity reuse
 lever), plus the schema-interning-at-getCell seam for caller literals.
+
+## Optimization round 3 (June 2026): schema interning at the cell seam
+
+The "schema-interning-at-getCell" lever from round 2's remaining list.
+Schemas attached to cell links via `runtime.getCell` / `getCellFromLink` /
+`getImmutableCell` and `cell.asSchema` are now interned
+(`internCellLinkSchema` in cell.ts): deep-frozen in place and collapsed to
+one canonical instance per structure, so every identity-keyed schema cache
+(`cfc.schemaAtPath`, schema-ref memos, selector standardization, value-hash)
+keys off the canonical instance from cell creation onward — including
+`key()` subschema derivation, which hits the `schemaAtPath` memo from the
+first access. In-place freezing is the same contract `resolveSchema()`
+already applies to cell schemas on every read/write-policy path; a caller
+sweep found no code mutating a schema after passing it to these APIs.
+
+Two carve-outs surfaced during implementation:
+
+1. **Query-result-proxy schemas must not be frozen in place.** The wish
+   builtin's `schema` argument is read through a query-result proxy;
+   `Object.freeze` forwards through the proxy and freezes the underlying
+   stored value, violating the proxy's object invariants (caught by the
+   pattern-scope wish-scope test as an `ownKeys` invariant TypeError).
+   `internCellLinkSchema` JSON-round-trips proxy-containing schemas first,
+   per the existing convention for proxy-wrapped schemas.
+2. **`TransformObjectCreator.mergeMatches` rebuilt its combined anyOf/allOf
+   cell schema fresh per matched cell** (the round-2 instrumentation
+   technique attributed 100% of intern misses during re-mount to this one
+   site). Each fresh build paid a full content hash at the new `asSchema`
+   seam: interning alone regressed re-mount @32 from ~34ms to ~46ms (+32%).
+   Memoized per frozen compound-schema identity × the match's `asCell`
+   values (module-level, mutable schemas never cached — same shape as the
+   round-2 seam memos), which recovers it fully and makes the output
+   identity-stable.
+
+**Bench effect (interleaved A/B vs the round-2 base): neutral to slightly
+positive.** Note-create @32 pull 24.4→22.7ms, selector subset path
+623→598µs, reconciler mount/re-mount/update all within run noise. The
+steady-state benches reuse stable module-level schema literals that
+`resolveSchema()` already interned in place on first use, so their identity
+caches were warm either way. The seam change is coverage and determinism
+groundwork: canonical link schemas from creation (not from first
+resolveSchema encounter), and structurally-equal-but-distinct schema objects
+(fresh pattern-JSON parses, cross-module duplicate literals, derived
+schemas) collapsing to one instance. The browser CDP pass confirms
+neutrality: worker busy CPU for notes 2–4 measured 741ms on this branch vs
+742ms on main (post-round-2), test green, per-note wall within noise.
