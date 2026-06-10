@@ -22,6 +22,7 @@ import {
   Runtime,
 } from "@commonfabric/runner";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { buildActionEvent } from "./trusted-test-event.ts";
 import {
   createSession,
   Identity,
@@ -85,6 +86,14 @@ const stepPeekSchema = {
     assertion: { type: "unknown" },
     label: { type: "string" },
     await: { type: "string" },
+    event: { type: "unknown" },
+    trustedUi: {
+      type: "object",
+      properties: {
+        surface: { type: "string" },
+        action: { type: "string" },
+      },
+    },
     skip: { type: "boolean" },
   },
 } as const;
@@ -267,7 +276,11 @@ const handlers: Record<
     if (typeof stream?.send !== "function") {
       throw new Error(`Test step ${index} action is not a stream`);
     }
-    stream.send(undefined);
+    const meta = stepCell.asSchema(stepPeekSchema).get() as {
+      event?: unknown;
+      trustedUi?: unknown;
+    };
+    stream.send(buildActionEvent(meta?.event, meta?.trustedUi));
     await settle();
     return {};
   },

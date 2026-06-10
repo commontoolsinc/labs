@@ -43,6 +43,10 @@ import { basename } from "@std/path";
 import { timeout } from "@commonfabric/utils/sleep";
 import { experimentalOptionsFromEnv } from "./utils.ts";
 import {
+  buildActionEvent,
+  type TrustedUiDescriptor,
+} from "./trusted-test-event.ts";
+import {
   multiUserDescriptorMeta,
   runMultiUserTestPattern,
 } from "./multi-user-test-runner.ts";
@@ -95,14 +99,27 @@ async function withPhase<T>(
  * A test step is an object with either an 'assertion' or 'action' property.
  * This discriminated union avoids TypeScript trying to unify incompatible Cell/Stream types.
  * Add `skip: true` to temporarily disable a step (like it.skip in other frameworks).
+ *
+ * Action steps may carry an `event` payload (sent instead of `undefined`) and
+ * a `trustedUi` descriptor. With `trustedUi`, the runner sends the event with
+ * renderer-trusted DOM provenance for that surface/action — the headless
+ * equivalent of the user clicking the trusted surface — which CFC
+ * `TrustedActionWrite` policies require under enforcement.
  */
 export type TestStep =
   | { assertion: OpaqueRef<boolean>; skip?: boolean }
-  | { action: Stream<void>; skip?: boolean };
+  | {
+    action: Stream<unknown>;
+    event?: unknown;
+    trustedUi?: TrustedUiDescriptor;
+    skip?: boolean;
+  };
 
 type HarnessTestStepMeta = {
   action?: unknown;
   assertion?: unknown;
+  event?: unknown;
+  trustedUi?: unknown;
   skip?: boolean;
 };
 
@@ -114,6 +131,14 @@ const testStepPeekSchema = internSchema(
     properties: {
       action: { type: "unknown" },
       assertion: { type: "unknown" },
+      event: { type: "unknown" },
+      trustedUi: {
+        type: "object",
+        properties: {
+          surface: { type: "string" },
+          action: { type: "string" },
+        },
+      },
       skip: { type: "boolean" },
     },
   },
@@ -1160,9 +1185,12 @@ export async function runTestPattern(
           () => actionStreamForStep(stepCell),
         );
 
-        // Send undefined for void streams
+        // Send the step's event (undefined for plain void actions), wrapped
+        // with renderer-trusted provenance when the step declares `trustedUi`.
         await withPhase(["runTestPattern", "step", actionName, "send"], () => {
-          actionStream.send(undefined);
+          actionStream.send(
+            buildActionEvent(stepValue.event, stepValue.trustedUi),
+          );
         });
 
         // Wait for idle, then settle commits and re-idle.
