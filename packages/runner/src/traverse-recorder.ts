@@ -293,6 +293,17 @@ if (capturePath !== undefined) {
   globalThis.addEventListener("unload", () => {
     active!.flush(capturePath);
   });
+  // Long-running processes (e.g. a local toolshed) rarely exit cleanly, so
+  // "unload" alone would lose the capture. Flush periodically too; the timer
+  // is unref'd so it never keeps a process alive.
+  const flushTimer = setInterval(() => {
+    try {
+      active!.flush(capturePath);
+    } catch (error) {
+      logger.warn("capture", () => ["periodic flush failed", error]);
+    }
+  }, 30_000);
+  Deno.unrefTimer(flushTimer);
 }
 
 /**
