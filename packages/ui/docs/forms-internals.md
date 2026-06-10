@@ -36,6 +36,8 @@ On reset it restores all fields to their initial cell values.
 To make a custom component work with cf-form, use `FormFieldController`:
 
 ```typescript
+// In a component file, e.g.
+// packages/ui/src/v2/components/my-custom-input/my-custom-input.ts
 import { BaseElement } from "../../core/base-element.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
 import { createFormFieldController } from "../../core/form-field-controller.ts";

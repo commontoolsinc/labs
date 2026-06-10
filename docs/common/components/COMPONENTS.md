@@ -73,6 +73,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-accordion` | Container for collapsible content panels | |
 | `cf-accordion-item` | Individual accordion panel | |
 | `cf-alert` | Alert message with variants and dismissible option | |
+| `cf-area-mark` | Filled area mark rendered inside `cf-chart` | `$data` |
 | `cf-aspect-ratio` | Maintains a fixed aspect ratio for its content | |
 | `cf-attachments-bar` | Displays pinned cells as a horizontal list of chips | |
 | `cf-audio-visualizer` | Real-time audio waveform visualization | |
@@ -81,6 +82,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-autostart` | Zero-UI element that emits a `start` event once on connect | |
 | `cf-avatar` | Avatar showing data-URI image, emoji glyph, or initials | |
 | `cf-badge` | Status indicator / label with visual variants | |
+| `cf-bar-mark` | Bar mark rendered inside `cf-chart` | `$data` |
 | `cf-button` | Interactive button with color/variant/size options | |
 | `cf-calendar` | Month-grid mini calendar | `$value`, `$markedDates` |
 | `cf-canvas` | Fixed-size canvas surface emitting `cf-canvas-click` with x/y | |
@@ -98,12 +100,14 @@ cell means none confirmed — check the component source before assuming.
 | `cf-code-editor` | Code/prose editor with highlighting and `[[`-mention completion | `$value`, `$mentionable`, `$mentioned` |
 | `cf-collapsible` | Single collapsible section with trigger and content | |
 | `cf-copy-button` | Copy-to-clipboard button with visual feedback | |
+| `cf-dot-mark` | Scatter/dot mark rendered inside `cf-chart` | `$data` |
 | `cf-drag-source` | Wraps draggable content; pairs with `cf-drop-zone` (see [drag-and-drop](../patterns/meta/drag-and-drop.md)) | `$cell` |
 | `cf-draggable` | Absolutely-positioned draggable container (x/y) | |
 | `cf-drop-zone` | Droppable region emitting `cf-drop` events (see [drag-and-drop](../patterns/meta/drag-and-drop.md)) | |
 | `cf-fab` | Morphing floating action button that expands into a panel | |
 | `cf-file-download` | File download button (encapsulates blob/anchor download) | `$data`, `$filename` |
 | `cf-file-input` | Generic file upload | |
+| `cf-form` | Transactional form wrapper buffering field writes until submit (see [cf-form](#cf-form)) | |
 | `cf-fragment` | Transparent wrapper element (`display: contents`) | |
 | `cf-google-oauth` | Google OAuth login (wrapper over `cf-oauth`) | `$auth` |
 | `cf-grid` | CSS Grid layout | |
@@ -118,6 +122,8 @@ cell means none confirmed — check the component source before assuming.
 | `cf-kbd` | Inline keyboard hint element | |
 | `cf-keybind` | Declarative keyboard shortcut listener | |
 | `cf-label` | Form field label with accessibility features | |
+| `cf-line-mark` | Line mark rendered inside `cf-chart` | `$data` |
+| `cf-link` | Navigation link that emits `cf-route-change` for `cf-router` | |
 | `cf-link-preview` | Rich link preview card for a URL | |
 | `cf-list-item` | Generic list row (SwiftUI-List inspired) | |
 | `cf-loader` | Inline spinner for pending async operations | |
@@ -155,6 +161,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-switch` | Toggle switch for binary on/off state | `$checked` |
 | `cf-tab` | Individual tab button used within `cf-tab-list` | |
 | `cf-tab-bar` | Fixed navigation bar for app-like UIs (with `cf-tab-bar-item`) | `$value` |
+| `cf-tab-bar-item` | Individual item within `cf-tab-bar` (value, label, icon) | |
 | `cf-tab-list` | Container for tab buttons | |
 | `cf-tab-panel` | Content panel associated with a tab | |
 | `cf-table` | Semantic table with striped/hover/bordered styling | |
@@ -165,6 +172,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-theme` | Provides a theme to a subtree and applies CSS variables | |
 | `cf-tile` | Page/item preview tile with click handling | |
 | `cf-toast` | Floating ephemeral notification (inside `cf-toast-provider`) | |
+| `cf-toast-provider` | Region that hosts and displays `cf-toast` notifications | |
 | `cf-toggle` | Pressable toggle button with variants and sizes | |
 | `cf-toggle-group` | Toggle container with single or multiple selection | |
 | `cf-tool-call` | Expandable tool-call display | |
@@ -176,7 +184,6 @@ cell means none confirmed — check the component source before assuming.
 | `cf-vscroll` | Vertical scroll container (snap-to-bottom, fade edges) | |
 | `cf-vstack` | Vertical stack layout (flexbox) | |
 | `cf-webhook` | Webhook integration: receives payloads into a stream | `$inbox`, `$config` |
-| `cf-form` | Transactional form wrapper buffering field writes until submit (see [cf-form](#cf-form)) | |
 
 ---
 

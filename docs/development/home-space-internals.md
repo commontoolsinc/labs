@@ -5,15 +5,16 @@ Implementation details behind the home-space behavior described in
 
 ## Runtime Configuration
 
-The runtime accepts `userIdentityDID` in its options, which is the user's actual
-identity DID (distinct from the current space DID):
+The runtime exposes `userIdentityDID`, the user's actual identity DID (distinct
+from the current space DID). It is not a constructor option — the runtime
+derives it internally from the storage manager's identity:
 
 ```typescript
 const runtime = new Runtime({
   apiUrl,
   storageManager,
-  userIdentityDID: storageManager.as.did(), // User's identity
 });
+// Derived internally: runtime.userIdentityDID === storageManager.as.did()
 ```
 
 ## ACL Initialization
