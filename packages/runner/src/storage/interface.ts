@@ -775,6 +775,15 @@ export interface IExtendedStorageTransaction
   recordCfcWritePolicyInput(input: WritePolicyInput): void;
 
   /**
+   * Surfaces a post-commit sink-request release rejection (the effect is fail-
+   * closed and not sent) to CFC diagnostics and runtime stats, instead of only
+   * logging it (audit W3.23).
+   */
+  noteCfcSinkReleaseReject(
+    info: { sink: string; effectId: string; detail: string },
+  ): void;
+
+  /**
    * Enqueues a side effect to run from the CFC outbox after a successful
    * commit. See ownership note above.
    */
