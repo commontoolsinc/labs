@@ -1176,21 +1176,37 @@ class SpaceReplica implements ISpaceReplica {
       promise: Promise.resolve({ ok: {} } as Result<Unit, PullError>),
     };
     const cfc = new ContextualFlowControl();
+    // Entries covered by an already-registered selector are not re-fetched,
+    // but the covering watch may still be IN FLIGHT. A sync's contract is
+    // "resolved means the data is locally available", so collect the covering
+    // promises and await them — returning early here would let a caller (e.g.
+    // handler-input presync) proceed before the doc-carrying response lands.
+    // For coverage registered by a long-settled watch the promise is already
+    // resolved and the await is a no-op.
+    const coveredInFlight: Promise<Result<Unit, PullError>>[] = [];
     const newEntries = normalizedEntries.filter(([address, selector]) => {
       const baseAddress = {
         id: address.id,
         type: DOCUMENT_MIME,
         scope: normalizeCellScope(address.scope),
       };
-      const [superset] = this.#watchSelectorTracker.getSupersetSelector(
-        baseAddress,
-        selector,
-        cfc,
-      );
+      const [superset, supersetPromise] = this.#watchSelectorTracker
+        .getSupersetSelector(
+          baseAddress,
+          selector,
+          cfc,
+        );
+      if (superset !== undefined && supersetPromise !== undefined) {
+        coveredInFlight.push(supersetPromise);
+      }
       return superset === undefined;
     });
     if (newEntries.length === 0) {
-      return { ok: {} };
+      if (coveredInFlight.length === 0) {
+        return { ok: {} };
+      }
+      const results = await Promise.all(coveredInFlight);
+      return results.find((result) => result.error) ?? { ok: {} };
     }
     task.entries = newEntries;
     this.#syncTasks.set(key, task);
@@ -1210,7 +1226,14 @@ class SpaceReplica implements ISpaceReplica {
     }
     this.#syncPromises.add(promise);
     try {
-      return await promise;
+      const result = await promise;
+      if (result.error || coveredInFlight.length === 0) {
+        return result;
+      }
+      // Mixed batch: some entries fetched here, others covered by in-flight
+      // watches. Resolve only when ALL requested docs are locally available.
+      const covered = await Promise.all(coveredInFlight);
+      return covered.find((coveredResult) => coveredResult.error) ?? result;
     } finally {
       this.#syncTasks.delete(key);
       this.#syncPromises.delete(promise);
