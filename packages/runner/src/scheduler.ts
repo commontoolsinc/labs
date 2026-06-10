@@ -139,7 +139,10 @@ import {
   type PullDemandState,
   shouldRunFirstPullComputationInDemandContext,
 } from "./scheduler/demand.ts";
-import { type StorageNotificationState } from "./scheduler/notifications.ts";
+import {
+  addCfcTriggerRead,
+  type StorageNotificationState,
+} from "./scheduler/notifications.ts";
 import { processPullStorageNotification } from "./scheduler/pull-notifications.ts";
 import { processPushStorageNotification } from "./scheduler/push-notifications.ts";
 import {
@@ -2051,6 +2054,7 @@ export class Scheduler {
     return {
       cancels: this.cancels,
       dependencies: this.dependencies,
+      cfcTriggerReads: this.cfcTriggerReads,
       actionChangeGroups: this.actionChangeGroups,
       changeGroupToActionId: this.changeGroupToActionId,
       pending: this.pending,
@@ -2288,6 +2292,15 @@ export class Scheduler {
         }
         this.cfcTriggerReads.delete(target);
         return pending.addresses;
+      },
+      restoreCfcTriggerReads: (target, addresses) => {
+        for (const address of addresses) {
+          addCfcTriggerRead(
+            { cfcTriggerReads: this.cfcTriggerReads },
+            target,
+            address,
+          );
+        }
       },
       actionChangeGroups: this.actionChangeGroups,
       inFlightSourceState: this.inFlightSourceState,

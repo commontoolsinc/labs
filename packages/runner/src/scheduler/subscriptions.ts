@@ -1,6 +1,7 @@
 import type { Cancel } from "../cancel.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import type { ChangeGroup } from "../storage/interface.ts";
+import type { StorageNotificationState } from "./notifications.ts";
 import { pendingDependencyCollectionMightAffect } from "./dependency-graph.ts";
 import { type DependencyUpdateState } from "./dependency-updates.ts";
 import {
@@ -261,6 +262,9 @@ export function registerParentChildAction(
 export interface SchedulerUnsubscribeActionState {
   readonly cancels: WeakMap<Action, Cancel>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
+  // Pending CFC trigger reads (§8.9.2); cleared so a later re-subscription
+  // of the same action object starts without stale taint.
+  readonly cfcTriggerReads: StorageNotificationState["cfcTriggerReads"];
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
   readonly changeGroupToActionId: Map<ChangeGroup, string>;
   readonly pending: Set<Action>;
@@ -341,6 +345,7 @@ function clearActionSchedulingState(
   action: Action,
 ): void {
   state.pending.delete(action);
+  state.cfcTriggerReads.delete(action);
   state.conditionallyScheduledEffects.delete(action);
   // Clear direct/stale state before removing outgoing edges so downstream
   // stale counts are decremented through normal propagation.

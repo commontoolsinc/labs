@@ -49,16 +49,40 @@ export function recordCfcTriggerRead(
   space: MemorySpace,
   change: IMemoryChange,
 ): void {
+  addCfcTriggerRead(state, action, { ...change.address, space });
+}
+
+/**
+ * Dedup key for a pending trigger-read address. Scope participates (an
+ * omitted scope normalizes to `space`, matching storage), and JSON keeps
+ * path segments unambiguous: ["a","b"] never collides with ["a/b"].
+ */
+function cfcTriggerReadKey(address: IMemorySpaceAddress): string {
+  return JSON.stringify([
+    address.space,
+    address.scope ?? "space",
+    address.id,
+    address.path,
+  ]);
+}
+
+/**
+ * Add a pending trigger-read address for `action`, deduping repeats of the
+ * same address across notifications. Also restores consumed addresses when
+ * an aborted run is retried: the retry still exists only because of these
+ * triggers, so its writes must carry their labels.
+ */
+export function addCfcTriggerRead(
+  state: Pick<StorageNotificationState, "cfcTriggerReads">,
+  action: Action,
+  address: IMemorySpaceAddress,
+): void {
   let pending = state.cfcTriggerReads.get(action);
   if (pending === undefined) {
     pending = { addresses: [], keys: new Set() };
     state.cfcTriggerReads.set(action, pending);
   }
-  const address: IMemorySpaceAddress = {
-    ...change.address,
-    space,
-  };
-  const key = `${space}\u0000${address.id}\u0000${address.path.join("/")}`;
+  const key = cfcTriggerReadKey(address);
   if (pending.keys.has(key)) {
     return;
   }

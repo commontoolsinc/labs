@@ -403,4 +403,109 @@ describe("CFC flow labels (default transition)", () => {
       await storageManager.close();
     }
   });
+
+  // A2 + retry: the triggered rerun aborts with RetryImmediately, so its
+  // consumed trigger reads must be restored for the retry run — otherwise
+  // the retry's writes are under-tainted (the run still exists only because
+  // the labeled dep changed).
+  it("keeps trigger-read labels across a RetryImmediately rerun", async () => {
+    const { RetryImmediately } = await import(
+      "../src/scheduler/retry-immediately.ts"
+    );
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "persist",
+    });
+    try {
+      const seed = runtime.edit();
+      const sourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-trigger-retry-source",
+          { type: "object", properties: { secret: { type: "string" } } },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: sourceId,
+        path: [],
+      }, {
+        value: { secret: "v1" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { confidentiality: ["secret"] },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const setup = runtime.edit();
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-trigger-retry-source",
+        undefined,
+        setup,
+      );
+      const flag = runtime.getCell(
+        signer.did(),
+        "cfc-trigger-retry-flag",
+        undefined,
+        setup,
+      );
+      setup.abort();
+
+      let runs = 0;
+      const action: Action = (atx) => {
+        runs++;
+        if (runs === 1) {
+          // Subscribe to the labeled doc.
+          source.withTx(atx).getRaw();
+        } else if (runs === 2) {
+          // The triggered rerun aborts; the scheduler re-runs it.
+          throw new RetryImmediately();
+        } else {
+          // The retry branches away: never re-reads the source.
+          flag.withTx(atx).set({ ran: runs });
+        }
+      };
+      runtime.scheduler.subscribe(
+        action,
+        { reads: [], shallowReads: [], writes: [] },
+        { isEffect: true },
+      );
+      await runtime.idle();
+      expect(runs).toBe(1);
+
+      const bump = runtime.edit();
+      bump.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: sourceId,
+        path: ["value", "secret"],
+      }, "v2");
+      expect((await bump.commit()).ok).toBeDefined();
+      await runtime.idle();
+      expect(runs).toBeGreaterThanOrEqual(3);
+
+      const flagId = flag.getAsNormalizedFullLink().id;
+      const entry = replicaEntries(storageManager, flagId).find((e) =>
+        e.origin === "derived"
+      );
+      expect(entry).toBeDefined();
+      expect(entry!.label.confidentiality).toContainEqual("secret");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 });
