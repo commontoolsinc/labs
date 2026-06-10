@@ -372,15 +372,17 @@ const dropMaterializedSuffix = (
 export interface Options {
   as: Signer;
   /**
-   * Default host base URL. The storage endpoint path
+   * Base URL of the default memory host. The storage endpoint path
    * (`/api/storage/memory`) is joined internally — pass the host, not
    * the full endpoint.
    */
-  apiUrl: URL;
+  memoryHost: URL;
   /**
    * Optional space DID → host base URL overrides. A space listed here
    * opens its storage connection against that host; absent map or
-   * absent entry resolves to `apiUrl`.
+   * absent entry resolves to `memoryHost`. The map is fixed for the
+   * manager's lifetime (the per-space provider cache assumes space →
+   * host never changes).
    */
   spaceHostMap?: Record<string, string>;
   id?: string;
@@ -544,7 +546,7 @@ export class StorageManager implements IStorageManager {
     return new this(
       options,
       new RemoteSessionFactory(
-        createStorageAddressResolver(options.apiUrl, options.spaceHostMap),
+        createStorageAddressResolver(options.memoryHost, options.spaceHostMap),
         options.as,
       ),
     );

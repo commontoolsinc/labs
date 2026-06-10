@@ -95,7 +95,7 @@ interface TestContext {
 function createTestContext(identity: Identity): TestContext {
   const storageManager = StorageManager.open({
     as: identity,
-    apiUrl: new URL(API_URL),
+    memoryHost: new URL(API_URL),
   });
   const runtime = new Runtime({
     apiUrl: API_URL,

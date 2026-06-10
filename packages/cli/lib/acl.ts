@@ -40,7 +40,7 @@ export async function createRuntime(
     experimental: experimentalOptionsFromEnv(),
     storageManager: StorageManager.open({
       as: session.as,
-      apiUrl: new URL(config.apiUrl),
+      memoryHost: new URL(config.apiUrl),
       spaceIdentity: session.spaceIdentity,
     }),
   });

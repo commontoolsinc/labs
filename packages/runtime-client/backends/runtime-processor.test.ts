@@ -47,7 +47,7 @@ const createRuntime = () => {
   const server = new MemoryV2Server.Server();
   const storageManager = new SharedV2StorageManager({
     as: cfcSigner,
-    apiUrl: new URL("memory://"),
+    memoryHost: new URL("memory://"),
   }, server);
   const runtime = new Runtime({
     apiUrl: new URL("http://localhost/"),

@@ -330,7 +330,7 @@ export class RuntimeProcessor {
     const storageManager = StorageManager.open({
       as: identity,
       spaceIdentity: spaceIdentity,
-      apiUrl: apiUrlObj,
+      memoryHost: apiUrlObj,
       spaceHostMap: data.spaceHostMap,
     });
 

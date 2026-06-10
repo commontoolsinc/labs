@@ -119,7 +119,7 @@ describe("Blob Routes", () => {
       apiUrl: base,
       storageManager: StorageManager.open({
         as: identity,
-        apiUrl: new URL(base),
+        memoryHost: new URL(base),
       }),
     });
 

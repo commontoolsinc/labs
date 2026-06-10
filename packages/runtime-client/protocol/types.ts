@@ -119,13 +119,13 @@ export interface BaseRequest {
 
 export interface InitializationData {
   // URL of backend server. Also the default host for spaces absent from
-  // `spaceHostMap` (the home host, which serves static assets).
+  // `spaceHostMap`.
   apiUrl: string;
   // Optional space DID → host base URL map. A space listed here has its
-  // storage (and, later, compute) resolved against that host instead of
-  // `apiUrl`. Absent map or absent entry ⇒ `apiUrl`, byte-identical to
-  // the single-host behavior. Plain record: structured-clone-safe — no
-  // functions cross the worker IPC boundary.
+  // storage resolved against that host instead of `apiUrl`. Absent map or
+  // absent entry ⇒ `apiUrl`, byte-identical to the single-host behavior.
+  // Plain record: structured-clone-safe — no functions cross the worker
+  // IPC boundary. Fixed for the connection's lifetime.
   spaceHostMap?: Record<string, string>;
   // Signer.
   identity: KeyPairRaw;

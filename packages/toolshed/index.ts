@@ -55,7 +55,7 @@ const initializeRuntime = async () => {
       // default in builder/env.ts (wrong for any non-default port).
       patternEnvironment: { apiUrl: new URL(env.API_URL) },
       storageManager: StorageManager.open({
-        apiUrl: new URL(env.MEMORY_URL),
+        memoryHost: new URL(env.MEMORY_URL),
         as: identity,
       }),
       experimental: {

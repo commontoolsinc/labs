@@ -63,7 +63,7 @@ function createRuntime(identity: Identity, base: URL): Runtime {
     apiUrl: base,
     storageManager: StorageManager.open({
       as: identity,
-      apiUrl: new URL(base),
+      memoryHost: new URL(base),
     }),
     experimental: {
       modernCellRep: readExperimentalFlag("EXPERIMENTAL_MODERN_CELL_REP"),

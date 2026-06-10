@@ -58,7 +58,7 @@ async function castPattern() {
     apiUrl: new URL(toolshedUrl),
     storageManager: StorageManager.open({
       as: identity,
-      apiUrl: new URL(toolshedUrl),
+      memoryHost: new URL(toolshedUrl),
     }),
   });
 

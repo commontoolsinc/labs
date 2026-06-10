@@ -1,12 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { MemorySpace } from "@commonfabric/memory/interface";
+import { Identity } from "@commonfabric/identity";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import {
   createStorageAddressResolver,
   MEMORY_STORAGE_PATH,
   toSpaceWebSocketAddress,
   toWebSocketAddress,
 } from "../src/storage/v2-remote-session.ts";
+import { StorageManager } from "../src/storage/v2.ts";
 
 describe("memory v2 remote session websocket address", () => {
   it("upgrades http and https urls to websocket protocols", () => {
@@ -95,5 +97,70 @@ describe("per-space storage address resolution", () => {
     expect(resolve(spaceA).toString()).toBe(
       `https://host-a.test${MEMORY_STORAGE_PATH}`,
     );
+  });
+
+  it("rejects a malformed spaceHostMap entry eagerly, naming the space", () => {
+    expect(() =>
+      createStorageAddressResolver(
+        new URL("https://host-a.test"),
+        { [spaceB]: "not a url" },
+      )
+    ).toThrow(`Invalid spaceHostMap entry for ${spaceB}`);
+  });
+});
+
+/**
+ * Stand-in WebSocket that records every dialed URL and never connects.
+ * Session creation stalls on the silent socket, which is fine: the test
+ * only asserts which hosts were dialed.
+ */
+class RecordingWebSocket extends EventTarget {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+  static dialed: string[] = [];
+  readyState = RecordingWebSocket.CONNECTING;
+  constructor(url: string | URL) {
+    super();
+    RecordingWebSocket.dialed.push(url.toString());
+  }
+  send(_payload: string): void {}
+  close(): void {}
+}
+
+describe("StorageManager per-space host wiring", () => {
+  // The pending session promises hold no resources, but their microtask
+  // chains outlive the test body; opt out of the op sanitizer for that.
+  it("dials a mapped space on its host and others on the default", {
+    sanitizeOps: false,
+    sanitizeResources: false,
+  }, async () => {
+    const realWebSocket = globalThis.WebSocket;
+    (globalThis as { WebSocket: unknown }).WebSocket = RecordingWebSocket;
+    try {
+      const signer = await Identity.fromPassphrase("per-space-host-wiring");
+      const spaceA = signer.did();
+      const spaceB = "did:key:z6Mk-other-space" as MemorySpace;
+      const manager = StorageManager.open({
+        as: signer,
+        memoryHost: new URL("http://host-a.test"),
+        spaceHostMap: { [spaceB]: "http://host-b.test" },
+      });
+      manager.open(spaceA).sync("of:wiring-probe" as URI).catch(() => {});
+      manager.open(spaceB).sync("of:wiring-probe" as URI).catch(() => {});
+      const deadline = Date.now() + 2_000;
+      while (RecordingWebSocket.dialed.length < 2 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      const hosts = RecordingWebSocket.dialed.map((url) => new URL(url).host)
+        .sort();
+      expect(hosts).toEqual(["host-a.test", "host-b.test"]);
+      for (const url of RecordingWebSocket.dialed) {
+        expect(new URL(url).pathname).toBe(MEMORY_STORAGE_PATH);
+      }
+    } finally {
+      (globalThis as { WebSocket: unknown }).WebSocket = realWebSocket;
+    }
   });
 });

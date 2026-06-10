@@ -1881,11 +1881,11 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const server = new MemoryV2Server.Server();
     const storageManagerA = new SharedV2StorageManager({
       as: signer,
-      apiUrl: new URL("memory://"),
+      memoryHost: new URL("memory://"),
     }, server);
     const storageManagerB = new SharedV2StorageManager({
       as: signer,
-      apiUrl: new URL("memory://"),
+      memoryHost: new URL("memory://"),
     }, server);
     const runtimeA = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -3770,7 +3770,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const createStorageManager = () =>
       new SharedV2StorageManager({
         as: signer,
-        apiUrl: new URL("memory://"),
+        memoryHost: new URL("memory://"),
       }, server);
     const storageManager1 = createStorageManager();
     const runtime1 = new Runtime({
@@ -3851,7 +3851,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const createStorageManager = () =>
       new SharedV2StorageManager({
         as: signer,
-        apiUrl: new URL("memory://"),
+        memoryHost: new URL("memory://"),
       }, server);
     const storageManager1 = createStorageManager();
     const runtime1 = new Runtime({

@@ -95,7 +95,7 @@ const createRuntime = (identity: Identity, base: URL) =>
     apiUrl: base,
     storageManager: StorageManager.open({
       as: identity,
-      apiUrl: new URL(base),
+      memoryHost: new URL(base),
     }),
   });
 
@@ -138,7 +138,7 @@ serialTest(
     const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
     const storageManager = StorageManager.open({
       as: session.as,
-      apiUrl: new URL(base),
+      memoryHost: new URL(base),
       spaceIdentity: session.spaceIdentity,
     });
     const runtime = new Runtime({
@@ -191,7 +191,7 @@ serialTest(
     try {
       storageManager = StorageManager.open({
         as: identity,
-        apiUrl: base,
+        memoryHost: base,
       });
       runtime = new Runtime({
         apiUrl: base,
@@ -246,7 +246,7 @@ serialTest(
         apiUrl: base,
         storageManager: StorageManager.open({
           as: identity,
-          apiUrl: base,
+          memoryHost: base,
         }),
       });
       const tx = runtime1.edit();
@@ -262,7 +262,7 @@ serialTest(
         apiUrl: base,
         storageManager: StorageManager.open({
           as: identity,
-          apiUrl: base,
+          memoryHost: base,
         }),
       });
       const reader = runtime2.getCell(identity.did(), cause);
