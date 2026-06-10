@@ -157,9 +157,26 @@ Key points:
   state may still be propagating from another runtime — don't assert
   "other user does NOT see X yet" right after the other user acted; assert
   stable invariants instead.
+- Pattern outputs a participant asserts on must be computed snapshots that
+  always yield a REAL, STABLE value. In a runtime that didn't write the
+  underlying scoped cell, the cell reads as `undefined` — and a computed that
+  returns `undefined` (or a fresh `[]` per recompute) is indistinguishable
+  from "not yet computed" for cross-runtime readers, so the assertion never
+  settles. Normalize inside the computed (`trimmedName(name.get())`,
+  `cell.get() ?? EMPTY_LIST` with a module-level constant).
+- Read another runtime's arrays with INLINE literal indexing in the assertion
+  computed (`users?.[0]?.name === "Alice"`). `.map()`, loop-variable
+  indexing, and module-level helper calls over the array resolve in the
+  runtime that wrote it but NOT cross-runtime before a local write.
+- A participant cannot read their own never-written `PerUser` array (e.g. an
+  empty rack before joining); assert pre-join isolation via normalized
+  primitives (`myName === ""`) instead.
 - The example to copy:
-  `packages/patterns/cfc-group-chat-demo/multi-user.test.tsx`. The scope
-  model background: `docs/common/patterns/multi-user-patterns.md` and
+  `packages/patterns/cfc-group-chat-demo/multi-user.test.tsx`; for the
+  output-snapshot and inline-read idioms see
+  `packages/patterns/scrabble/multi-user.test.tsx` and
+  `packages/patterns/lunch-poll/multi-user.test.tsx`. The scope model
+  background: `docs/common/patterns/multi-user-patterns.md` and
   `docs/development/debugging/gotchas/scoped-cell-pitfalls.md`.
 
 ## Testing Time and Randomness
