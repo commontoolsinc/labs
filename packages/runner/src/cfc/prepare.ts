@@ -287,9 +287,11 @@ const writeAuthorizedByReason = (
     return `writeAuthorizedBy requires a trust snapshot at /${path.join("/")}`;
   }
 
-  // Verify against the identity that authored this target's writes, falling
-  // back to the transaction's current identity for writes recorded without one.
-  const identity = targetIdentity ?? tx.getCfcState().implementationIdentity;
+  // Verify against the identity that authored this target's writes. A write
+  // recorded without an active identity stays unattributed (undefined) and
+  // fails closed below; it must not borrow the transaction's current identity
+  // (audit S13).
+  const identity = targetIdentity;
   if (
     Array.isArray(claim) && claim.every((entry) => typeof entry === "string")
   ) {
@@ -2082,7 +2084,13 @@ export const prepareBoundaryCommit = (
   const identityForInput = (
     input: WritePolicyInput,
   ): ImplementationIdentity | undefined =>
-    state.writePolicyInputIdentities.get(input) ?? state.implementationIdentity;
+    // Honor the identity captured when the input was recorded, even when that
+    // is undefined. Falling back to the transaction's current identity would
+    // let a write recorded before any identity was set borrow a trusted
+    // identity established later in the same transaction (audit S13). Every
+    // recorded input is registered in this map, so a missing key cannot occur
+    // for a real input; an unattributed write must fail closed.
+    state.writePolicyInputIdentities.get(input);
   const candidates = candidateSchemasByTarget(
     state.writePolicyInputs,
     identityForInput,
