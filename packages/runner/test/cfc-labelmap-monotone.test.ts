@@ -196,8 +196,9 @@ describe("CFC labelMap confidentiality monotonicity", () => {
           };
         } | undefined;
       };
-      const entries = replica.getDocument(persistedId)?.cfc?.labelMap?.entries ??
-        [];
+      const entries =
+        replica.getDocument(persistedId)?.cfc?.labelMap?.entries ??
+          [];
       const child = entries.find((e) =>
         e.path.length === 2 && e.path[0] === "obj" && e.path[1] === "field"
       );
