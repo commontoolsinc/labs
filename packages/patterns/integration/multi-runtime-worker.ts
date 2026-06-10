@@ -69,12 +69,14 @@ async function attachPiece(next: PieceController): Promise<void> {
 }
 
 /**
- * Make `value` postMessage-safe: keep JSON data, drop functions/cells.
+ * Make `value` postMessage-safe: keep JSON data, drop functions/cells,
+ * stringify bigints (JSON.stringify throws on them).
  */
 function sanitizeForTransfer(value: unknown): unknown {
   if (value === undefined) return undefined;
   return JSON.parse(JSON.stringify(value, (_key, entry) => {
     if (typeof entry === "function") return undefined;
+    if (typeof entry === "bigint") return entry.toString();
     return entry;
   }));
 }

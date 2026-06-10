@@ -281,7 +281,11 @@ export async function fillCfInput(
   }
 }
 
-/** Read the current value of a cf-input's inner input element. */
+/**
+ * Read the current value of a cf-input's inner input element. Throws when the
+ * selector does not resolve to an actual input, so an absent control cannot
+ * masquerade as an empty value in assertions.
+ */
 export async function readCfInputValue(
   page: Page,
   selector: string,
@@ -291,12 +295,20 @@ export async function readCfInputValue(
     strategy: "pierce",
     timeout,
   });
-  return await field.evaluate((element: Element): string => {
-    const input = element instanceof HTMLInputElement
-      ? element
-      : element.shadowRoot?.querySelector("input");
-    return input instanceof HTMLInputElement ? input.value : "";
-  });
+  const probe = await field.evaluate(
+    (element: Element): { found: boolean; value: string } => {
+      const input = element instanceof HTMLInputElement
+        ? element
+        : element.shadowRoot?.querySelector("input");
+      return input instanceof HTMLInputElement
+        ? { found: true, value: input.value }
+        : { found: false, value: "" };
+    },
+  );
+  if (!probe.found) {
+    throw new Error(`"${selector}" did not resolve to an input element`);
+  }
+  return probe.value;
 }
 
 export async function waitForRuntimeIdle(
