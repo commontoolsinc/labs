@@ -99,15 +99,19 @@ const deleteItem = handler<void, { items: Writable<Item[]>; index: number }>(
 // In JSX: onClick={deleteItem({ items, index })}
 ```
 
-**Rendering sub-patterns** - Use function calls, not JSX:
+**Rendering sub-patterns** - Function calls and JSX both work (verified:
+both forms pass `cf check` with a typed Output interface):
 
 ```tsx
-// ✅ Correct
+// ✅ Function call form
 return <>{items.map((item) => ItemPattern({ item, allItems: items }))}</>;
 
-// ❌ Wrong - JSX fails with typed Output
+// ✅ JSX form
 return <>{items.map((item) => <ItemPattern item={item} />)}</>;
 ```
+
+The sub-pattern's Output type must include `[UI]: VNode` — see
+`docs/common/patterns/composition.md`.
 
 ## Done When
 

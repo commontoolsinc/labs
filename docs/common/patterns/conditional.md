@@ -30,6 +30,13 @@ inspect the emitted source with
 `deno task cf check <pattern>.tsx --show-transformed` rather than guessing
 about the lowering.
 
+One caveat: ternaries lower to `ifElse(cond, branchA, branchB)`, and both
+branches are evaluated eagerly as arguments — they do not short-circuit. So
+`{maybeItem ? maybeItem.label : "none"}` dereferences `.label` even when
+`maybeItem` is null. Property access on a nullable reactive value inside a
+branch needs `computed()` deferral; see
+[Eager Ternary Branch Evaluation](../../development/debugging/gotchas/eager-ternary-branch-evaluation.md).
+
 ## Keep `computed()` for Data, Not UI Gating
 
 Inside a `computed()` body, ternaries and logical operators stay plain

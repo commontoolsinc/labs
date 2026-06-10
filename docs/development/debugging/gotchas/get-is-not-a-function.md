@@ -25,5 +25,5 @@ const formattedValue = getFormattedDate(date);  // Access directly
 
 ## See Also
 
-- @common/concepts/types-and-schemas.md - Type system and `Writable<>` explained
+- @common/concepts/types-and-schemas/writable.md - Type system and `Writable<>` explained
 - @common/concepts/reactivity.md - Reactivity system

@@ -34,5 +34,5 @@ const handleClear = handler<never, { items: Writable<Item[]> }>(
 
 ## See Also
 
-- @common/concepts/types-and-schemas.md - Type system, `Default<>`, and `Writable<>` explained
+- @common/concepts/types-and-schemas/writable.md - Type system, `Default<>`, and `Writable<>` explained
 - @common/concepts/reactivity.md - Reactivity system
