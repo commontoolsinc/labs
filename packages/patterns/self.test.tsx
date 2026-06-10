@@ -9,8 +9,8 @@
  *    so asserting against them covers the real code paths.
  *
  * B) Own-cell init test: instantiates Self({}) with no injection and asserts
- *    the owned cell starts as EMPTY_SELF_MODEL (exercises the previously
- *    untested right-hand branch of the ?? in Self).
+ *    the owned cell seeds to EMPTY_SELF_MODEL via Default<> (the production
+ *    home-local path; CT-1669 regression guard — see section B).
  *
  * Run: deno task cf test packages/patterns/self.test.tsx --verbose
  */
@@ -215,8 +215,8 @@ export default pattern(() => {
 
   // =========================================================================
   // B) Own-cell init test
-  //    Instantiate Self with NO injection — exercises the right-hand branch of
-  //    `injectedSelfModel ?? new Writable<SelfModel>(EMPTY_SELF_MODEL).for("selfModel")`
+  //    Instantiate Self with NO injection — the production home-local path that
+  //    seeds the owned cell from Default<typeof EMPTY_SELF_MODEL> (CT-1669).
   // =========================================================================
 
   // Instantiate with NO injection — the REAL production path (home-local, the
