@@ -281,6 +281,24 @@ export async function fillCfInput(
   }
 }
 
+/** Read the current value of a cf-input's inner input element. */
+export async function readCfInputValue(
+  page: Page,
+  selector: string,
+  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
+): Promise<string> {
+  const field = await page.waitForSelector(selector, {
+    strategy: "pierce",
+    timeout,
+  });
+  return await field.evaluate((element: Element): string => {
+    const input = element instanceof HTMLInputElement
+      ? element
+      : element.shadowRoot?.querySelector("input");
+    return input instanceof HTMLInputElement ? input.value : "";
+  });
+}
+
 export async function waitForRuntimeIdle(
   page: Page,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},

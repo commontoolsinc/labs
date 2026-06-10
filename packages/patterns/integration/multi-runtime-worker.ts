@@ -34,6 +34,7 @@ export interface TrustedUiDescriptor {
 
 let cc: PiecesController | undefined;
 let piece: PieceController | undefined;
+let resultSchema: unknown;
 let resultSinkCancel: (() => void) | undefined;
 
 function controller(): PiecesController {
@@ -46,8 +47,11 @@ function currentPiece(): PieceController {
   return piece;
 }
 
+// Read through the pattern's declared result schema, like the UI does —
+// schema defaults and scope annotations only apply on schema-aware reads.
 function result(): Cell<any> {
-  return controller().manager().getResult(currentPiece().getCell());
+  const raw = controller().manager().getResult(currentPiece().getCell());
+  return resultSchema !== undefined ? raw.asSchema(resultSchema as never) : raw;
 }
 
 async function idle(): Promise<void> {
@@ -55,8 +59,10 @@ async function idle(): Promise<void> {
   await controller().manager().synced();
 }
 
-function attachPiece(next: PieceController): void {
+async function attachPiece(next: PieceController): Promise<void> {
   piece = next;
+  resultSchema = (await next.getPattern() as { resultSchema?: unknown })
+    .resultSchema;
   resultSinkCancel?.();
   // Keep the result graph subscribed so server pushes reach this runtime.
   resultSinkCancel = result().sink(() => {});
@@ -95,13 +101,13 @@ const handlers: Record<
       ),
     );
     const created = await controller().create(program, { start: true });
-    attachPiece(created);
+    await attachPiece(created);
     await idle();
     return { pieceId: created.id };
   },
 
   async openPiece({ pieceId }) {
-    attachPiece(await controller().get(pieceId as string, true));
+    await attachPiece(await controller().get(pieceId as string, true));
     await idle();
     return {};
   },
@@ -142,10 +148,35 @@ const handlers: Record<
   },
 
   async read({ path }) {
-    const value = await currentPiece().result.get(
-      (path ?? []) as (string | number)[],
-    );
-    return sanitizeForTransfer(value);
+    const target = result();
+    await target.pull();
+    let cell = target;
+    for (const segment of (path ?? []) as (string | number)[]) {
+      cell = cell.key(segment as never) as Cell<any>;
+    }
+    return sanitizeForTransfer(cell.get());
+  },
+
+  /**
+   * Inspect the normalized link (id, space, scope) of a cell reached from
+   * the piece result by `path`, resolving links along the way. Lets tests
+   * assert the storage addressing (e.g. scope) of pattern state.
+   */
+  async link({ path }) {
+    const target = result();
+    await target.pull();
+    let cell = target;
+    for (const segment of (path ?? []) as (string | number)[]) {
+      cell = cell.key(segment as never) as Cell<any>;
+    }
+    const resolved = cell.resolveAsCell();
+    const link = resolved.getAsNormalizedFullLink();
+    return sanitizeForTransfer({
+      id: link.id,
+      space: link.space,
+      scope: link.scope,
+      path: link.path,
+    });
   },
 
   async idle() {

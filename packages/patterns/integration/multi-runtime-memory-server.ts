@@ -78,6 +78,8 @@ const authorizeSessionOpen = async (
   return invocation.iss;
 };
 
+let nextConnectionTag = 0;
+
 export class StandaloneMemoryServer {
   #memory: MemoryServer.Server;
   #http: Deno.HttpServer;
@@ -101,16 +103,52 @@ export class StandaloneMemoryServer {
         return new Response("memory websocket endpoint", { status: 200 });
       }
       const { socket, response } = Deno.upgradeWebSocket(request);
+      const connectionTag = nextConnectionTag++;
       const connection = memory.connect((message) => {
         if (socket.readyState === WebSocket.OPEN) {
           socket.send(encodeMemoryBoundary(message));
         }
       });
+      const debugWrites = Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";
       socket.addEventListener("message", (event) => {
         if (typeof event.data !== "string") {
           socket.close(1003, "memory websocket expects text frames");
           connection.close();
           return;
+        }
+        if (debugWrites) {
+          try {
+            const parsed = MemoryServer.parseClientMessage(
+              event.data,
+            ) as unknown as {
+              commit?: { operations?: unknown[] };
+            };
+            const operations = parsed?.commit?.operations as
+              | Array<Record<string, any>>
+              | undefined;
+            if (Array.isArray(operations)) {
+              for (const op of operations) {
+                const detail = op?.op === "patch"
+                  ? ` paths=${
+                    JSON.stringify(
+                      (op.patches ?? []).map((p: { path?: string }) => p?.path),
+                    )
+                  }`
+                  : op?.op === "set"
+                  ? ` keys=${
+                    JSON.stringify(Object.keys(op.value?.value ?? {}))
+                  }`
+                  : "";
+                console.error(
+                  `[memwrite conn=${connectionTag}] op=${op?.op} id=${
+                    String(op?.id).slice(0, 24)
+                  } scope=${op?.scope ?? "(space)"}${detail}`,
+                );
+              }
+            }
+          } catch {
+            // Best-effort logging only.
+          }
         }
         connection.receive(event.data).catch(() => {
           if (socket.readyState === WebSocket.OPEN) {

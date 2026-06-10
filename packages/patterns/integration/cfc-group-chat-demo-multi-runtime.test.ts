@@ -94,6 +94,13 @@ async function messages(session: MultiRuntimeSession): Promise<any[]> {
   return ((await session.read(["messages"])) as any[]) ?? [];
 }
 
+// `rooms` defaults to `{}`, so reading the path ["rooms", "list"] would throw
+// before the first room is added; read the parent and pluck the list instead.
+async function rooms(session: MultiRuntimeSession): Promise<any[]> {
+  const value = (await session.read(["rooms"])) as { list?: any[] } | undefined;
+  return value?.list ?? [];
+}
+
 describe("cfc group chat demo across runtimes", () => {
   let harness: MultiRuntimeHarness;
   let alice: MultiRuntimeSession;
@@ -260,10 +267,14 @@ describe("cfc group chat demo across runtimes", () => {
     // Room creation IS admin-gated: bob's attempt must be rejected…
     await addRoom(bob, "Bob's room");
     await harness.settle();
-    const roomsAfterBob = ((await alice.read(["rooms", "list"])) as any[]) ??
-      [];
+    // waitFor retries through transiently-unsynced reads; the room list must
+    // settle as readable AND empty.
+    await harness.waitFor(
+      "alice's room list stays empty after bob's rejected add",
+      async () => (await rooms(alice)).length === 0,
+    );
     assertEquals(
-      roomsAfterBob.map((room) => room?.name),
+      (await rooms(alice)).map((room) => room?.name),
       [],
       "non-admin bob was able to add a room",
     );
@@ -272,10 +283,7 @@ describe("cfc group chat demo across runtimes", () => {
     await addRoom(alice, "Ops");
     await harness.waitFor(
       "bob sees the room alice added",
-      async () =>
-        (((await bob.read(["rooms", "list"])) as any[]) ?? []).some(
-          (room) => room?.name === "Ops",
-        ),
+      async () => (await rooms(bob)).some((room) => room?.name === "Ops"),
     );
   });
 
@@ -293,9 +301,7 @@ describe("cfc group chat demo across runtimes", () => {
     await harness.waitFor(
       "bob can add a room once admin",
       async () =>
-        (((await alice.read(["rooms", "list"])) as any[]) ?? []).some(
-          (room) => room?.name === "Bob's room",
-        ),
+        (await rooms(alice)).some((room) => room?.name === "Bob's room"),
     );
   });
 });

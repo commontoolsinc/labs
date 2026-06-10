@@ -100,7 +100,9 @@ class WorkerClient {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
         reject(
-          new Error(`[${this.label}] ${cmd} timed out after ${RPC_TIMEOUT_MS}ms`),
+          new Error(
+            `[${this.label}] ${cmd} timed out after ${RPC_TIMEOUT_MS}ms`,
+          ),
         );
       }, RPC_TIMEOUT_MS);
       this.#pending.set(id, {
@@ -153,6 +155,18 @@ export class MultiRuntimeSession {
   /** Read a value from the piece result, pulling fresh state first. */
   async read(path: (string | number)[] = []): Promise<unknown> {
     return await this.#client.call("read", { path });
+  }
+
+  /** Inspect the normalized link (id, space, scope) at `path` in the result. */
+  async link(
+    path: (string | number)[] = [],
+  ): Promise<{ id: string; space: string; scope: string; path: string[] }> {
+    return await this.#client.call("link", { path }) as {
+      id: string;
+      space: string;
+      scope: string;
+      path: string[];
+    };
   }
 
   async idle(): Promise<void> {
@@ -216,7 +230,9 @@ export class MultiRuntimeHarness {
           spaceName,
           apiUrl,
         });
-        sessions.push(new MultiRuntimeSession(normalized.label, identity, client));
+        sessions.push(
+          new MultiRuntimeSession(normalized.label, identity, client),
+        );
       }
 
       // A throwaway bootstrap worker creates the piece, then every test
