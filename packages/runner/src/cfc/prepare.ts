@@ -2221,15 +2221,20 @@ const collectConsumedConfidentiality = (
     );
     if (metadata === undefined) continue;
     const path = canonicalizeLogicalPath(read.path);
-    // A read at `path` observes the value at `path` and everything below it, so
-    // its confidentiality is the union of every labelMap entry that is an
-    // ancestor-or-equal of `path` (a label that applies to it) OR a DESCENDANT
-    // of `path` (a label on a field inside the value just read). labelAtPath
-    // alone would only see the ancestor — so reading a whole object and sending
-    // one confidential field would slip the ceiling (review on #3993).
+    // A recursive read at `path` observes the value at `path` and everything
+    // below it, so its confidentiality is the union of every labelMap entry
+    // that is an ancestor-or-equal of `path` (a label that applies to it) OR a
+    // DESCENDANT of `path` (a label on a field inside the value just read).
+    // labelAtPath alone would only see the ancestor — so reading a whole object
+    // and sending one confidential field would slip the ceiling (review on
+    // #3993). A nonRecursive read sees ONLY the value at `path`, so it counts
+    // ancestor-or-equal entries but NOT descendants — counting those would
+    // false-reject valid commits (review round 2 on #3993).
     for (const entry of metadata.labelMap.entries) {
       const entryPath = canonicalizeLogicalPath(entry.path);
-      if (!isPrefix(entryPath, path) && !isPrefix(path, entryPath)) continue;
+      const overlapsRead = isPrefix(entryPath, path) ||
+        (read.nonRecursive !== true && isPrefix(path, entryPath));
+      if (!overlapsRead) continue;
       for (const atom of entry.label.confidentiality ?? []) addAtom(atom);
     }
   }
