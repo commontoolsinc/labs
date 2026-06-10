@@ -1,18 +1,22 @@
 /**
- * Standalone in-memory storage server for multi-runtime tests.
+ * Standalone in-process memory v2 server.
  *
- * Serves the same memory v2 websocket protocol (and session.open signature
- * verification) as toolshed's `/api/storage/memory` route, but in-process on
- * an ephemeral port with a non-persistent store. This lets several runtimes —
- * including ones in Deno Workers — share one storage backend without a
- * toolshed process.
+ * Serves the same websocket protocol (and `session.open` signature
+ * verification) as toolshed's `/api/storage/memory` route, on an ephemeral
+ * localhost port with a non-persistent store. Several runtimes — including
+ * ones in Deno Workers or subprocesses — can share one storage backend
+ * without a toolshed process. Used by multi-runtime test harnesses
+ * (`cf test` multi-user mode, packages/patterns integration tests).
+ *
+ * Deno-only (uses `Deno.serve`); keep this export path out of browser
+ * bundles.
  */
 
-import { encodeMemoryBoundary, MEMORY_PROTOCOL } from "@commonfabric/memory/v2";
-import * as MemoryServer from "@commonfabric/memory/v2/server";
+import { encodeMemoryBoundary, MEMORY_PROTOCOL } from "../v2.ts";
+import * as MemoryServer from "./server.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { VerifierIdentity } from "@commonfabric/identity";
+import { fromDID } from "../util.ts";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -31,7 +35,7 @@ const sameSessionDescriptor = (
 
 // Same verification as toolshed's memory route: the session principal is the
 // verified issuer of the signed session.open invocation. User/session scoped
-// storage partitioning keys off this principal, so the tests exercise real
+// storage partitioning keys off this principal, so clients exercise real
 // authentication, not a trusted-client shortcut.
 const authorizeSessionOpen = async (
   message: {
@@ -64,10 +68,12 @@ const authorizeSessionOpen = async (
     throw authorizationError("memory session.open authorization mismatch");
   }
 
-  const issuer = await VerifierIdentity.fromDid(
-    invocation.iss as `did:key:${string}`,
-  );
-  const verified = await issuer.verify({
+  const issuer = await fromDID(invocation.iss);
+  if (issuer.error) {
+    throw issuer.error;
+  }
+
+  const verified = await issuer.ok.verify({
     payload: hashOf(invocation).bytes,
     signature,
   });
@@ -117,38 +123,7 @@ export class StandaloneMemoryServer {
           return;
         }
         if (debugWrites) {
-          try {
-            const parsed = MemoryServer.parseClientMessage(
-              event.data,
-            ) as unknown as {
-              commit?: { operations?: unknown[] };
-            };
-            const operations = parsed?.commit?.operations as
-              | Array<Record<string, any>>
-              | undefined;
-            if (Array.isArray(operations)) {
-              for (const op of operations) {
-                const detail = op?.op === "patch"
-                  ? ` paths=${
-                    JSON.stringify(
-                      (op.patches ?? []).map((p: { path?: string }) => p?.path),
-                    )
-                  }`
-                  : op?.op === "set"
-                  ? ` keys=${
-                    JSON.stringify(Object.keys(op.value?.value ?? {}))
-                  }`
-                  : "";
-                console.error(
-                  `[memwrite conn=${connectionTag}] op=${op?.op} id=${
-                    String(op?.id).slice(0, 24)
-                  } scope=${op?.scope ?? "(space)"}${detail}`,
-                );
-              }
-            }
-          } catch {
-            // Best-effort logging only.
-          }
+          logCommitOperations(connectionTag, event.data);
         }
         connection.receive(event.data).catch(() => {
           if (socket.readyState === WebSocket.OPEN) {
@@ -167,5 +142,36 @@ export class StandaloneMemoryServer {
   async close(): Promise<void> {
     await this.#http.shutdown();
     await this.#memory.close();
+  }
+}
+
+// Best-effort per-commit write tracing (CF_DEBUG_MEMORY_WRITES=1): one line
+// per operation with id + scope, the fastest way to see which scope partition
+// a client's writes actually land in.
+function logCommitOperations(connectionTag: number, payload: string): void {
+  try {
+    const parsed = MemoryServer.parseClientMessage(payload) as unknown as {
+      commit?: { operations?: Array<Record<string, any>> };
+    };
+    const operations = parsed?.commit?.operations;
+    if (!Array.isArray(operations)) return;
+    for (const op of operations) {
+      const detail = op?.op === "patch"
+        ? ` paths=${
+          JSON.stringify(
+            (op.patches ?? []).map((p: { path?: string }) => p?.path),
+          )
+        }`
+        : op?.op === "set"
+        ? ` keys=${JSON.stringify(Object.keys(op.value?.value ?? {}))}`
+        : "";
+      console.error(
+        `[memwrite conn=${connectionTag}] op=${op?.op} id=${
+          String(op?.id).slice(0, 24)
+        } scope=${op?.scope ?? "(space)"}${detail}`,
+      );
+    }
+  } catch {
+    // Logging only.
   }
 }
