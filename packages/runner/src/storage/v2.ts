@@ -81,6 +81,7 @@ import {
   watchIdForEntry,
 } from "./v2-watch.ts";
 import {
+  createStorageAddressResolver,
   RemoteSessionFactory,
   type SessionFactory,
 } from "./v2-remote-session.ts";
@@ -370,7 +371,20 @@ const dropMaterializedSuffix = (
 
 export interface Options {
   as: Signer;
-  address: URL;
+  /**
+   * Base URL of the default memory host. The storage endpoint path
+   * (`/api/storage/memory`) is joined internally — pass the host, not
+   * the full endpoint.
+   */
+  memoryHost: URL;
+  /**
+   * Optional space DID → host base URL overrides. A space listed here
+   * opens its storage connection against that host; absent map or
+   * absent entry resolves to `memoryHost`. The map is fixed for the
+   * manager's lifetime (the per-space provider cache assumes space →
+   * host never changes).
+   */
+  spaceHostMap?: Record<string, string>;
   id?: string;
   settings?: IRemoteStorageProviderSettings;
   spaceIdentity?: Signer;
@@ -531,7 +545,10 @@ export class StorageManager implements IStorageManager {
   static open(options: Options) {
     return new this(
       options,
-      new RemoteSessionFactory(options.address, options.as),
+      new RemoteSessionFactory(
+        createStorageAddressResolver(options.memoryHost, options.spaceHostMap),
+        options.as,
+      ),
     );
   }
 
