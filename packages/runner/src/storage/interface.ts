@@ -162,6 +162,22 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   removeCrossSpacePromise(promise: Promise<void>): void;
 
   /**
+   * Number of cross-space promises currently pending (async loads of link
+   * targets in other spaces, kicked during link resolution or read
+   * traversal). Zero in steady state — `Cell.pull()` uses this to decide
+   * whether a convergence round is needed at all (CT-1667).
+   */
+  pendingCrossSpacePromiseCount?(): number;
+
+  /**
+   * Wait for the currently pending cross-space promises (and any they
+   * transitively kick) to settle, WITHOUT waiting for full provider sync the
+   * way `synced()` does. Used by `Cell.pull()`'s convergence loop so pulls
+   * that kicked no loads keep their existing timing.
+   */
+  crossSpaceSettled?(): Promise<void>;
+
+  /**
    * Load cell from storage. Will also subscribe to new changes.
    *
    * @returns Promise that resolves when the cell sync is complete.

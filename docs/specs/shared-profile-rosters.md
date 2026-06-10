@@ -76,29 +76,24 @@ Store a reference to the contributor's profile cell (the `result` of their
 `cf-cell-link` / `cf-render`):
 
 - **Pros:** Always current — a profile rename propagates to every roster that
-  links it.
-- **Cons:** Resolving the link requires reaching the *other* user's profile
-  space. That is exactly the cross-space reachability the runtime does **not**
-  guarantee for arbitrary users; it works cleanly for the current viewer's own
-  profile but is not guaranteed for a roster full of other people's profile
-  links. It also couples the roster's render to remote spaces' availability.
+  links it. The runtime materializes cross-space link targets on read (a read
+  that finds the target absent kicks an async load and re-renders on arrival —
+  CT-1667, PR #4019), so the link resolves for any viewer with access to the
+  profile's space.
+- **Cons:** First render shows blanks until the cross-space load lands, and
+  the roster's freshness couples to the remote space's availability — offline
+  or unreachable profile spaces render empty rather than stale.
 
 ### Verdict
 
 **Default to a snapshot.** It matches the "each user contributes their own data"
-model, keeps the shared roster fully self-describing inside the space, and avoids
-depending on other users' profile spaces being reachable. Reach for a live link
-only when (a) freshness genuinely matters and (b) you have confirmed the linked
-profiles resolve for *all* viewers in your deployment — and even then, consider a
-**hybrid**: store the snapshot for reliable rendering *and* keep the link
-alongside it for an explicit "refresh from profile" action.
-
-> Uncertainty flagged: persisting another user's live profile cell into a
-> `PerSpace` array and having *every* viewer dereference it across space
-> boundaries is not something this spec verified end to end. The current
-> viewer's own `#profile` result is known to render (see
-> `packages/patterns/shared-profile-demo/main.tsx`). Treat the live-link roster
-> as the advanced path and validate cross-space resolution before relying on it.
+model, keeps the shared roster fully self-describing inside the space, and
+renders identically (and immediately) for all viewers regardless of remote
+space availability. Reach for a live link when freshness genuinely matters —
+it resolves cross-space for any authorized viewer — and consider a **hybrid**:
+store the snapshot for immediate, availability-independent rendering *and*
+keep the link alongside it for live freshness or an explicit "refresh from
+profile" action.
 
 ## Reference demo
 
@@ -367,9 +362,10 @@ const profileWish = wish({ query: "#profile" }); // result is ProfileHomeOutput-
 // Render an entry with: <cf-cell-link $cell={entry.profile} /> or <cf-render $cell={entry.profile} />.
 ```
 
-Validate cross-space resolution for *all* viewers before shipping this — see the
-uncertainty note above. A hybrid (snapshot for rendering + link for an explicit
-refresh) is usually the safer way to get freshness.
+Cross-space resolution works for any viewer with access to the profile's
+space (CT-1667, PR #4019); the trade-off is availability — entries render
+blank while the remote space is unreachable. A hybrid (snapshot for immediate
+rendering + link for freshness or an explicit refresh) gives both.
 
 ## Recommended approach for chat/game patterns
 
@@ -382,8 +378,8 @@ refresh) is usually the safer way to get freshness.
    the fields). This returns the user's default profile under PR #3830, with the
    framework picker handling the multi-profile case.
 3. **Store a snapshot** (name + avatar copied at join time) in the roster by
-   default. Use a live link only when freshness matters and cross-space
-   resolution is confirmed; prefer a hybrid if you need both.
+   default. Use a live link when freshness matters; prefer a hybrid if you
+   want freshness without coupling first render to remote-space availability.
 4. Append idempotently — guard on "already joined" so re-renders and reconnects
    don't duplicate entries (see the `join` handler above).
 5. Render every other participant's name/avatar directly from `participants`.
@@ -400,8 +396,8 @@ It follows the snapshot model above and renders with the identity components:
   component covering the image / glyph / initials cases uniformly (no hand-rolled
   `<img>` + placeholder `<div>`).
 - The current viewer's own identity renders via the trusted
-  **`<cf-profile-badge $profile={profileWish.result} />`** — the one place a live
-  profile cell is reliably resolvable (the viewer's own `#profile`).
+  **`<cf-profile-badge $profile={profileWish.result} />`**. (Live profile cells
+  now also resolve cross-space for other authorized viewers — CT-1667.)
 
 Verified deployed (`cf piece new … main.tsx`): renders with 0 console errors;
 participant rows show image/emoji/initials avatars; the viewer badge shows the
@@ -410,9 +406,10 @@ profile (or a graceful "Unknown profile" fallback when the identity has none).
 ## Follow-ups (not done here)
 
 - The runnable pattern uses a **snapshot** roster. A live-link / hybrid variant
-  (rendering *other* users' rosters via `cf-profile-badge` bound to their profile
-  cell) still needs the cross-space resolution validation called out above before
-  it can be relied on for real multiplayer.
+  (rendering *other* users' entries via `cf-profile-badge` bound to their profile
+  cell) is unblocked now that cross-space link targets materialize on read
+  (CT-1667, PR #4019); it still deserves a multi-user browser pass before being
+  promoted to the recommended path.
 
 ## References
 
