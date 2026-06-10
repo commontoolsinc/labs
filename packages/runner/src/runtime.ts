@@ -64,6 +64,8 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   type CfcEnforcementMode,
   type CfcLabelView,
+  DEFAULT_SINK_MAX_CONFIDENTIALITY,
+  type SinkMaxConfidentiality,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
 import { PatternManager } from "./pattern-manager.ts";
@@ -209,6 +211,11 @@ export interface RuntimeOptions {
   experimental?: ExperimentalOptions;
   /** Rollout mode for commit-boundary CFC enforcement. Defaults to `enforce-explicit`. */
   cfcEnforcementMode?: CfcEnforcementMode;
+  /** Per-sink confidentiality ceilings for the sink-request egress gate. A sink
+   *  absent from the map is ungated; a declared ceiling rejects (or, in observe
+   *  mode, flags) a request carrying confidentiality outside it. Defaults to
+   *  none declared (`DEFAULT_SINK_MAX_CONFIDENTIALITY`). */
+  cfcSinkMaxConfidentiality?: SinkMaxConfidentiality;
   /** Deterministic provider for the trust snapshot attached to each new tx. */
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
   /** Optional compilation cache for persistent caching of compiled JS.
@@ -318,6 +325,7 @@ export class Runtime {
   readonly pieceCreatedCallback?: PieceCreatedCallback;
   readonly cfc: ContextualFlowControl;
   readonly cfcEnforcementMode: CfcEnforcementMode;
+  readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
@@ -397,6 +405,8 @@ export class Runtime {
     this.cfc = new ContextualFlowControl();
     this.cfcEnforcementMode = options.cfcEnforcementMode ??
       "enforce-explicit";
+    this.cfcSinkMaxConfidentiality = options.cfcSinkMaxConfidentiality ??
+      DEFAULT_SINK_MAX_CONFIDENTIALITY;
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(
@@ -602,6 +612,7 @@ export class Runtime {
       },
     });
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
+    wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     return wrapped;
   }

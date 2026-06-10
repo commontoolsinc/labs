@@ -63,6 +63,7 @@ import {
   prepareBoundaryCommit,
   preparedDigestFor,
   type PreparedDigestInput,
+  type SinkMaxConfidentiality,
   type TrustSnapshot,
   type WritePolicyInput,
 } from "../cfc/mod.ts";
@@ -156,6 +157,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         cfcEnforcementStrictness(mode),
       );
     }
+  }
+
+  // Per-sink confidentiality ceilings, set once by the Runtime at tx creation
+  // (before any handler code runs). Write-once: a later call is ignored, so
+  // code holding a Cell can't relax a configured ceiling mid-transaction. Not
+  // on the public tx interface for the same reason (audit S3 posture).
+  setCfcSinkMaxConfidentiality(map: SinkMaxConfidentiality): void {
+    if (this.cfcState.sinkMaxConfidentiality !== undefined) return;
+    this.cfcState.sinkMaxConfidentiality = map;
   }
 
   markCfcRelevant(reason?: string): void {

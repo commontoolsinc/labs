@@ -2198,6 +2198,67 @@ export const loadSchemaDocument = (
   return schema;
 };
 
+// Union of confidentiality atoms across every non-internal labeled read in the
+// transaction, resolved from stored labels the same way verifyInputRequirements
+// resolves them. Transaction-global by design: a sink request is built from
+// whatever the handler read, and the sink-request input does not record its own
+// read provenance, so the whole consumed set is the sound over-approximation.
+const collectConsumedConfidentiality = (
+  tx: IExtendedStorageTransaction,
+): readonly unknown[] => {
+  const atoms: unknown[] = [];
+  for (const read of tx.getReadActivities?.() ?? []) {
+    if (isInternalVerifierRead(read.meta)) continue;
+    const label = labelAtPath(
+      storedMetadataFor(
+        tx,
+        read.space,
+        read.id,
+        normalizeCellScope(read.scope),
+        read.type ?? "application/json",
+      ),
+      canonicalizeLogicalPath(read.path),
+    );
+    for (const atom of label?.confidentiality ?? []) {
+      if (!atoms.some((existing) => deepEqual(existing, atom))) {
+        atoms.push(atom);
+      }
+    }
+  }
+  return atoms;
+};
+
+// §5.2.1 / §7.3-7.5 egress gate: a recorded sink-request input whose sink
+// declares a confidentiality ceiling must not carry confidentiality outside it.
+// Rides the standard observe→enforce path (a reason invalidates prepare, which
+// the commit gate turns into a reject only in enforcing modes).
+const verifySinkRequestCeilings = (
+  tx: IExtendedStorageTransaction,
+): string[] => {
+  const state = tx.getCfcState();
+  const ceilings = state.sinkMaxConfidentiality;
+  if (ceilings === undefined) return [];
+  const gatedSinks = new Map<string, readonly unknown[]>();
+  for (const input of state.writePolicyInputs) {
+    if (input.kind !== "sink-request") continue;
+    const ceiling = ceilings[input.sink];
+    if (ceiling !== undefined) gatedSinks.set(input.sink, ceiling);
+  }
+  if (gatedSinks.size === 0) return [];
+  const consumed = collectConsumedConfidentiality(tx);
+  if (consumed.length === 0) return [];
+  const reasons: string[] = [];
+  for (const [sink, ceiling] of gatedSinks) {
+    const exceeds = consumed.some((atom) =>
+      !ceiling.some((allowed) => deepEqual(allowed, atom))
+    );
+    if (exceeds) {
+      reasons.push(`sink-request confidentiality exceeds ceiling for ${sink}`);
+    }
+  }
+  return reasons;
+};
+
 export const prepareBoundaryCommit = (
   tx: IExtendedStorageTransaction,
 ): string[] => {
@@ -2493,5 +2554,6 @@ export const prepareBoundaryCommit = (
       // attempted-target tracking of this internal metadata update.
     }, metadata as unknown as FabricValue);
   }
+  reasons.push(...verifySinkRequestCeilings(tx));
   return reasons;
 };
