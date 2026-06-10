@@ -11,7 +11,7 @@ import type { Runtime } from "../runtime.ts";
  * instantiation (see `Runner.substituteOpPatternRefs`), once the op pattern's
  * entry ref is known. Because it is plain data (no symbol keys), it survives the
  * `getImmutableCell` JSON round-trip that strips the in-memory
- * `unsafe_originalPattern` backref — so the builtin reads it back intact and
+ * derivation backref — so the builtin reads it back intact and
  * resolves the live canonical pattern without deserializing a graph or mapping
  * functions back by `implementationRef`.
  */
