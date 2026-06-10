@@ -249,27 +249,67 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     schemaHash: string | false,
   ): boolean {
     return isRecord(schema) && Array.isArray(schema.anyOf) &&
-      (schema.anyOf.some((item) => {
-        item = SelectorTracker.getStandardSchema(item);
-        if (hashSchema(item) === schemaHash) {
-          return true;
-        }
-        if (schema.$defs !== undefined) {
-          item = schemaWithProperties(item, {
-            $defs: schema.$defs,
-          });
-          item = SelectorTracker.getStandardSchema(item);
-          if (hashSchema(item) === schemaHash) {
-            return true;
-          }
-        }
-        if (item.$ref !== undefined) {
-          item = ContextualFlowControl.resolveSchemaRefs(item, schema);
-          item = SelectorTracker.getStandardSchema(item);
-          return hashSchema(item) === schemaHash;
-        }
-        return false;
-      }));
+      (schema.anyOf.some((item) =>
+        SelectorTracker.#anyOfItemHashes(schema, item).includes(
+          schemaHash as string,
+        )
+      ));
+  }
+
+  /**
+   * The standardized hashes an anyOf item can match under: its plain form,
+   * its `$defs`-grafted form, and its `$ref`-resolved form. Computing these
+   * builds fresh schema objects and re-hashes them, so cache the resulting
+   * hash strings per (parent schema, item) identity when the parent is
+   * deep-frozen (its items then are too).
+   */
+  static #anyOfItemHashesCache = new WeakMap<
+    object,
+    Map<JSONSchema, readonly string[]>
+  >();
+
+  static #anyOfItemHashes(
+    schema: JSONSchema & object,
+    item: JSONSchema,
+  ): readonly string[] {
+    const cacheable = isDeepFrozen(schema);
+    let byItem: Map<JSONSchema, readonly string[]> | undefined;
+    if (cacheable) {
+      byItem = SelectorTracker.#anyOfItemHashesCache.get(schema);
+      const cached = byItem?.get(item);
+      if (cached !== undefined) {
+        return cached;
+      }
+    }
+    const hashes: string[] = [];
+    let current = SelectorTracker.getStandardSchema(item);
+    hashes.push(hashSchema(current));
+    if (schema.$defs !== undefined) {
+      current = SelectorTracker.getStandardSchema(
+        schemaWithProperties(current, { $defs: schema.$defs }),
+      );
+      hashes.push(hashSchema(current));
+    }
+    if (isRecord(current) && current.$ref !== undefined) {
+      hashes.push(
+        hashSchema(
+          SelectorTracker.getStandardSchema(
+            ContextualFlowControl.resolveSchemaRefs(
+              current,
+              schema,
+            ) as JSONSchema,
+          ),
+        ),
+      );
+    }
+    if (cacheable) {
+      if (byItem === undefined) {
+        byItem = new Map();
+        SelectorTracker.#anyOfItemHashesCache.set(schema, byItem);
+      }
+      byItem.set(item, hashes);
+    }
+    return hashes;
   }
 
   static getStandardSchema(schema: JSONSchema): JSONSchema {
