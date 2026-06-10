@@ -1210,34 +1210,48 @@ class SpaceReplica implements ISpaceReplica {
     }
     task.entries = newEntries;
     this.#syncTasks.set(key, task);
-    const promise = this.enqueueWatchRefresh("pull", newEntries);
-    task.promise = promise;
+    const fetchPromise = this.enqueueWatchRefresh("pull", newEntries);
+    // Mixed batch: some entries fetched here, others covered by in-flight
+    // watches. The pull resolves only when ALL requested docs are locally
+    // available, and concurrent same-key callers dedupe onto this COMBINED
+    // wait (joining only `fetchPromise` would let them resolve before the
+    // covered docs land).
+    const combinedPromise = coveredInFlight.length === 0
+      ? fetchPromise
+      : (async (): Promise<Result<Unit, PullError>> => {
+        const result = await fetchPromise;
+        if (result.error) {
+          return result;
+        }
+        const covered = await Promise.all(coveredInFlight);
+        return covered.find((coveredResult) => coveredResult.error) ?? result;
+      })();
+    task.promise = combinedPromise;
     for (const [address, selector] of newEntries) {
       const baseAddress = {
         id: address.id,
         type: DOCUMENT_MIME,
         scope: normalizeCellScope(address.scope),
       };
+      // The tracker promise is what FUTURE pulls covered by these selectors
+      // await: their data is available once THIS fetch lands, independent of
+      // this batch's own covered set — so register the raw fetch promise.
       this.#watchSelectorTracker.add(
         baseAddress,
         selector,
-        promise,
+        fetchPromise,
       );
     }
-    this.#syncPromises.add(promise);
+    this.#syncPromises.add(combinedPromise);
     try {
-      const result = await promise;
-      if (result.error || coveredInFlight.length === 0) {
-        return result;
-      }
-      // Mixed batch: some entries fetched here, others covered by in-flight
-      // watches. Resolve only when ALL requested docs are locally available.
-      const covered = await Promise.all(coveredInFlight);
-      return covered.find((coveredResult) => coveredResult.error) ?? result;
+      return await combinedPromise;
     } finally {
       this.#syncTasks.delete(key);
-      this.#syncPromises.delete(promise);
-      const result = await Promise.resolve(task.promise);
+      this.#syncPromises.delete(combinedPromise);
+      // Tracker cleanup is keyed on THIS batch's fetch result alone: a
+      // failure in a covered watch belongs to the pull that registered it,
+      // and must not invalidate selectors whose fetch succeeded here.
+      const result = await fetchPromise;
       if (result.error) {
         for (const [address, selector] of newEntries) {
           const baseAddress = {
