@@ -59,8 +59,21 @@ const resolveTranscriptPathWithinRunRoot = (
     : fallbackPath;
 };
 
+// Artifacts such as run-state.json are the canonical audit and resume record and
+// are rewritten on every tool call. A crash partway through a plain truncating
+// write would leave a half-written file that breaks resume and corrupts the CFC
+// audit trail. Write to a sibling temp file and rename, which is atomic on the
+// same filesystem, so readers only ever observe a complete prior or new version.
 const writeJsonFile = async (path: string, value: unknown): Promise<void> => {
-  await Deno.writeTextFile(path, `${JSON.stringify(value, null, 2)}\n`);
+  const contents = `${JSON.stringify(value, null, 2)}\n`;
+  const tempPath = `${path}.${crypto.randomUUID()}.tmp`;
+  try {
+    await Deno.writeTextFile(tempPath, contents);
+    await Deno.rename(tempPath, path);
+  } catch (error) {
+    await Deno.remove(tempPath).catch(() => {});
+    throw error;
+  }
 };
 
 export interface HarnessArtifactStore {
