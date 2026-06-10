@@ -22,7 +22,6 @@ import {
   canonicalizeWritePolicyInput,
   logicalPathToPointer,
 } from "../src/cfc/mod.ts";
-import { flowPrecisionSchemaForBuiltin } from "../src/cfc/flow-precision.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type CfcEnforcementMode,
@@ -292,6 +291,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
         path: ["savedTitle"],
         label: {},
+        origin: "declared",
       });
     } finally {
       await runtime.dispose();
@@ -380,6 +380,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
         path: ["savedTitle"],
         label: {},
+        origin: "declared",
       });
     } finally {
       await runtime.dispose();
@@ -1761,7 +1762,22 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     try {
       const tx = runtime.edit();
       tx.setCfcEnforcementMode("enforce-explicit");
-      const schema = flowPrecisionSchemaForBuiltin("map");
+      // `flowPrecisionClaim` is a reserved legacy key: no longer minted, but
+      // already-persisted link schemas may embed it, so an ifc entry that is
+      // not a label must stay tolerated and must not persist CFC metadata.
+      const schema: JSONSchema = {
+        type: "array",
+        ifc: {
+          flowPrecisionClaim: {
+            concept:
+              "https://commonfabric.org/cfc/concepts/flow-taint-precision",
+            claims: [
+              { type: "PointwisePresencePreserved" },
+              { type: "PointwiseWriteDependency" },
+            ],
+          },
+        },
+      } as JSONSchema;
       const cell = runtime.getCell(
         signer.did(),
         "cfc-empty-label-ifc-noop",
@@ -1827,6 +1843,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           confidentiality: ["secret"],
           integrity: ["trusted"],
         },
+        origin: "declared",
       });
 
       const schemaDoc = replica.getDocument(
@@ -1895,10 +1912,12 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(entries).toContainEqual({
         path: ["first"],
         label: { integrity: ["shared-ref-integrity"] },
+        origin: "declared",
       });
       expect(entries).toContainEqual({
         path: ["second"],
         label: { integrity: ["shared-ref-integrity"] },
+        origin: "declared",
       });
     } finally {
       await runtime.dispose();
@@ -2017,6 +2036,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           confidentiality: ["secret"],
           integrity: ["trusted"],
         },
+        origin: "declared",
       });
       expect(spacePersisted?.cfc).toBeUndefined();
 
@@ -3102,6 +3122,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             subject: "alice",
           }],
         },
+        origin: "declared",
       });
     } finally {
       await runtime.dispose();
@@ -3214,6 +3235,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             subject: "alice",
           }],
         },
+        origin: "declared",
       });
     } finally {
       await runtime.dispose();
@@ -3364,6 +3386,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             subject: "alice",
           }],
         },
+        origin: "declared",
       });
     } finally {
       await runtime.dispose();
@@ -3454,12 +3477,14 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         label: {
           confidentiality: ["public"],
         },
+        origin: "declared",
       });
       expect(persisted?.cfc?.labelMap?.entries).not.toContainEqual({
         path: [],
         label: {
           confidentiality: ["public", "secret"],
         },
+        origin: "declared",
       });
     } finally {
       await runtime.dispose();
@@ -4533,6 +4558,85 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("rejects maxConfidentiality when a labeled child is consumed via a schema-less parent read", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      const sourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-max-conf-parent-read-input",
+          {
+            type: "object",
+            properties: {
+              secret: { type: "string" },
+            },
+          },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: sourceId,
+        path: [],
+      }, {
+        value: { secret: "seed" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { confidentiality: ["secret"] },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      // Raw parent read: the journal records one recursive read at the value
+      // root — no per-leaf reads — yet the raw value hands the labeled child
+      // to the handler. The child's label must enter the consumed set via
+      // subtree join, not vanish behind the ancestor-only lookup.
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-max-conf-parent-read-input",
+        undefined,
+        tx,
+      );
+      const raw = source.getRaw() as { secret?: string };
+      expect(raw.secret).toBe("seed");
+      tx.markCfcRelevant("stored-input-metadata");
+
+      const output = runtime.getCell(
+        signer.did(),
+        "cfc-max-conf-parent-read-output",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: { maxConfidentiality: ["internal"] },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      output.set({ value: "result" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain("maxConfidentiality");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("does not let helper source-cell reads affect the prepared digest", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
@@ -4736,6 +4840,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             "derived-integrity",
           ],
         },
+        origin: "declared",
       });
     } finally {
       await runtime.dispose();
@@ -5022,6 +5127,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             subject: signer.did(),
           }],
         },
+        origin: "declared",
       });
       verify.abort();
     } finally {
@@ -5121,6 +5227,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             subject: signer.did(),
           }],
         },
+        origin: "declared",
       });
       verify.abort();
     } finally {

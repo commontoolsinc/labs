@@ -43,6 +43,7 @@ import {
   type CfcMetadata,
   type IFCLabel,
   type ImplementationIdentity,
+  type LabelMapEntry,
   type WritePolicyInput,
 } from "./types.ts";
 import {
@@ -72,21 +73,70 @@ const labelAtPath = (
   if (!metadata) {
     return undefined;
   }
-  let match:
-    | {
-      path: readonly string[];
-      label: IFCLabel;
-    }
-    | undefined;
+  // Per-component longest-prefix resolution: within one origin component a
+  // more specific entry replaces its ancestor (§4.6.3 replace-down), but
+  // components layer independently, so the effective label is the join of
+  // each component's most-specific ancestor-or-equal entry. Legacy entries
+  // (no origin) form one combined component, preserving the historical
+  // single-map resolution for pre-component metadata.
+  const matches = new Map<
+    string,
+    { path: readonly string[]; label: IFCLabel }
+  >();
   for (const entry of metadata.labelMap.entries) {
     if (!isPrefix(entry.path, path)) {
       continue;
     }
+    const component = entry.origin ?? "legacy";
+    const match = matches.get(component);
     if (match === undefined || match.path.length < entry.path.length) {
-      match = entry;
+      matches.set(component, entry);
+    } else if (match.path.length === entry.path.length) {
+      // Two equally specific prefixes of one queried path are the same
+      // path; duplicate (path, origin) entries shouldn't survive
+      // coalescing, but join defensively rather than drop one.
+      matches.set(component, {
+        path: match.path,
+        label: mergeLabels(match.label, entry.label),
+      });
     }
   }
-  return match?.label;
+  if (matches.size === 0) {
+    return undefined;
+  }
+  let joined: IFCLabel | undefined;
+  for (const match of matches.values()) {
+    joined = joined === undefined
+      ? match.label
+      : mergeLabels(joined, match.label);
+  }
+  return joined;
+};
+
+// Effective label of a consumed read. A recursive read materializes the
+// whole subtree under `path`, so its label is the most-specific
+// ancestor-or-equal entry (§4.6.3 replace-down resolution) joined with
+// every labelMap entry strictly below the read path — an ancestor read
+// must not shadow descendant labels out of the consumed set (audit S7;
+// e.g. `getRaw()` records one recursive root read and hands over labeled
+// children with no further journal entries). Non-recursive reads observe
+// only the node itself and keep ancestor-or-equal resolution.
+const effectiveReadLabel = (
+  metadata: CfcMetadata | undefined,
+  path: readonly string[],
+  nonRecursive: boolean | undefined,
+): IFCLabel | undefined => {
+  const base = labelAtPath(metadata, path);
+  if (nonRecursive === true || metadata === undefined) {
+    return base;
+  }
+  let joined = base;
+  for (const entry of metadata.labelMap.entries) {
+    if (entry.path.length <= path.length) continue;
+    if (!isPrefix(path, entry.path)) continue;
+    joined = mergeLabels(joined, entry.label);
+  }
+  return joined;
 };
 
 const mergeLabelValues = (
@@ -232,8 +282,14 @@ const metadataAppliesToPath = (
   // entry-construction site). The mere presence of the entry signals "policy
   // applies on this path"; do NOT filter on `hasLabelValues` here, or
   // claim-only entries get silently bypassed.
+  //
+  // Derived (flow-label) entries are the exception: they record taint, not
+  // authored policy. A plain value write replacing a flow-labeled path is an
+  // ordinary overwrite (the derived component is replaced/cleared by the
+  // flow stage), so it must not demand a schema write-policy input.
   return metadata.labelMap.entries.some((entry) =>
-    isPrefix(entry.path, logicalPath) || isPrefix(logicalPath, entry.path)
+    entry.origin !== "derived" &&
+    (isPrefix(entry.path, logicalPath) || isPrefix(logicalPath, entry.path))
   );
 };
 
@@ -922,11 +978,22 @@ const valueWriteTargets = (
   );
   for (const space of seenWriteSpaces) {
     for (const write of tx.getWriteDetails?.(space) ?? []) {
-      const writePath = canonicalizeLogicalPath(write.address.path);
+      const rawPath = write.address.path;
+      const writePath = canonicalizeLogicalPath(rawPath);
+      // The `cfc`/`source` surface exclusions key on the RAW storage path:
+      // the runtime-internal surfaces are document-root siblings of `value`
+      // (raw `["cfc", ...]`/`["source", ...]`), while user fields of the
+      // same names live under `["value", ...]` and canonicalize to identical
+      // logical paths. Keying on the canonical path would let a user write
+      // to `value.source` dodge schema write policy and flow-label
+      // attachment (#4011 review). The link-valued `internal` exclusion
+      // stays canonical on purpose: it covers the runtime's link plumbing
+      // both at the root surface and inside process-doc values; link writes
+      // carry their labels via the link-write machinery, not here.
       if (
         write.address.id.startsWith("cid:") ||
-        writePath[0] === "cfc" ||
-        writePath[0] === "source" ||
+        rawPath[0] === "cfc" ||
+        rawPath[0] === "source" ||
         (
           writePath[0] === "internal" &&
           isPrimitiveCellLink(write.value)
@@ -950,6 +1017,185 @@ const valueWriteTargets = (
     }
   }
   return result;
+};
+
+// ---------------------------------------------------------------------------
+// S16 flow labels (default transition): one conservative confidentiality join
+// per transaction — everything the transaction observed taints everything it
+// wrote (§8.9.2/§8.9.3 collapsed to tx granularity). Reads of runtime-internal
+// surfaces (verifier reads, `cid:` schema docs, `["cfc"]`/`["source"]` paths)
+// are excluded, mirroring the write-side exclusions.
+
+// Keyed on the RAW storage path: the runtime-internal surfaces are
+// document-root siblings of `value` (raw `["cfc", ...]`/`["source", ...]`),
+// while user fields of the same names live under `["value", ...]` and
+// canonicalize to identical logical paths. Keying on the canonical path
+// would drop reads of a user `value.source` field from the taint join
+// (#4011 review).
+const flowReadExcluded = (
+  id: string,
+  rawPath: readonly string[],
+): boolean =>
+  id.startsWith("cid:") ||
+  rawPath[0] === "cfc" ||
+  rawPath[0] === "source";
+
+const forEachFlowObservation = (
+  tx: IExtendedStorageTransaction,
+  consume: (
+    space: MemorySpace,
+    id: URI,
+    scope: ReturnType<typeof normalizeCellScope>,
+    type: MediaType,
+    logicalPath: readonly string[],
+    nonRecursive: boolean | undefined,
+  ) => boolean,
+): boolean => {
+  for (const read of tx.getReadActivities?.() ?? []) {
+    if (isInternalVerifierRead(read.meta)) {
+      continue;
+    }
+    if (flowReadExcluded(read.id, read.path)) {
+      continue;
+    }
+    const logicalPath = canonicalizeLogicalPath(read.path);
+    if (
+      consume(
+        read.space,
+        read.id as URI,
+        normalizeCellScope(read.scope),
+        (read.type ?? "application/json") as MediaType,
+        logicalPath,
+        read.nonRecursive,
+      )
+    ) {
+      return true;
+    }
+  }
+  // Link reads are journaled as dereference traces rather than separate
+  // reads; both ends of a followed reference were observed. Trace ends
+  // carry value-relative link paths and can never name the document-root
+  // runtime surfaces, so only the `cid:` exclusion applies here — a path
+  // like `["source"]` on a trace end IS the user field `value.source`.
+  for (const trace of tx.getCfcState().dereferenceTraces) {
+    for (const end of [trace.source, trace.target]) {
+      if (end.id.startsWith("cid:")) {
+        continue;
+      }
+      const logicalPath = canonicalizeLogicalPath(end.path);
+      if (
+        consume(
+          end.space,
+          end.id as URI,
+          normalizeCellScope(end.scope),
+          "application/json",
+          logicalPath,
+          false,
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+};
+
+const deriveFlowConfidentiality = (
+  tx: IExtendedStorageTransaction,
+): unknown[] => {
+  const atoms: unknown[] = [];
+  const metadataByDoc = new Map<string, CfcMetadata | undefined>();
+  forEachFlowObservation(
+    tx,
+    (space, id, scope, type, logicalPath, nonRecursive) => {
+      const key = targetKey({ space, id, scope });
+      if (!metadataByDoc.has(key)) {
+        metadataByDoc.set(key, storedMetadataFor(tx, space, id, scope, type));
+      }
+      const label = effectiveReadLabel(
+        metadataByDoc.get(key),
+        logicalPath,
+        nonRecursive,
+      );
+      if (label?.confidentiality?.length) {
+        atoms.push(...label.confidentiality);
+      }
+      return false;
+    },
+  );
+  return uniqueCfcAtoms(atoms);
+};
+
+/**
+ * Cheap relevance trigger for the flow-labels dial: true when the
+ * transaction observed any labeled document or wrote into one. Used by the
+ * commit gate / prepare chokepoint to auto-mark relevance, so flow-label
+ * derivation does not depend on callers remembering `markCfcRelevant`.
+ */
+export const flowLabelWorkExists = (
+  tx: IExtendedStorageTransaction,
+): boolean => {
+  // Metadata minted by this transaction itself (raw `["cfc"]` seeding, or a
+  // prior prepare pass) must not make the transaction flow-relevant: flow
+  // labels exist to catch flows over *pre-existing* labels, and self-minted
+  // metadata writes are either the CFC machinery's own or the raw-seed test
+  // idiom. The raw-write surface itself is the S18 chokepoint seam, not a
+  // relevance question.
+  const selfMintedDocs = new Set<string>();
+  const log = tx.getReactivityLog?.();
+  const writeSpaces = new Set<MemorySpace>(
+    [...(log?.writes ?? []), ...(log?.attemptedWrites ?? [])].map((write) =>
+      write.space
+    ),
+  );
+  for (const space of writeSpaces) {
+    for (const write of tx.getWriteDetails?.(space) ?? []) {
+      // Either a direct `["cfc"]` write or a whole-envelope root write whose
+      // value embeds a `cfc` record (the raw-seed idiom).
+      if (
+        write.address.path[0] === "cfc" ||
+        (write.address.path.length === 0 && isRecord(write.value) &&
+          isRecord((write.value as { cfc?: unknown }).cfc))
+      ) {
+        selfMintedDocs.add(targetKey({
+          space: write.address.space,
+          id: write.address.id,
+          scope: normalizeCellScope(write.address.scope),
+        }));
+      }
+    }
+  }
+  const hasEntriesByDoc = new Map<string, boolean>();
+  const docHasEntries = (
+    space: MemorySpace,
+    id: URI,
+    scope: ReturnType<typeof normalizeCellScope>,
+    type: MediaType,
+  ): boolean => {
+    const key = targetKey({ space, id, scope });
+    let known = hasEntriesByDoc.get(key);
+    if (known === undefined) {
+      known = !selfMintedDocs.has(key) &&
+        (storedMetadataFor(tx, space, id, scope, type)?.labelMap.entries
+            .length ?? 0) > 0;
+      hasEntriesByDoc.set(key, known);
+    }
+    return known;
+  };
+  if (
+    forEachFlowObservation(
+      tx,
+      (space, id, scope, type) => docHasEntries(space, id, scope, type),
+    )
+  ) {
+    return true;
+  }
+  for (const [, target] of valueWriteTargets(tx)) {
+    if (docHasEntries(target.space, target.id, target.scope, target.type)) {
+      return true;
+    }
+  }
+  return false;
 };
 
 const walkIfcSchema = (
@@ -1783,7 +2029,7 @@ const verifyInputRequirements = (
   ).map((read) => ({
     ...read,
     path: canonicalizeLogicalPath(read.path),
-    label: labelAtPath(
+    label: effectiveReadLabel(
       storedMetadataFor(
         tx,
         read.space,
@@ -1792,6 +2038,7 @@ const verifyInputRequirements = (
         read.type ?? "application/json",
       ),
       canonicalizeLogicalPath(read.path),
+      read.nonRecursive,
     ),
   })).filter((read) =>
     read.label !== undefined &&
@@ -2188,25 +2435,31 @@ const cloneLabel = (label: IFCLabel): IFCLabel => ({
 });
 
 const coalesceLabelEntries = (
-  entries: ReadonlyArray<{ path: readonly string[]; label: IFCLabel }>,
-): Array<{ path: readonly string[]; label: IFCLabel }> => {
-  const byPath = new Map<
-    string,
-    { path: readonly string[]; label: IFCLabel }
-  >();
+  entries: ReadonlyArray<LabelMapEntry>,
+): Array<LabelMapEntry> => {
+  // Coalesce per (path, origin): same-component entries at one path merge;
+  // entries of different components stay separate so each can follow its
+  // own update discipline (declared monotone, link/derived per-value).
+  const byKey = new Map<string, LabelMapEntry>();
   for (const entry of entries) {
     const path = [...entry.path];
-    const key = pathKey(path);
-    const existing = byPath.get(key);
-    byPath.set(key, {
+    const key = `${entry.origin ?? ""} ${pathKey(path)}`;
+    const existing = byKey.get(key);
+    byKey.set(key, {
       path,
       label: mergeLabels(existing?.label, cloneLabel(entry.label)),
+      ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
     });
   }
-  return [...byPath.values()].sort((left, right) => {
+  return [...byKey.values()].sort((left, right) => {
     const leftKey = pathKey(left.path);
     const rightKey = pathKey(right.path);
-    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+    if (leftKey !== rightKey) {
+      return leftKey < rightKey ? -1 : 1;
+    }
+    const leftOrigin = left.origin ?? "";
+    const rightOrigin = right.origin ?? "";
+    return leftOrigin < rightOrigin ? -1 : leftOrigin > rightOrigin ? 1 : 0;
   });
 };
 
@@ -2385,6 +2638,26 @@ export const prepareBoundaryCommit = (
     identityForInput,
   );
   const linkWrites = linkWritesByTarget(state.writePolicyInputs);
+  // S16 flow labels: the per-tx conservative join. In `persist` mode every
+  // value write target gets a `derived` component carrying it; in `observe`
+  // mode it only feeds diagnostics. Derivation never rejects.
+  const flowMode = state.flowLabelsMode;
+  const flowPersist = flowMode === "persist";
+  const flowTargets = flowMode === "off" ? undefined : valueWriteTargets(tx);
+  const flowConfidentiality = flowMode === "off"
+    ? []
+    : deriveFlowConfidentiality(tx);
+  if (
+    flowMode === "observe" &&
+    flowTargets !== undefined &&
+    flowTargets.size > 0 &&
+    flowConfidentiality.length > 0
+  ) {
+    state.diagnostics.push(
+      `flow-labels(observe): would derive ${flowConfidentiality.length} ` +
+        `confidentiality atom(s) onto ${flowTargets.size} written doc(s)`,
+    );
+  }
   for (const [key, target] of valueWriteTargets(tx)) {
     if (candidates.has(key)) {
       continue;
@@ -2418,6 +2691,35 @@ export const prepareBoundaryCommit = (
     );
   }
   const targetKeys = new Set([...candidates.keys(), ...linkWrites.keys()]);
+  if (flowPersist && flowTargets !== undefined) {
+    // Flow targets enter the persist loop when there is taint to attach or
+    // stale per-value components (derived/link) to replace under a written
+    // path. Docs with neither stay on the fast path.
+    for (const [key, target] of flowTargets) {
+      if (targetKeys.has(key)) {
+        continue;
+      }
+      if (flowConfidentiality.length > 0) {
+        targetKeys.add(key);
+        continue;
+      }
+      const existingMeta = storedMetadataFor(
+        tx,
+        target.space,
+        target.id,
+        target.scope,
+        target.type,
+      );
+      if (
+        existingMeta?.labelMap.entries.some((entry) =>
+          (entry.origin === "derived" || entry.origin === "link") &&
+          target.paths.some((written) => isPrefix(written, entry.path))
+        )
+      ) {
+        targetKeys.add(key);
+      }
+    }
+  }
   for (const key of targetKeys) {
     const candidateSchema = candidates.get(key);
     const schema = candidateSchema ?? emptySchemaObject();
@@ -2518,60 +2820,86 @@ export const prepareBoundaryCommit = (
         entry.schema,
       ]),
     );
+    const flowWrittenPaths = flowPersist
+      ? flowTargets?.get(key)?.paths ?? []
+      : [];
+    // The Wave 2 grow-only ratchet stood in for the missing default
+    // transition: with flow labels persisting, taint rides the derived
+    // component instead, and only legacy (untagged) entries keep the
+    // ratchet. Folding link/derived atoms into freshly declared entries
+    // would otherwise ratchet per-value taint into the monotone store
+    // policy forever.
     const existingConfidentiality = (existing?.labelMap.entries ?? [])
+      .filter((e) => !flowPersist || e.origin === undefined)
       .filter((e) => (e.label.confidentiality?.length ?? 0) > 0)
       .map((e) => ({
         path: canonicalizeLogicalPath(e.path),
         confidentiality: e.label.confidentiality as readonly unknown[],
       }));
-    const persistedLabelEntries = mergedSchemaEntries.flatMap((entry) => {
-      if (
-        !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
-      ) {
-        return [];
-      }
-      const derived = gateRuntimeMintedIntegrity(
-        derivePersistedLabel(
-          tx,
-          entry.schema,
-          entry.label,
-          mergedSchemaEntryLabels,
-        ),
-        identityForSchemaPath(writeAuthorIdentities.get(key), entry.path),
-      );
-      // Store confidentiality is grow-only (§8.12.1): a re-write of a path must
-      // not drop confidentiality the labelMap already carried beyond the schema
-      // (e.g. link-derived or carried-view atoms). Reads use longest-prefix
-      // matching, so a new child entry shadows an ancestor — merge prior
-      // confidentiality from this path AND every ancestor of it, not just an
-      // exact-path match (audit S9, review follow-up). Integrity is left as
-      // derived (freshly gated) — it must not regrow.
-      const prior = existingConfidentiality
-        .filter((e) => isPrefix(e.path, entry.path))
-        .flatMap((e) => e.confidentiality);
-      const label = prior.length > 0
-        ? {
-          ...derived,
-          confidentiality: mergeLabelValues(derived.confidentiality, prior),
+    const persistedLabelEntries: LabelMapEntry[] = mergedSchemaEntries
+      .flatMap((entry) => {
+        if (
+          !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
+        ) {
+          return [];
         }
-        : derived;
-      return hasLabelValues(label) || hasPersistedPolicyClaim(entry.schema)
-        ? [{
-          path: entry.path,
-          label,
-        }]
-        : [];
-    });
+        const derived = gateRuntimeMintedIntegrity(
+          derivePersistedLabel(
+            tx,
+            entry.schema,
+            entry.label,
+            mergedSchemaEntryLabels,
+          ),
+          identityForSchemaPath(writeAuthorIdentities.get(key), entry.path),
+        );
+        // Store confidentiality is grow-only (§8.12.1): a re-write of a path must
+        // not drop confidentiality the labelMap already carried beyond the schema
+        // (e.g. link-derived or carried-view atoms). Reads use longest-prefix
+        // matching, so a new child entry shadows an ancestor — merge prior
+        // confidentiality from this path AND every ancestor of it, not just an
+        // exact-path match (audit S9, review follow-up). Integrity is left as
+        // derived (freshly gated) — it must not regrow.
+        const prior = existingConfidentiality
+          .filter((e) => isPrefix(e.path, entry.path))
+          .flatMap((e) => e.confidentiality);
+        const label = prior.length > 0
+          ? {
+            ...derived,
+            confidentiality: mergeLabelValues(derived.confidentiality, prior),
+          }
+          : derived;
+        return hasLabelValues(label) || hasPersistedPolicyClaim(entry.schema)
+          ? [{
+            path: entry.path,
+            label,
+            origin: "declared" as const,
+          }]
+          : [];
+      });
     const persistedLabelEntryKeys = new Set(
       persistedLabelEntries.map((entry) => pathKey(entry.path)),
     );
     const currentLinkWritePaths = new Set(
       linkWriteInputs.map((input) => pathKey(input.target.path)),
     );
+    let flowCleared = false;
     for (const entry of existing?.labelMap.entries ?? []) {
       const entryPath = canonicalizeLogicalPath(entry.path);
       const key = pathKey(entryPath);
       if (persistedLabelEntryKeys.has(key) || currentLinkWritePaths.has(key)) {
+        continue;
+      }
+      // Per-value components track the current value: a write at-or-above
+      // them replaced that value, so stale derived/link entries under any
+      // written path are dropped (fresh ones for this tx are appended
+      // below / by the link machinery). Declared and legacy entries are
+      // never cleared here.
+      if (
+        flowPersist &&
+        (entry.origin === "derived" || entry.origin === "link") &&
+        flowWrittenPaths.some((written) => isPrefix(written, entryPath))
+      ) {
+        flowCleared = true;
         continue;
       }
       const schemaEntry = mergedSchemaEntrySchemas.get(key);
@@ -2579,9 +2907,12 @@ export const prepareBoundaryCommit = (
         hasLabelValues(entry.label) ||
         (schemaEntry !== undefined && hasPersistedPolicyClaim(schemaEntry))
       ) {
+        // Carry-forward of an untouched path preserves the entry's
+        // component (legacy entries stay legacy).
         persistedLabelEntries.push({
           path: entryPath,
           label: cloneLabel(entry.label),
+          ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
         });
       }
     }
@@ -2601,6 +2932,7 @@ export const prepareBoundaryCommit = (
         persistedLabelEntries.push({
           path: canonicalizeLogicalPath(input.target.path),
           label: result.label,
+          origin: "link",
         });
       }
       const targetPath = canonicalizeLogicalPath(input.target.path);
@@ -2620,13 +2952,42 @@ export const prepareBoundaryCommit = (
             cloneLabel(entry.label),
             linkIdentity,
           ),
+          origin: "link",
+        });
+      }
+    }
+
+    if (flowPersist && flowConfidentiality.length > 0) {
+      // Attach the per-tx join at each written path. Within one tx every
+      // write carries the same join, so deeper written paths are redundant
+      // with a shallower written ancestor and are collapsed away (§4.6.4
+      // operational guidance). Last-write-wins per path is trivially
+      // satisfied for the same reason.
+      const seenFlowPaths = new Set<string>();
+      for (const path of flowWrittenPaths) {
+        const flowKey = pathKey(path);
+        if (seenFlowPaths.has(flowKey)) {
+          continue;
+        }
+        seenFlowPaths.add(flowKey);
+        if (
+          flowWrittenPaths.some((other) =>
+            other.length < path.length && isPrefix(other, path)
+          )
+        ) {
+          continue;
+        }
+        persistedLabelEntries.push({
+          path,
+          label: { confidentiality: [...flowConfidentiality] },
+          origin: "derived",
         });
       }
     }
 
     const coalescedLabelEntries = coalesceLabelEntries(persistedLabelEntries);
 
-    if (coalescedLabelEntries.length === 0) {
+    if (coalescedLabelEntries.length === 0 && !flowCleared) {
       continue;
     }
 

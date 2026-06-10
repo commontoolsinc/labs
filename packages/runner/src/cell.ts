@@ -130,7 +130,7 @@ import {
   mergeCfcLabelViews,
   rebaseCfcLabelView,
 } from "./cfc/label-view-state.ts";
-import { flowPrecisionSchemaForBuiltin } from "./cfc/flow-precision.ts";
+import { listResultSchema } from "./builtins/list-result-schema.ts";
 import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
@@ -2065,10 +2065,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    const schema = flowPrecisionSchemaForBuiltin("map", op.resultSchema);
-    if (schema !== undefined) {
-      result.setSchema(schema);
-    }
+    result.setSchema(listResultSchema(op.resultSchema));
     return result;
   }
 
@@ -2158,10 +2155,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    const schema = flowPrecisionSchemaForBuiltin("filter");
-    if (schema !== undefined) {
-      result.setSchema(schema);
-    }
+    result.setSchema(listResultSchema());
     return result;
   }
 
@@ -2201,10 +2195,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    const schema = flowPrecisionSchemaForBuiltin("flatMap");
-    if (schema !== undefined) {
-      result.setSchema(schema);
-    }
+    result.setSchema(listResultSchema());
     return result;
   }
 

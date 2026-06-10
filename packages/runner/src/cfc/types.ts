@@ -129,15 +129,33 @@ export type CfcSandboxResult = {
   diagnostics?: CfcSandboxDiagnostic[];
 };
 
+/**
+ * Provenance component of a persisted labelMap entry. Components follow
+ * distinct update disciplines (S16 design):
+ * - `declared`: schema store policy — monotone (grow-only) per §8.12.
+ * - `link`: reference-carried label — replaced when the link at the path
+ *   is rewritten.
+ * - `derived`: default-transition flow label — replaced when the value at
+ *   the path is overwritten; an ancestor overwrite clears derived
+ *   descendants.
+ * Entries without an origin are legacy (pre-component) entries and are
+ * treated as one combined component with the historical update rules.
+ * The effective label at a path is the join of all components.
+ */
+export type LabelEntryOrigin = "declared" | "link" | "derived";
+
+export type LabelMapEntry = {
+  path: readonly string[];
+  label: IFCLabel;
+  origin?: LabelEntryOrigin;
+};
+
 export type CfcMetadata = {
   version: 1;
   schemaHash: string;
   labelMap: {
     version: 1;
-    entries: Array<{
-      path: readonly string[];
-      label: IFCLabel;
-    }>;
+    entries: Array<LabelMapEntry>;
   };
 };
 
@@ -272,9 +290,21 @@ export type CfcPrepareState =
   | { status: "prepared"; digest: string; input: PreparedDigestInput }
   | { status: "invalidated"; digest?: string; reasons: string[] };
 
+/**
+ * Flow-label propagation dial (S16 default transition), orthogonal to the
+ * enforcement ladder: `off` = no derivation; `observe` = compute the per-tx
+ * conservative join and emit diagnostics, persist nothing; `persist` = write
+ * derived label components for every value write target. Propagation never
+ * rejects by itself — enforcement stays with the existing consumers.
+ */
+export type CfcFlowLabelsMode = "off" | "observe" | "persist";
+
+export const DEFAULT_CFC_FLOW_LABELS_MODE: CfcFlowLabelsMode = "off";
+
 export type CfcTxState = {
   relevant: boolean;
   enforcementMode: CfcEnforcementMode;
+  flowLabelsMode: CfcFlowLabelsMode;
   prepare: CfcPrepareState;
   dereferenceTraces: CfcDereferenceTrace[];
   writePolicyInputs: WritePolicyInput[];

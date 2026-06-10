@@ -80,6 +80,7 @@ describe("CFC exact copy claims", () => {
         label: {
           confidentiality: ["secret"],
         },
+        origin: "declared",
       });
     } finally {
       await runtime.dispose();

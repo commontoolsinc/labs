@@ -38,6 +38,7 @@ import { Cell } from "../cell.ts";
 import type {
   CfcDereferenceTrace,
   CfcEnforcementMode,
+  CfcFlowLabelsMode,
   CfcTxState,
   ImplementationIdentity,
   PostCommitSideEffect,
@@ -721,6 +722,7 @@ export interface IExtendedStorageTransaction
 
   getCfcState(): Readonly<CfcTxState>;
   setCfcEnforcementMode(mode: CfcEnforcementMode): void;
+  setCfcFlowLabelsMode(mode: CfcFlowLabelsMode): void;
   markCfcRelevant(reason?: string): void;
   invalidateCfc(reason: string): void;
 

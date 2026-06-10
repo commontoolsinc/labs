@@ -58,8 +58,10 @@ import { LINK_V1_TAG } from "./sigil-types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   type CfcEnforcementMode,
+  type CfcFlowLabelsMode,
   type CfcLabelView,
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
+  flowLabelWorkExists,
   type SinkMaxConfidentiality,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
@@ -198,6 +200,12 @@ export interface RuntimeOptions {
   experimental?: ExperimentalOptions;
   /** Rollout mode for commit-boundary CFC enforcement. Defaults to `enforce-explicit`. */
   cfcEnforcementMode?: CfcEnforcementMode;
+  /**
+   * Flow-label propagation dial (S16 default transition). Defaults to `off`.
+   * Propagation requires enforcement mode ≥ `observe` to run at the commit
+   * boundary; it derives and persists labels but never rejects by itself.
+   */
+  cfcFlowLabels?: CfcFlowLabelsMode;
   /** Per-sink confidentiality ceilings for the sink-request egress gate. A sink
    *  absent from the map is ungated; a declared ceiling rejects (or, in observe
    *  mode, flags) a request carrying confidentiality outside it. Defaults to
@@ -309,6 +317,7 @@ export class Runtime {
   readonly pieceCreatedCallback?: PieceCreatedCallback;
   readonly cfc: ContextualFlowControl;
   readonly cfcEnforcementMode: CfcEnforcementMode;
+  readonly cfcFlowLabels: CfcFlowLabelsMode;
   readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
@@ -383,6 +392,7 @@ export class Runtime {
     this.cfc = new ContextualFlowControl();
     this.cfcEnforcementMode = options.cfcEnforcementMode ??
       "enforce-explicit";
+    this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
     // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
     // be able to mutate it (per-sink array or the map) after construction to
     // change what egresses are allowed (review on #3993).
@@ -590,6 +600,7 @@ export class Runtime {
       },
     });
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
+    wrapped.setCfcFlowLabelsMode(this.cfcFlowLabels);
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     return wrapped;
@@ -740,7 +751,19 @@ export class Runtime {
 
   prepareTxForCommit(tx: IExtendedStorageTransaction): void {
     const state = tx.getCfcState();
-    if (!state.relevant || state.enforcementMode === "disabled") {
+    if (state.enforcementMode === "disabled") {
+      return;
+    }
+    // Flow-label relevance is computed, not caller-marked (S16): the
+    // laundering txs are exactly the ones nothing marked relevant.
+    if (
+      !state.relevant &&
+      state.flowLabelsMode !== "off" &&
+      flowLabelWorkExists(tx)
+    ) {
+      tx.markCfcRelevant("flow-labels");
+    }
+    if (!state.relevant) {
       return;
     }
     if (state.prepare.status === "unprepared") {
