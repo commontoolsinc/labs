@@ -1422,7 +1422,12 @@ export async function runTestPattern(
 
     // Collect idempotency violations detected during normal execution
     const nonIdempotent = runtime.getIdempotencyViolations()
-      .map((r) => r.actionInfo?.patternName ?? r.actionId);
+      .map((r) => {
+        const id = r.actionInfo?.patternName ?? r.actionId;
+        return r.differingWriteKeys.length
+          ? `${id} (differing writes: ${r.differingWriteKeys.join(", ")})`
+          : id;
+      });
 
     const errorMessages = runtimeErrors.map((e) => String(e));
     return {
