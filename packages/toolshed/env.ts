@@ -208,26 +208,9 @@ const EnvSchema = z.object({
   EXPERIMENTAL_MODERN_CELL_REP: flagValue(),
   EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: flagValue(),
 
-  // ===========================================================================
-  // Compilation cache flags (see docs/specs/compilation-cache.md)
-  // ===========================================================================
-  COMPILATION_CACHE_SERVER: z.string().default("true").transform((
-    v,
-  ) => v === "true"),
-  // COMPILATION_CACHE_CLIENT is read by the shell's felt.config.ts via
-  // Deno.env.get() at build time (esbuild define), not by toolshed code.
-  // It's defined here so the start scripts can pass it through consistently.
-  COMPILATION_CACHE_CLIENT: z.string().default("true").transform((
-    v,
-  ) => v === "true"),
-  // Git SHA to use as the compilation cache fingerprint.  Set at deploy time
-  // to the deployed commit.  Takes priority over live git auto-detection, so
-  // in local dev leave this unset to get dirty-file tracking.
+  // Git SHA of the deployed commit. Set at deploy time; takes priority over
+  // the build-baked SHA (see lib/build-info.ts).
   TOOLSHED_GIT_SHA: z.string().optional(),
-  // Directory for the server-side filesystem compilation cache.
-  // Must be writable. In multi-process environments (e.g. common-cluster),
-  // use distinct directories per process to avoid conflicts.
-  COMPILATION_CACHE_FS_DIR: z.string().default("/tmp/cf-compilation-cache"),
 
   // ===========================================================================
   // Sandbox Service

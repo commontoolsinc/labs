@@ -1,14 +1,8 @@
 import app from "@/app.ts";
 import env from "@/env.ts";
-import { resolveGitSha } from "@/lib/build-info.ts";
 import { identity } from "@/lib/identity.ts";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import {
-  CachedCompiler,
-  computeGitFingerprint,
-  FileSystemCompilationCache,
-} from "@commonfabric/runner/compilation-cache";
 import { memory } from "@/routes/storage/memory.ts";
 
 // Create a global runtime instance for the server
@@ -16,37 +10,9 @@ let runtime: Runtime;
 
 // Initialize runtime with storage and signer
 // FIXME(ja): should we do this even on memory-only toolsheds?
-const initializeRuntime = async () => {
+const initializeRuntime = () => {
   try {
     console.log(`Initializing runtime with signer ${identity.did()}...`);
-
-    // Construct server-side compilation cache if enabled.
-    // Fingerprint priority: TOOLSHED_GIT_SHA > build-baked SHA >
-    // live git repo > disabled. `resolveGitSha()` covers the first
-    // two; `computeGitFingerprint` does the live-git fallback.
-    let cachedCompiler: CachedCompiler | undefined;
-    if (env.COMPILATION_CACHE_SERVER) {
-      const fingerprint = await computeGitFingerprint(
-        resolveGitSha() ?? undefined,
-      );
-      if (fingerprint) {
-        cachedCompiler = new CachedCompiler(
-          new FileSystemCompilationCache(env.COMPILATION_CACHE_FS_DIR),
-          fingerprint,
-        );
-        console.log(
-          `Compilation cache enabled (server), fingerprint=${
-            fingerprint.substring(0, 8)
-          }`,
-        );
-      } else {
-        console.log("Compilation cache disabled (server): no git fingerprint");
-      }
-    } else {
-      console.log(
-        "Compilation cache disabled (server): COMPILATION_CACHE_SERVER not set",
-      );
-    }
 
     runtime = new Runtime({
       apiUrl: new URL(env.MEMORY_URL),
@@ -62,7 +28,6 @@ const initializeRuntime = async () => {
         modernCellRep: env.EXPERIMENTAL_MODERN_CELL_REP,
         persistentSchedulerState: env.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE,
       },
-      cachedCompiler,
     });
     console.log("Runtime initialized successfully");
     console.log("Configured to remote storage:", env.MEMORY_URL);
@@ -125,9 +90,9 @@ const handleShutdown = async () => {
 };
 
 // Start server with the abort controller
-async function startServer() {
+function startServer() {
   console.log(`Server is starting on port http://${env.HOST}:${env.PORT}`);
-  await initializeRuntime();
+  initializeRuntime();
 
   const serverOptions = {
     hostname: env.HOST,

@@ -25,7 +25,7 @@ import {
   getThemePreference,
   type ThemePreference,
 } from "../lib/theme-preference.ts";
-import { COMPILATION_CACHE_CLIENT, EXPERIMENTAL } from "../lib/env.ts";
+import { EXPERIMENTAL } from "../lib/env.ts";
 
 type CommonfabricDebugState = Partial<ReturnType<typeof createDebugUtils>> & {
   rt?: RuntimeClient;
@@ -115,7 +115,6 @@ export class XRootView extends BaseView {
           view: app.view,
           apiUrl: app.apiUrl,
           experimental: EXPERIMENTAL,
-          compilationCacheClient: COMPILATION_CACHE_CLIENT,
           navigate,
         });
 

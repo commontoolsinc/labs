@@ -146,11 +146,8 @@ describe("CFC authoring surface trust-sensitive claims", () => {
         }],
       };
 
-      const { id, jsScript } = await runtime.harness.compile(program);
-      const { main } = await runtime.harness.evaluate(
-        id,
-        jsScript,
-        program.files,
+      const { main } = await runtime.harness.compileAndEvaluateModules(
+        program,
       );
       const pattern = main?.default;
       const resultCell = runtime.getCell<{ value: string }>(

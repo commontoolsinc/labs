@@ -33,7 +33,6 @@ async function devAction(
     check: boolean;
     run: boolean;
     output?: string;
-    filename?: string;
     showTransformed?: boolean;
     mainExport?: string;
     verboseErrors?: boolean;
@@ -58,7 +57,6 @@ async function devAction(
         check: options.check,
         run: options.run,
         output: files.length === 1 ? options.output : undefined,
-        filename: options.filename,
         showTransformed: options.showTransformed,
         mainExport: options.mainExport,
         verboseErrors: options.verboseErrors,
@@ -120,7 +118,7 @@ function createDevCommand(cmdName: string): Command<any> {
     )
     .example(
       cliText(`cf ${cmdName} ./pattern.tsx --no-run --output out.js`),
-      "Compile a pattern, storing the translated and bundled JavaScript to out.js without evaluating.",
+      "Compile a pattern, storing the compiled per-module JavaScript to out.js without evaluating.",
     )
     .example(
       cliText(`cf ${cmdName} ./pattern.tsx --no-check`),
@@ -131,10 +129,6 @@ function createDevCommand(cmdName: string): Command<any> {
     .option(
       "--output <value:string>",
       "Store the compiled pattern at $output.",
-    )
-    .option(
-      "--filename <value:string>",
-      "The filename used when compiling the pattern, used in source maps.",
     )
     .option(
       "--show-transformed",

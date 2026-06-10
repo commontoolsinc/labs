@@ -1,5 +1,4 @@
 import type {
-  JsScript,
   Program,
   ProgramResolver,
   Source,
@@ -88,17 +87,6 @@ export interface CacheableModule {
 
 export type Exports = Record<string, any>;
 
-/** Result of compile(): the compiled JS and the id used for prefix stripping. */
-export interface CompileResult {
-  /** Content-derived id used as the filename prefix during compilation.
-   *  Must be passed to evaluate() so it can correctly strip the prefix
-   *  from export map keys. */
-  id: string;
-  jsScript: JsScript;
-  /** True only after the compiled JavaScript bundle has passed SES validation. */
-  sesValidated?: true;
-}
-
 export interface EvaluateResult {
   main?: Exports;
   exportMap?: Record<string, Exports>;
@@ -116,42 +104,16 @@ export interface EvaluateResult {
    * Hoist registrations collected during this evaluation (`__cfReg`): module
    * content identity → (symbol → live builder artifact). The PatternManager turns
    * each trusted entry into a content-addressed `{ identity, symbol }` reference
-   * and indexes it for synchronous by-identity resolution. Populated only on the
-   * ESM evaluate paths.
+   * and indexes it for synchronous by-identity resolution.
    */
   registrationsByIdentity?: HoistRegistrationSink;
 }
 
-export interface EvaluateOptions {
-  /**
-   * Skip SES bundle validation for compiled JavaScript loaded from a trusted
-   * cache entry. Direct callers should leave this unset.
-   */
-  skipBundleValidation?: boolean;
-}
-
 // A `Harness` wraps a flow of compiling, bundling, and executing typescript.
 export interface Harness extends EventTarget {
-  // Compiles `source` to JS without evaluation.
-  compile(
-    source: RuntimeProgram,
-    options?: TypeScriptHarnessProcessOptions,
-  ): Promise<CompileResult>;
-
-  // Evaluates pre-compiled JS, returning exports.
-  // `id` and `files` are the values from compilation — pass them through
-  // to avoid recomputing and to prevent mismatches.
-  evaluate(
-    id: string,
-    jsScript: JsScript,
-    files: Source[],
-    options?: EvaluateOptions,
-  ): Promise<EvaluateResult>;
-
-  // Compile + evaluate a program through the ESM module-record path (the
-  // `esmModuleLoader` flag route), returning the same shape as `evaluate`.
-  // Optional: present only on harnesses that implement the ESM loader.
-  compileAndEvaluateModules?(
+  // Compile + evaluate a program through the ESM module-record path,
+  // returning the entry exports plus the per-module export map.
+  compileAndEvaluateModules(
     program: RuntimeProgram,
     options?: TypeScriptHarnessProcessOptions,
   ): Promise<EvaluateResult>;
@@ -159,8 +121,8 @@ export interface Harness extends EventTarget {
   // Compile a program to a verified ESM record graph, returning the graph plus
   // the per-module cache descriptors (in content-identity space). Split from
   // evaluation so a caller can write the descriptors to the content-addressed
-  // cache between compile and evaluate. Optional (ESM-loader harnesses only).
-  compileToRecordGraph?(
+  // cache between compile and evaluate.
+  compileToRecordGraph(
     program: RuntimeProgram,
     options?: TypeScriptHarnessProcessOptions,
   ): Promise<{
@@ -172,7 +134,7 @@ export interface Harness extends EventTarget {
   }>;
 
   // Evaluate a verified ESM record graph produced by `compileToRecordGraph`.
-  evaluateRecordGraph?(
+  evaluateRecordGraph(
     id: string,
     graph: CompiledModuleGraph,
     mainSpecifier: string,
@@ -181,7 +143,7 @@ export interface Harness extends EventTarget {
 
   // Warm load: build + verify + evaluate a pattern directly from cached compiled
   // modules (by content identity) — no TS source, no resolve, no recompile.
-  evaluateCachedModules?(
+  evaluateCachedModules(
     modules: readonly CachedCompiledModule[],
     entryIdentity: string,
     options?: { sourceFiles?: Source[]; trustedBodies?: boolean },
@@ -189,7 +151,7 @@ export interface Harness extends EventTarget {
 
   // Cold recovery: recompile cacheable modules from the stored (already-resolved,
   // inject-transformed) source set — e.g. after a runtimeVersion bump.
-  compileResolvedToRecordGraph?(
+  compileResolvedToRecordGraph(
     resolvedFiles: Source[],
     entryFilename: string,
   ): Promise<{ modules: CacheableModule[]; entryIdentity: string }>;

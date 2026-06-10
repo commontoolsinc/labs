@@ -152,8 +152,7 @@ const handlers: Record<
         args.root as string | undefined,
       ),
     );
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
     const descriptor = (main?.default ?? {}) as {
       setup?: Pattern;
       participants?: Record<string, Pattern | { pattern: Pattern }>;

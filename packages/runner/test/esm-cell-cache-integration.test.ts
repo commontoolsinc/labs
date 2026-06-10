@@ -42,16 +42,15 @@ describe("ESM compile via content-addressed cell cache", () => {
     ],
   };
 
-  const newRuntime = (esm: boolean) =>
+  const newRuntime = () =>
     new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { esmModuleLoader: esm },
     });
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
-    runtime = newRuntime(true);
+    runtime = newRuntime();
     tx = runtime.edit();
   });
 
@@ -131,7 +130,7 @@ describe("ESM compile via content-addressed cell cache", () => {
     await tx.commit();
 
     // Session 2: a brand-new runtime on the same storage warms from the cache.
-    const runtime2 = newRuntime(true);
+    const runtime2 = newRuntime();
     const tx2 = runtime2.edit();
     try {
       const pm2 = runtime2.patternManager;
@@ -153,7 +152,6 @@ describe("ESM compile via content-addressed cell cache", () => {
     const disabled = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { esmModuleLoader: true },
       cfcEnforcementMode: "disabled",
     });
     const dtx = disabled.edit();
@@ -215,7 +213,6 @@ describe("ESM compile cache — Pattern.inSpace A → B routing", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { esmModuleLoader: true },
     });
     const tx = runtime.edit();
     const compilerDid = runtime.userIdentityDID;
@@ -275,7 +272,6 @@ describe("ESM compile cache — Pattern.inSpace A → B routing", () => {
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { esmModuleLoader: true },
     });
     const tx1 = rt1.edit();
     let rt2: Runtime | undefined;
@@ -292,7 +288,6 @@ describe("ESM compile cache — Pattern.inSpace A → B routing", () => {
       rt2 = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
-        experimental: { esmModuleLoader: true },
       });
       const tx2 = rt2.edit();
       await rt2.patternManager.compilePattern(PROGRAM, {

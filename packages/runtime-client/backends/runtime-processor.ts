@@ -26,10 +26,6 @@ import {
   type SigilLink,
 } from "@commonfabric/runner";
 import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
-import {
-  CachedCompiler,
-  IDBCompilationCache,
-} from "@commonfabric/runner/compilation-cache";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
@@ -128,7 +124,6 @@ export function runtimeOptionsFromInitializationData(
   data: InitializationData,
   storageManager: RuntimeOptions["storageManager"],
   telemetry: RuntimeTelemetry,
-  cachedCompiler: CachedCompiler | undefined,
 ): RuntimeOptions {
   const apiUrlObj = new URL(data.apiUrl);
   return {
@@ -141,7 +136,6 @@ export function runtimeOptionsFromInitializationData(
     trustSnapshotProvider: data.trustSnapshot
       ? () => data.trustSnapshot
       : undefined,
-    cachedCompiler,
   };
 }
 
@@ -334,18 +328,12 @@ export class RuntimeProcessor {
       spaceHostMap: data.spaceHostMap,
     });
 
-    // Construct compilation cache if a build hash was provided (browser path).
-    const cachedCompiler = data.buildHash
-      ? new CachedCompiler(new IDBCompilationCache(), data.buildHash)
-      : undefined;
-
     let pieceManager: PieceManager | undefined = undefined;
     const runtime = new Runtime({
       ...runtimeOptionsFromInitializationData(
         data,
         storageManager,
         telemetry,
-        cachedCompiler,
       ),
       consoleHandler: ({ metadata, method, args }) => {
         // Deep-walk args to convert uncloneable objects (Cells, Proxies,
