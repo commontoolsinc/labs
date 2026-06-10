@@ -557,22 +557,23 @@ each access; once frozen it is cached.
 
 #### 1.4.3 `FabricMap`
 
-**Implementation status: stubbed.** The class exists with the full wrapper
-shape, and its `Map@1` tag is reserved in `CODEC_TYPE_TAGS`, but the
-protocol members and the codec's `encode()`/`decode()` currently throw
-(`"FabricMap: not yet implemented"`) — `FabricMap` is not yet used and is
-being reworked separately. The normative wire format (entry pairs as an
-array of two-element arrays; Section 1.4.1) is unchanged and is what the
-eventual implementation must produce.
+> **Implementation status: stubbed (tag reserved).** The live class
+> exists with the full wrapper shape (including the native-projection
+> members, with `toNativeFrozen()` producing a `FrozenMap`), and its
+> `Map@1` tag is reserved in `CODEC_TYPE_TAGS`, but the protocol members
+> and the codec's `encode()`/`decode()` currently throw
+> (`"FabricMap: not yet implemented"`) — `FabricMap` is not yet used and
+> is being reworked separately. The code below is the **normative
+> target** the implementation must converge on; the wire format matches
+> Section 1.4.1.
 
 ```typescript
 // file: packages/data-model/fabric-instances/FabricMap.ts
+// (Normative target -- the live codec is currently a throwing stub.)
 
 /**
- * Wrapper for `Map` instances. Stub -- the static `[CODEC]` (the source
- * of truth) throws until `Map` support is fully implemented. Extra
- * properties beyond the wrapped collection are not supported on
- * non-`Error` wrappers.
+ * Wrapper for `Map` instances. Extra properties beyond the wrapped
+ * collection are not supported on non-`Error` wrappers.
  */
 export class FabricMap
   extends FabricNativeWrapper<Map<FabricValue, FabricValue>> {
@@ -580,10 +581,10 @@ export class FabricMap
     super();
   }
 
-  // [DEEP_FREEZE] / [IS_DEEP_FROZEN]: throwing stubs.
-  // shallowUnfrozenClone(): copies `map` into a new wrapper.
-  // wrappedValue / toNativeFrozen() (-> FrozenMap) / toNativeThawed():
-  //   the native-projection members are implemented.
+  // ([DEEP_FREEZE] / [IS_DEEP_FROZEN] freeze `this` and recurse into the
+  // entries; `shallowUnfrozenClone()` copies `map` into a new wrapper;
+  // `wrappedValue` / `toNativeFrozen()` (-> `FrozenMap`) /
+  // `toNativeThawed()` are the native-projection members.)
 
   static #codec = Object.freeze(
     new (class FabricMapCodec extends BaseFabricCodec {
@@ -591,18 +592,20 @@ export class FabricMap
         super(CODEC_TYPE_TAGS.Map, FabricMap);
       }
 
-      /** Stub -- throws until `Map` support is implemented. */
-      encode(_value: FabricMap): FabricValue {
-        throw new Error('FabricMap: not yet implemented');
+      /** Entry pairs as an array of two-element arrays; insertion order
+       *  is preserved. */
+      encode(value: FabricMap): FabricValue {
+        return [...value.map.entries()] as FabricValue;
       }
 
-      /** Stub -- throws until `Map` support is implemented. */
       decode(
         _typeTag: string,
-        _state: FabricValue,
-        _context: ReconstructionContext,
+        state: FabricValue,
+        context: ReconstructionContext,
       ): FabricValue {
-        throw new Error('FabricMap: not yet implemented');
+        const entries = state as [FabricValue, FabricValue][];
+        const result = new FabricMap(new Map(entries));
+        return context.shouldDeepFreeze ? deepFreeze(result) : result;
       }
     })(),
   );
@@ -616,27 +619,54 @@ export class FabricMap
 
 #### 1.4.4 `FabricSet`
 
-**Implementation status: stubbed**, exactly parallel to `FabricMap`
-(Section 1.4.3): the class shape and reserved `Set@1` tag exist; the
-protocol members and codec throw (`"FabricSet: not yet implemented"`); the
-native-projection members are implemented (`toNativeFrozen()` produces a
-`FrozenSet`). The normative wire format (elements as an array; Section
-1.4.1) is unchanged.
+> **Implementation status: stubbed (tag reserved)**, exactly parallel to
+> `FabricMap` (Section 1.4.3): the class shape and reserved `Set@1` tag
+> exist (with `toNativeFrozen()` producing a `FrozenSet`); the protocol
+> members and codec currently throw (`"FabricSet: not yet implemented"`).
+> The code below is the **normative target**; the wire format matches
+> Section 1.4.1.
 
 ```typescript
 // file: packages/data-model/fabric-instances/FabricSet.ts
+// (Normative target -- the live codec is currently a throwing stub.)
 
 /**
- * Wrapper for `Set` instances. Stub -- the static `[CODEC]` (the source
- * of truth) throws until `Set` support is fully implemented.
+ * Wrapper for `Set` instances.
  */
 export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   constructor(readonly set: Set<FabricValue>) {
     super();
   }
 
-  // (Same stub/implemented member split as `FabricMap`; codec tag is
-  // `CODEC_TYPE_TAGS.Set`.)
+  // (Lifecycle and native-projection members parallel to `FabricMap`.)
+
+  static #codec = Object.freeze(
+    new (class FabricSetCodec extends BaseFabricCodec {
+      constructor() {
+        super(CODEC_TYPE_TAGS.Set, FabricSet);
+      }
+
+      /** Elements as an array; iteration order is preserved. */
+      encode(value: FabricSet): FabricValue {
+        return [...value.set] as FabricValue;
+      }
+
+      decode(
+        _typeTag: string,
+        state: FabricValue,
+        context: ReconstructionContext,
+      ): FabricValue {
+        const elements = state as FabricValue[];
+        const result = new FabricSet(new Set(elements));
+        return context.shouldDeepFreeze ? deepFreeze(result) : result;
+      }
+    })(),
+  );
+
+  /** The codec for instances of this class. */
+  static get [CODEC](): FabricCodec {
+    return this.#codec;
+  }
 }
 ```
 
