@@ -1072,9 +1072,8 @@ export function validateAndTransform(
       options?.traverseCells ?? false,
       undefined,
       undefined,
-      // Absent link targets (typically across a space boundary, which the
-      // source doc's per-space subscription cannot cover) get an async load
-      // kicked; the tracked read re-runs the reader on arrival (CT-1667).
+      // Absent cross-space link targets get an async load kicked; the
+      // tracked read re-runs the reader on arrival.
       (missing) => runtime.ensureLinkedDocLoaded(missing),
     ),
     objectCreator,

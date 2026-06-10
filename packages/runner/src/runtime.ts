@@ -601,16 +601,14 @@ export class Runtime {
   private missingDocLoadKicks = new Set<string>();
 
   /**
-   * Kick an asynchronous load of a linked document that a read traversal
-   * found absent from the local replica (CT-1667). Per-space server queries
-   * cannot follow links across space boundaries, so the target of a
-   * cross-space link is never covered by the originating subscription — and
-   * a minimal-schema subscription can leave even same-space link targets
-   * uncovered. The load is fire-and-forget but registered as a cross-space
-   * promise, so `storageManager.synced()` (and `Cell.pull()`'s convergence
-   * loop) can await it; when the doc arrives, the tracked read dependency
-   * re-runs the reader. Deduped per (space, id): the kicked sync leaves a
-   * live subscription behind, so repeat kicks add nothing.
+   * Asynchronously load a cross-space link target that a read found absent
+   * from the local replica (CT-1667): per-space server queries cannot follow
+   * links across space boundaries, so the client must fetch such targets
+   * itself. Fire-and-forget, but registered as a cross-space promise so
+   * `storageManager.synced()` and `Cell.pull()`'s convergence loop can await
+   * it; the absent doc is a tracked read, so the reader re-runs on arrival.
+   * Deduped per (space, id): the kicked sync leaves a live subscription
+   * behind, so repeat kicks add nothing.
    */
   ensureLinkedDocLoaded(link: NormalizedFullLink): void {
     const key = `${link.space}\0${link.id}`;

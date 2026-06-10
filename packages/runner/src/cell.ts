@@ -989,18 +989,14 @@ export class CellImpl<T extends FabricValue>
       });
 
       // Wait for the scheduler to process all pending work, then resolve.
-      // Convergence (CT-1667): the read may have kicked async loads of link
-      // targets absent from the local replica (typically across a space
-      // boundary). Each arrival re-runs the read action (the absent doc is a
-      // tracked dependency) and can discover the NEXT hop, so loop — bounded
-      // — until no cross-space loads remain. Pulls that kicked nothing take
-      // the zero-iteration path and keep their existing timing.
+      // If the read kicked async loads of cross-space link targets, await
+      // them and re-idle — each arrival re-runs the read and can reveal the
+      // next hop — bounded. Pulls that kicked nothing take the
+      // zero-iteration path and keep their previous timing.
       this.runtime.scheduler.idle().then(async () => {
         const storage = this.runtime.storageManager;
-        // The pending pool is manager-global, so this pull may also wait on
-        // loads kicked by concurrent readers — same semantics as `synced()`,
-        // and converging on them is harmless (the loop exits as soon as the
-        // pool drains).
+        // The pending pool is manager-global (same semantics as `synced()`):
+        // this pull may also wait on loads kicked by concurrent readers.
         let round = 0;
         for (; round < 10; round++) {
           if ((storage.pendingCrossSpacePromiseCount?.() ?? 0) === 0) break;

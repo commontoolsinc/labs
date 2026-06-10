@@ -920,14 +920,12 @@ export type TraversalContext = {
   includeMeta: boolean;
   metaDocsVisited: Set<string>;
   /**
-   * Called when a followed link's target document is entirely absent from
-   * the local replica (CT-1667). Per-space server queries cannot follow
-   * links across space boundaries (and minimal-schema subscriptions can
-   * leave even same-space targets uncovered), so the traversal is the first
-   * place the gap is observable. The runtime-aware caller kicks an async
-   * load (see `Runtime.ensureLinkedDocLoaded`); the traversal itself only
-   * reports. Optional: schema-tracking traversals on the server have no
-   * runtime and no replica gap.
+   * Reports a followed link whose target document is absent from the local
+   * replica and lives in ANOTHER space. Per-space server queries cannot
+   * follow links across space boundaries, so such a target is never covered
+   * by the subscription that loaded the source doc — the client must fetch
+   * it itself (see `Runtime.ensureLinkedDocLoaded`). Optional: server-side
+   * schema traversals have no replica gap.
    */
   onMissingLinkTarget?: (link: NormalizedFullLink) => void;
 };
@@ -1874,32 +1872,32 @@ function followPointer(
         "traverse",
         () => ["followPointer found missing/retracted fact", valueEntry],
       );
-      // A linked doc absent from the local replica may simply never have
-      // been fetched — the subscription that loaded the SOURCE doc cannot
-      // cover targets across a space boundary (CT-1667). Report it so the
-      // runtime can kick an async load; this read still resolves notFound
-      // and the tracked dependency re-runs the reader when the doc arrives.
-      // Pass the link with the narrowed selector schema so the fetch covers
-      // the shape this traversal actually needs. The selector was re-rooted
-      // at the TARGET doc (its path is `["value", ...inDocPath]`), so when
-      // one exists its path — minus the "value" prefix — is the path the
-      // schema describes; pairing the schema with the bare link path would
-      // register a malformed watch selector.
-      context.onMissingLinkTarget?.({
-        space: link.space,
-        id: link.id,
-        path: selector !== undefined
-          ? selector.path.slice(1) as readonly string[]
-          : link.path,
-        scope: link.scope,
-        ...(selector?.schema !== undefined || link.schema !== undefined
-          ? {
-            schema: (selector?.schema ?? link.schema) as
-              | JSONSchema
-              | undefined,
-          }
-          : {}),
-      } as NormalizedFullLink);
+      // A CROSS-SPACE target absent from the replica cannot have been
+      // covered by the source doc's per-space subscription — report it for
+      // an async load. This read still resolves notFound; the absent doc is
+      // a tracked read, so the reader re-runs when it arrives. Same-space
+      // absent targets are NOT reported: they are either covered by the
+      // originating query or genuinely absent, and kicking them turns every
+      // read of an optional value into a server query. The reported link
+      // carries the selector's target-rooted path (minus its "value"
+      // prefix) and schema so the fetch covers the shape this read needs.
+      if (link.space !== doc.address.space) {
+        context.onMissingLinkTarget?.({
+          space: link.space,
+          id: link.id,
+          path: selector !== undefined
+            ? selector.path.slice(1) as readonly string[]
+            : link.path,
+          scope: link.scope,
+          ...(selector?.schema !== undefined || link.schema !== undefined
+            ? {
+              schema: (selector?.schema ?? link.schema) as
+                | JSONSchema
+                | undefined,
+            }
+            : {}),
+        } as NormalizedFullLink);
+      }
       // We include the path in the address, so that information is available,
       return [notFound(target), selector];
     } else if (error.name !== "NotFoundError") {
