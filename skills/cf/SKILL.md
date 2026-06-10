@@ -68,8 +68,8 @@ or default. For identity-sensitive local work, use one key everywhere and import
 the CLI PKCS8/PEM key in the browser via `Import CLI Key`. See
 `docs/development/SHARED_IDENTITY.md`.
 
-**Experimental flags** must be set as env vars on both servers AND CLI
-commands. See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
+**Experimental flags** must be set as env vars on both servers AND CLI commands.
+See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 
 **Local servers**: See `docs/development/LOCAL_DEV_SERVERS.md`
 

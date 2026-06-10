@@ -13,9 +13,9 @@ piece issues.
 
 - `docs/development/debugging/workflow.md` - 5-step debugging process
 - `docs/development/debugging/README.md` - Error reference matrix
-- `docs/common/concepts/reactivity.md` and `docs/common/patterns/new-cells.md`
-  — as mandated by pattern-dev; re-consult for Cell, Writable, or
-  reactive-value failures
+- `docs/common/concepts/reactivity.md` and `docs/common/patterns/new-cells.md` —
+  as mandated by pattern-dev; re-consult for Cell, Writable, or reactive-value
+  failures
 
 ## Process
 

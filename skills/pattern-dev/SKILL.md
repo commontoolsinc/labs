@@ -109,8 +109,8 @@ conditional site behaves unexpectedly or seems ambiguous, inspect the emitted
 source with `--show-transformed` rather than guessing.
 
 Pay special attention to the SES authoring section of
-`docs/common/ai/pattern-development-guide.md` before adding module-scope
-setup, timers, or time/random helpers. The current authored escape hatches are
+`docs/common/ai/pattern-development-guide.md` before adding module-scope setup,
+timers, or time/random helpers. The current authored escape hatches are
 `safeDateNow()` and `nonPrivateRandom()`. Also follow its binding guidance: when
 a control is already bound to a cell, usually via `$value` or `$checked`, do not
 add a handler that simply writes the same value back into that same cell.

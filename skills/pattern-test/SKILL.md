@@ -17,8 +17,8 @@ deno task cf test <pattern>.test.tsx
 ```
 
 When working in a Pattern Factory Build workspace, also follow
-`docs/common/ai/pattern-factory-build-guide.md` (as mandated by pattern-dev).
-It defines Pattern Factory's build completion gate and expected coverage shape.
+`docs/common/ai/pattern-factory-build-guide.md` (as mandated by pattern-dev). It
+defines Pattern Factory's build completion gate and expected coverage shape.
 
 For patterns that stamp timestamps or IDs, prefer deterministic assertions over
 recomputing time/random values inside the test itself.
@@ -41,14 +41,13 @@ Runtime notes:
 
 ## Done When
 
-- `deno task cf test` exits 0 for every test file. A failing test is not a
-  valid done state unless a concrete external, tooling, or environment blocker
+- `deno task cf test` exits 0 for every test file. A failing test is not a valid
+  done state unless a concrete external, tooling, or environment blocker
   prevents further repair.
-- Coverage matches the testing guide's expected shape: the product contract,
-  not only the happy path (first-run/default states; primary add, remove,
-  edit, toggle, or submit flows; repeated actions; validation and edge-case
-  branches from the spec).
-- The test report explains what was covered and what was intentionally
-  omitted.
+- Coverage matches the testing guide's expected shape: the product contract, not
+  only the happy path (first-run/default states; primary add, remove, edit,
+  toggle, or submit flows; repeated actions; validation and edge-case branches
+  from the spec).
+- The test report explains what was covered and what was intentionally omitted.
 - The pattern still compiles after any interface changes made to support
   testing.
