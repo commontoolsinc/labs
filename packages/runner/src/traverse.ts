@@ -262,11 +262,11 @@ function narrowAndCombineSelectorForLink(
  * returns one interned (canonical, deep-frozen) result per (schema identity,
  * path, marker variant).
  *
- * Only memoizes when `schema` is itself an interned object: interned implies
- * deep-frozen, so the identity key cannot go stale. (`schemaAtPath()` is
- * deterministic — `ContextualFlowControl` carries no instance state — so a
- * module-level cache across cfc instances is sound.) Non-interned input falls
- * back to the exact un-memoized computation.
+ * Only memoizes when `schema` is a memoizable input (interned or deep-frozen
+ * — see `isMemoizableSchemaInput()`), so the identity key cannot go stale.
+ * (`schemaAtPath()` is deterministic — `ContextualFlowControl` carries no
+ * instance state — so a module-level cache across cfc instances is sound.)
+ * Mutable input falls back to the exact un-memoized computation.
  *
  * `markers` selects the `$comment` marker pair `traverseObjectWithSchema`
  * uses to detect properties it should not descend into.
@@ -326,8 +326,9 @@ function schemaAtPathCanonical(
  * scratch. Canonicalizing it once per resolved-schema identity lets those
  * lookups hit the interned-schema hash cache in O(1).
  *
- * Like the other seam memos, only an interned (identity-stable, deep-frozen)
- * `schema` is memoized; otherwise this is exactly the old inline destructure.
+ * Like the other seam memos, only a memoizable (interned or deep-frozen,
+ * hence identity-stable) `schema` is memoized; otherwise this is exactly the
+ * old inline destructure.
  */
 const _restSchemaCache = new WeakMap<
   JSONSchemaObj,
@@ -360,8 +361,9 @@ function combinatorRestSchema(
  * interned result. `$ref` resolution mints a fresh schema per call, which
  * de-canonicalizes the whole subtree below it: every identity-keyed hash
  * cache downstream (memo keys, cycle-tracker keys, pair-merge keys) misses
- * and re-walks. Only memoizes interned (identity-stable, deep-frozen)
- * inputs; the un-memoized fallback is byte-identical to the direct call.
+ * and re-walks. Only memoizes memoizable (interned or deep-frozen, hence
+ * identity-stable) inputs; the un-memoized fallback is byte-identical to
+ * the direct call.
  * `null` records a failed resolution (`undefined` result).
  */
 const _resolvedRefCache = new WeakMap<JSONSchemaObj, JSONSchema | null>();
