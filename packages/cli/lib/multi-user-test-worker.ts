@@ -281,12 +281,11 @@ const handlers: Record<
   health() {
     return Promise.resolve({
       runtimeErrors: [...runtimeErrors],
-      nonIdempotent:
-        rt().getIdempotencyViolations?.()?.map((violation) =>
-          String(
-            (violation as { actionId?: string }).actionId ?? violation,
-          )
-        ) ?? [],
+      nonIdempotent: rt().getIdempotencyViolations?.()?.map((violation) =>
+        String(
+          (violation as { actionId?: string }).actionId ?? violation,
+        )
+      ) ?? [],
     });
   },
 

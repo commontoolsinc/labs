@@ -113,7 +113,11 @@ against one shared space on an in-process storage server.
 
 ```tsx
 import { action, computed, multiUserTest, pattern } from "commonfabric";
-import Chat from "./pattern.tsx";
+import Chat, { type ChatOutput } from "./pattern.tsx";
+
+interface Setup {
+  chat: ChatOutput;
+}
 
 // Instantiates the shared state ONCE; every participant runtime runs this
 // same instance (like every browser tab does) and receives its result as

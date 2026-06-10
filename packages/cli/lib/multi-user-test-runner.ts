@@ -136,7 +136,11 @@ class ParticipantWorker {
     };
   }
 
-  call(cmd: string, args: Record<string, unknown> = {}): Promise<unknown> {
+  call(
+    cmd: string,
+    args: Record<string, unknown> = {},
+    timeoutMs = RPC_TIMEOUT_MS,
+  ): Promise<unknown> {
     const id = this.#nextId++;
     const request: WorkerRequest = { id, cmd, args };
     return new Promise((resolve, reject) => {
@@ -144,10 +148,10 @@ class ParticipantWorker {
         this.#pending.delete(id);
         reject(
           new Error(
-            `[${this.name}] ${cmd} timed out after ${RPC_TIMEOUT_MS}ms`,
+            `[${this.name}] ${cmd} timed out after ${timeoutMs}ms`,
           ),
         );
-      }, RPC_TIMEOUT_MS);
+      }, timeoutMs);
       this.#pending.set(id, {
         resolve: (value) => {
           clearTimeout(timer);
@@ -193,8 +197,6 @@ export async function runMultiUserTestPattern(
   const results: TestResult[] = [];
   const runtimeErrors: string[] = [];
   const nonIdempotent: string[] = [];
-  let allowRuntimeErrors = false;
-  let expectNonIdempotent = false;
 
   const server = StandaloneMemoryServer.start();
   const spaceName = crypto.randomUUID();
@@ -238,8 +240,6 @@ export async function runMultiUserTestPattern(
           allowRuntimeErrors: init.allowRuntimeErrors,
           expectNonIdempotent: init.expectNonIdempotent,
         });
-        allowRuntimeErrors ||= init.allowRuntimeErrors;
-        expectNonIdempotent ||= init.expectNonIdempotent;
         if (options.verbose) {
           console.log(
             `  [${spec.name}] ${init.steps.length} step(s), user "${spec.user}"`,
@@ -286,7 +286,10 @@ export async function runMultiUserTestPattern(
             participant.actionCount++;
             participant.lastActionName = `action_${participant.actionCount}`;
             const stepStart = performance.now();
-            await participant.worker.call("action", { index });
+            // Per-action deadline, matching the single-runtime runner's use
+            // of --timeout (an action is a local send + settle; a slow one is
+            // a bug, not propagation latency).
+            await participant.worker.call("action", { index }, stepTimeout);
             if (options.verbose) {
               console.log(
                 `  [${participant.spec.name}] ${participant.lastActionName} (${
@@ -348,17 +351,25 @@ export async function runMultiUserTestPattern(
       }
     }
 
+    // Apply allowRuntimeErrors / expectNonIdempotent PER participant — one
+    // participant opting out must not mask another participant's failures —
+    // so the aggregate result reports only unallowed entries with the flags
+    // left off.
     for (const participant of participants) {
       const health = await participant.worker.call("health") as {
         runtimeErrors: string[];
         nonIdempotent: string[];
       };
-      runtimeErrors.push(
-        ...health.runtimeErrors.map((e) => `[${participant.spec.name}] ${e}`),
-      );
-      nonIdempotent.push(
-        ...health.nonIdempotent.map((e) => `[${participant.spec.name}] ${e}`),
-      );
+      if (!participant.allowRuntimeErrors) {
+        runtimeErrors.push(
+          ...health.runtimeErrors.map((e) => `[${participant.spec.name}] ${e}`),
+        );
+      }
+      if (!participant.expectNonIdempotent) {
+        nonIdempotent.push(
+          ...health.nonIdempotent.map((e) => `[${participant.spec.name}] ${e}`),
+        );
+      }
     }
 
     return {
@@ -367,9 +378,7 @@ export async function runMultiUserTestPattern(
       totalDurationMs: performance.now() - startTime,
       navigations: [],
       runtimeErrors,
-      allowRuntimeErrors,
       nonIdempotent,
-      expectNonIdempotent,
     };
   } catch (error) {
     return {
@@ -378,9 +387,7 @@ export async function runMultiUserTestPattern(
       totalDurationMs: performance.now() - startTime,
       navigations: [],
       runtimeErrors,
-      allowRuntimeErrors,
       nonIdempotent,
-      expectNonIdempotent,
       error: error instanceof Error
         ? `${error.message}\n${error.stack ?? ""}`
         : String(error),
