@@ -1,7 +1,50 @@
 # SQLite builtin: `db.exec` fails on a _deployed_ piece — bug report
 
-**Status:** OPEN, **trigger isolated 2026-06-09.** Dates: found 06-04,
-re-verified 06-05 and 06-09. **For:** the sqlite-builtin owner (Berni).
+**Status: RESOLVED 2026-06-09** (root cause found; fix in
+`packages/cli/lib/callable.ts`). Dates: found 06-04, re-verified 06-05 and
+06-09, fixed later on 06-09. **For:** the sqlite-builtin owner (Berni) — see the
+resolution below; one runtime-level follow-up remains open.
+
+## ✅ RESOLUTION 2026-06-09 — a client-side dispatch race, fully explained
+
+**Root cause:** `cf piece call` dispatched the handler event while the watch
+batches issued during piece load were still in flight. The `SqliteDb` handle is
+an asCell handler input read _synchronously_ inside the handler
+(`getRaw({ lastNode: "value" })`, cell.ts `.exec`); when the watch response
+carrying the handle doc hadn't landed in the local replica yet, the read saw an
+empty doc and the guard threw "invalid database handle". Verified by tracing the
+handle doc id through both sides of the sync boundary (session-attributed): the
+server returned the doc correctly in the CLI session's own piece-load batch —
+the response simply arrived _after_ the handler had already run.
+
+**The "emergent (query-count × pattern bulk)" trigger was the race's loss
+condition**, not a property of any SQL construct: each query node adds watch
+entries, and the per-session watch batches are answered serially, so bulk
+deterministically pushes the doc-carrying response past the dispatch. The
+emulated `cf test` runner never fails because loopback storage always wins the
+race. The `lph-*` table, the P1–P8 build-ups, and the day-to-day flakiness of
+the minimal repros are all explained by this.
+
+**Fix:** in `executeResolvedCallable` (`packages/cli/lib/callable.ts`), await
+`runtime.idle()` + `manager.synced()` **before** dispatching the event (both the
+`send()` path and the `.set()` fallback). The pre-existing awaits after `send`
+cover the handler's writes, not its inputs.
+
+**Verified:** full unmodified lunch-poll on a freshly deployed piece —
+`clearHistory`, `logVisit`, `addOption` all succeed across repeated fresh CLI
+sessions; rows land in (and are deleted from) the per-piece sqlite file;
+`cf test` 17/17; cli suite 43/43.
+
+**Remaining follow-up (runtime owners):** the invariant "a handler's asCell
+input docs are locally synced before the handler body runs" is still unguarded
+in the scheduler/event dispatch itself — the CLI was the only cold-start surface
+poking handlers immediately, but other surfaces (e.g. bg-piece-service
+delivering a queued event right after starting a piece) could in principle hit
+the same race. Also untested against this fix: the separate minimal
+`reactOn: db` repro below. Full investigation log:
+`session_outputs/2026-06-09_lunch-poll-sqlite-fresh-eyes/`.
+
+---
 
 ## ⭐ Update 2026-06-09 — isolated the trigger (post Berni's #3896 fix)
 
