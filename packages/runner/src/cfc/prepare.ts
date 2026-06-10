@@ -1043,6 +1043,29 @@ const forEachFlowObservation = (
       }
     }
   }
+  // Trigger reads (§8.9.2): the addresses whose invalidating writes
+  // scheduled this run. The decision to run now was influenced by their
+  // values even when this run's branch never re-reads them — without this,
+  // "dep changed" leaks one bit per change through the timing/existence of
+  // writes the rerun makes.
+  for (const trigger of tx.getCfcState().triggerReads) {
+    const logicalPath = canonicalizeLogicalPath(trigger.path);
+    if (flowReadExcluded(trigger.id, logicalPath)) {
+      continue;
+    }
+    if (
+      consume(
+        trigger.space,
+        trigger.id as URI,
+        normalizeCellScope(trigger.scope),
+        "application/json",
+        logicalPath,
+        false,
+      )
+    ) {
+      return true;
+    }
+  }
   return false;
 };
 

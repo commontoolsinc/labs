@@ -4,6 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
+import type { Action } from "../src/scheduler.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-flow-labels");
 
@@ -227,6 +228,176 @@ describe("CFC flow labels (default transition)", () => {
 
       const entriesAfter = replicaEntries(storageManager, targetId);
       expect(entriesAfter.find((e) => e.origin === "derived")).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  // A2: trigger reads (§8.9.2). The decision to run was influenced by the
+  // triggering change even when the run never reads the changed value, so
+  // its labels join the derivation.
+  it("joins trigger-read labels into the derived component", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "persist",
+    });
+    try {
+      const seed = runtime.edit();
+      const sourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-trigger-source",
+          { type: "object", properties: { secret: { type: "string" } } },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: sourceId,
+        path: [],
+      }, {
+        value: { secret: "s3cr3t" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { confidentiality: ["secret"] },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      // The transaction reads nothing — only the trigger connects it to
+      // the labeled doc.
+      const tx = runtime.edit();
+      tx.addCfcTriggerReads([{
+        space: signer.did(),
+        id: sourceId,
+        type: "application/json",
+        path: ["value", "secret"],
+      }]);
+      const out = runtime.getCell(
+        signer.did(),
+        "cfc-trigger-out",
+        undefined,
+        tx,
+      );
+      out.set({ flag: 1 });
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const outId = out.getAsNormalizedFullLink().id;
+      const entry = replicaEntries(storageManager, outId).find((e) =>
+        e.origin === "derived"
+      );
+      expect(entry).toBeDefined();
+      expect(entry!.label.confidentiality).toContainEqual("secret");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  // A2 end-to-end through the scheduler: run 1 subscribes to the labeled
+  // doc; the rerun triggered by its change takes a branch that never
+  // re-reads it, yet the rerun's write is tainted via the recorded trigger.
+  it("taints rerun writes with the triggering change's labels", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "persist",
+    });
+    try {
+      const seed = runtime.edit();
+      const sourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-trigger-sched-source",
+          { type: "object", properties: { secret: { type: "string" } } },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: sourceId,
+        path: [],
+      }, {
+        value: { secret: "v1" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { confidentiality: ["secret"] },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const setup = runtime.edit();
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-trigger-sched-source",
+        undefined,
+        setup,
+      );
+      const flag = runtime.getCell(
+        signer.did(),
+        "cfc-trigger-sched-flag",
+        undefined,
+        setup,
+      );
+      setup.abort();
+
+      let runs = 0;
+      const action: Action = (atx) => {
+        runs++;
+        if (runs === 1) {
+          // Subscribe to the labeled doc.
+          source.withTx(atx).getRaw();
+        } else {
+          // Branch away: never re-read the source, just write the flag.
+          flag.withTx(atx).set({ ran: runs });
+        }
+      };
+      runtime.scheduler.subscribe(
+        action,
+        { reads: [], shallowReads: [], writes: [] },
+        { isEffect: true },
+      );
+      await runtime.idle();
+      expect(runs).toBe(1);
+
+      const bump = runtime.edit();
+      bump.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: sourceId,
+        path: ["value", "secret"],
+      }, "v2");
+      expect((await bump.commit()).ok).toBeDefined();
+      await runtime.idle();
+      expect(runs).toBeGreaterThan(1);
+
+      const flagId = flag.getAsNormalizedFullLink().id;
+      const entry = replicaEntries(storageManager, flagId).find((e) =>
+        e.origin === "derived"
+      );
+      expect(entry).toBeDefined();
+      expect(entry!.label.confidentiality).toContainEqual("secret");
     } finally {
       await runtime.dispose();
       await storageManager.close();

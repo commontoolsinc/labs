@@ -6,6 +6,7 @@ import {
   createTriggerTraceEntry,
   hasRegisteredTriggers,
   planPushTriggeredAction,
+  recordCfcTriggerRead,
   shouldRecordTriggerTraceEntry,
   type StorageNotificationState,
 } from "./notifications.ts";
@@ -72,6 +73,7 @@ export function processPushStorageNotification(
       : null;
 
     for (const action of triggeredActions) {
+      recordCfcTriggerRead(state, action, space, change);
       // Causal edge tracking for diagnosis.
       if (
         diagnosisEnabled && hasSourceChangeGroup &&

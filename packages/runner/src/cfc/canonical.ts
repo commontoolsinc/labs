@@ -210,6 +210,8 @@ export const canonicalizePreparedDigestInput = (
   writes: [...input.writes].map(canonicalizeAttemptedWrite).sort(
     compareAddress,
   ),
+  triggerReads: [...(input.triggerReads ?? [])].map(canonicalizeAttemptedWrite)
+    .sort(compareAddress),
   dereferenceTraces: [...input.dereferenceTraces].map(
     canonicalizeDereferenceTrace,
   ).sort((left, right) => {

@@ -271,6 +271,12 @@ export class Scheduler {
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel>();
   private triggerIndex = new SchedulerTriggerIndex();
+  // Pending CFC trigger reads per dirtied action (§8.9.2): addresses whose
+  // invalidating writes scheduled it, consumed by the action's next run.
+  private cfcTriggerReads = new WeakMap<
+    Action,
+    { addresses: IMemorySpaceAddress[]; keys: Set<string> }
+  >();
   private actionChangeGroups = new WeakMap<Action, ChangeGroup>();
   private retries = new WeakMap<Action, number>();
 
@@ -1854,6 +1860,7 @@ export class Scheduler {
   private createStorageNotificationState(): StorageNotificationState {
     return {
       triggerIndex: this.triggerIndex,
+      cfcTriggerReads: this.cfcTriggerReads,
       getDiagnosisEnabled: () => this.diagnosisEnabled,
       getCollectTriggerTrace: () => this.collectTriggerTrace,
       changeGroupToActionId: this.changeGroupToActionId,
@@ -2274,6 +2281,14 @@ export class Scheduler {
   private createActionRunState(): SchedulerActionRunState {
     return {
       runtime: this.runtime,
+      takeCfcTriggerReads: (target) => {
+        const pending = this.cfcTriggerReads.get(target);
+        if (pending === undefined) {
+          return undefined;
+        }
+        this.cfcTriggerReads.delete(target);
+        return pending.addresses;
+      },
       actionChangeGroups: this.actionChangeGroups,
       inFlightSourceState: this.inFlightSourceState,
       actionTimingState: this.actionTimingState,

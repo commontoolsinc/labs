@@ -228,6 +228,12 @@ export function appendActionRunTrace(state: {
 
 export interface SchedulerActionRunState {
   readonly runtime: Runtime;
+  // Consume (and clear) the pending CFC trigger reads for an action: the
+  // addresses whose invalidating writes scheduled this run (§8.9.2). The
+  // run's transaction joins their labels into the flow-label derivation.
+  readonly takeCfcTriggerReads: (
+    action: Action,
+  ) => readonly IMemorySpaceAddress[] | undefined;
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
   readonly inFlightSourceState: InFlightSourceState;
   readonly actionTimingState: ActionTimingState;
@@ -308,6 +314,16 @@ export async function runSchedulerAction(
   const tx = state.runtime.edit({
     changeGroup: state.actionChangeGroups.get(action),
   });
+  // §8.9.2 trigger reads: hand the addresses whose changes scheduled this
+  // run to the transaction so flow-label derivation can taint its writes
+  // even when this run's branch never re-reads them. Consumed once; a
+  // retry after a commit conflict re-runs with the journal it accumulates
+  // then, which re-covers actual reads (triggers are not re-delivered —
+  // accepted under-taint on retry, noted in the S16 design).
+  const cfcTriggerReads = state.takeCfcTriggerReads(action);
+  if (cfcTriggerReads !== undefined && cfcTriggerReads.length > 0) {
+    tx.addCfcTriggerReads(cfcTriggerReads);
+  }
   (tx.tx as { debugActionId?: string }).debugActionId = actionId;
   addInFlightSource(state.inFlightSourceState, action, tx.tx);
   const actionStartTime = performance.now();
