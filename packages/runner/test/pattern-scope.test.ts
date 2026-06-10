@@ -2876,3 +2876,81 @@ Deno.test("scoped asCell property with no value gets an eager base-scope redirec
     await storageManager.close();
   }
 });
+
+Deno.test("schema-less write AT a scoped slot follows the stored redirect", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const cell = runtime.getCell(
+      space,
+      "write at scoped slot follows redirect",
+      {
+        type: "object",
+        properties: {
+          // Mirrors PerUser<Writable<string | Default<"">>>: a scoped
+          // primitive slot whose default populates the user instance and
+          // leaves a redirect at the base scope.
+          profileDraft: {
+            type: "string",
+            default: "",
+            asCell: [{ kind: "cell", scope: "user" }],
+          },
+        },
+      },
+      tx,
+    );
+
+    cell.set({} as never);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+
+    const baseLink = cell.key("profileDraft").getAsNormalizedFullLink();
+    const schemaless = createCell<{ profileDraft: string }>(
+      runtime,
+      { ...cell.getAsNormalizedFullLink(), schema: undefined },
+    );
+    assertEquals(
+      parseLink(
+        schemaless.key("profileDraft").getRaw({ lastNode: "writeRedirect" }),
+        schemaless.key("profileDraft").getAsNormalizedFullLink(),
+      )?.scope,
+      "user",
+    );
+
+    // A schema-less write AT the slot (this is what the browser renderer's
+    // $value binding does: the serialized alias carries the sub-pattern's
+    // scope-silent schema) must follow the stored narrower-scope link into
+    // the user instance, NOT overwrite the redirect with shared base-scope
+    // content.
+    const writeTx = runtime.edit();
+    schemaless.withTx(writeTx).key("profileDraft").set("Alice");
+    runtime.prepareTxForCommit(writeTx);
+    await writeTx.commit();
+    await runtime.idle();
+
+    // The base slot still holds the redirect, not the raw string.
+    assertEquals(
+      parseLink(
+        schemaless.key("profileDraft").getRaw({ lastNode: "writeRedirect" }),
+        schemaless.key("profileDraft").getAsNormalizedFullLink(),
+      )?.scope,
+      "user",
+      "base-scope slot must keep the scoped-instance redirect",
+    );
+    // The content landed in the user partition.
+    const userInstance = createCell<string>(
+      runtime,
+      { ...baseLink, schema: undefined, scope: "user" },
+    );
+    assertEquals(userInstance.getRaw(), "Alice");
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});

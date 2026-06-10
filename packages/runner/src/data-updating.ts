@@ -615,6 +615,38 @@ export function normalizeAndDiff(
     );
   }
 
+  // Scope realization on write: the base-scope slot of a scoped instance
+  // holds a regular link with an explicitly narrower scope (materialized at
+  // setup; see the narrowing branch above and the eager-redirect pass in the
+  // object branch below). A write of *content* arriving at this slot without
+  // a scope-declaring schema (e.g. through a serialized binding whose schema
+  // is scope-silent, like the renderer's $value cell) must follow that link
+  // into the narrower-scope instance — overwriting it would land per-user /
+  // per-session state at the shared base scope. Reference values are exempt:
+  // writing a link re-binds the slot (and the schema-declared narrowing above
+  // already handled scoped re-binds before reaching here).
+  if (isPrimitiveCellLink(currentValue) && !isCellLink(newValue)) {
+    const storedLink = parseLink(currentValue, link);
+    if (scopeRank(storedLink.scope) > scopeRank(link.scope)) {
+      diffLogger.debug(
+        "diff",
+        () =>
+          `[BRANCH_SCOPED_REDIRECT] Following narrower-scope stored link at path=${pathStr} (${link.scope} -> ${storedLink.scope})`,
+      );
+      return normalizeAndDiff(
+        runtime,
+        tx,
+        storedLink.schema === undefined && link.schema !== undefined
+          ? { ...storedLink, schema: link.schema }
+          : storedLink,
+        newValue,
+        context,
+        options,
+        seen,
+      );
+    }
+  }
+
   if (isPrimitiveCellLink(newValue)) {
     diffLogger.debug(
       "diff",
