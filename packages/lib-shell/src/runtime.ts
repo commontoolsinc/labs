@@ -58,6 +58,11 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   identity: Identity;
   view: RuntimeView;
   apiUrl: URL;
+  /**
+   * Optional space DID → host base URL map forwarded to the worker.
+   * Spaces absent from the map resolve to `apiUrl` (the default host).
+   */
+  spaceHostMap?: Record<string, string>;
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
   trustSnapshot?: RuntimeTrustSnapshot | null;
@@ -111,6 +116,7 @@ export function fetchBuildHash(): Promise<string | undefined> {
 export function createRuntimeClientOptions({
   session,
   apiUrl,
+  spaceHostMap,
   buildHash,
   experimental,
   cfcEnforcementMode = "enforce-explicit",
@@ -118,6 +124,7 @@ export function createRuntimeClientOptions({
 }: {
   session: Session;
   apiUrl: URL;
+  spaceHostMap?: Record<string, string>;
   buildHash?: string;
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
@@ -132,6 +139,7 @@ export function createRuntimeClientOptions({
 
   return {
     apiUrl,
+    spaceHostMap,
     identity: session.as,
     spaceIdentity: session.spaceIdentity,
     spaceDid: session.space,
@@ -421,6 +429,7 @@ export class RuntimeInternals extends EventTarget {
     identity,
     view,
     apiUrl,
+    spaceHostMap,
     experimental,
     cfcEnforcementMode,
     trustSnapshot,
@@ -503,6 +512,7 @@ export class RuntimeInternals extends EventTarget {
       createRuntimeClientOptions({
         session,
         apiUrl,
+        spaceHostMap,
         buildHash,
         experimental,
         cfcEnforcementMode,
