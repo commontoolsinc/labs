@@ -28,12 +28,11 @@ point of view.
 
 For pattern-building work, use this guidance stack in order:
 
-1. `skills/pattern-ui/SKILL.md`
-2. `docs/common/patterns/style.md`
-3. `docs/common/patterns/ui-cookbook.md`
-4. `docs/common/components/COMPONENTS.md`
-5. `packages/ui/README.md`
-6. `packages/ui/LLM-COMPONENT-INSTRUCTIONS.md`
+1. `docs/common/patterns/style.md`
+2. `docs/common/patterns/ui-cookbook.md`
+3. `docs/common/components/COMPONENTS.md`
+4. `packages/ui/README.md`
+5. `packages/ui/LLM-COMPONENT-INSTRUCTIONS.md`
 
 ## Design Brief Before Coding
 

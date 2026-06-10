@@ -71,8 +71,8 @@ const wishResult = wish<{ content: string }>({ query: "#note" });
 
 The `scope` parameter controls where wish searches for matching pieces:
 
-- `"~"` - Search favorites in the [[HOME_SPACE]] (global, cross-space)
-- `"."` - Search [[mentionable]] items in the current space
+- `"~"` - Search favorites in the [home space](HOME_SPACE.md) (global, cross-space)
+- `"."` - Search [mentionable](mentionable.md) items in the current space
 - `"profile"` - Search elements in the current user's shared profile
 
 By default (no scope), wish searches **favorites only** for backward
@@ -130,6 +130,21 @@ for the rendered output so each viewer sees their own home profile projection.
 | Scope      | Cross-space                | Per-space                       | Cross-space, per-user            |
 | Source     | User's favorites list      | Pattern's `mentionable` export  | User's profile element list      |
 | Tag source | Snapshotted when favorited | Computed from schema            | `userTags` first, then `tag`     |
+
+### Accessing the Favorites List Itself
+
+Favorites are pieces added to the user's home space; they are accessible from
+any space. You can wish for the favorites list directly (see
+`system/favorites-manager.tsx` for a full example):
+
+```tsx
+type Favorite = { cell: { [NAME]?: string }; tag: string };
+const wishResult = wish<Array<Favorite>>({ query: "#favorites" });
+```
+
+The `tag` field contains the serialized `resultSchema` of the piece pointed to
+by `cell`. It is populated automatically when a favorite is added and is used
+for tag-based searching in the wish system.
 
 ### When to Use Each Scope
 
