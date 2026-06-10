@@ -34,7 +34,11 @@ describe("CFC tool ceiling empty", () => {
 
   it("allows public observations under an empty tool ceiling", () => {
     expect(
-      toolAllowsObservedConfidentiality(catalogWithToolCeiling([]), "mytool", []),
+      toolAllowsObservedConfidentiality(
+        catalogWithToolCeiling([]),
+        "mytool",
+        [],
+      ),
     ).toBe(true);
   });
 
