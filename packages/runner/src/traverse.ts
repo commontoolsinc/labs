@@ -2895,7 +2895,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // precomputed per schema identity; the inlined prefilter below is
         // semantically identical to canBranchMatch(merged, doc.value).
         const prepared = prepareAnyOf(resolved, resolved.anyOf);
-        const valueIsLink = isPrimitiveCellLink(doc.value);
+        const valueIsLink = isSigilLink(doc.value);
         const actualType = getJsonType(doc.value);
         const valueIsRecord = isRecord(doc.value);
         for (const branch of prepared) {
