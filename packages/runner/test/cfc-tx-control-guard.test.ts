@@ -15,7 +15,7 @@ const signer = await Identity.fromPassphrase("runner-cfc-tx-control-guard");
 // setCfcEnforcementMode lowering an enforcing transaction back to disabled/observe.
 // The mode must not be lowerable below the highest enforcing level set on a tx.
 describe("CFC transaction control guard", () => {
-  it("refuses to weaken an enforcing transaction's mode", () => {
+  it("refuses to weaken an enforcing transaction's mode", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -40,12 +40,12 @@ describe("CFC transaction control guard", () => {
       // ...and cannot then be lowered back to a weaker enforcing level.
       expect(() => tx.setCfcEnforcementMode("enforce-explicit")).toThrow();
     } finally {
-      runtime.dispose();
-      storageManager.close();
+      await runtime.dispose();
+      await storageManager.close();
     }
   });
 
-  it("allows juggling non-enforcing modes before any enforcement", () => {
+  it("allows juggling non-enforcing modes before any enforcement", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -61,8 +61,8 @@ describe("CFC transaction control guard", () => {
       // Now the floor is set.
       expect(() => tx.setCfcEnforcementMode("observe")).toThrow();
     } finally {
-      runtime.dispose();
-      storageManager.close();
+      await runtime.dispose();
+      await storageManager.close();
     }
   });
 

@@ -17,8 +17,13 @@ export type EntityId = {
 /**
  * Generates an entity ID.
  *
+ * Derivation inputs must resolve: a Cell with no entityId or an OpaqueRef with
+ * no value throws rather than minting a random substitute, so a derived id never
+ * silently becomes non-deterministic (audit S14). A missing `cause`, by
+ * contrast, deliberately mints a fresh random id.
+ *
  * @param source - The source object.
- * @param cause - Optional causal source. Otherwise a random n is used.
+ * @param cause - Optional causal source. If omitted, a random id is minted.
  */
 export function createRef(
   source: Record<string | number | symbol, any> = {},
