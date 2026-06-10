@@ -356,11 +356,13 @@ Phased migration (op-migration playbook):
   graphs (e.g. `$opFallback` payloads); old ordinal-bearing refs will no
   longer match re-minted ones, so resolution of such stored graphs falls to
   the stringified-implementation fallback (or fails where the implementation
-  was omitted). If pre-change persisted graphs matter, register a legacy
-  alias during a transition: keep incrementing the counter and ALSO register
-  the fn under `createRef({kind, source, preview, ordinal})`. Decide based on
-  an audit of real stored data; the in-memory/identity fast paths are
-  unaffected either way.
+  was omitted). Mitigated by a transition shim (landed with Phase 0): the
+  counter keeps incrementing at the same call sites and the fn is ALSO
+  registered under the legacy `createRef({kind, source, preview, ordinal})`
+  alias, reproducing the pre-removal ordinal sequence exactly. The attached/
+  serialized ref is the content-derived one. The shim (and its test,
+  `implementation-ref.test.ts`) is removed together with `implementationRef`
+  itself in Phase 3.
 - **Phase 1 — dual-write, dual-read.** Writers emit `$implRef` (+ keep
   `implementationRef` and the conditional stringified `implementation`).
   Readers prefer `$implRef`; absent that, fall back to the legacy

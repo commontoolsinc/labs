@@ -717,6 +717,25 @@ function ensureImplementationRef(
       preview: implementation.toString(),
     }, "verified implementation").toString();
 
+    // Transition shim: graphs persisted before the ordinal removal carry
+    // ordinal-bearing refs, and `moduleToJSON` omits the function body for
+    // admitted (verified) modules — those stored refs only resolve if a fresh
+    // evaluation re-registers the implementation under the legacy form too.
+    // Consuming the frame counter HERE (first mint per function, same call
+    // sites as before) reproduces the pre-removal ordinal sequence exactly.
+    // Removed together with `implementationRef` itself — see
+    // docs/specs/content-addressed-action-identity.md.
+    const frame = getTopFrame();
+    if (frame) {
+      const legacy = createRef({
+        kind,
+        source,
+        preview: implementation.toString(),
+        ordinal: frame.generatedIdCounter++,
+      }, "verified implementation").toString();
+      registerVerifiedFunctionImplementation(legacy, implementation);
+    }
+
     if (Object.isExtensible(implementation)) {
       Object.defineProperty(implementation, "implementationRef", {
         value: minted,
