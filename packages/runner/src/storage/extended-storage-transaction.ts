@@ -308,20 +308,23 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     };
   }
 
-  prepareCfc(input?: PreparedDigestInput): string {
-    if (input === undefined) {
-      const reasons = prepareBoundaryCommit(this);
-      if (reasons.length > 0) {
-        this.cfcInstrumentation.onPrepareReject?.(reasons);
-        this.cfcState.prepare = {
-          status: "invalidated",
-          reasons,
-        };
-        this.cfcState.diagnostics.push(...reasons);
-        return "";
-      }
+  prepareCfc(): string {
+    // Verification always runs. There is deliberately no caller-supplied input
+    // override: the commit-time digest recheck only confirms the prepared input
+    // matches real activity, so accepting an external input here would let a
+    // caller skip prepareBoundaryCommit while still passing the recheck (audit
+    // S2 — verification bypass).
+    const reasons = prepareBoundaryCommit(this);
+    if (reasons.length > 0) {
+      this.cfcInstrumentation.onPrepareReject?.(reasons);
+      this.cfcState.prepare = {
+        status: "invalidated",
+        reasons,
+      };
+      this.cfcState.diagnostics.push(...reasons);
+      return "";
     }
-    const preparedInput = input ?? this.buildPreparedDigestInput();
+    const preparedInput = this.buildPreparedDigestInput();
     const digest = preparedDigestFor(preparedInput);
     this.cfcState.prepare = {
       status: "prepared",
@@ -805,8 +808,8 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.wrapped.recordCfcDereferenceTrace(trace);
   }
 
-  prepareCfc(input?: PreparedDigestInput): string {
-    return this.wrapped.prepareCfc(input);
+  prepareCfc(): string {
+    return this.wrapped.prepareCfc();
   }
 
   setCfcTrustSnapshot(snapshot: TrustSnapshot | undefined): void {

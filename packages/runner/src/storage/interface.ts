@@ -41,7 +41,6 @@ import type {
   CfcTxState,
   ImplementationIdentity,
   PostCommitSideEffect,
-  PreparedDigestInput,
   TrustSnapshot,
   WritePolicyInput,
 } from "../cfc/mod.ts";
@@ -743,7 +742,14 @@ export interface IExtendedStorageTransaction
    */
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void;
 
-  prepareCfc(input?: PreparedDigestInput): string;
+  /**
+   * Runs CFC boundary verification for this transaction and records the
+   * prepared digest. Takes no caller-supplied input: the commit-time digest
+   * recheck only confirms the prepared input matches real activity, so an
+   * external input override would let a caller skip verification while still
+   * passing the recheck (audit S2).
+   */
+  prepareCfc(): string;
 
   /**
    * Sets (or clears) the CFC trust snapshot for this transaction. See
