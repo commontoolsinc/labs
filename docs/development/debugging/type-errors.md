@@ -38,6 +38,6 @@ const removeItem = handler<
 
 ## See Also
 
-- @common/concepts/types-and-schemas.md - Type system fundamentals
+- @common/concepts/types-and-schemas/writable.md - Type system fundamentals
 - @common/concepts/reactivity.md - Reactivity and Cell types
 - @common/components/COMPONENTS.md - Component binding patterns

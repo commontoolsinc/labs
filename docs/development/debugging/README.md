@@ -20,7 +20,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | Data not updating | Missing `$` prefix or wrong event | Use `$checked`, `$value` ([reactivity-issues](reactivity-issues.md)) |
 | Filtered list not updating | Need computed() | Wrap in `computed()` ([reactivity-issues](reactivity-issues.md)) |
 | lift() returns 0/empty | Passing cell directly to lift() | Use `computed()` or pass as object param ([gotchas/lift-returns-stale-data](gotchas/lift-returns-stale-data.md)) |
-| Handler binding: unknown property | Passing event data at binding time | Use inline handler for test buttons ([gotchas/handler-binding-error](gotchas/handler-binding-error.md)) |
+| Handler binding: "Object literal may only specify known properties" | Passing event data at binding time | Use inline handler for test buttons ([gotchas/handler-binding-error](gotchas/handler-binding-error.md)) |
 | Stream.subscribe doesn't exist | Using new Stream()/subscribe() | Bound handler IS the stream ([gotchas/stream-subscribe-dont-exist](gotchas/stream-subscribe-dont-exist.md)) |
 | Can't access variable in nested scope | Variable scoping limitation | Pre-compute grouped data or use lift() with explicit params ([reactivity-issues](reactivity-issues.md#variable-scoping-in-reactive-contexts)) |
 | "Cannot access cell via closure" | Using lift() with closure | Pass all reactive deps as params to lift() ([@reactivity](../../common/concepts/reactivity.md)) |
@@ -35,7 +35,10 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | List of records renders intermittently/blank; full-cell read is huge | Persisting inline image `data` (base64 data-URL) in a (PerSpace) cell | Persist the blob `url`, not `data`; `includeData` only for transient LLM use ([gotchas/persisting-images-in-cells](gotchas/persisting-images-in-cells.md)) |
 | Per-row inline form (delete-confirm, edit, picker) never opens; no error | `computed()` nested in a `.map()` over a **`computed()`-produced** list reads a `perSession` cell — the narrower-scope follow is silently blocked (mapping a cell directly works) | Bake the flag into the producing `computed()`: read the perSession cell once at top level, emit a plain boolean per row ([gotchas/persession-read-in-mapped-computed](gotchas/persession-read-in-mapped-computed.md)) |
 | "Reactive reference from outer scope cannot be accessed via closure" / "Cannot access cell via closure" at pattern construction (pre-CT-1626 runtimes only; the construction-time abort is fixed in CT-1626 / PR #3726) | An inner `(cellCall() ?? []).map((el) => …)` was nested in an outer `.map((row) => …)`; the `?? []` hid the cell receiver from the ts-transformer so no `mapWithPattern` rewrite was inserted, but the runtime receiver was still an OpaqueRef. The shape remains a code smell — if you mean the cell, just map the cell. | Map the cell directly (`people.map(...)`); OR pre-bake into a top-level `computed` of plain values, then map that; OR use a local `computed()` bridge per row ([gotchas/closure-capture-in-nested-map](gotchas/closure-capture-in-nested-map.md)) |
-| Writable-input computed causes churn or stale fan-out | Computed writes through a `Writable<>` input while also participating in reactive scheduling | Treat it as effectful and check for cycles. Pull mode materializes stable side writes through idle materializers, so actual changed paths should drive downstream updates instead of broad fan-out. |
+| Writable-input computed causes churn or stale fan-out | Computed writes through a `Writable<>` input while also participating in reactive scheduling | Treat it as effectful and check for cycles ([non-idempotent-detection](non-idempotent-detection.md)). Pull mode materializes stable side writes through idle materializers, so actual changed paths should drive downstream updates instead of broad fan-out. |
+| `[object Object]` shown where a string was expected | A computed/`[NAME]` template string interpolates a whole object instead of a field | Interpolate the field, not the object, inside `computed()` ([gotchas/computed-cell-object-object](gotchas/computed-cell-object-object.md)) |
+| "secure mode %SharedMath%.random() throws" (or `Date.now` in computed) | SES removes ambient `Math.random()`/`Date.now()` in the pattern sandbox | Use `nonPrivateRandom()` / `safeDateNow()` from `commonfabric` ([gotchas/scoped-cell-pitfalls](gotchas/scoped-cell-pitfalls.md#7)) |
+| "Cannot read properties of null/undefined" exactly when a conditional section renders the fallback | Ternary branches are evaluated eagerly — the lowered `ifElse()` builds both branch expressions even when the condition is falsy | Defer the property-accessing branch in `computed()` ([gotchas/eager-ternary-branch-evaluation](gotchas/eager-ternary-branch-evaluation.md)) |
 
 ---
 
@@ -52,6 +55,8 @@ These issues compile without errors but fail at runtime.
   new pattern-owned cells initialized from static values
 - [onClick Inside computed()](gotchas/onclick-inside-computed.md) - ReadOnlyAddressError
 - [ifElse with Composed Pattern Cells](gotchas/ifelse-composed-pattern-cells.md) - Piece hangs
+- [Eager Ternary Branch Evaluation](gotchas/eager-ternary-branch-evaluation.md) - Ternary branches don't short-circuit; nullable property access crashes the fallback path
+- [`[object Object]` in computed() String](gotchas/computed-cell-object-object.md) - Reactive object coerced into a template string
 - [lift() Returns Stale/Empty Data](gotchas/lift-returns-stale-data.md) - Closure limitations
 - [Handler Binding Error](gotchas/handler-binding-error.md) - Two-step binding pattern
 - [Immediate Event Invocation](gotchas/immediate-event-invocation.md) - Event props invoking streams or writes during render

@@ -65,7 +65,7 @@ Both patterns receive the same `items` cell - changes sync automatically.
 
 **When to use which:**
 - **Pattern Composition**: Multiple views in one UI, reusable components
-- **Linked Charms**: Independent deployments that communicate
+- **Linked Pieces**: Independent deployments that communicate
 
 ## Merging Complex Objects from Pattern Inputs
 

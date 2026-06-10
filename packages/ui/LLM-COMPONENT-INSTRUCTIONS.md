@@ -6,8 +6,8 @@ library.
 
 ## Component Library Overview
 
-The Common Fabric UI library provides 40 secure web components that follow the
-shadcn/ui design system. All components:
+The Common Fabric UI library provides a full set of secure web components that
+follow the shadcn/ui design system. All components:
 
 - Use custom element tags prefixed with `cf-`
 - Support Shadow DOM encapsulation
