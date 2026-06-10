@@ -29,6 +29,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { createRef } from "../create-ref.ts";
 import {
   hardenVerifiedFunction,
+  registerVerifiedBindingCandidate,
   registerVerifiedFunctionImplementation,
 } from "../sandbox/function-hardening.ts";
 
@@ -156,6 +157,20 @@ export function createNodeFactory<T = any, R = any>(
   // look-alike never acquires the brand. (Patterns brand separately in
   // builder/pattern.ts.)
   brandTrustedBuilderArtifact(factory);
+  // CT-1665: surface the factory so the legacy/AMD eval path can register verified
+  // binding metadata for non-exported lift/derive/computed bindings (the ESM loader
+  // instead reuses `__cfReg`; see handlerInternal and Engine.evaluate).
+  // Only JS-function modules can be trusted-binding writers (and carry
+  // `__cfVerifiedBindingIdentity`); `type: "ref"` builtins never do — so the guard
+  // is semantically correct. It is also load-safe: an implementation-less builtin
+  // node factory is created at module-load time (e.g. builtins/sqlite/query-node.ts)
+  // and is reached via a module.ts import cycle BEFORE module.ts has evaluated its
+  // own `import` of function-hardening.ts, so calling the registrar there would hit
+  // its still-uninitialized module-scope `let` (a TDZ throw). Function modules are
+  // only ever built later, at pattern-build time, well clear of that window.
+  if (typeof module.implementation === "function") {
+    registerVerifiedBindingCandidate(factory);
+  }
   return factory;
 }
 
@@ -476,6 +491,15 @@ function handlerInternal<E, T>(
 
     return eventStream;
   }, module);
+
+  // CT-1665: surface the factory so the legacy/AMD eval path can register its
+  // verified binding metadata after evaluation (the ESM loader instead reuses the
+  // transformer's `__cfReg` registrations — see Engine.evaluate vs evaluateGraph).
+  // The transformer-emitted `__cfBindVerifiedBinding` annotates THIS object (the
+  // builder's return value) once the module body finishes; a non-exported binding
+  // is otherwise unreachable from the export-namespace capture walk and CFC would
+  // reject its owner-protected writes.
+  registerVerifiedBindingCandidate(factory);
 
   return factory;
 }

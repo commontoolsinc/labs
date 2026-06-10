@@ -156,6 +156,38 @@ export class ExecutableRegistry {
     return this.verifiedBindingMetadata.get(implementationRef);
   }
 
+  /**
+   * Record verified binding metadata from trusted-binding factory objects that
+   * the builder surfaced during this load (CT-1665).
+   *
+   * A handler/lift binding declared as a non-exported module-scope const carries
+   * its `__cfVerifiedBindingIdentity` on the FACTORY returned by the builder, but
+   * the node graph only retains the underlying module (which never received the
+   * metadata — the factory is `Object.assign(callable, module)`, a distinct
+   * object) and the post-evaluation capture walk only traverses the module's
+   * exports. The metadata is therefore otherwise never registered, so CFC
+   * `writeAuthorizedBy` rejects the binding's own writes with "requires a trusted
+   * verified binding identity". Recording keyed by the factory's
+   * `implementationRef` (shared with its module/implementation) closes that gap
+   * for both source-based and source-free (resume-by-identity) loads, since both
+   * re-run the module body and re-surface the candidates.
+   */
+  captureVerifiedBindingCandidates(candidates: Iterable<unknown>): void {
+    for (const candidate of candidates) {
+      if (
+        !candidate ||
+        (typeof candidate !== "object" && typeof candidate !== "function")
+      ) {
+        continue;
+      }
+      const implementationRef =
+        (candidate as { implementationRef?: unknown }).implementationRef;
+      if (typeof implementationRef === "string" && implementationRef) {
+        this.recordVerifiedBindingMetadata(implementationRef, candidate);
+      }
+    }
+  }
+
   getVerifiedLoadId(
     implementationRef: string,
     patternId?: string,
