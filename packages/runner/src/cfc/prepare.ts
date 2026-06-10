@@ -1851,6 +1851,23 @@ const verifyExactCopyRequirements = (
     if (sourcePath === undefined) {
       continue;
     }
+    // Only verify a claim whose target path the transaction actually wrote.
+    // Without this gate an untouched entry compares undefined to undefined and
+    // passes vacuously, accepting the claim (and copying its label) unverified.
+    if (
+      !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
+    ) {
+      continue;
+    }
+    // Array-item (wildcard) exactCopyOf is unsupported: the per-path value
+    // reconstruction matches segments literally, so "*" never resolves against a
+    // concrete write and the comparison would pass vacuously. Fail closed
+    // (audit W2.15).
+    if (entry.path.includes("*") || sourcePath.includes("*")) {
+      return `exactCopyOf under an array wildcard is unsupported at /${
+        entry.path.join("/")
+      }`;
+    }
     const targetValue = writeValueForTarget(tx, {
       ...target,
       path: entry.path,
