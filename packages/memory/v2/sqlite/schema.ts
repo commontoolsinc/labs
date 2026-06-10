@@ -8,6 +8,7 @@
 // case them.
 
 import { CF_LINK_SUFFIX, isCfLinkColumn } from "./columns.ts";
+import { buildRowLabelSpec, type RowLabelRule } from "./row-label.ts";
 
 export interface ColumnSchema {
   type: string;
@@ -112,15 +113,28 @@ function normalizeColumn(name: string, spec: ColumnSpec): ColumnSchema {
   return col;
 }
 
-/** Build a one-row JSON Schema from a column map. */
-export function table(columns: Record<string, ColumnSpec>): TableSchema {
+/**
+ * Build a one-row JSON Schema from a column map. The optional `rule` declares
+ * a per-row CFC label as a pure projection over the row's columns (CFC Phase
+ * 3); it is built + validated eagerly — a malformed rule throws here, at
+ * definition time — and serializes onto the schema as `rowLabel` (see
+ * `row-label.ts` and docs/specs/sqlite-builtin/06-cfc.md).
+ */
+export function table<C extends Record<string, ColumnSpec>>(
+  columns: C,
+  rule?: RowLabelRule<C>,
+): TableSchema {
   const properties: Record<string, ColumnSchema> = {};
   const required: string[] = [];
   for (const [name, spec] of Object.entries(columns)) {
     properties[name] = normalizeColumn(name, spec);
     required.push(name);
   }
-  return { type: "object", properties, required };
+  const schema: TableSchema = { type: "object", properties, required };
+  if (rule !== undefined) {
+    schema.rowLabel = buildRowLabelSpec(Object.keys(columns), rule);
+  }
+  return schema;
 }
 
 /** Names of the `_cf_link` columns in a table schema. */

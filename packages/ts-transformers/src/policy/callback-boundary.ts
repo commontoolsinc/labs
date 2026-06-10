@@ -23,7 +23,8 @@ export type SupportedCallbackBoundaryKind =
   | "computed-builder"
   | "action-builder"
   | "lift-builder"
-  | "handler-builder";
+  | "handler-builder"
+  | "sqlite-row-label-rule";
 
 export type UnsupportedCallbackBoundaryKind =
   | "plain-array-void"
@@ -91,6 +92,35 @@ function isWithinJsxExpression(node: ts.Node): boolean {
  * surrounding restricted context) rather than the restricted pattern-builder
  * boundary a bare `pattern(...)` gets.
  */
+/** True when `callee` is the SQLite `table()` builder (the `commonfabric`
+ *  export or `cfSqlite.table`) — recognized by name plus the
+ *  `SqliteTableFunction` type alias, so local rebinding keeps working and an
+ *  unrelated user function named `table` does not match. */
+function isSqliteTableCallee(
+  callee: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  const name = ts.isIdentifier(callee)
+    ? callee.text
+    : ts.isPropertyAccessExpression(callee)
+    ? callee.name.text
+    : undefined;
+  if (name !== "table") return false;
+  const type = checker.getTypeAtLocation(callee);
+  const alias = type.aliasSymbol;
+  if (!alias || alias.name !== "SqliteTableFunction") return false;
+  // The alias must be declared by Common Fabric's own typings (the api
+  // package in-repo, the bundled commonfabric d.ts in the pattern compile
+  // env) — a user-defined alias of the same name must not steer boundary
+  // classification.
+  return (alias.getDeclarations() ?? []).some((decl) => {
+    const file = decl.getSourceFile().fileName.replace(/\\/g, "/");
+    return file.endsWith("/api/index.ts") ||
+      file.endsWith("commonfabric.d.ts") ||
+      file.includes("/@commonfabric/api/");
+  });
+}
+
 function isPatternToolPatternArgument(
   patternCall: ts.CallExpression,
   checker: ts.TypeChecker,
@@ -164,6 +194,26 @@ export function classifyCallbackBoundary(
     return {
       kind: "supported",
       boundaryKind: "pattern-tool",
+      bodyContext: {
+        strategy: "explicit",
+        kind: "compute",
+        owner: "unknown",
+      },
+    };
+  }
+
+  // SQLite per-row label rule: `table(columns, (f) => ({…}))` — also reached
+  // via `cfSqlite.table`. `table()` evaluates the rule EAGERLY at pattern
+  // build time into a serialized plain-JSON AST (CFC Phase 3), so the
+  // callback is a compute-owned boundary like lift-applied: legitimate inside
+  // a pattern body, never a reactive closure.
+  if (
+    parent.arguments.length >= 2 && parent.arguments[1] === callback &&
+    isSqliteTableCallee(parent.expression, checker)
+  ) {
+    return {
+      kind: "supported",
+      boundaryKind: "sqlite-row-label-rule",
       bodyContext: {
         strategy: "explicit",
         kind: "compute",

@@ -1,10 +1,4 @@
-import {
-  Compiler,
-  JsScript,
-  Program,
-  ProgramResolver,
-  Source,
-} from "../interface.ts";
+import { Program, ProgramResolver, Source } from "../interface.ts";
 import type {
   CompilerHost,
   CompilerOptions,
@@ -21,7 +15,6 @@ import ts from "typescript";
 import * as path from "@std/path";
 import { getLogger } from "@commonfabric/utils/logger";
 import { getCompilerOptions, TARGET } from "./options.ts";
-import { bundleAMDOutput } from "./bundler/mod.ts";
 import { parseSourceMap } from "../source-map.ts";
 import type { SourceMap } from "../interface.ts";
 import { resolveProgram } from "./resolver.ts";
@@ -232,13 +225,8 @@ export type BeforeTransformersResult =
   | TransformerPipelineResult;
 
 export interface TypeScriptCompilerOptions {
-  // Filename for the output JS, used internally
-  // with source maps.
-  filename?: string;
   // Skip type checking.
   noCheck?: boolean;
-  // Extra scripts to inject into the output bundle.
-  injectedScript?: string;
   // Optional mapping of runtime module name e.g. `"@commonfabric/framework"`,
   // and its corresponding type definitions.
   runtimeModules?: string[];
@@ -250,28 +238,12 @@ export interface TypeScriptCompilerOptions {
   ) => BeforeTransformersResult;
   // Return the transformed program.
   getTransformedProgram?: (program: Program) => void;
-  // Whether the bundling process results in the bundle, upon invocation,
-  // evaluating to the main entry's exports (false|undefined),
-  // or an object containing the main/default export and a map of all files'
-  // exports (true).
-  // Changes the bundle's evaluation signature from
-  // ```ts
-  //   ({ runtimeDeps: Record<string, any> }) =>
-  //     Record<string, any>;
-  // ```
-  // to
-  //
-  // ```ts
-  //   ({ runtimeDeps: Record<string, any> }) =>
-  //     { main: Record<string, any>, exportMap: Record<string, Record<string, any>> }`
-  // ```
-  bundleExportAll?: true;
   // Optional transformer for diagnostic error messages.
   // Allows converting confusing TypeScript errors into clearer messages.
   diagnosticMessageTransformer?: DiagnosticMessageTransformer;
 }
 
-export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
+export class TypeScriptCompiler {
   private typeLibs: TypeLibs;
   constructor(typeLibs: TypeLibs) {
     this.typeLibs = Object.keys(typeLibs).reduce((libs, libName) => {
@@ -294,20 +266,11 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     });
   }
 
-  async resolveAndCompile(
-    resolver: ProgramResolver,
-    options: TypeScriptCompilerOptions = {},
-  ): Promise<JsScript> {
-    const program = await this.resolveProgram(resolver, options);
-    return await this.compile(program, options);
-  }
-
   /**
-   * Compile a program to per-module CommonJS, running the SAME type-check and
-   * Common Fabric transformer pipeline as {@link compile}, but emitting one
-   * CommonJS file per source (no AMD `outFile` bundle). Returns the compiled
-   * body + source map per original source name — the inputs the ESM module-
-   * record loader and verifier consume. Used by the `esmModuleLoader` path.
+   * Compile a program to per-module CommonJS, running the type-check and
+   * Common Fabric transformer pipeline and emitting one CommonJS file per
+   * source. Returns the compiled body + source map per original source name —
+   * the inputs the ESM module-record loader and verifier consume.
    */
   compileToModules(
     program: Program,
@@ -319,15 +282,10 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     validateSource(program);
     const sourceNames = program.files.map(({ name }) => name);
     const tsOptions = getCompilerOptions();
-    // Per-module CommonJS instead of the bundled AMD output.
-    tsOptions.module = ts.ModuleKind.CommonJS;
-    tsOptions.esModuleInterop = true;
-    delete tsOptions.outFile;
-    delete tsOptions.ignoreDeprecations;
-    // The bundled `outFile` path tolerates the trimmed virtual lib .d.ts files;
-    // the multi-file path type-checks them and surfaces lib-internal errors
-    // (e.g. FormData in dom.d.ts). We only need to type-check authored code, so
-    // skip checking the declaration libs themselves.
+    // The multi-file path type-checks the trimmed virtual lib .d.ts files and
+    // surfaces lib-internal errors (e.g. FormData in dom.d.ts). We only need
+    // to type-check authored code, so skip checking the declaration libs
+    // themselves.
     tsOptions.skipLibCheck = true;
 
     const host = new TypeScriptHost(program, this.typeLibs, runtimeModules);
@@ -341,10 +299,11 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     }
     checker.declarationCheck();
 
-    const { beforeTransformers, getDiagnostics } = createTransformers(
-      tsProgram,
-      inputOptions,
-    );
+    const { beforeTransformers, sourceCollector, getDiagnostics } =
+      createTransformers(
+        tsProgram,
+        inputOptions,
+      );
 
     // Emit ALL source files (not just main), so every module gets a body.
     const { diagnostics, emitSkipped } = tsProgram.emit(
@@ -366,6 +325,13 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     }
     if (emitSkipped) {
       throw new Error("Emit skipped. Check diagnostics.");
+    }
+
+    if (sourceCollector && inputOptions.getTransformedProgram) {
+      inputOptions.getTransformedProgram({
+        main: program.main,
+        files: sourceCollector.sources(),
+      });
     }
 
     // Map emitted `<name>.js` outputs back to their original source names.
@@ -396,114 +362,6 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       });
     }
     return result;
-  }
-
-  // Compiles `source` into `JsArtifact`.
-  // Artifact files must be TypeScriptModuleSource
-  compile(
-    program: Program,
-    inputOptions: TypeScriptCompilerOptions = {},
-  ): JsScript {
-    const filename = inputOptions.filename ?? "out.js";
-    const noCheck = inputOptions.noCheck ?? false;
-    const injectedScript = inputOptions.injectedScript;
-    const runtimeModules = inputOptions.runtimeModules ?? [];
-
-    validateSource(program);
-    const sourceNames = program.files.map(({ name }) => name);
-    const tsOptions = getCompilerOptions();
-    tsOptions.outFile = filename;
-
-    const host = new TypeScriptHost(
-      program,
-      this.typeLibs,
-      runtimeModules,
-    );
-    const tsProgram = ts.createProgram(
-      sourceNames,
-      tsOptions,
-      host,
-    );
-
-    const checker = new Checker(tsProgram, {
-      messageTransformer: inputOptions.diagnosticMessageTransformer,
-    });
-    if (!noCheck) {
-      checker.typeCheck();
-    }
-    checker.declarationCheck();
-
-    const mainSource = tsProgram.getSourceFiles().find((source) =>
-      source.fileName === program.main
-    );
-    if (!mainSource) {
-      throw new Error("Missing main source.");
-    }
-
-    const { beforeTransformers, sourceCollector, getDiagnostics } =
-      createTransformers(
-        tsProgram,
-        inputOptions,
-      );
-
-    const { diagnostics, emittedFiles: _, emitSkipped } = tsProgram.emit(
-      mainSource,
-      undefined,
-      undefined,
-      undefined,
-      { before: beforeTransformers },
-    );
-    checker.check(diagnostics);
-
-    // Check for transformer diagnostics (from Common Fabric pipeline)
-    if (getDiagnostics) {
-      const transformerDiagnostics = getDiagnostics();
-      const errors = transformerDiagnostics.filter((d) =>
-        d.severity === "error"
-      );
-      if (errors.length > 0) {
-        // Build a map of file names to source contents for error rendering
-        const sources = new Map<string, string>();
-        for (const file of program.files) {
-          sources.set(file.name, file.contents);
-        }
-        throw new TransformerError(errors, sources);
-      }
-    }
-
-    if (emitSkipped) {
-      throw new Error("Emit skipped. Check diagnostics.");
-    }
-
-    if (sourceCollector && inputOptions.getTransformedProgram) {
-      const transformed = {
-        main: program.main,
-        files: sourceCollector.sources(),
-      };
-      inputOptions.getTransformedProgram(transformed);
-    }
-
-    // Get written files, should be a JS and source map.
-    const writes = host.getWrites();
-
-    const source = writes[filename];
-    const sourceMap = parseSourceMap(writes[`${filename}.map`]);
-    const exportModuleExports = inputOptions.bundleExportAll
-      ? sourceNames.filter((name) => !name.endsWith(".d.ts"))
-      : undefined;
-    const bundled = bundleAMDOutput({
-      mainModule: program.main,
-      source,
-      sourceMap,
-      filename,
-      injectedScript,
-      exportModuleExports,
-    });
-    return {
-      js: bundled,
-      filename,
-      sourceMap,
-    };
   }
 }
 

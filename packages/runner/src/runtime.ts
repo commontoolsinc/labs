@@ -24,11 +24,6 @@ import {
   resetPersistentSchedulerStateConfig,
   setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
-import {
-  getEsmModuleLoaderConfig,
-  resetEsmModuleLoaderConfig,
-  setEsmModuleLoaderConfig,
-} from "./sandbox/esm-loader-config.ts";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import type {
@@ -79,7 +74,6 @@ import { isDeno } from "@commonfabric/utils/env";
 import { popFrame, pushFrame } from "./builder/pattern.ts";
 import type { Frame } from "./builder/types.ts";
 import type { ConsoleMessage } from "./interface.ts";
-import type { CachedCompiler } from "./compilation-cache/mod.ts";
 import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
@@ -188,13 +182,6 @@ export interface ExperimentalOptions {
   persistentSchedulerState?: boolean | undefined;
   /** Preserve cumulative scheduler write history instead of using current-known writes. */
   schedulerHistoricalMightWrite?: boolean | undefined;
-  /**
-   * Load compiled patterns as a graph of per-module records through the SES
-   * Compartment module system (synchronous `importNow`) instead of evaluating
-   * one flattened AMD bundle. Default off; the AMD path remains the default.
-   * See docs/specs/module-loading.md (Phases 2–5).
-   */
-  esmModuleLoader?: boolean | undefined;
 }
 
 export interface RuntimeOptions {
@@ -218,9 +205,6 @@ export interface RuntimeOptions {
   cfcSinkMaxConfidentiality?: SinkMaxConfidentiality;
   /** Deterministic provider for the trust snapshot attached to each new tx. */
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
-  /** Optional compilation cache for persistent caching of compiled JS.
-   *  If absent, no persistent caching is performed (same as before). */
-  cachedCompiler?: CachedCompiler;
   /** Replace runner-owned frames with `<CF_INTERNAL>` in surfaced stacks. */
   hideInternalStackFrames?: boolean;
 }
@@ -330,7 +314,6 @@ export class Runtime {
   readonly storageManager: IStorageManager;
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
   readonly telemetry: RuntimeTelemetry;
-  readonly cachedCompiler?: CachedCompiler;
   /** Resolved experimental flags (all properties present, defaulting to `false`). */
   readonly experimental: ExperimentalOptions;
   readonly apiUrl: URL;
@@ -347,7 +330,6 @@ export class Runtime {
       modernCellRep: undefined,
       persistentSchedulerState: undefined,
       schedulerHistoricalMightWrite: undefined,
-      esmModuleLoader: undefined,
       ...options.experimental,
     };
 
@@ -373,9 +355,6 @@ export class Runtime {
     );
     this.experimental.persistentSchedulerState =
       getPersistentSchedulerStateConfig();
-    // Env-seeded default (CF_ESM_MODULE_LOADER) unless an explicit option is set.
-    setEsmModuleLoaderConfig(this.experimental.esmModuleLoader);
-    this.experimental.esmModuleLoader = getEsmModuleLoaderConfig();
 
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
@@ -384,7 +363,6 @@ export class Runtime {
       : new StaticCacheHTTP(new URL("/static", this.apiUrl));
 
     this.telemetry = options.telemetry ?? new RuntimeTelemetry();
-    this.cachedCompiler = options.cachedCompiler;
 
     // Create harness first (no dependencies on other services)
     this.harness = new Engine(this, {
@@ -442,13 +420,6 @@ export class Runtime {
     // fallback in builder/env.ts. This is still a singleton. TODO(seefeld).
     if (options.patternEnvironment) {
       setPatternEnvironment(options.patternEnvironment);
-    }
-
-    // Fire-and-forget startup eviction for compilation cache
-    if (this.cachedCompiler) {
-      this.cachedCompiler.evictStale().catch((err) => {
-        console.warn("Compilation cache eviction failed:", err);
-      });
     }
 
     if (options.debug) {
@@ -569,7 +540,6 @@ export class Runtime {
     // Reset experimental config to defaults.
     resetModernCellRepConfig();
     resetPersistentSchedulerStateConfig();
-    resetEsmModuleLoaderConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

@@ -195,7 +195,9 @@ describe("CFC sink-request confidentiality ceiling", () => {
         expect(result.ok).toBeDefined();
         expect(
           tx.getCfcState().diagnostics.some((d) =>
-            d.includes("exceeds ceiling for fetchData")
+            // The diagnostic must name the offending atom so a deployment can
+            // identify which (sink, atom) pair needs a ceiling entry (#3993).
+            d.includes("exceeds ceiling for fetchData") && d.includes("medical")
           ),
         ).toBe(true);
       },

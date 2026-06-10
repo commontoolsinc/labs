@@ -17,22 +17,17 @@ import {
 import {
   isAllowedTsLibHelperDeclaration,
   normalizeExact,
-} from "./bundle-preflight.ts";
+} from "./tslib-helpers.ts";
 
 /**
  * Structural pre-flight verification for a module-record graph (Phase 3 of
- * docs/specs/module-loading.md).
- *
- * This is the record-path analogue of the AMD bundle pre-flight
- * (`bundle-preflight.ts`): it validates the *shape and wiring* of the graph
- * before any module executes — every specifier is content-addressed, every
- * record is well-formed, and every resolved import points at a present record.
+ * docs/specs/module-loading.md): it validates the *shape and wiring* of the
+ * graph before any module executes — every specifier is content-addressed,
+ * every record is well-formed, and every resolved import points at a present
+ * record.
  *
  * The deep SES_SANDBOXING module-item classification is provided by
- * {@link verifyCompiledModuleBody}, which reuses the shared `classifyModuleItems`
- * core extracted from the AMD verifier. The `esmModuleLoader` flag stays off and
- * the AMD verifier remains the enforcement path until the differential parity
- * oracle confirms ESM and AMD verdicts match across the corpus.
+ * {@link verifyCompiledModuleBody}, built on the `classifyModuleItems` core.
  */
 
 const VALID_SPECIFIER = /^cf:(module|runtime)\//;

@@ -2,6 +2,7 @@ import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { isRecord } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { rendererVDOMSchema, vnodeSchema } from "@commonfabric/runner/schemas";
 import { decodeJsonPointer } from "../link-types.ts";
@@ -197,7 +198,50 @@ const resolveCfcSchemaRefUncached = (
   return schemaCursor as JSONSchema;
 };
 
+// resolveCfcSchemaRefs results per (frozen schemaObj, frozen fullSchema)
+// identity pair. The loop body builds a fresh `{...resolved, ...rest, $defs}`
+// spread whenever a $ref schema carries extra keys (e.g. `{$ref, $defs}` —
+// the rendererVDOMSchema read path), and that fresh object then re-paid a
+// full content hash at downstream interning on every read. A sentinel marks
+// `undefined` results so failed resolutions are memoized too.
+const RESOLVED_UNDEFINED = Symbol("resolved-undefined");
+const resolvedRefsCache = new WeakMap<
+  object,
+  WeakMap<object, JSONSchema | typeof RESOLVED_UNDEFINED>
+>();
+
 export const resolveCfcSchemaRefs = (
+  schemaObj: JSONSchemaObj,
+  fullSchema: JSONSchema = schemaObj,
+): JSONSchema | undefined => {
+  const cacheable = isDeepFrozen(schemaObj) &&
+    (fullSchema === schemaObj ||
+      (isRecord(fullSchema) && isDeepFrozen(fullSchema)));
+  let byFull: WeakMap<object, JSONSchema | typeof RESOLVED_UNDEFINED>;
+  if (cacheable) {
+    const fullKey = fullSchema as object;
+    let existing = resolvedRefsCache.get(schemaObj);
+    if (existing === undefined) {
+      existing = new WeakMap();
+      resolvedRefsCache.set(schemaObj, existing);
+    }
+    byFull = existing;
+    const cached = byFull.get(fullKey);
+    if (cached !== undefined) {
+      return cached === RESOLVED_UNDEFINED ? undefined : cached;
+    }
+    // Intern record results so the cached instance is canonical and frozen —
+    // downstream identity-keyed caches then hit, and sharing it across
+    // callers is safe.
+    const raw = resolveCfcSchemaRefsUncached(schemaObj, fullSchema);
+    const result = raw !== undefined && isRecord(raw) ? internSchema(raw) : raw;
+    byFull.set(fullKey, result === undefined ? RESOLVED_UNDEFINED : result);
+    return result;
+  }
+  return resolveCfcSchemaRefsUncached(schemaObj, fullSchema);
+};
+
+const resolveCfcSchemaRefsUncached = (
   schemaObj: JSONSchemaObj,
   fullSchema: JSONSchema = schemaObj,
 ): JSONSchema | undefined => {

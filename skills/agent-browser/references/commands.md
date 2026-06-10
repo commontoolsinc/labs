@@ -1,7 +1,10 @@
 # Command Reference
 
-Complete reference for all agent-browser commands. For quick start and common
-patterns, see SKILL.md.
+Reference for agent-browser commands. For quick start and common patterns, see
+SKILL.md.
+
+This is a curated subset; for the full, version-matched reference run
+`agent-browser skills get core --full`.
 
 ## Navigation
 
@@ -98,6 +101,8 @@ agent-browser wait --text "Success"        # Wait for text (or -t)
 agent-browser wait --url "**/dashboard"    # Wait for URL pattern (or -u)
 agent-browser wait --load networkidle      # Wait for network idle (or -l)
 agent-browser wait --fn "window.ready"     # Wait for JS condition (or -f)
+agent-browser wait "#spinner" --state hidden   # Wait for element to disappear
+agent-browser wait @e5 --state detached    # Wait for element removal from DOM
 ```
 
 ## Mouse Control
@@ -238,7 +243,9 @@ agent-browser --session <name> ...    # Isolated browser session
 agent-browser --json ...              # JSON output for parsing
 agent-browser --headed ...            # Show browser window (not headless)
 agent-browser --full ...              # Full page screenshot (-f)
-agent-browser --cdp <port> ...        # Connect via Chrome DevTools Protocol
+agent-browser --cdp <port|origin> ... # Connect via Chrome DevTools Protocol;
+                                      # accepts a port (9222) or an HTTP origin
+                                      # (http://host.docker.internal:9222)
 agent-browser -p <provider> ...       # Cloud browser provider (--provider)
 agent-browser --proxy <url> ...       # Use proxy server
 agent-browser --headers <json> ...    # HTTP headers scoped to URL's origin

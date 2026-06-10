@@ -11,6 +11,8 @@
 const fixtureName = Deno.args[0] ?? "notebook-test";
 const rounds = Deno.args[1] ?? "2";
 const outPrefix = Deno.args[2] ?? `/tmp/traverse-${fixtureName}`;
+/** Optional: forwarded to profile-target to replay a single invocation. */
+const onlyInvocation = Deno.args[3];
 const INSPECT_PORT = 9911;
 
 const target = new Deno.Command(Deno.execPath(), {
@@ -22,6 +24,7 @@ const target = new Deno.Command(Deno.execPath(), {
     new URL("./profile-target.ts", import.meta.url).pathname,
     fixtureName,
     rounds,
+    ...(onlyInvocation !== undefined ? [onlyInvocation] : []),
   ],
   stdout: "piped",
   stderr: "null",

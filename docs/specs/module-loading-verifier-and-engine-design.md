@@ -1,5 +1,11 @@
 # ESM Module Loading: Verifier Port & Engine Integration — Design
 
+> **Status:** Shipped — the ESM module-record loader is now the only loader.
+> The `esmModuleLoader`/`CF_ESM_MODULE_LOADER` flag and the AMD bundle path
+> (bundler, whole-bundle verifier, `Engine.compile`/`evaluate`, AMD
+> compilation cache) have been removed; flag/AMD references below are
+> historical design context.
+
 Companion to [module-loading.md](module-loading.md) and
 [module-loading-implementation-plan.md](module-loading-implementation-plan.md).
 Phase 1 (content-addressed identity) and the Phase 2–4 loader mechanism are

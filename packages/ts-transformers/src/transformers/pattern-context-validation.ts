@@ -80,6 +80,9 @@ const SES_SELF_CONTAINED_CALLBACK_BOUNDARIES = new Set<
   "action-builder",
   "lift-builder",
   "handler-builder",
+  // NB: "sqlite-row-label-rule" is deliberately NOT here — table() evaluates
+  // the rule callback eagerly at pattern build into a serialized AST; it is
+  // never extracted to run later, so closure capture is harmless.
 ]);
 
 export class PatternContextValidationTransformer

@@ -29,7 +29,6 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { createRef } from "../create-ref.ts";
 import {
   hardenVerifiedFunction,
-  registerVerifiedBindingCandidate,
   registerVerifiedFunctionImplementation,
 } from "../sandbox/function-hardening.ts";
 
@@ -157,20 +156,6 @@ export function createNodeFactory<T = any, R = any>(
   // look-alike never acquires the brand. (Patterns brand separately in
   // builder/pattern.ts.)
   brandTrustedBuilderArtifact(factory);
-  // CT-1665: surface the factory so the legacy/AMD eval path can register verified
-  // binding metadata for non-exported lift/derive/computed bindings (the ESM loader
-  // instead reuses `__cfReg`; see handlerInternal and Engine.evaluate).
-  // Only JS-function modules can be trusted-binding writers (and carry
-  // `__cfVerifiedBindingIdentity`); `type: "ref"` builtins never do — so the guard
-  // is semantically correct. It is also load-safe: an implementation-less builtin
-  // node factory is created at module-load time (e.g. builtins/sqlite/query-node.ts)
-  // and is reached via a module.ts import cycle BEFORE module.ts has evaluated its
-  // own `import` of function-hardening.ts, so calling the registrar there would hit
-  // its still-uninitialized module-scope `let` (a TDZ throw). Function modules are
-  // only ever built later, at pattern-build time, well clear of that window.
-  if (typeof module.implementation === "function") {
-    registerVerifiedBindingCandidate(factory);
-  }
   return factory;
 }
 
@@ -492,15 +477,6 @@ function handlerInternal<E, T>(
     return eventStream;
   }, module);
 
-  // CT-1665: surface the factory so the legacy/AMD eval path can register its
-  // verified binding metadata after evaluation (the ESM loader instead reuses the
-  // transformer's `__cfReg` registrations — see Engine.evaluate vs evaluateGraph).
-  // The transformer-emitted `__cfBindVerifiedBinding` annotates THIS object (the
-  // builder's return value) once the module body finishes; a non-exported binding
-  // is otherwise unreachable from the export-namespace capture walk and CFC would
-  // reject its owner-protected writes.
-  registerVerifiedBindingCandidate(factory);
-
   return factory;
 }
 
@@ -723,18 +699,42 @@ function ensureImplementationRef(
   implementation: (...args: any[]) => unknown,
   kind: "fn" | "handler",
 ): string {
-  const frame = getTopFrame();
   const existing = (implementation as { implementationRef?: string })
     .implementationRef;
   const implementationRef = existing ?? (() => {
+    // Purely content-derived: `src` is the canonical content-addressed source
+    // location (`cf:module/<hash>/<path>:line:col`) under the ESM loader, and
+    // the builder-call-hoisting transformer + SES verifier guarantee one
+    // builder call per module-scope declaration, so (source, preview)
+    // uniquely identifies the implementation. (An order-dependent `ordinal`
+    // used to be folded in as a defense against inline duplicate
+    // declarations, which made refs build-order-dependent.)
     const source = (implementation as { src?: string }).src ??
       implementation.name;
     const minted = createRef({
       kind,
       source,
       preview: implementation.toString(),
-      ...(frame ? { ordinal: frame.generatedIdCounter++ } : {}),
     }, "verified implementation").toString();
+
+    // Transition shim: graphs persisted before the ordinal removal carry
+    // ordinal-bearing refs, and `moduleToJSON` omits the function body for
+    // admitted (verified) modules — those stored refs only resolve if a fresh
+    // evaluation re-registers the implementation under the legacy form too.
+    // Consuming the frame counter HERE (first mint per function, same call
+    // sites as before) reproduces the pre-removal ordinal sequence exactly.
+    // Removed together with `implementationRef` itself — see
+    // docs/specs/content-addressed-action-identity.md.
+    const frame = getTopFrame();
+    if (frame) {
+      const legacy = createRef({
+        kind,
+        source,
+        preview: implementation.toString(),
+        ordinal: frame.generatedIdCounter++,
+      }, "verified implementation").toString();
+      registerVerifiedFunctionImplementation(legacy, implementation);
+    }
 
     if (Object.isExtensible(implementation)) {
       Object.defineProperty(implementation, "implementationRef", {

@@ -9,10 +9,17 @@ import { loadFixture, replayFixture } from "./replay.ts";
 
 const name = Deno.args[0] ?? "notebook-test";
 const rounds = Number(Deno.args[1] ?? "2");
+/** Optional: replay only the invocation at this index (tail analysis). */
+const onlyInvocation = Deno.args[2] !== undefined
+  ? Number(Deno.args[2])
+  : undefined;
 
 const fixture = await loadFixture(
   new URL(`./fixtures/${name}.json.gz`, import.meta.url).pathname,
 );
+if (onlyInvocation !== undefined) {
+  fixture.invocations = [fixture.invocations[onlyInvocation]];
+}
 
 // Warm-up: intern caches, JIT.
 replayFixture(fixture, { limit: 200 });

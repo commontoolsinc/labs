@@ -30,6 +30,10 @@ pattern code.
 4. Fields that could be undefined initially: use `Default<T, value>`
 5. Actions in Output type: `Stream<T>` (enables testing and linking)
 6. Sub-patterns need `[NAME]: string` and `[UI]: VNode` in Output type
+7. **Decide the sharing boundary now** - choose `PerSpace<>` / `PerUser<>` /
+   `PerSession<>` for every Input field at schema time; see the `pattern-dev`
+   skill for the new-tab test. Transient UI state (selected tab, filter text,
+   open modal) defaults to `PerSession<>`.
 
 ## Top-Level vs Sub-Pattern Inputs
 
@@ -50,7 +54,15 @@ state owned by a parent pattern. Those sub-patterns also need `[NAME]` and
 ## Template
 
 ```tsx
-import { Default, NAME, Stream, UI, VNode, Writable } from "commonfabric";
+import {
+  Default,
+  NAME,
+  type PerSession,
+  Stream,
+  UI,
+  VNode,
+  Writable,
+} from "commonfabric";
 
 // ============ DATA TYPES ============
 export interface Item {
@@ -58,7 +70,23 @@ export interface Item {
   done: Default<boolean, false>;
 }
 
-// ============ PATTERN INPUT/OUTPUT ============
+// ============ TOP-LEVEL PATTERN (typical deliverable) ============
+// Usable standalone: no required caller-provided Writable<> inputs.
+// Optional Writable<... | Default<...>> lets callers link state while the
+// pattern still works alone; scope wrappers set each field's boundary.
+export interface ItemListInput {
+  items?: Writable<Item[] | Default<[]>>; // optional + Default = standalone-safe
+  filterText?: PerSession<string | Default<"">>; // transient UI state
+}
+
+export interface ItemListOutput {
+  [NAME]: string;
+  [UI]: VNode;
+  items: Item[]; // No Writable in Output
+  addItem: Stream<{ name: string }>; // Actions as Stream<T>
+}
+
+// ============ SUB-PATTERN (edits parent-owned state) ============
 export interface ItemInput {
   item: Writable<Item>; // Writable in Input = pattern will modify
 }

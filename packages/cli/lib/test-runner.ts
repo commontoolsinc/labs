@@ -26,7 +26,7 @@
  */
 
 import { Identity } from "@commonfabric/identity";
-import { Engine, Runtime } from "@commonfabric/runner";
+import { Runtime } from "@commonfabric/runner";
 import type {
   Cell,
   ErrorWithContext,
@@ -42,6 +42,10 @@ import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { basename } from "@std/path";
 import { timeout } from "@commonfabric/utils/sleep";
 import { experimentalOptionsFromEnv } from "./utils.ts";
+import {
+  buildActionEvent,
+  type TrustedUiDescriptor,
+} from "./trusted-test-event.ts";
 import {
   multiUserDescriptorMeta,
   runMultiUserTestPattern,
@@ -95,14 +99,27 @@ async function withPhase<T>(
  * A test step is an object with either an 'assertion' or 'action' property.
  * This discriminated union avoids TypeScript trying to unify incompatible Cell/Stream types.
  * Add `skip: true` to temporarily disable a step (like it.skip in other frameworks).
+ *
+ * Action steps may carry an `event` payload (sent instead of `undefined`) and
+ * a `trustedUi` descriptor. With `trustedUi`, the runner sends the event with
+ * renderer-trusted DOM provenance for that surface/action — the headless
+ * equivalent of the user clicking the trusted surface — which CFC
+ * `TrustedActionWrite` policies require under enforcement.
  */
 export type TestStep =
   | { assertion: OpaqueRef<boolean>; skip?: boolean }
-  | { action: Stream<void>; skip?: boolean };
+  | {
+    action: Stream<unknown>;
+    event?: unknown;
+    trustedUi?: TrustedUiDescriptor;
+    skip?: boolean;
+  };
 
 type HarnessTestStepMeta = {
   action?: unknown;
   assertion?: unknown;
+  event?: unknown;
+  trustedUi?: unknown;
   skip?: boolean;
 };
 
@@ -114,6 +131,14 @@ const testStepPeekSchema = internSchema(
     properties: {
       action: { type: "unknown" },
       assertion: { type: "unknown" },
+      event: { type: "unknown" },
+      trustedUi: {
+        type: "object",
+        properties: {
+          surface: { type: "string" },
+          action: { type: "string" },
+        },
+      },
       skip: { type: "boolean" },
     },
   },
@@ -833,10 +858,11 @@ export async function runTestPattern(
     () =>
       new Runtime({
         storageManager,
-        // Pattern-native tests invoke returned action streams directly rather
-        // than through the trusted renderer event path. Keep CFC visible while
-        // avoiding false failures for tests that intentionally bypass the UI.
-        cfcEnforcementMode: options.cfcEnforcementMode ?? "observe",
+        // Match the production runtime default: enforce explicitly declared
+        // `ifc` policies so pattern tests act as a regression net for CFC.
+        // Patterns without CFC annotations are unaffected; tests that need a
+        // laxer mode can pass `cfcEnforcementMode` explicitly.
+        cfcEnforcementMode: options.cfcEnforcementMode ?? "enforce-explicit",
         experimental: experimentalOptionsFromEnv(),
         apiUrl: new URL(import.meta.url),
         errorHandlers: [(error: ErrorWithContext) => runtimeErrors.push(error)],
@@ -862,9 +888,15 @@ export async function runTestPattern(
   if (options.verbose) {
     runtime.scheduler.enableSettleStats();
   }
+  // Compile/evaluate through the runtime's OWN harness, not a second Engine.
+  // Verified-load registration, source maps, and module hashes all live on the
+  // engine that evaluates the bundle; the runner and the builder's source-
+  // location annotation consult `runtime.harness`. A separate Engine splits
+  // that state, so `fn.src` stays a raw bundle coordinate and CFC verified-
+  // binding identities (writeAuthorizedBy) fail under enforcement.
   const engine = await withPhase(
     ["runTestPattern", "engine"],
-    () => new Engine(runtime),
+    () => runtime.harness,
   );
 
   try {
@@ -876,13 +908,9 @@ export async function runTestPattern(
           new FileSystemProgramResolver(testPath, options.root),
         ),
     );
-    const { jsScript, id } = await withPhase(
-      ["runTestPattern", "compile"],
-      () => engine.compile(program),
-    );
     const { main } = await withPhase(
-      ["runTestPattern", "evaluate"],
-      () => engine.evaluate(id, jsScript, program.files),
+      ["runTestPattern", "compile"],
+      () => engine.compileAndEvaluateModules(program),
     );
 
     if (!main?.default) {
@@ -1158,9 +1186,12 @@ export async function runTestPattern(
           () => actionStreamForStep(stepCell),
         );
 
-        // Send undefined for void streams
+        // Send the step's event (undefined for plain void actions), wrapped
+        // with renderer-trusted provenance when the step declares `trustedUi`.
         await withPhase(["runTestPattern", "step", actionName, "send"], () => {
-          actionStream.send(undefined);
+          actionStream.send(
+            buildActionEvent(stepValue.event, stepValue.trustedUi),
+          );
         });
 
         // Wait for idle, then settle commits and re-idle.

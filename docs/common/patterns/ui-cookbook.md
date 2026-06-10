@@ -179,6 +179,9 @@ page:
 When creating new examples, try to add new aesthetic directions rather than
 converging on the same look repeatedly.
 
+For drag-and-drop interactions (`cf-drag-source` / `cf-drop-zone`), see the
+worked example in [drag-and-drop](meta/drag-and-drop.md).
+
 ## Working Rule
 
 The cookbook should help an agent get to:

@@ -385,21 +385,23 @@ Bytes: TAG_INSTANCE  TYPE_TAG_STRING  STATE
 ```
 
 - **Type tag**: The `FabricInstance`'s type tag string (e.g., `"Error@1"`,
-  `"Map@1"`, `"Set@1"`) encoded as a complete tagged string
+  `"Map@1"`, `"Set@1"`), as reported by its codec's `tagForValue()` (see
+  `1-fabric-values.md` Section 2.4), encoded as a complete tagged string
   value per Section 4.4. Concretely, this emits either the direct form
   (`TAG_STRING` + LEB128 length + UTF-8 bytes) for type tags of 64 UTF-8 bytes
   or fewer, or the hashed form (`TAG_STRING_HASH` + 32-byte SHA-256 of the
   UTF-8) for longer type tags. Existing type tags are short, so the direct
   form is used in practice.
-- **Deconstructed state**: The value returned by `[DECONSTRUCT]()`, hashed
+- **Encoded state**: The value returned by the codec's `encode()`, hashed
   recursively as a complete tagged value.
 
 > **Note on types with dedicated tags.** `FabricBytes`,
 > `FabricEpochNsec`, `FabricEpochDays`, `FabricHash`, and `FabricRegExp` are
 > **not** hashed via `TAG_INSTANCE`. Each has a dedicated type tag and is
 > encoded directly (see Sections 4.8, 4.9, 4.10, 4.11, and 4.16
-> respectively). These are all `FabricPrimitive` subclasses — they do not
-> implement `[DECONSTRUCT]`.
+> respectively). These are all `FabricPrimitive` subclasses — at this
+> layer they are hashed from their own stored values, not via their wire
+> codecs.
 
 ### 4.15 Holes (sparse array elements)
 
@@ -433,8 +435,8 @@ Bytes: TAG_REGEXP  SOURCE_STRING   FLAGS_STRING    FLAVOR_STRING
 ```
 
 `FabricRegExp` represents a regular-expression value. It is a
-`FabricPrimitive` subclass and has a dedicated type tag; it does not implement
-`[DECONSTRUCT]` and is **not** hashed via `TAG_INSTANCE`.
+`FabricPrimitive` subclass and has a dedicated type tag; it is hashed from
+its own stored strings (below) and is **not** hashed via `TAG_INSTANCE`.
 
 - **Source**: The pattern source string (`regex.source`), encoded as a
   complete tagged string value per Section 4.4 (direct form for sources of 64

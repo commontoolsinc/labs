@@ -106,11 +106,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     writePolicyInputIdentities: new Map(),
     outbox: [],
     diagnostics: [],
+    unprivilegedSystemWrites: [],
   };
   private reportedCfcRelevant = false;
   private reportedCfcPrepared = false;
   // Highest enforcing strictness ever set on this tx; mode cannot drop below it.
   private cfcEnforcementFloor = 0;
+  // Depth of the runtime's privileged system-write scope. The runtime's own
+  // label/schema persistence (prepareBoundaryCommit) runs inside it; any write
+  // to a protected system path outside it is recorded as unprivileged (S18).
+  // ECMAScript-private (#) so handler code reaching cell.tx cannot enter the
+  // scope via `(cell.tx as any)` — `as any` cannot touch a `#private` member.
+  #privilegedSystemWriteDepth = 0;
   // Per-transaction cache of `Cell.get()` results, keyed by cell link identity.
   // Replaced wholesale on any write (see `invalidateReadResultCache`), so a hit
   // is only ever served when nothing has been written since the cached read.
@@ -165,7 +172,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // on the public tx interface for the same reason (audit S3 posture).
   setCfcSinkMaxConfidentiality(map: SinkMaxConfidentiality): void {
     if (this.cfcState.sinkMaxConfidentiality !== undefined) return;
-    this.cfcState.sinkMaxConfidentiality = map;
+    // Deep-freeze on store so the ceiling is immutable regardless of caller —
+    // TS `Readonly<>` is compile-time only, so storing a bare reference would
+    // let later mutation change the egress policy (review on #3993). Cheap:
+    // deepFreeze short-circuits on the Runtime's already-frozen config.
+    this.cfcState.sinkMaxConfidentiality = deepFreeze(map);
   }
 
   markCfcRelevant(reason?: string): void {
@@ -177,6 +188,43 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (reason) {
       this.cfcState.diagnostics.push(reason);
     }
+  }
+
+  // Runs `fn` with writes to protected system paths (a document's ["cfc"]
+  // label-map) permitted. The runtime's own label/schema persistence in
+  // prepareBoundaryCommit is the only legitimate such writer; `prepareCfc`
+  // wraps that call in this scope via `this`. ECMAScript-private (#) and absent
+  // from IExtendedStorageTransaction, so handler code reaching `cell.tx` cannot
+  // enter the scope — `(cell.tx as any).#runPrivilegedSystemWrite` is a
+  // TypeError, not a bypass (audit S18 review). Tests that need stored ["cfc"]
+  // metadata seed it instead via an ungated path-[] full-document write (the
+  // same shape hydration delivers), never through this scope.
+  #runPrivilegedSystemWrite<T>(fn: () => T): T {
+    this.#privilegedSystemWriteDepth += 1;
+    try {
+      return fn();
+    } finally {
+      this.#privilegedSystemWriteDepth -= 1;
+    }
+  }
+
+  // Record a write to a document's ["cfc"] label-map path made outside the
+  // privileged scope. Such a write forges the metadata that drives CFC
+  // derivation for OTHER writes, bypassing the commit-boundary derivation +
+  // mint-gating (audit S18). prepareBoundaryCommit turns each recorded address
+  // into a fail-closed reason, so the violation surfaces uniformly with every
+  // other CFC reason (enforce rejects, observe diagnoses). `disabled` leaves
+  // CFC inert, so the guard does nothing there.
+  private noteSystemWrite(address: IMemorySpaceAddress): void {
+    if (this.#privilegedSystemWriteDepth > 0) return;
+    if (this.cfcState.enforcementMode === "disabled") return;
+    // The ["cfc"] document field holds the persisted label map. A value-path
+    // write (path[0] is a user key) or a path-[] full-document write is not it.
+    if (address.path[0] !== "cfc") return;
+    this.markCfcRelevant("unprivileged-cfc-metadata-write");
+    this.cfcState.unprivilegedSystemWrites.push(
+      `${address.id}/${address.path.join("/")}`,
+    );
   }
 
   invalidateCfc(reason: string): void {
@@ -358,7 +406,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // matches real activity, so accepting an external input here would let a
     // caller skip prepareBoundaryCommit while still passing the recheck (audit
     // S2 — verification bypass).
-    const reasons = prepareBoundaryCommit(this);
+    //
+    // Runs inside the privileged system-write scope: prepareBoundaryCommit
+    // persists the derived ["cfc"] label map (and cid: schema docs), which are
+    // exactly the protected writes `noteSystemWrite` rejects from untrusted
+    // code (audit S18). The runtime's own persistence is the one legitimate
+    // writer, so it alone is exempt.
+    const reasons = this.#runPrivilegedSystemWrite(() =>
+      prepareBoundaryCommit(this)
+    );
     if (reasons.length > 0) {
       this.cfcInstrumentation.onPrepareReject?.(reasons);
       this.cfcState.prepare = {
@@ -499,6 +555,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     value: FabricValue,
   ): Result<IAttestation, WriteError | WriterError> {
     this.assertWritable("write()");
+    this.noteSystemWrite(address);
     if (this.cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-after-prepare");
     }
@@ -511,6 +568,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     value: FabricValue,
   ): void {
     this.assertWritable("writeOrThrow()");
+    this.noteSystemWrite(address);
     if (this.cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-after-prepare");
     }

@@ -71,10 +71,12 @@ round-trip correctly.
 > **must accept** both padded and unpadded input for compatibility; standard-base64
 > characters (`+`, `/`) are still invalid and must be rejected. This convention
 > applies to `Bytes@1`, `BigInt@1`, `EpochNsec@1`, and `EpochDays@1` state
-> values.
+> values, and to the `hash` field of `Hash@1` state.
 
 ```typescript
-// file: packages/data-model/json-type-handlers.ts (illustrative -- tag-to-format map)
+// Illustrative tag-to-format map. The canonical tag-string constants live
+// in `packages/data-model/codec-common/codec-type-tags.ts`
+// (`CODEC_TYPE_TAGS`) and `codec-meta-tags.ts` (`CODEC_META_TAGS`).
 
 /**
  * Standard JSON encodings for all built-in special types.
@@ -116,6 +118,27 @@ round-trip correctly.
 // Binary data (base64url-encoded per the base64url convention above)
 // Tag: "Bytes@1"
 // { "/Bytes@1": string }
+
+// Content hashes (see `1-fabric-values.md` Section 1.4.9)
+// Tag: "Hash@1"
+// { "/Hash@1": { tag: string, hash: string } }
+//
+// `tag` is the algorithm tag (e.g. "fid1"); `hash` is the hash bytes as an
+// unpadded base64url string (per the convention above). On
+// deserialization, a non-object state or non-string fields produce a
+// `ProblematicValue` (see `1-fabric-values.md` Section 3.5) per the
+// general codec-validation rule below.
+
+// Regular expressions (see `1-fabric-values.md` Section 1.4.5)
+// Tag: "RegExp@1"
+// { "/RegExp@1": { source: string, flags: string, flavor: string } }
+//
+// `source` is the pattern string; `flags` is the flag string (e.g. "gi");
+// `flavor` identifies the regex dialect (e.g. "es2025", the default). On
+// deserialization, a non-object state produces a `ProblematicValue`, as
+// does an `es2025` pattern that fails native `RegExp` construction;
+// non-`es2025` flavors are stored faithfully without syntax validation
+// (their dialects cannot be validated here).
 
 // Epoch nanoseconds (bigint, encoded per BigInt@1 conventions)
 // Tag: "EpochNsec@1"
@@ -163,7 +186,7 @@ round-trip correctly.
 // form would be lossy through the JSON layer. On deserialization, any state
 // other than these four literals — including a non-string state — produces
 // a `ProblematicValue` (see `1-fabric-values.md` Section 3.5) per the
-// general handler-validation rule below.
+// general codec-validation rule below.
 //
 // Whether such values reach this encoder depends on the fabric-value
 // conversion gate; see `1-fabric-values.md` Section 4.9. The wire format
@@ -179,12 +202,12 @@ round-trip correctly.
 // is `===` to any other `Symbol.for(state)` in the same realm.
 //
 // Unique symbols (`Symbol(desc)`, where `Symbol.keyFor(s)` returns
-// `undefined`) have no portable representation. The handler's
-// `canSerialize()` returns `false` for them, which routes them to the
+// `undefined`) have no portable representation. The codec's
+// `canEncode()` returns `false` for them, which routes them to the
 // registry's "unhandled value" path rather than coercing them silently
 // to a registry key. On deserialization, any state other than a string
 // yields a `ProblematicValue` (see `1-fabric-values.md` Section 3.5)
-// per the general handler-validation rule below.
+// per the general codec-validation rule below.
 //
 // Whether a symbol value reaches this encoder depends on the fabric-value
 // conversion gate; see `1-fabric-values.md` Section 4.9. The wire format
@@ -192,14 +215,18 @@ round-trip correctly.
 ```
 
 > **Deserialization validation.** Deserialization cannot assume type safety from
-> the wire. Each type handler must validate the format of its state before
-> processing. For example, a handler whose state is a base64url string (such as
+> the wire. Each codec must validate the format of its state in `decode()`
+> before processing. For example, a codec whose state is a base64url string
+> (such as
 > `BigInt@1`, `EpochNsec@1`, `EpochDays@1`, or `Bytes@1`) must validate that
 > its state is a `string` containing valid base64url (padded or unpadded) before decoding. On
-> malformed input — wrong type, invalid format, or missing fields — the handler
+> malformed input — wrong type, invalid format, or missing fields — the codec
 > should produce a `ProblematicValue` (see `1-fabric-values.md` Section 3.5)
-> rather than throwing or silently producing garbage. This principle applies to
-> all type handlers. Wire data is untrusted input. See `1-fabric-values.md`
+> rather than silently producing garbage; a codec may either construct the
+> `ProblematicValue` directly or throw and rely on a lenient encoding
+> context to do the wrapping (see `1-fabric-values.md` Section 4.5). This
+> principle applies to
+> all codecs. Wire data is untrusted input. See `1-fabric-values.md`
 > Section 7.4 for the broader principle that applies to all code consuming
 > deserialized values.
 
@@ -344,15 +371,19 @@ The JSON encoding context's internal `wrapTag()` / `unwrapTag()` methods
 generate and parse `/<Type>@<Version>` keys. The context is also responsible
 for:
 
-- Re-wrapping unknown types using the `wireTypeTag` preserved in
-  `UnknownValue` and `ExplicitTagValue`.
-- Managing the class registry for deserialization of known `FabricInstance`
-  types (e.g., `FabricError`, `FabricMap`, `FabricSet`).
-- Providing a narrow `TypeHandlerCodec` view to type handlers during tree
-  walking, exposing only `wrapTag()` and `getTagFor()`.
+- Owning recursion and tag-wrapping around the shallow per-type codecs
+  (see `1-fabric-values.md` Sections 2.4 and 4.5): tags come from
+  `codec.tagForValue(value)` on encode, and decode routes each tag to its
+  registered codec via the `CodecRegistry`.
+- Re-wrapping unknown types using the per-instance `wireTypeTag` preserved
+  in `UnknownValue` / `ProblematicValue` (read back through their codecs'
+  `tagForValue()`), and constructing `UnknownValue` for tags with no
+  registered codec.
+- In lenient mode, converting codec `decode()` throws into
+  `ProblematicValue`.
 
 Note: `/object` escaping (Section 6) is applied directly by the context's
-private `serialize()` method in its plain-objects path, since it is structural
+private encode walker in its plain-objects path, since it is structural
 escaping rather than type encoding.
 
 ## 8. Unknown Type Handling

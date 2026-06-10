@@ -78,4 +78,4 @@ export default pattern(({ searchQuery }) => {
 ## See Also
 
 - @common/concepts/reactivity.md - Reactivity and fetchData patterns
-- @common/concepts/types-and-schemas.md - Cell and Writable types
+- @common/concepts/types-and-schemas/writable.md - Cell and Writable types

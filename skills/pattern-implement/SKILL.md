@@ -31,15 +31,12 @@ testability.
 
 ## Read First
 
-- `docs/common/ai/pattern-factory-build-guide.md` - when working in a Pattern
-  Factory Build workspace
-- `docs/common/concepts/reactivity.md` - Cell behavior, reactive values, and
-  `.get()` / `.set()` boundaries
-- `docs/common/patterns/new-cells.md` - when and how to create pattern-owned
-  writable cells with static initial values
-- `docs/common/ai/pattern-development-guide.md` - especially the SES authoring
-  limits and escape-hatch guidance
-- `docs/common/patterns/` - especially `meta/` for generalizable idioms
+- The reads mandated by pattern-dev:
+  `docs/common/ai/pattern-development-guide.md` (especially the SES authoring
+  limits and escape-hatch guidance), `docs/common/concepts/reactivity.md`,
+  `docs/common/patterns/new-cells.md`, and — in a Pattern Factory Build
+  workspace — `docs/common/ai/pattern-factory-build-guide.md`
+- `docs/common/patterns/` - generalizable pattern idioms
 - `docs/common/concepts/action.md` - action() for local state
 - `docs/common/concepts/handler.md` - handler() for reusable logic
 - `docs/common/concepts/identity.md` - equals() for object comparison
@@ -78,11 +75,8 @@ static local UI state, or draft/editing state:
 - Draft/editing state: create it from a static value, then copy from input state
   inside an `action()` or another valid event/reactive context.
 
-For transient UI state, prefer `PerSession<>` unless the state should persist
-across sessions. This includes active tab, selected item, selected room, local
-filter text, open modal, and focused item. A useful test: if the user opens the
-same instance in a new tab, should this state carry over? If not, it is probably
-`PerSession<>`.
+Transient UI state (active tab, selected item, filter text, open modal): apply
+the PerSession new-tab test from the pattern-dev skill.
 
 Use `safeDateNow()` and `nonPrivateRandom()` instead of ambient `Date.now()` and
 `Math.random()` when a pattern needs explicit time or randomness. If a control
@@ -105,15 +99,19 @@ const deleteItem = handler<void, { items: Writable<Item[]>; index: number }>(
 // In JSX: onClick={deleteItem({ items, index })}
 ```
 
-**Rendering sub-patterns** - Use function calls, not JSX:
+**Rendering sub-patterns** - Function calls and JSX both work (verified: both
+forms pass `cf check` with a typed Output interface):
 
 ```tsx
-// ✅ Correct
+// ✅ Function call form
 return <>{items.map((item) => ItemPattern({ item, allItems: items }))}</>;
 
-// ❌ Wrong - JSX fails with typed Output
+// ✅ JSX form
 return <>{items.map((item) => <ItemPattern item={item} />)}</>;
 ```
+
+The sub-pattern's Output type must include `[UI]: VNode` — see
+`docs/common/patterns/composition.md`.
 
 ## Done When
 

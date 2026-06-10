@@ -38,6 +38,25 @@ for (const { name, path } of listFixturePaths()) {
   });
 }
 
+const lastLatency = new Map<string, string>();
+if (DIAGNOSTICS) {
+  // One latency-collected pass per fixture for tail tracking (p99/max are
+  // the tail metrics; see OPTIMIZATION-JOURNAL.md "tail round").
+  for (const { name, path } of listFixturePaths()) {
+    const fixture = await loadFixture(path);
+    replayFixture(fixture); // warm
+    const { latency } = replayFixture(fixture, { collectLatency: true });
+    if (latency !== undefined) {
+      lastLatency.set(
+        name,
+        `p50=${latency.p50.toFixed(3)} p99=${latency.p99.toFixed(2)} ` +
+          `p99.9=${latency.p999.toFixed(2)} max=${latency.max.toFixed(2)} ` +
+          `mean=${latency.mean.toFixed(3)} (ms/invocation)`,
+      );
+    }
+  }
+}
+
 if (DIAGNOSTICS) {
   globalThis.addEventListener("unload", () => {
     for (const [name, m] of lastMetrics) {
@@ -50,6 +69,10 @@ if (DIAGNOSTICS) {
           `getDocAtPath=${m.getDocAtPathCalls} ` +
           `memoHits=${m.schemaMemoHits}`,
       );
+      const latency = lastLatency.get(name);
+      if (latency !== undefined) {
+        console.log(`[diagnostics] ${name}: latency ${latency}`);
+      }
     }
   });
 }

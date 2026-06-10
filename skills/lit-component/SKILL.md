@@ -19,6 +19,10 @@ Use this skill when:
 - Building reactive components for pattern UIs
 - Debugging component lifecycle or reactivity issues
 
+Do NOT use this skill when authoring or styling pattern UIs that consume `cf-`
+components — that's `pattern-ui`'s job. Patterns must never touch component
+internals, and pattern JSX uses `theme={...}`, not Lit's `.theme=${...}`.
+
 ## Core Philosophy
 
 Common UI is inspired by SwiftUI and emphasizes:
@@ -123,130 +127,42 @@ export { CFComponentName };
 export type {}; /* exported types */
 ```
 
+Both registrations are the codebase convention, not a contradiction: the
+component file registers unconditionally when it is imported, and the index
+file's guarded define is a safe no-op in that case — it only registers when the
+component module didn't (and prevents duplicate-registration errors during hot
+module replacement). Keep both.
+
 ## Theme Integration
 
-Most components should use `var(--cf-theme-*)` CSS variables with fallbacks.
-Consume `cfThemeContext` only when JavaScript needs the theme object for runtime
-logic, derived values, or applying theme variables to dynamically created
-elements:
+Most components should use `var(--cf-theme-*)` CSS variables with fallbacks
+(`--cf-theme-*` first, then `--cf-*` base token, then a literal). Consume
+`cfThemeContext` (with `applyThemeToElement`) only when JavaScript needs the
+theme object for runtime logic, derived values, or applying theme variables to
+dynamically created elements.
 
-```typescript
-import { consume } from "@lit/context";
-import { property } from "lit/decorators.js";
-import {
-  applyThemeToElement,
-  type CFTheme,
-  cfThemeContext,
-  defaultTheme,
-} from "../theme-context.ts";
-
-export class MyComponent extends BaseElement {
-  @consume({ context: cfThemeContext, subscribe: true })
-  @property({ attribute: false })
-  declare theme?: CFTheme;
-
-  override firstUpdated(changed: Map<string | number | symbol, unknown>) {
-    super.firstUpdated(changed);
-    this._updateThemeProperties();
-  }
-
-  override updated(changed: Map<string | number | symbol, unknown>) {
-    super.updated(changed);
-    if (changed.has("theme")) {
-      this._updateThemeProperties();
-    }
-  }
-
-  private _updateThemeProperties() {
-    const currentTheme = this.theme || defaultTheme;
-    applyThemeToElement(this, currentTheme);
-  }
-}
-```
-
-Then use theme CSS variables with fallbacks:
-
-```css
-.button {
-  background-color: var(
-    --cf-theme-color-primary,
-    var(--cf-colors-primary-500, #3b82f6)
-  );
-  border-radius: var(
-    --cf-theme-border-radius,
-    var(--cf-border-radius-md, 0.375rem)
-  );
-  font-family: var(--cf-theme-font-family, inherit);
-}
-```
-
-**Complete theme reference:** See `references/theme-system.md` for all available
-CSS variables and helper functions.
+**Theme consumption code and complete reference:** See
+`references/theme-system.md` for the `@consume` boilerplate, all available CSS
+variables, and helper functions.
 
 ## Cell Integration
 
-For components that work with reactive runtime data:
+For components that work with reactive runtime data, declare the cell as
+`@property({ attribute: false })`, subscribe with
+`cell.sink(() =>
+this.requestUpdate())` when the `cell` property changes, and
+read with `cell.get()` in `render()` (guarding the no-cell case). The pitfalls
+that matter:
 
-```typescript
-import { property } from "lit/decorators.js";
-import type { Cell } from "@commonfabric/runner";
-import { isCell } from "@commonfabric/runner";
+- Clean up the previous subscription before subscribing to a new cell, and
+  unsubscribe in `disconnectedCallback()` (memory leaks)
+- Check `isCell(this.cell)` before subscribing
+- Mutate cells through transactions, never directly
 
-export class MyComponent extends BaseElement {
-  @property({ attribute: false })
-  declare cell: Cell<MyDataType>;
-
-  private _unsubscribe: (() => void) | null = null;
-
-  override updated(changedProperties: Map<string, any>) {
-    super.updated(changedProperties);
-
-    if (changedProperties.has("cell")) {
-      // Clean up previous subscription
-      if (this._unsubscribe) {
-        this._unsubscribe();
-        this._unsubscribe = null;
-      }
-
-      // Subscribe to new Cell
-      if (this.cell && isCell(this.cell)) {
-        this._unsubscribe = this.cell.sink(() => {
-          this.requestUpdate();
-        });
-      }
-    }
-  }
-
-  override disconnectedCallback() {
-    super.disconnectedCallback();
-    if (this._unsubscribe) {
-      this._unsubscribe();
-      this._unsubscribe = null;
-    }
-  }
-
-  override render() {
-    if (!this.cell) {
-      return html`
-
-      `;
-    }
-
-    const value = this.cell.get();
-    return html`
-      <div>${value}</div>
-    `;
-  }
-}
-```
-
-**Complete Cell patterns:** See `references/cell-integration.md` for:
-
-- Subscription management
-- Nested property access with `.key()`
-- Array cell manipulation
-- Transaction-based mutations
-- Finding cells by equality
+**Subscription boilerplate and complete Cell patterns:** See
+`references/cell-integration.md` for subscription management, nested property
+access with `.key()`, array cell manipulation, transaction-based mutations, and
+finding cells by equality.
 
 ## Reactive Controllers
 

@@ -1,67 +1,40 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createBindingIdentityHelperSource } from "@commonfabric/utils/sandbox-contract";
-import {
-  parseCompiledBundleSource as parseCompiledBundleSourceRaw,
-} from "../src/sandbox/compiled-js-parser.ts";
-import {
-  verifyCompiledBundleModuleFactoriesWithParser
-    as verifyCompiledBundleModuleFactoriesRaw,
-  verifyParsedCompiledBundleModuleFactoriesWithParser
-    as verifyParsedCompiledBundleModuleFactoriesWithParserRaw,
-} from "../src/sandbox/compiled-bundle-verifier.ts";
-import { withFactoryGuards } from "./support/amd-bundles.ts";
+import { verifyCompiledModuleBody } from "../src/sandbox/module-record-verifier.ts";
 
-function parseCompiledBundleSource(bundle: string) {
-  return parseCompiledBundleSourceRaw(withFactoryGuards(bundle));
+// These tests guard the format-agnostic SES module-item classification rules
+// (the `classifyModuleItems` core) through the live enforcement entry point,
+// `verifyCompiledModuleBody` — the ESM module-body verifier. They were
+// originally written against the retired AMD whole-bundle verifier; each case
+// is the same compiled module body, now in compiled-CommonJS form with a
+// `require()` import preamble instead of an AMD `define` factory.
+//
+// Broad accept/reject parity cases (mutable bindings, classes, generators,
+// IIFEs, raw mutable exports, import policy) live in
+// esm-verifier-parity.test.ts and esm-module-body-verifier.test.ts; the
+// `__cfReg` registration rules live in cfreg-security.test.ts. This file keeps
+// the finer-grained classifier shapes those suites do not cover.
+
+const IMPORT = `const commonfabric_1 = require("commonfabric");`;
+
+function verify(body: string) {
+  return verifyCompiledModuleBody(body, "/main.tsx");
 }
 
-function verifyParsedCompiledBundleModuleFactoriesWithParser(
-  bundle: string,
-  parsedBundle: ReturnType<typeof parseCompiledBundleSourceRaw>,
-) {
-  return verifyParsedCompiledBundleModuleFactoriesWithParserRaw(
-    withFactoryGuards(bundle),
-    parsedBundle,
-  );
-}
-
-function verifyCompiledBundleModuleFactories(bundle: string) {
-  return verifyCompiledBundleModuleFactoriesRaw(withFactoryGuards(bundle));
-}
-
-describe("verifyCompiledBundleModuleFactories()", () => {
-  it("accepts compiled authored module factories", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commonfabric_1.lift)(() => 42);
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
+describe("verifyCompiledModuleBody() classifier shapes", () => {
   it("accepts the 2-arg no-input lift(false, fn) form at module scope", () => {
     // CT-1644: Phase 2 hoists a `lift(false, fn)()` computation to a module-
     // scope const, surfacing the 2-arg no-input form (PR #3709) to the
-    // authored-factory verifier. The callback is the SECOND argument; the
+    // module-scope verifier. The callback is the SECOND argument; the
     // verifier must read it at index 1, not 0 (where `false` sits).
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    const __cfLift_1 = (0, commonfabric_1.lift)(false, () => 42);
-    exports.default = (0, commonfabric_1.handler)(false, false, () => [__cfLift_1()][0]);
-  });
-});
+    const body = `
+${IMPORT}
+const __cfLift_1 = (0, commonfabric_1.lift)(false, () => 42);
+exports.default = (0, commonfabric_1.handler)(false, false, () => [__cfLift_1()][0]);
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+    expect(() => verify(body)).not.toThrow();
   });
 
   it("accepts the 2-arg lift(fn, options) form (callback at index 0)", () => {
@@ -69,18 +42,13 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     // valid 2-arg form whose callback is the FIRST argument (options second).
     // The verifier must disambiguate by which position is the function — not
     // assume a 2-arg lift always has its callback at index 1.
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    const __cfLift_1 = (0, commonfabric_1.lift)(() => 42, { materializerWriteInputPaths: [["x"]] });
-    exports.default = (0, commonfabric_1.handler)(false, false, () => [__cfLift_1()][0]);
-  });
-});
+    const body = `
+${IMPORT}
+const __cfLift_1 = (0, commonfabric_1.lift)(() => 42, { materializerWriteInputPaths: [["x"]] });
+exports.default = (0, commonfabric_1.handler)(false, false, () => [__cfLift_1()][0]);
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+    expect(() => verify(body)).not.toThrow();
   });
 
   it("accepts a hoisted handler(...) call at module scope", () => {
@@ -89,899 +57,428 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     // const `__cfHandler_N = handler(eventSchema, stateSchema, cb)`, with the
     // captures applied at the original site. The 3-arg form puts the callback
     // at index 2; the verifier must accept this trusted-builder call at module
-    // scope and verify the callback there (previously the handler call only
-    // appeared inline inside a pattern/JSX body, unverified at module scope).
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    const __cfHandler_1 = (0, commonfabric_1.handler)(false, false, (_event, { count }) => count.set(count.get() + 1));
-    exports.default = (0, commonfabric_1.pattern)((__cf_pattern_input) => ({
-      inc: __cfHandler_1({ count: __cf_pattern_input.key("count") }),
-    }));
-  });
-});
+    // scope and verify the callback there.
+    const body = `
+${IMPORT}
+const __cfHandler_1 = (0, commonfabric_1.handler)(false, false, (_event, { count }) => count.set(count.get() + 1));
+exports.default = (0, commonfabric_1.pattern)((__cf_pattern_input) => ({
+  inc: __cfHandler_1({ count: __cf_pattern_input.key("count") }),
+}));
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+    expect(() => verify(body)).not.toThrow();
   });
 
   it("accepts a hoisted pattern(...) call at module scope", () => {
     // CT-1655: extends whole-call hoisting to `pattern`. A reactive map lowers
     // to `receiver.mapWithPattern(pattern(cb, inSchema, outSchema), { params })`;
-    // the bare `pattern(...)` (the first mapWithPattern argument) is hoisted to a
-    // module-scope const `__cfPattern_N = pattern(...)` with the callback inline,
-    // and the call site reads `mapWithPattern(__cfPattern_N, { params })`. The
-    // verifier must accept this trusted-builder call at module scope and verify
-    // its callback (index 0) there.
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    const __cfPattern_1 = (0, commonfabric_1.pattern)((__cf_pattern_input) => {
-      const item = __cf_pattern_input.key("element");
-      return item.key("name");
-    }, false, false);
-    exports.default = (0, commonfabric_1.pattern)((__cf_pattern_input) => ({
-      names: __cf_pattern_input.key("items").mapWithPattern(__cfPattern_1, {}),
-    }));
-  });
-});
+    // the bare `pattern(...)` (the first mapWithPattern argument) is hoisted to
+    // a module-scope const `__cfPattern_N = pattern(...)` with the callback
+    // inline, and the call site reads `mapWithPattern(__cfPattern_N, { params })`.
+    // The verifier must accept this trusted-builder call at module scope and
+    // verify its callback (index 0) there.
+    const body = `
+${IMPORT}
+const __cfPattern_1 = (0, commonfabric_1.pattern)((__cf_pattern_input) => {
+  const item = __cf_pattern_input.key("element");
+  return item.key("name");
+}, false, false);
+exports.default = (0, commonfabric_1.pattern)((__cf_pattern_input) => ({
+  names: __cf_pattern_input.key("items").mapWithPattern(__cfPattern_1, {}),
+}));
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("accepts a previously parsed compiled bundle", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commonfabric_1.lift)(() => 42);
-  });
-});
-`;
-    const parsedBundle = parseCompiledBundleSource(bundle);
-
-    expect(() =>
-      verifyParsedCompiledBundleModuleFactoriesWithParser(bundle, parsedBundle)
-    ).not.toThrow();
+    expect(() => verify(body)).not.toThrow();
   });
 
   it("accepts compiled dependencies from the shared runtime-module policy", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric/schema", "turndown"], function (require, exports, _schema, turndown_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    turndown_1 = __importDefault(turndown_1);
-    exports.default = turndown_1.default;
-  });
-});
+    const body = `
+const _schema = require("commonfabric/schema");
+const turndown_1 = __importDefault(require("turndown"));
+exports.default = turndown_1.default;
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+    expect(() => verify(body)).not.toThrow();
   });
 
-  it("accepts a single trailing __cfReg({ … }) hoist registration", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    const __cfLift_1 = (0, commonfabric_1.lift)(() => 42);
-    const __cfPattern_1 = (0, commonfabric_1.pattern)(() => ({}));
-    exports.default = (0, commonfabric_1.pattern)(() => ({}));
-    __cfReg({ __cfLift_1, __cfPattern_1 });
-  });
-});
+  it("rejects imports outside the shared runtime-module policy", () => {
+    const body = `
+const evil_1 = require("evil");
+exports.default = evil_1.default;
 `;
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
 
-  it("rejects a second __cfReg() registration call", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    const __cfPattern_1 = (0, commonfabric_1.pattern)(() => ({}));
-    exports.default = __cfPattern_1;
-    __cfReg({ __cfPattern_1 });
-    __cfReg({ __cfPattern_1 });
-  });
-});
-`;
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "at most one __cfReg() registration call",
-    );
-  });
-
-  it("rejects a __cfReg() referencing an undeclared binding", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commonfabric_1.pattern)(() => ({}));
-    __cfReg({ notDeclared });
-  });
-});
-`;
-    // Not the canonical shape (the name is not a top-level binding) → falls
-    // through to the generic unsupported-statement rejection.
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "unsupported top-level executable code",
-    );
+    expect(() => verify(body)).toThrow();
   });
 
   it("rejects default exports of trusted runtime helper references", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = commonfabric_1.pattern;
-  });
-});
+    const body = `
+${IMPORT}
+exports.default = commonfabric_1.pattern;
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+    expect(() => verify(body)).toThrow(
       "Default exports must be trusted builders, direct functions, verified data, or import re-exports",
     );
   });
 
   it("rejects default exports of trusted runtime helper aliases", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    const rawPattern = commonfabric_1.pattern;
-    exports.default = rawPattern;
-  });
-});
+    const body = `
+${IMPORT}
+const rawPattern = commonfabric_1.pattern;
+exports.default = rawPattern;
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+    expect(() => verify(body)).toThrow(
       "Default exports must be trusted builders, direct functions, verified data, or import re-exports",
     );
   });
 
-  it("accepts verified top-level function references for compiled trusted builders", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    function sanitize(value) {
-      return (value == null ? "" : value).trim();
-    }
-    exports.default = (0, commonfabric_1.lift)(sanitize);
-  });
-});
+  it("accepts verified top-level function declarations for compiled trusted builders", () => {
+    const body = `
+${IMPORT}
+function sanitize(value) {
+  return (value == null ? "" : value).trim();
+}
+exports.default = (0, commonfabric_1.lift)(sanitize);
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+    expect(() => verify(body)).not.toThrow();
   });
 
   it("accepts canonical verified binding annotation statements at module scope", () => {
-    const bindingHelper = createBindingIdentityHelperSource()
-      .split("\n")
-      .map((line) => `    ${line}`)
-      .join("\n");
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-${bindingHelper}
-    function localFunction(value) { return value.toUpperCase(); }
-    __cfBindVerifiedBinding(localFunction, {
-      sourceFile: "/main.tsx",
-      bindingPath: ["localFunction"]
-    });
-    exports.default = (0, commonfabric_1.lift)(localFunction);
-  });
+    const body = `
+${IMPORT}
+${createBindingIdentityHelperSource()}
+function localFunction(value) { return value.toUpperCase(); }
+__cfBindVerifiedBinding(localFunction, {
+  sourceFile: "/main.tsx",
+  bindingPath: ["localFunction"]
 });
+exports.default = (0, commonfabric_1.lift)(localFunction);
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+    expect(() => verify(body)).not.toThrow();
   });
 
   it("accepts canonical verified binding annotation for trusted builder results", () => {
-    const bindingHelper = createBindingIdentityHelperSource()
-      .split("\n")
-      .map((line) => `    ${line}`)
-      .join("\n");
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-${bindingHelper}
-    const saveTitle = (0, commonfabric_1.handler)(true, true, (_event, { title }) => title);
-    __cfBindVerifiedBinding(saveTitle, {
-      sourceFile: "/main.tsx",
-      bindingPath: ["saveTitle"]
-    });
-    exports.default = saveTitle;
-  });
+    const body = `
+${IMPORT}
+${createBindingIdentityHelperSource()}
+const saveTitle = (0, commonfabric_1.handler)(true, true, (_event, { title }) => title);
+__cfBindVerifiedBinding(saveTitle, {
+  sourceFile: "/main.tsx",
+  bindingPath: ["saveTitle"]
 });
+exports.default = saveTitle;
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+    expect(() => verify(body)).not.toThrow();
   });
 
   it("accepts compiled JSX intrinsic tags inside trusted builder callbacks", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commonfabric_1.pattern)(() => {
-      return {
-        ui: h("div", null, h("cf-screen", null, "Hello")),
-      };
-    });
-  });
+    const body = `
+${IMPORT}
+exports.default = (0, commonfabric_1.pattern)(() => {
+  return {
+    ui: h("div", null, h("cf-screen", null, "Hello")),
+  };
 });
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+    expect(() => verify(body)).not.toThrow();
   });
 
   it("accepts destructured compiled builder callbacks with injected schema args", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    const count = (0, commonfabric_1.schema)({ type: "number" });
-    exports.default = (0, commonfabric_1.pattern)(({ count: value }) => ({
-      data: { value },
-    }), false, {
-      type: "object",
-      properties: {
-        data: { type: "object" },
-      },
-    });
-  });
+    const body = `
+${IMPORT}
+const count = (0, commonfabric_1.schema)({ type: "number" });
+exports.default = (0, commonfabric_1.pattern)(({ count: value }) => ({
+  data: { value },
+}), false, {
+  type: "object",
+  properties: {
+    data: { type: "object" },
+  },
 });
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("rejects mutable compiled module state", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    let counter = 0;
-    exports.default = (0, commonfabric_1.lift)(() => ++counter);
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Top-level mutable bindings are not allowed in SES mode",
-    );
-  });
-
-  it("rejects authored factories that bind reserved wrapper-local names", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports"], function (require, exports) {
-    "use strict";
-    const define = 42;
-    exports.default = define;
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Reserved wrapper binding",
-    );
-  });
-
-  it("rejects default exports of wrapper-local require", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports"], function (require, exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = require;
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Default exports must be trusted builders, direct functions, verified data, or import re-exports",
-    );
-  });
-
-  it("rejects compiled dependencies outside the shared import policy", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "evil"], function (require, exports, evil) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = evil;
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Compiled AMD dependency 'evil' is not allowed in SES mode",
-    );
+    expect(() => verify(body)).not.toThrow();
   });
 
   it("accepts canonical compiled function hardening", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports"], function (require, exports) {
-    "use strict";
-    function __cfHardenFn(fn) {
-      Object.freeze(fn);
-      const prototype = fn.prototype;
-      if (prototype && typeof prototype === "object") {
-        Object.freeze(prototype);
-      }
-      return fn;
+    const body = `
+function __cfHardenFn(fn) {
+  Object.freeze(fn);
+  const prototype = fn.prototype;
+  if (prototype && typeof prototype === "object") {
+    Object.freeze(prototype);
+  }
+  return fn;
+}
+const step = __cfHardenFn(() => 42);
+exports.default = step;
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("accepts regex literals inside compiled helper functions", () => {
+    const body = `
+${IMPORT}
+function clean(content) {
+  return content.replace(/\\n+/g, " ").trim();
+}
+exports.default = (0, commonfabric_1.lift)(clean);
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("accepts pure ambient global helper captures in compiled callbacks", () => {
+    const body = `
+${IMPORT}
+exports.default = (0, commonfabric_1.lift)(() => ({
+  parsed: parseInt("42", 10),
+  float: parseFloat("3.14"),
+  nan: isNaN(Number("x")),
+  finite: isFinite(12),
+}));
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("accepts ambient base64 helpers in compiled callbacks", () => {
+    const body = `
+${IMPORT}
+exports.default = (0, commonfabric_1.lift)(() => atob("YQ=="));
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("accepts compiled __cf_data() with intrinsic collection helpers and local helpers", () => {
+    const body = `
+${IMPORT}
+function buildYears() {
+  const currentYear = new Date((0, commonfabric_1.safeDateNow)()).getFullYear();
+  const years = [];
+  for (let year = currentYear; year >= currentYear - 2; year--) {
+    years.push(String(year));
+  }
+  return years;
+}
+const scopeMap = (0, commonfabric_1.__cf_data)({ gmail: "gmail.readonly" });
+const years = (0, commonfabric_1.__cf_data)(buildYears());
+const scopes = (0, commonfabric_1.__cf_data)(Object.fromEntries(Object.entries(scopeMap).map(([key, value]) => [key, { value }])));
+const payload = (0, commonfabric_1.__cf_data)({ years, scopes });
+exports.default = payload;
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("accepts compiled nested __cfHelpers.__cf_data() runtime helper calls", () => {
+    const body = `
+${IMPORT}
+const startedAt = commonfabric_1.__cfHelpers.__cf_data((0, commonfabric_1.safeDateNow)());
+const seed = commonfabric_1.__cfHelpers.__cf_data((0, commonfabric_1.nonPrivateRandom)());
+exports.default = (0, commonfabric_1.__cf_data)({ startedAt, seed });
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("accepts compiled __cf_data() references rewritten through exports", () => {
+    const body = `
+${IMPORT}
+exports.MODULE_METADATA = exports.STANDARD_LABELS = void 0;
+exports.STANDARD_LABELS = (0, commonfabric_1.__cf_data)(["Personal", "Work"]);
+exports.MODULE_METADATA = (0, commonfabric_1.__cf_data)({
+  type: "email",
+  label: "Email",
+  schema: {
+    label: {
+      enum: exports.STANDARD_LABELS,
+    },
+  },
+});
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("accepts compiled __cf_data() helpers that use for...of iteration", () => {
+    const body = `
+${IMPORT}
+function buildIndex() {
+  const index = new Map();
+  for (const [group, members] of Object.entries({ dairy: ["milk"] })) {
+    for (const member of members) {
+      index.set(member, [group]);
     }
-    const step = __cfHardenFn(() => 42);
-    exports.default = step;
-  });
-});
+  }
+  return index;
+}
+const parentIndex = (0, commonfabric_1.__cf_data)(buildIndex());
+exports.default = parentIndex;
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+    expect(() => verify(body)).not.toThrow();
   });
 
-  it("accepts compiled default-import normalization", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "./dep"], function (require, exports, dep_1) {
+  it("accepts compiled callbacks that declare nested callback parameters", () => {
+    const body = `
+${IMPORT}
+exports.default = (0, commonfabric_1.lift)((items) => items.map((_item) => _item + 1));
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("accepts compiled trusted callbacks that contain nested handler parameters", () => {
+    const body = `
+${IMPORT}
+exports.default = (0, commonfabric_1.pattern)(() => ({
+  addChild: (0, commonfabric_1.handler)(false, {
+    type: "object",
+    properties: {
+      children: { type: "array", items: { type: "number" }, asCell: ["cell"] }
+    },
+    required: ["children"]
+  }, (_, { children }) => children.push(1))({ children: [] }),
+}));
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("accepts compiled helper functions that only close over __cf_data()", () => {
+    const body = `
+${IMPORT}
+const STANDARD_LABELS = (0, commonfabric_1.__cf_data)({ email: ["Personal", "Work"] });
+function getNextUnusedLabel(type) {
+  const standards = STANDARD_LABELS[type];
+  return standards || undefined;
+}
+exports.default = (0, commonfabric_1.lift)(() => getNextUnusedLabel("email"));
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("accepts compiled __cf_data() accessors with inert bodies", () => {
+    const body = `
+${IMPORT}
+const data = (0, commonfabric_1.__cf_data)({
+  get value() {
+    return 1;
+  },
+  set value(_next) {
     "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    dep_1 = __importDefault(dep_1);
-    exports.default = dep_1.default;
-  });
+  },
 });
+exports.default = data;
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+    expect(() => verify(body)).not.toThrow();
   });
 
-  it("rejects compiled namespace-import normalization", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "./dep"], function (require, exports, dep_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    dep_1 = __importStar(dep_1);
-    exports.default = dep_1.default;
-  });
+  it("accepts compiled __cf_data() accessors without inspecting captured bindings", () => {
+    const body = `
+${IMPORT}
+const helper_1 = require("./helper.ts");
+const data = (0, commonfabric_1.__cf_data)({
+  get value() {
+    return helper_1.state;
+  },
 });
+exports.default = data;
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("accepts compiled builder callbacks that capture top-level schema snapshots", () => {
+    const body = `
+${IMPORT}
+const state = (0, commonfabric_1.schema)({ type: "object", properties: { count: { type: "number" } } });
+exports.default = (0, commonfabric_1.lift)(() => state.type);
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("accepts compiled builder callbacks that reference their own top-level binding", () => {
+    const body = `
+${IMPORT}
+const Note = (0, commonfabric_1.pattern)(() => ({
+  json: JSON.stringify(Note),
+}));
+exports.default = Note;
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("accepts compiled callbacks that capture later const helper bindings", () => {
+    const body = `
+${IMPORT}
+const readValue = (0, commonfabric_1.lift)((value) => formatValue(value));
+const formatValue = (value) => {
+  return value;
+};
+exports.default = readValue;
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("rejects raw top-level helper calls without __cf_data()", () => {
+    const body = `
+function build() {
+  return { count: 1 };
+}
+exports.default = build();
+`;
+
+    expect(() => verify(body)).toThrow();
+  });
+
+  it("rejects compiled fragment mutation escape hatches at module scope", () => {
+    const body = `
+function counter() {
+  const self = counter;
+  self.fragment.count += 1;
+  return self.fragment.count;
+}
+counter.fragment = { count: 0 };
+exports.default = counter;
+`;
+
+    expect(() => verify(body)).toThrow(
       "unsupported top-level executable code",
     );
   });
 
-  it("accepts regex literals inside compiled helper functions", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    function clean(content) {
-      return content.replace(/\\n+/g, " ").trim();
-    }
-    exports.default = (0, commonfabric_1.lift)(clean);
-  });
-});
+  it("rejects direct require() calls outside the import preamble", () => {
+    // A bare `require("./dep.ts")` in export position is not the canonical
+    // `const x = require(...)` preamble; it must fall through to
+    // classification and be rejected, never executed.
+    const body = `
+exports.default = require("./dep.ts");
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+    expect(() => verify(body)).toThrow();
   });
 
-  it("rejects compiled top-level generator declarations", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports"], function (require, exports) {
-    "use strict";
-    function* foo() {
-      yield 1;
-    }
-    exports.foo = foo;
-  });
-});
+  it("rejects top-level patternTool() calls in compiled modules", () => {
+    const body = `
+${IMPORT}
+exports.default = (0, commonfabric_1.patternTool)(() => ({ ok: true }));
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Compiled AMD module contains unsupported top-level executable code",
-    );
-  });
-
-  it("accepts canonical compiled named reexports from imports", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "./dep"], function (require, exports, dep_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    Object.defineProperty(exports, "foo", { enumerable: true, get: function () { return dep_1.foo; } });
-    exports.default = 42;
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("accepts canonical compiled export-star reexports in authored modules", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "./dep"], function (require, exports, dep_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    __exportStar(dep_1, exports);
-    exports.default = 42;
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("rejects top-level class declarations in compiled authored modules", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    class Counter {
-      constructor() {
-        this.value = 1;
-      }
-      next() {
-        return this.value + parseInt("2", 10);
-      }
-    }
-    exports.default = (0, commonfabric_1.lift)(() => new Counter().next());
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Top-level class declarations are not allowed in SES mode",
-    );
-  });
-
-  it("accepts pure ambient global helper captures in compiled callbacks", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commonfabric_1.lift)(() => ({
-      parsed: parseInt("42", 10),
-      float: parseFloat("3.14"),
-      nan: isNaN(Number("x")),
-      finite: isFinite(12),
-    }));
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("accepts ambient fetch captures in compiled callbacks", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commonfabric_1.lift)(() => typeof fetch !== "undefined");
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("accepts ambient base64 helpers in compiled callbacks", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commonfabric_1.lift)(() => atob("YQ=="));
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("accepts compiled __cf_data() with intrinsic collection helpers and local helpers", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    function buildYears() {
-      const currentYear = new Date((0, commonfabric_1.safeDateNow)()).getFullYear();
-      const years = [];
-      for (let year = currentYear; year >= currentYear - 2; year--) {
-        years.push(String(year));
-      }
-      return years;
-    }
-    const scopeMap = (0, commonfabric_1.__cf_data)({ gmail: "gmail.readonly" });
-    const years = (0, commonfabric_1.__cf_data)(buildYears());
-    const scopes = (0, commonfabric_1.__cf_data)(Object.fromEntries(Object.entries(scopeMap).map(([key, value]) => [key, { value }])));
-    const payload = (0, commonfabric_1.__cf_data)({ years, scopes });
-    exports.default = payload;
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("accepts compiled nested __cfHelpers.__cf_data() runtime helper calls", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    const startedAt = commonfabric_1.__cfHelpers.__cf_data((0, commonfabric_1.safeDateNow)());
-    const seed = commonfabric_1.__cfHelpers.__cf_data((0, commonfabric_1.nonPrivateRandom)());
-    exports.default = (0, commonfabric_1.__cf_data)({ startedAt, seed });
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("accepts compiled __cf_data() references rewritten through exports", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.MODULE_METADATA = exports.STANDARD_LABELS = void 0;
-    exports.STANDARD_LABELS = (0, commonfabric_1.__cf_data)(["Personal", "Work"]);
-    exports.MODULE_METADATA = (0, commonfabric_1.__cf_data)({
-      type: "email",
-      label: "Email",
-      schema: {
-        label: {
-          enum: exports.STANDARD_LABELS,
-        },
-      },
-    });
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("accepts compiled __cf_data() helpers that use for...of iteration", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    function buildIndex() {
-      const index = new Map();
-      for (const [group, members] of Object.entries({ dairy: ["milk"] })) {
-        for (const member of members) {
-          index.set(member, [group]);
-        }
-      }
-      return index;
-    }
-    const parentIndex = (0, commonfabric_1.__cf_data)(buildIndex());
-    exports.default = parentIndex;
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("accepts compiled callbacks that declare nested callback parameters", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commonfabric_1.lift)((items) => items.map((_item) => _item + 1));
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("accepts compiled trusted callbacks that contain nested handler parameters", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commonfabric_1.pattern)(() => ({
-      addChild: (0, commonfabric_1.handler)(false, {
-        type: "object",
-        properties: {
-          children: { type: "array", items: { type: "number" }, asCell: ["cell"] }
-        },
-        required: ["children"]
-      }, (_, { children }) => children.push(1))({ children: [] }),
-    }));
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("accepts compiled helper functions that only close over __cf_data()", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    const STANDARD_LABELS = (0, commonfabric_1.__cf_data)({ email: ["Personal", "Work"] });
-    function getNextUnusedLabel(type) {
-      const standards = STANDARD_LABELS[type];
-      return standards || undefined;
-    }
-    exports.default = (0, commonfabric_1.lift)(() => getNextUnusedLabel("email"));
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("accepts compiled __cf_data() accessors with inert bodies", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    const data = (0, commonfabric_1.__cf_data)({
-      get value() {
-        return 1;
-      },
-      set value(_next) {
-        "use strict";
-      },
-    });
-    exports.default = data;
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("accepts compiled __cf_data() accessors without inspecting captured bindings", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric", "./helper"], function (require, exports, commonfabric_1, helper_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    const data = (0, commonfabric_1.__cf_data)({
-      get value() {
-        return helper_1.state;
-      },
-    });
-    exports.default = data;
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("accepts compiled builder callbacks that capture top-level schema snapshots", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    const state = (0, commonfabric_1.schema)({ type: "object", properties: { count: { type: "number" } } });
-    exports.default = (0, commonfabric_1.lift)(() => state.type);
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("accepts compiled builder callbacks that reference their own top-level binding", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    const Note = (0, commonfabric_1.pattern)(() => ({
-      json: JSON.stringify(Note),
-    }));
-    exports.default = Note;
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("accepts compiled callbacks that capture later const helper bindings", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    const readValue = (0, commonfabric_1.lift)((value) => formatValue(value));
-    const formatValue = (value) => {
-      return value;
-    };
-    exports.default = readValue;
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
-  it("rejects raw mutable compiled top-level exports without __cf_data()", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports"], function (require, exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = {
-      nested: { count: 1 },
-    };
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Mutable top-level data must be wrapped in __cf_data() in SES mode",
-    );
-  });
-
-  it("rejects raw top-level helper calls without __cf_data()", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports"], function (require, exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    function build() {
-      return { count: 1 };
-    }
-    exports.default = build();
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Top-level call results must be wrapped in __cf_data() in SES mode",
-    );
-  });
-
-  it("rejects compiled fragment mutation escape hatches at module scope", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports"], function (require, exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    function counter() {
-      const self = counter;
-      self.fragment.count += 1;
-      return self.fragment.count;
-    }
-    counter.fragment = { count: 0 };
-    exports.default = counter;
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Compiled AMD module contains unsupported top-level executable code",
-    );
-  });
-
-  it("rejects compiled factories that omit require capture", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["exports"], function (exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = 42;
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Compiled AMD factories must shadow outer require with a canonical 'require' dependency parameter",
-    );
-  });
-
-  it("rejects compiled factories that rename the require capture", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports"], function (__cfRequire, exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = 42;
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Compiled AMD factories must shadow outer require with a canonical 'require' dependency parameter",
-    );
-  });
-
-  it("rejects direct authored require() calls in compiled factories", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = require("./dep");
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Top-level call results must be wrapped in __cf_data() in SES mode",
-    );
-  });
-
-  it("rejects top-level IIFEs that try to hide mutable state in compiled factories", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports"], function (require, exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    const state = (() => ({ count: 0 }))();
-    exports.default = 42;
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Only trusted builder calls, schema(), canonical function hardening, and canonical binding annotation are allowed at module scope in SES mode",
-    );
-  });
-
-  it("rejects top-level patternTool() calls in compiled factories", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = (0, commonfabric_1.patternTool)(() => ({ ok: true }));
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+    expect(() => verify(body)).toThrow(
       "Only trusted builder calls, schema(), canonical function hardening, and canonical binding annotation are allowed at module scope in SES mode",
     );
   });
