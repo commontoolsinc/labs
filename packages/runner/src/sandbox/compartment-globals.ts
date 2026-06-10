@@ -57,6 +57,16 @@ function createCompatibilityGlobals(): Record<string, unknown> {
   }
 
   globals.console = createSafeConsoleGlobal();
+
+  // `__cfReg({ symbol: value })` registers a module's hoisted builder artifacts
+  // for content-addressed `{ identity, symbol }` lookup. The ESM module loader
+  // supplies a real, identity-bound registrar as the module factory's 4th
+  // parameter (which shadows this global inside that wrapper). On the legacy/AMD
+  // bundle path identity addressing is not wired, so this global is a no-op — it
+  // only needs to exist so a transformer-emitted `__cfReg({…})` call resolves
+  // rather than throwing a ReferenceError.
+  globals.__cfReg = freezeSandboxValue(() => undefined);
+
   return globals;
 }
 

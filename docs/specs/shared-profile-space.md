@@ -2,7 +2,16 @@
 
 ## Status
 
-Implementation spec.
+Implementation spec — **partially superseded** by multi-profile support
+(PR #3830). This document describes the original *single* shared profile linked
+at `homeSpaceCell.defaultPattern.profile`. The home space now stores a **list**
+of profiles (`defaultPattern.profiles`) plus `defaultProfile` and a
+recency-ordered `mru`, and `#profile` resolves the default (then by MRU) and
+launches a picker for 2+ profiles. For the current model see
+`docs/common/conventions/HOME_SPACE.md` (Profile section) and
+`docs/common/conventions/wish.md` (Well-Known Profile Targets). The per-profile
+*space* shape, owner-protection, and `wish()` resolution described below still
+hold per profile.
 
 This document captures the target behavior for shared user profiles across
 multi-user patterns. It is intended to drive implementation across home-space

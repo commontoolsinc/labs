@@ -35,6 +35,7 @@ import {
   scopedCell,
 } from "./scope-policy.ts";
 import { resolveLink } from "../link-resolution.ts";
+import { resolveOpPattern } from "./op-pattern-ref.ts";
 
 /**
  * Implementation of built-in map module. Unlike regular modules, this will be
@@ -112,8 +113,10 @@ export function map(
     const listCell = sourceListCell.withTx(tx).resolveAsCell();
     const list = listCell.asSchema(MAP_LIST_SCHEMA).withTx(tx).get();
     // .getRaw() because we want the pattern itself and avoid following the
-    // aliases in the pattern.
-    const opPattern = op.getRaw();
+    // aliases in the pattern. The raw value is either a compact
+    // `{ $patternRef }` sentinel (resolved to the live canonical pattern by
+    // identity) or, on the legacy path, the embedded pattern graph itself.
+    const opPattern = resolveOpPattern(runtime, op.getRaw(), "map");
 
     if (!result || result.getAsNormalizedFullLink().scope !== listScope) {
       const resultSchema = trustedFlowPrecisionSchemaForBuiltin(

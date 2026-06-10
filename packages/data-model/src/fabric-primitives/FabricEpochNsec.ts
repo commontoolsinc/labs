@@ -2,9 +2,25 @@ import type {
   FabricEpochNsec as ApiFabricEpochNsec,
   FabricEpochNsecConstructor as ApiFabricEpochNsecConstructor,
 } from "@commonfabric/api";
+import {
+  fromBase64url,
+  toUnpaddedBase64url,
+} from "@commonfabric/utils/base64url";
+import {
+  bigintFromMinimalTwosComplement,
+  bigintToMinimalTwosComplement,
+} from "@commonfabric/utils/bigint";
 
+import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import {
+  CODEC,
+  type FabricCodec,
+  type ReconstructionContext,
+} from "@/codec-common/interface.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 
 /**
  * Temporal type representing nanoseconds from the POSIX Epoch (1970-01-01T00:00:00Z).
@@ -22,14 +38,57 @@ export class FabricEpochNsec extends BaseFabricPrimitive
     Object.freeze(this);
   }
 
-  /** @inheritDoc */
-  get wireTypeTag(): string {
-    return WIRE_TYPE_TAGS.EpochNsec;
-  }
-
   /** Nanoseconds from POSIX Epoch. Negative values represent pre-epoch timestamps. */
   get value(): bigint {
     return this.#value;
+  }
+
+  //
+  // Static members
+  //
+
+  static #codec = Object.freeze(
+    new (class EpochNsecCodec extends BaseFabricCodec {
+      constructor() {
+        super(CODEC_TYPE_TAGS.EpochNsec, FabricEpochNsec);
+      }
+
+      /** @inheritDoc */
+      encode(value: FabricEpochNsec): FabricValue {
+        return toUnpaddedBase64url(bigintToMinimalTwosComplement(value.#value));
+      }
+
+      /** @inheritDoc */
+      decode(
+        typeTag: string,
+        state: FabricValue,
+        _context: ReconstructionContext,
+      ): FabricValue {
+        if (typeof state !== "string") {
+          return new ProblematicValue(
+            typeTag,
+            state,
+            `EpochNsec: expected string state, got ${typeof state}`,
+          );
+        }
+        try {
+          return new FabricEpochNsec(
+            bigintFromMinimalTwosComplement(fromBase64url(state)),
+          );
+        } catch {
+          return new ProblematicValue(
+            typeTag,
+            state,
+            `EpochNsec: invalid base64: ${state}`,
+          );
+        }
+      }
+    })(),
+  );
+
+  /** The codec for instances of this class. */
+  static get [CODEC](): FabricCodec {
+    return this.#codec;
   }
 }
 

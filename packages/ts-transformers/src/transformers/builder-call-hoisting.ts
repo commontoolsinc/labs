@@ -226,6 +226,17 @@ function hoistBuilderCalls(
   // hoisted const).
   const counters = new Map<string, number>();
 
+  // Every hoisted builder-artifact name (`__cfPattern_N`, `__cfLift_N`,
+  // `__cfHandler_N`), in creation order. After the whole file is visited we emit
+  // a SINGLE trailing `__cfReg({ __cfPattern_1, __cfLift_1, … })` call so the
+  // runtime can assign each a content-addressed `{ identity, symbol }` reference
+  // (the property key is the symbol). A single trailing call — rather than
+  // exporting each hoist or registering it inline — keeps the verifier's job to
+  // "exactly one top-level `__cfReg` call" and lets a run-once trap reject any
+  // injected duplicate. See PatternManager.registerHoistedValues / the
+  // `__cfReg` factory parameter wired up by the module-record compiler.
+  const registeredNames: string[] = [];
+
   const visit: ts.Visitor = (node: ts.Node): ts.Node => {
     const visited = ts.visitEachChild(node, visit, context.tsContext);
     if (!ts.isCallExpression(visited)) {
@@ -240,7 +251,9 @@ function hoistBuilderCalls(
 
       const next = (counters.get(builder.prefix) ?? 0) + 1;
       counters.set(builder.prefix, next);
-      const name = factory.createIdentifier(`${builder.prefix}_${next}`);
+      const nameText = `${builder.prefix}_${next}`;
+      const name = factory.createIdentifier(nameText);
+      registeredNames.push(nameText);
       // Carry the hoisted call's identity on the synthetic call-site identifier.
       // The checker can't resolve a synthetic identifier to its const
       // initializer, so detectCallKind would otherwise fail to recognize
@@ -298,12 +311,146 @@ function hoistBuilderCalls(
   // post-order traversal already pushed inner/earlier calls first, so a hoist
   // that references another hoist (e.g. `__cfPattern` whose callback calls
   // `__cfLift`) sees it declared above.
+  // Local names that leave the module through ANY export form — `export const`,
+  // `export { x }` / `export { x as y }`, `export default x`. Such artifacts are
+  // addressable through the module namespace by their export name, so they are
+  // NOT also routed through `__cfReg` (and `export const` has no local binding
+  // after CommonJS emit anyway). `__cfReg` covers exactly the gap: hoists and
+  // non-exported top-level builder consts.
+  const exportedLocalNames = collectExportedLocalNames(sourceFile);
+
   const resultStatements: ts.Statement[] = [];
   for (const statement of sourceFile.statements) {
+    // Also register AUTHORED non-exported top-level builder artifacts
+    // (`const foo = lift(...)`), so `__cfReg` covers every top-level builder
+    // artifact that does not reach the namespace. Detect on the ORIGINAL
+    // statement (the checker resolves real, not synthetic, nodes). Only a direct
+    // builder CALL counts, so an import/alias (`const x = imported`) — whose value
+    // belongs to another module — is never mis-attributed to this identity.
+    collectTopLevelBuilderArtifactNames(
+      statement,
+      context,
+      exportedLocalNames,
+      registeredNames,
+    );
     pendingHoists = [];
     const visitedStatement = ts.visitNode(statement, visit) as ts.Statement;
     resultStatements.push(...pendingHoists, visitedStatement);
   }
 
+  // Register every hoisted builder artifact with one trailing call. `__cfReg` is
+  // a free identifier supplied by the module wrapper (the 4th factory parameter
+  // under the ESM loader; a no-op global on the legacy/AMD path). The object uses
+  // shorthand so each value is the module-level `const` binding itself — the
+  // registrar receives `{ symbol -> live value }` and the runtime pairs it with
+  // this module's content identity. Emitted only when there is something to
+  // register, so hoist-free modules are unchanged.
+  if (registeredNames.length > 0) {
+    resultStatements.push(
+      factory.createExpressionStatement(
+        factory.createCallExpression(
+          factory.createIdentifier("__cfReg"),
+          undefined,
+          [
+            factory.createObjectLiteralExpression(
+              registeredNames.map((n) =>
+                factory.createShorthandPropertyAssignment(
+                  factory.createIdentifier(n),
+                )
+              ),
+              true,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   return factory.updateSourceFile(sourceFile, resultStatements);
+}
+
+/**
+ * Collect the names of top-level `const`/`let`/`var` declarations whose
+ * initializer is a direct builder CALL (`pattern(...)`, `lift(...)`,
+ * `handler(...)`, `computed(...)`, …) — i.e. authored module-scope builder
+ * artifacts. These are added to the module's `__cfReg({ … })` registration so
+ * they receive a content-addressed `{ identity, symbol }` reference (symbol = the
+ * binding name), exactly like the synthetic hoists.
+ *
+ * Requiring a builder call (via `detectCallKind`) means a re-export / alias
+ * (`const x = imported`) — whose value belongs to ANOTHER module — is never
+ * registered here, so identity is never mis-attributed. Non-artifact builders are
+ * harmlessly trust-filtered at registration time. Destructuring is skipped.
+ *
+ * Names in `exportedLocalNames` are skipped: they leave the module through an
+ * export and are addressable by their export name through the namespace (and an
+ * `export const` has no local binding after CommonJS emit anyway, so a shorthand
+ * would read `undefined`). `__cfReg` covers exactly the gap — hoists and
+ * non-exported top-level builder consts.
+ */
+function collectTopLevelBuilderArtifactNames(
+  statement: ts.Statement,
+  context: TransformationContext,
+  exportedLocalNames: ReadonlySet<string>,
+  out: string[],
+): void {
+  if (!ts.isVariableStatement(statement)) return;
+  for (const decl of statement.declarationList.declarations) {
+    if (!ts.isIdentifier(decl.name)) continue;
+    if (exportedLocalNames.has(decl.name.text)) continue;
+    const init = decl.initializer;
+    if (!init || !ts.isCallExpression(init)) continue;
+    if (detectCallKind(init, context.checker)?.kind === "builder") {
+      out.push(decl.name.text);
+    }
+  }
+}
+
+/**
+ * The set of LOCAL binding names that are exported from the module by any form:
+ * `export const foo`, `export { foo }` / `export { foo as bar }` (the local name
+ * `foo`), and `export default foo`. Used to keep exported builder artifacts out
+ * of `__cfReg` (they are addressable through the module namespace instead).
+ */
+/** Strip parentheses and `as` / `satisfies` wrappers to reach the underlying
+ * `export default` expression (so a wrapped identifier is still recognized). */
+function unwrapDefaultExportExpression(expr: ts.Expression): ts.Expression {
+  let current = expr;
+  while (
+    ts.isParenthesizedExpression(current) || ts.isAsExpression(current) ||
+    ts.isSatisfiesExpression(current) || ts.isTypeAssertionExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function collectExportedLocalNames(sourceFile: ts.SourceFile): Set<string> {
+  const names = new Set<string>();
+  for (const statement of sourceFile.statements) {
+    if (
+      ts.isVariableStatement(statement) &&
+      statement.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
+    ) {
+      for (const decl of statement.declarationList.declarations) {
+        if (ts.isIdentifier(decl.name)) names.add(decl.name.text);
+      }
+    } else if (
+      ts.isExportDeclaration(statement) && !statement.moduleSpecifier &&
+      statement.exportClause && ts.isNamedExports(statement.exportClause)
+    ) {
+      // `export { local as exported }`: the LOCAL name is `propertyName` when
+      // aliased, otherwise `name`.
+      for (const el of statement.exportClause.elements) {
+        names.add((el.propertyName ?? el.name).text);
+      }
+    } else if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
+      // `export default foo` — unwrap parens / `as` / `satisfies` so a wrapped
+      // identifier (`export default (foo)`, `export default foo satisfies T`) is
+      // still recognized as exporting the local `foo`.
+      const expr = unwrapDefaultExportExpression(statement.expression);
+      if (ts.isIdentifier(expr)) names.add(expr.text);
+    }
+  }
+  return names;
 }

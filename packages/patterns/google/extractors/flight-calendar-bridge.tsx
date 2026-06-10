@@ -29,7 +29,6 @@ import {
   wish,
   Writable,
 } from "commonfabric";
-import type { Output as ProfileOutput } from "../../profile.tsx";
 
 // =============================================================================
 // TYPES
@@ -44,6 +43,12 @@ interface Address {
   zip: string;
   country: string;
 }
+
+// Minimal local stand-in for the now-deleted profile.tsx Output. The
+// multi-profile model (#3830) dropped the legacy `addresses` field, so the
+// `#profile` wish no longer returns it; `homeAddress` below degrades to null
+// until a profile address field/element exists.
+type ProfileOutput = { addresses?: Address[] };
 
 /** Flight data from united-flight-tracker */
 interface TrackedFlight {

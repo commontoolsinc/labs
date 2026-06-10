@@ -72,7 +72,7 @@ const ERROR_CLASS_BY_TYPE: ReadonlyMap<string, ErrorConstructor> = new Map([
 ]);
 
 /**
- * Helper for `FabricError.[RECONSTRUCT]()`, which returns the `Error`
+ * Helper for `FabricError`'s codec `decode()`, which returns the `Error`
  * constructor for the given type string (e.g. `"TypeError"`). Falls back
  * to the base `Error` constructor for unknown types.
  */
@@ -262,7 +262,7 @@ export function shallowFabricFromNativeValue(
  * Checks whether a value has a callable `toJSON()` method.
  *
  * TODO: Remove `toJSON()` support once all callers have migrated to
- * `[DECONSTRUCT]`. See spec Section 7.1.
+ * `[CODEC]`-based encoding. See spec Section 7.1.
  *
  * This function is a TypeScript type guard for `{ toJSON: () => unknown }`.
  */
@@ -422,8 +422,8 @@ function fabricFromNativeValueInternal(
 /**
  * Creates a new `Error` with the same class and properties as the original,
  * but with `.cause` and custom enumerable properties recursively converted
- * to `FabricValue`. This ensures that when `FabricError[DECONSTRUCT]`
- * runs at serialization time, all nested values are already `FabricValue`.
+ * to `FabricValue`. This ensures that when `FabricError`'s `[CODEC]` encodes
+ * at serialization time, all nested values are already `FabricValue`.
  *
  * We create a new `Error` rather than mutating the original because the
  * caller's `Error` should not be modified as a side effect of storing it.

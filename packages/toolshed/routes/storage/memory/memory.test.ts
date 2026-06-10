@@ -8,6 +8,7 @@ import {
   MEMORY_PROTOCOL,
 } from "@commonfabric/memory/v2";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { createSession, Identity } from "@commonfabric/identity";
 import { type JSONSchema, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -47,8 +48,10 @@ const createSessionOpenAuth = async (
   }
   return {
     invocation,
+    // Mirror the production producer (`v2-remote-session.ts`): send the
+    // signature as a `FabricBytes`.
     authorization: {
-      signature: signature.ok,
+      signature: new FabricBytes(signature.ok),
     },
   };
 };

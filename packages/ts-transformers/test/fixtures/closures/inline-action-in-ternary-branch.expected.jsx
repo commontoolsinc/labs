@@ -47,7 +47,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         isEditing: __cfHelpers.ReadonlyCell<boolean>;
     };
-}, import("commonfabric").JSXElement>({
+}, __cfHelpers.JSXElement>({
     type: "object",
     properties: {
         state: {
@@ -197,3 +197,7 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfHandler_1,
+    __cfLift_1
+});

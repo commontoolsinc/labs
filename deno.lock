@@ -1939,6 +1939,7 @@
         "dependencies": [
           "jsr:@commonfabric/leb128@*",
           "jsr:@db/sqlite@0.12",
+          "jsr:@denosaurs/plug@1",
           "npm:@opentelemetry/api@^1.9.0"
         ]
       },

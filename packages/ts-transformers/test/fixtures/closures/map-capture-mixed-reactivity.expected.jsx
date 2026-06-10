@@ -46,7 +46,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
                 },
                 limit: {
                     type: "number",
-                    asCell: ["cell"]
+                    asCell: ["readonly"]
                 }
             },
             required: ["label", "derived", "limit"]
@@ -77,7 +77,9 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 // FIXTURE: map-capture-mixed-reactivity
 // Verifies: captures of different reactivity kinds are annotated distinctly in the schema
 //   label (plain string) → params.label (type: "string", accessed via .params)
-//   limit (cell) → params.limit (asCell: true)
+//   limit (cell, READ-only in this callback) → params.limit (asCell: ["readonly"])
+//     — read-only usage yields the precise `readonly` capability, not the broader
+//       `cell`. (The capture is created with cell(100) but never written here.)
 //   derived (state.threshold) → params.derived (asOpaque: true)
 // Context: Three capture kinds — plain value, cell, and state-derived — in one map callback
 export default pattern((state) => {
@@ -148,3 +150,6 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfPattern_1
+});

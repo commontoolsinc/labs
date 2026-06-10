@@ -726,5 +726,43 @@ describe("module", () => {
 
       expect(result.location).toBe("/main.tsx:4:26");
     });
+
+    it("resolves an ESM-loader browser eval frame to the canonical cf:module source", () => {
+      // Under the ESM module loader in a BROWSER, `new Error().stack` surfaces
+      // the per-module eval frame whose file is the `//# sourceURL` the loader
+      // tags each `compartment.evaluate` with (the prefixed per-module source
+      // name). The engine registers a per-module source map under that exact
+      // sourceURL (see engine.ts near `loadSourceMap`), and the production
+      // resolver uses `canonicalizingMapPosition`, which maps the coordinate to
+      // the authored source and then upgrades it to the reload-stable canonical
+      // `cf:module/<hash>/<path>` form. Both source-location consumers (CFC
+      // verified-source AND the scheduler implementation hash) require that
+      // canonical output, so pin the browser resolution path here. (Deno's tamed
+      // SES strips this frame, falling back to the indexOf-into-`script` path
+      // exercised by esm-source-location.test.ts — the browser relies on THIS.)
+      const ESM_SOURCE_URL = "/2b3c/main.tsx"; // per-module eval sourceURL
+      const CANONICAL = "cf:module/2b3cZ9hashZ9/main.tsx";
+      const stack = [
+        "Error",
+        "    at getExternalSourceLocation (bundle.js:10:5)",
+        "    at annotateFunctionDebugMetadata (bundle.js:11:5)",
+        "    at createNodeFactory (bundle.js:12:5)",
+        "    at handler (bundle.js:13:5)",
+        // The authored handler, as a browser eval frame keyed on the sourceURL.
+        `    at inc (${ESM_SOURCE_URL}:2:33)`,
+      ].join("\n");
+
+      const result = resolveSourceLocationFromStack(
+        stack,
+        // Mimics `canonicalizingMapPosition`: only the per-module eval frame has
+        // a registered map, and it resolves to the canonical cf:module form.
+        (file, _line, _col) =>
+          file === ESM_SOURCE_URL
+            ? { source: CANONICAL, line: 2, column: 33 }
+            : null,
+      );
+
+      expect(result.location).toBe(`${CANONICAL}:2:33`);
+    });
   });
 });

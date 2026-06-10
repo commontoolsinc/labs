@@ -43,7 +43,6 @@ import type {
 import {
   addressKey,
   createDataCellURI,
-  isPrimitiveCellLink,
   NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
@@ -77,6 +76,10 @@ import {
 import type { LastNode } from "./link-resolution.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 import { SigilLink } from "./sigil-types.ts";
+import {
+  recordTraverseInvocation,
+  wrapTxForTraverseCapture,
+} from "./traverse-recorder.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
@@ -758,7 +761,10 @@ export abstract class BaseObjectTraverser {
     protected context: TraversalContext = createDefaultTraversalContext(),
     public objectCreator: IObjectCreator<FabricValue> =
       new StandardObjectCreator(),
-  ) {}
+  ) {
+    // Identity passthrough unless CF_TRAVERSE_CAPTURE is recording a fixture.
+    this.tx = wrapTxForTraverseCapture(tx);
+  }
   protected dagMemo = new Map<string, Immutable<FabricValue>>();
   private coverageSelectorCache = new Map<string, SchemaPathSelector>();
   traverseDAGCalls = 0;
@@ -854,7 +860,7 @@ export abstract class BaseObjectTraverser {
         // We follow the first link in array elements so we don't have
         // strangeness with setting item at 0 to item at 1
         let arrayElementLink = itemLink;
-        if (isPrimitiveCellLink(item)) {
+        if (isSigilLink(item)) {
           const [redirDoc, redirSelector] = this.getDocAtPath(
             docItem,
             [],
@@ -900,7 +906,7 @@ export abstract class BaseObjectTraverser {
       return arrayResult;
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
-      if (isPrimitiveCellLink(doc.value)) {
+      if (isSigilLink(doc.value)) {
         // Check coverage before getAtPath/followPointer adds this link target
         // to schemaTracker.
         const alreadyTracked = this.isLinkedDocumentCovered(
@@ -1022,7 +1028,7 @@ export abstract class BaseObjectTraverser {
     doc: IMemorySpaceValueAttestation,
     selector?: SchemaPathSelector,
   ): [IMemorySpaceValueAttestation, SchemaPathSelector | undefined] {
-    if (isPrimitiveCellLink(doc.value)) {
+    if (isSigilLink(doc.value)) {
       this.tx.read(doc.address, READ_FOR_SCHEDULING);
       return followPointer(this.tx, doc, [], this.context, selector, "top");
     } else {
@@ -1152,7 +1158,7 @@ export function getAtPath(
   let remaining = [...path];
 
   while (true) {
-    if (isPrimitiveCellLink(curDoc.value)) {
+    if (isSigilLink(curDoc.value)) {
       // We've only done a nonRecursive read on curDoc, so promote that
       tx.read(curDoc.address, READ_FOR_SCHEDULING);
       // we follow links when we point to a child of the link, since we need
@@ -1176,7 +1182,7 @@ export function getAtPath(
       remaining = [];
     }
     // Our return should never be a link
-    //assert(!isPrimitiveCellLink(curDoc.value));
+    //assert(!isSigilLink(curDoc.value));
     const part = remaining.shift();
     if (part === undefined) {
       return [curDoc, selector];
@@ -1558,7 +1564,7 @@ function loadMetaLinkedDoc(
       }
     }
   } else {
-    const linkObj = isPrimitiveCellLink(targetObj[meta])
+    const linkObj = isSigilLink(targetObj[meta])
       ? targetObj[meta] as SigilLink
       : (meta === "cfc") // cfc links are different
       ? cfcMetaToSigilLink(targetObj["cfc"])
@@ -2151,6 +2157,14 @@ export class SchemaObjectTraverser<V extends FabricValue>
     doc: IMemorySpaceValueAttestation,
     link?: NormalizedFullLink,
   ): TraverseResult<Immutable<FabricValue>> {
+    // No-op unless CF_TRAVERSE_CAPTURE is recording a fixture.
+    recordTraverseInvocation(
+      doc,
+      this.selector,
+      link,
+      this.context,
+      this.sharedSchemaMemo,
+    );
     // Reset per-traverse stats (but NOT the shared memo)
     this.traverseWithSchemaCalls = 0;
     this.traversePointerCalls = 0;
@@ -2624,7 +2638,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       newValue.length = entries.length;
       return { ok: this.objectCreator.createObject(newLink, newValue) };
     } else if (isRecord(doc.value)) {
-      if (isPrimitiveCellLink(doc.value)) {
+      if (isSigilLink(doc.value)) {
         this.tx.read(doc.address, READ_FOR_SCHEDULING);
         // When traversing a pointer, use the unresolved schema, so we have
         // the same values in the schema tracker.
@@ -2890,7 +2904,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // work as expected. Handle boolean items values for element schema
       // let createdDataURI = false;
       // const maybeLink = parseLink(item, arrayLink);
-      if (isPrimitiveCellLink(item)) {
+      if (isSigilLink(item)) {
         const alreadyTracked = this.isLinkedDocumentCovered(
           curDoc,
           curSelector,
@@ -2973,7 +2987,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // If the target is not written yet, still return a cell for it instead
         // of invalidating the parent array; downstream consumers can subscribe
         // to the child cell and observe it when the target materializes.
-        const isLink = isPrimitiveCellLink(curDoc.value);
+        const isLink = isSigilLink(curDoc.value);
         if (isLink) this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         const cellLink = isLink
           ? getNextCellLink(curDoc, curSelector.schema!)
@@ -3092,7 +3106,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       if (
         !this.traverseCells &&
         SchemaObjectTraverser.hasAsCell(propSchema) &&
-        !isPrimitiveCellLink(propValue)
+        !isSigilLink(propValue)
       ) {
         // Intentionally treat asCell/asStream as an opaque boundary in
         // traverseCells=false mode for inline object values. We create a cell
@@ -3233,7 +3247,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       ) {
         const schema = combineOptionalSchema(
           redirSelector?.schema,
-          doc.value && isPrimitiveCellLink(doc.value)
+          doc.value && isSigilLink(doc.value)
             ? parseLink(doc.value, doc.address)?.schema
             : undefined,
         ) ?? redirSelector?.schema;
@@ -3278,7 +3292,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // For my cell link, redirDoc currently points to the last redirect
       // target, but we want cell properties to be based on the link value at
       // that location, so we effectively follow one more link if available.
-      if (isPrimitiveCellLink(redirDoc.value)) {
+      if (isSigilLink(redirDoc.value)) {
         this.tx.read(redirDoc.address, READ_FOR_SCHEDULING);
       }
       const cellLink = getNextCellLink(redirDoc, combinedSchema);
@@ -3425,7 +3439,7 @@ export function canBranchMatch(
   // If the value is an object that could be a link/pointer, bail out entirely.
   // Links are dereferenced during traversal, so the current shape of the value
   // tells us nothing about the resolved type or properties.
-  if (isPrimitiveCellLink(value)) return true;
+  if (isSigilLink(value)) return true;
 
   let resolved: JSONSchema | undefined = branch;
   if ("$ref" in branch) {

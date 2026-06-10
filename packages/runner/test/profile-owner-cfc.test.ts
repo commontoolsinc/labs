@@ -395,18 +395,25 @@ describe("profile owner CFC policy", () => {
     }
   });
 
-  it("marks the home profile link as integrity-protected data", async () => {
+  it("marks the home profiles list as integrity-protected data", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const homePattern = await compileHomePattern(runtime);
       const rootSchema = homePattern.resultSchema as JSONSchema;
-      const profileSchema = resolveLocalSchemaRef(
+      // Protection lives on the array *elements* (TrustedProfileLink), not the
+      // array container — so resolve `profiles.items` and assert there.
+      const profilesSchema = resolveLocalSchemaRef(
         rootSchema,
         (rootSchema as { properties?: Record<string, JSONSchema> }).properties
-          ?.profile ?? {},
+          ?.profiles ?? {},
+      ) as { type?: string; items?: JSONSchema };
+      expect(profilesSchema.type).toBe("array");
+      const itemSchema = resolveLocalSchemaRef(
+        rootSchema,
+        profilesSchema.items ?? {},
       ) as { ifc?: { addIntegrity?: unknown[]; writeAuthorizedBy?: unknown } };
-      expect(profileSchema.ifc?.addIntegrity).toContain("profile-link");
-      expect(profileSchema.ifc?.writeAuthorizedBy).toBeDefined();
+      expect(itemSchema.ifc?.addIntegrity).toContain("profile-link");
+      expect(itemSchema.ifc?.writeAuthorizedBy).toBeDefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -488,7 +495,7 @@ describe("profile owner CFC policy", () => {
     }
   });
 
-  it("rejects direct untrusted writes to the home profile link", async () => {
+  it("rejects direct untrusted writes to the home profiles list", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const homePattern = await compileHomePattern(runtime);
@@ -519,7 +526,51 @@ describe("profile owner CFC policy", () => {
         homePattern.resultSchema,
         writeTx,
       );
-      protectedHomeDefault.key("profile").set(profileDefault);
+      protectedHomeDefault.key("profiles").set([profileDefault]);
+      writeTx.prepareCfc();
+      const result = await writeTx.commit();
+      expect(result.error?.message).toContain("trusted");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects untrusted truncation/removal of the home profiles list", async () => {
+    // Element-level protection only gates *changed* elements of the new array,
+    // so a shrink (set([]) / dropping an entry) would otherwise be unmediated.
+    // The container-level writeAuthorizedBy must reject it.
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const homePattern = await compileHomePattern(runtime);
+      // Seed a non-empty profiles list WITHOUT enforcement (no prepareCfc).
+      const seed = runtime.edit();
+      const profileA = runtime.getCell(
+        alice.did(),
+        "home-profiles-truncate-A",
+        undefined,
+        seed,
+      );
+      profileA.set({ name: "Ada", avatar: "", elements: [] });
+      const home = runtime.getCell(
+        alice.did(),
+        "home-profiles-truncate",
+        homePattern.resultSchema,
+        seed,
+      );
+      home.key("profiles").set([profileA]);
+      await seed.commit();
+
+      // Untrusted truncation under enforcement → rejected by the container
+      // writeAuthorizedBy (the array value changed [A] -> []).
+      const writeTx = runtime.edit();
+      const protectedHome = runtime.getCell(
+        alice.did(),
+        "home-profiles-truncate",
+        homePattern.resultSchema,
+        writeTx,
+      );
+      protectedHome.key("profiles").set([]);
       writeTx.prepareCfc();
       const result = await writeTx.commit();
       expect(result.error?.message).toContain("trusted");

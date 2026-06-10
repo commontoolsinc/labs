@@ -13,7 +13,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     count: number;
-}, import("commonfabric").JSXElement>({
+}, __cfHelpers.JSXElement>({
     type: "object",
     properties: {
         count: {
@@ -97,3 +97,6 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

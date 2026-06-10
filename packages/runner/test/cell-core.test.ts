@@ -99,13 +99,11 @@ describe("Cell", () => {
     // Error is stored as a `FabricError`-shaped value. `c.get()` returns a
     // proxy view of the stored wrapper — its observable fields (`type`,
     // `name`, `message`, `stack`, etc.) are exposed directly on the
-    // projection, and its `wireTypeTag` is `"Error@1"` (`FabricError`'s tag).
+    // projection.
     const result = c.get() as {
       message: string;
       stack: string;
-      wireTypeTag: string;
     };
-    expect(result.wireTypeTag).toBe("Error@1");
     expect(result.message).toBe("something went wrong");
     expect(typeof result.stack).toBe("string");
     await localTx.commit();
@@ -136,9 +134,7 @@ describe("Cell", () => {
     const result = c.get() as {
       message: string;
       cause: { message: string; stack: string };
-      wireTypeTag: string;
     };
-    expect(result.wireTypeTag).toBe("Error@1");
     expect(result.message).toBe("wrapper error");
     expect(result.cause.message).toBe("root cause");
     expect(typeof result.cause.stack).toBe("string");
@@ -187,9 +183,7 @@ describe("Cell", () => {
 
     const targetResult = target.get() as {
       message: string;
-      wireTypeTag: string;
     };
-    expect(targetResult.wireTypeTag).toBe("Error@1");
     expect(targetResult.message).toBe("through nested redirect");
 
     await localTx.commit();

@@ -77,6 +77,27 @@ A discovery mode for when the group is bored of the usual rotation.
 - Pull in candidates by cuisine that match people's favorites.
 - One-tap "add this as an option" from a suggestion into the live poll.
 
+### 6. Open/closed days per location
+
+Track which days of the week each place is closed (or open) so a location that's
+shut today never even shows up as a votable option. Almost every spot in a real
+rotation is dark at least one work day, and nothing's more deflating than the
+poll picking a place that's closed when you walk over.
+
+- Add a per-option `closedDays` field (e.g. a set of weekday indices, or
+  `hours: PerWeekday<{ open, close } | "closed">` if we want open/close times
+  later). Editable host-side when an option is added or via a per-option editor.
+- Filter the live ballot by the **current weekday**: an option closed today is
+  hidden from voting (or shown greyed-out and non-votable, "closed Mondays").
+  Derive the weekday in a handler-fed cell, not inside a `computed`/`derive` —
+  reading the clock in a derive is non-idempotent (same lesson as the history
+  visit labels in feature #1).
+- Keep hidden options in the data so they reappear automatically on a day
+  they're open; don't delete them.
+- Plays well with feature #3 (calendar): the target lunch slot's date decides
+  which weekday we filter on, so a poll scheduled for tomorrow can already drop
+  places closed tomorrow.
+
 ## Notes
 
 - These features should layer on top of the existing scoped-cells identity model

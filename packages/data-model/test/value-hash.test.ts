@@ -466,10 +466,10 @@ describe("value-hash", () => {
         expect(hex(hashBytesOf(nsec))).not.toBe(hex(hashBytesOf(days)));
       });
     });
-    describe("FabricError (FabricInstance via DECONSTRUCT)", () => {
-      it("matches a byte stream built from `[DECONSTRUCT]` output for `FabricError`", () => {
-        // Build the expected byte stream programmatically because the
-        // deconstructed state includes `stack` which is environment-dependent.
+    describe("FabricError (FabricInstance via [CODEC])", () => {
+      it("matches a byte stream built from `[CODEC]` `encode()` output for `FabricError`", () => {
+        // Build the expected byte stream programmatically because the encoded
+        // state includes `stack` which is environment-dependent.
         // We construct the stream the same way `hashOf()` does, then SHA-256 it.
         const error = FabricError.fromNativeError(new Error("test"));
         const enc = new TextEncoder();
@@ -490,8 +490,8 @@ describe("value-hash", () => {
         // Type tag.
         pushShortString("Error@1");
 
-        // Deconstructed state is an object with sorted keys.
-        // FabricError.DECONSTRUCT() returns:
+        // The encoded state is an object with sorted keys.
+        // `FabricError[CODEC].encode()` returns:
         //   { type: "Error", name: null, message: "test", stack: <string> }
         // Keys sorted by UTF-8: message, name, stack, type
         stream.push(0x11); // TAG_OBJECT

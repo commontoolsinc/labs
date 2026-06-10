@@ -148,3 +148,11 @@ export default __cfHelpers.__cf_data({
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    liftWrapped,
+    patternFullShape,
+    patternExplicit,
+    liftPassthrough,
+    patternHelper,
+    wildcardLift
+});

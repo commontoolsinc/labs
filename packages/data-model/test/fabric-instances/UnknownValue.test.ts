@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
-import { DECONSTRUCT } from "@/wire-common/interface.ts";
+import { CODEC } from "@/codec-common/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ExplicitTagValue } from "@/fabric-instances/ExplicitTagValue.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
@@ -25,16 +25,6 @@ describe("UnknownValue", () => {
   });
 
   describe("instance members", () => {
-    describe("[DECONSTRUCT]", () => {
-      it("returns the type-tagged `state`", () => {
-        const us = new UnknownValue("Test@1", "state");
-        expect(us[DECONSTRUCT]()).toEqual({
-          type: "Test@1",
-          state: "state",
-        });
-      });
-    });
-
     describe("`[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`", () => {
       it("via dispatch: recurses state, freezes in place", () => {
         const child = { y: 2 };
@@ -60,6 +50,24 @@ describe("UnknownValue", () => {
         expect(Object.isFrozen(uv)).toBe(true);
         expect(Object.isFrozen(child)).toBe(true);
         expect(uv[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
+      });
+    });
+  });
+
+  describe("static members", () => {
+    describe("[CODEC]", () => {
+      describe("tagForValue()", () => {
+        it("returns the value's own (per-instance) wire type tag", () => {
+          const uv = new UnknownValue("Weird@7", "s");
+          expect(UnknownValue[CODEC].tagForValue(uv)).toBe("Weird@7");
+        });
+      });
+
+      describe("encode()", () => {
+        it("returns the bare `state` (the tag is carried separately)", () => {
+          const uv = new UnknownValue("Weird@7", { data: [1, 2, 3] });
+          expect(UnknownValue[CODEC].encode(uv)).toEqual({ data: [1, 2, 3] });
+        });
       });
     });
   });

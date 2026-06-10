@@ -57,7 +57,7 @@ describe("resume the fuse-exec piece by identity and invoke its handler", () => 
       const tx1 = rt1.edit();
       const pm1 = rt1.patternManager;
       const cold = await pm1.compilePattern(PROGRAM, { space, tx: tx1 });
-      expect(pm1.getPatternEntryRef(cold)?.symbol).toBe("customPatternExport");
+      expect(pm1.getArtifactEntryRef(cold)?.symbol).toBe("customPatternExport");
       const resultCell1 = rt1.getCell<Record<string, unknown>>(
         space,
         RESULT_CAUSE,

@@ -555,7 +555,7 @@ const __cfLift_7 = __cfHelpers.lift<{
     state: {
         lane: string;
     };
-}, import("commonfabric").JSXElement[]>({
+}, __cfHelpers.JSXElement[]>({
     type: "object",
     properties: {
         visibleThreads: {
@@ -1006,3 +1006,20 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    jumpToComment,
+    passthroughLabels,
+    __cfLift_1,
+    __cfLift_2,
+    __cfLift_3,
+    __cfLift_4,
+    __cfPattern_1,
+    __cfLift_5,
+    __cfLift_6,
+    __cfPattern_2,
+    __cfLift_7,
+    __cfLift_8,
+    __cfLift_9,
+    __cfPattern_3,
+    __cfPattern_4
+});

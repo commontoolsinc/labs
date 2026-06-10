@@ -1,9 +1,6 @@
 import { assertEquals } from "@std/assert";
-import {
-  parseShard,
-  shardForPatternIntegrationFile,
-  stableShardForName,
-} from "./select-pattern-integration-files.ts";
+import { shardForPatternIntegrationFile } from "./select-pattern-integration-files.ts";
+import { parseShard, stableShardForName } from "./shard-utils.ts";
 
 Deno.test("parseShard parses shard notation", () => {
   assertEquals(parseShard("2/4"), { index: 2, total: 4 });

@@ -1,4 +1,5 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { type MemorySpace, type Signer } from "@commonfabric/memory/interface";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import { MEMORY_PROTOCOL } from "@commonfabric/memory/v2";
@@ -150,7 +151,11 @@ export class RemoteSessionFactory implements SessionFactory {
     return {
       invocation,
       authorization: {
-        signature: signature.ok,
+        // The signature travels as a `FabricBytes` -- the proper fabric form
+        // for a byte sequence, which serializes to a compact `/Bytes@1` wire
+        // form and round-trips faithfully. The server's `toByteArray` accepts
+        // it.
+        signature: new FabricBytes(signature.ok),
       },
     };
   }

@@ -292,3 +292,13 @@ export default pattern(() => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    SimplePattern,
+    createCellRef,
+    addCharmAndNavigate,
+    createSimplePattern,
+    goToCharm,
+    __cfLift_1,
+    __cfLift_2,
+    __cfPattern_1
+});

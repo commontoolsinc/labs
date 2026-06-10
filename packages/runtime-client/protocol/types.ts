@@ -49,6 +49,7 @@ export enum RequestType {
   GetHomeSpaceCell = "runtime:getHomeSpaceCell",
   EnsureHomePatternRunning = "runtime:ensureHomePatternRunning",
   Idle = "runtime:idle",
+  FlushCompileCacheWrites = "runtime:flushCompileCacheWrites",
   GetGraphSnapshot = "runtime:getGraphSnapshot",
   SetPullMode = "runtime:setPullMode",
   GetLoggerCounts = "runtime:getLoggerCounts",
@@ -218,6 +219,16 @@ export interface EnsureHomePatternRunningRequest extends BaseRequest {
 
 export interface IdleRequest extends BaseRequest {
   type: RequestType.Idle;
+}
+
+/**
+ * Await all in-flight compile-cache write-backs (persistence durability), as
+ * distinct from `Idle` (reactive/scheduler quiescence). Used by tests that
+ * assert a precompiled pattern loads without an in-client recompile: the cache
+ * write must be durable before a subsequent load reads it.
+ */
+export interface FlushCompileCacheWritesRequest extends BaseRequest {
+  type: RequestType.FlushCompileCacheWrites;
 }
 
 export interface GetGraphSnapshotRequest extends BaseRequest {
@@ -589,6 +600,7 @@ export type IPCClientRequest =
   | GetWriteStackTraceRequest
   | SetWriteStackTraceMatchersRequest
   | IdleRequest
+  | FlushCompileCacheWritesRequest
   | PageCreateRequest
   | PageGetSpaceDefault
   | RecreateSpaceRootPatternRequest
@@ -773,6 +785,10 @@ export type Commands = {
   };
   [RequestType.Idle]: {
     request: IdleRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.FlushCompileCacheWrites]: {
+    request: FlushCompileCacheWritesRequest;
     response: EmptyResponse;
   };
   [RequestType.GetGraphSnapshot]: {

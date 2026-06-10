@@ -614,3 +614,16 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    openNoteEditor,
+    openSettings,
+    toggleExpanded,
+    trashSubPiece,
+    __cfLift_1,
+    __cfLift_2,
+    __cfLift_3,
+    __cfLift_4,
+    __cfLift_5,
+    __cfLift_6,
+    __cfPattern_1
+});

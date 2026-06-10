@@ -2,10 +2,10 @@ import { getModernCellRepConfig } from "@commonfabric/data-model/cell-rep";
 import {
   jsonFromValue,
   valueFromJson,
-} from "@commonfabric/data-model/json-wire";
+} from "@commonfabric/data-model/codec-json";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import type { FabricValue, SchemaPathSelector } from "./interface.ts";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/wire-common";
+import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import { isObject, isRecord } from "@commonfabric/utils/types";
 
 export const MEMORY_PROTOCOL = "memory" as const;
@@ -330,8 +330,29 @@ export interface SqliteQueryRequest {
   params?: SqliteParamsWire;
 }
 
+/** A result column's output name plus its TRUE source `(table, column)` origin
+ *  (null for an expression/computed/compound column). */
+export interface SqliteResultColumn {
+  output: string;
+  table: string | null;
+  column: string | null;
+}
+
+/** Whether a column's `ifc` annotation is present and non-empty — the single
+ *  predicate for "this column participates in CFC labeling". Shared by the
+ *  server's declares-ifc gate (which decides whether to capture column origins)
+ *  and the runner's per-column label schema, so the two can't drift. */
+export function columnDeclaresIfc(ifc: unknown): boolean {
+  return !!ifc && typeof ifc === "object" && Object.keys(ifc).length > 0;
+}
+
 export interface SqliteQueryResult {
   rows: unknown[];
+  /** Per-result-column origin, present ONLY when the queried db declares
+   *  per-column `ifc` (CFC read-labeling needs sound provenance — an aliased or
+   *  joined column maps back to its declared `(table, column)`). Undefined
+   *  otherwise, so unlabeled queries pay nothing. */
+  columns?: SqliteResultColumn[];
 }
 
 // NOTE: there is no `sqlite.execute` write verb. Writes go through the commit
