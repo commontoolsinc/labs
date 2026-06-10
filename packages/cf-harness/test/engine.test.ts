@@ -126,6 +126,55 @@ Deno.test("CfHarnessEngine accepts a default sandbox image override", () => {
   );
 });
 
+Deno.test("CfHarnessEngine constructs in enforce mode without CFC transports", () => {
+  // Construction must stay cheap and inspectable; the transport floor is only
+  // enforced once a tool actually runs (see the run-start test below).
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    cfcEnforcementMode: "enforce-strict",
+  });
+  assertEquals(engine.getRunState().cfcEnforcementMode, "enforce-strict");
+});
+
+Deno.test("CfHarnessEngine refuses to run a tool in enforce mode without CFC transports", async () => {
+  const engine = new CfHarnessEngine({
+    runId: "run-1",
+    workspaceHostPath: "/host/project",
+    cfcEnforcementMode: "enforce-explicit",
+  });
+  await assertRejects(
+    () => engine.invokeBuiltinTool("bash", { command: "echo hi" }),
+    Error,
+    "requires the runsc sandbox to wire",
+  );
+});
+
+Deno.test("CfHarnessEngine runs a tool in enforce mode when CFC transports are wired", async () => {
+  const cfcResultDir = await Deno.makeTempDir({ prefix: "cf-harness-result-" });
+  const cfcInvocationContextDir = await Deno.makeTempDir({
+    prefix: "cf-harness-ctx-",
+  });
+  const runner = new FakeProcessRunner([
+    { stdout: "container-1\n", stderr: "", exitCode: 0 },
+    { stdout: "hi\n", stderr: "", exitCode: 0 },
+    { stdout: "0\n", stderr: "", exitCode: 0 },
+    { stdout: "", stderr: "", exitCode: 0 },
+  ]);
+  const engine = new CfHarnessEngine({
+    runId: "run-1",
+    workspaceHostPath: "/host/project",
+    cfcEnforcementMode: "enforce-explicit",
+    cfcResultDir,
+    cfcInvocationContextDir,
+    processRunner: runner,
+  });
+  // The guard does not fire; execution reaches the (faked) docker lifecycle
+  // (the exact mediated output is covered elsewhere — here we only assert the
+  // transport floor lets the run proceed and an outputId is produced).
+  const result = await engine.invokeBuiltinTool("bash", { command: "echo hi" });
+  assertEquals(typeof result.output.outputId, "string");
+});
+
 Deno.test("CfHarnessEngine lets bash-no-sandbox host commands handle missing workspace paths", async () => {
   const workspaceHostPath = await Deno.makeTempDir({
     prefix: "cf-harness-engine-missing-",
