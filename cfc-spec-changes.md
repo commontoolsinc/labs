@@ -163,6 +163,40 @@ that everything else fails closed, and that the default may only be tightened,
 not loosened, without a new release judgment (§8.10.5.2 audience-expansion logic
 applies).
 
+## Status: SC-1..SC-16 applied (2026-06-10)
+
+Applied to `~/src/specs/cfc` by the spec/Lean session: prose commit `f4647273`,
+Lean mechanization `ce595217` (StoreComponents: declared monotonicity under the
+combined update rule, effective ≥ declared, ancestor derived-clears never bypass
+declared, journaled reads stable under later derived writes; TriggerReads:
+PC-with-triggers is a monotone strengthening; DegenerateJoin: all-singleton CNF
+join = dedup union — all sorry-free, `lake build` green), correspondence-block
+sync `6ac0060f`. SC-16 landed as new §8.10.6; SC-1 as §8.12.8 + §4.6.4
+`LabelComponent`; SC-6/SC-13 as §18.6.1-3.
+
+## New observations (from applying SC-1..16; not yet designed)
+
+**SC-17 [clarify] `provenance` propagation class × §8.4 exact copies.** Whether
+provenance-class evidence (event/gesture-shaped atoms) survives an `exactCopyOf`
+transition is unstated. Decide and state it (lean: it survives — exact copy
+preserves the value identity the evidence binds to — but say so).
+
+**SC-18 [normative] `canWrite` rejection semantics under derived taint.**
+§8.12.4's writer rule (data label must fit the store label) has no defined
+behavior when a _derived_ (flow) label exceeds the declared store policy:
+reject, auto-upgrade, or persist-and-flag. Currently only matrix-level coverage
+in §18.6.3; belongs with the queued enforcement-ladder item (audit 3.1).
+
+**SC-19 [clarify] Blanket "confidentiality always joins" dependency.**
+§15.2/§15.3 now lean on the rule that confidentiality atoms uniformly join; if
+an atom family with non-join combination semantics ever lands, those sections
+need revisiting. Record the assumption where the rule is stated.
+
+**SC-20 [registry] `UserSurfaceInput` registry status.** Runtime-minted- gated
+in the implementation (`RUNTIME_MINTED_INTEGRITY_ATOM_TYPES`) but listed as
+merely an "example" in §15.6 — promote to a registered atom with its minting
+discipline.
+
 ## Queue (from the audit, not yet worked through in a design session)
 
 These were identified during the audit as spec-absent implementation mechanisms

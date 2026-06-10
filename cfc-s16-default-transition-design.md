@@ -341,10 +341,19 @@ as J** — removing it earlier reopens a laundering window, since the ratchet is
 currently the only thing carrying taint across value overwrites.
 
 - **A0 (prerequisites)**: ~~S2/S3~~ (landed, Wave 0); subtree-join read
-  resolution (S7 — **done**, this branch); labelMap v2 component schema
-  (refactors the Wave 2 ratchet into components); skip-if-unchanged plumbing
-  (verified absent: persistence writes `["cfc"]` whenever entries exist,
-  `prepare.ts` persist block).
+  resolution (S7 — **done**, this branch, `effectiveReadLabel`); labelMap v2
+  component schema (**done**, this branch — origin tags, per-component
+  coalesce/resolution); skip-if-unchanged (**done** — provided by journal
+  novelty diffing, pinned by test).
+- **A1 (core)** — **done, this branch**: `cfcFlowLabels` dial; computed
+  relevance with self-minted-metadata exclusion; J over consumed reads +
+  dereference traces; derived-component persistence with replace-on-overwrite +
+  ancestor clearing + written-path collapse; ratchet restricted to legacy
+  entries under persist; derived entries exempt from the schema-write-policy
+  guard; laundering repro green end-to-end (propagation + existing
+  maxConfidentiality egress). Notable journal-truth finding: `cell.set()` reads
+  the prior value, so a set-overwrite of a tainted doc conservatively re-derives
+  the taint; only read-free writes (raw root writes) shed it.
 - **A1 (core)**: computed relevance + fast path; J computation; derived
   component persistence (replace + descendant clear + collapse); dials (§12);
   instrumentation + benches. Red-green: the laundering repro (read labeled →
