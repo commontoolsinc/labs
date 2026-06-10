@@ -355,9 +355,22 @@ const FALSE_SCHEMA_KEY: Record<never, never> = {};
  * component containing the separator cannot collide with a differently-split
  * path.
  */
+// Path-key strings per (frozen) path array identity. internPathSelector
+// computes the key on EVERY call — including idempotent re-interning of an
+// already-canonical selector, the common repeat case — and that string
+// build showed up with >100ms self time in remount profiles. Canonical
+// selectors carry frozen, identity-stable path arrays, so a WeakMap hits.
+const selectorPathKeyCache = new WeakMap<readonly string[], string>();
+
 const selectorPathKey = (path: readonly string[]): string => {
+  if (path.length === 0) return "";
+  const cached = selectorPathKeyCache.get(path);
+  if (cached !== undefined) return cached;
   let key = "";
   for (const part of path) key += `${part.length}:${part}`;
+  if (Object.isFrozen(path)) {
+    selectorPathKeyCache.set(path, key);
+  }
   return key;
 };
 

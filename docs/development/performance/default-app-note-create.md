@@ -332,3 +332,51 @@ resolveSchema encounter), and structurally-equal-but-distinct schema objects
 schemas) collapsing to one instance. The browser CDP pass confirms
 neutrality: worker busy CPU for notes 2–4 measured 741ms on this branch vs
 742ms on main (post-round-2), test green, per-note wall within noise.
+
+## Optimization round 4 (June 2026): the remaining candidates, in order
+
+Branch `perf/read-path-identity`. All four remaining candidates from the
+round-2/3 lists, tackled in priority order:
+
+**4a — read-path hashing eliminated.** Post-round-3 profiles showed ONE seam
+holding ~97% of remaining hash time: `resolveCfcSchemaRefs` (the plural
+follow-the-chain resolver; round 1 only memoized the singular) rebuilds a
+fresh `{...resolved, ...rest, $defs}` spread whenever a `$ref` schema carries
+extra keys — every `validateAndTransform` read of a vdom node. Memoized per
+(frozen schemaObj, frozen fullSchema) pair with interned results. Also:
+`selectorPathKey` ran on every `internPathSelector` call (>100ms self time)
+— now cached per frozen path-array identity. Remount loop: 1888 → 1045ms;
+hashing no longer appears in the remount profile's top frames at all.
+
+**4b — trigger-index rebuild skipped on unchanged reads.**
+`replaceActionTriggerPaths` cleared + re-added the per-entity trigger index
+on every action re-run; now it remembers the last-registered (reads,
+shallowReads) per action and returns the existing registration when equal.
+Update loop A/B: ~4%; removes O(read-entities) churn from every steady-state
+settle re-run.
+
+**4c — verified-load-id seeding memoized.** `seedVerifiedLoadIds` re-walked
+the full frozen pattern graph on every by-identity cache hit (every
+map/filter op resolve; ~24% of the commit-callback phase in the original
+profile). Seeded (root, loadId) pairs now skip.
+
+**4d — shared-hashtag wish send halved.** The ~17ms per `#notebook` query
+was `schemaAsCell` JSON-round-tripping the schema through its query-result
+proxy — every property access pays full cell-read machinery — and being
+called TWICE with identical input. Single materialization + content-keyed
+parse/intern cache: **16.9 → 7.8ms avg** in the browser integration. The
+remaining ~8ms is the one unavoidable stringify-through-proxy walk; reading
+the schema slot without proxying (a concrete recursive JSON schema instead
+of `schema: true` in TARGET_SCHEMA, or raw reads with link detection) is the
+documented next step if it matters.
+
+| Gauge | Round 3 / main | Round 4 |
+|---|---|---|
+| Remount loop, 100×(mount+unmount) @32 (in-process) | 1888ms | **1045ms** |
+| Reconciler bench: mount+unmount @128 | 69.3ms | **47.6ms** |
+| Integration: worker busy CPU, notes 2–4 | 742ms | **726ms** (pre-4d) |
+| Integration: `#notebook` wish send | 16.9ms avg | **7.8ms avg** |
+| Macro note-create @128 (pull) | 52.0ms | **49.8ms** |
+
+Observed for a future round: `getCfcState` (~139ms self in the remount loop)
+is now the largest single JS frame after GC.

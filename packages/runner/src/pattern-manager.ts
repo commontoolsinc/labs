@@ -249,15 +249,29 @@ export class PatternManager {
     return pattern;
   }
 
+  // Roots already fully seeded per verifiedLoadId. The walk is idempotent
+  // and pattern graphs are frozen after load, but it re-ran on every
+  // by-identity cache hit (i.e. every map/filter op resolve), paying a full
+  // Reflect.ownKeys recursion over the pattern graph each time — ~24% of the
+  // commit-callback phase in the default-app profile.
+  #seededVerifiedRoots = new WeakMap<object, Set<string>>();
+
   private seedVerifiedLoadIds(
     value: unknown,
     verifiedLoadId: string,
-    seen = new Map<unknown, boolean>(),
+    seen?: Map<unknown, boolean>,
     trusted = false,
   ): void {
     if (!value || (typeof value !== "object" && typeof value !== "function")) {
       return;
     }
+    const isRoot = seen === undefined;
+    if (
+      isRoot && this.#seededVerifiedRoots.get(value)?.has(verifiedLoadId)
+    ) {
+      return;
+    }
+    seen ??= new Map<unknown, boolean>();
 
     // Trust is rooted at a builder-produced (`isTrustedPattern`) value; nested
     // subpatterns within a trusted pattern's serialized node graph are legit
@@ -299,6 +313,15 @@ export class PatternManager {
         seen,
         subtreeTrusted,
       );
+    }
+
+    if (isRoot) {
+      let ids = this.#seededVerifiedRoots.get(value as object);
+      if (ids === undefined) {
+        ids = new Set();
+        this.#seededVerifiedRoots.set(value as object, ids);
+      }
+      ids.add(verifiedLoadId);
     }
   }
 
