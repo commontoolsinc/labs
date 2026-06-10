@@ -16,6 +16,13 @@ import {
   readCfcLabelView,
 } from "../../core/cfc-label.ts";
 import { type IdentitySeal, identitySeal } from "./identity-seal.ts";
+import {
+  registerSeal,
+  sealGlowDelay,
+  type SealLivenessClient,
+  sealSpinDelay,
+  unregisterSeal,
+} from "./seal-liveness.ts";
 
 /** Verification state of the presented identity. */
 export type ProfileBadgeState = "presented" | "verified" | "unverified";
@@ -77,7 +84,7 @@ export const profileDisplayFromValue = (val: unknown): ProfileBadgeDisplay => {
  * @element cf-profile-badge
  * @attr {string} size - avatar size: xs | sm | md | lg | xl (default md)
  */
-export class CFProfileBadge extends BaseElement {
+export class CFProfileBadge extends BaseElement implements SealLivenessClient {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -145,6 +152,59 @@ export class CFProfileBadge extends BaseElement {
         transform-origin: center;
       }
 
+      /* Intrinsic shimmer — a soft light band that sweeps across the disc on a
+        shared clock (seeded per-badge via animation-delay so every verified seal
+        sweeps in lockstep). Keeps the seal visibly "alive" even when the cursor
+        is still, in a way ordinary chrome never is. Sits above the avatar so the
+        light glazes the face; screen-blended and contained by the aura's
+        isolation so it only lifts the badge, not the page behind it. */
+      .aura-glow {
+        position: absolute;
+        inset: 0;
+        border-radius: var(--cf-border-radius-full, 9999px);
+        z-index: 2;
+        pointer-events: none;
+        opacity: 0;
+        mix-blend-mode: screen;
+        background: linear-gradient(
+          115deg,
+          transparent 34%,
+          hsl(var(--seal-hue, 200) 95% 90% / 0.5) 47%,
+          rgba(255, 255, 255, 0.85) 50%,
+          hsl(var(--seal-hue, 200) 95% 90% / 0.5) 53%,
+          transparent 66%
+        );
+        background-size: 280% 280%;
+      }
+
+      /* Cursor sheen — a bright reflective hotspot that tracks the host cursor,
+        even when the cursor is nowhere near the badge. Driven by
+        --seal-mx/--seal-my/--seal-sheen-a/--seal-sheen-hue, which the shared
+        liveness controller sets on the host (they inherit into this layer). A
+        sandboxed pattern only sees pointer events inside its own iframe, so a
+        forgery cannot reproduce this. */
+      .aura-sheen {
+        position: absolute;
+        inset: 0;
+        border-radius: var(--cf-border-radius-full, 9999px);
+        z-index: 3;
+        pointer-events: none;
+        opacity: var(--seal-sheen-a, 0);
+        mix-blend-mode: screen;
+        background:
+          radial-gradient(
+            circle at var(--seal-mx, 50%) var(--seal-my, 50%),
+            rgba(255, 255, 255, 1) 0%,
+            rgba(255, 255, 255, 0.6) 11%,
+            rgba(255, 255, 255, 0) 32%
+          ),
+          radial-gradient(
+            circle at var(--seal-mx, 50%) var(--seal-my, 50%),
+            hsl(var(--seal-sheen-hue, 200) 100% 72% / 0.9) 0%,
+            hsl(var(--seal-sheen-hue, 200) 100% 60% / 0) 52%
+          );
+      }
+
       .aura cf-avatar {
         position: relative;
         z-index: 1;
@@ -152,6 +212,8 @@ export class CFProfileBadge extends BaseElement {
 
       .badge[data-state="verified"] .aura {
         padding: 3px;
+        isolation: isolate;
+        transition: transform 200ms ease-out;
       }
 
       .badge[data-state="verified"] .aura cf-avatar {
@@ -159,19 +221,26 @@ export class CFProfileBadge extends BaseElement {
         border-radius: var(--cf-border-radius-full, 9999px);
       }
 
-      /* Hovering a verified badge spins the aura and lifts the glow — a small,
-        deliberate "this is special" tell that user-space chrome doesn't get. */
-      .badge[data-state="verified"] .aura:hover .aura-ring {
-        animation: cf-aura-spin 5s linear infinite;
+      /* Always-on, lockstep liveness once verified: the ring slowly rotates and
+        the shimmer sweeps. Both are seeded to a shared epoch (inline
+        animation-delay) so all verified seals move in unison — the "chorus" a
+        forgery can't join. */
+      .badge[data-state="verified"] .aura-ring {
+        animation: cf-aura-spin var(--seal-spin-period, 26s) linear infinite;
+        animation-delay: var(--seal-spin-delay, 0ms);
       }
 
+      .badge[data-state="verified"] .aura-glow {
+        opacity: 1;
+        animation: cf-aura-glow var(--seal-glow-period, 7s) linear infinite;
+        animation-delay: var(--seal-glow-delay, 0ms);
+      }
+
+      /* Hover lifts the seal a touch — a deliberate "this is special" tell that
+        user-space chrome doesn't get. */
       .badge[data-state="verified"] .aura:hover {
         transform: scale(1.04);
         transition: transform 160ms ease-out;
-      }
-
-      .badge[data-state="verified"] .aura {
-        transition: transform 200ms ease-out;
       }
 
       @keyframes cf-aura-spin {
@@ -180,9 +249,23 @@ export class CFProfileBadge extends BaseElement {
         }
       }
 
+      @keyframes cf-aura-glow {
+        0% {
+          background-position: 0% 0%;
+        }
+        100% {
+          background-position: 280% 280%;
+        }
+      }
+
       @media (prefers-reduced-motion: reduce) {
-        .badge[data-state="verified"] .aura:hover .aura-ring {
+        .badge[data-state="verified"] .aura-ring,
+        .badge[data-state="verified"] .aura-glow {
           animation: none;
+        }
+        .badge[data-state="verified"] .aura-glow {
+          opacity: 0.5;
+          background-position: 50% 50%;
         }
         .badge[data-state="verified"] .aura:hover {
           transform: none;
@@ -228,6 +311,14 @@ export class CFProfileBadge extends BaseElement {
   private _unsubscribe?: () => void;
   private _resolveGeneration = 0;
 
+  // Liveness: whether this seal is currently registered with the shared cursor
+  // controller, and the per-seal animation phases (seeded to the shared epoch
+  // when the seal is derived, so all verified seals move in lockstep).
+  private _livenessRegistered = false;
+  private _spinDelay = "0ms";
+  private _glowDelay = "0ms";
+  private _lastSheenA = -1;
+
   override connectedCallback(): void {
     super.connectedCallback();
     void this._resolve();
@@ -243,6 +334,7 @@ export class CFProfileBadge extends BaseElement {
     // subscription that updates a detached element.
     this._resolveGeneration++;
     this._cleanup();
+    this._setLiveness(false);
   }
 
   protected override willUpdate(changed: PropertyValues): void {
@@ -250,6 +342,68 @@ export class CFProfileBadge extends BaseElement {
     if (changed.has("profile")) {
       void this._resolve();
     }
+  }
+
+  protected override updated(changed: PropertyValues): void {
+    super.updated(changed);
+    // Register for cursor sheen only while actually verified + connected; the
+    // shared controller is a no-op under prefers-reduced-motion.
+    const verified = this._state === "verified" && this._seal !== undefined;
+    this._setLiveness(verified && this.isConnected);
+  }
+
+  private _setLiveness(on: boolean): void {
+    if (on === this._livenessRegistered) return;
+    this._livenessRegistered = on;
+    if (on) {
+      registerSeal(this);
+    } else {
+      unregisterSeal(this);
+      this._lastSheenA = -1;
+    }
+  }
+
+  /**
+   * Called once per animation frame by the shared liveness controller while
+   * this seal is registered. Places a reflective hotspot on the seal in the
+   * direction of the host cursor, brightening as the cursor nears — and
+   * responding even when the cursor is far away (the unforgeable part). Reads
+   * the aura's own rect so geometry is correct regardless of the badge's
+   * surrounding layout, and culls when offscreen.
+   */
+  updateSeal(cursorX: number, cursorY: number, frameMs: number): void {
+    const aura = this.shadowRoot?.querySelector(".aura") as HTMLElement | null;
+    if (!aura) return;
+    const r = aura.getBoundingClientRect();
+    const vh = globalThis.innerHeight ?? 0;
+    if (r.width === 0 || r.bottom < -80 || r.top > vh + 80) {
+      if (this._lastSheenA !== 0) {
+        this.style.setProperty("--seal-sheen-a", "0");
+        this._lastSheenA = 0;
+      }
+      return;
+    }
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const dx = cursorX - cx;
+    const dy = cursorY - cy;
+    const dist = Math.hypot(dx, dy);
+    const prox = Math.max(0, 1 - dist / 520); // 1 at center → 0 by ~520px
+    const a = Math.min(1, prox * prox * 1.25 + prox * 0.15); // punchy near
+    // Far + already dark: nothing to draw, skip all writes (cheap at scale).
+    if (a === 0 && this._lastSheenA === 0) return;
+    this._lastSheenA = a;
+    const reach = Math.max(r.width, r.height) * 1.9;
+    const nx = Math.max(-1, Math.min(1, dx / reach));
+    const ny = Math.max(-1, Math.min(1, dy / reach));
+    const hue = this._seal?.hue ?? 0;
+    this.style.setProperty("--seal-mx", `${(50 + nx * 62).toFixed(1)}%`);
+    this.style.setProperty("--seal-my", `${(50 + ny * 62).toFixed(1)}%`);
+    this.style.setProperty("--seal-sheen-a", a.toFixed(3));
+    this.style.setProperty(
+      "--seal-sheen-hue",
+      String(Math.round((hue + frameMs * 0.03 + nx * 40 + 360) % 360)),
+    );
   }
 
   private _cleanup(): void {
@@ -332,6 +486,10 @@ export class CFProfileBadge extends BaseElement {
       const owner = ownerPrincipalFromLabel(view);
       if (owner) {
         this._seal = identitySeal(owner);
+        // Seed the lockstep animation phases to the shared epoch so this seal
+        // joins the chorus in sync with every other verified seal on screen.
+        this._spinDelay = sealSpinDelay();
+        this._glowDelay = sealGlowDelay();
         this._state = "verified";
       } else {
         this._seal = undefined;
@@ -364,6 +522,11 @@ export class CFProfileBadge extends BaseElement {
     const sealTitle = verified
       ? "Identity verified by the system"
       : "System-rendered identity";
+    // Per-identity hue (tints the shimmer) + lockstep animation phases, supplied
+    // inline so the seeded delays line this seal up with the shared clock.
+    const auraStyle = verified
+      ? `--seal-hue: ${hue}; --seal-spin-delay: ${this._spinDelay}; --seal-glow-delay: ${this._glowDelay};`
+      : "";
 
     return html`
       <span
@@ -372,7 +535,7 @@ export class CFProfileBadge extends BaseElement {
         data-cf-profile-badge
         data-state="${this._state}"
       >
-        <span class="aura" part="aura">
+        <span class="aura" part="aura" style="${auraStyle}">
           ${verified
             ? html`
               <span class="aura-ring" part="aura-ring" style="${ringStyle}"> </span>
@@ -385,6 +548,12 @@ export class CFProfileBadge extends BaseElement {
             .name="${this._name}"
             size="${this.size}"
           ></cf-avatar>
+          ${verified
+            ? html`
+              <span class="aura-glow" part="aura-glow" aria-hidden="true"></span>
+              <span class="aura-sheen" part="aura-sheen" aria-hidden="true"></span>
+            `
+            : null}
         </span>
         <span class="name" part="name">
           ${this._name ?? "Unknown profile"}
