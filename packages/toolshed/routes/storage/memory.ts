@@ -94,6 +94,13 @@ await FS.ensureDir(memoryEngineStoreUrl);
 export const memoryServer = new MemoryServer.Server({
   store: memoryEngineStoreUrl,
   authorizeSessionOpen,
+  acl: {
+    mode: env.MEMORY_ACL_MODE,
+    serviceDids: env.MEMORY_SERVICE_DIDS
+      .split(",")
+      .map((did) => did.trim())
+      .filter((did) => did.length > 0),
+  },
 });
 export const memory = {
   async close(): Promise<
