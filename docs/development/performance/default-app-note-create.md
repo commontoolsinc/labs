@@ -329,5 +329,6 @@ caches were warm either way. The seam change is coverage and determinism
 groundwork: canonical link schemas from creation (not from first
 resolveSchema encounter), and structurally-equal-but-distinct schema objects
 (fresh pattern-JSON parses, cross-module duplicate literals, derived
-schemas) collapsing to one instance. Whether it moves the browser
-integration profile still needs a CDP pass.
+schemas) collapsing to one instance. The browser CDP pass confirms
+neutrality: worker busy CPU for notes 2–4 measured 741ms on this branch vs
+742ms on main (post-round-2), test green, per-note wall within noise.
