@@ -33,7 +33,6 @@ import {
   computed,
   Default,
   fetchData,
-  getPatternEnvironment,
   handler,
   NAME,
   nonPrivateRandom,
@@ -60,9 +59,9 @@ export interface Option {
   id: string;
   title: string;
   addedByName: string;
-  // Homepage link enrichment, persisted so we don't re-run the grounded web
-  // search on every load. `homePageUrl` is the auto-found official site; a host
-  // can refresh it. `homePageUrlOverride` is a human-supplied link that wins.
+  // Optional homepage links. `homePageUrl` is a stored legacy auto-found site;
+  // reactive refreshes derive a current candidate with fetchData.
+  // `homePageUrlOverride` is a human-supplied link that wins.
   homePageUrl?: string;
   homePageUrlOverride?: string;
 }
@@ -91,6 +90,10 @@ interface ImageGenResponse {
   choices?: Array<{
     message?: { images?: Array<{ image_url?: { url?: string } }> };
   }>;
+}
+
+interface WebSearchResponse {
+  results?: Array<{ url?: string }>;
 }
 
 // Art-director prompt. Goals (hard-won from early results): capture the
@@ -175,6 +178,7 @@ type VotesCell = Writable<Vote[] | Default<[]>>;
 type UsersCell = Writable<User[] | Default<[]>>;
 type HistoryCell = Writable<HistoryEntry[] | Default<[]>>;
 type NameCell = Writable<string | Default<"">>;
+type HomePageRefreshCell = Writable<number | Default<0>>;
 
 const PLAYER_COLORS = [
   "#2f8a64",
@@ -385,46 +389,6 @@ const setCity = handler<SetCityEvent, {
   cityDraft.set("");
 });
 
-// Ask the LLM whether a candidate URL really is this restaurant's official
-// homepage — a cheap sanity check that catches wrong-but-real results the
-// domain denylist misses (e.g. a similarly-named different restaurant, or a
-// stray directory). Fail-open: if the verifier itself errors, don't drop the
-// candidate.
-async function verifyHomePage(
-  base: URL,
-  url: string,
-  title: string,
-  city: string,
-): Promise<boolean> {
-  try {
-    const res = await fetch(new URL("/api/ai/llm", base).toString(), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "gemini-3.5-flash",
-        messages: [{
-          role: "user",
-          content:
-            `Is ${url} the official website of the restaurant "${title}" in ` +
-            `${city}? Judge mainly by whether the domain name belongs to that ` +
-            `restaurant (not a directory, review, or aggregator site). Answer ` +
-            `with only the word "yes" or "no".`,
-        }],
-        stream: false,
-        cache: true,
-      }),
-    });
-    if (!res.ok) return true;
-    const data = await res.json();
-    const ans = String(
-      data?.content ?? data?.choices?.[0]?.message?.content ?? "",
-    ).trim().toLowerCase();
-    return ans.startsWith("yes");
-  } catch {
-    return true;
-  }
-}
-
 // Reduce a resolved result URL to the site's homepage (root). Grounding often
 // lands on a deep/junk path (e.g. `/Account/SignUp//`, `/accessibility`) even
 // when the domain is right; we only want the homepage. We don't re-validate the
@@ -442,58 +406,17 @@ function toHomepage(url: string): string {
 
 export type EnrichHomePagesEvent = Record<PropertyKey, never>;
 
-// Host-only: (re-)run the grounded web search for every option and persist the
-// resulting official homepage URL onto each option, so loads don't re-run the
-// LLM. Async handler — fetches the web-search route (resolved against the
-// runtime's apiUrl) per option and writes the result back. Overwrites existing
-// `homePageUrl` (this doubles as "refresh"); never touches a user's override.
+// Host-only: bump a shared refresh marker. The actual homepage lookup is a
+// reactive fetchData node per option, so the handler never waits on network I/O.
 const enrichHomePages = handler<EnrichHomePagesEvent, {
-  options: OptionsCell;
-  city: CityCell;
+  homePageRefresh: HomePageRefreshCell;
   myName: NameCell;
   adminName: NameCell;
-}>(async (_evt, { options, city, myName, adminName }) => {
+}>((_evt, { homePageRefresh, myName, adminName }) => {
   const me = trimmedName(myName.get());
   const admin = trimmedName(adminName.get());
   if (!me || me !== admin) return;
-  const cityVal = trimmedName(city.get()) || "Berkeley, CA";
-  const base = getPatternEnvironment().apiUrl;
-  for (const opt of options.get()) {
-    try {
-      const target = new URL("/api/agent-tools/web-search", base).toString();
-      const res = await fetch(target, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query:
-            `official website of the restaurant "${opt.title}" in ${cityVal}`,
-          max_results: 4,
-        }),
-      });
-      if (!res.ok) continue;
-      const data = await res.json();
-      const candidates = Array.isArray(data?.results) ? data.results : [];
-      // Take the first candidate the LLM confirms is the restaurant's own site.
-      let chosen = "";
-      for (const cand of candidates) {
-        const url = cand?.url;
-        if (typeof url !== "string" || !url) continue;
-        // Normalize to the validated homepage root before confirming.
-        const home = toHomepage(url);
-        if (await verifyHomePage(base, home, opt.title, cityVal)) {
-          chosen = home;
-          break;
-        }
-      }
-      if (!chosen) continue;
-      // Re-find by id — the array may have shifted across awaits.
-      const cur = options.get();
-      const idx = cur.findIndex((o) => o.id === opt.id);
-      if (idx >= 0) options.key(idx).key("homePageUrl").set(chosen);
-    } catch (_e) {
-      // best-effort; leave this option's link unchanged on failure
-    }
-  }
+  homePageRefresh.set(Number(homePageRefresh.get() ?? 0) + 1);
 });
 
 export interface SetOptionUrlEvent {
@@ -791,6 +714,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // Click-to-reveal for the host-takeover control, so it stays out of the
     // way until a non-host clicks the "Hosted by …" label.
     const claimHostRevealed = Writable.perSession.of<boolean>(false);
+    // Shared marker that tells the reactive homepage lookup nodes to run.
+    // Starts at zero so loading the poll does not immediately fan out searches.
+    const homePageRefresh = Writable.perSpace.of<number>(0);
 
     // Resolve THIS viewer's shared profile. The `#profile` wish's built-in UI
     // covers the whole lifecycle: a create surface when the viewer has no
@@ -849,8 +775,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const boundClearHistory = clearHistory({ history, myName, adminName });
     const boundSetCity = setCity({ city, myName, adminName, cityDraft });
     const boundEnrichHomePages = enrichHomePages({
-      options,
-      city,
+      homePageRefresh,
       myName,
       adminName,
     });
@@ -1376,6 +1301,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     mode: "json",
                     options: {
                       method: "POST",
+                      mutexTimeoutMs: 30_000,
                       headers: { "Content-Type": "application/json" },
                       body: computed(() => ({
                         model: IMAGE_MODEL,
@@ -1398,17 +1324,51 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       ?.image_url?.url;
                     return typeof u === "string" && u.length > 0 ? u : "";
                   });
-                  // Persisted homepage-link enrichment — NO per-load LLM/fetch.
-                  // A host runs the grounded search once (the "refresh" button)
-                  // and we store the official-site URL on the option. The link
-                  // shown resolves by priority: user override > stored auto URL >
-                  // a guaranteed-working Google Maps fallback (so there's always
-                  // a working link, even before enrichment runs).
+                  const homePageSearch = fetchData<WebSearchResponse>({
+                    url: computed(() =>
+                      Number(homePageRefresh.get() ?? 0) > 0
+                        ? "/api/agent-tools/web-search"
+                        : ""
+                    ),
+                    mode: "json",
+                    options: {
+                      method: "POST",
+                      mutexTimeoutMs: 10_000,
+                      headers: computed(() => ({
+                        "Content-Type": "application/json",
+                        "X-Lunch-Poll-Refresh": String(
+                          homePageRefresh.get() ?? 0,
+                        ),
+                      })),
+                      body: computed(() => ({
+                        query:
+                          `official website of the restaurant "${option.title}" in ${cityLabel}`,
+                        max_results: 4,
+                      })),
+                    },
+                  });
+                  const fetchedHomePageUrl = computed(() => {
+                    const candidates = homePageSearch.result?.results;
+                    if (!Array.isArray(candidates)) return "";
+                    for (const candidate of candidates) {
+                      const url = candidate?.url;
+                      if (typeof url === "string" && url) {
+                        return toHomepage(url);
+                      }
+                    }
+                    return "";
+                  });
+                  // Homepage-link enrichment. The host's refresh button bumps a
+                  // shared marker; fetchData then performs the web search
+                  // reactively. Priority: user override > stored legacy auto
+                  // URL > latest reactive result > Google Maps fallback.
                   const homeUrl = computed(() => {
                     const o = trimmedName(option.homePageUrlOverride);
                     if (o) return o;
                     const s = trimmedName(option.homePageUrl);
                     if (s) return s;
+                    const fetched = fetchedHomePageUrl;
+                    if (fetched) return fetched;
                     return `https://www.google.com/maps/search/?api=1&query=${
                       encodeURIComponent(`${option.title} ${cityLabel}`)
                     }`;
@@ -1421,7 +1381,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       return "🔗 Website (edited)";
                     }
                     if (
-                      !trimmedName(option.homePageUrl)
+                      !trimmedName(option.homePageUrl) &&
+                      !fetchedHomePageUrl
                     ) return "🔎 Find on Maps";
                     return "🔗 Website";
                   });
@@ -1510,10 +1471,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           {optionTitle}
                         </div>
                         {
-                          /* Homepage link — persisted enrichment (no per-load
-                            LLM). Priority: user override > stored official site
-                            > Google Maps fallback, so there's always a working
-                            link. A joined viewer can edit/override it. */
+                          /* Homepage link. Priority: user override > stored
+                            official site > latest reactive lookup > Google Maps
+                            fallback, so there's always a working link. */
                         }
                         <div
                           style={{
@@ -1971,7 +1931,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         <cf-button
                           variant="secondary"
                           onClick={boundEnrichHomePages}
-                          title="Look up each option's official homepage and store it"
+                          title="Look up each option's official homepage"
                         >
                           🔄 Refresh homepage links
                         </cf-button>
