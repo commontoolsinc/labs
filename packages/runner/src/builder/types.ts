@@ -185,6 +185,14 @@ declare module "@commonfabric/api" {
     type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
     implementation?: ((...args: any[]) => any) | Pattern | string;
     implementationRef?: string;
+    /**
+     * Content-addressed reference to the module-scope builder artifact whose
+     * implementation this module runs: the defining module's content identity
+     * and the artifact's export/`__cfReg` symbol. Dual-written alongside
+     * `implementationRef` during the migration; resolution prefers it
+     * (see docs/specs/content-addressed-action-identity.md).
+     */
+    $implRef?: { identity: string; symbol: string };
     wrapper?: "handler";
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;

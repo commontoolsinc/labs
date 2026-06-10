@@ -23,6 +23,11 @@ import type {
 } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { CachedCompiledModule } from "./sandbox/module-record-compiler.ts";
+import {
+  identityFromCanonicalSource,
+  readBindingIdentity,
+  recordVerifiedProvenance,
+} from "./harness/verified-provenance.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   COMPILE_CACHE_RUNTIME_VERSION,
@@ -998,6 +1003,35 @@ export class PatternManager {
     // value is, by content identity, the original. `getArtifactEntryRef`
     // consumers tolerate this (it resolves to a real, addressable artifact).
     setArtifactEntryRef(value, { identity, symbol });
+    // Content-addressed CFC provenance for the artifact's implementation
+    // function: registering through this (trust-gated) indexing path is what
+    // makes a function "verified" under the by-identity model. The factory
+    // carries the CT-1665 binding annotation when present.
+    const implementation =
+      (value as { implementation?: unknown }).implementation ?? value;
+    // Skip a CONFIRMED cross-module mismatch: a re-exporting module surfaces a
+    // function defined elsewhere under its OWN identity, but the function's
+    // canonical `fn.src` names the defining module. Provenance is
+    // first-write-wins and CFC fails closed on an identity/`fn.src` mismatch,
+    // so a re-exporter (possibly indexed first) stamping its identity would
+    // make a valid verified artifact resolve as `unsupported`. Recording only
+    // when the src doesn't name a different module leaves the defining
+    // module's matching record to stick. A non-canonical src is left alone.
+    const srcIdentity = identityFromCanonicalSource(
+      (implementation as { src?: string }).src,
+    );
+    if (
+      typeof implementation === "function" &&
+      (srcIdentity === undefined || srcIdentity === identity)
+    ) {
+      recordVerifiedProvenance(implementation, {
+        identity,
+        symbol,
+        ...(readBindingIdentity(value) === undefined
+          ? {}
+          : { bindingIdentity: readBindingIdentity(value)! }),
+      });
+    }
   }
 
   /**
