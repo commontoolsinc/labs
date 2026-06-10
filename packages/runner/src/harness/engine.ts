@@ -605,11 +605,10 @@ export class Engine extends EventTarget implements Harness {
     try {
       const loadId = `${ctx.loadIdPrefix}:esm:${this.nextLoadId++}`;
       this.executableRegistry.beginVerifiedLoad(loadId);
-      // Register per-module content hashes for parity with the AMD evaluate
-      // path. This wires the scheduler's content-addressed implementation hash.
-      // It is effective flag-on: source-location resolution under the ESM loader
-      // is wired (the `indexOf`-into-`script` fallback plus the per-module source
-      // maps registered below), so `fn.src` resolves to the canonical
+      // Register per-module content hashes — this wires the scheduler's
+      // content-addressed implementation hash. Source-location resolution (the
+      // `indexOf`-into-`script` fallback plus the per-module source maps
+      // registered below) resolves `fn.src` to the canonical
       // `cf:module/<hash>/<path>` form these hashes key on. Covered by
       // `action-fingerprint.test.ts` and `esm-source-location.test.ts`.
       ctx.registerHashes();
@@ -676,8 +675,7 @@ export class Engine extends EventTarget implements Harness {
         ctx.verifiedSources,
       );
 
-      // Register functions defined during this load as verified, mirroring the
-      // AMD path's verified-execution model.
+      // Register functions defined during this load as verified.
       const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
         this.executableRegistry.createVerifiedFunctionRegistrar(loadId),
       );
@@ -760,7 +758,7 @@ export class Engine extends EventTarget implements Harness {
         }
       }
       // Capture the export map too, so verified values from non-entry modules
-      // are indexed by the registry exactly as on the AMD path.
+      // are indexed by the registry.
       this.executableRegistry.captureVerifiedValue(loadId, exportMap);
       this.runtimeInternals?.exportsCallback(exportsByValue);
 

@@ -619,7 +619,7 @@ export class PatternManager {
     let warmHit = false;
     let compiled;
     try {
-      compiled = await harness.compileToRecordGraph!(program, {
+      compiled = await harness.compileToRecordGraph(program, {
         // The bodies returned below come from `loadCompiledClosure`, an
         // integrity-gated (`requiredIntegrity`, fail-closed) read of the
         // compiled set. On a full hit the CFC integrity label is the security
@@ -667,7 +667,7 @@ export class PatternManager {
     cacheCtx.onEntryIdentity?.(entryIdentity);
 
     const evalStart = performance.now();
-    const result = harness.evaluateRecordGraph!(
+    const result = harness.evaluateRecordGraph(
       id,
       graph,
       mainSpecifier,
@@ -742,7 +742,7 @@ export class PatternManager {
     );
 
     try {
-      const result = await harness.evaluateCachedModules!(
+      const result = await harness.evaluateCachedModules(
         cachedModules,
         entryIdentity,
         // Bodies came from the integrity-gated compiled-set read
