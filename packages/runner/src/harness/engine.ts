@@ -749,14 +749,6 @@ export class Engine extends EventTarget implements Harness {
       const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
         this.executableRegistry.createVerifiedFunctionRegistrar(loadId),
       );
-      // CT-1665: collect trusted-binding factory objects surfaced by the
-      // builder so their (export-independent) verified binding metadata can be
-      // registered after evaluation.
-      const bindingCandidates: unknown[] = [];
-      const restoreBindingCandidateRegistrar =
-        setVerifiedBindingCandidateRegistrar((candidate) => {
-          bindingCandidates.push(candidate);
-        });
       const frame = pushFrame({
         runtime: this.ctRuntime,
         verifiedLoadId: loadId,
@@ -777,16 +769,27 @@ export class Engine extends EventTarget implements Harness {
       } finally {
         popFrame(frame);
         restoreVerifiedFunctionRegistrar();
-        restoreBindingCandidateRegistrar();
       }
 
       const main = loaded.namespace as Exports;
       this.executableRegistry.captureVerifiedValue(loadId, main);
-      // Record binding metadata for non-exported bindings (CT-1665). The
-      // candidates carry their metadata now that the module body (including the
-      // transformer's `__cfBindVerifiedBinding` calls) has finished executing.
+      // CT-1665: register verified binding metadata for NON-exported trusted
+      // handlers. The export-namespace capture above only reaches exported
+      // builders; a non-exported `const setName = handler(...)` is surfaced
+      // instead by the transformer's trailing `__cfReg({...})` into
+      // `graph.registrationSink` — the same registrations pattern-manager indexes
+      // for `{identity, symbol}` addressing. We reuse that ESM channel rather than
+      // a parallel registrar. The `__cfBindVerifiedBinding` annotations are already
+      // attached (it runs in the module body, ahead of the trailing `__cfReg`), so
+      // each registered factory carries its `__cfVerifiedBindingIdentity`.
+      const registrationCandidates: unknown[] = [];
+      for (const entries of graph.registrationSink.values()) {
+        for (const value of entries.values()) {
+          registrationCandidates.push(value);
+        }
+      }
       this.executableRegistry.captureVerifiedBindingCandidates(
-        bindingCandidates,
+        registrationCandidates,
       );
 
       // Build the per-module export map (keyed by normalized source path) from
@@ -996,9 +999,13 @@ export class Engine extends EventTarget implements Harness {
       const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
         this.executableRegistry.createVerifiedFunctionRegistrar(loadId),
       );
-      // CT-1665: collect trusted-binding factory objects surfaced by the builder
-      // (see the source-based path) so non-exported bindings resolve their
-      // verified binding metadata on source-free (resume-by-identity) loads too.
+      // CT-1665: on the legacy/AMD eval path `__cfReg` is a no-op (identity
+      // addressing is ESM-only), so the ESM sink-based capture used by
+      // `evaluateGraph` does not apply here. Collect the trusted-binding factories
+      // the builder surfaces during evaluation directly, so non-exported handlers
+      // still resolve their verified binding metadata under the default (non-ESM)
+      // loader. (Removable with the registrar + builder hook once the ESM loader
+      // is the default and this path is retired.)
       const bindingCandidates: unknown[] = [];
       const restoreBindingCandidateRegistrar =
         setVerifiedBindingCandidateRegistrar((candidate) => {

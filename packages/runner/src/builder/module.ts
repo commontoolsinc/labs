@@ -157,8 +157,9 @@ export function createNodeFactory<T = any, R = any>(
   // look-alike never acquires the brand. (Patterns brand separately in
   // builder/pattern.ts.)
   brandTrustedBuilderArtifact(factory);
-  // CT-1665: surface the factory so the engine can register verified binding
-  // metadata for non-exported lift/derive/computed bindings (see handlerInternal).
+  // CT-1665: surface the factory so the legacy/AMD eval path can register verified
+  // binding metadata for non-exported lift/derive/computed bindings (the ESM loader
+  // instead reuses `__cfReg`; see handlerInternal and Engine.evaluate).
   // Only JS-function modules can be trusted-binding writers (and carry
   // `__cfVerifiedBindingIdentity`); `type: "ref"` builtins never do — so the guard
   // is semantically correct. It is also load-safe: an implementation-less builtin
@@ -491,11 +492,13 @@ function handlerInternal<E, T>(
     return eventStream;
   }, module);
 
-  // CT-1665: surface the factory so the engine can register its verified binding
-  // metadata after evaluation. The transformer-emitted `__cfBindVerifiedBinding`
-  // annotates THIS object (the builder's return value) once the module body
-  // finishes; a non-exported binding is otherwise unreachable from the capture
-  // walk and CFC would reject its owner-protected writes.
+  // CT-1665: surface the factory so the legacy/AMD eval path can register its
+  // verified binding metadata after evaluation (the ESM loader instead reuses the
+  // transformer's `__cfReg` registrations — see Engine.evaluate vs evaluateGraph).
+  // The transformer-emitted `__cfBindVerifiedBinding` annotates THIS object (the
+  // builder's return value) once the module body finishes; a non-exported binding
+  // is otherwise unreachable from the export-namespace capture walk and CFC would
+  // reject its owner-protected writes.
   registerVerifiedBindingCandidate(factory);
 
   return factory;

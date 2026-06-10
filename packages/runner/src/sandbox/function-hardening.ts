@@ -31,8 +31,14 @@ export function registerVerifiedFunctionImplementation(
 // setName/setAvatar/addElement) the factory is reachable only through the
 // instantiated node graph, which retains the underlying module (sans metadata),
 // so the metadata is never registered and CFC `writeAuthorizedBy` rejects the
-// binding's own writes. Builders surface every factory here so the engine can
-// record its binding metadata after evaluation regardless of export status.
+// binding's own writes.
+//
+// This registrar is the LEGACY/AMD load path's channel for surfacing those
+// factories (Engine.evaluate): there is no `__cfReg` there, since identity
+// addressing is ESM-only. The ESM loader instead reuses the transformer's
+// `__cfReg` registrations (Engine.evaluateGraph reads `graph.registrationSink`),
+// so it installs no registrar and these builder calls are inert no-ops under it.
+// This whole channel retires with the legacy loader.
 type VerifiedBindingCandidateRegistrar = (candidate: unknown) => void;
 
 let verifiedBindingCandidateRegistrar:
