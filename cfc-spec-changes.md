@@ -148,6 +148,21 @@ Plain intersection can carry a value-bound atom whose binding no longer
 holds (caught later only by §8.10.4 binding checks, and only at boundaries
 that run them). Make §4.6.1 class-aware to match §8.9.3/§3.1.6.2.
 
+**SC-16 [normative] Default display-boundary release profile — §8.10.5 /
+§18.** Owner direction (2026-06-10): rendering is the first label-gated
+egress, with a default ceiling of roughly *acting-user identity atoms plus
+an allow-list of caveat-kind confidentiality classes*, admitted by default
+and tightened over time; author-supplied declassification on render
+boundaries is policy-gated (the `renderDeclassificationPolicy` knob of PR
+#3994, end state = verified authority only). The spec has display-sink
+boundary context (§8.10.5 `sinkClass: "display"`) and caveat discharge
+rules, but no notion of a *default* release profile for display sinks when
+no policy is authored. Spec the profile: which atom families a display sink
+admits by default (acting-user/audience identity; enumerated caveat kinds
+whose display-stage discharge rules apply), that everything else fails
+closed, and that the default may only be tightened, not loosened, without a
+new release judgment (§8.10.5.2 audience-expansion logic applies).
+
 ## Queue (from the audit, not yet worked through in a design session)
 
 These were identified during the audit as spec-absent implementation

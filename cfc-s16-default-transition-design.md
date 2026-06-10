@@ -306,10 +306,20 @@ a dependency-scheduled rerun defines its trigger set (SC-3).
 
 ## 10. Egress inventory (where J must eventually bite)
 
+Owner decision (2026-06-10): **rendering is the first egress channel to
+gate.** The declassify-prop half of S15 is handled by PR #3994
+(`renderDeclassificationPolicy` knob: `allow` default today, `deny`
+available; verified-authority gating deferred). The remaining phase-D piece
+is the **default render ceiling**: the reconciler's existing
+`maxConfidentiality` bound (`childRenderPolicyForNode` →
+`canRenderCellUnderPolicy`) gets a default policy of roughly *acting-user
+identity atoms + an allow-list of caveat-kind label classes*, admitted by
+default and tightened over time (SC-16 specs the profile).
+
 | Channel | Check today | With propagation |
 | --- | --- | --- |
-| Sink requests (network) | replay fidelity only (`sink-request.ts:51-82`) | Wave 3 #21: join request-input labels (now including derived) vs per-sink `maxConfidentiality` from `sink-inventory.ts` |
-| Render/display | authored-by boundaries; declassify prop unguarded (S15) | derived labels reach the render label views automatically; S15 decision (ceiling/default policy) is the gate |
+| Render/display (**first**) | authored-by boundaries; opt-in `maxConfidentiality` bounds; declassify knob per PR #3994 | derived labels reach the render label views automatically; default ceiling = user identity + allow-listed caveat classes, tightened later |
+| Sink requests (network) | replay fidelity only (`sink-request.ts:51-82`) | Wave 3 #21 (after render): join request-input labels (now including derived) vs per-sink `maxConfidentiality` from `sink-inventory.ts` |
 | LLM prompt assembly | observed-confidentiality treats errors as "no label" | Wave 3 #22 fail-closed + derived labels flow in via label views |
 | Handler→protected-slot writes | `maxConfidentiality` input checks (vacuous-pass S7) | Wave 2 #14 makes them sound; derived labels make them meaningful for computed data |
 | CLI/FUSE reads | none (acting user = owner) | unchanged in phase A; revisit with multi-user spaces + server ACL (Track A) |
@@ -334,7 +344,9 @@ a dependency-scheduled rerun defines its trigger set (SC-3).
   meet; TransformedBy minting on implementation identity; reconcile §4.6.1
   vs §8.9.3 (SC-15); requires Wave 2 #17 (integrity-union fix) and Wave 1
   #10 (mint gating).
-- **D (egress activation)**: Wave 3 #21/#22 + S15 render decision, now
+- **D (egress activation)**: render first — default render ceiling
+  (acting-user identity + allow-listed caveat classes; on top of PR #3994's
+  declassification knob), then Wave 3 #21/#22 (sink ceilings, LLM path), all
   consuming derived labels.
 
 ## 12. Rollout dials and testing
@@ -345,8 +357,13 @@ propagation; SC-13 specs the combined matrix):
 
 - `off` — today's behavior.
 - `observe` — compute relevance + J, emit diagnostics/metrics and
-  would-persist deltas; write nothing. Ships first; runs in CI and dogfood
-  long enough to read the blast-radius metrics.
+  would-persist deltas; write nothing. A development/debugging tool and a
+  brief sanity stage, **not** a metrics-gated rollout ceremony (owner
+  decision 2026-06-10: build it and fix after, tests green is the bar —
+  propagation rejects nothing, so the audit's observe-first discipline for
+  semantic tightenings doesn't apply here; the first actual tightening is
+  the phase-D render ceiling, which has its own knob-then-flip path per
+  PR #3994).
 - `persist` — write derived components. Enforcement consumers then see them
   under the existing enforcement modes; no new rejection class is introduced
   by this design itself.
@@ -359,19 +376,33 @@ fetches user A's laundered derivative and the label survives; perf benches
 per §8. Pattern-test default mode stays `observe` until audit Wave 2 lands
 (per audit fix-order note).
 
-## 13. Open questions (need owner decisions, not more code reading)
+## 13. Decisions (resolved 2026-06-10) and remaining recommendations
 
-1. **Blast-radius acceptance**: what relevant-tx % / labeled-doc growth in
-   observe mode is acceptable before flipping persist on? (Suggest: decide
-   from dogfood metrics, not a priori.)
-2. **Render default policy** (S15): does phase D add a default render
-   ceiling (breaking unguarded declassify-by-markup), or only gate the
-   declassify prop? Product call.
-3. **flowPrecisionClaim**: delete the minting path in phase B, or keep
-   inert for future non-decomposable ops? (Lean: delete; re-add with a
-   consumer when a real op needs it.)
-4. **Sink inventory scope** for phase D: which sinks get ceilings first
-   (fetchData/LLM/email?), and who authors per-sink `maxConfidentiality`?
-5. **Naming**: "derived" vs "flow" for the new component in code/spec
-   (this doc says `derived`; spec §8.11 vocabulary says flow labels carry
-   only part of what J contains).
+1. **Blast-radius acceptance** — *decided*: build it and fix after; tests
+   green is the bar. No metrics-gated persist flip; instrumentation stays as
+   a debugging tool (§8), §12 updated accordingly.
+2. **Render declassify prop (S15)** — *decided*: PR #3994 lands the
+   `renderDeclassificationPolicy` knob (`allow` default, `deny` available;
+   verified-authority gating deferred).
+3. **flowPrecisionClaim** — *recommended, pending confirm*: stop minting in
+   `map`/`filter`/`flatMap` (phase B); tx decomposition already yields the
+   precision the claims were staged for (D4). `flowPrecisionClaim` becomes
+   reserved-and-ignored on read — NOT fail-closed rejected, because existing
+   persisted link schemas embed it (minted into result-container schemas via
+   `setSchema`, `map.ts:123,148`); a reject would break stored data. Keep
+   the concept/type definitions; re-introduce minting only with a real
+   consumer — the realistic candidates are non-decomposable ops where one tx
+   reads all elements and writes all outputs: sqlite row transforms under
+   per-row labels (CFC phase 3), batched LLM calls. Note the audit's Wave 0
+   #6 defusal is already live (`flow-precision.ts:52-55` drops element-local
+   claims when the op uses `array`/`params`).
+4. **First egress channel** — *decided*: rendering. Default ceiling ≈
+   acting-user identity atoms + allow-listed caveat-kind classes, admitted
+   by default and tightened later (§10, SC-16).
+5. **Naming** — *recommended, pending confirm*: implementation keeps
+   `origin: "declared" | "link" | "derived"` (provenance axis, drives the
+   update rules); the spec edit (SC-1) uses §8.12.4's existing
+   store-label/data-label vocabulary for the update-discipline axis, with
+   data labels subdivided into link-carried and transition-derived. Avoid
+   naming the component "flow": J mixes content and flow contributions by
+   design (§8.11.4), and most of J is ordinary content propagation.
