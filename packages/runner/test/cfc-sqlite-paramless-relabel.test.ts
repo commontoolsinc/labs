@@ -86,4 +86,38 @@ describe("CFC sqlite paramless relabeling", () => {
       ),
     ).toBeUndefined();
   });
+
+  it("treats an empty bound-param array as a paramless write (F7)", () => {
+    expect(
+      checkSqliteWriteCeiling(
+        "INSERT INTO plain(body) SELECT secret_col FROM notes",
+        [],
+        labeledTables,
+        noConf,
+      ),
+    ).toBeDefined();
+  });
+
+  it("rejects a paramless ON CONFLICT DO UPDATE col = col upsert (F6)", () => {
+    expect(
+      checkSqliteWriteCeiling(
+        "INSERT INTO notes(secret_col) VALUES ('x') " +
+          "ON CONFLICT(secret_col) DO UPDATE SET pub = secret_col",
+        undefined,
+        labeledTables,
+        noConf,
+      ),
+    ).toBeDefined();
+  });
+
+  it("allows paramless literal UPDATEs with exponent/hex numerals (F8)", () => {
+    expect(
+      checkSqliteWriteCeiling(
+        "UPDATE notes SET pub = 1e3, secret_col = 0xFF",
+        undefined,
+        labeledTables,
+        noConf,
+      ),
+    ).toBeUndefined();
+  });
 });

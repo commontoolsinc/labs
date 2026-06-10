@@ -39,7 +39,9 @@ function rhsIsLiteral(rhs: string): boolean {
   const t = rhs.replace(/;\s*$/, "").trim();
   return t === "" ||
     /^''$/.test(t) || // blanked string literal
-    /^[-+]?\d+(\.\d+)?$/.test(t) || // numeric literal
+    // numeric literal incl. floats, exponents (1e3), and hex (0x1)
+    /^(?:[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?|0[xX][0-9A-Fa-f]+)$/
+      .test(t) ||
     /^(null|true|false)$/i.test(t) || // keyword literal
     t === "?"; // positional param (handled by the param path)
 }
@@ -56,7 +58,10 @@ function paramlessRelabelRisk(blanked: string): boolean {
   const kw = /^\s*(\w+)/.exec(blanked)?.[1]?.toUpperCase();
   if (kw === "DELETE") return false;
   if (kw === "INSERT" || kw === "REPLACE") {
-    return /\bselect\b/i.test(blanked);
+    // INSERT…SELECT copies column data; an ON CONFLICT … DO UPDATE clause can
+    // also relabel via `SET col = other_col`, so treat any upsert DO UPDATE as
+    // risky (the bound-param parser likewise fails closed on upserts).
+    return /\bselect\b/i.test(blanked) || /\bdo\s+update\b/i.test(blanked);
   }
   if (kw === "UPDATE") {
     const setIdx = blanked.search(/\bset\b/i);
@@ -114,7 +119,8 @@ export function checkSqliteWriteCeiling(
   // check below has nothing to inspect. A column-to-column flow (INSERT…SELECT,
   // UPDATE col = col) would still relabel data past a destination column's
   // declared label. On a labeled db, fail closed for such shapes (audit S6).
-  if (params === undefined) {
+  // An empty bound-param array is the same no-bound-value flow as `undefined`.
+  if (params === undefined || (Array.isArray(params) && params.length === 0)) {
     if (dbDeclaresAnyLabel(tables) && paramlessRelabelRisk(blanked)) {
       return (
         "sqlite: a paramless write moves column data on a labeled database " +
