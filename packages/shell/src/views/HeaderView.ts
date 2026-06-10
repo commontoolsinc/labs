@@ -647,7 +647,10 @@ export class XHeaderView extends BaseView {
 
       const results = await Promise.allSettled(
         ids.map(async (id) => {
-          const page = await rt.getPattern(id);
+          // Names come from the persisted result cells — do NOT start every
+          // piece in the space just to label a menu (CT-1623: that cost ~10s
+          // of dependency collection per reload or on first interaction).
+          const page = await rt.getPattern(id, { start: false });
           await page.cell().sync();
           return {
             id: page.id(),
