@@ -2778,3 +2778,101 @@ Deno.test("wish result schema scope overrides query-derived scope", async () => 
     await storageManager.close();
   }
 });
+
+Deno.test("scoped asCell property with no value gets an eager base-scope redirect", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const cell = runtime.getCell(
+      space,
+      "eager scoped redirect for omitted property",
+      {
+        type: "object",
+        properties: {
+          // Scoped reference with NO value and NO default: the object branch
+          // of normalizeAndDiff must eagerly materialize the base-scope
+          // redirect so later schema-less writes land in the user instance.
+          myProfile: {
+            type: "object",
+            properties: { name: { type: "string" } },
+            asCell: [{ kind: "cell", scope: "user" }],
+          },
+          // Sibling with a default: covered by the existing populated-keys
+          // narrowing; included for contrast.
+          title: { type: "string", default: "untitled" },
+        },
+      },
+      tx,
+    );
+
+    // Write an object that OMITS the scoped property.
+    cell.set({ title: "hello" } as never);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+
+    // Inspect the base-scope slot through a schema-less handle (so no
+    // schema-driven scope realization applies on read): it must hold a sigil
+    // link to the user-scoped instance.
+    const baseLink = cell.key("myProfile").getAsNormalizedFullLink();
+    assertEquals(baseLink.scope, "space");
+    const schemaless = createCell<{ myProfile: { name: string } }>(
+      runtime,
+      { ...cell.getAsNormalizedFullLink(), schema: undefined },
+    );
+    const storedRedirect = parseLink(
+      schemaless.key("myProfile").getRaw({ lastNode: "writeRedirect" }),
+      schemaless.key("myProfile"),
+    );
+    assertEquals(storedRedirect?.scope, "user");
+    assertEquals(storedRedirect?.id, baseLink.id);
+
+    // A schema-less write through the stored link (as a handler writing via a
+    // stored cell reference would) must land in the user partition: the path
+    // traverses the redirect, so the content goes to the scoped instance.
+    const writeTx = runtime.edit();
+    schemaless.withTx(writeTx).key("myProfile").key("name").set("Ada");
+    runtime.prepareTxForCommit(writeTx);
+    await writeTx.commit();
+    await runtime.idle();
+
+    const userInstance = createCell<{ name: string }>(
+      runtime,
+      { ...baseLink, schema: undefined, scope: "user" },
+    );
+    assertEquals(userInstance.getRaw(), { name: "Ada" });
+    // The base slot still holds the redirect, not the content.
+    assertEquals(
+      parseLink(
+        schemaless.key("myProfile").getRaw({ lastNode: "writeRedirect" }),
+        schemaless.key("myProfile"),
+      )?.scope,
+      "user",
+    );
+
+    // Rewriting the object without the key must NOT strip the redirect (the
+    // eager keys are exempt from the removed-keys pass).
+    const rewriteTx = runtime.edit();
+    cell.withTx(rewriteTx).set({ title: "hello again" } as never);
+    runtime.prepareTxForCommit(rewriteTx);
+    await rewriteTx.commit();
+    await runtime.idle();
+
+    assertEquals(
+      parseLink(
+        schemaless.key("myProfile").getRaw({ lastNode: "writeRedirect" }),
+        schemaless.key("myProfile"),
+      )?.scope,
+      "user",
+    );
+    assertEquals(userInstance.getRaw(), { name: "Ada" });
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
