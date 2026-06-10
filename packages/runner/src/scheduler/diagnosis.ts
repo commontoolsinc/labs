@@ -237,7 +237,10 @@ function readInvariantMovedExternally(
     // Only reads both runs performed are comparable.
     if (!previous) continue;
     if (deepEqual(previous.value, value)) continue;
-    const coveredByOwnWrites = log.writes.some((write) =>
+    // Cover writes of EITHER run: run1's commit moving its own read is the
+    // accumulator pattern, and a write-then-read inside the recheck run is
+    // nondeterminism, not external interference — both must stay flagged.
+    const coveredByOwnWrites = [...log.writes, ...log2.writes].some((write) =>
       write.space === address.space && write.id === address.id &&
       arraysOverlap(write.path, address.path)
     );
