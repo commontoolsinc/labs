@@ -5,7 +5,6 @@ import {
   type JSONSchema,
   type Pattern,
   unsafe_originalPattern,
-  unsafe_parentPattern,
 } from "./builder/types.ts";
 import {
   getVerifiedLoadId,
@@ -341,20 +340,6 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
     } else return binding;
   }
   return convert(binding, true, options?.targetSchema) as T;
-}
-
-export function unsafe_noteParentOnPatterns(
-  pattern: Pattern,
-  binding: unknown,
-): void {
-  // For now we just do top-level bindings
-  if (isRecord(binding)) {
-    for (const key in binding) {
-      if (isRecord(binding[key]) && binding[key][unsafe_originalPattern]) {
-        binding[key][unsafe_parentPattern] = pattern;
-      }
-    }
-  }
 }
 
 /**
