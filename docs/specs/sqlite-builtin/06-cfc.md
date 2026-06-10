@@ -344,12 +344,15 @@ zero cost until a table declares a rule:
   value's confidentiality must be captured by that computed label — and an
   empty computed label captures *nothing* (it is not an unrestricted ceiling)
   — else storing the value would launder its label away; fail closed.
-- An **UPDATE** may not write a rule-input column (the post-image row label
+- An **UPDATE**'s SET clause must consist entirely of simple `col = ?`
+  assignments — attributed from the SQL text, not the bind params; a literal,
+  expression, or subquery assignment is unattributable and **fails closed**
+  (so `SET col = 'x'` cannot bypass the rule-input check). An attributable
+  UPDATE still may not write a rule-input column (the post-image row label
   cannot be computed runner-side — the other inputs are unknown; server-side
-  3.c lifts this). SET columns are attributed from the SQL text, not the bind
-  params, so a literal assignment cannot bypass the check. A non-input UPDATE
-  with unlabeled values passes; a labeled value outside an evaluable INSERT
-  fails closed. DELETE stores nothing and passes.
+  3.c lifts this); one that writes only non-input columns with unlabeled
+  values passes, while a labeled value outside an evaluable INSERT fails
+  closed. DELETE stores nothing and passes.
 - Everything the runner cannot attribute on a rule-bearing table —
   `INSERT…SELECT`, upsert, columnless INSERT, named params, an unparseable
   target — **fails closed**.
