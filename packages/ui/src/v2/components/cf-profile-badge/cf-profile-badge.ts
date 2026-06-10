@@ -199,10 +199,10 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
             rgba(255, 255, 255, 0) 32%
           ),
           radial-gradient(
-            circle at var(--seal-mx, 50%) var(--seal-my, 50%),
-            hsl(var(--seal-sheen-hue, 200) 100% 72% / 0.9) 0%,
-            hsl(var(--seal-sheen-hue, 200) 100% 60% / 0) 52%
-          );
+          circle at var(--seal-mx, 50%) var(--seal-my, 50%),
+          hsl(var(--seal-sheen-hue, 200) 100% 72% / 0.9) 0%,
+          hsl(var(--seal-sheen-hue, 200) 100% 60% / 0) 52%
+        );
       }
 
       .aura cf-avatar {

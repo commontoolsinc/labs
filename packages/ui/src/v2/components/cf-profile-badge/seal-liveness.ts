@@ -109,7 +109,9 @@ export const registerSeal = (client: SealLivenessClient): void => {
   if (typeof globalThis.requestAnimationFrame !== "function") return;
   clients.add(client);
   if (!listening) {
-    globalThis.addEventListener("pointermove", onPointerMove, { passive: true });
+    globalThis.addEventListener("pointermove", onPointerMove, {
+      passive: true,
+    });
     listening = true;
   }
   if (!rafId) rafId = globalThis.requestAnimationFrame(tick);
