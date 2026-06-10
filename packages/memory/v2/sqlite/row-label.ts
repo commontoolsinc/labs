@@ -499,7 +499,7 @@ function evalMatch(
     return fail(`rule input field "${field}" is absent from the row`);
   }
   const value = row[field];
-  let values: string[] = [];
+  const values: string[] = [];
   if (value !== null && value !== undefined && value !== "") {
     if (typeof value !== "string") {
       return fail(
