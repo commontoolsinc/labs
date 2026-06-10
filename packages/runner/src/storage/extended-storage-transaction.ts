@@ -193,6 +193,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.invalidateCfc("trigger-reads-after-prepare");
     }
     for (const read of reads) {
+      // Surface exclusion keys on the RAW storage path before
+      // canonicalization loses the raw/value distinction: triggers from the
+      // runtime-internal root surfaces (`["cfc",…]`/`["source",…]`) don't
+      // join the flow derivation, while a user field literally named
+      // `source` (raw `["value","source"]`) does (#4011 review).
+      if (read.path[0] === "cfc" || read.path[0] === "source") {
+        continue;
+      }
       this.cfcState.triggerReads.push(deepFreeze({
         space: read.space,
         id: read.id,

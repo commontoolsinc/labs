@@ -158,10 +158,13 @@ export function resolveLink(
     // Sigil probe at full path. Probe reads are shape observations of link
     // topology — flow labels must not treat them as content reads
     // (reactivity still does, so the link appearing later re-resolves).
-    const sigilProbe = tx.read(toMemorySpaceAddress({
-      ...link,
-      path: [...link.path, "/", LINK_V1_TAG],
-    }), { meta: linkResolutionProbe });
+    const sigilProbe = tx.read(
+      toMemorySpaceAddress({
+        ...link,
+        path: [...link.path, "/", LINK_V1_TAG],
+      }),
+      { meta: linkResolutionProbe },
+    );
     if (
       sigilProbe.ok &&
       isRecord(sigilProbe.ok.value) &&
@@ -207,10 +210,13 @@ export function resolveLink(
           }
         } else {
           // Check sigil at this parent, then legacy
-          const parentSigil = tx.read(toMemorySpaceAddress({
-            ...link,
-            path: [...lastValid, "/", LINK_V1_TAG],
-          }), { meta: linkResolutionProbe });
+          const parentSigil = tx.read(
+            toMemorySpaceAddress({
+              ...link,
+              path: [...lastValid, "/", LINK_V1_TAG],
+            }),
+            { meta: linkResolutionProbe },
+          );
           if (parentSigil.ok && isRecord(parentSigil.ok.value)) {
             // Read the full value at the parent to ensure proper reactivity
             const whole = tx.readValueOrThrow({ ...link, path: lastValid });
@@ -333,10 +339,13 @@ function checkLegacyAt(
   atPath: readonly string[],
   onlyRedirects: boolean,
 ): NormalizedFullLink | undefined {
-  const aliasPath = tx.read(toMemorySpaceAddress({
-    ...link,
-    path: [...atPath, "$alias", "path"],
-  }), { meta: linkResolutionProbe });
+  const aliasPath = tx.read(
+    toMemorySpaceAddress({
+      ...link,
+      path: [...atPath, "$alias", "path"],
+    }),
+    { meta: linkResolutionProbe },
+  );
   if (Array.isArray(aliasPath.ok?.value)) {
     return parseLink(
       tx.readValueOrThrow({ ...link, path: atPath }) as CellLink,
@@ -344,10 +353,13 @@ function checkLegacyAt(
     );
   }
   if (onlyRedirects) return undefined;
-  const legacyCell = tx.read(toMemorySpaceAddress({
-    ...link,
-    path: [...atPath, "cell", "/"],
-  }), { meta: linkResolutionProbe });
+  const legacyCell = tx.read(
+    toMemorySpaceAddress({
+      ...link,
+      path: [...atPath, "cell", "/"],
+    }),
+    { meta: linkResolutionProbe },
+  );
   if (typeof legacyCell.ok?.value === "string") {
     return parseLink(
       tx.readValueOrThrow({ ...link, path: atPath }) as CellLink,

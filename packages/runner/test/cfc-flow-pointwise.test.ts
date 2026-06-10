@@ -189,4 +189,90 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect(conf1).toContainEqual("bob-secret");
     expect(conf1).not.toContainEqual("alice-secret");
   });
+
+  // §8.5.6.1 membership taint: which elements survive a filter is decided
+  // by the predicate outputs, and those are values the coordinator reads —
+  // so the filtered container's derived component must join the predicate
+  // taint of every element it considered. (No flow-precision claims
+  // needed: the membership channel rides ordinary value reads.)
+  it("filter: membership structure carries the predicate outputs' taint", async () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "persist",
+    });
+
+    await seedLabeledDoc(runtime, "memb-el-0", { n: 1 }, "alice-secret");
+    await seedLabeledDoc(runtime, "memb-el-1", { n: 2 }, "bob-secret");
+
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { pattern, lift } = commonfabric as unknown as {
+      pattern: typeof commonfabric.pattern;
+      lift: (fn: (value: any) => unknown) => (value: unknown) => unknown;
+    };
+    const isPositive = lift((value: { n: number }) => value.n > 0);
+    let filteredRef: any;
+
+    const setup = runtime.edit();
+    const el0 = runtime.getCell(space, "memb-el-0", undefined, setup);
+    const el1 = runtime.getCell(space, "memb-el-1", undefined, setup);
+    const listCell = runtime.getCell(
+      space,
+      "memb-list",
+      {
+        type: "array",
+        items: { asCell: ["cell"] },
+      },
+      setup,
+    );
+    listCell.set([el0, el1]);
+    expect((await setup.commit()).ok).toBeDefined();
+
+    const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
+      filteredRef = (values as any).filterWithPattern(
+        pattern(({ element }: Opaque<any>) => isPositive(element)),
+        {},
+      );
+      return { kept: filteredRef };
+    });
+
+    const tx = runtime.edit();
+    const valuesIn = runtime.getCell(space, "memb-list", undefined, tx);
+    const resultCell = runtime.getCell(
+      space,
+      "memb-filter-result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      collectionPattern,
+      { values: valuesIn },
+      resultCell,
+    );
+    await tx.commit();
+    await result.pull();
+    await runtime.idle();
+
+    const kept = (result.key("kept") as any).get() as Array<{ n: number }>;
+    expect(kept.length).toBe(2);
+
+    // A consumer of the membership structure (the array shape itself, not
+    // any element's content) picks up the predicate taint of every element
+    // the filter considered.
+    const ptx = runtime.edit();
+    const keptLength = ((result.key("kept") as any).withTx(ptx)
+      .get() as Array<unknown>).length;
+    const out = runtime.getCell(space, "memb-probe", undefined, ptx);
+    out.set({ count: keptLength });
+    ptx.prepareCfc();
+    expect((await ptx.commit()).ok).toBeDefined();
+    const probeConf = derivedConfidentiality(
+      out.getAsNormalizedFullLink().id,
+    );
+    expect(probeConf).toContainEqual("alice-secret");
+    expect(probeConf).toContainEqual("bob-secret");
+  });
 });

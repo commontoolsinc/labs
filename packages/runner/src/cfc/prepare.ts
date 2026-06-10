@@ -973,11 +973,22 @@ const valueWriteTargets = (
   );
   for (const space of seenWriteSpaces) {
     for (const write of tx.getWriteDetails?.(space) ?? []) {
-      const writePath = canonicalizeLogicalPath(write.address.path);
+      const rawPath = write.address.path;
+      const writePath = canonicalizeLogicalPath(rawPath);
+      // The `cfc`/`source` surface exclusions key on the RAW storage path:
+      // the runtime-internal surfaces are document-root siblings of `value`
+      // (raw `["cfc", ...]`/`["source", ...]`), while user fields of the
+      // same names live under `["value", ...]` and canonicalize to identical
+      // logical paths. Keying on the canonical path would let a user write
+      // to `value.source` dodge schema write policy and flow-label
+      // attachment (#4011 review). The link-valued `internal` exclusion
+      // stays canonical on purpose: it covers the runtime's link plumbing
+      // both at the root surface and inside process-doc values; link writes
+      // carry their labels via the link-write machinery, not here.
       if (
         write.address.id.startsWith("cid:") ||
-        writePath[0] === "cfc" ||
-        writePath[0] === "source" ||
+        rawPath[0] === "cfc" ||
+        rawPath[0] === "source" ||
         (
           writePath[0] === "internal" &&
           isPrimitiveCellLink(write.value)
@@ -1012,13 +1023,19 @@ const valueWriteTargets = (
 // surfaces (verifier reads, `cid:` schema docs, `["cfc"]`/`["source"]` paths)
 // are excluded, mirroring the write-side exclusions.
 
+// Keyed on the RAW storage path: the runtime-internal surfaces are
+// document-root siblings of `value` (raw `["cfc", ...]`/`["source", ...]`),
+// while user fields of the same names live under `["value", ...]` and
+// canonicalize to identical logical paths. Keying on the canonical path
+// would drop reads of a user `value.source` field from the taint join
+// (#4011 review).
 const flowReadExcluded = (
   id: string,
-  logicalPath: readonly string[],
+  rawPath: readonly string[],
 ): boolean =>
   id.startsWith("cid:") ||
-  logicalPath[0] === "cfc" ||
-  logicalPath[0] === "source";
+  rawPath[0] === "cfc" ||
+  rawPath[0] === "source";
 
 // A written value made entirely of references (links at every leaf, or
 // empty structure) carries no readable content of its own: the per-slot
@@ -1061,10 +1078,10 @@ const forEachFlowObservation = (
     if (isLinkResolutionProbe(read.meta)) {
       continue;
     }
-    const logicalPath = canonicalizeLogicalPath(read.path);
-    if (flowReadExcluded(read.id, logicalPath)) {
+    if (flowReadExcluded(read.id, read.path)) {
       continue;
     }
+    const logicalPath = canonicalizeLogicalPath(read.path);
     if (
       consume(
         read.space,
@@ -1091,10 +1108,12 @@ const forEachFlowObservation = (
   // scheduled this run. The decision to run now was influenced by their
   // values even when this run's branch never re-reads them — without this,
   // "dep changed" leaks one bit per change through the timing/existence of
-  // writes the rerun makes.
+  // writes the rerun makes. Raw-path surface exclusion happens at capture
+  // time (`addCfcTriggerReads`), before canonicalization loses the
+  // raw/value distinction; only the `cid:` check remains meaningful here.
   for (const trigger of tx.getCfcState().triggerReads) {
     const logicalPath = canonicalizeLogicalPath(trigger.path);
-    if (flowReadExcluded(trigger.id, logicalPath)) {
+    if (trigger.id.startsWith("cid:")) {
       continue;
     }
     if (
