@@ -128,6 +128,11 @@ export class PatternManager {
   // In-flight compiled-cache write-backs (fire-and-forget); awaited by
   // flushCompileCacheWrites() for graceful shutdown / deterministic tests.
   private compileCacheWrites = new Set<Promise<unknown>>();
+  // The subset of `compileCacheWrites` that are cold-compile closure
+  // write-backs. Tracked separately so `replicateClosures` can await them
+  // before reading the origin space — its own promise lives in
+  // `compileCacheWrites`, so awaiting that whole set would deadlock on itself.
+  private pendingCacheWriteBacks = new Set<Promise<unknown>>();
   // `${patternId}\0${space}` pairs whose meta has been persisted this session.
   // Per-SPACE (not per-pattern): an `inSpace` child piece is loaded from its
   // own space by a fresh runtime, so the same pattern's meta may need to exist
@@ -484,10 +489,32 @@ export class PatternManager {
 
     if (!providedTx) {
       this.runtime.prepareTxForCommit(tx);
-      tx.commit().then((result) => {
-        if (result.error) {
-          logger.warn("pattern", "Pattern already existed", patternId);
+      tx.commit().then(async (result) => {
+        if (!result.error) return;
+        // A commit error here is usually the benign content-addressed
+        // "already existed" conflict (see HACK above) — but for a cross-space
+        // save it can be a real failure (no write access to the child space,
+        // offline). Verify rather than taxonomize: if the meta is readable
+        // with a program, the desired state holds and the claim stands;
+        // otherwise release the claim so the next save into this space
+        // retries instead of silently never landing (CT-1687).
+        try {
+          const metaCell = this.getPatternMetaCell({ patternId, space });
+          await metaCell.sync();
+          if (metaCell.get()?.program) {
+            logger.warn("pattern", "Pattern already existed", patternId);
+            return;
+          }
+        } catch {
+          // fall through to release
         }
+        this.savedMetaSpaces.delete(spaceKey);
+        logger.warn(
+          "pattern",
+          "Pattern meta save failed",
+          patternId,
+          space,
+        );
       });
     }
 
@@ -581,6 +608,14 @@ export class PatternManager {
     fromSpace: MemorySpace,
     toSpace: MemorySpace,
   ): Promise<void> {
+    // The origin-space closure may have been produced by THIS session's cold
+    // compile, whose write-back is itself fire-and-forget and may not have
+    // committed yet. A lost race would throw here — and for a handler-created
+    // child (one space per profile) nothing re-fires the released dedupe key,
+    // leaving that child permanently unloadable. Await the in-flight
+    // write-backs first. (Their own set, not flushCompileCacheWrites: this
+    // replication promise is tracked there and would await itself.)
+    await Promise.allSettled([...this.pendingCacheWriteBacks]);
     const cacheOpts = {
       runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
       compilerDid: this.runtime.userIdentityDID,
@@ -589,6 +624,11 @@ export class PatternManager {
     let sourceDocs;
     let compiledDocs;
     try {
+      // Verification recomputes module identities with the default ("")
+      // runtimeFingerprint — the same default every compile path in the tree
+      // uses today. If a non-empty fingerprint is ever threaded into
+      // compilation, it must be threaded here too or verification will
+      // reject every closure (logged as replication failures).
       sourceDocs = await loadVerifiedSourceClosure(
         this.runtime,
         fromSpace,
@@ -858,7 +898,11 @@ export class PatternManager {
         cacheOpts,
       );
       this.compileCacheWrites.add(writeBack);
-      writeBack.finally(() => this.compileCacheWrites.delete(writeBack));
+      this.pendingCacheWriteBacks.add(writeBack);
+      writeBack.finally(() => {
+        this.compileCacheWrites.delete(writeBack);
+        this.pendingCacheWriteBacks.delete(writeBack);
+      });
     }
 
     return this.patternFromEvaluation(result, program, entryIdentity);

@@ -9,6 +9,7 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 const signer = await Identity.fromPassphrase("inspace-child-reload");
 const spaceA = signer.did();
 const spaceB = (await Identity.fromPassphrase("inspace child target B")).did();
+const spaceC = (await Identity.fromPassphrase("inspace child target C")).did();
 
 // CT-1687: a handler that materializes a child piece in ANOTHER space via
 // `Child.inSpace(...)({...})` (the multi-profile flow: profile-create.tsx pushes
@@ -125,6 +126,76 @@ describe("inSpace child piece reload from its own space (CT-1687)", () => {
       await childCell.pull();
       const value = childCell.getAsQueryResult() as { label: string };
       expect(value.label).toBe("hi");
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  // The build-time variant: the child node sits in the PARENT's graph (not a
+  // handler frame), so the cross-space transition is visible to
+  // `instantiatePatternNode` (resultCell.space !== resultCellLink.space) —
+  // the other replication hook.
+  it("a fresh runtime can start a build-time inSpace child", async () => {
+    const STATIC_PROGRAM: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { pattern } from 'commonfabric';",
+            "",
+            "export const child = pattern<{ label: string }>(({ label }) => ({",
+            "  label,",
+            "}));",
+            "",
+            "export default pattern(() => ({",
+            `  kid: child.inSpace("${spaceC}")({ label: 'static-hi' }),`,
+            "}));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const rt1 = newRuntime();
+    const rt2 = newRuntime();
+    try {
+      const tx1 = rt1.edit();
+      const parent = await rt1.patternManager.compilePattern(STATIC_PROGRAM, {
+        space: spaceA,
+        tx: tx1,
+      });
+      const resultCell1 = rt1.getCell<Record<string, unknown>>(
+        spaceA,
+        "inspace static child parent",
+        undefined,
+        tx1,
+      );
+      // deno-lint-ignore no-explicit-any
+      const r1 = rt1.run(tx1, parent as any, {}, resultCell1);
+      await tx1.commit();
+      await r1.pull();
+      await rt1.idle();
+
+      const kidCell = r1.key("kid").asSchema(
+        // deno-lint-ignore no-explicit-any
+        { type: "unknown", asCell: ["cell"] } as any,
+        // deno-lint-ignore no-explicit-any
+      ).get() as any;
+      const kidLink = kidCell.getAsNormalizedFullLink();
+      expect(kidLink.space).toBe(spaceC);
+
+      await rt1.patternManager.flushCompileCacheWrites();
+      await rt1.storageManager.synced();
+
+      const childCell = rt2.getCellFromLink(kidLink);
+      await childCell.sync();
+      const started = await rt2.start(childCell);
+      expect(started).toBe(true);
+
+      await childCell.pull();
+      const value = childCell.getAsQueryResult() as { label: string };
+      expect(value.label).toBe("static-hi");
     } finally {
       await rt2.dispose();
       await rt1.dispose();
