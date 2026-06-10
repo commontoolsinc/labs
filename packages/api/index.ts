@@ -2252,7 +2252,7 @@ export type SqliteColumnSpec = string | JSONSchema;
 export type SqliteRowFieldRef = { readonly field: string };
 
 /** A per-row CFC label rule: a pure declarative projection over the row's
- *  columns, built from the closed helper set (match/principal/all/when/
+ *  columns, built from the closed helper set (match/principal/all/whenMatches/
  *  dbOwner/endorsedBy/…). Validated and serialized at `table()` time;
  *  evaluated identically at the write gate, server commit, and read. */
 export type SqliteRowLabelRule = (

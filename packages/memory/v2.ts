@@ -381,9 +381,10 @@ export function dbNeedsColumnProvenance(
 
 export interface SqliteQueryResult {
   rows: unknown[];
-  /** Per-result-column origin, present ONLY when the queried db declares
-   *  per-column `ifc` (CFC read-labeling needs sound provenance — an aliased or
-   *  joined column maps back to its declared `(table, column)`). Undefined
+  /** Per-result-column origin, present ONLY when the db needs provenance for
+   *  CFC labeling — any column declares `ifc` (Phase 2) or any table declares
+   *  a per-row label rule (Phase 3); see `dbNeedsColumnProvenance`. An aliased
+   *  or joined column maps back to its declared `(table, column)`. Undefined
    *  otherwise, so unlabeled queries pay nothing. */
   columns?: SqliteResultColumn[];
 }

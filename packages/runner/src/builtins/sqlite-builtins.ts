@@ -32,7 +32,7 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import type { CellScope } from "../builder/types.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
-import { narrowestScope } from "../scope.ts";
+import { isCellScope, narrowestScope } from "../scope.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
@@ -104,7 +104,9 @@ function readDbRef(value: unknown): SqliteDbRef {
           { frozen: false },
         ) as Record<string, unknown>
         : undefined,
-      scope: ref.scope,
+      // Validate at the boundary: an invalid scope value must not flow into
+      // query execution / on-disk filename derivation.
+      scope: isCellScope(ref.scope) ? ref.scope : undefined,
       owner: typeof ref.owner === "string" ? ref.owner : undefined,
     };
   }

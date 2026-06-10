@@ -107,7 +107,18 @@ function isSqliteTableCallee(
     : undefined;
   if (name !== "table") return false;
   const type = checker.getTypeAtLocation(callee);
-  return type.aliasSymbol?.name === "SqliteTableFunction";
+  const alias = type.aliasSymbol;
+  if (!alias || alias.name !== "SqliteTableFunction") return false;
+  // The alias must be declared by Common Fabric's own typings (the api
+  // package in-repo, the bundled commonfabric d.ts in the pattern compile
+  // env) — a user-defined alias of the same name must not steer boundary
+  // classification.
+  return (alias.getDeclarations() ?? []).some((decl) => {
+    const file = decl.getSourceFile().fileName.replace(/\\/g, "/");
+    return file.endsWith("/api/index.ts") ||
+      file.endsWith("commonfabric.d.ts") ||
+      file.includes("/@commonfabric/api/");
+  });
 }
 
 function isPatternToolPatternArgument(

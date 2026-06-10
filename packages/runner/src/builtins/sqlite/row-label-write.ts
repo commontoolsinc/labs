@@ -19,6 +19,7 @@ import { tableDeclaresRowLabel } from "@commonfabric/memory/v2";
 import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
 import {
   blankWriteSql,
+  parseUpdateSetColumns,
   parseWriteParamColumns,
   parseWriteTable,
 } from "./write-targets.ts";
@@ -119,22 +120,35 @@ export function checkSqliteRowLabelWrite(
   }
   const values: readonly unknown[] = params ?? [];
 
-  const cols = parseWriteParamColumns(sql, blanked);
-  if (cols === undefined) {
-    return {
-      error: `sqlite: this write to rule-bearing table "${declaredKey}" is ` +
-        "not attributable (INSERT…SELECT, upsert, computed SET, columnless " +
-        "INSERT, …) — the row label cannot be evaluated runner-side; fail " +
-        "closed (server-side commit evaluation is the planned lift)",
-    };
-  }
-
   const inputFields = ruleInputFields(spec);
   const inputSet = new Set(inputFields.map((f) => f.toLowerCase()));
 
   if (kw === "UPDATE") {
-    for (const c of cols) {
-      if (c !== null && inputSet.has(c.toLowerCase())) {
+    // Attribute the SET columns from the SQL itself, NOT from the bind
+    // params: a literal assignment (`SET col = 'x'`, zero placeholders) must
+    // not bypass the rule-input check. Anything the strict parser can't
+    // attribute fails closed on a rule-bearing table.
+    const setCols = parseUpdateSetColumns(sql, blanked);
+    if (setCols === undefined) {
+      // Diagnostic only: name a rule input that appears as an assignment LHS
+      // so the refusal points at the dangerous column (the statement is
+      // rejected either way — this scan never ADMITS anything).
+      const touchedInput = [...blanked.matchAll(/([A-Za-z_][\w$]*)\s*=/g)]
+        .map((m) => m[1])
+        .find((c) => inputSet.has(c.toLowerCase()));
+      return {
+        error: `sqlite: this UPDATE of rule-bearing table "${declaredKey}" ` +
+          "has an unattributable SET clause (literal/expression/subquery " +
+          "assignment)" +
+          (touchedInput !== undefined
+            ? ` and may write rule input column "${touchedInput}"`
+            : "") +
+          " — fail closed; bind values with positional ? in simple " +
+          "`col = ?` form",
+      };
+    }
+    for (const c of setCols) {
+      if (inputSet.has(c.toLowerCase())) {
         return {
           error: `sqlite: UPDATE writes rule input column "${c}" of ` +
             `"${declaredKey}" — the post-image row label cannot be computed ` +
@@ -152,6 +166,16 @@ export function checkSqliteRowLabelWrite(
       }
     }
     return {}; // non-input UPDATE with unlabeled values: label unchanged
+  }
+
+  const cols = parseWriteParamColumns(sql, blanked);
+  if (cols === undefined) {
+    return {
+      error: `sqlite: this write to rule-bearing table "${declaredKey}" is ` +
+        "not attributable (INSERT…SELECT, upsert, columnless INSERT, …) — " +
+        "the row label cannot be evaluated runner-side; fail closed " +
+        "(server-side commit evaluation is the planned lift)",
+    };
   }
 
   // INSERT / REPLACE: group the cycled param→column mapping back into rows.
@@ -196,10 +220,22 @@ export function checkSqliteRowLabelWrite(
       };
     }
     // No-laundering: every labeled bound value of this row must be captured
-    // by the row's computed confidentiality.
+    // by the row's computed confidentiality. An EMPTY computed label captures
+    // NOTHING — it must not act like an unrestricted ceiling (which is what
+    // cfcObservationFitsCeiling's empty-ceiling convention would do): storing
+    // a labeled value under a row that re-derives as label-free would launder
+    // the label away.
     for (const v of rowParams) {
       const conf = confidentialityOf(v);
       if (conf.length === 0) continue;
+      if (res.confidentiality.length === 0) {
+        return {
+          error: `sqlite: a labeled value is bound to rule-bearing table ` +
+            `"${declaredKey}", but the row's computed label is empty — an ` +
+            "empty label captures nothing (it is not an unrestricted " +
+            "ceiling); storing the value would launder its label; fail closed",
+        };
+      }
       if (!cfcObservationFitsCeiling(conf, res.confidentiality)) {
         return {
           error: `sqlite: a value bound to rule-bearing table ` +

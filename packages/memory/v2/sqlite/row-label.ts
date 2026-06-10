@@ -225,7 +225,12 @@ function regexLintReason(source: string): string | undefined {
       continue;
     }
     if (c === ")") {
-      const frame = stack.pop() ?? { hasQuant: false };
+      const frame = stack.pop();
+      if (frame === undefined || stack.length === 0) {
+        // Unmatched ")" — invalid regex; report a reason rather than crash
+        // (the lint runs on hostile wire specs and must stay fail-closed).
+        return "regex fails the safety lint (unbalanced parenthesis)";
+      }
       const next = source[i + 1];
       if (frame.hasQuant && next !== undefined && QUANT.has(next)) {
         return "regex fails the safety lint (nested quantifier — ReDoS risk)";
@@ -506,7 +511,12 @@ function evalMatch(
         `field "${field}" is ${typeof value}, not a string — regex input`,
       );
     }
-    const re = new RegExp(node.source as string, node.flags as string);
+    // Force the global flag like match() does at authoring: matchAll throws
+    // on non-global regexes, and a hostile/legacy wire spec must degrade to
+    // the documented split semantics, not an uncaught exception.
+    const rawFlags = typeof node.flags === "string" ? node.flags : "";
+    const flags = rawFlags.includes("g") ? rawFlags : rawFlags + "g";
+    const re = new RegExp(node.source as string, flags);
     const group = node.group as number | undefined;
     for (const m of value.matchAll(re)) {
       const picked = group !== undefined ? m[group] : m[0];

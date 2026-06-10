@@ -12,6 +12,7 @@ import { table } from "@commonfabric/memory/sqlite/schema";
 import {
   all,
   authoredBy,
+  constant,
   dbOwner,
   match,
   principal,
@@ -283,6 +284,69 @@ describe("checkSqliteRowLabelWrite — UPDATE / DELETE / rule-less", () => {
         confidentialityOf: unlabeled,
       }),
       "dbOwner",
+    );
+  });
+});
+
+describe("checkSqliteRowLabelWrite — review-round soundness fixes", () => {
+  // A rule whose confidentiality is entirely data-dependent: rows that don't
+  // match the gate compute an EMPTY label.
+  const gatedTables = {
+    drafts: table(
+      { id: "integer primary key", flag: "text", body: "text" },
+      (f) => ({
+        confidentiality: whenMatches(f.flag, /locked/, constant("sealed")),
+      }),
+    ),
+  };
+
+  it("an EMPTY computed row label captures nothing — labeled inputs fail closed", () => {
+    expectError(
+      checkSqliteRowLabelWrite({
+        sql: "INSERT INTO drafts (flag, body) VALUES (?, ?)",
+        params: ["open", "secret payload"],
+        tables: gatedTables,
+        owner: OWNER,
+        confidentialityOf: (v) => (v === "secret payload" ? ["x"] : []),
+      }),
+      "empty",
+    );
+  });
+
+  it("the same labeled input passes when the gate fires (non-empty label captures it)", () => {
+    const res = checkSqliteRowLabelWrite({
+      sql: "INSERT INTO drafts (flag, body) VALUES (?, ?)",
+      params: ["locked", "secret payload"],
+      tables: gatedTables,
+      owner: OWNER,
+      confidentialityOf: (v) => (v === "secret payload" ? ["sealed"] : []),
+    });
+    expectOk(res);
+  });
+
+  it("a param-less LITERAL UPDATE of a rule input column fails closed", () => {
+    expectError(
+      checkSqliteRowLabelWrite({
+        sql: "UPDATE emails SET to_addrs = 'eve@evil.example' WHERE id = 1",
+        params: [],
+        tables,
+        owner: OWNER,
+        confidentialityOf: unlabeled,
+      }),
+      "to_addrs",
+    );
+  });
+
+  it("a param-less literal UPDATE of a NON-input column also fails closed (unattributable SET)", () => {
+    expectError(
+      checkSqliteRowLabelWrite({
+        sql: "UPDATE emails SET body = 'plain' WHERE id = 1",
+        params: [],
+        tables,
+        owner: OWNER,
+        confidentialityOf: unlabeled,
+      }),
+      "fail closed",
     );
   });
 });

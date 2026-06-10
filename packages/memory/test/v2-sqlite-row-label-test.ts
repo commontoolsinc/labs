@@ -562,3 +562,44 @@ Deno.test("dbNeedsColumnProvenance: rowLabel-only tables need origin capture too
   assert(!dbNeedsColumnProvenance(unlabeled));
   assert(!dbNeedsColumnProvenance(undefined));
 });
+
+// ---------------------------------------------------------------------------
+// Review-round fixes: validator/evaluator robustness on hostile wire specs
+// ---------------------------------------------------------------------------
+
+Deno.test("an unbalanced regex in a wire spec returns a reason (no lint crash)", () => {
+  const spec: RowLabelSpec = {
+    version: 1,
+    confidentiality: {
+      allOf: [{
+        principal: {
+          protocol: "mailto",
+          of: { match: { field: "from", source: "a)b", flags: "g" } },
+        },
+      }],
+    },
+  };
+  const reason = validateRowLabelSpec(spec, ["from"]);
+  assert(typeof reason === "string");
+});
+
+Deno.test("a wire match without the global flag still evaluates (forced, no throw)", () => {
+  const spec: RowLabelSpec = {
+    version: 1,
+    confidentiality: {
+      allOf: [{
+        principal: {
+          protocol: "mailto",
+          // flags deliberately non-global: a hostile/legacy wire form must not
+          // crash matchAll — evaluation forces the global flag like match().
+          of: {
+            match: { field: "from", source: "[^\\s]+@[^\\s]+", flags: "" },
+          },
+        },
+      }],
+    },
+  };
+  const res = evaluateRowLabel(spec, { from: "a@b.example" }, {});
+  if ("error" in res) throw new Error(res.error);
+  assertEquals(res.confidentiality, ["did:mailto:a@b.example"]);
+});
