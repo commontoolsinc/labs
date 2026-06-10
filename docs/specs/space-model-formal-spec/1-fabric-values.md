@@ -2977,9 +2977,11 @@ returned value is always a valid `FabricValue` regardless of its frozen state.
  * actually performing the conversion (and its associated wrapping, freezing,
  * and allocation).
  *
- * Relationship to other functions:
- * - `isFabricValue(x)`: "Is `x` already a `FabricValue`?" Does NOT
- *   return `true` for raw native types like `Error` or `Map`.
+ * Relationship to other functions and checks:
+ * - The narrower conceptual check -- "is `x` already a `FabricValue`?",
+ *   which would NOT accept raw native types like `Error` or `Map` -- has
+ *   no standalone predicate; a dedicated `isFabricValue()` is a noted
+ *   TODO in `deep-freeze.ts`.
  * - `isFabricCompatible(x)`: "Could `x` be converted to a `FabricValue` via
  *   `fabricFromNativeValue()`?" Returns `true` for both `FabricValue`
  *   values AND `FabricNativeObject` values (and deep trees thereof).
