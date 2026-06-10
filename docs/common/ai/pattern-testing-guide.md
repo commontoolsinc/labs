@@ -102,6 +102,62 @@ export default pattern(() => {
 - test a sub-pattern before building the next dependent layer when that helps
   isolate failures
 
+## Multi-User Tests
+
+A single-runtime test cannot exercise `PerUser`/`PerSession` scoping or
+cross-client propagation — one runtime is one user and one session. For
+patterns with multi-user behavior, export a `multiUserTest` descriptor as the
+default export instead of a single test pattern. `cf test` then runs each
+participant pattern in its own isolated runtime (own identity, own realm)
+against one shared space on an in-process storage server.
+
+```tsx
+import { action, computed, multiUserTest, pattern } from "commonfabric";
+import Chat from "./pattern.tsx";
+
+// Instantiates the shared state ONCE; every participant runtime runs this
+// same instance (like every browser tab does) and receives its result as
+// the `setup` input.
+export const setup = pattern(() => ({ chat: Chat({}) }));
+
+export const alice = pattern<{ setup: Setup }>(({ setup }) => {
+  const save = action(() => setup.chat.saveProfile.send());
+  const sees_bob = computed(() => /* ... */);
+  return {
+    tests: [
+      { action: save },
+      { label: "alice-saved" }, //  announce a marker
+      { await: "bob-saved" }, //    park until bob announces
+      { assertion: sees_bob },
+    ],
+  };
+});
+
+export const bob = pattern<{ setup: Setup }>(({ setup }) => {
+  /* ... */
+});
+
+export default multiUserTest({ setup, participants: { alice, bob } });
+```
+
+Key points:
+
+- A participant's steps run in order; cross-participant ordering happens
+  ONLY at `{ label: "name" }` / `{ await: "name" }` markers. If every
+  remaining participant is parked on an unannounced marker, the test fails
+  with a deadlock report.
+- Each participant gets its own identity. Use
+  `{ pattern: aliceTab2, user: "alice" }` for a second session of an
+  existing user (PerUser state shared, PerSession state isolated).
+- Assertions retry (with settling) until the step timeout, since asserted
+  state may still be propagating from another runtime — don't assert
+  "other user does NOT see X yet" right after the other user acted; assert
+  stable invariants instead.
+- The example to copy:
+  `packages/patterns/cfc-group-chat-demo/multi-user.test.tsx`. The scope
+  model background: `docs/common/patterns/multi-user-patterns.md` and
+  `docs/development/debugging/gotchas/scoped-cell-pitfalls.md`.
+
 ## Testing Time and Randomness
 
 If a pattern uses `safeDateNow()` or `nonPrivateRandom()`, keep the assertions
