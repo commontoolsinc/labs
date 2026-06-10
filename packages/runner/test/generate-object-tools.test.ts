@@ -1690,6 +1690,12 @@ describe("generateObject with tools", () => {
     );
 
     const parseResultSchema = lift(
+      ({ resultSchema }) => {
+        if (typeof resultSchema === "string") {
+          return JSON.parse(resultSchema);
+        }
+        return resultSchema;
+      },
       {
         type: "object",
         properties: {
@@ -1705,12 +1711,6 @@ describe("generateObject with tools", () => {
         additionalProperties: false,
       },
       true,
-      ({ resultSchema }) => {
-        if (typeof resultSchema === "string") {
-          return JSON.parse(resultSchema);
-        }
-        return resultSchema;
-      },
     );
 
     const subAgentPattern = pattern<any, any>(
@@ -2157,6 +2157,12 @@ describe("generateObject with tools", () => {
     );
 
     const parseResultSchema = lift(
+      ({ resultSchema }) => {
+        if (typeof resultSchema === "string") {
+          return JSON.parse(resultSchema);
+        }
+        return resultSchema;
+      },
       {
         type: "object",
         properties: {
@@ -2172,12 +2178,6 @@ describe("generateObject with tools", () => {
         additionalProperties: false,
       },
       true,
-      ({ resultSchema }) => {
-        if (typeof resultSchema === "string") {
-          return JSON.parse(resultSchema);
-        }
-        return resultSchema;
-      },
     );
     const subAgentPattern = pattern<any, any>(
       ({

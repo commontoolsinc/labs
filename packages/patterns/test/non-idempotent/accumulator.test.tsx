@@ -1,6 +1,9 @@
 /**
  * Test that exercises a non-idempotent accumulator computation.
- * The idempotency check in cf test should warn about it.
+ * expectNonIdempotent asserts the idempotency check detects it; the test
+ * FAILS if no violation is reported. Detection is deterministic here: the
+ * computation reads the log it appends to, so the recheck always writes one
+ * more entry than the run it verifies.
  *
  * Run: deno task cf test packages/patterns/test/non-idempotent/accumulator.test.tsx --verbose
  */

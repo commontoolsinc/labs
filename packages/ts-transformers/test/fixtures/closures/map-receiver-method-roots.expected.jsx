@@ -14,7 +14,7 @@ const __cfAmdHooks = undefined;
 const identity = __cfHardenFn(<T,>(value: T) => value);
 const __cfLift_1 = __cfHelpers.lift<{
     item: string;
-}, string>({
+}, string>(({ item }) => item.toUpperCase(), {
     type: "object",
     properties: {
         item: {
@@ -24,7 +24,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["item"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.toUpperCase());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return <span>{__cfLift_1({ item: item })}</span>;
@@ -59,7 +59,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     item: string;
-}, string>({
+}, string>(({ item }) => identity(item.toUpperCase()), {
     type: "object",
     properties: {
         item: {
@@ -69,7 +69,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["item"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ item }) => identity(item.toUpperCase()));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return <span>{__cfLift_2({ item: item })}</span>;

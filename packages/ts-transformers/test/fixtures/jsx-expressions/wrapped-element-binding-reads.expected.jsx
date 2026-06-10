@@ -39,7 +39,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         name: string;
     };
     prefix: string;
-}, boolean>({
+}, boolean>(({ entry, prefix }) => (entry).name === prefix, {
     type: "object",
     properties: {
         entry: {
@@ -58,13 +58,13 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["entry", "prefix"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ entry, prefix }) => (entry).name === prefix);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     entry: {
         name: string;
     };
     prefix: string;
-}, boolean>({
+}, boolean>(({ entry, prefix }) => entry!.name === prefix, {
     type: "object",
     properties: {
         entry: {
@@ -83,13 +83,13 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["entry", "prefix"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ entry, prefix }) => entry!.name === prefix);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     entry: {
         name: string;
     };
     prefix: string;
-}, boolean>({
+}, boolean>(({ entry, prefix }) => (entry as Entry).name === prefix, {
     type: "object",
     properties: {
         entry: {
@@ -108,7 +108,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["entry", "prefix"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ entry, prefix }) => (entry as Entry).name === prefix);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const entry = __cf_pattern_input.key("element");
     const prefix = __cf_pattern_input.key("params", "prefix");

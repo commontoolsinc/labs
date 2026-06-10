@@ -97,10 +97,13 @@ export function brandTrustedPattern<T>(value: T): T {
 }
 
 // Derivation tracking: `copy → root original`. Replaces the former
-// `unsafe_originalPattern` symbol backref. Registered ONLY by runner-owned
+// `unsafe_originalPattern` symbol backref. Registered ONLY by trusted-builder
 // copy sites (`noteDerivedCopy` callers: build-time graph serialization in
 // json-utils, traversal copies in traverse-utils, binding copies in
-// pattern-binding) — authored/forged values never enter, since nothing on the
+// pattern-binding, and the `asScope`/`inSpace` factory derivations in
+// builder/pattern.ts — the latter reachable from authored pattern code, which
+// is sound because both objects are builder-minted and already branded) —
+// forged values never enter, since nothing on the
 // object itself can establish the link. Module-level (not per-manager): the
 // copy sites live in builder-layer utilities with no PatternManager handle,
 // and the linked facts (trust brands, content-addressed entry refs) are

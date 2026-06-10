@@ -31,7 +31,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         taxRate: number;
     };
     multiplier: number;
-}, number>({
+}, number>(({ item, state, multiplier }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost, {
     type: "object",
     properties: {
         item: {
@@ -65,7 +65,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["item", "state", "multiplier"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ item, state, multiplier }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");

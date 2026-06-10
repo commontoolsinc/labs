@@ -17,15 +17,15 @@ type Question = {
     category: string;
     priority: number;
 };
-const __cfLift_1 = __cfHelpers.lift(false, (): Question | null => {
+const __cfLift_1 = __cfHelpers.lift((): Question | null => {
     // In real code this would filter and return first match, or null
     return null;
-});
+}, false);
 const __cfLift_2 = __cfHelpers.lift<{
     topQuestion: {
         question: string;
     } | null;
-}, string>({
+}, string>(({ topQuestion }) => topQuestion?.question || "", {
     type: "object",
     properties: {
         topQuestion: {
@@ -45,10 +45,10 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["topQuestion"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ topQuestion }) => topQuestion?.question || "");
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     topQuestion: Question | null;
-}, string>({
+}, string>(({ topQuestion }) => topQuestion === null ? "" : topQuestion.question, {
     type: "object",
     properties: {
         topQuestion: {
@@ -79,12 +79,12 @@ const __cfLift_3 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ topQuestion }) => topQuestion === null ? "" : topQuestion.question);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     topQuestion: {
         category: string;
     } | null;
-}, string>({
+}, string>(({ topQuestion }) => topQuestion?.category || "", {
     type: "object",
     properties: {
         topQuestion: {
@@ -104,10 +104,10 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["topQuestion"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ topQuestion }) => topQuestion?.category || "");
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_5 = __cfHelpers.lift<{
     topQuestion: Question | null;
-}, string>({
+}, string>(({ topQuestion }) => topQuestion === null ? "" : topQuestion.category, {
     type: "object",
     properties: {
         topQuestion: {
@@ -138,7 +138,7 @@ const __cfLift_5 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ topQuestion }) => topQuestion === null ? "" : topQuestion.category);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-nullable-optional-chain
 // Verifies: computed() capturing a nullable computed result preserves anyOf [type, null] in schema
 //   computed(() => topQuestion?.question || "") → lift(({ topQuestion }) => topQuestion?.question || "")({ topQuestion })

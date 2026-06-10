@@ -16,7 +16,11 @@ const __cfLift_1 = __cfHelpers.lift<{
     numLiteral: number;
     floatLiteral: number;
     strLiteral: string;
-}, string>({
+}, string>(({ value, numLiteral, floatLiteral, boolLiteral, strLiteral }) => {
+    // Use all captured literals to ensure they're all widened
+    const combined = value.get() + numLiteral + floatLiteral;
+    return boolLiteral ? strLiteral + combined : "";
+}, {
     type: "object",
     properties: {
         value: {
@@ -36,11 +40,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value", "numLiteral", "floatLiteral", "strLiteral"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ value, numLiteral, floatLiteral, boolLiteral, strLiteral }) => {
-    // Use all captured literals to ensure they're all widened
-    const combined = value.get() + numLiteral + floatLiteral;
-    return boolLiteral ? strLiteral + combined : "";
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // Test that all literal types are widened in closure captures
 // FIXTURE: computed-all-literal-types
 // Verifies: literal values (number, string, boolean, float) are captured and their types widened in schemas

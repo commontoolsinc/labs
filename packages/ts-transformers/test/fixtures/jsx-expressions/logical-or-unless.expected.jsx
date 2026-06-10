@@ -13,7 +13,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     items: __cfHelpers.Cell<string[]>;
-}, number>({
+}, number>(({ items }) => items.get().length, {
     type: "object",
     properties: {
         items: {
@@ -27,7 +27,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["items"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().length);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: logical-or-unless
 // Verifies: || with JSX fallback on right side is transformed to unless()
 //   items.get().length || <span>List is empty</span> → unless(lift(...)(...length), <span>List is empty</span>)

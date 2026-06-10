@@ -14,7 +14,7 @@ const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     prefix: __cfHelpers.ReadonlyCell<string>;
     value: __cfHelpers.ReadonlyCell<number>;
-}, string>({
+}, string>(({ prefix, value }) => `${prefix.get()}${value.get()}`, {
     type: "object",
     properties: {
         prefix: {
@@ -29,7 +29,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["prefix", "value"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ prefix, value }) => `${prefix.get()}${value.get()}`);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-template-literal
 // Verifies: captured cells used inside a template literal expression are extracted
 //   computed(() => `${prefix.get()}${value.get()}`) → lift(...)({ value, prefix })

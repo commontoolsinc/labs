@@ -479,7 +479,7 @@ async function setupMapScenario(
     (index) => index + 1,
   );
 
-  const double = env.lift(numberSchema, numberSchema, (x: number) => x * 2);
+  const double = env.lift((x: number) => x * 2, numberSchema, numberSchema);
   const doublePattern = unaryNumberListOpPattern(
     env,
     // deno-lint-ignore no-explicit-any
@@ -524,9 +524,9 @@ async function setupFilterScenario(
   );
 
   const isPositive = env.lift(
+    (x: number) => x > 0,
     numberSchema,
     booleanSchema,
-    (x: number) => x > 0,
   );
   const filterPatternFn = unaryNumberListOpPattern(
     env,
@@ -572,9 +572,9 @@ async function setupFlatMapScenario(
   );
 
   const expand = env.lift(
+    (x: number) => (x > 0 ? [x, x * 10] : []),
     numberSchema,
     numberArraySchema,
-    (x: number) => (x > 0 ? [x, x * 10] : []),
   );
   const flatMapPatternFn = unaryNumberListOpPattern(
     env,
@@ -619,7 +619,7 @@ async function setupObjectMapScenario(
     (index) => index + 1,
   );
 
-  const double = env.lift(numberSchema, numberSchema, (x: number) => x * 2);
+  const double = env.lift((x: number) => x * 2, numberSchema, numberSchema);
   const doublePattern = unaryNumberObjectListOpPattern(
     env,
     // deno-lint-ignore no-explicit-any
@@ -665,9 +665,9 @@ async function setupObjectFilterScenario(
   );
 
   const isPositive = env.lift(
+    (x: number) => x > 0,
     numberSchema,
     booleanSchema,
-    (x: number) => x > 0,
   );
   const filterPatternFn = unaryNumberObjectListOpPattern(
     env,
@@ -714,9 +714,9 @@ async function setupObjectFlatMapScenario(
   );
 
   const expand = env.lift(
+    (x: number) => (x > 0 ? [x, x * 10] : []),
     numberSchema,
     numberArraySchema,
-    (x: number) => (x > 0 ? [x, x * 10] : []),
   );
   const flatMapPatternFn = unaryNumberObjectListOpPattern(
     env,
@@ -768,9 +768,9 @@ async function setupFanoutScenario(
 
   for (let i = 0; i < FANOUT_WIDTH; i++) {
     const addOffset = env.lift(
-      numberSchema,
-      numberSchema,
       (value: number) => value + i + 1,
+      numberSchema,
+      numberSchema,
     );
     const derivePattern = env.pattern<{ value: number }>(
       ({ value }) => ({

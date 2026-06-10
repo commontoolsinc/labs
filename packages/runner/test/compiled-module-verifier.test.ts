@@ -23,14 +23,14 @@ function verify(body: string) {
 }
 
 describe("verifyCompiledModuleBody() classifier shapes", () => {
-  it("accepts the 2-arg no-input lift(false, fn) form at module scope", () => {
-    // CT-1644: Phase 2 hoists a `lift(false, fn)()` computation to a module-
-    // scope const, surfacing the 2-arg no-input form (PR #3709) to the
-    // module-scope verifier. The callback is the SECOND argument; the
-    // verifier must read it at index 1, not 0 (where `false` sits).
+  it("accepts the no-input lift(fn, false) form at module scope", () => {
+    // CT-1644: Phase 2 hoists a `lift(fn, false)()` computation to a module-
+    // scope const, surfacing the no-input form (argumentSchema:false) to the
+    // module-scope verifier. lift is function-first, so the callback is the
+    // FIRST argument and `false` (the argument schema) trails at index 1.
     const body = `
 ${IMPORT}
-const __cfLift_1 = (0, commonfabric_1.lift)(false, () => 42);
+const __cfLift_1 = (0, commonfabric_1.lift)(() => 42, false);
 exports.default = (0, commonfabric_1.handler)(false, false, () => [__cfLift_1()][0]);
 `;
 

@@ -376,10 +376,21 @@ const writeAuthorizedByReason = (
       path.join("/")
     }`;
   }
+  // Identity arm (fail closed): a claim stamped with the content-addressed
+  // moduleIdentity must match it; a legacy claim (bundleId only, written
+  // before the moduleIdentity switch) must match the live bundleId. A claim
+  // carrying neither is rejected. New claims are stamped with BOTH (see
+  // rebindWriteAuthorizedByClaims), so the bundleId arm only serves stored
+  // legacy data and retires with it.
+  const identityArmMatches = typeof bindingIdentity.moduleIdentity === "string"
+    ? (typeof identity.moduleIdentity === "string" &&
+      identity.moduleIdentity.length > 0 &&
+      identity.moduleIdentity === bindingIdentity.moduleIdentity)
+    : (typeof identity.bundleId === "string" &&
+      identity.bundleId.length > 0 &&
+      identity.bundleId === bindingIdentity.bundleId);
   if (
-    typeof identity.bundleId !== "string" ||
-    identity.bundleId.length === 0 ||
-    identity.bundleId !== bindingIdentity.bundleId ||
+    !identityArmMatches ||
     normalizeIdentitySource(identity.sourceFile) !==
       normalizeIdentitySource(bindingIdentity.file) ||
     !arraysEqual(identity.bindingPath, bindingIdentity.path)
@@ -391,7 +402,12 @@ const writeAuthorizedByReason = (
 
 const parseWriteAuthorizedByBindingIdentity = (
   claim: unknown,
-): { bundleId?: string; file: string; path: string[] } | undefined => {
+): {
+  bundleId?: string;
+  moduleIdentity?: string;
+  file: string;
+  path: string[];
+} | undefined => {
   if (!isRecord(claim) || !isRecord(claim.__ctWriterIdentityOf)) {
     return undefined;
   }
@@ -406,6 +422,9 @@ const parseWriteAuthorizedByBindingIdentity = (
   return {
     ...(typeof identity.bundleId === "string"
       ? { bundleId: identity.bundleId }
+      : {}),
+    ...(typeof identity.moduleIdentity === "string"
+      ? { moduleIdentity: identity.moduleIdentity }
       : {}),
     file: identity.file,
     path: [...identity.path],
@@ -772,7 +791,10 @@ const stripWriterIdentityBundleIds = (value: unknown): unknown => {
 
   const next: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
-    if (key === "bundleId" && typeof value.file === "string") {
+    if (
+      (key === "bundleId" || key === "moduleIdentity") &&
+      typeof value.file === "string"
+    ) {
       continue;
     }
     next[key] = stripWriterIdentityBundleIds(entry);
@@ -833,27 +855,34 @@ const rebindWriteAuthorizedByClaims = (
   schema: JSONSchema,
   identity: ImplementationIdentity | undefined,
 ): JSONSchema => {
-  if (
-    !identity || identity.kind !== "verified" ||
-    typeof identity.bundleId !== "string" ||
-    identity.bundleId.length === 0
-  ) {
+  if (!identity || identity.kind !== "verified") {
+    return schema;
+  }
+  const bundleId = typeof identity.bundleId === "string" &&
+      identity.bundleId.length > 0
+    ? identity.bundleId
+    : undefined;
+  const moduleIdentity = typeof identity.moduleIdentity === "string" &&
+      identity.moduleIdentity.length > 0
+    ? identity.moduleIdentity
+    : undefined;
+  if (!bundleId && !moduleIdentity) {
     return schema;
   }
   return rebindWriteAuthorizedByClaimsInner(
     schema,
-    identity.bundleId,
+    { bundleId, moduleIdentity },
   ) as JSONSchema;
 };
 
 const rebindWriteAuthorizedByClaimsInner = (
   value: unknown,
-  bundleId: string,
+  ids: { bundleId?: string; moduleIdentity?: string },
 ): unknown => {
   if (Array.isArray(value)) {
     let changed = false;
     const next = value.map((entry) => {
-      const rebound = rebindWriteAuthorizedByClaimsInner(entry, bundleId);
+      const rebound = rebindWriteAuthorizedByClaimsInner(entry, ids);
       changed ||= rebound !== entry;
       return rebound;
     });
@@ -866,23 +895,28 @@ const rebindWriteAuthorizedByClaimsInner = (
   let changed = false;
   const next: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
-    const rebound = rebindWriteAuthorizedByClaimsInner(entry, bundleId);
+    const rebound = rebindWriteAuthorizedByClaimsInner(entry, ids);
     changed ||= rebound !== entry;
     next[key] = rebound;
   }
 
   if (isRecord(value.ifc) && isRecord(value.ifc.writeAuthorizedBy)) {
     const claim = value.ifc.writeAuthorizedBy;
+    // Stamp an unstamped claim with BOTH identity arms: the content-addressed
+    // moduleIdentity (the durable one) and the legacy bundleId (kept so a
+    // rollback or an older reader can still verify; retired with the flip).
     if (
       isRecord(claim.__ctWriterIdentityOf) &&
-      claim.__ctWriterIdentityOf.bundleId === undefined
+      claim.__ctWriterIdentityOf.bundleId === undefined &&
+      claim.__ctWriterIdentityOf.moduleIdentity === undefined
     ) {
       const nextIfc = { ...value.ifc };
       nextIfc.writeAuthorizedBy = {
         ...claim,
         __ctWriterIdentityOf: {
           ...claim.__ctWriterIdentityOf,
-          bundleId,
+          ...(ids.bundleId ? { bundleId: ids.bundleId } : {}),
+          ...(ids.moduleIdentity ? { moduleIdentity: ids.moduleIdentity } : {}),
         },
       };
       next.ifc = nextIfc;
@@ -944,11 +978,22 @@ const valueWriteTargets = (
   );
   for (const space of seenWriteSpaces) {
     for (const write of tx.getWriteDetails?.(space) ?? []) {
-      const writePath = canonicalizeLogicalPath(write.address.path);
+      const rawPath = write.address.path;
+      const writePath = canonicalizeLogicalPath(rawPath);
+      // The `cfc`/`source` surface exclusions key on the RAW storage path:
+      // the runtime-internal surfaces are document-root siblings of `value`
+      // (raw `["cfc", ...]`/`["source", ...]`), while user fields of the
+      // same names live under `["value", ...]` and canonicalize to identical
+      // logical paths. Keying on the canonical path would let a user write
+      // to `value.source` dodge schema write policy and flow-label
+      // attachment (#4011 review). The link-valued `internal` exclusion
+      // stays canonical on purpose: it covers the runtime's link plumbing
+      // both at the root surface and inside process-doc values; link writes
+      // carry their labels via the link-write machinery, not here.
       if (
         write.address.id.startsWith("cid:") ||
-        writePath[0] === "cfc" ||
-        writePath[0] === "source" ||
+        rawPath[0] === "cfc" ||
+        rawPath[0] === "source" ||
         (
           writePath[0] === "internal" &&
           isPrimitiveCellLink(write.value)
@@ -981,13 +1026,21 @@ const valueWriteTargets = (
 // surfaces (verifier reads, `cid:` schema docs, `["cfc"]`/`["source"]` paths)
 // are excluded, mirroring the write-side exclusions.
 
-const flowReadExcluded = (
+// Keyed on the RAW storage path: the runtime-internal surfaces are
+// document-root siblings of `value` (raw `["cfc", ...]`/`["source", ...]`),
+// while user fields of the same names live under `["value", ...]` and
+// canonicalize to identical logical paths. Keying on the canonical path
+// would drop reads of a user `value.source` field from the taint join
+// (#4011 review). Exported for `addCfcTriggerReads`, which applies it at
+// insertion time — the only point where the raw notification path exists
+// (trigger reads are stored canonicalized).
+export const flowReadExcluded = (
   id: string,
-  logicalPath: readonly string[],
+  rawPath: readonly string[],
 ): boolean =>
   id.startsWith("cid:") ||
-  logicalPath[0] === "cfc" ||
-  logicalPath[0] === "source";
+  rawPath[0] === "cfc" ||
+  rawPath[0] === "source";
 
 const forEachFlowObservation = (
   tx: IExtendedStorageTransaction,
@@ -1004,10 +1057,10 @@ const forEachFlowObservation = (
     if (isInternalVerifierRead(read.meta)) {
       continue;
     }
-    const logicalPath = canonicalizeLogicalPath(read.path);
-    if (flowReadExcluded(read.id, logicalPath)) {
+    if (flowReadExcluded(read.id, read.path)) {
       continue;
     }
+    const logicalPath = canonicalizeLogicalPath(read.path);
     if (
       consume(
         read.space,
@@ -1022,13 +1075,16 @@ const forEachFlowObservation = (
     }
   }
   // Link reads are journaled as dereference traces rather than separate
-  // reads; both ends of a followed reference were observed.
+  // reads; both ends of a followed reference were observed. Trace ends
+  // carry value-relative link paths and can never name the document-root
+  // runtime surfaces, so only the `cid:` exclusion applies here — a path
+  // like `["source"]` on a trace end IS the user field `value.source`.
   for (const trace of tx.getCfcState().dereferenceTraces) {
     for (const end of [trace.source, trace.target]) {
-      const logicalPath = canonicalizeLogicalPath(end.path);
-      if (flowReadExcluded(end.id, logicalPath)) {
+      if (end.id.startsWith("cid:")) {
         continue;
       }
+      const logicalPath = canonicalizeLogicalPath(end.path);
       if (
         consume(
           end.space,
@@ -1047,19 +1103,19 @@ const forEachFlowObservation = (
   // scheduled this run. The decision to run now was influenced by their
   // values even when this run's branch never re-reads them — without this,
   // "dep changed" leaks one bit per change through the timing/existence of
-  // writes the rerun makes.
+  // writes the rerun makes. Runtime-surface addresses were already dropped
+  // by `addCfcTriggerReads` (which sees the raw notification path before
+  // canonicalization), so no `flowReadExcluded` check here — the stored
+  // path is canonical, where a user `value.source` is indistinguishable
+  // from the raw `["source"]` surface.
   for (const trigger of tx.getCfcState().triggerReads) {
-    const logicalPath = canonicalizeLogicalPath(trigger.path);
-    if (flowReadExcluded(trigger.id, logicalPath)) {
-      continue;
-    }
     if (
       consume(
         trigger.space,
         trigger.id as URI,
         normalizeCellScope(trigger.scope),
         "application/json",
-        logicalPath,
+        trigger.path,
         false,
       )
     ) {
@@ -1942,6 +1998,40 @@ const ifcEntryAppliesToAttemptedWrite = (
   );
 };
 
+// Structural-link provenance atoms the runtime mints when a value is
+// dereferenced / fetched. They describe HOW a value was obtained, never an
+// endorsement an author can require via requiredIntegrity.
+const STRUCTURAL_LINK_PROVENANCE_ATOM_TYPES = new Set<string>([
+  CFC_ATOM_TYPE.LinkReference,
+  CFC_ATOM_TYPE.Origin,
+]);
+
+const isNonEndorsementProvenanceAtom = (atom: unknown): boolean =>
+  (isRecord(atom) && typeof atom.type === "string" &&
+    STRUCTURAL_LINK_PROVENANCE_ATOM_TYPES.has(atom.type)) ||
+  // The current-principal claim family (authored-by / represents-principal) is
+  // an identity provenance claim gated separately by
+  // currentPrincipalIntegrityReason, never a requiredIntegrity target.
+  isCurrentPrincipalClaimAtom(atom);
+
+// A consumed read whose label carries no confidentiality and whose integrity is
+// ENTIRELY non-endorsement provenance (a link reference / origin / a
+// current-principal claim) is structural plumbing, not a data input. It must
+// not gate a requiredIntegrity write: the transaction-global quantification
+// would otherwise false-reject an unrelated protected write (audit S7 — e.g.
+// cfc-group-chat-demo's admin grant reads adminRegistry.bootstrapAdmin.subject,
+// label [represents-principal, LinkReference], and that lookup fails the admins
+// list's requiredIntegrity:[group-chat-admin]). A read carrying ANY
+// confidentiality, or any genuine endorsement integrity atom, stays in the gate
+// — that keeps the cross-cell prompt-injection screen sound (its briefing reads
+// carry confidentiality; its endorsement reads carry real integrity).
+const isProvenanceOnlyConsumedLabel = (label: IFCLabel): boolean => {
+  if ((label.confidentiality?.length ?? 0) > 0) return false;
+  const integrity = label.integrity ?? [];
+  return integrity.length > 0 &&
+    integrity.every(isNonEndorsementProvenanceAtom);
+};
+
 const verifyInputRequirements = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
@@ -1975,7 +2065,15 @@ const verifyInputRequirements = (
       canonicalizeLogicalPath(read.path),
       read.nonRecursive,
     ),
-  })).filter((read) => read.label !== undefined);
+  })).filter((read) =>
+    read.label !== undefined &&
+    // Provenance-only reads (link/origin/current-principal, no confidentiality)
+    // are structural plumbing, not endorsable inputs — excluding them stops the
+    // transaction-global quantification from false-rejecting unrelated
+    // protected writes (audit S7). Confidentiality- or endorsement-bearing
+    // reads stay, keeping the prompt-injection screen sound.
+    !isProvenanceOnlyConsumedLabel(read.label)
+  );
 
   for (const entry of walkIfcSchema(schema)) {
     if (

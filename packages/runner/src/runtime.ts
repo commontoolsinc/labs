@@ -606,6 +606,37 @@ export class Runtime {
     return wrapped;
   }
 
+  // (space, id) pairs for which a missing-link-target load has been kicked
+  // this session. The kicked sync establishes a live per-doc subscription, so
+  // a later creation of the doc still arrives — one kick per doc suffices.
+  private missingDocLoadKicks = new Set<string>();
+
+  /**
+   * Asynchronously load a cross-space link target that a read found absent
+   * from the local replica (CT-1667): per-space server queries cannot follow
+   * links across space boundaries, so the client must fetch such targets
+   * itself. Fire-and-forget, but registered as a cross-space promise so
+   * `storageManager.synced()` and `Cell.pull()`'s convergence loop can await
+   * it; the absent doc is a tracked read, so the reader re-runs on arrival.
+   * Deduped per (space, id): the kicked sync leaves a live subscription
+   * behind, so repeat kicks add nothing.
+   */
+  ensureLinkedDocLoaded(link: NormalizedFullLink): void {
+    const key = `${link.space}\0${link.id}`;
+    if (this.missingDocLoadKicks.has(key)) return;
+    this.missingDocLoadKicks.add(key);
+    const maybePromise = this.getCellFromLink(link).sync();
+    if (maybePromise instanceof Promise) {
+      const promise = maybePromise.catch(() => {
+        // Allow a retry on failure (e.g. transient disconnect).
+        this.missingDocLoadKicks.delete(key);
+      }).finally(() => {
+        this.storageManager.removeCrossSpacePromise(promise);
+      }) as unknown as Promise<void>;
+      this.storageManager.addCrossSpacePromise(promise);
+    }
+  }
+
   getCfcStats(): Readonly<CfcRuntimeStats> {
     return { ...this.cfcStats };
   }

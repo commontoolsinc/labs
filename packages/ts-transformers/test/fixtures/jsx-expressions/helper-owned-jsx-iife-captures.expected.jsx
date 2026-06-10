@@ -60,7 +60,7 @@ const __cfHandler_1 = __cfHelpers.handler({
 });
 const __cfLift_1 = __cfHelpers.lift<{
     path: __cfHelpers.Cell<string[]>;
-}, readonly string[]>({
+}, readonly string[]>(({ path }) => path.get(), {
     type: "object",
     properties: {
         path: {
@@ -77,10 +77,10 @@ const __cfLift_1 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ path }) => path.get());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     path: __cfHelpers.Cell<string[]>;
-}, readonly string[]>({
+}, readonly string[]>(({ path }) => path.get(), {
     type: "object",
     properties: {
         path: {
@@ -97,12 +97,12 @@ const __cfLift_2 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ path }) => path.get());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     entries: Writable<Default<Entry[], [
     ]>>;
     p: readonly string[];
-}, Entry[]>({
+}, Entry[]>(({ entries, p }) => visibleEntries(entries, p[0] || ""), {
     type: "object",
     properties: {
         entries: {
@@ -148,7 +148,7 @@ const __cfLift_3 = __cfHelpers.lift<{
             required: ["name"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ entries, p }) => visibleEntries(entries, p[0] || ""));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {

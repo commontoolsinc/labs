@@ -26,7 +26,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     item: {
         maybe?: { value: number; } | undefined;
     };
-}, number>({
+}, number>(({ item }) => item.maybe?.value ?? 0, {
     type: "object",
     properties: {
         item: {
@@ -47,7 +47,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["item"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.maybe?.value ?? 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return (<span>{__cfLift_1({ item: {

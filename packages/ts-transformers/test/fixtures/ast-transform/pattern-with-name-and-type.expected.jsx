@@ -18,7 +18,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     input: {
         value: number;
     };
-}, number>({
+}, number>(({ input }) => input.value * 2, {
     type: "object",
     properties: {
         input: {
@@ -34,7 +34,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["input"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ input }) => input.value * 2);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-with-name-and-type
 // Verifies: pattern with inline typed parameter generates input and output schemas
 //   pattern((input: MyInput) => ...)   → pattern((input) => ..., inputSchema, outputSchema)

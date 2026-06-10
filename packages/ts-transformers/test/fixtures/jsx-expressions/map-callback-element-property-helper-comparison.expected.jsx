@@ -42,7 +42,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         messages: [
         ];
     }>>;
-}, Message[]>({
+}, Message[]>(({ selectedRoom }) => selectedRoom.get()?.messages, {
     type: "object",
     properties: {
         selectedRoom: {
@@ -96,13 +96,13 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["author", "body"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ selectedRoom }) => selectedRoom.get()?.messages);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     message: {
         author: string;
     };
     name: Writable<Default<string, "">>;
-}, boolean>({
+}, boolean>(({ message, name }) => message.author === senderName(name.get()), {
     type: "object",
     properties: {
         message: {
@@ -123,12 +123,12 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["message", "name"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ message, name }) => message.author === senderName(name.get()));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     message: {
         author: string;
     };
-}, boolean>({
+}, boolean>(({ message }) => message.author === "Alice", {
     type: "object",
     properties: {
         message: {
@@ -144,7 +144,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["message"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ message }) => message.author === "Alice");
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const message = __cf_pattern_input.key("element");
     const name = __cf_pattern_input.key("params", "name");

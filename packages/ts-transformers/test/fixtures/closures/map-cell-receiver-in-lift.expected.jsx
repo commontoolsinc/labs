@@ -35,12 +35,12 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-export const fn = lift(false as const satisfies __cfHelpers.JSONSchema, {
+export const fn = lift(() => items.mapWithPattern(__cfPattern_1, {}), false as const satisfies __cfHelpers.JSONSchema, {
     type: "array",
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema, () => items.mapWithPattern(__cfPattern_1, {}));
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

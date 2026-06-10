@@ -67,14 +67,9 @@ function probeHandlerIdentity(
     throw new Error("no verified handler node found in compiled pattern");
   }
   const implementationRef = handlerModule.implementationRef!;
-  const patternId = runtime.patternManager.getPatternId(compiled);
-  const verifiedLoadId = runtime.harness.getVerifiedLoadId?.(
-    implementationRef,
-    patternId,
-  );
+  const verifiedLoadId = runtime.harness.getVerifiedLoadId?.(implementationRef);
   const fn = runtime.harness.getExecutableFunction?.(
     implementationRef,
-    patternId,
   ) as (((...a: unknown[]) => unknown) & { src?: string }) | undefined;
   const src = fn?.src;
   const match = typeof src === "string" ? /^(.*):(\d+):(\d+)$/.exec(src) : null;

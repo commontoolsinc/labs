@@ -87,6 +87,10 @@ import {
   type ImplementationIdentity,
 } from "./cfc/types.ts";
 import { setVerifiedFunctionRegistrar } from "./sandbox/function-hardening.ts";
+import {
+  identityFromCanonicalSource,
+  recordVerifiedProvenance,
+} from "./harness/verified-provenance.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 export {
@@ -2337,39 +2341,32 @@ export class Runner {
 
   private resolveJavaScriptFunction(
     module: Module,
-    pattern: Pattern,
   ): ResolvedJavaScriptModule {
     let fn: (...args: any[]) => any;
-    const patternId = this.runtime.patternManager.getPatternId(pattern);
     const verifiedLoadId = module.implementationRef
-      ? this.runtime.harness.getVerifiedLoadId?.(
-        module.implementationRef,
-        patternId,
-      )
+      ? this.runtime.harness.getVerifiedLoadId?.(module.implementationRef)
       : undefined;
 
-    if (module.implementationRef) {
-      const cached = this.functionCache.get(module);
-      if (cached) {
-        fn = cached;
-      } else {
-        const executable = this.runtime.harness.getExecutableFunction(
-          module.implementationRef,
-          patternId,
-        );
-        fn = executable
-          ? executable as (...args: any[]) => any
-          : this.getFallbackJavaScriptImplementation(module);
-        this.functionCache.set(module, fn);
-      }
+    const cached = this.functionCache.get(module);
+    if (cached) {
+      fn = cached;
     } else {
-      const cached = this.functionCache.get(module);
-      if (cached) {
-        fn = cached;
-      } else {
-        fn = this.getFallbackJavaScriptImplementation(module);
-        this.functionCache.set(module, fn);
-      }
+      // Resolution order (docs/specs/content-addressed-action-identity.md):
+      // 1. content-addressed `$implRef` — resolve the registered builder
+      //    artifact by `{ identity, symbol }` from the in-memory index (only
+      //    trust-gated artifacts are indexed, so whatever resolves is
+      //    builder-made) and run its implementation;
+      // 2. legacy `implementationRef` registry lookup (dual-read until the
+      //    flip);
+      // 3. the stringified-source fallback (SES-sandboxed, CFC-unverified).
+      fn = this.resolveByImplRef(module) ??
+        (module.implementationRef
+          ? this.runtime.harness.getExecutableFunction(
+            module.implementationRef,
+          ) as (...args: any[]) => any | undefined
+          : undefined) ??
+        this.getFallbackJavaScriptImplementation(module);
+      this.functionCache.set(module, fn);
     }
 
     const namedFn = fn as {
@@ -2386,6 +2383,36 @@ export class Runner {
     }
 
     return { fn, name, verifiedLoadId };
+  }
+
+  /**
+   * Resolve a module's implementation through its content-addressed
+   * `$implRef` (the defining module's content identity + the registered
+   * artifact's export/`__cfReg` symbol). Returns undefined on a miss (no ref,
+   * never registered, or rolled out of the bounded index) — callers fall back
+   * to the legacy ref or the stringified source.
+   */
+  private resolveByImplRef(
+    module: Module,
+  ): ((...args: any[]) => any) | undefined {
+    const ref = (module as { $implRef?: { identity: string; symbol: string } })
+      .$implRef;
+    if (
+      !ref || typeof ref.identity !== "string" ||
+      typeof ref.symbol !== "string"
+    ) {
+      return undefined;
+    }
+    const artifact = this.runtime.patternManager.artifactFromIdentitySync(
+      ref.identity,
+      ref.symbol,
+    );
+    if (!artifact) return undefined;
+    const implementation =
+      (artifact as { implementation?: unknown }).implementation ?? artifact;
+    return typeof implementation === "function"
+      ? implementation as (...args: any[]) => any
+      : undefined;
   }
 
   /**
@@ -2592,6 +2619,28 @@ export class Runner {
       resultPattern,
     );
     const crossSpace = resultSpace !== processCell.space;
+
+    // CT-1687: a handler that materializes a child piece in another space
+    // (`Factory.inSpace(...)`) leaves a piece that a fresh runtime must load
+    // FROM THAT SPACE — where neither the pattern meta nor the compiled
+    // closure exist (the handler's bundle artifacts live in the handler's own
+    // space). The whole result pattern materializes inside the target space,
+    // so the per-node cross-space hook in instantiatePatternNode never sees
+    // the transition; replicate here, where the originating space is known.
+    for (const { module } of resultPattern.nodes) {
+      if (
+        module.type === "pattern" &&
+        module.targetSpace !== undefined &&
+        module.targetSpace !== processCell.space &&
+        isPattern(module.implementation)
+      ) {
+        this.runtime.patternManager.replicatePatternToSpace(
+          module.implementation,
+          module.targetSpace,
+          processCell.space,
+        );
+      }
+    }
 
     if (deferForNavigate && result === undefined) {
       const resultCell = this.runtime.getCell(
@@ -3446,7 +3495,6 @@ export class Runner {
     );
     const { fn, name, verifiedLoadId } = this.resolveJavaScriptFunction(
       module,
-      pattern,
     );
     const context: JavaScriptNodeContext = {
       tx,
@@ -3524,6 +3572,17 @@ export class Runner {
           implementationRef,
           implementation as (input: any) => void,
         );
+        // Content-addressed provenance for artifacts created DURING a
+        // verified action's execution: the identity derives from the new
+        // function's canonical source location (it was compiled as part of a
+        // verified module). In-session only (`dynamic`), matching the legacy
+        // behavior — such artifacts never resolve across a reload.
+        const identity = identityFromCanonicalSource(
+          (implementation as { src?: string }).src,
+        );
+        if (identity) {
+          recordVerifiedProvenance(implementation, { identity, dynamic: true });
+        }
       },
     );
     try {
@@ -4027,6 +4086,15 @@ export class Runner {
       // identity. The journal allows the cross-space write once opted in.
       this.enableCrossSpaceChildCommit(
         tx,
+        resultCell.space,
+        resultCellLink.space,
+      );
+      // CT-1687: a fresh runtime navigating to the child piece loads its
+      // pattern artifacts from `resultCell.space` (the child's own space),
+      // where neither the meta nor the compiled closure exist yet. Replicate
+      // them there (fire-and-forget) so the child is independently loadable.
+      this.runtime.patternManager.replicatePatternToSpace(
+        patternImpl,
         resultCell.space,
         resultCellLink.space,
       );

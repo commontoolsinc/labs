@@ -25,7 +25,10 @@ const currentYear = 2024;
 //   lift((person: Person): PersonWithYear => ...) → lift(inputSchema, outputSchema, fn)
 // Context: lift() appears as a JSX child expression; schemas derived from param + return type annotations
 export const result = (<div>
-    {lift({
+    {lift((person: Person): PersonWithYear => ({
+        name: person.name,
+        birthYear: currentYear - person.age,
+    }), {
         type: "object",
         properties: {
             name: {
@@ -47,10 +50,7 @@ export const result = (<div>
             }
         },
         required: ["name", "birthYear"]
-    } as const satisfies __cfHelpers.JSONSchema, (person: Person): PersonWithYear => ({
-        name: person.name,
-        birthYear: currentYear - person.age,
-    }))}
+    } as const satisfies __cfHelpers.JSONSchema)}
   </div>);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }

@@ -84,11 +84,12 @@ export const setDefaultProfile = handler<
   unknown,
   {
     defaultProfile: Writable<ProfileHomeOutput | undefined>;
-    // Take the profile as a LINK cell, not a resolved value: resolving the full
-    // ProfileHomeOutput requires reading its owner-protected name/avatar/elements
-    // across the profile's space boundary, which returns undefined (CT-1667 read
-    // gap) → the action argument fails schema validation → "stream action argument
-    // is undefined … not running". We only need the link to write into defaultProfile.
+    // Take the profile as a LINK cell, not a resolved value: the handler only
+    // needs the link to write into defaultProfile, and a link argument doesn't
+    // require the profile's cross-space values to be loaded at event time —
+    // resolving the full value here would fail required-field validation
+    // ("stream action argument is undefined … not running") whenever the
+    // profile's space hasn't materialized locally yet.
     profile: Cell<ProfileHomeOutput>;
   }
 >((_, { defaultProfile, profile }) => {
@@ -103,8 +104,8 @@ export const setMruProfile = handler<
   unknown,
   {
     mru: Writable<ProfileHomeOutput[]>;
-    // Link cell, not a resolved value — same CT-1667 cross-space-read reason as
-    // setDefaultProfile above (resolving the owner-protected fields yields undefined).
+    // Link cell, not a resolved value — same event-time-validation reason as
+    // setDefaultProfile above.
     profile: Cell<ProfileHomeOutput>;
   }
 >((_, { mru, profile }) => {

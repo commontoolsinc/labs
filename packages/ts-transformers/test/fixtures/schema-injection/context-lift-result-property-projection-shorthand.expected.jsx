@@ -11,7 +11,15 @@ import { Cell, computed, lift, pattern, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const liftSummary = lift({
+const liftSummary = lift(({ primary, secondary }) => {
+    const primaryValue = primary.get();
+    const secondaryValue = secondary.get();
+    return {
+        primary: primaryValue,
+        secondary: secondaryValue,
+        difference: primaryValue - secondaryValue,
+    };
+}, {
     type: "object",
     properties: {
         primary: {
@@ -38,20 +46,12 @@ const liftSummary = lift({
         }
     },
     required: ["primary", "secondary", "difference"]
-} as const satisfies __cfHelpers.JSONSchema, ({ primary, secondary }) => {
-    const primaryValue = primary.get();
-    const secondaryValue = secondary.get();
-    return {
-        primary: primaryValue,
-        secondary: secondaryValue,
-        difference: primaryValue - secondaryValue,
-    };
-});
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_1 = __cfHelpers.lift<{
     summary: {
         difference: any;
     };
-}, any>({
+}, any>(({ summary }) => summary.difference, {
     type: "object",
     properties: {
         summary: {
@@ -63,7 +63,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     },
     required: ["summary"]
-} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ summary }) => summary.difference);
+} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: context-lift-result-property-projection-shorthand
 // Verifies: shorthand object returns preserve the projected computed() result type
 //   return { difference } → result schema difference: number

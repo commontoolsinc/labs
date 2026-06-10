@@ -13,7 +13,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     user: __cfHelpers.Cell<{ active: boolean; verified: boolean; name: string; }>;
-}, boolean>({
+}, boolean>(({ user }) => user.get().active && user.get().verified, {
     type: "object",
     properties: {
         user: {
@@ -33,10 +33,10 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["user"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().active && user.get().verified);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     user: __cfHelpers.Cell<{ active: boolean; verified: boolean; name: string; }>;
-}, string>({
+}, string>(({ user }) => user.get().name, {
     type: "object",
     properties: {
         user: {
@@ -53,7 +53,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["user"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().name);
+} as const satisfies __cfHelpers.JSONSchema);
 // Tests triple && chain: a && b && c
 // Should produce nested when calls or lower the entire chain to a lift-applied computation
 // FIXTURE: logical-triple-and-chain

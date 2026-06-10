@@ -30,7 +30,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         }[];
         filter: string;
     };
-}, number>({
+}, number>(({ state }) => state.items.filter((i) => i.name.includes(state.filter)).length, {
     type: "object",
     properties: {
         state: {
@@ -58,7 +58,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((i) => i.name.includes(state.filter)).length);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     item: {
         price: number;
@@ -66,7 +66,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     state: {
         discount: number;
     };
-}, string>({
+}, string>(({ item, state }) => (item.price * (1 - state.discount)).toFixed(2), {
     type: "object",
     properties: {
         item: {
@@ -91,7 +91,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["item", "state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => (item.price * (1 - state.discount)).toFixed(2));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     item: {
         price: number;
@@ -100,7 +100,8 @@ const __cfLift_3 = __cfHelpers.lift<{
         discount: number;
         taxRate: number;
     };
-}, string>({
+}, string>(({ item, state }) => (item.price * (1 - state.discount) * (1 + state.taxRate))
+    .toFixed(2), {
     type: "object",
     properties: {
         item: {
@@ -128,8 +129,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["item", "state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => (item.price * (1 - state.discount) * (1 + state.taxRate))
-    .toFixed(2));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");
@@ -230,7 +230,7 @@ const __cfLift_4 = __cfHelpers.lift<{
     state: {
         items: Item[];
     };
-}, number>({
+}, number>(({ state }) => state.items.filter((i) => i.active).length, {
     type: "object",
     properties: {
         state: {
@@ -255,12 +255,12 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((i) => i.active).length);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_5 = __cfHelpers.lift<{
     state: {
         discount: number;
     };
-}, number>({
+}, number>(({ state }) => state.discount * 100, {
     type: "object",
     properties: {
         state: {
@@ -276,12 +276,12 @@ const __cfLift_5 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.discount * 100);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_6 = __cfHelpers.lift<{
     state: {
         taxRate: number;
     };
-}, number>({
+}, number>(({ state }) => state.taxRate * 100, {
     type: "object",
     properties: {
         state: {
@@ -297,12 +297,12 @@ const __cfLift_6 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.taxRate * 100);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_7 = __cfHelpers.lift<{
     state: {
         items: Item[];
     };
-}, boolean>({
+}, boolean>(({ state }) => state.items.every((i) => i.active), {
     type: "object",
     properties: {
         state: {
@@ -327,12 +327,12 @@ const __cfLift_7 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.every((i) => i.active));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_8 = __cfHelpers.lift<{
     state: {
         items: Item[];
     };
-}, boolean>({
+}, boolean>(({ state }) => state.items.some((i) => i.active), {
     type: "object",
     properties: {
         state: {
@@ -357,12 +357,12 @@ const __cfLift_8 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.some((i) => i.active));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_9 = __cfHelpers.lift<{
     state: {
         items: Item[];
     };
-}, boolean>({
+}, boolean>(({ state }) => state.items.some((i) => i.price > 100), {
     type: "object",
     properties: {
         state: {
@@ -387,14 +387,14 @@ const __cfLift_9 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.some((i) => i.price > 100));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_10 = __cfHelpers.lift<{
     state: {
         filter: {
             length: number;
         };
     };
-}, boolean>({
+}, boolean>(({ state }) => state.filter.length > 0, {
     type: "object",
     properties: {
         state: {
@@ -416,7 +416,7 @@ const __cfLift_10 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.filter.length > 0);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: jsx-complex-mixed
 // Verifies: mixed transforms -- map, filter, arithmetic, ternary/ifElse, attribute bindings in one pattern
 //   .filter(fn)              → .filterWithPattern(pattern(...), {captures})

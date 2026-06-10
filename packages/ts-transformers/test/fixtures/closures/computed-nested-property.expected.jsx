@@ -13,7 +13,10 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     counter: __cfHelpers.ReadonlyCell<{ count: number; }>;
-}, number>({
+}, number>(({ counter }) => {
+    const current = counter.get();
+    return current.count * 2;
+}, {
     type: "object",
     properties: {
         counter: {
@@ -30,10 +33,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["counter"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ counter }) => {
-    const current = counter.get();
-    return current.count * 2;
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-nested-property
 // Verifies: computed() capturing a cell with an object value and accessing a nested property
 //   computed(() => { const current = counter.get(); return current.count * 2 }) → lift(({ counter }) => { ... })({ counter })
