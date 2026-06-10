@@ -9,6 +9,7 @@ import {
   pattern,
   safeDateNow,
   UI,
+  wish,
   Writable,
 } from "commonfabric";
 import GroupChatRoom, { Message, User } from "./group-chat-room.tsx";
@@ -16,8 +17,11 @@ import GroupChatRoom, { Message, User } from "./group-chat-room.tsx";
 /**
  * Group Chat Lobby Pattern
  *
- * Apple iOS-style lobby where unlimited users can join.
- * Shows all joined users and a form for new users.
+ * Apple iOS-style lobby where unlimited users can join. Identity comes from
+ * the viewer's shared profile (`wish({ query: "#profile" })`): the wish's
+ * built-in UI lets the viewer pick one of their existing profiles or create a
+ * new one, and joining snapshots the resolved name/avatar into the shared
+ * user roster (see docs/specs/shared-profile-rosters.md).
  */
 
 interface LobbyInput {
@@ -32,33 +36,6 @@ interface LobbyOutput {
   messages: Writable<Message[] | Default<[]>>;
   users: Writable<User[] | Default<[]>>;
   sessionId: Writable<string | Default<"">>;
-}
-
-// Random color selection from a pool of distinct colors
-function getRandomColor(): string {
-  const colors = [
-    "#007AFF", // Apple blue
-    "#34C759", // Apple green
-    "#FF9500", // Apple orange
-    "#AF52DE", // Apple purple
-    "#FF3B30", // Apple red
-    "#5856D6", // Apple indigo
-    "#FF2D55", // Apple pink
-    "#00C7BE", // Apple teal
-  ];
-  return colors[Math.floor(nonPrivateRandom() * colors.length)];
-}
-
-// Get initials from name
-function getInitials(name: string): string {
-  if (!name || typeof name !== "string") return "?";
-  return name
-    .trim()
-    .split(/\s+/)
-    .map((word) => word[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
 }
 
 // Handler to reset the lobby (clear all state and generate new session)
@@ -84,23 +61,25 @@ const resetLobby = handler<
   );
 });
 
-// Handler for joining the chat
+// Handler for joining the chat. `name`/`avatar` arrive as plain strings
+// resolved from the viewer's shared profile (named `computed` values
+// auto-unwrap as handler state).
 const joinChat = handler<
   unknown,
   {
-    chatName: string;
     messages: Writable<Message[]>;
     users: Writable<User[]>;
     sessionId: Writable<string>;
-    nameInput: Writable<string>;
+    name: string;
+    avatar: string;
   }
->((_event, { messages, users, sessionId, nameInput }) => {
-  const name = nameInput.get().trim();
-  if (!name) {
-    console.log("[joinChat] No name entered, returning");
+>((_event, { messages, users, sessionId, name, avatar }) => {
+  const trimmed = (name ?? "").trim();
+  if (!trimmed) {
+    console.log("[joinChat] No profile name resolved yet, returning");
     return;
   }
-  console.log("[joinChat] Name:", name);
+  console.log("[joinChat] Name:", trimmed);
 
   // Initialize session ID if not set (first user joining)
   let currentSessionId = sessionId.get();
@@ -116,16 +95,16 @@ const joinChat = handler<
   const existingUsers = users.get() || [];
 
   // Check if user already exists
-  const existingUser = existingUsers.find((u) => u.name === name);
+  const existingUser = existingUsers.find((u) => u.name === trimmed);
   if (!existingUser) {
-    // Create new user and add to list
+    // Create new user with a profile snapshot and add to list
     const newUser: User = {
-      name,
+      name: trimmed,
       joinedAt: safeDateNow(),
-      color: getRandomColor(),
+      avatar: (avatar ?? "").trim(),
     };
     users.set([...existingUsers, newUser]);
-    console.log("[joinChat] User added:", name);
+    console.log("[joinChat] User added:", trimmed);
 
     // Add system message for join
     const existingMessages = messages.get() || [];
@@ -134,16 +113,13 @@ const joinChat = handler<
       {
         id: `msg-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2)}`,
         author: "System",
-        content: `${name} joined the chat`,
+        content: `${trimmed} joined the chat`,
         timestamp: safeDateNow(),
         type: "system",
         reactions: [],
       },
     ]);
   }
-
-  // Clear the name input
-  nameInput.set("");
 
   // Create chat room instance and navigate
   // Pass both the session ID at join time (mySessionId) and the Cell reference to check against (currentSessionId)
@@ -154,7 +130,7 @@ const joinChat = handler<
   const roomInstance = GroupChatRoom({
     messages,
     users,
-    myName: name,
+    myName: trimmed,
     mySessionId: currentSessionId,
     currentSessionId: sessionId,
   });
@@ -164,10 +140,34 @@ const joinChat = handler<
 
 export default pattern<LobbyInput, LobbyOutput>(
   ({ chatName, messages, users, sessionId }) => {
-    // Name input for new users
-    const nameInput = new Writable("");
+    // Resolve THIS viewer's shared profile. The `#profile` wish's built-in UI
+    // covers the whole lifecycle: a create surface when the viewer has no
+    // profile, a link when they have one, and a picker (with inline create)
+    // when they have several. The field targets give the snapshot strings.
+    const profileWish = wish<{ name?: string; avatar?: string }>({
+      query: "#profile",
+    });
+    const profileNameWish = wish<string>({ query: "#profileName" });
+    const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
+
+    const myName = computed(() => profileNameWish.result ?? "");
+    const myAvatar = computed(() => profileAvatarWish.result ?? "");
+    const hasProfile = computed(() =>
+      (profileNameWish.result ?? "").trim() !== ""
+    );
+    const joinLabel = computed(() =>
+      hasProfile ? `Join as ${myName}` : "Create a profile to join"
+    );
 
     const userCount = computed(() => users.get().length);
+
+    const join = joinChat({
+      messages,
+      users,
+      sessionId,
+      name: myName,
+      avatar: myAvatar,
+    });
 
     return {
       [NAME]: computed(() => `${chatName} - Lobby`),
@@ -208,7 +208,7 @@ export default pattern<LobbyInput, LobbyOutput>(
                 fontSize: "1.1rem",
               }}
             >
-              Enter your name to join the conversation
+              Join the conversation with your profile
             </p>
 
             {/* Join Form Card */}
@@ -232,43 +232,32 @@ export default pattern<LobbyInput, LobbyOutput>(
                   letterSpacing: "0.05em",
                 }}
               >
-                Join as
+                Your profile
               </div>
-              <cf-input
-                $value={nameInput}
-                placeholder="Your name"
-                style="width: 100%; margin-bottom: 1rem;"
-                timingStrategy="immediate"
-                oncf-submit={joinChat({
-                  chatName,
-                  messages,
-                  users,
-                  sessionId,
-                  nameInput,
-                })}
-              />
+              {
+                /* Built-in profile UI: create a profile when there is none,
+                  pick between (or add to) existing profiles otherwise. */
+              }
+              <div style={{ marginBottom: "1rem" }}>{profileWish[UI]}</div>
               <button
                 type="button"
+                disabled={computed(() => !hasProfile)}
                 style={{
                   width: "100%",
                   padding: "0.75rem 1.5rem",
                   fontSize: "1rem",
-                  backgroundColor: "#007AFF",
+                  backgroundColor: computed(() =>
+                    hasProfile ? "#007AFF" : "#b9b9c0"
+                  ),
                   color: "white",
                   fontWeight: "600",
                   border: "none",
                   borderRadius: "8px",
-                  cursor: "pointer",
+                  cursor: computed(() => hasProfile ? "pointer" : "default"),
                 }}
-                onClick={joinChat({
-                  chatName,
-                  messages,
-                  users,
-                  sessionId,
-                  nameInput,
-                })}
+                onClick={join}
               >
-                Join Chat
+                {joinLabel}
               </button>
             </div>
 
@@ -314,22 +303,7 @@ export default pattern<LobbyInput, LobbyOutput>(
                         borderRadius: "20px",
                       }}
                     >
-                      <div
-                        style={{
-                          width: "28px",
-                          height: "28px",
-                          borderRadius: "50%",
-                          backgroundColor: user.color,
-                          color: "white",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontWeight: "600",
-                          fontSize: "11px",
-                        }}
-                      >
-                        {computed(() => user ? getInitials(user.name) : "?")}
-                      </div>
+                      <cf-avatar src={user.avatar} name={user.name} size="xs" />
                       <span
                         style={{
                           fontSize: "0.875rem",
