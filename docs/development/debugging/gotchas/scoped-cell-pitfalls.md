@@ -143,7 +143,40 @@ that breaks it nested. See
 the three idiomatic alternatives (map the cell directly; pre-bake into a
 top-level `computed`; local `computed()` bridge per row).
 
-## 6. `Math.random()` throws under SES
+## 6. Don't share `perUser`/`perSession` cells through `PerSpace` data
+
+**Symptom:** Other participants see "Unnamed user" / empty values where a
+user's profile (or similar per-user record) should appear, while the owning
+user sees their own data fine.
+
+A user/session-scoped cell instance is isolated **by reader**
+(`docs/specs/scoped-cell-instances.md`): the same link resolves to each
+reader's own instance. So registering a `Writable.perUser.of(...)` cell in a
+shared (`PerSpace`) list hands every other participant a link to *their own*
+empty instance — the data can never propagate.
+
+```typescript
+// WRONG — other users dereference this to their own empty instance.
+const profile = Writable.perUser.of<TrustedProfile>(snapshot);
+registerProfile(sharedProfiles, profile);
+
+// CORRECT — mint a space-scoped cell; per-user distinctness comes from
+// creation (per-invocation cause on each user's first save) plus a PerUser
+// pointer that remembers which cell is "mine".
+const profile = currentProfileCell(myProfile) ??
+  Writable.perSpace.of<TrustedProfile>(snapshot);
+myProfile.set({ profile });
+registerProfile(sharedProfiles, profile);
+```
+
+Rule of thumb: scope controls _who reads which instance_, not _who owns the
+data_. Anything that must be visible to other users belongs in a space-scoped
+cell; use `PerUser` for the pointer, not the shared record. Fixed in
+`packages/patterns/cfc-group-chat-demo/trusted.tsx`; guarded by the
+multi-runtime test
+`packages/patterns/integration/cfc-group-chat-demo-multi-runtime.test.ts`.
+
+## 7. `Math.random()` throws under SES
 
 **Symptom:** `TypeError: secure mode %SharedMath%.random() throws` when a
 handler runs.
