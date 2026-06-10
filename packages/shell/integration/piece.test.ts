@@ -326,17 +326,17 @@ describe("shell piece tests", () => {
         return await page.evaluate(() => !!globalThis.commonfabric?.rt);
       });
       await waitForSpaceRootPattern(page);
-      // Let the space-root chain's own compiles finish and settle before
-      // baselining (a trailing root compile landing inside the measurement
-      // window would show up as a false piece recompile).
-      let settledCompileCount = await getClientEngineCompileCount(page);
-      await waitFor(async () => {
-        const before = settledCompileCount;
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        settledCompileCount = await getClientEngineCompileCount(page);
-        return settledCompileCount === before;
+      // Settle the space-root chain's own loads before baselining (a trailing
+      // root compile landing inside the measurement window would show up as a
+      // false piece recompile): drain the scheduler, then the compile-cache
+      // write-backs — both deterministic completion signals, no timed waits.
+      await page.evaluate(async () => {
+        await globalThis.commonfabric?.rt?.idle();
+        await globalThis.commonfabric?.rt?.flushCompileCacheWrites();
       });
-      const compileCountBeforePieceLoad = settledCompileCount;
+      const compileCountBeforePieceLoad = await getClientEngineCompileCount(
+        page,
+      );
       await page.evaluate(async (spaceName, pieceId) => {
         await globalThis.app.setView({ spaceName, pieceId });
       }, { args: [SPACE_NAME, pieceId] });
