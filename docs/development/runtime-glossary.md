@@ -7,10 +7,11 @@ rarely need these terms — for author-facing concepts see the
 ## Fact
 
 Is a record of state in time represented using `{ the, of, is, cause }` tuples.
-E.g consider following fact: _The_ **color** _of_ **sky** _is_ **blue** it would
-directly translated to `{ the: "color", of: "object:sky", is: "blue" }`.
+E.g. consider the following fact: _The_ **color** _of_ **sky** _is_ **blue** —
+it would be directly translated to
+`{ the: "color", of: "object:sky", is: "blue" }`.
 
-> ℹ️ The `cause` filed is used to establis causal references, it effectively
+> ℹ️ The `cause` field is used to establish causal references; it effectively
 > represents a logical time per fact as opposed to global time.
 
 In practice we use `the` field to describe kind of the information value (`is`
@@ -31,8 +32,8 @@ providing a way to recall facts that had being succeeded by the new ones.
 Memory also provides interface for accreting new information through an
 interface with [compare and swap (CAS)][CAS] semantics.
 
-> ℹ️ Please note that layers above [memory] do not follow same principals or
-> operate at the level of [fact]s, instead they use more traditional
+> ℹ️ Please note that layers above [memory] do not follow the same principles
+> or operate at the level of [fact]s, instead they use more traditional
 > document-oriented semantics and reference state by the address inside the
 > mutable memory space.
 
