@@ -47,6 +47,14 @@ export class Browser {
     return new Page(page, { timeout: this.timeout });
   }
 
+  // The browser-level CDP websocket endpoint. Chrome supports multiple
+  // concurrent CDP clients, so a second connection (e.g. for CPU profiling
+  // via `cdp-profiler.ts`) can attach alongside Astral's.
+  wsEndpoint(): string {
+    this.checkIsOk();
+    return this.browser!.wsEndpoint();
+  }
+
   async close(): Promise<void> {
     this.checkIsOk();
     const browser = this.browser;
