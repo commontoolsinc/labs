@@ -120,10 +120,27 @@ class RecordingWebSocket extends EventTarget {
   static readonly CLOSING = 2;
   static readonly CLOSED = 3;
   static dialed: string[] = [];
+  static #waiters: Array<{ count: number; resolve: () => void }> = [];
   readyState = RecordingWebSocket.CONNECTING;
   constructor(url: string | URL) {
     super();
     RecordingWebSocket.dialed.push(url.toString());
+    RecordingWebSocket.#waiters = RecordingWebSocket.#waiters.filter(
+      (waiter) => {
+        if (RecordingWebSocket.dialed.length >= waiter.count) {
+          waiter.resolve();
+          return false;
+        }
+        return true;
+      },
+    );
+  }
+  /** Resolves once `count` sockets have been dialed — no polling. */
+  static whenDialed(count: number): Promise<void> {
+    if (RecordingWebSocket.dialed.length >= count) return Promise.resolve();
+    return new Promise((resolve) =>
+      RecordingWebSocket.#waiters.push({ count, resolve })
+    );
   }
   send(_payload: string): void {}
   close(): void {}
@@ -149,10 +166,7 @@ describe("StorageManager per-space host wiring", () => {
       });
       manager.open(spaceA).sync("of:wiring-probe" as URI).catch(() => {});
       manager.open(spaceB).sync("of:wiring-probe" as URI).catch(() => {});
-      const deadline = Date.now() + 2_000;
-      while (RecordingWebSocket.dialed.length < 2 && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
+      await RecordingWebSocket.whenDialed(2);
       const hosts = RecordingWebSocket.dialed.map((url) => new URL(url).host)
         .sort();
       expect(hosts).toEqual(["host-a.test", "host-b.test"]);
