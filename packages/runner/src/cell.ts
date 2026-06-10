@@ -23,6 +23,8 @@ import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
 import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
 import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
+import { checkSqliteRowLabelWrite } from "./builtins/sqlite/row-label-write.ts";
+import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
 import { cfcLabelViewForCell } from "./cfc/label-view.ts";
 import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
 import { getTopFrame } from "./builder/pattern.ts";
@@ -1032,28 +1034,76 @@ export class CellImpl<T extends FabricValue>
         ".exec() is only available on a SqliteDb cell (invalid database handle)",
       );
     }
+    // Materialize `tables` through a RESOLVING read: a rowLabel rule's term
+    // lists (arrays of objects) split into per-element entity docs when the
+    // handle value is stored, so `getRaw` sees doc LINKS where the rule's AST
+    // nodes should be. The permissive schema bypasses the SqliteDb shape (no
+    // declared properties) that would shape `get()` down to `{}`.
+    const materialized = this.asSchema(
+      { type: "object", additionalProperties: true } as JSONSchema,
+    ).withTx(this.tx).get() as { tables?: unknown } | undefined;
+    const tables = materialized?.tables !== undefined
+      ? cloneIfNecessary(
+        materialized.tables as Parameters<typeof cloneIfNecessary>[0],
+        { frozen: false },
+      ) as Record<string, unknown>
+      : handle.tables as Record<string, unknown> | undefined;
     // CFC write-ceiling (Phase 2): a value bound to a labeled column must fit the
     // column's `ifc.maxConfidentiality`. The label rides the bound value (a Cell
     // or any carried-label value); fail closed when a labeled value's target
     // column can't be determined. No-op until a column declares `ifc`.
+    const confidentialityOf = (value: unknown): readonly unknown[] => {
+      const view = cfcLabelViewForCell(value);
+      return view
+        ? cfcConfidentialityForObservationNode({ labelView: view })
+        : [];
+    };
     const ceilingViolation = checkSqliteWriteCeiling(
       sql,
       params,
-      handle.tables as Parameters<typeof checkSqliteWriteCeiling>[2],
-      (value) => {
-        const view = cfcLabelViewForCell(value);
-        return view
-          ? cfcConfidentialityForObservationNode({ labelView: view })
-          : [];
-      },
+      tables as Parameters<typeof checkSqliteWriteCeiling>[2],
+      confidentialityOf,
     );
     if (ceilingViolation) throw new TypeError(ceilingViolation);
+
+    // CFC per-row rule gate (Phase 3): an attributable INSERT into a
+    // rule-bearing table computes the prospective row label from its bound
+    // values; labeled inputs must be captured by it (no-laundering), and the
+    // computed per-row labels are recorded as this write's CFC policy input
+    // (sink-request) before the commit. Unattributable shapes fail closed.
+    // No-op (zero cost) until a table declares a rule.
+    const rowGate = checkSqliteRowLabelWrite({
+      sql,
+      params,
+      tables,
+      owner: typeof (handle as { owner?: unknown }).owner === "string"
+        ? (handle as { owner: string }).owner
+        : undefined,
+      confidentialityOf,
+    });
+    if ("error" in rowGate) throw new TypeError(rowGate.error);
+    if (rowGate.policies !== undefined && rowGate.policies.length > 0) {
+      this.tx.markCfcRelevant(`sqlite-row-label:${handle.id}`);
+      recordSinkRequestPolicyInput(
+        this.tx,
+        `sqlite:${handle.id}`,
+        `sqlite-exec:${handle.id}:${sql}:${
+          JSON.stringify(encodeSqliteParams(sql, params) ?? null)
+        }`,
+        {
+          table: rowGate.policies[0].table,
+          rows: rowGate.policies.map((p) => p.label),
+        } as Parameters<typeof recordSinkRequestPolicyInput>[3],
+      );
+    }
 
     this.tx.recordSqliteWrite(this.space, {
       op: "sqlite",
       db: {
         id: handle.id,
-        tables: handle.tables as Record<string, unknown> | undefined,
+        // Materialized (link-free) — the server's write path must see the
+        // same plain schema JSON the read path's provenance gate keys off.
+        tables,
         // Carry the db's declared scope so the write lands in the same per-user
         // / per-session on-disk file the read path resolves (stamped by
         // sqliteDatabase onto the handle value).

@@ -94,7 +94,16 @@ function readDbRef(value: unknown): SqliteDbRef {
     const ref = value as SqliteDbRef;
     return {
       id: ref.id,
-      tables: ref.tables,
+      // Materialize to plain JSON: a rowLabel rule's term LISTS (arrays of
+      // objects) split into per-element entity docs when the handle value is
+      // stored, so the stored form holds doc LINKS — the wire (server
+      // provenance gate) and every local consumer need the resolved spec.
+      tables: ref.tables
+        ? cloneIfNecessary(
+          ref.tables as Parameters<typeof cloneIfNecessary>[0],
+          { frozen: false },
+        ) as Record<string, unknown>
+        : undefined,
       scope: ref.scope,
       owner: typeof ref.owner === "string" ? ref.owner : undefined,
     };
