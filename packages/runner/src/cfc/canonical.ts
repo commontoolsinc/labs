@@ -194,11 +194,7 @@ export const canonicalizeCfcMetadata = (
       }
       const leftOrigin = left.origin ?? "";
       const rightOrigin = right.origin ?? "";
-      return leftOrigin < rightOrigin
-        ? -1
-        : leftOrigin > rightOrigin
-        ? 1
-        : 0;
+      return leftOrigin < rightOrigin ? -1 : leftOrigin > rightOrigin ? 1 : 0;
     }),
   },
 });

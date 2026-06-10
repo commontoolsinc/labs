@@ -14,6 +14,7 @@ export type {
   CfcAddress,
   CfcDereferenceTrace,
   CfcEnforcementMode,
+  CfcFlowLabelsMode,
   CfcMetadata,
   CfcPrepareState,
   CfcSandboxDiagnostic,
@@ -39,6 +40,7 @@ export {
   CFC_ENFORCING_STRICTNESS,
   cfcEnforcementStrictness,
   DEFAULT_CFC_ENFORCEMENT_MODE,
+  DEFAULT_CFC_FLOW_LABELS_MODE,
   isCfcEnforcementMode,
 } from "./types.ts";
 export {
@@ -50,7 +52,7 @@ export {
   logicalPathToPointer,
   preparedDigestFor,
 } from "./canonical.ts";
-export { prepareBoundaryCommit } from "./prepare.ts";
+export { flowLabelWorkExists, prepareBoundaryCommit } from "./prepare.ts";
 export {
   createSinkRequestPolicyInput,
   recordSinkRequestPolicyInput,

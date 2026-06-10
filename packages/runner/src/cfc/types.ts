@@ -279,9 +279,21 @@ export type CfcPrepareState =
   | { status: "prepared"; digest: string; input: PreparedDigestInput }
   | { status: "invalidated"; digest?: string; reasons: string[] };
 
+/**
+ * Flow-label propagation dial (S16 default transition), orthogonal to the
+ * enforcement ladder: `off` = no derivation; `observe` = compute the per-tx
+ * conservative join and emit diagnostics, persist nothing; `persist` = write
+ * derived label components for every value write target. Propagation never
+ * rejects by itself — enforcement stays with the existing consumers.
+ */
+export type CfcFlowLabelsMode = "off" | "observe" | "persist";
+
+export const DEFAULT_CFC_FLOW_LABELS_MODE: CfcFlowLabelsMode = "off";
+
 export type CfcTxState = {
   relevant: boolean;
   enforcementMode: CfcEnforcementMode;
+  flowLabelsMode: CfcFlowLabelsMode;
   prepare: CfcPrepareState;
   dereferenceTraces: CfcDereferenceTrace[];
   writePolicyInputs: WritePolicyInput[];

@@ -58,7 +58,9 @@ import { LINK_V1_TAG } from "./sigil-types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   type CfcEnforcementMode,
+  type CfcFlowLabelsMode,
   type CfcLabelView,
+  flowLabelWorkExists,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
 import { PatternManager } from "./pattern-manager.ts";
@@ -196,6 +198,12 @@ export interface RuntimeOptions {
   experimental?: ExperimentalOptions;
   /** Rollout mode for commit-boundary CFC enforcement. Defaults to `enforce-explicit`. */
   cfcEnforcementMode?: CfcEnforcementMode;
+  /**
+   * Flow-label propagation dial (S16 default transition). Defaults to `off`.
+   * Propagation requires enforcement mode ≥ `observe` to run at the commit
+   * boundary; it derives and persists labels but never rejects by itself.
+   */
+  cfcFlowLabels?: CfcFlowLabelsMode;
   /** Deterministic provider for the trust snapshot attached to each new tx. */
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
   /** Replace runner-owned frames with `<CF_INTERNAL>` in surfaced stacks. */
@@ -302,6 +310,7 @@ export class Runtime {
   readonly pieceCreatedCallback?: PieceCreatedCallback;
   readonly cfc: ContextualFlowControl;
   readonly cfcEnforcementMode: CfcEnforcementMode;
+  readonly cfcFlowLabels: CfcFlowLabelsMode;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
@@ -375,6 +384,7 @@ export class Runtime {
     this.cfc = new ContextualFlowControl();
     this.cfcEnforcementMode = options.cfcEnforcementMode ??
       "enforce-explicit";
+    this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(
@@ -572,6 +582,7 @@ export class Runtime {
       },
     });
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
+    wrapped.setCfcFlowLabelsMode(this.cfcFlowLabels);
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     return wrapped;
   }
@@ -690,7 +701,19 @@ export class Runtime {
 
   prepareTxForCommit(tx: IExtendedStorageTransaction): void {
     const state = tx.getCfcState();
-    if (!state.relevant || state.enforcementMode === "disabled") {
+    if (state.enforcementMode === "disabled") {
+      return;
+    }
+    // Flow-label relevance is computed, not caller-marked (S16): the
+    // laundering txs are exactly the ones nothing marked relevant.
+    if (
+      !state.relevant &&
+      state.flowLabelsMode !== "off" &&
+      flowLabelWorkExists(tx)
+    ) {
+      tx.markCfcRelevant("flow-labels");
+    }
+    if (!state.relevant) {
       return;
     }
     if (state.prepare.status === "unprepared") {

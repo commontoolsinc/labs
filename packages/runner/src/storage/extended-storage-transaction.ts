@@ -55,9 +55,12 @@ import {
   type CfcDereferenceTrace,
   type CfcEnforcementMode,
   cfcEnforcementStrictness,
+  type CfcFlowLabelsMode,
   type CfcTxState,
   type ConsumedRead,
   DEFAULT_CFC_ENFORCEMENT_MODE,
+  DEFAULT_CFC_FLOW_LABELS_MODE,
+  flowLabelWorkExists,
   type ImplementationIdentity,
   type PostCommitSideEffect,
   prepareBoundaryCommit,
@@ -99,6 +102,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private cfcState: CfcTxState = {
     relevant: false,
     enforcementMode: DEFAULT_CFC_ENFORCEMENT_MODE,
+    flowLabelsMode: DEFAULT_CFC_FLOW_LABELS_MODE,
     prepare: { status: "unprepared" },
     dereferenceTraces: [],
     writePolicyInputs: [],
@@ -110,6 +114,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private reportedCfcPrepared = false;
   // Highest enforcing strictness ever set on this tx; mode cannot drop below it.
   private cfcEnforcementFloor = 0;
+  // Once flow-label persistence is on for this tx it cannot be turned back
+  // off — same shape as the enforcement floor (audit S3): code holding a
+  // Cell must not disable propagation mid-transaction to launder a value.
+  private cfcFlowLabelsPinned = false;
   // Per-transaction cache of `Cell.get()` results, keyed by cell link identity.
   // Replaced wholesale on any write (see `invalidateReadResultCache`), so a hit
   // is only ever served when nothing has been written since the cached read.
@@ -155,6 +163,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         this.cfcEnforcementFloor,
         cfcEnforcementStrictness(mode),
       );
+    }
+  }
+
+  setCfcFlowLabelsMode(mode: CfcFlowLabelsMode): void {
+    if (this.cfcFlowLabelsPinned && mode !== "persist") {
+      throw new Error(
+        `CFC flow-labels mode cannot be weakened to "${mode}": transaction ` +
+          `is pinned at "persist"`,
+      );
+    }
+    this.cfcState.flowLabelsMode = mode;
+    if (mode === "persist") {
+      this.cfcFlowLabelsPinned = true;
     }
   }
 
@@ -664,6 +685,21 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.tx.clearReadOnly?.();
     }
     if (!readOnly) {
+      // Flow-label relevance is computed, not caller-marked: a tx that
+      // observed or wrote a labeled doc derives labels even when nothing
+      // called markCfcRelevant (S16 — value-copy laundering happens in
+      // exactly the txs nobody marked). Probe only while unprepared: the
+      // probe reads metadata, and a read after prepare would invalidate the
+      // digest of a transaction that already did its flow work.
+      if (
+        !this.cfcState.relevant &&
+        this.cfcState.prepare.status === "unprepared" &&
+        this.cfcState.flowLabelsMode !== "off" &&
+        this.cfcState.enforcementMode !== "disabled" &&
+        flowLabelWorkExists(this)
+      ) {
+        this.markCfcRelevant("flow-labels");
+      }
       if (
         this.cfcState.relevant &&
         this.cfcState.enforcementMode === "observe" &&
@@ -820,6 +856,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   setCfcEnforcementMode(mode: CfcEnforcementMode): void {
     this.wrapped.setCfcEnforcementMode(mode);
+  }
+
+  setCfcFlowLabelsMode(mode: CfcFlowLabelsMode): void {
+    this.wrapped.setCfcFlowLabelsMode(mode);
   }
 
   markCfcRelevant(reason?: string): void {
