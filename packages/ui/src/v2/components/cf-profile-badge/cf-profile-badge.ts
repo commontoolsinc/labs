@@ -135,7 +135,8 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         verified, a separate aura-ring layer carries the per-identity conic
         gradient (a pure function of the owner DID) behind the avatar, so the ring
         is unique-but-stable for each person. Keeping it on its own layer lets it
-        spin on hover without rotating the avatar. */
+        rotate in lockstep (the always-on animation below) and carry the shimmer
+        and cursor-sheen layers, all without rotating the avatar. */
       .aura {
         position: relative;
         display: inline-flex;
