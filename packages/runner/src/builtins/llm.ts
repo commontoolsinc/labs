@@ -1455,6 +1455,13 @@ export function generateObject<T extends Record<string, unknown>>(
               await runtime.idle();
 
               await runtime.editWithRetry((tx) => {
+                // The InjectionSafe annotations on resultSchema are minted by
+                // the trusted sanitizer; attribute this write to the builtin so
+                // the persist-time evidence gate trusts them (audit S4).
+                tx.setCfcImplementationIdentity({
+                  kind: "builtin",
+                  builtinId: "generateObject",
+                });
                 resultCell.key("pending").withTx(tx).set(false);
                 const resultTarget = objectResponse.resultSchema === undefined
                   ? resultCell.key("result")
@@ -1670,6 +1677,13 @@ export function generateObject<T extends Record<string, unknown>>(
               await runtime.idle();
 
               await runtime.editWithRetry((tx) => {
+                // The InjectionSafe annotations on resultSchema are minted by
+                // the trusted sanitizer; attribute this write to the builtin so
+                // the persist-time evidence gate trusts them (audit S4).
+                tx.setCfcImplementationIdentity({
+                  kind: "builtin",
+                  builtinId: "generateObject",
+                });
                 const assistantMessage: BuiltInLLMMessage = {
                   role: "assistant",
                   content: JSON.stringify(response.object, null, 2),

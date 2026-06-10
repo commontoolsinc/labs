@@ -1897,6 +1897,54 @@ const derivePersistedLabel = (
   };
 };
 
+// Integrity atom families that are concrete evidence minted only by trusted
+// runtime code (the InjectionSafe sanitizer, code-identity/provenance minting,
+// the harness prompt-slot binder). Untrusted schema authors must not be able to
+// self-attach them and then satisfy a requiredIntegrity gate or the
+// prompt-injection screen (audit S4). The current-principal claim family
+// (authored-by / represents-principal) is gated separately by
+// currentPrincipalIntegrityReason and intentionally not listed here.
+const RUNTIME_MINTED_INTEGRITY_ATOM_TYPES = new Set<string>([
+  CFC_ATOM_TYPE.InjectionSafe,
+  CFC_ATOM_TYPE.Builtin,
+  CFC_ATOM_TYPE.LinkReference,
+  CFC_ATOM_TYPE.Origin,
+  CFC_ATOM_TYPE.PromptSlotBound,
+  CFC_ATOM_TYPE.PromptSlotInfluence,
+  CFC_ATOM_TYPE.UserSurfaceInput,
+]);
+
+const isRuntimeMintedIntegrityAtom = (atom: unknown): boolean =>
+  isRecord(atom) && typeof atom.type === "string" &&
+  RUNTIME_MINTED_INTEGRITY_ATOM_TYPES.has(atom.type);
+
+/**
+ * Drops runtime-minted evidence atoms from a persisted label's integrity unless
+ * the write was authored by a trusted builtin (the sanitizer, compile cache,
+ * and link/provenance minting all run as builtins). Verified pattern code and
+ * unattributed writes may not mint evidence (audit S4).
+ */
+const gateRuntimeMintedIntegrity = (
+  label: IFCLabel,
+  authoringIdentity: ImplementationIdentity | undefined,
+): IFCLabel => {
+  if (authoringIdentity?.kind === "builtin") {
+    return label;
+  }
+  const integrity = label.integrity;
+  if (integrity === undefined || integrity.length === 0) {
+    return label;
+  }
+  const filtered = integrity.filter((atom) => !isRuntimeMintedIntegrityAtom(atom));
+  if (filtered.length === integrity.length) {
+    return label;
+  }
+  return {
+    ...label,
+    integrity: filtered.length > 0 ? filtered : undefined,
+  };
+};
+
 const persistedLabelFromSchemaAtPath = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
@@ -2280,11 +2328,14 @@ export const prepareBoundaryCommit = (
       ) {
         return [];
       }
-      const label = derivePersistedLabel(
-        tx,
-        entry.schema,
-        entry.label,
-        mergedSchemaEntryLabels,
+      const label = gateRuntimeMintedIntegrity(
+        derivePersistedLabel(
+          tx,
+          entry.schema,
+          entry.label,
+          mergedSchemaEntryLabels,
+        ),
+        identityForSchemaPath(writeAuthorIdentities.get(key), entry.path),
       );
       return hasLabelValues(label) || hasPersistedPolicyClaim(entry.schema)
         ? [{
