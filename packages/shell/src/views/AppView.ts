@@ -1,7 +1,7 @@
 import { css, html, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseView, createDefaultAppState } from "./BaseView.ts";
-import { KeyStore } from "@commonfabric/identity";
+import { type DID, KeyStore } from "@commonfabric/identity";
 import { slugIdForSpace, validateSlug } from "@commonfabric/runner/slugs";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { DebuggerController } from "../lib/debugger-controller.ts";
@@ -50,6 +50,10 @@ export class XAppView extends BaseView {
   @property({ attribute: false })
   accessor rt: RuntimeInternals | undefined = undefined;
 
+  /** The space the current view addresses — view state from RootView. */
+  @property({ attribute: false })
+  accessor space: DID | undefined = undefined;
+
   @property({ attribute: false })
   accessor keyStore: KeyStore | undefined = undefined;
 
@@ -78,38 +82,38 @@ export class XAppView extends BaseView {
 
   _spaceRootPattern = new Task(this, {
     task: async (
-      [rt],
+      [rt, space],
     ): Promise<
       | PageHandle<NameSchema>
       | undefined
     > => {
-      if (!rt) return;
+      if (!rt || !space) return;
       try {
-        return await rt.getSpaceRootPattern();
+        return await rt.getSpaceRootPattern(space);
       } catch (err) {
         console.error("[AppView] Failed to load space root pattern:", err);
         throw err;
       }
     },
-    args: () => [this.rt],
+    args: () => [this.rt, this.space],
   });
 
   _selectedPattern = new Task(this, {
     task: async (
-      [app, rt],
+      [app, rt, space],
       { signal },
     ): Promise<
       | PageHandle<NameSchema>
       | undefined
     > => {
-      if (!rt) return;
+      if (!rt || !space) return;
       this._patternError = undefined;
       if ("pieceSlug" in app.view && app.view.pieceSlug) {
         try {
-          const pieceId = slugIdForSpace(rt.space(), app.view.pieceSlug);
-          const pattern = await rt.getPattern(pieceId);
+          const pieceId = slugIdForSpace(space, app.view.pieceSlug);
+          const pattern = await rt.getPattern(space, pieceId);
           // Track as recently visited (fire-and-forget)
-          rt.trackRecentPiece(pieceId);
+          rt.trackRecentPiece(space, pieceId);
           return pattern;
         } catch (e) {
           if (!signal.aborted) {
@@ -119,13 +123,13 @@ export class XAppView extends BaseView {
       }
       if ("pieceId" in app.view && app.view.pieceId) {
         try {
-          const pattern = await rt.getPattern(app.view.pieceId);
-          const slug = await rt.getSlug(app.view.pieceId);
+          const pattern = await rt.getPattern(space, app.view.pieceId);
+          const slug = await rt.getSlug(space, app.view.pieceId);
           if (!signal.aborted && slug) {
             this.#replacePieceUrlWithSlug(app.view, slug);
           }
           // Track as recently visited (fire-and-forget)
-          rt.trackRecentPiece(app.view.pieceId);
+          rt.trackRecentPiece(space, app.view.pieceId);
           return pattern;
         } catch (e) {
           if (!signal.aborted) {
@@ -134,7 +138,9 @@ export class XAppView extends BaseView {
         }
       }
     },
-    args: () => [this.app, this.rt, this._slugRevision],
+    // _slugRevision is a rerun trigger only — keep it after the
+    // destructured args.
+    args: () => [this.app, this.rt, this.space, this._slugRevision],
   });
 
   // This derives a space root pattern as well as an "active" (main)
@@ -184,18 +190,19 @@ export class XAppView extends BaseView {
 
   #syncSlugSubscription() {
     const rt = this.rt;
+    const space = this.space;
     const slug = "pieceSlug" in this.app.view
       ? this.app.view.pieceSlug
       : undefined;
-    const key = rt && slug ? `${rt.space()}:${slug}` : undefined;
+    const key = rt && space && slug ? `${space}:${slug}` : undefined;
 
     if (key === this.slugSubscriptionKey) return;
     this.#clearSlugSubscription();
-    if (!rt || !slug || !key) return;
+    if (!rt || !space || !slug || !key) return;
 
     this.slugSubscriptionKey = key;
     const token = ++this.slugSubscriptionToken;
-    rt.getSlugCell(slug).then(async (cell) => {
+    rt.getSlugCell(space, slug).then(async (cell) => {
       if (
         this.slugSubscriptionToken !== token ||
         this.slugSubscriptionKey !== key
@@ -203,7 +210,7 @@ export class XAppView extends BaseView {
         return;
       }
 
-      await this.#refreshSlugTarget(rt, slug, token, key, false);
+      await this.#refreshSlugTarget(rt, space, slug, token, key, false);
       if (
         this.slugSubscriptionToken !== token ||
         this.slugSubscriptionKey !== key
@@ -212,7 +219,7 @@ export class XAppView extends BaseView {
       }
 
       this.slugPollInterval = globalThis.setInterval(() => {
-        void this.#refreshSlugTarget(rt, slug, token, key, true);
+        void this.#refreshSlugTarget(rt, space, slug, token, key, true);
       }, 1000);
 
       let sawInitialCallback = false;
@@ -221,7 +228,7 @@ export class XAppView extends BaseView {
           sawInitialCallback = true;
           return;
         }
-        void this.#refreshSlugTarget(rt, slug, token, key, true);
+        void this.#refreshSlugTarget(rt, space, slug, token, key, true);
       });
     }).catch((error) => {
       if (this.slugSubscriptionToken === token) {
@@ -244,6 +251,7 @@ export class XAppView extends BaseView {
 
   async #refreshSlugTarget(
     rt: RuntimeInternals,
+    space: DID,
     slug: string,
     token: number,
     key: string,
@@ -258,7 +266,10 @@ export class XAppView extends BaseView {
 
     let targetKey: string;
     try {
-      const pattern = await rt.refreshPattern(slugIdForSpace(rt.space(), slug));
+      const pattern = await rt.refreshPattern(
+        space,
+        slugIdForSpace(space, slug),
+      );
       targetKey = pattern.id();
     } catch (error) {
       if (notify) {
@@ -269,11 +280,11 @@ export class XAppView extends BaseView {
     if (targetKey === this.slugTargetKey) return;
     this.slugTargetKey = targetKey;
     if (notify) {
-      this.#handleSlugCellUpdate(rt, slug);
+      this.#handleSlugCellUpdate(rt, space, slug);
     }
   }
 
-  #handleSlugCellUpdate(rt: RuntimeInternals, slug: string) {
+  #handleSlugCellUpdate(rt: RuntimeInternals, space: DID, slug: string) {
     if (
       this.rt !== rt ||
       !("pieceSlug" in this.app.view) ||
@@ -282,7 +293,7 @@ export class XAppView extends BaseView {
       return;
     }
 
-    rt.invalidatePattern(slugIdForSpace(rt.space(), slug));
+    rt.invalidatePattern(space, slugIdForSpace(space, slug));
     this._slugRevision++;
   }
 
@@ -335,14 +346,14 @@ export class XAppView extends BaseView {
 
   #handleRecreateSpaceRootPattern = async (e: Event) => {
     const done = (e as CustomEvent).detail?.done as (() => void) | undefined;
-    if (!this.rt) {
+    if (!this.rt || !this.space) {
       done?.();
       return;
     }
     if (this.#isRecreatingSpaceRootPattern) return;
     this.#isRecreatingSpaceRootPattern = true;
     try {
-      await this.rt.recreateSpaceRootPattern();
+      await this.rt.recreateSpaceRootPattern(this.space);
       this._spaceRootPattern.run();
     } catch (err) {
       console.error("[AppView] Failed to recreate pattern:", err);
@@ -401,7 +412,10 @@ export class XAppView extends BaseView {
       );
     }
 
-    if (changedProperties.has("app") || changedProperties.has("rt")) {
+    if (
+      changedProperties.has("app") || changedProperties.has("rt") ||
+      changedProperties.has("space")
+    ) {
       this.#syncSlugSubscription();
     }
   }
@@ -415,8 +429,8 @@ export class XAppView extends BaseView {
       return this.app.view.pieceId;
     }
     if ("pieceSlug" in this.app.view && this.app.view.pieceSlug) {
-      return this.rt
-        ? slugIdForSpace(this.rt.space(), this.app.view.pieceSlug)
+      return this.space
+        ? slugIdForSpace(this.space, this.app.view.pieceSlug)
         : this.app.view.pieceSlug;
     }
   }
@@ -430,6 +444,7 @@ export class XAppView extends BaseView {
     const authenticated = html`
       <x-body-view
         .rt="${this.rt}"
+        .space="${this.space}"
         .activePattern="${activePattern}"
         .spaceRootPattern="${spaceRootPattern}"
         .patternError="${this._patternError}"
@@ -445,7 +460,10 @@ export class XAppView extends BaseView {
     const pieceId = this.getActivePatternId();
     const spaceName = this.app && "spaceName" in this.app.view
       ? this.app.view.spaceName
-      : this.rt?.spaceName();
+      : this.app && "builtin" in this.app.view &&
+          this.app.view.builtin === "home"
+      ? "<home>"
+      : undefined;
     const spaceDid = this.app && "spaceDid" in this.app.view
       ? this.app.view.spaceDid
       : undefined;
@@ -459,6 +477,7 @@ export class XAppView extends BaseView {
             .spaceName="${spaceName}"
             .spaceDid="${spaceDid}"
             .rt="${this.rt}"
+            .space="${this.space}"
             .keyStore="${this.keyStore}"
             .pieceTitle="${this.pieceTitle}"
             .pieceId="${pieceId}"
@@ -480,6 +499,7 @@ export class XAppView extends BaseView {
           <x-quick-jump-view
             .visible="${config.showQuickJumpView ?? false}"
             .rt="${this.rt}"
+            .space="${this.space}"
           ></x-quick-jump-view>
         `
         : ""}

@@ -16,7 +16,7 @@ import { property, state } from "lit/decorators.js";
 import { Task } from "@lit/task";
 import { type RuntimeClient } from "@commonfabric/runtime-client";
 import { type DID } from "@commonfabric/identity";
-import { RuntimeInternals } from "@commonfabric/lib-shell";
+import { resolveSpaceDid, RuntimeInternals } from "@commonfabric/lib-shell";
 import { createVDomDebugHelpers } from "@commonfabric/html/debug";
 import { createDebugUtils } from "../lib/debug-utils.ts";
 import { runtimeContext, spaceContext } from "@commonfabric/ui";
@@ -113,10 +113,21 @@ export class XRootView extends BaseView {
 
         const rt = await RuntimeInternals.create({
           identity: app.identity,
-          view: app.view,
           apiUrl: app.apiUrl,
           experimental: EXPERIMENTAL,
-          navigate,
+          // lib-shell emits address-shaped targets ({spaceDid, pieceId}).
+          // Mapping a DID back to the human-readable spaceName URL is view
+          // state, so it happens here.
+          navigate: (target) => {
+            const view = this.app?.view;
+            if (
+              target.spaceDid === this.space && view && "spaceName" in view
+            ) {
+              navigate({ spaceName: view.spaceName, pieceId: target.pieceId });
+            } else {
+              navigate(target);
+            }
+          },
         });
 
         if (signal.aborted) {
@@ -131,18 +142,15 @@ export class XRootView extends BaseView {
           return;
         }
 
-        // Update the provided runtime and space values
+        // Update the provided runtime; `space` is view state, resolved
+        // from app.view in updated() independent of the runtime's life.
         this.runtime = rt.runtime();
-        this.space = rt.space() as DID;
 
         // Expose RuntimeClient for console debugging
         // (e.g. commonfabric.rt.setLoggerLevel("debug"))
         const global = getCommonfabricGlobal();
         global.commonfabric ??= {};
         global.commonfabric.rt = this.runtime;
-        // Page operations on rt require an explicit space; expose the
-        // bound one for console/evaluated callers.
-        global.commonfabric.space = rt.space();
         global.commonfabric.vdom = createVDomDebugHelpers();
         global.commonfabric.detectNonIdempotent = async (
           durationMs = 5000,
@@ -159,7 +167,6 @@ export class XRootView extends BaseView {
         };
 
         // Debug utilities for inspecting cell values from the console
-        global.commonfabric.space = this.space;
         const debugUtils = createDebugUtils(
           () => this.space as DID,
           () => this.runtime,
@@ -206,19 +213,46 @@ export class XRootView extends BaseView {
     const flipState = (!previous && current) ||
       !current;
 
-    let spaceChanged = false;
-    if (previous && !isAppViewEqual(previous.view, current.view)) {
-      spaceChanged = didViewSpaceChange(previous.view, current.view);
-    }
-
-    // If host, view's space, or identity changes, we'll
-    // need to recreate the runtime.
+    // One runtime per (identity, host): only those changes recreate it.
+    // A view/space change is pure view state — the same runtime serves
+    // every space (space is part of the address, nothing special).
     const stateChanged = !!previous &&
       (previous.apiUrl !== current.apiUrl ||
-        previous.identity !== current.identity || spaceChanged);
+        previous.identity !== current.identity);
 
     if (flipState || stateChanged) {
       this._rt.run([current]);
+    }
+    if (
+      flipState || stateChanged ||
+      (previous && !isAppViewEqual(previous.view, current.view))
+    ) {
+      void this.#resolveViewSpace(current);
+    }
+  }
+
+  // Resolve the current view to a space DID — view state, independent of
+  // the runtime's lifecycle.
+  #resolveSpaceToken = 0;
+  async #resolveViewSpace(app: AppState | undefined): Promise<void> {
+    const token = ++this.#resolveSpaceToken;
+    let space: DID | undefined;
+    const identity = app?.identity;
+    const view = app?.view;
+    if (identity && view) {
+      if ("builtin" in view) {
+        space = view.builtin === "home" ? identity.did() : undefined;
+      } else if ("spaceDid" in view) {
+        space = view.spaceDid;
+      } else if ("spaceName" in view) {
+        space = await resolveSpaceDid(identity, view.spaceName);
+      }
+    }
+    if (token !== this.#resolveSpaceToken) return;
+    this.space = space;
+    const global = getCommonfabricGlobal();
+    if (global.commonfabric) {
+      global.commonfabric.space = space;
     }
   }
 
@@ -260,7 +294,7 @@ export class XRootView extends BaseView {
   }
 
   getRuntimeSpaceDID(): DID | undefined {
-    return this._rt.value?.space();
+    return this.space;
   }
 
   override render() {
@@ -270,23 +304,11 @@ export class XRootView extends BaseView {
           .app="${this.app}"
           .keyStore="${this.keyStore}"
           .rt="${this._rt.value}"
+          .space="${this.space}"
         ></x-app-view>
       </cf-theme>
     `;
   }
 }
-
-const didViewSpaceChange = (previous: AppView, current: AppView): boolean => {
-  if ("builtin" in previous || "builtin" in current) {
-    return JSON.stringify(previous) !== JSON.stringify(current);
-  }
-  if ("spaceName" in previous && "spaceName" in current) {
-    return previous.spaceName !== current.spaceName;
-  }
-  if ("spaceDid" in previous && "spaceDid" in current) {
-    return previous.spaceDid !== current.spaceDid;
-  }
-  return true;
-};
 
 globalThis.customElements.define("x-root-view", XRootView);

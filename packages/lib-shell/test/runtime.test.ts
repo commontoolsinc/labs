@@ -98,13 +98,12 @@ describe("RuntimeInternals", () => {
     const runtime = new RuntimeInternals(
       client as any,
       spaceDid,
-      undefined,
-      false,
-      spaceDid,
     );
 
     try {
-      await expect(runtime.getSlug("piece-789")).resolves.toBe("demo");
+      await expect(runtime.getSlug(spaceDid, "piece-789")).resolves.toBe(
+        "demo",
+      );
     } finally {
       await runtime.dispose();
     }
@@ -117,14 +116,11 @@ describe("RuntimeInternals", () => {
     const runtime = new RuntimeInternals(
       client as any,
       spaceDid,
-      undefined,
-      false,
-      spaceDid,
     );
 
     await runtime.dispose();
 
-    await expect(runtime.removePage("piece-789")).rejects.toThrow(
+    await expect(runtime.removePage(spaceDid, "piece-789")).rejects.toThrow(
       "RuntimeInternals disposed.",
     );
   });
@@ -135,9 +131,6 @@ describe("RuntimeInternals", () => {
     const client = new MockRuntimeClient();
     const runtime = new RuntimeInternals(
       client as any,
-      spaceDid,
-      undefined,
-      false,
       spaceDid,
     );
 
@@ -181,11 +174,8 @@ describe("RuntimeInternals", () => {
     const runtime = new RuntimeInternals(
       client as any,
       currentSpace,
-      "current-space",
-      false,
-      currentSpace,
       {
-        navigate: (navigation) => {
+        navigate: (navigation: unknown) => {
           navigationReceived.resolve(navigation as NavigationDetail);
         },
       },
@@ -315,7 +305,6 @@ describe("RuntimeInternals", () => {
       try {
         await expect(RuntimeInternals.create({
           identity,
-          view: { spaceName: "lib-shell-worker-url" },
           apiUrl: new URL("http://shell.test/"),
           workerUrl: new URL("http://shell.test/scripts/worker-runtime.js"),
           getBuildHash,
@@ -357,9 +346,6 @@ describe("RuntimeInternals", () => {
       const runtime = new RuntimeInternals(
         client as any,
         spaceDid,
-        undefined,
-        false,
-        spaceDid,
       );
       return { client, runtime };
     }
@@ -367,7 +353,7 @@ describe("RuntimeInternals", () => {
     it("starts by default (display path)", async () => {
       const { client, runtime } = await makeRuntime();
       try {
-        await runtime.getPattern("piece-1");
+        await runtime.getPattern(spaceDid, "piece-1");
         expect(client.getPageCalls).toEqual([
           { pageId: "piece-1", runIt: true, space: spaceDid },
         ]);
@@ -379,7 +365,7 @@ describe("RuntimeInternals", () => {
     it("does not start when start: false (name listings)", async () => {
       const { client, runtime } = await makeRuntime();
       try {
-        await runtime.getPattern("piece-1", { start: false });
+        await runtime.getPattern(spaceDid, "piece-1", { start: false });
         expect(client.getPageCalls).toEqual([
           { pageId: "piece-1", runIt: false, space: spaceDid },
         ]);
@@ -391,8 +377,8 @@ describe("RuntimeInternals", () => {
     it("upgrades a non-started cache entry when a starting caller asks", async () => {
       const { client, runtime } = await makeRuntime();
       try {
-        await runtime.getPattern("piece-1", { start: false });
-        await runtime.getPattern("piece-1");
+        await runtime.getPattern(spaceDid, "piece-1", { start: false });
+        await runtime.getPattern(spaceDid, "piece-1");
         expect(client.getPageCalls).toEqual([
           { pageId: "piece-1", runIt: false, space: spaceDid },
           { pageId: "piece-1", runIt: true, space: spaceDid },
@@ -405,9 +391,9 @@ describe("RuntimeInternals", () => {
     it("serves started entries from cache for both kinds of callers", async () => {
       const { client, runtime } = await makeRuntime();
       try {
-        await runtime.getPattern("piece-1");
-        await runtime.getPattern("piece-1");
-        await runtime.getPattern("piece-1", { start: false });
+        await runtime.getPattern(spaceDid, "piece-1");
+        await runtime.getPattern(spaceDid, "piece-1");
+        await runtime.getPattern(spaceDid, "piece-1", { start: false });
         expect(client.getPageCalls).toEqual([
           { pageId: "piece-1", runIt: true, space: spaceDid },
         ]);
@@ -419,8 +405,8 @@ describe("RuntimeInternals", () => {
     it("serves repeated non-started requests from cache", async () => {
       const { client, runtime } = await makeRuntime();
       try {
-        await runtime.getPattern("piece-1", { start: false });
-        await runtime.getPattern("piece-1", { start: false });
+        await runtime.getPattern(spaceDid, "piece-1", { start: false });
+        await runtime.getPattern(spaceDid, "piece-1", { start: false });
         expect(client.getPageCalls).toEqual([
           { pageId: "piece-1", runIt: false, space: spaceDid },
         ]);
@@ -430,9 +416,8 @@ describe("RuntimeInternals", () => {
     });
   });
 
-  // §federation PR2: one worker serves patterns from many spaces.
-  // options.space addresses another space; the cache is keyed per
-  // (space, id) with the no-space form aliasing the bound space.
+  // One runtime serves every space; a pattern's address is (space, id)
+  // and the cache is keyed by that address.
   describe("getPattern multi-space", () => {
     const homeDid = "did:key:z6Mk-lib-shell-runtime-home" as DID;
     const otherDid = "did:key:z6Mk-lib-shell-runtime-other" as DID;
@@ -443,9 +428,6 @@ describe("RuntimeInternals", () => {
       const runtime = new RuntimeInternals(
         client as any,
         homeDid,
-        undefined,
-        false,
-        homeDid,
       );
       return { client, runtime };
     }
@@ -453,7 +435,7 @@ describe("RuntimeInternals", () => {
     it("passes the space through to the client", async () => {
       const { client, runtime } = await makeRuntime();
       try {
-        await runtime.getPattern("piece-1", { space: otherDid });
+        await runtime.getPattern(otherDid, "piece-1");
         expect(client.getPageCalls).toEqual([
           { pageId: "piece-1", runIt: true, space: otherDid },
         ]);
@@ -465,9 +447,9 @@ describe("RuntimeInternals", () => {
     it("caches per (space, id) — same id in two spaces are distinct", async () => {
       const { client, runtime } = await makeRuntime();
       try {
-        await runtime.getPattern("piece-1");
-        await runtime.getPattern("piece-1", { space: otherDid });
-        await runtime.getPattern("piece-1", { space: otherDid });
+        await runtime.getPattern(homeDid, "piece-1");
+        await runtime.getPattern(otherDid, "piece-1");
+        await runtime.getPattern(otherDid, "piece-1");
         expect(client.getPageCalls).toEqual([
           { pageId: "piece-1", runIt: true, space: homeDid },
           { pageId: "piece-1", runIt: true, space: otherDid },
@@ -477,25 +459,14 @@ describe("RuntimeInternals", () => {
       }
     });
 
-    it("treats an explicit home space and the no-space form as one entry", async () => {
-      const { client, runtime } = await makeRuntime();
-      try {
-        await runtime.getPattern("piece-1");
-        await runtime.getPattern("piece-1", { space: homeDid });
-        expect(client.getPageCalls.length).toBe(1);
-      } finally {
-        await runtime.dispose();
-      }
-    });
-
     it("invalidates per space", async () => {
       const { client, runtime } = await makeRuntime();
       try {
-        await runtime.getPattern("piece-1");
-        await runtime.getPattern("piece-1", { space: otherDid });
-        runtime.invalidatePattern("piece-1", otherDid);
-        await runtime.getPattern("piece-1"); // still cached
-        await runtime.getPattern("piece-1", { space: otherDid }); // re-fetched
+        await runtime.getPattern(homeDid, "piece-1");
+        await runtime.getPattern(otherDid, "piece-1");
+        runtime.invalidatePattern(otherDid, "piece-1");
+        await runtime.getPattern(homeDid, "piece-1"); // still cached
+        await runtime.getPattern(otherDid, "piece-1"); // re-fetched
         expect(client.getPageCalls).toEqual([
           { pageId: "piece-1", runIt: true, space: homeDid },
           { pageId: "piece-1", runIt: true, space: otherDid },

@@ -71,13 +71,12 @@ describe("RuntimeInternals navigation", () => {
     const runtime = new (RuntimeInternals as any)(
       client,
       spaceDid,
-      undefined,
-      false,
-      spaceDid,
     );
 
     try {
-      await expect(runtime.getSlug("piece-789")).resolves.toBe("demo");
+      await expect(runtime.getSlug(spaceDid, "piece-789")).resolves.toBe(
+        "demo",
+      );
     } finally {
       await runtime.dispose();
     }
@@ -109,9 +108,6 @@ describe("RuntimeInternals navigation", () => {
     const client = new MockRuntimeClient();
     const runtime = new (RuntimeInternals as any)(
       client,
-      spaceDid,
-      undefined,
-      false,
       spaceDid,
     );
 
@@ -190,9 +186,6 @@ describe("RuntimeInternals navigation", () => {
     const client = new MockRuntimeClient();
     const runtime = new (RuntimeInternals as any)(
       client,
-      currentSpace,
-      "current-space",
-      false,
       currentSpace,
     );
 

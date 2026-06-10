@@ -480,7 +480,7 @@ export class RuntimeProcessor {
    * out-of-date callers that still omit it.)
    */
   private getSpaceCtx(space: DID): SpaceContext {
-    const target = space;
+    const target: DID | undefined = space;
     if (!target) {
       throw new Error("Page operations must name a space explicitly.");
     }
@@ -737,27 +737,9 @@ export class RuntimeProcessor {
     };
   }
 
-  /**
-   * Root-pattern ensure/recreate stays home-space only. Both can WRITE
-   * (create + start the default pattern), and they seed the pattern URL
-   * from the requesting user's home `defaultAppUrl` — the right
-   * semantics for your own space, wrong for a foreign one. Mounting an
-   * existing foreign pattern (`PageGet`) doesn't need either. Lift this
-   * when federation defines who provisions a space's root pattern.
-   */
-  private checkRootPatternSpace(space: DID): void {
-    if (space !== this.space) {
-      throw new Error(
-        "Root-pattern operations are home-space only; " +
-          `got space ${space}`,
-      );
-    }
-  }
-
   async handleGetSpaceRootPattern(
     request: PatternGetSpaceRoot,
   ): Promise<PageResponse> {
-    this.checkRootPatternSpace(request.space);
     const { cc } = this.getSpaceCtx(request.space);
     const piece = await cc.ensureDefaultPattern();
     return {
@@ -768,7 +750,6 @@ export class RuntimeProcessor {
   async handleRecreateSpaceRootPattern(
     request: RecreateSpaceRootPatternRequest,
   ): Promise<PageResponse> {
-    this.checkRootPatternSpace(request.space);
     const { cc } = this.getSpaceCtx(request.space);
     const piece = await cc.recreateDefaultPattern();
     return {
