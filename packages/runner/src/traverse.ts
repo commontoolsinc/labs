@@ -1,5 +1,6 @@
 import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   hashSchema,
   internSchema,
@@ -173,13 +174,16 @@ function schemaToken(schema: JSONSchema | undefined): string | number {
 }
 
 /**
- * True when a schema input can safely feed an identity-token memo key:
- * value-like (`undefined`/boolean) or interned (canonical and deep-frozen,
- * so the identity can never go stale through later mutation).
+ * True when a schema input can safely feed an identity-keyed memo:
+ * value-like (`undefined`/boolean), interned, or deep-frozen. Frozen
+ * suffices — the identity cannot go stale through later mutation. The
+ * distinction matters on the server: doc values arrive deep-frozen from the
+ * wire-decode boundary, so their embedded link schemas are frozen but never
+ * interned, and an interned-only gate would bypass every seam memo there.
  */
 function isMemoizableSchemaInput(schema: JSONSchema | undefined): boolean {
   return schema === undefined || typeof schema === "boolean" ||
-    isInternedSchema(schema);
+    isInternedSchema(schema) || isDeepFrozen(schema);
 }
 
 /**
@@ -294,7 +298,7 @@ function schemaAtPathCanonical(
         MISSING_PROPERTY_MARKER,
       )
       : cfc.schemaAtPath(schema, path);
-  if (typeof schema === "boolean" || !isInternedSchema(schema)) {
+  if (typeof schema === "boolean" || !isMemoizableSchemaInput(schema)) {
     return compute();
   }
   let byPath = _schemaAtPathCache.get(schema);
@@ -334,7 +338,7 @@ function combinatorRestSchema(
   schema: JSONSchemaObj,
   keyword: "anyOf" | "oneOf" | "allOf",
 ): JSONSchemaObj {
-  if (!isInternedSchema(schema)) {
+  if (!isMemoizableSchemaInput(schema)) {
     const { [keyword]: _dropped, ...rest } = schema;
     return rest as JSONSchemaObj;
   }
@@ -365,7 +369,7 @@ const _resolvedRefCache = new WeakMap<JSONSchemaObj, JSONSchema | null>();
 function resolveSchemaRefsCanonical(
   schema: JSONSchemaObj,
 ): JSONSchema | undefined {
-  if (!isInternedSchema(schema)) {
+  if (!isMemoizableSchemaInput(schema)) {
     return ContextualFlowControl.resolveSchemaRefs(schema);
   }
   let cached = _resolvedRefCache.get(schema);
