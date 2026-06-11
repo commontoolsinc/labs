@@ -161,7 +161,7 @@ describe("CT-1665: verified binding metadata for non-exported handlers", () => {
     });
   }
 
-  it("registers binding metadata for real profile-home setName/setAvatar/addElement", async () => {
+  it("registers binding metadata for real profile-home setName/setAvatar/mutateElements", async () => {
     const rt = newRuntime();
     try {
       const tx = rt.edit();
@@ -182,7 +182,7 @@ describe("CT-1665: verified binding metadata for non-exported handlers", () => {
       const paths = recordedBindingPaths(rt);
       expect(paths).toContainEqual(["setName"]);
       expect(paths).toContainEqual(["setAvatar"]);
-      expect(paths).toContainEqual(["addElement"]);
+      expect(paths).toContainEqual(["mutateElements"]);
     } finally {
       await rt.dispose();
     }

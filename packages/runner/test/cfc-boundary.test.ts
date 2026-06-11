@@ -8,7 +8,10 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import * as V2Storage from "../src/storage/v2.ts";
 import { raw } from "../src/module.ts";
-import { storedCfcMetadataAppliesToPath } from "../src/cfc/metadata.ts";
+import {
+  readStoredCfcMetadata,
+  storedCfcMetadataAppliesToPath,
+} from "../src/cfc/metadata.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
 import {
@@ -2415,7 +2418,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("rejects CFC-relevant link writes when source metadata is missing", async () => {
+  it("rejects link writes when a PRE-EXISTING source has no metadata", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const seed = runtime.edit();
@@ -2430,6 +2433,15 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         seed,
       );
       target.set({ existing: true });
+      // The unlabeled source pre-exists: written and committed WITHOUT any
+      // schema, in a transaction that never links it anywhere.
+      const unlabeledSeed = runtime.getCell(
+        signer.did(),
+        "cfc-link-missing-source",
+        undefined,
+        seed,
+      );
+      unlabeledSeed.set({ title: "unlabeled" });
       seed.prepareCfc();
       expect((await seed.commit()).ok).toBeDefined();
 
@@ -2441,7 +2453,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         undefined,
         tx,
       );
-      unlabeledSource.set({ title: "unlabeled" });
       const linkedTarget = runtime.getCell(
         signer.did(),
         "cfc-link-missing-source-target",
@@ -2454,6 +2465,68 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(result.error?.message).toContain(
         "missing link source metadata",
       );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("labels a SAME-TRANSACTION link source from the target's own schema", async () => {
+    // A doc this transaction itself wrote and then linked into a labeled
+    // location (the data layer does exactly this when an array/object entry
+    // is split into a child doc) is treated like the inline value it holds:
+    // the link label derives from the target's schema at the target path —
+    // here the location's own confidentiality — instead of failing closed
+    // (CT-1698: profile element writes).
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      seed.setCfcEnforcementMode("enforce-explicit");
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-link-same-tx-source-target",
+        {
+          type: "object",
+          ifc: { confidentiality: ["personal-space"] },
+        },
+        seed,
+      );
+      target.set({ existing: true });
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const sameTxSource = runtime.getCell(
+        signer.did(),
+        "cfc-link-same-tx-source",
+        undefined,
+        tx,
+      );
+      sameTxSource.set({ title: "fresh" });
+      const linkedTarget = runtime.getCell(
+        signer.did(),
+        "cfc-link-same-tx-source-target",
+        undefined,
+        tx,
+      );
+      linkedTarget.set(sameTxSource);
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error).toBeUndefined();
+
+      // The persisted link label carries the location's confidentiality.
+      const verify = runtime.edit();
+      const metadata = readStoredCfcMetadata(verify, {
+        space: signer.did(),
+        id: linkedTarget.getAsNormalizedFullLink().id,
+        scope: "space",
+      });
+      const rootEntry = metadata?.labelMap.entries.find((entry) =>
+        entry.path.length === 0 && entry.origin === "link"
+      );
+      expect(rootEntry?.label.confidentiality).toEqual(["personal-space"]);
+      verify.abort?.();
     } finally {
       await runtime.dispose();
       await storageManager.close();

@@ -2377,6 +2377,38 @@ const rootLabelFromSchema = (
     : derivePersistedLabel(tx, root.schema, root.label);
 };
 
+/**
+ * The result schema a piece's setup wrote as the source doc's ["schema"] meta
+ * — visible read-your-writes for a piece instantiated in THIS transaction
+ * (e.g. a handler materializing a sub-pattern and linking it into a protected
+ * list in one commit), and from storage for a piece set up earlier. A fresh
+ * piece has no stored CFC metadata and no schema write-policy input (its value
+ * is computed by later actions), but this is the same author-declared shape a
+ * pending schema input carries, so the link-label derivation below trusts it
+ * the same way; stored CFC metadata still takes precedence when present.
+ */
+const setupResultSchemaFor = (
+  tx: IExtendedStorageTransaction,
+  source: LinkWritePolicyInput["source"],
+): JSONSchema | undefined => {
+  const document = tx.readOrThrow({
+    space: source.space,
+    id: source.id as URI,
+    scope: source.scope,
+    type: "application/json",
+    path: [],
+  }, {
+    meta: INTERNAL_VERIFIER_META,
+  });
+  if (!isRecord(document)) {
+    return undefined;
+  }
+  const schema = (document as Record<string, unknown>).schema;
+  return schema === undefined || schema === null
+    ? undefined
+    : schema as JSONSchema;
+};
+
 const derivePersistedLinkLabel = (
   tx: IExtendedStorageTransaction,
   input: LinkWritePolicyInput,
@@ -2390,14 +2422,39 @@ const derivePersistedLinkLabel = (
     input.source.scope,
     "application/json",
   );
-  const pendingSourceSchema = candidateSchemas.get(targetKey(input.source));
-  const pendingSourceLabel = pendingSourceSchema !== undefined
+  let pendingSourceSchema = candidateSchemas.get(targetKey(input.source)) ??
+    setupResultSchemaFor(tx, input.source);
+  let pendingSourceLabel = pendingSourceSchema !== undefined
     ? persistedLabelFromSchemaAtPath(
       tx,
       pendingSourceSchema,
       input.source.path,
     )
     : undefined;
+  if (pendingSourceSchema === undefined && sourceMetadata === undefined) {
+    // Child docs minted by this same write: an array/object entry written
+    // into a labeled location is split into its own doc by the data layer,
+    // so the link's "source" is a doc this transaction just created to hold
+    // an inline value. The writer's schema input covers the TARGET path —
+    // derive the label the value would have carried inline. Gated to docs
+    // this transaction actually wrote (a pre-existing doc with persisted
+    // labels resolves through its stored CFC metadata above; one without
+    // stored metadata stays fail-closed unless this tx wrote it).
+    const sourceWrittenInThisTx = [
+      ...(tx.getWriteDetails?.(input.source.space) ?? []),
+    ].some((detail) => detail.address.id === input.source.id);
+    if (sourceWrittenInThisTx) {
+      const targetCandidate = candidateSchemas.get(targetKey(input.target));
+      if (targetCandidate !== undefined) {
+        pendingSourceSchema = targetCandidate;
+        pendingSourceLabel = persistedLabelFromSchemaAtPath(
+          tx,
+          targetCandidate,
+          input.target.path,
+        );
+      }
+    }
+  }
   const linkSchemaLabel = rootLabelFromSchema(tx, input.linkSchema);
   const hasCarriedLabel =
     input.cfcLabelView?.entries.some((entry) => hasLabelValues(entry.label)) ??
