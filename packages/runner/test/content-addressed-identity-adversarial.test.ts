@@ -984,7 +984,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       });
       const identity = resolvePolicyFacingImplementationIdentity(
         { type: "javascript" } as Module,
-        { harness: runtime?.harness, implementation: fn },
+        { implementation: fn },
       );
       expect(identity?.kind).toBe("verified");
       const v = identity as {
@@ -1087,37 +1087,51 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
   });
 
   // ---------------------------------------------------------------------------
-  // Attack 11 — the loadId-less dynamic registrar must not leak a load id (that
-  // would feed CFC bundle-id derivation) and must not be evicted by a real
-  // load that shares its ref. Pinned at the registry seam.
+  // Attack 11 — keyspace separation. E2 deleted every loadId surface, so the
+  // historical "don't leak a verifiedLoadId" concern is structurally moot;
+  // what remains is that admitting a fn to the string-keyed executable index
+  // (the dynamic / legacy rehydration channel) must NOT make it resolvable
+  // through the content-addressed `{ identity, symbol }` index a forged
+  // `$implRef` reads. Pinned at the registry seam.
   // ---------------------------------------------------------------------------
-  describe("attack 11: dynamic registrar never leaks a verifiedLoadId", () => {
-    it("a dynamic ref has NO verifiedLoadId and its partition has NO bundleId (cannot feed bundle-id derivation)", () => {
+  describe("attack 11: admission to the executable index does not grant a content-addressed $implRef", () => {
+    // E2 deleted ALL loadId machinery (no verifiedLoadId to leak, no per-load
+    // partitions, no cross-load repair). The residual invariant the dynamic /
+    // legacy read path must preserve is keyspace separation: the STRING-keyed
+    // executable index (`getExecutableFunction`, the rehydration channel for
+    // pre-flip graphs + host + dynamic artifacts) and the content-addressed
+    // `{ identity, symbol }` index (`getVerifiedImplementation`, what a
+    // serialized `$implRef` resolves through) are independent. Admitting a fn
+    // to the former — the only thing the dynamic registrar does — must NOT
+    // make it resolvable by a forged `$implRef`.
+    it("a string-ref registration is executable but not resolvable by { identity, symbol }", () => {
       const reg = new ExecutableRegistry();
       const fn = (() => {}) as unknown as HarnessedFunction;
-      reg.registerDynamicVerifiedFunction("dyn-ref-leak", fn);
-      // It IS executable (the live-closure rehydration channel)...
-      expect(reg.getExecutableFunction("dyn-ref-leak")).toBe(fn);
-      // ...but carries NO load id: surfacing the reserved partition key as a
-      // verifiedLoadId would leak it into CFC bundle-id derivation.
-      expect(reg.getVerifiedLoadId("dyn-ref-leak")).toBeUndefined();
-      // The reserved partition key itself is not a resolvable bundle.
-      expect(reg.getVerifiedBundleId("dynamic:in-action")).toBeUndefined();
+      reg.registerVerifiedFunction("fid1:dynamic-or-legacy", fn);
+
+      // Executable via the legacy string-keyed channel (the rehydration path).
+      expect(reg.getExecutableFunction("fid1:dynamic-or-legacy")).toBe(fn);
+
+      // ...but invisible to the content-addressed index. An attacker who
+      // crafts a `$implRef` whose `{ identity, symbol }` happens to spell the
+      // same string still resolves nothing — the two indexes never alias.
+      expect(reg.getVerifiedImplementation("fid1", "dynamic-or-legacy"))
+        .toBeUndefined();
+      expect(reg.getVerifiedImplementation("fid1:dynamic-or-legacy", ""))
+        .toBeUndefined();
     });
 
-    it("a real load that shares a dynamic ref does NOT evict it (cross-load repair finds the dynamic owner)", () => {
+    it("a re-registration of a ref points the executable index at the FRESH function (interchangeable by construction)", () => {
+      // Two evaluations of one module mint the same content-derived ref for
+      // behaviorally interchangeable fns; the dynamic registrar likewise
+      // overwrites. There is no stale-pinning and no partitioned divergence to
+      // exploit — last write wins, deterministically.
       const reg = new ExecutableRegistry();
-      const dyn = (() => {}) as unknown as HarnessedFunction;
-      reg.registerDynamicVerifiedFunction("shared-ref", dyn);
-      // A real (esm) load registers the same ref, then re-begins.
-      reg.registerVerifiedFunction(
-        "space:esm:1",
-        "shared-ref",
-        (() => {}) as unknown as HarnessedFunction,
-      );
-      reg.beginVerifiedLoad("space:esm:1");
-      // The ref still resolves — repointed to the dynamic owner, not deleted.
-      expect(reg.getExecutableFunction("shared-ref")).toBe(dyn);
+      const first = (() => {}) as unknown as HarnessedFunction;
+      const second = (() => {}) as unknown as HarnessedFunction;
+      reg.registerVerifiedFunction("shared-ref", first);
+      reg.registerVerifiedFunction("shared-ref", second);
+      expect(reg.getExecutableFunction("shared-ref")).toBe(second);
     });
   });
 
@@ -1136,7 +1150,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       expect(getVerifiedProvenance(hostFn)).toBeUndefined();
       const identity = resolvePolicyFacingImplementationIdentity(
         { type: "javascript", debugName: "unsafe-host:7" } as unknown as Module,
-        { harness: runtime?.harness, implementation: hostFn },
+        { implementation: hostFn },
       );
       expect(identity).toBeUndefined();
     });
@@ -1147,7 +1161,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       });
       const identity = resolvePolicyFacingImplementationIdentity(
         { type: "javascript", debugName: "" } as unknown as Module,
-        { harness: runtime?.harness, implementation: hostFn },
+        { implementation: hostFn },
       );
       // No provenance WeakMap entry → undefined, NOT verified — the canonical
       // src is an own-property the resolver never trusts on its own.
@@ -1160,7 +1174,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       });
       const identity = resolvePolicyFacingImplementationIdentity(
         { type: "javascript", debugName: "forgedBuiltin" } as unknown as Module,
-        { harness: runtime?.harness, implementation: hostFn },
+        { implementation: hostFn },
       );
       expect(identity?.kind).toBe("builtin");
       // A builtin identity is rejected by a verified-BINDING writeAuthorizedBy
