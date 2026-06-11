@@ -17,6 +17,13 @@ interface AssociatedFunction {
   implementation: HarnessedFunction;
 }
 
+// Reserved `verifiedFunctions` partition for loadId-less dynamic
+// registrations ({@link ExecutableRegistry.registerDynamicVerifiedFunction}).
+// Engine-issued load ids always contain an `:esm:` segment
+// (`${prefix}:esm:${n}`), so this key can never collide with a real load and
+// `beginVerifiedLoad` is never called with it.
+const DYNAMIC_REGISTRATION_PARTITION = "dynamic:in-action";
+
 export class ExecutableRegistry {
   private readonly verifiedFunctions = new Map<
     string,
@@ -100,14 +107,28 @@ export class ExecutableRegistry {
    * artifact's serialized module on the legacy
    * `{ implementationRef, body omitted }` form, whose
    * `getExecutableFunction` lookup is the live-closure rehydration channel.
-   * No per-load partition entry and no load-id mapping are written (there is
-   * no load); re-registration on a later run of the creating action
-   * overwrites to the fresh function, matching per-load registration.
+   * Re-registration on a later run of the creating action overwrites to the
+   * fresh function, matching per-load registration.
+   *
+   * The registration is held in a RESERVED partition of `verifiedFunctions`
+   * (never a real load id — engine ids always carry an `:esm:` segment) so
+   * that `beginVerifiedLoad`'s cross-load repair sees an owner for a shared
+   * ref and repoints the index to the dynamic function instead of deleting
+   * it (cubic P1 on PR #4053). `verifiedFunctionLoadIds` is deliberately NOT
+   * written: there is no load to resolve, and surfacing the partition key as
+   * a `verifiedLoadId` would leak it into CFC bundle-id derivation — the
+   * loadId-less CFC path must keep flowing through provenance.
    */
   registerDynamicVerifiedFunction(
     implementationRef: string,
     implementation: HarnessedFunction,
   ): void {
+    let partition = this.verifiedFunctions.get(DYNAMIC_REGISTRATION_PARTITION);
+    if (!partition) {
+      partition = new Map();
+      this.verifiedFunctions.set(DYNAMIC_REGISTRATION_PARTITION, partition);
+    }
+    partition.set(implementationRef, implementation);
     this.verifiedFunctionIndex.set(implementationRef, implementation);
     this.recordVerifiedBindingMetadata(implementationRef, implementation);
   }
