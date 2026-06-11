@@ -104,6 +104,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-drag-source` | Wraps draggable content; pairs with `cf-drop-zone` (see [drag-and-drop](../patterns/meta/drag-and-drop.md)) | `$cell` |
 | `cf-draggable` | Absolutely-positioned draggable container (x/y) | |
 | `cf-drop-zone` | Droppable region emitting `cf-drop` events (see [drag-and-drop](../patterns/meta/drag-and-drop.md)) | |
+| `cf-empty-state` | Centered, muted placeholder for empty lists (see [cf-empty-state](#cf-empty-state)) | |
 | `cf-fab` | Morphing floating action button that expands into a panel | |
 | `cf-file-download` | File download button (encapsulates blob/anchor download) | `$data`, `$filename` |
 | `cf-file-input` | Generic file upload | |
@@ -336,6 +337,32 @@ fade-edges, or a styled/hidden scrollbar.
   </cf-vscroll>
   <cf-message-input slot="footer" />
 </cf-screen>
+```
+
+---
+
+## cf-empty-state
+
+Centered, muted placeholder for empty lists and regions. Use instead of ad-hoc
+`<div style="text-align: center; color: ...; padding: 2rem;">` blocks.
+
+The message comes from the `message` attribute (simple case) or the default
+slot. Optional `icon` and `action` slots render above and below the message.
+
+```tsx
+// Simple case — message attribute
+{items.get().length === 0
+  ? <cf-empty-state message="No items yet. Add one below!" />
+  : null}
+
+// With icon and a call to action
+<cf-empty-state>
+  <span slot="icon">📋</span>
+  Your shopping list is empty.
+  <cf-button slot="action" size="sm" onClick={addItem}>
+    Add first item
+  </cf-button>
+</cf-empty-state>
 ```
 
 ---

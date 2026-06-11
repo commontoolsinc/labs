@@ -81,6 +81,7 @@ interface CatalogInput {
           { id: "label"; label: "Label" },
           { id: "chip"; label: "Chip" },
           { id: "badge"; label: "Badge" },
+          { id: "empty-state"; label: "Empty State" },
           { id: "separator"; label: "Separator" },
           { id: "markdown"; label: "Markdown" },
           { id: "svg"; label: "SVG" },
