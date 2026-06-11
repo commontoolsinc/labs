@@ -14,6 +14,7 @@ import {
 import {
   resolveOpPattern,
   resolveStoredPattern,
+  resolveStoredPatternAsync,
 } from "../src/builtins/op-pattern-ref.ts";
 import type { Opaque } from "../src/builder/types.ts";
 
@@ -217,5 +218,57 @@ describe("resolveStoredPattern (stored tool patterns)", () => {
     expect(resolveStoredPattern({} as never, graph)).toBe(graph);
     expect(resolveStoredPattern({} as never, undefined)).toBeUndefined();
     expect(resolveStoredPattern({} as never, null)).toBeUndefined();
+  });
+
+  it("async net: loads an unresolvable refs-only value by identity", async () => {
+    const live = { argumentSchema: true } as never;
+    let loadedWith: unknown[] = [];
+    const fakeRuntime = {
+      patternManager: {
+        artifactFromIdentitySync: () => undefined,
+        loadPatternByIdentity: (
+          identity: string,
+          symbol: string,
+          space: string,
+        ) => {
+          loadedWith = [identity, symbol, space];
+          return Promise.resolve(live);
+        },
+      },
+    } as never;
+    const resolved = await resolveStoredPatternAsync(
+      fakeRuntime,
+      refValue,
+      "did:test:space" as never,
+    );
+    expect(resolved).toBe(live);
+    expect(loadedWith).toEqual(["cf:module/abc", "default", "did:test:space"]);
+  });
+
+  it("async net: sync hits and plain graphs never reach the loader", async () => {
+    const live = { argumentSchema: true } as never;
+    const fakeRuntime = {
+      patternManager: {
+        artifactFromIdentitySync: () => live,
+        loadPatternByIdentity: () => {
+          throw new Error("must not load");
+        },
+      },
+    } as never;
+    expect(
+      await resolveStoredPatternAsync(
+        fakeRuntime,
+        refValue,
+        "did:test:space" as never,
+      ),
+    ).toBe(live);
+    const graph = { nodes: [], result: {} };
+    expect(
+      await resolveStoredPatternAsync(
+        fakeRuntime,
+        graph,
+        "did:test:space" as never,
+      ),
+    ).toBe(graph);
   });
 });

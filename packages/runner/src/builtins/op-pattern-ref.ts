@@ -1,5 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { isPattern, type Pattern } from "../builder/types.ts";
+import type { MemorySpace } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
 
 /**
@@ -97,4 +98,28 @@ export function resolveStoredPattern(
     return undefined;
   }
   return raw as Pattern;
+}
+
+/**
+ * {@link resolveStoredPattern} with the async net for refs-only stored values
+ * whose module never evaluated in this session: load it by identity from the
+ * space's persisted compiled artifacts (compilation persists them in-space as
+ * an expected invariant). The usual caller is llm-dialog's tool invocation —
+ * a stored toolDef pattern is normally in-session live (whatever defined the
+ * tool mentioned the pattern, so its module rode that bundle), but a tool
+ * invoked cold after a reload may reach for storage.
+ */
+export async function resolveStoredPatternAsync(
+  runtime: Runtime,
+  raw: unknown,
+  space: MemorySpace,
+): Promise<Pattern | undefined> {
+  const resolved = resolveStoredPattern(runtime, raw);
+  if (resolved !== undefined || !isPatternRefSentinel(raw)) return resolved;
+  const { identity, symbol } = raw.$patternRef;
+  return await runtime.patternManager.loadPatternByIdentity(
+    identity,
+    symbol,
+    space,
+  );
 }

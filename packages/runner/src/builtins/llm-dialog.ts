@@ -27,7 +27,7 @@ import { isBoolean, isObject, isRecord } from "@commonfabric/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import { isCell, isStream } from "../cell.ts";
 import { type CellScope, ID, NAME, type Pattern } from "../builder/types.ts";
-import { resolveStoredPattern } from "./op-pattern-ref.ts";
+import { resolveStoredPatternAsync } from "./op-pattern-ref.ts";
 import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
 import { Runtime } from "../runtime.ts";
 import { spaceCellSchema } from "../runtime.ts";
@@ -2250,11 +2250,12 @@ async function handleInvoke(
     handler = resolved.handler;
   }
 
-  // A pattern read raw from a cell is the boundary serialization: prefer
-  // resolving the live canonical pattern via its $patternRef (trust brand +
-  // entry ref intact), fall back to the stored graph (pre-dual-write data or
-  // evicted module).
-  pattern = resolveStoredPattern(runtime, pattern) as
+  // A pattern read raw from a cell is the boundary serialization (refs-only
+  // since identity E4): resolve the live canonical pattern via its
+  // $patternRef — sync from the session-lifetime artifact index, async from
+  // the space's persisted compiled artifacts when the module never evaluated
+  // here — with stored graph vintages passing through unchanged.
+  pattern = await resolveStoredPatternAsync(runtime, pattern, space) as
     | Readonly<Pattern>
     | undefined;
 
