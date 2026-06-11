@@ -2297,6 +2297,73 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         }
       },
     );
+
+    // The mounted root cell is an egress like any descendant cell: its own
+    // label must pass the root policy before its resolved content renders.
+    await t.step(
+      "default ceiling gates a labeled cell mounted as the root",
+      async () => {
+        const blocked = createOpsCollector();
+        const blockedReconciler = new WorkerReconciler({
+          onOps: blocked.onOps,
+          renderConfidentialityCeiling: { atoms: [], caveatKinds: [] },
+        });
+        const cancelBlocked = blockedReconciler.mount(confidential);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = blocked.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            false,
+          );
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancelBlocked();
+        }
+
+        const admitted = createOpsCollector();
+        const admittedReconciler = new WorkerReconciler({
+          onOps: admitted.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [healthRecordAtom],
+            caveatKinds: [],
+          },
+        });
+        const cancelAdmitted = admittedReconciler.mount(confidential);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = admitted.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            true,
+          );
+        } finally {
+          cancelAdmitted();
+        }
+      },
+    );
+
+    await t.step(
+      "a labeled root cell still renders when no ceiling is configured",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+        const cancel = reconciler.mount(confidential);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
   } finally {
     await runtime.dispose();
     await storageManager.close();

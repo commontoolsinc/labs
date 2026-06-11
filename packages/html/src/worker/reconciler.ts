@@ -182,6 +182,25 @@ export class WorkerReconciler {
       addCancel(
         vnode.sink((resolvedVnode: unknown) => {
           logger.debug("root-cell-update", () => ({ resolvedVnode }));
+          // The mounted cell is an egress like any descendant cell: gate its
+          // own label against the root policy (the host ceiling when
+          // configured) before rendering its resolved content. Checked per
+          // update so label changes re-evaluate, mirroring renderCellChild.
+          if (
+            !this.canRenderCellUnderPolicy(
+              vnode as Cell<unknown>,
+              this.rootRenderPolicy,
+            )
+          ) {
+            this.reconcileIntoWrapper(
+              ctx,
+              wrapperState,
+              this.blockedPlaceholderVNode(),
+              this.rootRenderPolicy,
+            );
+            this.rootChildId = wrapperState.currentChild?.nodeId ?? null;
+            return;
+          }
           // Validate that the resolved value is a valid render node
           if (!this.isValidRenderNode(resolvedVnode)) {
             this.onError?.(

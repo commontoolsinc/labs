@@ -1876,3 +1876,98 @@ describe("RuntimeProcessor per-space piece contexts", () => {
     }
   });
 });
+
+// S16 phase D: the host's render confidentiality ceiling must reach every
+// mount's reconciler — a ceiling configured at initialization that never
+// arrives at the egress surface is silently unbounded rendering.
+describe("RuntimeProcessor vdom mount render policy", () => {
+  const handleVDomMount = (RuntimeProcessor.prototype as any).handleVDomMount;
+  const handleVDomUnmount =
+    (RuntimeProcessor.prototype as any).handleVDomUnmount;
+
+  type RootRenderPolicy = {
+    maxConfidentiality?: readonly unknown[];
+    caveatKindAllow?: readonly string[];
+  };
+
+  async function mountAndGetRootPolicy(
+    renderConfidentialityCeiling:
+      | { atoms?: unknown[]; caveatKinds?: string[] }
+      | undefined,
+  ): Promise<RootRenderPolicy> {
+    const { runtime } = createRuntime();
+    const space = cfcSigner.did();
+    const tx = runtime.edit();
+    const cell = runtime.getCell<string>(
+      space,
+      "vdom-mount-render-policy",
+      undefined,
+      tx,
+    );
+    cell.set("hello");
+    const commit = await tx.commit();
+    expect(commit.ok !== undefined).toBe(true);
+
+    const state = {
+      runtime,
+      vdomMounts: new Map<
+        number,
+        { reconciler: unknown; cancel: () => void }
+      >(),
+      vdomBatchIdCounter: 0,
+      renderDeclassificationPolicy: "allow",
+      renderConfidentialityCeiling,
+      handleVDomUnmount,
+    };
+    // handleVDomMount's onOps/onError callbacks post to the worker scope;
+    // stub postMessage for the main-thread test.
+    const hadPostMessage = "postMessage" in globalThis;
+    const originalPostMessage = (globalThis as any).postMessage;
+    (globalThis as any).postMessage = () => {};
+    try {
+      handleVDomMount.call(state, {
+        type: RequestType.VDomMount,
+        mountId: 1,
+        cell: cell.getAsNormalizedFullLink() as unknown as CellRef,
+      });
+      const mount = state.vdomMounts.get(1);
+      expect(mount).toBeDefined();
+      const policy = (mount!.reconciler as { rootRenderPolicy?: unknown })
+        .rootRenderPolicy as RootRenderPolicy;
+      handleVDomUnmount.call(state, {
+        type: RequestType.VDomUnmount,
+        mountId: 1,
+      });
+      // Let queued reconciler flushes drain while the stub is in place.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return policy;
+    } finally {
+      if (hadPostMessage) {
+        (globalThis as any).postMessage = originalPostMessage;
+      } else {
+        delete (globalThis as any).postMessage;
+      }
+      await runtime.dispose();
+    }
+  }
+
+  it("threads the configured ceiling into each mount's reconciler", async () => {
+    const userAtom = {
+      type: "https://commonfabric.org/cfc/atom/Resource",
+      class: "ActingUser",
+      subject: cfcSigner.did(),
+    };
+    const caveatKind = "https://commonfabric.org/cfc/concepts/prompt-influence";
+    const policy = await mountAndGetRootPolicy({
+      atoms: [userAtom],
+      caveatKinds: [caveatKind],
+    });
+    expect(policy.maxConfidentiality).toEqual([userAtom]);
+    expect(policy.caveatKindAllow).toEqual([caveatKind]);
+  });
+
+  it("keeps mounts unbounded when no ceiling is configured", async () => {
+    const policy = await mountAndGetRootPolicy(undefined);
+    expect(policy.maxConfidentiality).toBeUndefined();
+  });
+});

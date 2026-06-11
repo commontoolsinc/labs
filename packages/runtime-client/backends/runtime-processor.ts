@@ -443,6 +443,7 @@ export class RuntimeProcessor {
     // any present-but-unknown value becomes "deny"; absent stays "allow".
     processor.renderDeclassificationPolicy =
       normalizeRenderDeclassificationPolicy(data.renderDeclassificationPolicy);
+    processor.renderConfidentialityCeiling = data.renderConfidentialityCeiling;
     // Site-table v0: the home space carries did → host hints; the
     // runtime reads them as its live host lookup (2026-06-09 federation
     // session — "move the lookup into the runtime itself"). Refusals
@@ -1401,6 +1402,7 @@ export class RuntimeProcessor {
     // Create a reconciler that sends ops to the main thread
     const reconciler = new WorkerReconciler({
       renderDeclassificationPolicy: this.renderDeclassificationPolicy,
+      renderConfidentialityCeiling: this.renderConfidentialityCeiling,
       onOps: (ops: VDomOp[]) => {
         const batchId = this.vdomBatchIdCounter++;
         self.postMessage({
