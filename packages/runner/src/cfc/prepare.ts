@@ -2437,13 +2437,18 @@ const derivePersistedLinkLabel = (
     // so the link's "source" is a doc this transaction just created to hold
     // an inline value. The writer's schema input covers the TARGET path —
     // derive the label the value would have carried inline. Gated to docs
-    // this transaction actually wrote (a pre-existing doc with persisted
-    // labels resolves through its stored CFC metadata above; one without
-    // stored metadata stays fail-closed unless this tx wrote it).
-    const sourceWrittenInThisTx = [
+    // this transaction CREATED (a root-level write with no previous value):
+    // a pre-existing doc with persisted labels resolves through its stored
+    // CFC metadata above, and one without stored metadata stays fail-closed
+    // even when this tx touched one of its fields.
+    const sourceCreatedInThisTx = [
       ...(tx.getWriteDetails?.(input.source.space) ?? []),
-    ].some((detail) => detail.address.id === input.source.id);
-    if (sourceWrittenInThisTx) {
+    ].some((detail) =>
+      detail.address.id === input.source.id &&
+      detail.address.path.length <= 1 &&
+      detail.previousValue === undefined
+    );
+    if (sourceCreatedInThisTx) {
       const targetCandidate = candidateSchemas.get(targetKey(input.target));
       if (targetCandidate !== undefined) {
         pendingSourceSchema = targetCandidate;

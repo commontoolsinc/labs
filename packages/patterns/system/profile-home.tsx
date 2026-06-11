@@ -152,67 +152,94 @@ const appendElement = (
 // against the writing handler's implementation identity — so every element
 // mutation (the exported add/remove streams, the catalog/link-form buttons,
 // the per-row remove) must be an INSTANCE of this one implementation.
-// Instances differ only in bound state, which doesn't change the
-// implementation identity.
+// Instances differ only in bound state — including the explicit `mode`
+// below — which doesn't change the implementation identity.
 const mutateElements = handler<
   MutateProfileElementsEvent,
   {
     elements: Writable<ProfileElement[]>;
-    // Per-row remove binding: when set, this instance removes that element.
+    // Instance intent. Each binding site declares what its events may do, so
+    // a malformed/empty event can never cross purposes (an empty remove must
+    // not add; an empty link form must not add a catalog card):
+    //   "add"     — the exported add stream: event-driven, url or catalog.
+    //   "addCard" — the catalog button: one fixed "Profile card".
+    //   "addLink" — the link form: reads (and clears) the bound form; no-op
+    //               without a URL.
+    //   "remove"  — the exported remove stream / per-row button: removes
+    //               `event.cell ?? state.cell`; no-op without one.
+    mode: "add" | "addCard" | "addLink" | "remove";
+    // Per-row remove binding ("remove" mode).
     cell?: any;
-    // Link form binding: when bound and the event carries no explicit
-    // patternUrl, the URL/title/tag are read from (and cleared on) the form.
+    // Link form binding ("addLink" mode).
     patternUrl?: Writable<string>;
     title?: Writable<string>;
     tag?: Writable<string>;
     userTags?: string[];
   }
 >((event, state) => {
-  const removeCell = event.cell ?? state.cell;
-  if (removeCell !== undefined) {
-    state.elements.set(
-      state.elements.get().filter((element) =>
-        !equals(element.cell, removeCell)
-      ),
-    );
-    return;
-  }
-  const eventUrl = (event.patternUrl ?? "").trim();
-  const formUrl = eventUrl.length === 0
-    ? (state.patternUrl?.get() ?? "").trim()
-    : "";
-  const url = eventUrl.length > 0 ? eventUrl : formUrl;
-  if (url.length > 0) {
-    const fromForm = eventUrl.length === 0;
-    const title = (event.title ??
-      (fromForm ? state.title?.get() : undefined))?.trim() ||
-      url;
-    const tag = (event.tag ??
-      (fromForm ? state.tag?.get() : undefined))?.trim() ||
-      url;
-    appendElement({
-      cell: (UrlPatternReference({ title, url }) as any).for(tag),
-      source: "url",
-      title,
-      tag,
-      userTags: event.userTags ?? state.userTags ?? [],
-    }, state.elements);
-    if (fromForm) {
+  const userTags = event.userTags ?? state.userTags ?? [];
+  switch (state.mode) {
+    case "remove": {
+      const removeCell = event.cell ?? state.cell;
+      if (removeCell === undefined) return;
+      state.elements.set(
+        state.elements.get().filter((element) =>
+          !equals(element.cell, removeCell)
+        ),
+      );
+      return;
+    }
+    case "addLink": {
+      const url = (state.patternUrl?.get() ?? "").trim();
+      if (url.length === 0) return;
+      const title = (state.title?.get() ?? "").trim() || url;
+      const tag = (state.tag?.get() ?? "").trim() || url;
+      appendElement({
+        cell: (UrlPatternReference({ title, url }) as any).for(tag),
+        source: "url",
+        title,
+        tag,
+        userTags,
+      }, state.elements);
       state.patternUrl?.set("");
       state.title?.set("");
       state.tag?.set("");
+      return;
     }
-    return;
+    case "addCard": {
+      appendElement({
+        cell: (ProfileCatalogCard({ title: "Profile card" }) as any).for(
+          "profile-card",
+        ),
+        source: "catalog",
+        title: "Profile card",
+        tag: "profile-card",
+        userTags,
+      }, state.elements);
+      return;
+    }
+    case "add": {
+      const source = event.patternUrl ? "url" : "catalog";
+      const title = event.title ??
+        (source === "url"
+          ? event.patternUrl ?? "Profile pattern"
+          : "Profile card");
+      const tag = event.tag ?? event.catalogId ?? event.patternUrl ??
+        "profile";
+      const cell = source === "url"
+        ? (UrlPatternReference({ title, url: event.patternUrl ?? "" }) as any)
+          .for(tag)
+        : (ProfileCatalogCard({ title }) as any).for(tag);
+      appendElement({
+        cell,
+        tag,
+        userTags,
+        title,
+        source,
+      }, state.elements);
+      return;
+    }
   }
-  const title = event.title ?? "Profile card";
-  const tag = event.tag ?? event.catalogId ?? "profile-card";
-  appendElement({
-    cell: (ProfileCatalogCard({ title }) as any).for(tag),
-    source: "catalog",
-    title,
-    tag,
-    userTags: event.userTags ?? state.userTags ?? [],
-  }, state.elements);
 });
 
 const setName = handler<SetProfileNameEvent, { name: Writable<string> }>(
@@ -284,9 +311,10 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       elements,
       setName: setName({ name }),
       setAvatar: setAvatar({ avatar }),
-      // Both exported streams are instances of the one authorized writer.
-      addElement: mutateElements({ elements }),
-      removeElement: mutateElements({ elements }),
+      // Both exported streams are instances of the one authorized writer,
+      // pinned to their declared purpose via the bound mode.
+      addElement: mutateElements({ elements, mode: "add" }),
+      removeElement: mutateElements({ elements, mode: "remove" }),
       initialNameApplied,
       [UI]: (
         <cf-screen
@@ -331,6 +359,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
               <cf-button
                 onClick={mutateElements({
                   elements,
+                  mode: "addCard",
                   userTags: parsedUserTags,
                 })}
               >
@@ -346,6 +375,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
               <cf-button
                 onClick={mutateElements({
                   elements,
+                  mode: "addLink",
                   patternUrl,
                   title: elementTitle,
                   tag: elementTag,
@@ -374,6 +404,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
                     variant="ghost"
                     onClick={mutateElements({
                       elements,
+                      mode: "remove",
                       cell: element.cell,
                     })}
                   >

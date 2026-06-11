@@ -163,12 +163,11 @@ const mergeSetLikeIfcArray = (
         if (!deepEqual(existing, candidate)) {
           // One transaction can record the same protected field through a
           // schema input whose `writeAuthorizedBy` claim was rebound with the
-          // authoring identity's bundleId and one recorded without an
+          // authoring identity's provenance stamp and one recorded without an
           // identity (unstamped). The BINDING (file + path) is what the claim
-          // means; the bundle stamp is provenance added per input. Mirror
-          // prepare's `schemasEqualIgnoringWriterBundleIds` tolerance and
-          // keep the stamped claim. Two DIFFERENT stamps (or different
-          // bindings) still conflict.
+          // means; the stamp is provenance added per input — keep the stamped
+          // claim. Two DIFFERENT stamps (or different bindings) still
+          // conflict.
           if (key === "writeAuthorizedBy") {
             const reconciled = reconcileWriterClaimStamp(existing, candidate);
             if (reconciled !== undefined) {

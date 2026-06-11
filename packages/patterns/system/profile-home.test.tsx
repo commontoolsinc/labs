@@ -20,6 +20,14 @@ export default pattern(() => {
     }
   });
 
+  // A remove event without a cell must be a no-op — the consolidated
+  // mutateElements writer dispatches on the instance's bound mode, so a
+  // malformed remove must never fall through to an add (cf-review on
+  // CT-1698).
+  const action_remove_with_empty_event = action(() => {
+    profile.removeElement.send({});
+  });
+
   const action_clear_name = action(() => {
     profile.setName.send({ name: "" });
   });
@@ -64,6 +72,8 @@ export default pattern(() => {
       { action: action_add_catalog_element },
       { assertion: assert_added_element },
       { action: action_remove_catalog_element },
+      { assertion: assert_removed_element },
+      { action: action_remove_with_empty_event },
       { assertion: assert_removed_element },
     ],
   };
