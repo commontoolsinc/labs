@@ -83,39 +83,27 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
           </cf-vstack>
 
           <cf-vscroll flex showScrollbar fadeEdges>
-            <cf-vstack gap="3" style="padding: 1rem;">
+            <cf-vstack gap="3" padding="4">
               <cf-card>
                 <cf-vstack gap="2">
-                  <cf-vstack gap="1">
-                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
-                      Title
-                    </label>
+                  <cf-field label="Title">
                     <cf-input $value={title} placeholder="Title" />
-                  </cf-vstack>
+                  </cf-field>
 
-                  <cf-vstack gap="1">
-                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
-                      Author
-                    </label>
+                  <cf-field label="Author">
                     <cf-input $value={author} placeholder="Author name" />
-                  </cf-vstack>
+                  </cf-field>
 
-                  <cf-vstack gap="1">
-                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
-                      URL
-                    </label>
+                  <cf-field label="URL">
                     <cf-input
                       $value={url}
                       placeholder="https://..."
                       type="url"
                     />
-                  </cf-vstack>
+                  </cf-field>
 
                   <cf-hstack gap="2">
-                    <cf-vstack gap="1" style="flex: 1;">
-                      <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
-                        Type
-                      </label>
+                    <cf-field label="Type" style="flex: 1;">
                       <cf-select
                         $value={type}
                         items={[
@@ -125,12 +113,9 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
                           { label: "🎬 Video", value: "video" },
                         ]}
                       />
-                    </cf-vstack>
+                    </cf-field>
 
-                    <cf-vstack gap="1" style="flex: 1;">
-                      <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
-                        Status
-                      </label>
+                    <cf-field label="Status" style="flex: 1;">
                       <cf-select
                         $value={status}
                         items={[
@@ -140,13 +125,10 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
                           { label: "Abandoned", value: "abandoned" },
                         ]}
                       />
-                    </cf-vstack>
+                    </cf-field>
                   </cf-hstack>
 
-                  <cf-vstack gap="1">
-                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
-                      Rating
-                    </label>
+                  <cf-field label="Rating">
                     <cf-select
                       $value={rating}
                       items={[
@@ -158,21 +140,18 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
                         { label: "★★★★★ (5)", value: 5 },
                       ]}
                     />
-                  </cf-vstack>
+                  </cf-field>
                 </cf-vstack>
               </cf-card>
 
               <cf-card>
-                <cf-vstack gap="1">
-                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
-                    Notes
-                  </label>
+                <cf-field label="Notes">
                   <cf-textarea
                     $value={notes}
                     placeholder="Your thoughts, highlights, quotes..."
                     rows={8}
                   />
-                </cf-vstack>
+                </cf-field>
               </cf-card>
             </cf-vstack>
           </cf-vscroll>
