@@ -28,7 +28,6 @@ import type { Opaque } from "../src/builder/types.ts";
  */
 
 const signer = await Identity.fromPassphrase("pattern-ref-dual-write");
-const space = signer.did();
 
 const PROGRAM: RuntimeProgram = {
   main: "/main.tsx",
@@ -88,9 +87,11 @@ describe("pattern $patternRef dual-write at the JSON boundary", () => {
       JSON.stringify(await runtime.patternManager.compilePattern(PROGRAM)),
     );
     const second = JSON.parse(
-      JSON.stringify(await runtime.patternManager.compilePattern({
-        ...PROGRAM,
-      })),
+      JSON.stringify(
+        await runtime.patternManager.compilePattern({
+          ...PROGRAM,
+        }),
+      ),
     );
     expect(first.$patternRef).toBeDefined();
     expect(first.$patternRef).toEqual(second.$patternRef);
