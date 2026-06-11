@@ -752,7 +752,10 @@ export class PatternManager {
       return await this.compileViaCellCache(program, cacheCtx);
     }
     const { id, graph, mainSpecifier, entryIdentity } = await this.runtime
-      .harness.compileToRecordGraph(program);
+      .harness.compileToRecordGraph(
+        program,
+        cacheCtx ? { fabricImports: { space: cacheCtx.space } } : {},
+      );
     cacheCtx?.onEntryIdentity?.(entryIdentity);
     const result = this.runtime.harness.evaluateRecordGraph(
       id,
@@ -818,6 +821,7 @@ export class PatternManager {
     let compiled;
     try {
       compiled = await harness.compileToRecordGraph(program, {
+        fabricImports: { space },
         // The bodies returned below come from `loadCompiledClosure`, an
         // integrity-gated (`requiredIntegrity`, fail-closed) read of the
         // compiled set. On a full hit the CFC integrity label is the security
@@ -1025,7 +1029,14 @@ export class PatternManager {
     } finally {
       readTx.abort?.("load-pattern-by-identity read complete");
     }
-    if (!closure.has(entryIdentity)) return undefined;
+    if (!closure.has(entryIdentity)) {
+      return await this.tryColdLoadByIdentity(
+        entryIdentity,
+        symbol,
+        space,
+        cacheOpts,
+      );
+    }
 
     const cachedModules: CachedCompiledModule[] = [...closure].map(
       ([identity, doc]) => ({
@@ -1056,6 +1067,95 @@ export class PatternManager {
       return pattern;
     } catch (error) {
       logger.warn("load-pattern-by-identity-miss", () => [
+        `entry=${entryIdentity}`,
+        `symbol=${symbol}`,
+        String(error),
+      ]);
+      return await this.tryColdLoadByIdentity(
+        entryIdentity,
+        symbol,
+        space,
+        cacheOpts,
+      );
+    }
+  }
+
+  /**
+   * Runtime-version-bump recovery for a content-addressed pattern reference:
+   * recompile from the verified source closure, letting fabric imports refetch
+   * their own source closures from the same space.
+   */
+  private async tryColdLoadByIdentity(
+    entryIdentity: string,
+    symbol: string,
+    space: MemorySpace,
+    cacheOpts: { runtimeVersion: string; compilerDid: string },
+  ): Promise<Pattern | undefined> {
+    const harness = this.runtime.harness;
+    const readTx = this.runtime.edit();
+    let sourceDocs;
+    try {
+      sourceDocs = await loadVerifiedSourceClosure(
+        this.runtime,
+        space,
+        entryIdentity,
+        readTx,
+      );
+    } finally {
+      readTx.abort?.("load-pattern-by-identity source read complete");
+    }
+    if (sourceDocs === undefined) return undefined;
+    const entry = sourceDocs.get(entryIdentity);
+    if (entry === undefined) return undefined;
+
+    const sourceFiles: Source[] = [...sourceDocs.values()].map((doc) => ({
+      name: doc.filename,
+      contents: doc.code,
+    }));
+
+    try {
+      const compiled = await harness.compileResolvedToRecordGraph(
+        sourceFiles,
+        entry.filename,
+        { fabricImports: { space } },
+      );
+      if (compiled.entryIdentity !== entryIdentity) {
+        throw new Error(
+          `source closure recompiled to ${compiled.entryIdentity}, expected ${entryIdentity}`,
+        );
+      }
+      const cachedModules: CachedCompiledModule[] = compiled.modules.map(
+        (module) => ({
+          identity: module.identity,
+          filename: module.filename,
+          code: module.js,
+          ...(module.sourceMap !== undefined
+            ? { sourceMap: module.sourceMap as never }
+            : {}),
+          imports: module.imports,
+        }),
+      );
+      const result = await harness.evaluateCachedModules(
+        cachedModules,
+        entryIdentity,
+        { sourceFiles },
+      );
+      const pattern = this.patternFromMain(result, symbol, entryIdentity);
+      const writeBack = this.writeBackCompileCache(
+        space,
+        compiled.modules,
+        entryIdentity,
+        cacheOpts,
+      );
+      this.compileCacheWrites.add(writeBack);
+      this.pendingCacheWriteBacks.add(writeBack);
+      writeBack.finally(() => {
+        this.compileCacheWrites.delete(writeBack);
+        this.pendingCacheWriteBacks.delete(writeBack);
+      });
+      return pattern;
+    } catch (error) {
+      logger.warn("load-pattern-by-identity-source-miss", () => [
         `entry=${entryIdentity}`,
         `symbol=${symbol}`,
         String(error),
