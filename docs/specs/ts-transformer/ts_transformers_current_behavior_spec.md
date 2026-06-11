@@ -260,17 +260,21 @@ itself resolves through the Common Fabric provenance rules in §5.
 Validates that property paths detected by capability analysis can actually
 resolve against the declared parameter type during schema shrinking.
 
-Detection occurs in `applyShrinkAndWrap` (schema-injection.ts) and in the
-`defaults_only` branch of `applyCapabilitySummaryToArgument`. After shrinking
-completes, `validateShrinkCoverage` compares requested top-level path heads
-against what was materialized in the shrunk result.
+Detection occurs in `applyShrinkAndWrap` and `validateShrinkCoverage` (both in
+`type-shrinking.ts`; `schema-injection.ts` and `lift-applied-strategy.ts` call
+into them), including the `defaults_only` branch of
+`applyCapabilitySummaryToArgument`. After shrinking completes,
+`validateShrinkCoverage` compares requested top-level path heads against what
+was materialized in the shrunk result.
 
-Path extraction (`extractAccessPath` in capability-analysis.ts) sees through
-type assertions (`as any`, `as T`, angle-bracket casts) at every level of
-property/element access chains. For example `(state as any).foo` resolves to a
-read of `state.foo` because `unwrapExpression` is applied after each step up the
-access chain. This means `as any` single casts do not hide property accesses
-from capability analysis.
+Path extraction (`extractAccessPath` in capability-analysis.ts) sees through the
+non-semantic wrappers `unwrapExpression` strips — parenthesization, `as`
+assertions, angle-bracket type assertions, `satisfies`, and non-null (`!`) — at
+every level of property/element access chains. `unwrapExpression` is applied to
+the receiver after each property/element step, so for example `(state as any)
+.foo` resolves to a read of `state.foo`. This means single casts (or
+`satisfies`/`!` wrappers) do not hide property accesses from capability
+analysis.
 
 When interprocedural analysis is enabled (compute-context builders like `lift`,
 `handler`), read paths discovered in helper function bodies propagate
@@ -302,15 +306,24 @@ Guards that skip validation:
 - synthetic parameters injected by the pipeline (`__ct_pattern_input`,
   `__param0`, etc. — names starting with `__`)
 - `never`-typed parameters (bottom type, vacuously valid)
+- `any`-typed parameters (top type; the runtime fetches everything, so every key
+  is reachable — this is what distinguishes `any` from `unknown`)
 - paths whose head is `"key"` (reactive proxy accessor injected by
   `PatternCallbackLoweringTransformer`)
 
 Diagnostics:
 
 - **Error** `schema:unknown-type-access`
-  - parameter is typed as `unknown` and the code accesses properties, OR one or
-    more accessed property heads resolve to `unknown`-typed members on an
-    otherwise concrete type
+  - fires in any of these cases:
+    - parameter base type is `unknown` and the code accesses properties
+    - parameter base type is an **uninstantiated generic type parameter** and
+      the code accesses properties (the `isUnknownBase` check treats
+      `TypeFlags.TypeParameter` like `Unknown` — an unresolved `<T>` base cannot
+      express a fetch shape any more than `unknown` can)
+    - one or more accessed property heads resolve to `unknown`-typed **members**
+      on an otherwise concrete type (e.g. `{ data?: unknown }`)
+    - a **wildcard** parameter (passed to an opaque/unanalyzable function) whose
+      base type is `unknown` (see the wildcard note above)
   - message lists the accessed property heads and instructs the author to
     replace `unknown` with a concrete type
 - **Error** `schema:path-not-in-type`
