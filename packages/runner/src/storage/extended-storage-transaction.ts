@@ -62,6 +62,7 @@ import {
   DEFAULT_CFC_FLOW_LABELS_MODE,
   flowLabelWorkExists,
   flowReadExcluded,
+  gatedSinkRequestExists,
   type ImplementationIdentity,
   type PostCommitSideEffect,
   prepareBoundaryCommit,
@@ -801,6 +802,27 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         flowLabelWorkExists(this)
       ) {
         this.markCfcRelevant("flow-labels");
+      }
+      // Sink-request ceiling relevance (audit item 21): a request built from a
+      // value pulled through a schema-less link marks nothing, so the egress
+      // would otherwise commit without prepareCfc and skip the ceiling check.
+      // Independent of the flow dial. Unlike the flow-labels probe above this
+      // reads no stored metadata (only already-recorded policy inputs), so it
+      // is safe to fire even once `prepare` is `invalidated` — and it MUST: a
+      // late confidential read plus a late sink-request flips an early
+      // `prepared` to `invalidated` (see `invalidateCfc` triggers) while
+      // leaving `relevant` false, and without marking here the enforcement
+      // reject below is skipped and the request flushes fail-open (Codex P2 on
+      // #4070). A genuinely `prepared` transaction either was already relevant
+      // (so this guard is moot) or read nothing confidential (consumed set
+      // empty — nothing to gate), so only the non-prepared states need this.
+      if (
+        !this.cfcState.relevant &&
+        this.cfcState.prepare.status !== "prepared" &&
+        this.cfcState.enforcementMode !== "disabled" &&
+        gatedSinkRequestExists(this)
+      ) {
+        this.markCfcRelevant("sink-request-ceiling");
       }
       if (
         this.cfcState.relevant &&

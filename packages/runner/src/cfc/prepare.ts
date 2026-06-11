@@ -1225,6 +1225,36 @@ export const flowLabelWorkExists = (
   return false;
 };
 
+/**
+ * Relevance trigger for the per-sink confidentiality ceiling (audit item 21):
+ * true when the transaction recorded a sink-request write-policy input whose
+ * sink declares a ceiling. Used by the commit chokepoint to auto-mark
+ * relevance, the same way `flowLabelWorkExists` does for the flow dial.
+ *
+ * Without this, a request assembled from a value pulled through a schema-less
+ * link never marks the transaction relevant: the materializing read carries no
+ * `ifc` schema and the read target's stored metadata is not consulted on that
+ * read path, so nothing calls `markCfcRelevant`. The transaction then commits
+ * without `prepareCfc`, and `verifySinkRequestCeilings` (which only runs inside
+ * `prepareBoundaryCommit`) never gates the egress — the request leaves carrying
+ * confidentiality outside the ceiling. Tying relevance to the egress act itself
+ * closes that gap regardless of how the request's inputs were read: the same
+ * transaction's consumed reads still supply the confidentiality the ceiling is
+ * checked against (§5.2.1 / §7.3-7.5 egress gate).
+ */
+export const gatedSinkRequestExists = (
+  tx: IExtendedStorageTransaction,
+): boolean => {
+  const state = tx.getCfcState();
+  const ceilings = state.sinkMaxConfidentiality;
+  if (ceilings === undefined) {
+    return false;
+  }
+  return state.writePolicyInputs.some((input) =>
+    input.kind === "sink-request" && ceilings[input.sink] !== undefined
+  );
+};
+
 const walkIfcSchema = (
   schema: JSONSchema,
   path: readonly string[] = [],
