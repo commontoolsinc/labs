@@ -1,10 +1,11 @@
 # Work order 07 — Phase 3: Node records, liveness, the new pass
 
-> The structural cutover. Several PRs on one branch series, in the
-> sub-order sequence below; the full runner suite must be green after
-> EVERY commit (no long red stretches, no parallel old/new flag — see
-> migration plan). Sub-orders: 3a records → 3b liveness → 3c pass+channel
-> → 3d read-delta → 3f facade. PR titles:
+> The structural cutover. Each sub-order is its own stacked branch/PR
+> (`scheduler-v2/07-3a`, `07-3b`, …) per the 00-README stacked-PR
+> protocol; the full runner suite must be green after EVERY commit (no
+> long red stretches, no parallel old/new flag — see migration plan).
+> Sub-orders: 3a records → 3b liveness → 3c pass+channel → 3d read-delta
+> → 3f facade. PR titles:
 > `refactor(runner): scheduler-v2 cutover <3x>: <title>`.
 
 Spec sections that are binding here: §4 (node record), §5 (liveness),

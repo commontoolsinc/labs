@@ -20,8 +20,11 @@
 
 ## Work-order sequence
 
-Execute in this order. Do not start a document until the previous one's exit
-checklist passes (exceptions noted inline).
+Execute in this order. **Do not wait for review between work orders**: when
+an order's exit checklist passes your own self-check and its PR is open,
+continue immediately with the next order on a stacked branch (see "Stacked
+PRs" below). Review happens asynchronously; you address feedback on the
+earlier branch as it arrives while continuing forward.
 
 | # | Document | Contents | Depends on |
 | --- | --- | --- | --- |
@@ -139,11 +142,45 @@ At the end of each work order:
 1. Run the full runner suite: `cd packages/runner && deno task test`.
 2. Run the phase's listed benchmarks; record numbers in PROGRESS.md
    (before/after where the order says to capture a baseline first).
-3. Run the work order's exit-checklist greps.
-4. Push the branch, open a PR titled as the work order specifies, with the
-   PROGRESS.md excerpt for the phase in the description.
-5. Wait for review before starting the next work order (unless told to
-   proceed).
+3. Run the work order's exit-checklist greps (this is your self-check; the
+   reviewer re-runs it asynchronously).
+4. Push the branch, open the stacked PR titled as the work order
+   specifies, with the PROGRESS.md excerpt for the phase in the
+   description.
+5. **Continue immediately** with the next work order on a new branch
+   stacked on this one. Do not block on review.
+
+## Stacked PRs
+
+One branch and one PR per work order, each stacked on the previous:
+
+- Branch naming: `scheduler-v2/01-phase0`, `scheduler-v2/02-e0`,
+  `scheduler-v2/03-e1`, … — created FROM the previous order's branch
+  (`scheduler-v2/01-phase0` is created from `main` once the spec PR has
+  merged, else from the spec branch).
+- PR base: the previous order's branch, so each PR's diff shows only its
+  own work order. When a parent PR merges (and its branch is deleted),
+  GitHub retargets the child to the parent's base automatically; verify
+  the retarget happened and note it in PROGRESS.md.
+- Mark each PR description with its stack position:
+  `Stack: 02/E0 — based on scheduler-v2/01-phase0 (#<parent PR>)`.
+
+Review feedback while you've moved on:
+
+1. Address feedback with new commits ON THE PR'S OWN BRANCH (never on a
+   descendant; never `--amend`, G2 applies).
+2. Then propagate forward: for each descendant branch in stack order, run
+   `git merge <parent-branch>` and push. Use merges, not rebases — no
+   force-pushes anywhere in the stack.
+3. If a feedback fix changes something a later work order built on,
+   STOP the forward work, apply the merge chain, fix the descendants'
+   affected code in the descendant branch (one commit per branch,
+   message `fixup: propagate review fix from <work order>`), record in
+   PROGRESS.md, then resume.
+4. CI on every open PR in the stack stays your responsibility: after any
+   push, check the stack's PR checks and fix reds before continuing new
+   work (perf checks excepted per repo convention: rerun the flagged perf
+   job up to 3× before surfacing).
 
 ## Glossary cross-check
 
