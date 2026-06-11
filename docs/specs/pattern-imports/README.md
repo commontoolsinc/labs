@@ -59,9 +59,10 @@ Design.
   pointer (resolved once, at pin time) or a content hash. Pattern lineage
   (`parents`, `spec` in the pattern meta cell) is metadata, not a resolution
   input.
-- **A package registry product.** The toolshed surface below is a content
-  mirror plus a pointer-resolution endpoint, both trust-free (hash-verified by
-  the client); discovery and curation are out of scope.
+- **A package registry product.** There is no registry service at all: every
+  resolution hop — including cross-host — is an ordinary authenticated cell
+  read, and content is hash-verified by the client regardless of which host
+  served it. Discovery and curation are out of scope.
 
 ## Background: what exists today
 
@@ -76,6 +77,7 @@ Design.
 | Slug cells: generic **redirect link to any cell** (`setSlugLink` is target-agnostic; only `resolvePieceAddress` layers a "must be a piece" check) | `packages/piece/src/slugs.ts:34-80` | Slugs can name pieces *or* patterns today, mechanically |
 | Slug ids: `hashOf({causal:{space, slug}})`; slug grammar `[a-z0-9]+(-[a-z0-9]+)*`, ≤80 chars; **`isSlugAddress(t) = !t.includes(":")`** | `packages/runner/src/slugs.ts` | The existing slug-vs-URI discriminator the grammar reuses |
 | `loadPatternByIdentity(entryIdentity, symbol, space)` | `packages/runner/src/pattern-manager.ts:985` | Existing by-identity load path the resolver builds on |
+| Per-space host routing: `spaceHostMap` resolves each space to its memory host; foreign-host sessions are ordinary authenticated memory sessions (#3947) | `packages/runner/src/storage/v2-remote-session.ts:47` | Cross-toolshed refs are just cell reads in a space routed to another host — no HTTP endpoints needed |
 
 ### The two "pattern by hash" handles, explicitly
 
@@ -360,15 +362,14 @@ Engine wraps the authored resolver; on a `cf:` specifier:
    chase **as ordinary cell reads through the compiling runtime's storage**
    (slug cell redirect, piece `meta(…)` hop, meta-cell `entryIdentity`) —
    `cf check`/`cf dev` already construct a runtime (`packages/cli/lib/dev.ts`),
-   and every production compile happens inside one, so no resolution endpoint
-   is involved and space authz is exactly memory-read authz. The one
-   exception is host-qualified refs (§ Toolshed surface).
+   and every production compile happens inside one, so space authz is exactly
+   memory-read authz. Host-qualified refs are the same reads with the space
+   routed to its host via `spaceHostMap` (§ Cross-host references).
 2. **Identity → source set**, first hit wins, every hop hash-verified:
    1. local/space compile-cache source docs (`pattern:<identity>`, walking
       import links);
-   2. the space named in the reference (if any);
-   3. the toolshed pattern endpoint (below);
-   4. for host-qualified refs, that host's pattern endpoint.
+   2. the space named in the reference, routed to its host if the ref is
+      host-qualified.
 3. **Verify**: recompute `computeModuleHashes` over the fetched program (its
    own namespace, its own authored paths) and require the entry hash to equal
    the requested identity. Mismatch = compile error. This is what makes every
@@ -405,38 +406,34 @@ share compiled artifacts and live module namespaces
 (`modulesByIdentity`, `addressableByIdentity` in `pattern-manager.ts`) — the
 import costs nothing the deployed pattern hasn't already paid.
 
-### 4. Toolshed surface
+### 4. Cross-host references: no service surface at all
 
-Mutable-pointer resolution does **not** get an endpoint for the common case:
-every compile context has a runtime (CLI commands construct one; production
-compiles run inside one), and the chase is ordinary cell reads over the
-existing memory session — which also means space authz is inherited rather
-than re-implemented in an HTTP route.
+A runtime is no longer bound to one memory host: `spaceHostMap`
+(`storage/v2-remote-session.ts:createStorageAddressResolver`, PR #3947)
+routes each space to its host, and a foreign-host session is an ordinary
+authenticated memory session. So a `cf://host/space/ref` reference resolves
+exactly like a local one — slug chase, piece/meta hops, and `pattern:<identity>`
+source-doc reads are all cell reads in a space that happens to live on
+another host, under that host's normal authz. No resolve endpoint, no
+content endpoint; nothing re-implements space authorization in an HTTP
+route, and hash verification of fetched sources is unchanged (it never
+depended on the transport).
 
-One new endpoint, needed for cross-host content:
+Consequences:
 
-- `GET /api/registry/pattern/:identity` → the source set
-  (`{ main, files: [{name, contents}] }`, plus per-module identities) for a
-  **published** pattern. Backed by publication-as-naming: assigning a slug to
-  a pattern meta cell in a toolshed-readable space (sugar: `cf publish`).
-  Responses are immutable and cacheable (`Cache-Control: immutable`, like
-  blobs); clients verify by re-hashing, so mirroring is safe.
-
-And one *possible* endpoint, deferred until host-qualified refs land:
-
-- `GET /api/registry/resolve/:space/:ref` → `{ spaceDid, chain, entryIdentity }`
-  — runs the chase server-side. Its only justified scenario is **pin time for
-  a cross-toolshed mutable ref** (`cf://other-host/...`): the author's runtime
-  has a memory session to *its* toolshed only, and usually no identity on the
-  foreign host, so reading the remote slug/piece chain needs either a one-shot
-  foreign memory session or this GET. That is a rare, authoring-time,
-  human-in-the-loop operation — and if cross-host refs are simply required to
-  be born pinned (resolve once via the publisher's host at authoring time),
-  the compile path never needs it at all. Decide when phase 3 starts; the
-  conservative default is to ship publication (slug → pattern in a public
-  space) such that the chase for *published* names is readable
-  unauthenticated, making this endpoint a thin projection rather than new
-  authority.
+- **Publication is purely a data/authz act**: make the slug cell, the pattern
+  meta cell, and the `pattern:<identity>` source docs readable in a space
+  (`cf publish` is sugar for writing them to such a space and assigning the
+  slug). Whoever can read the space can import; nobody else can.
+- **The host segment maps to a `spaceHostMap` entry.** One mechanical work
+  item: the map is fixed at storage construction today
+  (`v2.ts` options), while a host-qualified ref is discovered mid-compile —
+  the resolver needs either dynamic registration of a space→host route on the
+  live session or a short-lived secondary session for the foreign space.
+- A cacheable, anonymous HTTP mirror for published patterns (CDN-style
+  distribution to readers with no fabric identity) remains *possible* later —
+  it would be trust-free thanks to hash verification — but it is an
+  optimization, not part of this design (§ Open questions).
 
 The existing `/api/patterns/:filename` (repo-file serving) is unrelated and
 unchanged.
@@ -456,14 +453,14 @@ unchanged.
 
 ### Phasing
 
-1. **`cf:pattern:<hash>`, same-space.** No new endpoints, no pinning step —
-   resolution entirely via existing cell-cache source docs +
-   `computeModuleHashes` verification. Proves the resolver/mounting/emit seams.
-2. **Slug/piece refs + pinning**, current toolshed — still no endpoints
-   (resolution = the compiling runtime's storage reads); deploy-time pin
-   rewrite; `cf deps update`.
-3. **`cf publish` + registry pattern endpoint + host-qualified refs**
-   (cross-toolshed); decide the resolve-endpoint question here.
+1. **`cf:pattern:<hash>`, same-space.** No pinning step — resolution entirely
+   via existing cell-cache source docs + `computeModuleHashes` verification.
+   Proves the resolver/mounting/emit seams.
+2. **Slug/piece refs + pinning**, current toolshed; deploy-time pin rewrite;
+   `cf deps update`. (Resolution = the compiling runtime's storage reads
+   throughout — no phase adds a service endpoint.)
+3. **`cf publish` + host-qualified refs** — cross-host reads via
+   `spaceHostMap` routing, incl. the dynamic-route work item above.
 4. **Subpaths; `npm:`/esm.sh vendoring** on the same rails.
 
 ## Security considerations
@@ -476,16 +473,17 @@ unchanged.
   swapping a piece's pattern cannot change any pinned importer; it changes
   only future pins. This closes the classic "dependency hijack via mutable
   pointer" hole by construction.
-- **Mirrors and registries are trust-free.** Every fetched source set is
-  verified by recomputing the Merkle identity; a malicious toolshed can refuse
-  to serve but cannot substitute code.
+- **Hosts are trust-free for content.** Every fetched source set is verified
+  by recomputing the Merkle identity; a malicious host can refuse to serve
+  but cannot substitute code.
 - **CFC.** Module identities are already the content-addressed provenance
   CFC verified-identity resolution uses
   (`docs/specs/content-addressed-action-identity.md`); imported modules verify
   and register exactly like authored ones. No new identity kind is introduced.
-- **No ambient escalation surface.** The registry endpoints expose only what a
-  space-read already grants (resolve endpoint) or what publishing deliberately
-  made public (pattern endpoint).
+- **No new authorization surface.** Resolution and content fetch are memory
+  reads under existing space authz — including cross-host (`spaceHostMap`
+  sessions authenticate like any other). Nothing exposes data a space-read
+  doesn't already grant.
 
 ## Failure modes (all compile-time errors with actionable messages)
 
@@ -494,7 +492,7 @@ unchanged.
 | Slug/space not found, or no read access | "cannot resolve cf:… (space/slug/permission)" naming the failing hop |
 | Chain does not terminate at a pattern (slug → data cell, piece without pattern, …) | "cf:… does not resolve to a pattern" + the chain followed |
 | Unpinned mutable ref in deployed/`--frozen` compile | "unpinned fabric import; run `cf deps update` / deploy to pin" |
-| Source set unavailable at every resolution hop | "source for pattern:<hash> not found (tried: local, space …, registry …)" |
+| Source set unavailable at every resolution hop | "source for pattern:<hash> not found (tried: local cache, space … on host …)" |
 | Hash mismatch on fetched source | "integrity failure for <hash> from <source>" (and the hop is skipped, next source tried) |
 | Cycle during live (unpinned) resolution | "cyclic imports: A → B → A" |
 | Imported source fails SES verification | existing verifier error, attributed to the imported module's original path |
@@ -517,7 +515,7 @@ unchanged.
 - **Dedupe**: importer of a running piece's pattern reuses its compiled docs
   and live module namespace (assert on `esmCacheStats` / `modulesByIdentity`
   hits).
-- **Verification**: tampered source set from a mock registry → integrity
+- **Verification**: tampered source set served by a mock host → integrity
   error; fallback hop succeeds.
 - **Multi-runtime** (`multiUserTest` harness): user 1 deploys + publishes;
   user 2 imports across spaces; CFC verified identity intact.
@@ -531,8 +529,8 @@ unchanged.
    source-disclosure; explicit publish is the conservative default proposed
    here.
 2. **Space-name resolution.** Refs with space *names* (not DIDs) need a
-   name→DID resolution authority; the shell resolves names client-side today.
-   The registry resolve endpoint can own this, but name squatting/renaming
+   name→DID mapping per host; the shell resolves names client-side today and
+   there is no service surface here to hang it on. Name squatting/renaming
    semantics need a decision before phase 2 (DID-form refs sidestep it).
 3. **Slug-cell typing.** The uniform chase duck-types its hops
    (`meta("pattern")` present ⇒ piece; matches `patternMetaSchema` ⇒ pattern
@@ -552,3 +550,13 @@ unchanged.
    with identical pins (status quo for runtime modules, now also for fabric
    refs). Acceptable, but worth stating in the compile-cache invalidation
    docs.
+7. **What "publicly readable" means.** Memory sessions are authenticated;
+   importing requires *some* identity the publishing space grants read to.
+   Does publication mean "readable by any authenticated identity" (a broad
+   grant), and is an anonymous, CDN-cacheable HTTP mirror for published
+   patterns ever wanted on top (trust-free via hash verification, but a
+   second distribution path to maintain)?
+8. **Dynamic space→host routes.** `spaceHostMap` is fixed at storage
+   construction; host-qualified refs discovered mid-compile need dynamic
+   route registration (or a short-lived secondary session). Small, but it
+   touches session lifecycle — design alongside phase 3.
