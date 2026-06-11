@@ -529,15 +529,23 @@ Topological sort over the work set with:
 ### 7.5 Events
 
 Events are dispatched per **ordering lane**. A lane is a FIFO queue with a
-per-event retry budget; events carry a global enqueue sequence number. There
-is exactly **one lane today** (lane = everything), so observable behavior is
-v1's global FIFO unchanged — but the spec states ordering, consistency
-gating, parking, and (future) confirmed-commit dispatch *per lane*, so that
-relaxing ordering later (per-stream, per-piece, or read/write-overlap lanes;
-or an opt-in server-confirmed mode that occupies only its own lane while
-others proceed) is a policy change, not a contract change. Lane granularity
-is an open question (§15); nothing in v2 may assume "the head event" is
-globally unique — components address "the head of a lane".
+per-event retry budget. There is exactly **one lane today** (lane =
+everything), so observable behavior is v1's global FIFO unchanged — but the
+spec states ordering, consistency gating, parking, and (future)
+confirmed-commit dispatch *per lane*, so that relaxing ordering later is a
+policy change, not a contract change. Decided: the first relaxation step,
+when contention warrants it, is **per-space lanes** (per-piece is too
+granular to buy much; finer schemes like handler-closure-overlap need
+evidence first). An opt-in server-confirmed dispatch mode would occupy only
+its own lane while others proceed. Nothing in v2 may assume "the head
+event" is globally unique — components address "the head of a lane".
+
+Every event gets a durable **event id minted at send time**, causally
+derived from the originating context: the sending transaction's id (or the
+external ingress id for events not born in a transaction), the stream link,
+and a per-origin sequence number. The id orders events within a lane,
+carries speculation lineage, derives receipt ids (§7.6), and names the
+event in telemetry.
 
 Per pass, for each lane's head event:
 
@@ -571,8 +579,9 @@ path). The handler's **data** writes are atomic with its commit and roll
 back for free; the launched work is control flow, and v2 makes its failure
 semantics explicit.
 
-Requirement (invariant I10): work launched by an event handler takes effect
-**at most once, and only if the launching commit succeeds**.
+Requirements: invariant I10 (launched work survives only if the launching
+commit succeeds, and descendants of a failed attempt are never retried) and
+invariant I11 (receipt-gated events are handled at most once system-wide).
 
 Current state, for the record (verified in code, June 2026):
 
@@ -581,7 +590,12 @@ Current state, for the record (verified in code, June 2026):
   sender's commit. A handler whose commit is rejected and retried queues its
   follow-up event once per attempt (duplication), and a follow-up queued by
   a permanently failed attempt still dispatches — possibly with a payload
-  computed from rolled-back state. This violates I10 today.
+  computed from rolled-back state. The storage layer's dependent-speculation
+  rejection does **not** close this: it rejects a follow-up only when its
+  handler *read* the parent's unconfirmed writes; a handler that consumes
+  only the event payload (computed during the parent's run, embedded in the
+  event value) has no read edge to the parent and escapes. This violates
+  I10 today.
 - *Handler-result pieces* are instantiated inline in the handler's
   transaction (data atomic — good), but their scheduler registrations are
   eager. The on-commit-error cleanup (cancel + stop) exists only in the dead
@@ -592,32 +606,92 @@ Current state, for the record (verified in code, June 2026):
   retries leave a registered piece running against rolled-back data. The
   commit-gated mechanism already exists (`startAfterSuccessfulCommit`) but
   is used only for `navigateTo` results.
+- *Exactly-once handling* does not exist at all: a re-delivered event
+  (cross-runtime or ingress retry) is handled again wherever it lands.
 
-v2 rules:
+The design rests on two shared pieces of infrastructure — durable event
+identity (§7.5) and a **rejection taxonomy**: commit rejections split into
+*retryable* (ordinary optimistic conflicts — retry as today) and
+*permanent* (a commit-time precondition failed — drop, never retry).
 
-1. **Sent events ride the post-commit outbox.** The transaction layer
-   already has an idempotency-keyed outbox flushed only on successful commit
-   (`extended-storage-transaction.ts:385,859`). Handler-emitted events are
-   staged there and enqueued into their lane at commit-success time. Retries
-   cannot duplicate (only the committed attempt flushes); failed handlers
-   emit nothing. Ordering note: events emitted by one handler enqueue
-   together at commit time, preserving their relative order; their
-   interleaving with independently arriving events shifts from send-time to
-   commit-time, which is the causally honest ordering.
-2. **Handler-result pieces: eager start + compensating stop.** Inline
-   instantiation stays (commit-gating every child start on server ack would
-   add a round trip to interactive flows); v2 restores the missing failure
-   path: a commit callback that, on final rejection, cancels the child
-   registrations and stops the piece — the pull-mode equivalent of the
-   cleanup the push path had. `navigateTo` results keep the fully
-   commit-gated start (durability before navigation).
-3. **Computation-launched children are outside I10.** Computations are
-   idempotent and re-runnable; their children converge through deterministic
-   ids and normal re-runs, and orphaned registrations are bounded by the
-   same retry budget. (The exhausted-retry zombie is accepted as
-   pre-existing; tracked as an open question.)
+**Speculation lineage.** Follow-up work dispatches immediately and
+speculatively, exactly as today — no added latency for resend chains — and
+correctness comes from cancellation, not staging:
 
-Both fixes are independent of the v2 cutover and can land against v1 (see
+1. An event sent during a transaction carries that transaction's id as its
+   *origin*. The handler transaction for such an event carries a
+   commit-time precondition: *origin committed*. The server (memory engine)
+   verifies it and rejects with a permanent rejection if the origin failed.
+   Same-session commits are processed in order, so by the time a follow-up's
+   commit arrives, its origin's fate is decided in the common case;
+   cross-session/cross-space origins may need a retryable "origin pending"
+   hold (open question for cross-space, where the verifying server cannot
+   see the origin's commit log — there, client-side cancellation plus
+   receipts bound the damage).
+2. Client-side, the runtime keeps a lineage registry: origin tx →
+   {queued events, started pieces}. When an origin's failure becomes known
+   locally, undispatched descendant events are cancelled in place and
+   descendant pieces are stopped (the compensating cancel+stop that the
+   pull path is missing today, now keyed off the same registry).
+   `navigateTo` results keep the fully commit-gated start (durability
+   before navigation).
+3. Descendants of a *failed attempt* are never retried (permanent
+   rejection); when the parent itself retries and succeeds, the re-run
+   emits fresh follow-ups under the new attempt's tx id. This is what
+   kills the duplication: each attempt's launches are tied to that attempt,
+   and only the committed attempt's launches survive.
+4. Events with no transactional origin (renderer/UI gestures, external
+   ingress) carry no lineage and behave as today.
+
+Rejected alternatives, for the record: staging sends in the post-commit
+outbox would serialize every handler→event hop behind a server round trip
+(the outbox flush awaits the commit promise,
+`extended-storage-transaction.ts:857-871`) — too slow for the trivial
+resend chains that are common in practice. A "pure forwarder" fast path
+(dispatch immediately iff the handler made no writes and launched nothing)
+avoids that but bifurcates dispatch semantics on handler internals, and the
+class becomes nearly empty once receipts exist, since every receipt-gated
+handling transaction writes at least the receipt. The outbox remains the
+right tool for what it was built for: external side effects that *want*
+server confirmation.
+
+**Receipts (exactly-once handling).** Needed for CFC: certain events must
+be handled at most once system-wide, not once per runtime that sees them.
+Per opt-in event class (declared on the stream/ingress; renderer-local UI
+events default off — they cannot race; cross-runtime, webhook-ingress, and
+background-delivery classes default on):
+
+1. The handling transaction also creates a **receipt document** whose id is
+   causally derived from the event id (and the handler id iff the stream
+   opts into multiple handlers; default is single-handler — note today's
+   `queueSchedulerEvent` silently queues one event per matching handler,
+   which an audit must make explicit before receipts land).
+2. Receipt creation is a create-only commit precondition. If the receipt
+   already exists, the commit fails with a *permanent* rejection: the
+   client lost the race and must **not** retry — the event was handled
+   elsewhere.
+3. Retryable conflicts on other documents re-run the handler as usual; the
+   re-run derives the same receipt id from the same event id, so a
+   handler's own retries never collide with themselves (the losing attempt
+   never committed its receipt).
+4. Receipts compose with non-durable event queues: delivery may be
+   at-least-once (redelivery after restart, multi-runtime fanout); receipts
+   make *handling* exactly-once, including across process restarts, without
+   making queues durable.
+
+Lineage and receipts are deliberately the same shape — commit-time
+precondition, permanent rejection, no-retry client behavior, ids derived
+from the event id — so they share their implementation (migration plan,
+phase E).
+
+**Computation-launched children are outside I10.** Computations are
+idempotent and re-runnable; their children converge through deterministic
+ids and normal re-runs, and orphaned registrations are bounded by the same
+retry budget. (The exhausted-retry zombie is accepted as pre-existing; the
+implementation should leave a watch-this comment at the retry-exhaustion
+sites.)
+
+All of this is independent of the v2 cutover and can land against v1 (see
 migration plan, phase E).
 
 ### 7.7 Convergence bounds
@@ -785,11 +859,18 @@ originating node id and the trigger-read addresses that caused the run.
 data edge M→N, M runs (or is skipped as clean/ineligible) before N in that
 iteration.
 
-**I10 — Event-launched work is commit-gated.** Events sent and pieces
-started by an event handler take effect at most once, and only if the
-handler's transaction commits successfully (sent events: staged in the
-post-commit outbox; started pieces: compensated by cancel+stop on final
-rejection). See §7.6.
+**I10 — Event-launched work is lineage-gated.** Work launched by a handler
+attempt (events sent, pieces started) may begin speculatively, but survives
+only if that attempt's transaction commits: descendants of a failed attempt
+are cancelled client-side or permanently rejected at commit, and are never
+retried. A retried parent emits fresh launches under its new attempt. See
+§7.6.
+
+**I11 — Receipt-gated events are handled at most once.** For event classes
+with receipts enabled, at most one handling transaction system-wide ever
+commits for a given event id (per handler, where multi-handler is opted
+in). A receipt-exists rejection is permanent: the losing client does not
+retry. See §7.6.
 
 ---
 
@@ -896,9 +977,10 @@ Summary table; the full per-mechanism walkthrough with file references is in
    strategy.
 2. **Server-confirmed dispatch.** Future feature, strictly opt-in — never
    the only mode. Decided now so it stays cheap later: events are specified
-   per ordering *lane* with enqueue sequence numbers (§7.5); a confirmed
-   event would occupy only its lane. FIFO relaxation (and per-lane
-   consistency gating) is the real design question and stays open below.
+   per ordering *lane* with durable event ids (§7.5); a confirmed event
+   would occupy only its lane. First FIFO relaxation step, when needed, is
+   per-space lanes (per-piece is too granular to buy much); anything finer
+   needs contention evidence.
 3. **Preflight closure caching.** Default is populate-per-dispatch (v1
    behavior); caching the last dispatch's closure is an optional, off-by-
    default optimization to be adopted only behind the preflight benchmark
@@ -911,29 +993,45 @@ Summary table; the full per-mechanism walkthrough with file references is in
 6. **`schedulerHistoricalMightWrite`.** Confirmed deletable — flag, legacy
    `getMightWrite` mode, and historical write tracking go in migration
    phase 1.
+7. **Event-launch failure semantics: lineage over staging.** Staging sends
+   in the post-commit outbox was rejected (it would put a server round trip
+   into every trivial resend chain — the flush awaits the commit promise).
+   Chosen design: speculation lineage — immediate dispatch, origin-tx
+   annotation, server-verified *origin committed* precondition, permanent
+   rejection class, client-side cancellation registry (§7.6). The
+   pure-forwarder fast path was also rejected (bifurcated semantics; class
+   vanishes under receipts).
+8. **Exactly-once receipts folded in.** The CFC exactly-once requirement
+   (receipt doc, id causal to the event id, create-precondition, lost-race
+   = permanent rejection, no retry) is specified alongside lineage because
+   the two share identity, precondition, and rejection machinery (§7.6,
+   I11). Per-event-class opt-in; renderer-local UI events off by default.
+9. **Zombie pieces on exhausted retries.** Accepted (bounded, rare,
+   pre-existing); no reaper. Implementation leaves a watch-this comment at
+   the retry-exhaustion sites.
+10. **Effect-launched work.** No audit needed: effects re-run freely and
+    deterministic ids converge the same way computation children do.
 
 ### Open
 
-1. **Lane granularity.** When ordering is relaxed, what is a lane —
-   per-stream link, per-piece, per-space, or dynamic (events whose handler
-   closures don't overlap commute)? Closure-overlap is the most permissive
-   but makes ordering data-dependent; per-piece is predictable but still
-   blocks within a busy piece. Likely staged: keep one lane; introduce
-   per-piece lanes behind an experiment flag; evaluate closure-overlap only
-   with real contention data. The same question applies to the consistency
-   gate: today the gate blocks the lane head globally; per-lane gates are
-   the natural pairing.
-2. **Outbox enqueue-time ordering.** §7.6 moves handler-sent events from
-   send-time to commit-time enqueueing. Within one handler this preserves
-   order; across handlers it can reorder relative to today when commits
-   resolve out of order. Position: commit-time is the causally honest order;
-   needs a fixture catalog of today's interleavings before landing to
-   confirm nothing user-visible depends on send-time order.
-3. **Zombie pieces on exhausted retries.** Computation-launched children
-   whose creating run never durably commits stay registered against
-   rolled-back data (pre-existing, bounded, rare). Worth a cheap reaper
-   (e.g. piece-level "result cell never became durable" check) or accept?
-4. **Speculation rollback beyond events.** §7.6 covers handler-launched
-   work. Is there an analogous gap for *effect*-launched work (sinks
-   starting pieces)? Effects re-run freely, so deterministic ids should
-   converge the same way computations do, but this has not been audited.
+1. **Lane relaxation beyond per-space.** Per-space is the agreed first step
+   when contention warrants lanes at all. Finer schemes (per-stream,
+   handler-closure-overlap) make ordering data-dependent and are deferred
+   until real contention data exists. Pairing question when lanes split:
+   the consistency gate also becomes per-lane.
+2. **Cross-space lineage verification.** A follow-up handled in space B
+   cannot have its origin (committed in space A) verified by B's server.
+   Options: client-side cancellation only (receipts bound duplicates), a
+   cross-space origin-attestation carried with the event, or piggybacking
+   on a future multi-space commit protocol. Until decided, lineage is
+   server-verified same-space and best-effort cross-space.
+3. **Receipt class surface.** Where is the receipt opt-in declared — stream
+   schema annotation, ingress configuration, or handler registration? And
+   which classes default on (webhook ingress and background delivery
+   clearly; cross-runtime UI streams less clear). Needs alignment with the
+   CFC spec's exactly-once requirement scope.
+4. **Multi-handler events.** Today `queueSchedulerEvent` silently queues
+   one event per matching handler. Receipts default to single-handler
+   semantics, which would make the second handler lose the race. Audit
+   whether anything relies on multi-match today, then make multi-handler
+   an explicit opt-in (receipt id incorporates handler id).

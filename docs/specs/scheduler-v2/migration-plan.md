@@ -104,33 +104,72 @@ dual-write).
 Exit: exactly one path marks nodes dirty; self-suppression is one id
 comparison.
 
-## Phase E (independent) — commit-gate event-launched work
+## Phase E (independent) — lineage + receipts for event-launched work
 
-Correctness fixes for spec §7.6 / invariant I10. Independent of the v2
-cutover: both land against the current scheduler and should not wait for it.
+Implements spec §7.6 (invariants I10, I11). Independent of the v2 cutover:
+lands against the current scheduler and should not wait for it. Has a
+memory-engine component — coordinate with the memory owners from the start.
 
-1. **Sent events → post-commit outbox.** Stream `Cell.set` stages the event
-   send in the transaction's idempotency-keyed post-commit outbox
-   (`extended-storage-transaction.ts`) instead of calling
-   `scheduler.queueEvent` at send time (`cell.ts:1167`); the flush on
-   commit success enqueues it. Internal callers that need send-time
-   semantics (if any — audit UI bridge / framework senders) keep an
-   explicit immediate path.
-2. **Handler-result pieces: compensating stop.** In
-   `handleJavaScriptHandlerResult`'s pull path, register a commit callback
-   that on final rejection cancels the child registrations and stops the
-   result piece — restoring for pull mode the cleanup the push branch had
-   (`runner.ts:2724-2729` vs `2735`). `navigateTo` results keep the
-   commit-gated `startAfterSuccessfulCommit` path.
-3. Fixtures (red first, per repo practice):
-   - handler whose commit conflicts then succeeds on retry: follow-up event
-     dispatches exactly once, with payload from the committed run;
-   - handler whose commit exhausts retries: follow-up event never
-     dispatches; result piece is stopped and unregistered;
-   - interleaving snapshot tests for the send-time → commit-time enqueue
-     shift (spec open question 2) before flipping.
+**E0 — shared infrastructure.**
 
-Exit: I10 holds for handler-sent events and handler-started pieces.
+1. Durable event identity minted at send: origin tx id (or ingress id) +
+   stream link + per-origin sequence; carried on `QueuedEvent` and into the
+   handling transaction.
+2. Rejection taxonomy: split commit rejections into *retryable* (optimistic
+   conflict — retry as today) and *permanent* (precondition failed — drop,
+   never retry), surfaced distinctly to the scheduler's retry paths
+   (`events.ts` unshift-retry must not fire on permanent rejections).
+
+**E1 — speculation lineage (I10).**
+
+1. Stream `Cell.set` keeps queueing at send time (`cell.ts:1167` —
+   unchanged latency); the queued event records its origin tx id.
+2. Handling transactions for origin-bearing events carry an
+   *origin-committed* precondition; the memory engine verifies it
+   (same-session commits are processed in order, so the origin's fate is
+   known; cross-space origins are best-effort client-side until spec open
+   question 2 is resolved).
+3. Client lineage registry: origin tx → {queued events, started pieces}.
+   On locally-known origin failure: cancel undispatched descendant events,
+   cancel+stop descendant pieces (`handleJavaScriptHandlerResult` pull
+   path — restoring the cleanup the push branch had, `runner.ts:2724-2729`
+   vs `2735`). `navigateTo` keeps `startAfterSuccessfulCommit`.
+4. Leave a watch-this comment at the retry-exhaustion sites
+   (`watchReactiveActionCommit`, `rescheduleActionForImmediateRetry`) for
+   the accepted zombie-piece case (spec resolved decision 9).
+
+**E2 — receipts (I11).**
+
+1. Memory engine: create-only receipt precondition with a distinct
+   permanent rejection (receipt-exists), keyed by receipt doc id derived
+   causally from the event id (+ handler id when multi-handler is opted
+   in).
+2. Runner: for receipt-enabled event classes, the handling tx writes the
+   receipt; on receipt-exists rejection the client drops the event (lost
+   race — no retry) and emits telemetry.
+3. Class surface: declare the opt-in (stream/ingress annotation — spec open
+   question 3); default on for webhook ingress and background delivery,
+   off for renderer-local UI events.
+4. Multi-handler audit: today `queueSchedulerEvent` queues one event per
+   matching handler; determine whether anything relies on that, then make
+   multi-handler explicit opt-in.
+
+**Fixtures (red first, per repo practice):**
+
+- payload-only follow-up from a failed parent commit (escapes today's
+  read-dependency rejection): never handled durably;
+- handler conflicts then succeeds on retry: follow-up handled exactly once,
+  payload from the committed attempt;
+- handler exhausts retries: follow-up never handled; result piece stopped
+  and unregistered;
+- receipt race (multi-runtime, same event id — use the multi-user `cf test`
+  harness): exactly one runtime's handler commits; the loser does not
+  retry;
+- receipt + retryable conflict on another doc: handler retries and commits;
+  its own receipt never blocks it.
+
+Exit: I10 holds for handler-sent events and handler-started pieces; I11
+holds for receipt-enabled classes.
 
 ## Phase 3 — Node records + liveness refcounts + new pass (the cutover)
 
@@ -159,7 +198,7 @@ where separable, or as one reviewed series where not:
    - the existing behavioral suite is the contract — it must pass unchanged
      except where it asserts v1 *internals* (set memberships, filter stats
      wording); rewrite those against the introspection surface;
-   - new fixtures: provisional-demand expiry (spec open question 4),
+   - new fixtures: provisional-demand expiry (spec resolved decision 4),
      parent-continuation-as-invalidation, first-run with under-approximated
      declared reads (assert ≤1 extra run and convergence), cycle backoff
      (non-converging pair stays rate-limited, `idle()` still resolves, other
@@ -248,8 +287,10 @@ Coordinate with memory-layer owners (observation rows live in memory v2):
 | A storage configuration delivers commit notifications asynchronously, so same-pass convergence regresses (still correct, more ticks) | 2 | Test-only synchronicity assertion across providers; accept extra ticks as degraded-but-correct; document the provider requirement in storage interface docs |
 | Hidden dependence on prefetch as replica warmer (cold-start empty reads) | 4 | Fixture in 4.4; awaitSync piece gate; arrival-as-change invariant test |
 | A side-writer the transformer's capability analysis missed (write outside the registered surface) | 1 | Dev-mode actual-writes-within-surface assertion (phase 1.4) surfaces declaration gaps; idempotency validator covers the contract side |
-| Send-time → commit-time enqueue shift reorders handler-sent events relative to independent arrivals | E | Interleaving snapshot fixtures before the flip; commit-time order is the causally honest one (spec §15 open question 2) |
-| Audit gap: internal senders relying on send-time queueing (UI bridge, framework code) | E | Call-site audit of `queueEvent`; explicit immediate path for non-handler senders |
+| Cross-space lineage cannot be server-verified (origin's commit log lives in another space) | E | Best-effort client cancellation cross-space; receipts bound duplicates; revisit with spec open question 2 (origin attestation / multi-space commit) |
+| Permanent-vs-retryable rejection taxonomy leaks wrong behavior (a permanent rejection retried, or a conflict dropped) | E | Taxonomy lands first (E0) with focused tests on both retry paths (`events.ts` unshift, `action-run.ts` watch) before lineage/receipts build on it |
+| Receipt write traffic on high-frequency event classes | E | Per-class opt-in with UI-local classes off by default; measure commit volume on enabled classes before widening defaults |
+| Multi-handler streams silently rely on today's one-event-per-matching-handler fanout | E | Audit before receipts land; make multi-handler explicit opt-in (receipt id incorporates handler id) |
 | Conditional-effect parity (effects running more often than v1's watermark filter allowed) | 2–3 | Run-count parity fixtures on the v1 conditional-effect tests; the §7.2 closure-ordering must land with the watermark deletion, not after |
 | Persisted observation misses after fingerprint change | 0, 7 | Versioned fingerprints; a miss only costs one re-run per node |
 | changeGroup external consumers (runtime client, toolshed diagnostics) | 2 | Grep + keep as inert diagnostic label until consumers migrate |
