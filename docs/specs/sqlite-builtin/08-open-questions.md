@@ -87,17 +87,23 @@ during design are marked **[resolved]** with the decision.
      await. The old LRU attach/detach *read* cache is removed; the limit is
      effectively never approached. A one-time startup **probe only logs** the
      real limit (no dependency on headroom).
-   - **Core-table shadowing:** V1 ships **without** the core-table rename. Cheap
-     mitigations now: the statement guard rejects schema-qualified references,
-     `ATTACH`/`DETACH`/`PRAGMA`, and multiple statements; patterns may **not
-     declare** a table whose name collides with the core set, and the guard
-     **rejects statements that reference a core-table identifier**. Residual,
-     documented pre-production gap: tokenizer-level reference checking has minor
-     false positives/negatives (e.g. a column literally named `commit`).
-     *Deferred (production hardening, behind a flag):* rename the engine's core
-     tables to include the space DID (e.g. `commit__<did>`), which removes
-     shadowing structurally and drops the name-based guarding. Kept out of the
-     feature's critical path because it's an invasive core-store migration.
+   - **Core-table shadowing → [resolved: per-space core-table scoping].** The
+     structural fix shipped: the engine scopes its core tables per space —
+     `commit` → `"commit__<token>"`, etc., where `<token>` is a stable hash of
+     the space DID (`engine.ts` `scopeToken`/`coreTableNames`). An attached
+     pattern cell-db's unqualified `commit` therefore can no longer resolve to a
+     core table (none exists by that bare name on the engine connection), so
+     shadowing is removed structurally rather than by the name denylist. It is a
+     **migration, not a flag**: `migrateCoreTablesToSpaceScoped` renames legacy
+     bare tables in place on first scoped open (idempotent; `ALTER TABLE RENAME`
+     auto-rewrites FK references), running before the scoped `INIT`/migrations.
+     Opening without a space keeps the legacy bare names (back-compat for
+     tools/tests that don't supply a DID). The guard's core-table-name rejection
+     is retained as a **belt-and-suspenders backstop** during the soak and can be
+     dropped once all live dbs are scoped. **Bonus:** because each space's core
+     tables are now globally unique, two spaces' dbs can be attached to one
+     connection without name collision — the precondition for **cross-space
+     transactions** (pinned by `v2-core-table-scoping-test.ts`).
 9. **[resolved — V1 cut] DDL ownership + migration scope → additive-only.** The
    database owns DDL via `sqliteDatabase({ tables })` (Section
    [01](./01-api.md#schema-ownership--the-database-owns-its-tables)); patterns do
