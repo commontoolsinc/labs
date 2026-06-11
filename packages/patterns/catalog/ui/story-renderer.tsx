@@ -29,6 +29,7 @@ import LabelStory from "../stories/cf-label-story.tsx";
 import FieldStory from "../stories/cf-field-story.tsx";
 import ChipStory from "../stories/cf-chip-story.tsx";
 import BadgeStory from "../stories/cf-badge-story.tsx";
+import EmptyStateStory from "../stories/cf-empty-state-story.tsx";
 import AvatarStory from "../stories/cf-avatar-story.tsx";
 import ProfileBadgeStory from "../stories/cf-profile-badge-story.tsx";
 import AlertStory from "../stories/cf-alert-story.tsx";
@@ -138,6 +139,8 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return ChipStory({});
         case "badge":
           return BadgeStory({});
+        case "empty-state":
+          return EmptyStateStory({});
         case "avatar":
           return AvatarStory({});
         case "profile-badge":
