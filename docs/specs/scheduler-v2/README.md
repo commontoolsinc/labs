@@ -6,7 +6,9 @@
 > **Companion docs**:
 > [`current-system-inventory.md`](./current-system-inventory.md) — every
 > mechanism in today's scheduler and what subsumes it here;
-> [`migration-plan.md`](./migration-plan.md) — phased path from v1 to v2.
+> [`migration-plan.md`](./migration-plan.md) — phased path from v1 to v2;
+> [`implementation/`](./implementation/00-README.md) — step-by-step work
+> orders for the implementing agent (start at `00-README.md`).
 > **Persistence**: builds on `docs/specs/persistent-scheduler-state.md`
 > (the observation/rehydration model carries over with a smaller payload).
 
@@ -120,9 +122,14 @@ the idempotency contract (§4.2), which the idempotency validator enforces in
 tests.
 
 **P5 — Self-identification through the transaction.** Every run's transaction
-carries its node id. Change records derived from that transaction do not
-invalidate the originating node. This single mechanism replaces in-flight
-source tracking and change-group comparison for self-suppression.
+carries a reference to its originating node (object identity, not an id
+string — diagnostic ids can collide across instances of the same source).
+Change records derived from that transaction do not invalidate the
+originating node. This single mechanism replaces the scheduler-internal
+in-flight-source tracking. The `changeGroup` option remains, but as what it
+actually is: a user-facing suppression feature for external subscribers
+(e.g. a collaborative editor's sink filtering out its own edits), not
+scheduler plumbing.
 
 **P6 — Subscriptions are durable; runs apply deltas.** A node's read set is
 updated by diffing the new run log against the registered one and applying

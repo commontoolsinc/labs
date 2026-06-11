@@ -67,42 +67,32 @@ Exit: writer lookup is a static map access; observation payload no longer
 needs write sets (coordinate the payload change with phase 7 or ship
 dual-write).
 
-## Phase 2 — One change channel + tx-carried identity
+## Phase 2 — Tx-carried identity (self-suppression)
 
-1. Make the node id a first-class transaction attribute (today's
-   `debugActionId` stamp at `action-run.ts:337`, formalized on
-   `IExtendedStorageTransaction`), set for action runs *and* event
-   dispatches.
-2. Switch self-suppression in notification handling to compare
-   `change.source.nodeId`; delete `inFlightSources` and the
-   change-group-equality skip (keep changeGroup only as a diagnostic label,
-   or delete if causal-edge capture moves to tx.nodeId directly).
-3. Delete the in-process propagation channel: `write-propagation.ts`
-   (`recordChangedComputationWrites`, `markReadersDirtyForChangedWrites`,
-   `changedWritesHistory`, event `onEventCommitWrites`), and the
-   conditional-effect machinery (`conditionallyScheduledEffects`,
-   `markEffectConditionallyScheduled`, `conditionalEffectHasChangedInputs`,
-   the run-time filter and the quiescence history clearing).
-4. Interim semantics shim (until phase 3): notification-driven dirtying
-   already exists; the only behavior previously delivered *only* by the
-   in-process channel is same-pass continuation of scheduler-parent
-   ancestors — verified covered because local commit notifications fire
-   synchronously inside `tx.commit()` (`storage/v2.ts` `notifyOptimistic`),
-   i.e. before the next action in the settle order runs. Add an explicit
-   regression fixture for the `ifElse`-style and parent-continuation cases
-   before deleting.
-5. Verification gates for this phase:
-   - assert (test-only) that every commit with semantic operations produces
-     a synchronous notification before `commit()` returns its promise, for
-     every storage provider configuration used in tests (in-process server,
-     worker client, emulator);
-   - convergence suite (`scheduler-convergence.test.ts`,
-     `scheduler-pull*.test.ts`, `scheduler-ordering.test.ts`) green;
-   - filter-stat parity check: effects skipped-as-unchanged under the old
-     conditional filter must still not run (same fixtures, count runs).
+Deliberately narrow. The in-process channel CANNOT be deleted here: the
+conditional-effect filter depends on `changedWritesHistory`, which that
+channel records; removing the filter before phase 3's invalid-at-turn
+run-gate exists would regress effect-run counts. Channel deletion happens
+inside the phase 3 cutover, where its replacement lands atomically.
 
-Exit: exactly one path marks nodes dirty; self-suppression is one id
-comparison.
+1. Make the originating action a first-class transaction attribute:
+   `sourceAction?: Action` stamped on the inner `IStorageTransaction`
+   (alongside today's informal `debugActionId`, `action-run.ts:337`), set
+   for action runs *and* event dispatches. Comparison is **object
+   identity** — never the diagnostic action id, which can collide across
+   instances (e.g. `pull:${uri}`).
+2. Switch self-suppression in notification handling to
+   `notification.source?.sourceAction === action`; delete `inFlightSources`
+   (the WeakMap, add/remove lifecycle, and its notification check).
+3. **Keep the changeGroup skip unchanged.** It is a user-facing suppression
+   feature (`cf-code-editor` sinks subscribe with a changeGroup to filter
+   their own edits), not scheduler plumbing.
+4. Verification: scheduler suite green; a focused fixture that an action
+   writing its own read does not retrigger itself, and that a sibling
+   action with the same diagnostic id IS still triggered.
+
+Exit: self-suppression is one object-identity comparison; no per-action
+in-flight bookkeeping.
 
 ## Phase E (independent) — lineage + receipts for event-launched work
 
@@ -206,7 +196,13 @@ where separable, or as one reviewed series where not:
    `dirty-dependencies.ts` upstream collector, traversal-root asymmetry,
    `collectStack`, the late-materializer per-effect recheck (folded into
    work-set construction), and the cycle breaker (replaced by §7.7 budgets +
-   backoff).
+   backoff). **The in-process propagation channel and the conditional-effect
+   machinery are deleted here** (moved from phase 2): `write-propagation.ts`,
+   `changedWritesHistory`, `conditionallyScheduledEffects` and its run-time
+   filter — in the same change-series that lands the invalid-at-turn
+   run-gate, with filter parity fixtures (effects skipped-as-unchanged under
+   the old filter must still not run) and the synchronous-notification
+   assertion across storage providers as gates.
 4. Read-delta application replaces resubscribe/unsubscribe-around-runs
    (`pull-subscriptions.ts` resubscribe path, trigger replace memo).
 5. Port the run path (`action-run.ts`) minus the deleted steps; keep CFC
