@@ -133,6 +133,7 @@ export function runtimeOptionsFromInitializationData(
   const apiUrlObj = new URL(data.apiUrl);
   return {
     apiUrl: apiUrlObj,
+    spaceHostMap: data.spaceHostMap,
     storageManager,
     patternEnvironment: { apiUrl: apiUrlObj },
     telemetry,
