@@ -572,7 +572,10 @@ export class StorageManager implements IStorageManager {
     this.#settings = options.settings ?? defaultSettings;
     this.#sessionFactory = sessionFactory;
     this.#spaceIdentity = options.spaceIdentity;
-    this.#seedHosts = options.spaceHostMap ?? {};
+    // Snapshot + freeze: the resolver snapshotted its own copy at
+    // open(), so refusal logic must see the same fixed facts — a
+    // caller mutating their map object must not desynchronize them.
+    this.#seedHosts = Object.freeze({ ...(options.spaceHostMap ?? {}) });
   }
 
   /**

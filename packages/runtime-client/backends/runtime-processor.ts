@@ -472,6 +472,9 @@ export class RuntimeProcessor {
         siteTableSchema,
       );
       Promise.resolve(table.sync()).then(() => {
+        // dispose() may have run while sync was in flight — installing
+        // the sink then would leak a live subscription past disposal.
+        if (this._isDisposed) return;
         this.#siteTableCancel = table.sink(
           (entries: Readonly<SiteTable> | undefined) => {
             for (const entry of entries ?? []) {
