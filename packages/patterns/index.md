@@ -336,8 +336,9 @@ interface TodoListOutput {
 
 ## `simple-list/simple-list.tsx`
 
-A checklist with indent support. Works standalone or embedded in Record
-containers.
+A checklist with indent support. Works standalone (it also carries a legacy
+`MODULE_METADATA` export for Record containers — see the status-tier caveat
+above; don't copy that part).
 
 **Keywords:** checklist, indentation, composable
 
