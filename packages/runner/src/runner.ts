@@ -67,7 +67,6 @@ import {
   markReadAsAttemptedWrite,
 } from "./scheduler.ts";
 import { internalVerifierRead } from "./storage/reactivity-log.ts";
-import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
@@ -544,7 +543,6 @@ function dedupeNormalizedLinks(
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${CellScope}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
-  private functionCache = new FunctionCache();
   private locallyPreparedResults = new Set<
     `${MemorySpace}/${CellScope}/${URI}`
   >();
@@ -1054,8 +1052,6 @@ export class Runner {
       resultCell,
     );
 
-    this.discoverAndCacheFunctions(pattern, new Set());
-
     const key = this.getDocKey(resultCell);
     this.locallyPreparedResults.add(key);
     tx.addCommitCallback((_tx, result) => {
@@ -1159,7 +1155,6 @@ export class Runner {
       addCancel(nodeCancel);
 
       // Instantiate nodes
-      this.discoverAndCacheFunctions(pattern, new Set());
       const actualTx = useTx ?? this.runtime.edit();
       const shouldCommit = !useTx;
       const schedulerRehydration = options.rehydrateSchedulerFromStorage ===
@@ -1866,126 +1861,6 @@ export class Runner {
     this.locallyStoppedResults.clear();
   }
 
-  /**
-   * Discover and cache JavaScript functions from a pattern.
-   * This recursively traverses the pattern structure to find all JavaScript modules
-   * with string implementations and evaluates them for caching.
-   *
-   * @param pattern The pattern to discover functions from
-   */
-  private discoverAndCacheFunctions(
-    pattern: Pattern,
-    seen: Set<object>,
-  ): void {
-    if (seen.has(pattern)) return;
-    seen.add(pattern);
-
-    for (const node of pattern.nodes) {
-      this.discoverAndCacheFunctionsFromModule(node.module, seen);
-
-      // Also check inputs for nested patterns (e.g., in map operations)
-      this.discoverAndCacheFunctionsFromValue(node.inputs, seen);
-    }
-  }
-
-  /**
-   * Discover and cache functions from a module.
-   *
-   * @param module The module to process
-   */
-  private discoverAndCacheFunctionsFromModule(
-    module: Module,
-    seen: Set<object>,
-  ): void {
-    if (seen.has(module)) return;
-    seen.add(module);
-
-    if (!isModule(module)) return;
-
-    switch (module.type) {
-      case "javascript":
-        // Only prewarm the cache from functions that were already registered
-        // by the SES verification/evaluation pipeline. Host callbacks must not
-        // enter the execution cache directly.
-        if (module.implementationRef && !this.functionCache.has(module)) {
-          const executable = this.runtime.harness.getExecutableFunction(
-            module.implementationRef,
-          );
-          if (executable) {
-            this.functionCache.set(module, executable);
-          }
-        }
-        break;
-
-      case "pattern":
-        // Recursively discover functions in nested patterns
-        if (isPattern(module.implementation)) {
-          this.discoverAndCacheFunctions(module.implementation, seen);
-        }
-        break;
-
-      case "ref":
-        // Resolve reference and process the referenced module
-        try {
-          const referencedModule = this.runtime.moduleRegistry.getModule(
-            module.implementation as string,
-          );
-          this.discoverAndCacheFunctionsFromModule(referencedModule, seen);
-        } catch (error) {
-          console.warn(
-            `Failed to resolve module reference for implementation "${module.implementation}":`,
-            error,
-          );
-        }
-        break;
-    }
-  }
-
-  /**
-   * Discover and cache functions from a value that might contain patterns.
-   * This handles cases where patterns are passed as inputs (e.g., to map operations).
-   *
-   * @param value The value to search for patterns
-   */
-  private discoverAndCacheFunctionsFromValue(
-    value: FabricValue,
-    seen: Set<object>,
-  ): void {
-    if (isPattern(value)) {
-      this.discoverAndCacheFunctions(value, seen);
-      return;
-    }
-
-    if (isModule(value)) {
-      this.discoverAndCacheFunctionsFromModule(value, seen);
-      return;
-    }
-
-    if (
-      !isRecord(value) || isCell(value) || isCellResult(value)
-    ) {
-      return;
-    }
-
-    if (seen.has(value)) return;
-    seen.add(value);
-
-    // Recursively search in objects and arrays
-    if (Array.isArray(value)) {
-      for (const item of value as FabricValue[]) {
-        this.discoverAndCacheFunctionsFromValue(item, seen);
-      }
-      return;
-    }
-
-    for (const key in value as Record<string, any>) {
-      this.discoverAndCacheFunctionsFromValue(
-        value[key] as FabricValue,
-        seen,
-      );
-    }
-  }
-
   private instantiateNode(
     tx: IExtendedStorageTransaction,
     module: Module,
@@ -2368,30 +2243,25 @@ export class Runner {
   private resolveJavaScriptFunction(
     module: Module,
   ): ResolvedJavaScriptModule {
-    let fn: (...args: any[]) => any;
-
-    const cached = this.functionCache.get(module);
-    if (cached) {
-      fn = cached;
-    } else {
-      // Resolution order (docs/specs/content-addressed-action-identity.md):
-      // 1. content-addressed `$implRef` — resolve the registered builder
-      //    artifact by `{ identity, symbol }` from the in-memory index (only
-      //    trust-gated artifacts are indexed, so whatever resolves is
-      //    builder-made) and run its implementation;
-      // 2. legacy `implementationRef` registry lookup (the retained read path
-      //    for graphs persisted before the writer flip, plus host-trusted and
-      //    dynamic artifacts — gate-2 decision in the implementation plan);
-      // 3. the stringified-source fallback (SES-sandboxed, CFC-unverified).
-      fn = this.resolveByImplRef(module) ??
-        (module.implementationRef
-          ? this.runtime.harness.getExecutableFunction(
-            module.implementationRef,
-          ) as ((...args: any[]) => any) | undefined
-          : undefined) ??
-        this.getFallbackJavaScriptImplementation(module);
-      this.functionCache.set(module, fn);
-    }
+    // Resolution order (docs/specs/content-addressed-action-identity.md):
+    // 1. content-addressed `$implRef` — resolve the registered builder
+    //    artifact by `{ identity, symbol }` from the in-memory index (only
+    //    trust-gated artifacts are indexed, so whatever resolves is
+    //    builder-made) and run its implementation;
+    // 2. legacy `implementationRef` registry lookup (the retained read path
+    //    for graphs persisted before the writer flip, plus host-trusted and
+    //    dynamic artifacts — gate-2 decision in the implementation plan);
+    // 3. the stringified-source fallback (SES-sandboxed, CFC-unverified).
+    // (The former per-runner FunctionCache is gone — steps 1–2 are two Map
+    // probes against session-lifetime indexes, so the ref-keyed cache only
+    // added a third map in front of them.)
+    const fn: (...args: any[]) => any = this.resolveByImplRef(module) ??
+      (module.implementationRef
+        ? this.runtime.harness.getExecutableFunction(
+          module.implementationRef,
+        ) as ((...args: any[]) => any) | undefined
+        : undefined) ??
+      this.getFallbackJavaScriptImplementation(module);
 
     const namedFn = fn as {
       src?: string;
