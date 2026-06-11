@@ -1,5 +1,6 @@
-import { type CellHandle, UI } from "@commonfabric/runtime-client";
+import { type CellHandle, isCellHandle, UI } from "@commonfabric/runtime-client";
 import { render } from "@commonfabric/html/client";
+import { mayContainCfcRenderBoundary } from "./cfc-render-boundary-scan.ts";
 import "../components/cf-cell-link/cf-cell-link.ts";
 
 /**
@@ -196,8 +197,18 @@ export function createDragPreview(cell: CellHandle): HTMLElement {
 
   const cellValue = cell.get();
   if (cellValue && typeof cellValue === "object" && UI in cellValue) {
+    const ui = (cellValue as Record<string, unknown>)[UI];
+    // A CellHandle [UI] renders through the worker renderer, which enforces
+    // the CFC render policy itself. A plain-VNode [UI] renders through the
+    // legacy main-thread renderer, which has no CFC awareness — so any tree
+    // that may contain a <cf-cfc-render-boundary> must not be rendered here
+    // and gets the generic pill instead.
+    if (!isCellHandle(ui) && mayContainCfcRenderBoundary(ui)) {
+      _addFallbackPreview(preview, cell);
+      return preview;
+    }
     try {
-      render(preview, (cellValue as Record<string, unknown>)[UI] as any);
+      render(preview, ui as any);
     } catch (error) {
       console.warn("[drag-state] Failed to render [UI] preview:", error);
       _addFallbackPreview(preview, cell);
