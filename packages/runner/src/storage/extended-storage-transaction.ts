@@ -61,6 +61,7 @@ import {
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
   flowLabelWorkExists,
+  flowReadExcluded,
   type ImplementationIdentity,
   type PostCommitSideEffect,
   prepareBoundaryCommit,
@@ -106,6 +107,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     flowLabelsMode: DEFAULT_CFC_FLOW_LABELS_MODE,
     prepare: { status: "unprepared" },
     dereferenceTraces: [],
+    triggerReads: [],
     writePolicyInputs: [],
     writePolicyInputIdentities: new Map(),
     outbox: [],
@@ -184,6 +186,27 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.cfcState.flowLabelsMode = mode;
     if (mode === "persist") {
       this.cfcFlowLabelsPinned = true;
+    }
+  }
+
+  addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {
+    if (this.cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("trigger-reads-after-prepare");
+    }
+    for (const read of reads) {
+      // Runtime-surface exclusion keys on the RAW notification path; this
+      // is the only point where it still exists (storage below holds the
+      // canonical form, where a user `value.source` is indistinguishable
+      // from the raw `["source"]` surface).
+      if (flowReadExcluded(read.id, read.path)) {
+        continue;
+      }
+      this.cfcState.triggerReads.push(deepFreeze({
+        space: read.space,
+        id: read.id,
+        scope: normalizeCellScope(read.scope),
+        path: canonicalizeLogicalPath(read.path) as string[],
+      }));
     }
   }
 
@@ -415,6 +438,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       attemptedWrites,
       writes,
       dereferenceTraces: [...this.cfcState.dereferenceTraces],
+      triggerReads: [...this.cfcState.triggerReads],
       writePolicyInputs: [...this.cfcState.writePolicyInputs],
       implementationIdentity: this.cfcState.implementationIdentity,
       trustSnapshot: this.cfcState.trustSnapshot,
@@ -928,6 +952,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   setCfcFlowLabelsMode(mode: CfcFlowLabelsMode): void {
     this.wrapped.setCfcFlowLabelsMode(mode);
+  }
+
+  addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {
+    this.wrapped.addCfcTriggerReads(reads);
   }
 
   markCfcRelevant(reason?: string): void {

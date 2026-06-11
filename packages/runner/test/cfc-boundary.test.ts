@@ -152,6 +152,7 @@ describe("CFC canonicalization helpers", () => {
       attemptedWrites: [],
       writes: [],
       dereferenceTraces: [],
+      triggerReads: [],
       writePolicyInputs: [{
         kind: "custom",
         name: "b",

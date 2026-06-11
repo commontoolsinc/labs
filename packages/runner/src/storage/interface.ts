@@ -723,6 +723,12 @@ export interface IExtendedStorageTransaction
   getCfcState(): Readonly<CfcTxState>;
   setCfcEnforcementMode(mode: CfcEnforcementMode): void;
   setCfcFlowLabelsMode(mode: CfcFlowLabelsMode): void;
+  /**
+   * Record the addresses whose invalidating writes scheduled this run
+   * (§8.9.2 trigger reads). Their labels join the flow-label derivation
+   * even when the run never re-reads them.
+   */
+  addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void;
   markCfcRelevant(reason?: string): void;
   invalidateCfc(reason: string): void;
 

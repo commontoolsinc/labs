@@ -1031,8 +1031,10 @@ const valueWriteTargets = (
 // while user fields of the same names live under `["value", ...]` and
 // canonicalize to identical logical paths. Keying on the canonical path
 // would drop reads of a user `value.source` field from the taint join
-// (#4011 review).
-const flowReadExcluded = (
+// (#4011 review). Exported for `addCfcTriggerReads`, which applies it at
+// insertion time — the only point where the raw notification path exists
+// (trigger reads are stored canonicalized).
+export const flowReadExcluded = (
   id: string,
   rawPath: readonly string[],
 ): boolean =>
@@ -1095,6 +1097,29 @@ const forEachFlowObservation = (
       ) {
         return true;
       }
+    }
+  }
+  // Trigger reads (§8.9.2): the addresses whose invalidating writes
+  // scheduled this run. The decision to run now was influenced by their
+  // values even when this run's branch never re-reads them — without this,
+  // "dep changed" leaks one bit per change through the timing/existence of
+  // writes the rerun makes. Runtime-surface addresses were already dropped
+  // by `addCfcTriggerReads` (which sees the raw notification path before
+  // canonicalization), so no `flowReadExcluded` check here — the stored
+  // path is canonical, where a user `value.source` is indistinguishable
+  // from the raw `["source"]` surface.
+  for (const trigger of tx.getCfcState().triggerReads) {
+    if (
+      consume(
+        trigger.space,
+        trigger.id as URI,
+        normalizeCellScope(trigger.scope),
+        "application/json",
+        trigger.path,
+        false,
+      )
+    ) {
+      return true;
     }
   }
   return false;

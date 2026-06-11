@@ -2,6 +2,7 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 import type {
   ChangeGroup,
   IMemoryChange,
+  IMemorySpaceAddress,
   IStorageTransaction,
 } from "../storage/interface.ts";
 import type { TriggerIndexState } from "./trigger-index.ts";
@@ -33,6 +34,60 @@ export function collectTriggeredActionsForChange(
   triggeredActions: Action[];
 } {
   return state.collectTriggeredActionsForChange(space, change);
+}
+
+/**
+ * Record the address whose change scheduled `action` (§8.9.2 trigger
+ * reads). Consumed by the action's next run, whose transaction joins the
+ * addresses' labels into the flow-label derivation: the decision to run
+ * now was influenced by the changed values even if that run's branch never
+ * re-reads them.
+ */
+export function recordCfcTriggerRead(
+  state: Pick<StorageNotificationState, "cfcTriggerReads">,
+  action: Action,
+  space: MemorySpace,
+  change: IMemoryChange,
+): void {
+  addCfcTriggerRead(state, action, { ...change.address, space });
+}
+
+/**
+ * Dedup key for a pending trigger-read address. Scope participates (an
+ * omitted scope normalizes to `space`, matching storage), and JSON keeps
+ * path segments unambiguous: ["a","b"] never collides with ["a/b"].
+ */
+function cfcTriggerReadKey(address: IMemorySpaceAddress): string {
+  return JSON.stringify([
+    address.space,
+    address.scope ?? "space",
+    address.id,
+    address.path,
+  ]);
+}
+
+/**
+ * Add a pending trigger-read address for `action`, deduping repeats of the
+ * same address across notifications. Also restores consumed addresses when
+ * an aborted run is retried: the retry still exists only because of these
+ * triggers, so its writes must carry their labels.
+ */
+export function addCfcTriggerRead(
+  state: Pick<StorageNotificationState, "cfcTriggerReads">,
+  action: Action,
+  address: IMemorySpaceAddress,
+): void {
+  let pending = state.cfcTriggerReads.get(action);
+  if (pending === undefined) {
+    pending = { addresses: [], keys: new Set() };
+    state.cfcTriggerReads.set(action, pending);
+  }
+  const key = cfcTriggerReadKey(address);
+  if (pending.keys.has(key)) {
+    return;
+  }
+  pending.keys.add(key);
+  pending.addresses.push(address);
 }
 
 export function createTriggerTraceEntry(state: {
@@ -192,6 +247,14 @@ interface CausalEdge {
 
 export interface StorageNotificationState {
   readonly triggerIndex: TriggerIndexState;
+  // Pending CFC trigger reads per dirtied action (§8.9.2): the addresses
+  // whose invalidating writes scheduled it. Consumed when the action next
+  // runs; that run's transaction joins their labels into the flow-label
+  // derivation. `keys` dedups addresses across notifications.
+  readonly cfcTriggerReads: WeakMap<
+    Action,
+    { addresses: IMemorySpaceAddress[]; keys: Set<string> }
+  >;
   readonly getDiagnosisEnabled: () => boolean;
   readonly getCollectTriggerTrace: () => boolean;
   readonly changeGroupToActionId: Map<ChangeGroup, string>;

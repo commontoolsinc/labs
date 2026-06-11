@@ -52,7 +52,11 @@ export {
   logicalPathToPointer,
   preparedDigestFor,
 } from "./canonical.ts";
-export { flowLabelWorkExists, prepareBoundaryCommit } from "./prepare.ts";
+export {
+  flowLabelWorkExists,
+  flowReadExcluded,
+  prepareBoundaryCommit,
+} from "./prepare.ts";
 export {
   createSinkRequestPolicyInput,
   recordSinkRequestPolicyInput,

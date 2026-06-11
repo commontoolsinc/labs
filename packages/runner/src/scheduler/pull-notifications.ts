@@ -6,6 +6,7 @@ import {
   createTriggerTraceEntry,
   hasRegisteredTriggers,
   planPullTriggeredAction,
+  recordCfcTriggerRead,
   shouldRecordTriggerTraceEntry,
   type StorageNotificationState,
 } from "./notifications.ts";
@@ -107,6 +108,13 @@ export function processPullStorageNotification(
         actionChangeGroup,
         sourceChangeGroup,
       });
+      // §8.9.2 trigger reads: only changes that actually dirty or schedule
+      // the action become trigger reads. Skipped notifications (own commit
+      // source, same change group) did not cause the next run, so their
+      // labels must not taint it.
+      if (plan.operation !== "none") {
+        recordCfcTriggerRead(state, action, space, change);
+      }
       const scheduledEffects: TriggerTraceScheduledEffect[] =
         applyPullTriggeredActionPlan(
           state,

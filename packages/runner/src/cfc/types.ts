@@ -273,6 +273,7 @@ export type PreparedDigestInput = {
   readonly attemptedWrites: readonly AttemptedWrite[];
   readonly writes: readonly AttemptedWrite[];
   readonly dereferenceTraces: readonly CfcDereferenceTrace[];
+  readonly triggerReads: readonly CfcAddress[];
   readonly writePolicyInputs: readonly WritePolicyInput[];
   readonly implementationIdentity?: ImplementationIdentity;
   readonly trustSnapshot?: TrustSnapshot;
@@ -307,6 +308,13 @@ export type CfcTxState = {
   flowLabelsMode: CfcFlowLabelsMode;
   prepare: CfcPrepareState;
   dereferenceTraces: CfcDereferenceTrace[];
+  // Addresses whose invalidating writes scheduled this run (§8.9.2 trigger
+  // reads): the decision to run *now* was influenced by their values, so
+  // they join the flow-label derivation even when the run never re-reads
+  // them. Recorded by the scheduler when it consumes the pending trigger
+  // set for an action; empty for non-scheduled (manual/event) transactions
+  // whose triggers are in-journal anyway.
+  triggerReads: CfcAddress[];
   writePolicyInputs: WritePolicyInput[];
   // Implementation identity active when each write-policy input was recorded.
   // A single transaction may legitimately span multiple trust contexts (e.g. a
