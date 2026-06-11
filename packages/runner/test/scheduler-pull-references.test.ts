@@ -27,7 +27,6 @@ describe("pull mode with references", () => {
   beforeEach(() => {
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
       import.meta.url,
-      { pullMode: "enabled" },
     ));
   });
 

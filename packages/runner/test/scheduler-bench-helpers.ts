@@ -88,7 +88,7 @@ const timingKeys = [
 
 let blackhole = 0;
 
-export function createSchedulerBenchEnv(pullMode = true): SchedulerBenchEnv {
+export function createSchedulerBenchEnv(): SchedulerBenchEnv {
   const storageManager = StorageManager.emulate({
     as: benchSigner,
   });
@@ -96,12 +96,6 @@ export function createSchedulerBenchEnv(pullMode = true): SchedulerBenchEnv {
     apiUrl: new URL(import.meta.url),
     storageManager,
   });
-
-  if (pullMode) {
-    runtime.scheduler.enablePullMode();
-  } else {
-    runtime.scheduler.disablePullMode();
-  }
 
   return { runtime, storageManager };
 }

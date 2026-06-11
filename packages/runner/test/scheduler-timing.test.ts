@@ -96,8 +96,6 @@ describe("debounce and throttling", () => {
   });
 
   it("should coalesce rapid triggers into single execution", async () => {
-    runtime.scheduler.enablePullMode();
-
     const cell = runtime.getCell<number>(
       space,
       "debounce-coalesce",
@@ -184,8 +182,6 @@ describe("debounce and throttling", () => {
   });
 
   it("should debounce dirty pull computations with immediate first run and trailing flush", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "debounce-pull-computation-source",
@@ -379,8 +375,6 @@ describe("debounce and throttling", () => {
   });
 
   it("should not auto-debounce write-less pull demand root effects", () => {
-    runtime.scheduler.enablePullMode();
-
     const effect: Action = () => {};
     runtime.scheduler.subscribe(effect, {
       reads: [],
@@ -451,8 +445,6 @@ describe("debounce and throttling", () => {
   });
 
   it("should work with both debounce and pull mode", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "debounce-pull-source",
@@ -664,8 +656,6 @@ describe("debounce and throttling", () => {
   });
 
   it("should not cycle-debounce pull computations with live effect demand", async () => {
-    runtime.scheduler.enablePullMode();
-
     const counter = runtime.getCell<number>(
       space,
       "no-cycle-debounce-computation-counter",

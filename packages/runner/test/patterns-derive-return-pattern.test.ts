@@ -243,8 +243,6 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
   });
 
   it("should not spuriously rerun parent derive when returned child pattern changes", async () => {
-    runtime.scheduler.enablePullMode();
-
     let deriveCallCount = 0;
     let doubleRunCount = 0;
     let tripleRunCount = 0;

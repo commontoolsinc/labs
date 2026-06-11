@@ -26,7 +26,6 @@ describe("onCommit callback final outcome", () => {
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
     });
-    runtime.scheduler.disablePullMode();
     tx = runtime.edit();
   });
 

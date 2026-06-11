@@ -1350,8 +1350,6 @@ describe("Cell commit callbacks", () => {
     });
 
     it("should work in pull mode", async () => {
-      runtime.scheduler.enablePullMode();
-
       // In pull mode, pull() works the same way - it registers as an effect
       // and waits for the scheduler. The key difference is that pull() ensures
       // the effect mechanism is used, which triggers pull-based execution.
@@ -1370,8 +1368,6 @@ describe("Cell commit callbacks", () => {
 
       const value2 = await c.pull();
       expect(value2).toBe(100);
-
-      runtime.scheduler.disablePullMode();
     });
 
     it("should handle multiple sequential pulls", async () => {
@@ -1411,8 +1407,6 @@ describe("Cell commit callbacks", () => {
     });
 
     it("should not create a persistent effect after pull completes", async () => {
-      runtime.scheduler.enablePullMode();
-
       // Create source and computed cells
       const source = runtime.getCell<number>(
         space,
@@ -1482,8 +1476,6 @@ describe("Cell commit callbacks", () => {
       // If pull() created a persistent effect, the computation would run
       // again when source changes. With correct cleanup, it should NOT run.
       expect(runsAfterSourceChange).toBe(runsAfterFirstPull);
-
-      runtime.scheduler.disablePullMode();
     });
   });
 });

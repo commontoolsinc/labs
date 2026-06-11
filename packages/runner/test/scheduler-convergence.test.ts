@@ -28,7 +28,6 @@ describe("cycle-aware convergence", () => {
   beforeEach(() => {
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
       import.meta.url,
-      { pullMode: "disabled" },
     ));
   });
 
@@ -59,7 +58,7 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], shallowReads: [], writes: [] },
-      {},
+      { isEffect: true },
     );
     runtime.scheduler.queueExecution();
     await runtime.idle();
@@ -99,7 +98,7 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], shallowReads: [], writes: [] },
-      {},
+      { isEffect: true },
     );
     await output.pull();
 
@@ -123,7 +122,6 @@ describe("cycle-aware convergence", () => {
 
   it("should handle cycles implicitly via re-dirtying detection", async () => {
     // Test that cycles are detected implicitly when actions re-dirty processed actions
-    runtime.scheduler.enablePullMode();
 
     // Create cells for a simple converging cycle: A → B → A
     const cellA = runtime.getCell<number>(
@@ -224,7 +222,6 @@ describe("cycle-aware convergence", () => {
   it("should run fast cycle convergence method", async () => {
     // This test verifies the fast cycle convergence logic by directly
     // testing with default scheduling (which bypasses pull mode complexity)
-    runtime.scheduler.enablePullMode();
 
     // Create a simple dependency chain
     const counter = runtime.getCell<number>(
@@ -287,8 +284,6 @@ describe("cycle-aware convergence", () => {
   });
 
   it("should enforce iteration limit for non-converging cycles", async () => {
-    runtime.scheduler.enablePullMode();
-
     // Create a non-converging cycle (always increments)
     const cellA = runtime.getCell<number>(
       space,
@@ -389,8 +384,6 @@ describe("cycle-aware convergence", () => {
   });
 
   it("should snapshot dirty effects when breaking a pull-mode cycle", async () => {
-    runtime.scheduler.enablePullMode();
-
     const schedulerInternal = runtime.scheduler as unknown as {
       execute: () => Promise<void>;
       pendingQueueTaskTimer: number | null;
@@ -436,8 +429,6 @@ describe("cycle-aware convergence", () => {
   });
 
   it("should not create infinite loops in collectDirtyDependencies", async () => {
-    runtime.scheduler.enablePullMode();
-
     // Create a simple dependency structure
     const source = runtime.getCell<number>(
       space,
@@ -499,8 +490,6 @@ describe("cycle-aware convergence", () => {
   });
 
   it("should handle cycles during dependency collection without infinite recursion", async () => {
-    runtime.scheduler.enablePullMode();
-
     // Create cells that form a cycle
     const cellA = runtime.getCell<number>(
       space,
@@ -606,7 +595,7 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       errorAction,
       { reads: [], shallowReads: [], writes: [] },
-      {},
+      { isEffect: true },
     );
 
     runtime.scheduler.queueExecution();
@@ -644,7 +633,7 @@ describe("cycle-aware convergence", () => {
       runtime.scheduler.subscribe(
         action,
         { reads: [], shallowReads: [], writes: [] },
-        {},
+        { isEffect: true },
       );
       await cell.pull();
     }
@@ -661,8 +650,6 @@ describe("cycle-aware convergence", () => {
   // ============================================================
 
   it("should handle larger cycles without hanging", async () => {
-    runtime.scheduler.enablePullMode();
-
     const cellA = runtime.getCell<number>(space, "4cycle-A", undefined, tx);
     cellA.set(1);
     const cellB = runtime.getCell<number>(space, "4cycle-B", undefined, tx);
@@ -717,8 +704,6 @@ describe("cycle-aware convergence", () => {
   });
 
   it("should handle self-referential action without infinite loop", async () => {
-    runtime.scheduler.enablePullMode();
-
     const counter = runtime.getCell<number>(
       space,
       "self-ref-counter",
@@ -816,8 +801,6 @@ describe("cycle-aware convergence", () => {
   });
 
   it("should handle mixed cyclic and acyclic actions without hanging", async () => {
-    runtime.scheduler.enablePullMode();
-
     // Acyclic: source → computed
     const source = runtime.getCell<number>(
       space,
