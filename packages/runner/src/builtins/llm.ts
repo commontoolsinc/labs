@@ -347,6 +347,7 @@ function buildContextDocumentation(
   runtime: Runtime,
   space: any,
   tx: IExtendedStorageTransaction,
+  sink: string,
 ): { docs: string; observedConfidentiality: readonly unknown[] } {
   const context = inputs.key("context").withTx(tx).get();
   if (!context) {
@@ -381,9 +382,16 @@ function buildContextDocumentation(
         pinnedCellsSchema,
         tx,
       ),
-      inputs.key("observationMaxConfidentiality").withTx(tx).get() as
-        | readonly unknown[]
-        | undefined,
+      // Bound the pattern-supplied ceiling by the deployment ceiling for this
+      // sink so neither the context docs nor the tool loop observe past it
+      // (#3993 review).
+      llmToolExecutionHelpers.effectiveObservationCeiling(
+        runtime,
+        sink,
+        inputs.key("observationMaxConfidentiality").withTx(tx).get() as
+          | readonly unknown[]
+          | undefined,
+      ),
     );
 }
 
@@ -498,6 +506,7 @@ export function llm(
       runtime,
       parentCell.space,
       tx,
+      "llm",
     );
     const outputScope = tx.getNarrowestReadScope();
 
@@ -618,11 +627,16 @@ export function llm(
                 toolCatalog,
                 initialObservedConfidentiality:
                   contextDocs.observedConfidentiality,
-                observationMaxConfidentiality: inputs.key(
-                  "observationMaxConfidentiality",
-                ).get() as
-                  | readonly unknown[]
-                  | undefined,
+                // Deployment-bounded so post-commit tool reads can't exceed the
+                // llm sink ceiling (#3993 review).
+                observationMaxConfidentiality: llmToolExecutionHelpers
+                  .effectiveObservationCeiling(
+                    runtime,
+                    "llm",
+                    inputs.key("observationMaxConfidentiality").get() as
+                      | readonly unknown[]
+                      | undefined,
+                  ),
                 updatePartial,
                 runtime,
                 space: parentCell.space,
@@ -796,6 +810,7 @@ export function generateText(
       runtime,
       parentCell.space,
       tx,
+      "generateText",
     );
     const outputScope = tx.getNarrowestReadScope();
 
@@ -936,11 +951,16 @@ export function generateText(
                 toolCatalog,
                 initialObservedConfidentiality:
                   contextDocs.observedConfidentiality,
-                observationMaxConfidentiality: inputs.key(
-                  "observationMaxConfidentiality",
-                ).get() as
-                  | readonly unknown[]
-                  | undefined,
+                // Deployment-bounded so post-commit tool reads can't exceed the
+                // generateText sink ceiling (#3993 review).
+                observationMaxConfidentiality: llmToolExecutionHelpers
+                  .effectiveObservationCeiling(
+                    runtime,
+                    "generateText",
+                    inputs.key("observationMaxConfidentiality").get() as
+                      | readonly unknown[]
+                      | undefined,
+                  ),
                 updatePartial,
                 runtime,
                 space: parentCell.space,
@@ -1057,11 +1077,18 @@ export function generateObject<T extends Record<string, unknown>>(
     const context = inputs.key("context").withTx(tx).get() as
       | Record<string, unknown>
       | undefined;
-    const observationMaxConfidentiality = inputs.key(
-      "observationMaxConfidentiality",
-    ).withTx(tx).get() as
-      | readonly unknown[]
-      | undefined;
+    // Bound the pattern-supplied ceiling by the deployment generateObject
+    // ceiling once here; every downstream consumer (context docs, the tools
+    // loop, and the direct path) inherits the effective bound, so post-commit
+    // tool reads can't observe past the deployment ceiling (#3993 review).
+    const observationMaxConfidentiality = llmToolExecutionHelpers
+      .effectiveObservationCeiling(
+        runtime,
+        "generateObject",
+        inputs.key("observationMaxConfidentiality").withTx(tx).get() as
+          | readonly unknown[]
+          | undefined,
+      );
     const outputScope = tx.getNarrowestReadScope();
 
     if (!cellsInitialized || cellScope !== outputScope) {
