@@ -68,6 +68,15 @@ export interface TypeScriptHarnessProcessOptions {
 
 export interface FabricImportOptions {
   space: MemorySpace;
+  /**
+   * Dev-only: resolve unpinned mutable refs by chasing the live pointer.
+   * The resulting compile is NOT cacheable — module identity folds the
+   * (unpinned) specifier text, so the chase result varies under a fixed
+   * identity, and persisting it would make `pattern:`/`compileCache:` docs
+   * key-unstable. The cell-cache write path enforces this
+   * (`assertNoUnpinnedFabricImports`); callers that write compiled artifacts
+   * back must never set this flag.
+   */
   allowUnpinned?: boolean;
 }
 

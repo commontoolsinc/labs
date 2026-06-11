@@ -479,6 +479,43 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     });
   });
 
+  it("refuses to persist modules carrying unpinned fabric edges", () => {
+    // An unpinned specifier folds into the module identity AS TEXT, so the
+    // resolution result (the edge's target) can vary under a fixed identity —
+    // persisting such a module would make cache content key-unstable.
+    const { modules, importerIdentity, depIdentity } = fabricLinkedModules();
+    const unpinned: CacheableModule = {
+      ...modules[0],
+      source:
+        `import { x } from "cf:dep";\nexport function y() { return x + 1; }`,
+      imports: [{ specifier: "cf:dep", targetIdentity: depIdentity }],
+    };
+    const wtx = runtime.edit();
+    try {
+      expect(() =>
+        writeSourceDocs(
+          runtime,
+          spaceA,
+          [unpinned, modules[1]],
+          importerIdentity,
+          wtx,
+        )
+      ).toThrow("unpinned fabric import 'cf:dep'");
+      expect(() =>
+        writeCompiledDocs(
+          runtime,
+          spaceA,
+          [unpinned, modules[1]],
+          importerIdentity,
+          opts(),
+          wtx,
+        )
+      ).toThrow("unpinned fabric import 'cf:dep'");
+    } finally {
+      wtx.abort?.();
+    }
+  });
+
   it("replicates fabric dependencies even though source closures exclude them", async () => {
     const spaceB = "did:key:z6MkCellCacheFabricReplicationTarget";
     const { modules, importerIdentity, depIdentity } = fabricLinkedModules();

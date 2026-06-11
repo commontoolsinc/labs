@@ -6,7 +6,11 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { type Cell, isCell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { readStoredCfcMetadata } from "../cfc/metadata.ts";
-import { isFabricImportSpecifier } from "../sandbox/fabric-import-specifier.ts";
+import {
+  isFabricImportSpecifier,
+  parseFabricRef,
+  pinnedIdentity,
+} from "../sandbox/fabric-import-specifier.ts";
 
 const logger = getLogger("cell-cache");
 
@@ -110,6 +114,31 @@ function unreachedRoots(
     }
   }
   return modules.filter((m) => !seen.has(m.identity)).map((m) => m.identity);
+}
+
+/**
+ * Persisted cache entries must be a pure function of their module identity.
+ * An UNPINNED fabric specifier breaks that: the Merkle identity folds the
+ * specifier TEXT (not the resolution result), so two compiles of
+ * byte-identical source can chase to different targets and produce different
+ * documents under the same `pattern:`/`compileCache:` key. Unpinned
+ * resolution (`FabricImportOptions.allowUnpinned`) is therefore dev-only and
+ * must never reach the persistent cache — both write paths fail loudly here.
+ */
+function assertNoUnpinnedFabricImports(
+  modules: readonly CacheableModule[],
+): void {
+  for (const module of modules) {
+    for (const imp of module.imports) {
+      if (!isFabricImportSpecifier(imp.specifier)) continue;
+      const ref = parseFabricRef(imp.specifier);
+      if (ref !== undefined && pinnedIdentity(ref) === undefined) {
+        throw new Error(
+          `refusing to cache module '${module.filename}': unpinned fabric import '${imp.specifier}' (unpinned resolution is dev-only; pin before deploy)`,
+        );
+      }
+    }
+  }
 }
 
 /**
@@ -292,6 +321,7 @@ export function writeSourceDocs(
   entryIdentity: string,
   tx: IExtendedStorageTransaction,
 ): void {
+  assertNoUnpinnedFabricImports(modules);
   const docs = buildSourceDocs(modules, entryIdentity);
   for (const [identity, doc] of docs) {
     // Write with an untyped cell (the recursive read schema would over-constrain
@@ -530,6 +560,7 @@ export function writeCompiledDocs(
   opts: { runtimeVersion: string; compilerDid: string },
   tx: IExtendedStorageTransaction,
 ): void {
+  assertNoUnpinnedFabricImports(modules);
   const extraRoots = unreachedRoots(modules, entryIdentity);
   const schema = compiledDocWriteSchema(opts.compilerDid);
   for (const module of modules) {
