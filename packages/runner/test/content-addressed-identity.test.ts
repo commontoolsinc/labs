@@ -7,6 +7,7 @@ import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementa
 import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
 import type { Module, Pattern } from "../src/builder/types.ts";
 import type { HarnessedFunction } from "../src/harness/types.ts";
+import { trustModule } from "./support/trusted-builder.ts";
 
 /**
  * PR C of docs/specs/content-addressed-action-identity-implementation-plan.md:
@@ -212,5 +213,93 @@ describe("provenance bundleId fallback (legacy claim compat)", () => {
     expect((identity as { bundleId?: string }).bundleId).toBe(
       "load:legacy-bundle",
     );
+  });
+});
+
+describe("$implRef resolution arm (Runner.resolveJavaScriptFunction)", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
+  let runtime: Runtime | undefined;
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+    runtime = undefined;
+    storageManager = undefined;
+  });
+
+  // A lift makes the resolved executable's EFFECT observable through the
+  // result value, so the assertion below proves the function actually RAN —
+  // not merely that something resolved.
+  const LIFT_PROGRAM = {
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: `/// <cts-enable />
+import { lift, pattern } from "commonfabric";
+
+export const double = lift((x: number) => x * 2);
+
+export default pattern<{ value: number }>(({ value }) => ({
+  doubled: double(value),
+}));
+`,
+    }],
+  };
+
+  it("a module with ONLY $implRef (legacy ref and body stripped) resolves and executes", async () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "observe",
+    });
+    const pattern = await runtime.patternManager.compilePattern(
+      LIFT_PROGRAM,
+    ) as Pattern;
+    await runtime.idle();
+
+    // Serialize the compiled lift node's module the way a cell write would
+    // (dual-write: $implRef alongside implementationRef), then strip the
+    // legacy fields — the exact shape the planned flip produces (PR E of
+    // docs/specs/content-addressed-action-identity-implementation-plan.md:
+    // writers stop emitting implementationRef and the stringified
+    // implementation).
+    const node = pattern.nodes.find((n) =>
+      (n.module as Module).type === "javascript"
+    );
+    expect(node).toBeDefined();
+    const live = node!.module as Module & { toJSON?: () => unknown };
+    const json =
+      (live.toJSON
+        ? live.toJSON()
+        : JSON.parse(JSON.stringify(live))) as Record<string, unknown>;
+    const ref = json.$implRef as { identity: string; symbol: string };
+    expect(ref).toBeDefined();
+    delete json.implementationRef;
+    delete json.implementation;
+
+    // With both legacy fields gone, neither the legacy-registry arm (needs
+    // module.implementationRef) nor the stringified-source fallback (needs
+    // module.implementation; throws without it) can produce an executable.
+    // Only `resolveByImplRef` can — by resolving the ref in the artifact
+    // index. The functionCache cannot mask either: it keys on
+    // implementationRef, so it neither prewarms nor caches this module.
+    expect(
+      runtime.patternManager.artifactFromIdentitySync(ref.identity, ref.symbol),
+    ).toBeDefined();
+
+    const stripped = trustModule(runtime, json as unknown as Module);
+    const tx = runtime.edit();
+    const resultCell = runtime.getCell<number>(
+      signer.did(),
+      "implref-only-execution",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, stripped, 21, resultCell);
+    await tx.commit();
+    const out = await result.pull();
+    // 21 → 42: the registered artifact's implementation ran via $implRef.
+    expect(out).toBe(42);
   });
 });
