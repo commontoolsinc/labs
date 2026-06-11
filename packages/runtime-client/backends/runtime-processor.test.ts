@@ -1780,6 +1780,32 @@ describe("RuntimeProcessor per-space piece contexts", () => {
     }
   });
 
+  it("handleRegisterSpaceHost forwards to the runtime and reports the verdict", () => {
+    const calls: Array<[string, string]> = [];
+    const processor = {
+      runtime: {
+        registerSpaceHost: (space: string, host: string) => {
+          calls.push([space, host]);
+          return host === "http://accepted.test/";
+        },
+      },
+    } as unknown as RuntimeProcessor;
+    const handle =
+      (RuntimeProcessor.prototype as unknown as Record<string, Function>)
+        .handleRegisterSpaceHost;
+    expect(handle.call(processor, {
+      type: RequestType.RegisterSpaceHost,
+      space: "did:key:z6Mk-ipc-a",
+      host: "http://accepted.test/",
+    })).toEqual({ value: true });
+    expect(handle.call(processor, {
+      type: RequestType.RegisterSpaceHost,
+      space: "did:key:z6Mk-ipc-b",
+      host: "http://refused.test/",
+    })).toEqual({ value: false });
+    expect(calls.length).toBe(2);
+  });
+
   it("managerFor returns only existing contexts (no lazy create)", async () => {
     const { processor, runtime, homeSpace } = await makeProcessorState();
     const spaceB = (await Identity.fromPassphrase(

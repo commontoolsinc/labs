@@ -50,6 +50,7 @@ export enum RequestType {
   EnsureHomePatternRunning = "runtime:ensureHomePatternRunning",
   Idle = "runtime:idle",
   RuntimeSynced = "runtime:synced",
+  RegisterSpaceHost = "runtime:registerSpaceHost",
   FlushCompileCacheWrites = "runtime:flushCompileCacheWrites",
   GetGraphSnapshot = "runtime:getGraphSnapshot",
   SetPullMode = "runtime:setPullMode",
@@ -236,6 +237,20 @@ export interface IdleRequest extends BaseRequest {
  */
 export interface RuntimeSyncedRequest extends BaseRequest {
   type: RequestType.RuntimeSynced;
+}
+
+/**
+ * Record a runtime-learned host hint for a space (site-table v0).
+ * The durable record is the home-space site table; this IPC lets an
+ * embedder make a just-learned hint (e.g. from a share link) effective
+ * on the live runtime without waiting for a sync round-trip. The
+ * worker's refusal semantics apply: seed wins, opened spaces are never
+ * re-pointed.
+ */
+export interface RegisterSpaceHostRequest extends BaseRequest {
+  type: RequestType.RegisterSpaceHost;
+  space: DID;
+  host: string;
 }
 
 /**
@@ -648,6 +663,7 @@ export type IPCClientRequest =
   | PageGetAllRequest
   | PageSyncedRequest
   | RuntimeSyncedRequest
+  | RegisterSpaceHostRequest
   | VDomEventRequest
   | VDomMountRequest
   | VDomUnmountRequest
@@ -933,6 +949,10 @@ export type Commands = {
   [RequestType.RuntimeSynced]: {
     request: RuntimeSyncedRequest;
     response: EmptyResponse;
+  };
+  [RequestType.RegisterSpaceHost]: {
+    request: RegisterSpaceHostRequest;
+    response: BooleanResponse;
   };
   [RequestType.PageGet]: {
     request: PageGetRequest;

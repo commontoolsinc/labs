@@ -59,6 +59,15 @@ export class EmulatedStorageManager extends StorageManager {
     serverHolder.get = () => this.server();
   }
 
+  /**
+   * Emulated sessions are loopback — there is no per-space host to
+   * resolve, so a host hint can never take effect. Refuse honestly
+   * rather than inherit an acceptance that routes nothing.
+   */
+  override registerSpaceHost(): boolean {
+    return false;
+  }
+
   override async close(): Promise<void> {
     await super.close();
     if (this.#server) {

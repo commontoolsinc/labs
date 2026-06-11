@@ -81,6 +81,7 @@ import {
   type PageSyncedRequest,
   type PatternSourcesResponse,
   type RecreateSpaceRootPatternRequest,
+  type RegisterSpaceHostRequest,
   RequestType,
   type SetActionRunTraceEnabledRequest,
   type SetBreakpointsRequest,
@@ -105,6 +106,11 @@ import {
 } from "../protocol/mod.ts";
 import { HttpProgramResolver, Program } from "@commonfabric/js-compiler";
 import { setLLMUrl } from "@commonfabric/llm";
+import {
+  type SiteTable,
+  siteTableCause,
+  siteTableSchema,
+} from "@commonfabric/home-schemas";
 import {
   createCellRef,
   createPageRef,
@@ -433,7 +439,58 @@ export class RuntimeProcessor {
     // any present-but-unknown value becomes "deny"; absent stays "allow".
     processor.renderDeclassificationPolicy =
       normalizeRenderDeclassificationPolicy(data.renderDeclassificationPolicy);
+    // Site-table v0: the home space carries did → host hints; the
+    // runtime reads them as its live host lookup (2026-06-09 federation
+    // session — "move the lookup into the runtime itself"). Refusals
+    // (seeded differently / space already open) are by design; failures
+    // here must not block worker boot.
+    processor.watchSiteTable();
     return processor;
+  }
+
+  /**
+   * Subscribe to the home-space site table and register each entry as
+   * a host hint. Fire-and-forget: resolution hints are an enhancement,
+   * never a boot dependency.
+   */
+  watchSiteTable(): void {
+    try {
+      const userDid = this.runtime.userIdentityDID;
+      const table = this.runtime.getCell(
+        userDid,
+        siteTableCause(userDid),
+        siteTableSchema,
+      );
+      Promise.resolve(table.sync()).then(() => {
+        table.sink((entries: Readonly<SiteTable> | undefined) => {
+          for (const entry of entries ?? []) {
+            if (!entry?.did || !entry.host) continue;
+            if (!String(entry.did).startsWith("did:")) continue;
+            try {
+              this.runtime.registerSpaceHost(
+                entry.did as DID,
+                entry.host,
+              );
+            } catch (error) {
+              console.warn(
+                `[RuntimeProcessor] Ignoring invalid site-table entry for ${entry.did}:`,
+                error instanceof Error ? error.message : error,
+              );
+            }
+          }
+        });
+      }).catch((error: unknown) => {
+        console.warn(
+          "[RuntimeProcessor] Site table unavailable (continuing without hints):",
+          error instanceof Error ? error.message : error,
+        );
+      });
+    } catch (error) {
+      console.warn(
+        "[RuntimeProcessor] Site table watch failed to start:",
+        error instanceof Error ? error.message : error,
+      );
+    }
   }
 
   /**
@@ -895,6 +952,14 @@ export class RuntimeProcessor {
     await pieceManager.synced();
   }
 
+  handleRegisterSpaceHost(
+    request: RegisterSpaceHostRequest,
+  ): BooleanResponse {
+    return {
+      value: this.runtime.registerSpaceHost(request.space, request.host),
+    };
+  }
+
   /** Convergence across every opened space — no space named, none implied. */
   async handleRuntimeSynced(): Promise<void> {
     await Promise.all(
@@ -1203,6 +1268,8 @@ export class RuntimeProcessor {
         return await this.handlePageSynced(request);
       case RequestType.RuntimeSynced:
         return await this.handleRuntimeSynced();
+      case RequestType.RegisterSpaceHost:
+        return this.handleRegisterSpaceHost(request);
       case RequestType.GetGraphSnapshot:
         return this.getGraphSnapshot(request);
       case RequestType.SetPullMode:
