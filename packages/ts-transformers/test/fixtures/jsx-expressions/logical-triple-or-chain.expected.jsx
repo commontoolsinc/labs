@@ -14,7 +14,7 @@ const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     primary: __cfHelpers.Cell<string>;
     secondary: __cfHelpers.Cell<string>;
-}, number>({
+}, number>(({ primary, secondary }) => primary.get().length || secondary.get().length, {
     type: "object",
     properties: {
         primary: {
@@ -29,10 +29,10 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["primary", "secondary"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ primary, secondary }) => primary.get().length || secondary.get().length);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     items: __cfHelpers.Cell<string[]>;
-}, number | undefined>({
+}, number | undefined>(({ items }) => items.get()[0]?.length || items.get()[1]?.length, {
     type: "object",
     properties: {
         items: {
@@ -46,7 +46,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["items"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get()[0]?.length || items.get()[1]?.length);
+} as const satisfies __cfHelpers.JSONSchema);
 // Tests triple || chain: a || b || c
 // Should produce nested unless calls
 // FIXTURE: logical-triple-or-chain

@@ -281,22 +281,25 @@ export interface IReadable<T> {
   sample(): Readonly<StripDefaultBrand<T>>;
 }
 
+export type MetaLinkField =
+  | "pattern"
+  | "argument"
+  | "result";
+
 /**
  * The `pattern` field links a result cell to its pattern
  * The `argument` field links a result cell to its argument cell
- * The `internal` field links a result cell to its internal cell for state
+ * The `internal` field contains a manifest with links to derived internal cells.
  * The `schema` field stores the schema for a result cell
  * The `result` field lets a result cell link to its parent result cell,
- * and also lets the argument and internal cells link back to the result cell.
+ * and also lets the argument and derived internal cells link back to the result cell.
  * The cfc code accesses the `cfc` field directly, but I include it here too.
  */
 export type MetaField =
-  | "pattern"
+  | MetaLinkField
   | "patternIdentity" // content-addressed {identity, symbol} pattern reference
-  | "argument"
   | "internal"
   | "schema"
-  | "result" // this lets us get from internal/argument back to result
   | "slug"
   | "cfc";
 
@@ -1322,7 +1325,6 @@ export type AnyCellWrapping<T> =
 export interface Pattern {
   argumentSchema: JSONSchema;
   resultSchema: JSONSchema;
-  internalSchema?: JSONSchema;
   defaultScope?: CellScope;
 }
 export interface Module {
@@ -1982,6 +1984,14 @@ export type PatternToolFunction = <
   extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,
 ) => PatternToolResult<E>;
 
+// Public (schema-light) surface, matching PatternFunction's index.ts shape: the
+// callback is the only argument and the types come from the callback itself. The
+// schema-bearing, type-materializing overloads (where the callback's input type
+// is derived FROM the supplied JSONSchema) live in `commonfabric/schema`
+// (api/schema.ts) so that schema and type can never contradict each other — the
+// same split pattern already used for pattern()/handler(). Transformer-emitted
+// `__cfHelpers.lift(...)` is untyped (`__cfHelpers: any`), so it does not depend
+// on these overloads; only authored `lift(...)` calls resolve against them.
 export interface LiftFunction {
   <T, R>(
     implementation: (input: T) => R,
@@ -1994,23 +2004,6 @@ export interface LiftFunction {
   <T extends (...args: any[]) => any>(
     implementation: T,
   ): ModuleFactory<StripCell<Parameters<T>[0]>, StripCell<ReturnType<T>>>;
-
-  // Two-arg form: lift(argumentSchema, fn). Listed before the all-optional
-  // catch-all so `lift(false, fn)` resolves here (fn in slot 2) instead of
-  // matching the catch-all and rejecting fn as a resultSchema. The transformer
-  // emits no-input (computed-origin) lifts as `lift(false, fn)()`:
-  // argumentSchema:false keeps the no-input application valid (the runner's
-  // isValidArgument check passes on `argumentSchema === false`).
-  <T, R>(
-    argumentSchema: JSONSchema,
-    implementation: (input: T) => R,
-  ): ModuleFactory<StripCell<T>, StripCell<R>>;
-
-  <T, R>(
-    argumentSchema?: JSONSchema,
-    resultSchema?: JSONSchema,
-    implementation?: (input: T) => R,
-  ): ModuleFactory<StripCell<T>, StripCell<R>>;
 }
 
 // Helper type to make non-Cell and non-Stream properties readonly in handler state.

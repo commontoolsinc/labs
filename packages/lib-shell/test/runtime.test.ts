@@ -50,15 +50,23 @@ class MockRuntimeClient {
     return Promise.resolve(this.slugByPageId.get(pageId));
   }
 
-  /** Records every (pageId, runIt) pair so tests can assert which calls START
-   * the piece (CT-1623: name listings must not start every piece). */
-  getPageCalls: Array<{ pageId: string; runIt: boolean | undefined }> = [];
+  /** Records every (pageId, runIt, space) so tests can assert which calls
+   * START the piece (CT-1623: name listings must not start every piece) and
+   * which space each call targets. */
+  getPageCalls: Array<
+    { pageId: string; runIt: boolean | undefined; space?: DID }
+  > = [];
 
   getPage(
     pageId: string,
     runIt?: boolean,
+    space?: DID,
   ): Promise<{ id: () => string }> {
-    this.getPageCalls.push({ pageId, runIt });
+    this.getPageCalls.push({
+      pageId,
+      runIt,
+      ...(space !== undefined ? { space } : {}),
+    });
     return Promise.resolve({ id: () => pageId });
   }
 
@@ -223,12 +231,10 @@ describe("RuntimeInternals", () => {
     const experimental = {
       modernCellRep: true,
       persistentSchedulerState: false,
-      esmModuleLoader: true,
     };
     const options = createRuntimeClientOptions({
       session,
       apiUrl: new URL("http://shell.test/"),
-      buildHash: "build-hash",
       experimental,
     });
 
@@ -239,7 +245,6 @@ describe("RuntimeInternals", () => {
     });
     expect(options.spaceDid).toBe(session.space);
     expect(options.spaceName).toBe(session.spaceName);
-    expect(options.buildHash).toBe("build-hash");
     expect(options.experimental).toBe(experimental);
   });
 
@@ -278,6 +283,69 @@ describe("RuntimeInternals", () => {
       trustSnapshot: null,
     });
     expect(withoutTrust.trustSnapshot).toBeUndefined();
+  });
+
+  // A deploy must always load the fresh worker bundle: the worker URL is
+  // cache-busted with `?v=<buildHash>` whenever the build manifest provides
+  // a hash (no feature gate).
+  describe("worker URL versioning", () => {
+    async function workerUrlFromCreate(
+      getBuildHash: () => Promise<string | undefined>,
+    ): Promise<URL> {
+      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+      const { Identity } = await import("@commonfabric/identity");
+      const identity = await Identity.generate({ implementation: "noble" });
+
+      const capturedUrls: string[] = [];
+      class StubWorker extends EventTarget {
+        constructor(url: URL | string) {
+          super();
+          capturedUrls.push(String(url));
+          // Error out before READY so create() aborts right after the worker
+          // URL is built — this test only covers URL construction, not the
+          // worker protocol.
+          queueMicrotask(() => {
+            this.dispatchEvent(
+              new ErrorEvent("error", { message: "stub worker" }),
+            );
+          });
+        }
+        postMessage(): void {}
+        terminate(): void {}
+      }
+
+      const OriginalWorker = globalThis.Worker;
+      (globalThis as { Worker: unknown }).Worker = StubWorker;
+      try {
+        await expect(RuntimeInternals.create({
+          identity,
+          view: { spaceName: "lib-shell-worker-url" },
+          apiUrl: new URL("http://shell.test/"),
+          workerUrl: new URL("http://shell.test/scripts/worker-runtime.js"),
+          getBuildHash,
+        })).rejects.toThrow("stub worker");
+      } finally {
+        (globalThis as { Worker: unknown }).Worker = OriginalWorker;
+      }
+      expect(capturedUrls).toHaveLength(1);
+      return new URL(capturedUrls[0]);
+    }
+
+    it("always consults getBuildHash and sets ?v= when a hash is present", async () => {
+      let calls = 0;
+      const url = await workerUrlFromCreate(() => {
+        calls += 1;
+        return Promise.resolve("hash-123");
+      });
+      expect(calls).toBe(1);
+      expect(url.pathname).toBe("/scripts/worker-runtime.js");
+      expect(url.searchParams.get("v")).toBe("hash-123");
+    });
+
+    it("omits ?v= when the build manifest provides no hash", async () => {
+      const url = await workerUrlFromCreate(() => Promise.resolve(undefined));
+      expect(url.searchParams.has("v")).toBe(false);
+    });
   });
 
   // CT-1623: starting a piece is expensive (pattern instantiation + eager
@@ -359,6 +427,83 @@ describe("RuntimeInternals", () => {
         await runtime.getPattern("piece-1", { start: false });
         expect(client.getPageCalls).toEqual([
           { pageId: "piece-1", runIt: false },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+  });
+
+  // §federation PR2: one worker serves patterns from many spaces.
+  // options.space addresses another space; the cache is keyed per
+  // (space, id) with the no-space form aliasing the bound space.
+  describe("getPattern multi-space", () => {
+    const homeDid = "did:key:z6Mk-lib-shell-runtime-home" as DID;
+    const otherDid = "did:key:z6Mk-lib-shell-runtime-other" as DID;
+
+    async function makeRuntime() {
+      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+      const client = new MockRuntimeClient();
+      const runtime = new RuntimeInternals(
+        client as any,
+        homeDid,
+        undefined,
+        false,
+        homeDid,
+      );
+      return { client, runtime };
+    }
+
+    it("passes the space through to the client", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern("piece-1", { space: otherDid });
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: true, space: otherDid },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("caches per (space, id) — same id in two spaces are distinct", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern("piece-1");
+        await runtime.getPattern("piece-1", { space: otherDid });
+        await runtime.getPattern("piece-1", { space: otherDid });
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: true },
+          { pageId: "piece-1", runIt: true, space: otherDid },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("treats an explicit home space and the no-space form as one entry", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern("piece-1");
+        await runtime.getPattern("piece-1", { space: homeDid });
+        expect(client.getPageCalls.length).toBe(1);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("invalidates per space", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern("piece-1");
+        await runtime.getPattern("piece-1", { space: otherDid });
+        runtime.invalidatePattern("piece-1", otherDid);
+        await runtime.getPattern("piece-1"); // still cached
+        await runtime.getPattern("piece-1", { space: otherDid }); // re-fetched
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: true },
+          { pageId: "piece-1", runIt: true, space: otherDid },
+          { pageId: "piece-1", runIt: true, space: otherDid },
         ]);
       } finally {
         await runtime.dispose();

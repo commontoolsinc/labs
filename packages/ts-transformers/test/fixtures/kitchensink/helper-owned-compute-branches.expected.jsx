@@ -40,7 +40,9 @@ const __cfLift_1 = __cfHelpers.lift<{
             archived: boolean;
         }[];
     };
-}, Project[]>({
+}, Project[]>(({ state }) => state.showArchived
+    ? state.projects
+    : state.projects.filter((project) => !project.archived), {
     type: "object",
     properties: {
         state: {
@@ -112,12 +114,10 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["text", "active"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.showArchived
-    ? state.projects
-    : state.projects.filter((project) => !project.archived));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     memberIndex: number;
-}, boolean>({
+}, boolean>(({ memberIndex }) => memberIndex === 0, {
     type: "object",
     properties: {
         memberIndex: {
@@ -127,13 +127,13 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["memberIndex"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ memberIndex }) => memberIndex === 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     project: {
         name: string;
     };
     member: string;
-}, string>({
+}, string>(({ project, member }) => `${project.name}-${member}`, {
     type: "object",
     properties: {
         project: {
@@ -152,7 +152,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["project", "member"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ project, member }) => `${project.name}-${member}`);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const member = __cf_pattern_input.key("element");
     const memberIndex = __cf_pattern_input.key("index");
@@ -233,7 +233,51 @@ const __cfLift_4 = __cfHelpers.lift<{
         prefix: string;
     };
     fallbackMembers: __cfHelpers.ReadonlyCell<string[]>;
-}, (__cfHelpers.VNode | __cfHelpers.UIRenderable)[]>({
+}, (__cfHelpers.VNode | __cfHelpers.UIRenderable)[]>(({ visibleProjects, state, fallbackMembers }) => 
+// [TRANSFORM] .map() stays plain: visibleProjects is a captured computed input, plain inside this compute
+visibleProjects.map((project, projectIndex) => {
+    // [TRANSFORM] .map() stays plain: ["alpha","beta"] is a literal array
+    const plainPreview = ["alpha", "beta"].map((label, labelIndex) => `${project.name}-${labelIndex}-${label}`);
+    // [TRANSFORM] ifElse: schema args injected on authored ifElse
+    return ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{}, {
+                type: "object",
+                properties: {}
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{}, {
+                type: "object",
+                properties: {}
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, project.badges.length > 0, <div>
+          <h3>{project.name}</h3>
+          {/* [TRANSFORM] .map() stays plain: project.badges is compute-owned data inside computed */}
+          {project.badges.map((badge, badgeIndex) => (<span>
+              {badge.active
+                ? `${state.prefix}${badge.text}-${projectIndex}`
+                : badgeIndex === 0
+                    ? `${project.name}:${badge.text}`
+                    : ""}
+            </span>))}
+          {/* [TRANSFORM] .map() → mapWithPattern: fallbackMembers is a Writable (reactive Cell), lowered even inside computed */}
+          {fallbackMembers.mapWithPattern(__cfPattern_1, {
+            project: {
+                name: project.name
+            }
+        })}
+          {/* [TRANSFORM] .map() stays plain: plainPreview is a local literal array */}
+          {plainPreview.map((label) => <i>{label}</i>)}
+        </div>, <div>
+          {/* [TRANSFORM] .map() stays plain: project.members is compute-owned data inside computed */}
+          {project.members.map((member, memberIndex) => (<span>
+              {memberIndex === projectIndex
+                ? `${state.prefix}${member}`
+                : member}
+            </span>))}
+        </div>);
+}), {
     type: "object",
     properties: {
         visibleProjects: {
@@ -307,51 +351,7 @@ const __cfLift_4 = __cfHelpers.lift<{
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ visibleProjects, state, fallbackMembers }) => 
-// [TRANSFORM] .map() stays plain: visibleProjects is a captured computed input, plain inside this compute
-visibleProjects.map((project, projectIndex) => {
-    // [TRANSFORM] .map() stays plain: ["alpha","beta"] is a literal array
-    const plainPreview = ["alpha", "beta"].map((label, labelIndex) => `${project.name}-${labelIndex}-${label}`);
-    // [TRANSFORM] ifElse: schema args injected on authored ifElse
-    return ifElse({
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        anyOf: [{}, {
-                type: "object",
-                properties: {}
-            }]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        anyOf: [{}, {
-                type: "object",
-                properties: {}
-            }]
-    } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, project.badges.length > 0, <div>
-          <h3>{project.name}</h3>
-          {/* [TRANSFORM] .map() stays plain: project.badges is compute-owned data inside computed */}
-          {project.badges.map((badge, badgeIndex) => (<span>
-              {badge.active
-                ? `${state.prefix}${badge.text}-${projectIndex}`
-                : badgeIndex === 0
-                    ? `${project.name}:${badge.text}`
-                    : ""}
-            </span>))}
-          {/* [TRANSFORM] .map() → mapWithPattern: fallbackMembers is a Writable (reactive Cell), lowered even inside computed */}
-          {fallbackMembers.mapWithPattern(__cfPattern_1, {
-            project: {
-                name: project.name
-            }
-        })}
-          {/* [TRANSFORM] .map() stays plain: plainPreview is a local literal array */}
-          {plainPreview.map((label) => <i>{label}</i>)}
-        </div>, <div>
-          {/* [TRANSFORM] .map() stays plain: project.members is compute-owned data inside computed */}
-          {project.members.map((member, memberIndex) => (<span>
-              {memberIndex === projectIndex
-                ? `${state.prefix}${member}`
-                : member}
-            </span>))}
-        </div>);
-}));
+} as const satisfies __cfHelpers.JSONSchema);
 // [TRANSFORM] pattern: type param stripped; input+output schemas appended after callback
 export default pattern((state) => {
     // [TRANSFORM] new Writable: schema arg injected

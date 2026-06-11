@@ -15,29 +15,29 @@ import {
   type OpaqueRef,
   type Pattern,
   type toJSON,
-  unsafe_originalPattern,
 } from "./types.ts";
 import { getTopFrame } from "./pattern.ts";
-import { getPatternProgram } from "./pattern-metadata.ts";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { getPatternProgram, noteDerivedCopy } from "./pattern-metadata.ts";
+import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
 import { Runtime } from "../runtime.ts";
-import {
-  isCellLink,
-  isLegacyAlias,
-  parseLink,
-  sanitizeSchemaForLinks,
-} from "../link-utils.ts";
+import { isCellLink, isLegacyAlias, parseLink } from "../link-utils.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { isCell } from "../cell.ts";
 
+export type CellAliasResolver = (
+  cell: OpaqueRef<any>,
+  path: readonly PropertyKey[],
+  ignoreSelfAliases: boolean,
+) => LegacyAlias | null | undefined;
+
 export function toJSONWithLegacyAliases(
   value: Opaque<any>,
-  paths: Map<OpaqueRef<any>, PropertyKey[]>,
+  resolveCellAlias?: CellAliasResolver,
   ignoreSelfAliases: boolean = false,
-  path: PropertyKey[] = [],
+  path: readonly PropertyKey[] = [],
   seen?: WeakMap<object, number>,
 ): JSONValue | undefined {
   // Turn strongly typed builder values into legacy JSON structures while
@@ -47,7 +47,7 @@ export function toJSONWithLegacyAliases(
   if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
 
   if (isCell(value)) {
-    const { external, frame, schema, scope } = value.export();
+    const { external, frame } = value.export();
 
     // If this is an external reference, just copy the reference as is.
     if (external) return external as JSONValue;
@@ -59,44 +59,16 @@ export function toJSONWithLegacyAliases(
       );
     }
 
-    // Otherwise it's an internal reference. Extract the schema and output a link.
-    const pathToCell = paths.get(value);
-    if (pathToCell) {
-      if (ignoreSelfAliases && deepEqual(path, pathToCell)) return undefined;
-
-      const [maybeCellName, ...restPath] = pathToCell;
-      const cellName = maybeCellName === "argument"
-        ? "argument"
-        : maybeCellName === "internal"
-        ? "internal"
-        : maybeCellName === "result"
-        ? "result"
-        : undefined;
-      if (cellName !== undefined) {
-        return {
-          $alias: {
-            cell: cellName,
-            path: restPath.map(String),
-            ...(scope !== undefined && { scope }),
-            ...(schema !== undefined &&
-              {
-                schema: sanitizeSchemaForLinks(schema, { keepStreams: true }),
-              }),
-          },
-        } satisfies LegacyAlias;
-      } else {
-        return {
-          $alias: {
-            path: pathToCell as (string | number)[],
-            ...(scope !== undefined && { scope }), // we're including scope, though we may not honor it
-            ...(schema !== undefined &&
-              {
-                schema: sanitizeSchemaForLinks(schema, { keepStreams: true }),
-              }),
-          },
-        } satisfies LegacyAlias;
-      }
-    } else throw new Error(`Cell not found in paths`);
+    // Otherwise it's an internal reference. Ask the pattern builder how this
+    // cell should be represented in the serialized pattern.
+    const alias = resolveCellAlias?.(
+      value as OpaqueRef<any>,
+      path,
+      ignoreSelfAliases,
+    );
+    if (alias === null) return undefined;
+    if (alias !== undefined) return alias as unknown as JSONValue;
+    throw new Error(`Cell not found in pattern aliases`);
   }
 
   // If we encounter a link, it's from a nested pattern.
@@ -104,36 +76,28 @@ export function toJSONWithLegacyAliases(
     const alias = (value as LegacyAlias).$alias;
     // If this was a shadow ref, i.e. a nested pattern, see whether we're now at
     // the level that it should be resolved to the actual cell.
-    if (!("cell" in alias) || typeof alias.cell === "number") {
-      // If we encounter an existing alias and it isn't an absolute reference
-      // with a cell id, then increase the nesting level.
+    if (alias.partialCause !== undefined) {
       return {
         $alias: {
-          ...alias, // Preserve existing metadata.
-          cell: ((alias.cell as number) ?? 0) + 1, // Increase nesting level.
-          path: alias.path as (string | number)[],
+          partialCause: alias.partialCause,
+          defer: (alias.defer ?? 0) + 1,
+          path: alias.path,
+          ...(alias.scope !== undefined && { scope: alias.scope }),
+          ...(alias.schema !== undefined && { schema: alias.schema }),
         },
       } satisfies LegacyAlias;
-    } else if (typeof alias.cell === "string") {
+    } else if (!("cell" in alias) || typeof (alias.cell) === "string") {
       // If we encounter an existing alias and it isn't an absolute reference
       // with a cell id, then increase the nesting level.
       return {
         $alias: {
-          ...alias, // Preserve existing metadata.
-          cell: [null, alias.cell], // Increase nesting level.
-          path: alias.path as (string | number)[],
+          defer: (alias.defer ?? 0) + 1,
+          path: alias.path,
+          ...(alias.scope !== undefined && { scope: alias.scope }),
+          ...(alias.schema !== undefined && { schema: alias.schema }),
+          ...(alias.cell !== undefined && { cell: alias.cell }),
         },
-      };
-    } else if (Array.isArray(alias.cell)) {
-      // If we encounter an existing alias and it isn't an absolute reference
-      // with a cell id, then increase the nesting level.
-      return {
-        $alias: {
-          ...alias, // Preserve existing metadata.
-          cell: [null, ...alias.cell], // Increase nesting level.
-          path: alias.path as (string | number)[],
-        },
-      };
+      } satisfies LegacyAlias;
     } else {
       throw new Error(`Invalid alias cell`);
     }
@@ -142,7 +106,10 @@ export function toJSONWithLegacyAliases(
   // If this is an array, process each element recursively.
   if (Array.isArray(value)) {
     return (value as Opaque<any>).map((v: Opaque<any>, i: number) =>
-      toJSONWithLegacyAliases(v, paths, ignoreSelfAliases, [...path, i], seen)
+      toJSONWithLegacyAliases(v, resolveCellAlias, ignoreSelfAliases, [
+        ...path,
+        i,
+      ], seen)
     );
   }
 
@@ -166,7 +133,7 @@ export function toJSONWithLegacyAliases(
     for (const key in valueToProcess as any) {
       const jsonValue = toJSONWithLegacyAliases(
         valueToProcess[key],
-        paths,
+        resolveCellAlias,
         ignoreSelfAliases,
         [...path, key],
         seen,
@@ -179,8 +146,10 @@ export function toJSONWithLegacyAliases(
     // Restore depth so shared references can be re-serialized
     seen.set(value as object, depth);
 
-    // Retain the original pattern reference for downstream processing.
-    if (isPattern(value)) result[unsafe_originalPattern] = value;
+    // Register the copy's derivation link so trust and the content-addressed
+    // entry ref carry to the serialized copy (side table; symbol keys would be
+    // dropped by JSON anyway).
+    if (isPattern(value)) noteDerivedCopy(result, value);
 
     return result;
   }
@@ -386,8 +355,6 @@ export function moduleToJSON(module: Module) {
   ) {
     implementation = toJSONWithLegacyAliases(
       implementation as unknown as Opaque<any>,
-      new Map(),
-      false,
     ) as unknown as Pattern;
     return {
       ...rest,
@@ -404,6 +371,20 @@ export function moduleToJSON(module: Module) {
         "JavaScript function modules must carry implementationRef before serialization",
       );
     }
+    // Content-addressed reference (dual-write with implementationRef until
+    // the flip — see docs/specs/content-addressed-action-identity.md): when
+    // the implementation function has module-scope provenance, serialize its
+    // `{ identity, symbol }` so a rehydrated module resolves by identity.
+    // `toJSON` runs at cell-write time — post-evaluation, after provenance was
+    // recorded by the module indexing. Dynamic (in-action-created) artifacts
+    // have no symbol and serialize without a ref (in-session only, as before).
+    const provenance = module.type === "javascript"
+      ? getVerifiedProvenance(implementation)
+      : undefined;
+    const implRefValue = provenance?.symbol
+      ? { identity: provenance.identity, symbol: provenance.symbol }
+      : undefined;
+    const implRef = implRefValue ? { $implRef: implRefValue } : {};
     const preview = (implementation as { preview?: string }).preview ??
       implementation.toString().slice(0, 200);
     const location = (implementation as { src?: string }).src;
@@ -420,9 +401,25 @@ export function moduleToJSON(module: Module) {
           module.implementationRef,
         )
       : undefined;
+    // Omit the stringified body only when the implementation is resolvable on
+    // load BY THE RUNTIME THAT WILL READ IT — either THIS runtime's identity
+    // index already resolves the `$implRef` (content-addressed), or the legacy
+    // verified-function registry admits it. Provenance is process-global, so
+    // a `$implRef` being PRESENT does not by itself prove the reading runtime
+    // can resolve it: a pattern compiled by a standalone Engine and registered
+    // on another runtime carries `$implRef`, but that runtime's index never saw
+    // the artifact (no `compilePattern`/`registerEvaluatedModules`), so it must
+    // keep the stringified body as the fallback or reload throws. Stringify
+    // whenever NEITHER resolution path applies.
+    const implRefResolvable = implRefValue !== undefined &&
+      frame?.runtime?.patternManager?.artifactFromIdentitySync?.(
+          implRefValue.identity,
+          implRefValue.symbol,
+        ) !== undefined;
     return {
       ...rest,
-      ...(module.type === "javascript" &&
+      ...implRef,
+      ...(module.type === "javascript" && !implRefResolvable &&
           admittedImplementation !== implementation
         ? {
           implementation: Function.prototype.toString.call(implementation),
@@ -462,10 +459,9 @@ export function patternToJSON(pattern: Pattern) {
   return {
     argumentSchema: pattern.argumentSchema,
     resultSchema: pattern.resultSchema,
-    ...(pattern.internalSchema
-      ? { internalSchema: pattern.internalSchema }
+    ...(pattern.derivedInternalCells
+      ? { derivedInternalCells: pattern.derivedInternalCells }
       : {}),
-    ...(pattern.initial ? { initial: pattern.initial } : {}),
     result: pattern.result,
     nodes: pattern.nodes,
     ...(programIdentity ? { program: programIdentity } : {}),

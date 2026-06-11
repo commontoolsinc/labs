@@ -11,10 +11,10 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-// End-to-end: with `esmModuleLoader` enabled, a real reactive pattern compiles
+// End-to-end: a real reactive pattern compiles
 // AND runs through the ESM module-record loader path (compileToRecordGraph +
 // evaluateRecordGraph), producing correct reactive output — not just loading.
-describe("Pattern run via esmModuleLoader", () => {
+describe("Pattern run via the ESM module loader", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -24,7 +24,6 @@ describe("Pattern run via esmModuleLoader", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { esmModuleLoader: true },
     });
     tx = runtime.edit();
   });

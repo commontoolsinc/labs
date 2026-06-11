@@ -28,7 +28,7 @@ export default pattern<Input>(({ pieces, [SELF]: self }) => {
         {filtered.map((piece: Piece) => (
           <div
             style={{
-              border: "1px solid var(--cf-color-border, #e5e5e7)",
+              border: "1px solid var(--cf-theme-color-border, #e5e5e7)",
               borderRadius: "12px",
               overflow: "hidden",
             }}

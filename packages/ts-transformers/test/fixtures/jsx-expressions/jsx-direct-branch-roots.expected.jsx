@@ -17,7 +17,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             done: boolean;
         };
     };
-}, boolean>({
+}, boolean>(({ state }) => !state.task.done, {
     type: "object",
     properties: {
         state: {
@@ -39,12 +39,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => !state.task.done);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         label?: string | null | undefined;
     };
-}, string>({
+}, string>(({ state }) => state.label ?? "Pending", {
     type: "object",
     properties: {
         state: {
@@ -59,7 +59,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.label ?? "Pending");
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: jsx-direct-branch-roots
 // Verifies: direct JSX branch roots lower structurally without leaving raw
 //   child expressions in place.

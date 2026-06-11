@@ -45,7 +45,6 @@ import type {
 import {
   addressKey,
   createDataCellURI,
-  isPrimitiveCellLink,
   NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
@@ -72,6 +71,7 @@ import { ignoreReadForScheduling } from "./storage/reactivity-log.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
 import {
   type IMemorySpaceValueAddress,
+  isSigilLink,
   isWriteRedirectLink,
   type ValuePath,
 } from "./link-types.ts";
@@ -351,6 +351,150 @@ function combinatorRestSchema(
   byKeyword.set(keyword, interned);
   return interned;
 }
+
+/**
+ * Per-branch precomputation for an anyOf schema. The per-node loop in
+ * `_traverseWithSchemaInner` previously re-did, on EVERY visited node, work
+ * that depends only on the schema: sorting branches (two `hasAsCell` filter
+ * passes), merging rest+option per branch, and `canBranchMatch`'s static
+ * derivations ($ref resolution, type-list normalization, required-props
+ * applicability). Tail-latency motivated: anyOf-heavy vnode docs evaluate
+ * thousands of branches per traversal, so the per-branch constant dominates
+ * p99/max traversal time. Prepared once per identity, the per-node check
+ * collapses to a few field reads.
+ *
+ * Semantics are exactly `canBranchMatch(mergeSchemaOption(rest, option))`
+ * in the exact pre-existing branch order, including counter accounting for
+ * `false` options.
+ */
+type PreparedAnyOfBranch = {
+  /** Original option was the `false` schema: counted, never matched. */
+  optionIsFalse: boolean;
+  merged: JSONSchema;
+  /** Prefilter verdict known statically (boolean merged / unresolved $ref). */
+  constant: boolean | undefined;
+  hasAsCell: boolean;
+  /** Normalized type list of the resolved merged schema, if constrained. */
+  types: readonly string[] | undefined;
+  /** Required property names, when the resolved type admits objects. */
+  required: readonly string[] | undefined;
+};
+
+const _preparedAnyOfCache = new WeakMap<
+  JSONSchemaObj,
+  readonly PreparedAnyOfBranch[]
+>();
+
+function prepareAnyOfBranch(
+  restSchema: JSONSchemaObj,
+  option: JSONSchema,
+): PreparedAnyOfBranch {
+  const rejected: PreparedAnyOfBranch = {
+    optionIsFalse: true,
+    merged: false,
+    constant: false,
+    hasAsCell: false,
+    types: undefined,
+    required: undefined,
+  };
+  if (ContextualFlowControl.isFalseSchema(option)) return rejected;
+  const merged = mergeSchemaOption(restSchema, option);
+  if (typeof merged === "boolean") {
+    // canBranchMatch's first check: boolean schemas decide immediately.
+    return {
+      optionIsFalse: false,
+      merged,
+      constant: merged,
+      hasAsCell: false,
+      types: undefined,
+      required: undefined,
+    };
+  }
+  const hasAsCell = SchemaObjectTraverser.hasAsCell(merged);
+  let resolved: JSONSchema | undefined = merged;
+  if ("$ref" in merged) {
+    resolved = resolveSchemaRefsCanonical(merged);
+    if (typeof resolved === "boolean") {
+      return {
+        optionIsFalse: false,
+        merged,
+        constant: resolved,
+        hasAsCell,
+        types: undefined,
+        required: undefined,
+      };
+    } else if (resolved === undefined) {
+      // Unresolved $ref: pass the prefilter; traversal complains properly.
+      return {
+        optionIsFalse: false,
+        merged,
+        constant: true,
+        hasAsCell,
+        types: undefined,
+        required: undefined,
+      };
+    }
+  }
+  const types = resolved.type !== undefined
+    ? (Array.isArray(resolved.type) ? resolved.type : [resolved.type])
+    : undefined;
+  const typeIncludesObject = resolved.type === undefined ||
+    resolved.type === "object" ||
+    (Array.isArray(resolved.type) && resolved.type.includes("object"));
+  const required = typeIncludesObject && Array.isArray(resolved.required)
+    ? resolved.required as readonly string[]
+    : undefined;
+  return {
+    optionIsFalse: false,
+    merged,
+    constant: undefined,
+    hasAsCell,
+    types,
+    required,
+  };
+}
+
+/**
+ * Callers must gate on `isMemoizableSchemaInput(resolved)`: for mutable
+ * schemas the preparation cannot be cached, and rebuilding it per visited
+ * node costs more than the legacy inline loop (a measured ~25% regression
+ * on dynamic-schema patterns) — those take the legacy path instead.
+ */
+function prepareAnyOf(
+  resolved: JSONSchemaObj,
+  anyOf: readonly JSONSchema[],
+): readonly PreparedAnyOfBranch[] {
+  const cached = _preparedAnyOfCache.get(resolved);
+  if (cached !== undefined) return cached;
+  const restSchema = combinatorRestSchema(resolved, "anyOf");
+  // Consider items without asCell or asStream first, since if we aren't
+  // traversing cells, we consider them a match.
+  const sortedAnyOf = [
+    ...anyOf.filter((option) => !SchemaObjectTraverser.hasAsCell(option)),
+    ...anyOf.filter(SchemaObjectTraverser.hasAsCell),
+  ];
+  const prepared = sortedAnyOf.map((option) =>
+    prepareAnyOfBranch(restSchema, option)
+  );
+  _preparedAnyOfCache.set(resolved, prepared);
+  return prepared;
+}
+
+/**
+ * Per-call doc-visit/unique-path diagnostics in `traverseWithSchema` build a
+ * string and touch a Map+Set on EVERY schema visit — measurable in tail
+ * traversals (thousands of visits each). They only feed the slow-traverse
+ * log, so they are collected only when explicitly enabled.
+ */
+const TRAVERSE_DIAGNOSTICS: boolean = (() => {
+  try {
+    return typeof Deno !== "undefined" &&
+      typeof Deno.env?.get === "function" &&
+      Deno.env.get("CF_TRAVERSE_DIAGNOSTICS") === "1";
+  } catch {
+    return false;
+  }
+})();
 
 /**
  * Identity-memoized `ContextualFlowControl.resolveSchemaRefs()` with an
@@ -775,6 +919,15 @@ export type TraversalContext = {
   schemaTracker: MapSet<string, SchemaPathSelector>;
   includeMeta: boolean;
   metaDocsVisited: Set<string>;
+  /**
+   * Reports a followed link whose target document is absent from the local
+   * replica and lives in ANOTHER space. Per-space server queries cannot
+   * follow links across space boundaries, so such a target is never covered
+   * by the subscription that loaded the source doc — the client must fetch
+   * it itself (see `Runtime.ensureLinkedDocLoaded`). Optional: server-side
+   * schema traversals have no replica gap.
+   */
+  onMissingLinkTarget?: (link: NormalizedFullLink) => void;
 };
 
 export function createTraversalContext(
@@ -783,6 +936,7 @@ export function createTraversalContext(
   schemaTracker: MapSet<string, SchemaPathSelector>,
   includeMeta: boolean = false,
   metaDocsVisited: Set<string> = new Set<string>(),
+  onMissingLinkTarget?: (link: NormalizedFullLink) => void,
 ): TraversalContext {
   return {
     tracker,
@@ -790,6 +944,7 @@ export function createTraversalContext(
     schemaTracker,
     includeMeta,
     metaDocsVisited,
+    onMissingLinkTarget,
   };
 }
 
@@ -798,6 +953,7 @@ export function createDefaultTraversalContext(
   schemaTracker: MapSet<string, SchemaPathSelector> =
     new MapSetStringToPathSelectors(true),
   metaDocsVisited: Set<string> = new Set<string>(),
+  onMissingLinkTarget?: (link: NormalizedFullLink) => void,
 ): TraversalContext {
   return createTraversalContext(
     new CompoundCycleTracker<
@@ -808,6 +964,7 @@ export function createDefaultTraversalContext(
     schemaTracker,
     includeMeta,
     metaDocsVisited,
+    onMissingLinkTarget,
   );
 }
 
@@ -1156,7 +1313,7 @@ export abstract class BaseObjectTraverser {
         // We follow the first link in array elements so we don't have
         // strangeness with setting item at 0 to item at 1
         let arrayElementLink = itemLink;
-        if (isPrimitiveCellLink(item)) {
+        if (isSigilLink(item)) {
           const [redirDoc, redirSelector] = this.getDocAtPath(
             docItem,
             [],
@@ -1202,7 +1359,7 @@ export abstract class BaseObjectTraverser {
       return arrayResult;
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
-      if (isPrimitiveCellLink(doc.value)) {
+      if (isSigilLink(doc.value)) {
         // Check coverage before getAtPath/followPointer adds this link target
         // to schemaTracker.
         const alreadyTracked = this.isLinkedDocumentCovered(
@@ -1324,7 +1481,7 @@ export abstract class BaseObjectTraverser {
     doc: IMemorySpaceValueAttestation,
     selector?: SchemaPathSelector,
   ): [IMemorySpaceValueAttestation, SchemaPathSelector | undefined] {
-    if (isPrimitiveCellLink(doc.value)) {
+    if (isSigilLink(doc.value)) {
       this.tx.read(doc.address, READ_FOR_SCHEDULING);
       return followPointer(this.tx, doc, [], this.context, selector, "top");
     } else {
@@ -1460,7 +1617,7 @@ export function getAtPath(
   let remaining = [...path];
 
   while (true) {
-    if (isPrimitiveCellLink(curDoc.value)) {
+    if (isSigilLink(curDoc.value)) {
       // We've only done a nonRecursive read on curDoc, so promote that
       tx.read(curDoc.address, READ_FOR_SCHEDULING);
       // we follow links when we point to a child of the link, since we need
@@ -1484,7 +1641,7 @@ export function getAtPath(
       remaining = [];
     }
     // Our return should never be a link
-    //assert(!isPrimitiveCellLink(curDoc.value));
+    //assert(!isSigilLink(curDoc.value));
     const part = remaining.shift();
     if (part === undefined) {
       return [curDoc, selector];
@@ -1715,6 +1872,32 @@ function followPointer(
         "traverse",
         () => ["followPointer found missing/retracted fact", valueEntry],
       );
+      // A CROSS-SPACE target absent from the replica cannot have been
+      // covered by the source doc's per-space subscription — report it for
+      // an async load. This read still resolves notFound; the absent doc is
+      // a tracked read, so the reader re-runs when it arrives. Same-space
+      // absent targets are NOT reported: they are either covered by the
+      // originating query or genuinely absent, and kicking them turns every
+      // read of an optional value into a server query. The reported link
+      // carries the selector's target-rooted path (minus its "value"
+      // prefix) and schema so the fetch covers the shape this read needs.
+      if (link.space !== doc.address.space) {
+        context.onMissingLinkTarget?.({
+          space: link.space,
+          id: link.id,
+          path: selector !== undefined
+            ? selector.path.slice(1) as readonly string[]
+            : link.path,
+          scope: link.scope,
+          ...(selector?.schema !== undefined || link.schema !== undefined
+            ? {
+              schema: (selector?.schema ?? link.schema) as
+                | JSONSchema
+                | undefined,
+            }
+            : {}),
+        } as NormalizedFullLink);
+      }
       // We include the path in the address, so that information is available,
       return [notFound(target), selector];
     } else if (error.name !== "NotFoundError") {
@@ -1793,6 +1976,7 @@ function followPointer(
   // then the provided path from the arguments.
   return getAtPath(tx, targetDoc, path, context, selector, lastNode);
 }
+
 function trackVisitedDoc(
   tx: IExtendedStorageTransaction,
   target: IMemorySpaceAddress,
@@ -1828,30 +2012,77 @@ function trackVisitedDoc(
 }
 
 // These meta links don't have full link chains. We only follow the first link.
-export function loadMetaLinkedDoc(
+function loadMetaLinkedDoc(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
   meta: "cfc" | "result" | "pattern" | "argument" | "internal",
   schemaTracker: MapSet<string, SchemaPathSelector>,
-): MetaLinkedDoc | undefined {
-  if (!isRecord(valueEntry.value)) {
-    return undefined;
-  }
+): MetaLinkedDoc[] {
   const targetObj = valueEntry.value as Immutable<JSONObject>;
-  if (!isRecord(targetObj) || !(meta in targetObj)) return undefined;
-  const linkObj = isPrimitiveCellLink(targetObj[meta])
-    ? targetObj[meta]
-    : (meta === "cfc") // cfc links are different
-    ? cfcMetaToSigilLink(targetObj["cfc"])
-    : undefined;
-  if (linkObj === undefined) {
-    // undefined is strange, but acceptable
-    logger.warn(
-      "traverse",
-      () => ["Invalid meta link", meta, "in", valueEntry.address],
+  if (!isRecord(targetObj) || !(meta in targetObj)) return [];
+  const loaded = [];
+  // The internal meta field contains a list of objects with links instead
+  if (meta === "internal") {
+    if (!Array.isArray(targetObj["internal"])) {
+      logger.warn(
+        "traverse",
+        () => ["Invalid internal manifest in", valueEntry.address],
+      );
+      return [];
+    }
+    for (const manifestEntry of targetObj["internal"]) {
+      if (!isRecord(manifestEntry)) {
+        logger.warn(
+          "traverse",
+          () => ["Invalid internal manifest entry in", valueEntry.address],
+        );
+        continue;
+      }
+      if ("link" in manifestEntry && isSigilLink(manifestEntry.link)) {
+        const item = loadMetaLinkedDocFromLink(
+          tx,
+          valueEntry,
+          schemaTracker,
+          manifestEntry.link,
+        );
+        if (item !== undefined) {
+          loaded.push(item);
+        }
+      }
+    }
+  } else {
+    const linkObj = isSigilLink(targetObj[meta])
+      ? targetObj[meta] as SigilLink
+      : (meta === "cfc") // cfc links are different
+      ? cfcMetaToSigilLink(targetObj["cfc"])
+      : undefined;
+    if (linkObj === undefined) {
+      // undefined is strange, but acceptable
+      logger.warn(
+        "traverse",
+        () => ["Invalid meta link", meta, "in", valueEntry.address],
+      );
+      return [];
+    }
+    const item = loadMetaLinkedDocFromLink(
+      tx,
+      valueEntry,
+      schemaTracker,
+      linkObj,
     );
-    return undefined;
+    if (item !== undefined) {
+      loaded.push(item);
+    }
   }
+  return loaded;
+}
+
+function loadMetaLinkedDocFromLink(
+  tx: IExtendedStorageTransaction,
+  valueEntry: IMemorySpaceAttestation,
+  schemaTracker: MapSet<string, SchemaPathSelector>,
+  linkObj: SigilLink,
+) {
   const link = parseLink(linkObj, valueEntry.address)!;
   const address = {
     space: link.space,
@@ -1911,6 +2142,7 @@ function traverseMetaLinkedDoc(
     context.schemaTracker,
     context.includeMeta,
     context.metaDocsVisited,
+    context.onMissingLinkTarget,
   );
   const traverser = new SchemaObjectTraverser(
     tx,
@@ -1951,21 +2183,23 @@ export function loadMetaLinkedDocs(
         "internal",
       ] as const
     ) {
-      const linkedDoc = loadMetaLinkedDoc(
+      const linkedDocs = loadMetaLinkedDoc(
         tx,
         currentDoc,
         meta,
         context.schemaTracker,
       );
-      // Don't recurse into invalid docs or cid docs
-      if (linkedDoc === undefined || linkedDoc.address.id.startsWith("cid:")) {
-        continue;
+      for (const linkedDoc of linkedDocs) {
+        // Don't recurse into invalid docs or cid docs
+        if (linkedDoc.address.id.startsWith("cid:")) {
+          continue;
+        }
+        const linkedDocKey = getTrackerKey(linkedDoc.address);
+        if (context.metaDocsVisited.has(linkedDocKey)) continue;
+        context.metaDocsVisited.add(linkedDocKey);
+        traverseMetaLinkedDoc(tx, linkedDoc, context);
+        pendingDocs.push(linkedDoc);
       }
-      const linkedDocKey = getTrackerKey(linkedDoc.address);
-      if (context.metaDocsVisited.has(linkedDocKey)) continue;
-      context.metaDocsVisited.add(linkedDocKey);
-      traverseMetaLinkedDoc(tx, linkedDoc, context);
-      pendingDocs.push(linkedDoc);
     }
   }
 }
@@ -2479,7 +2713,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
         `maxDepth=${this.maxDepth}`,
         `schemaMemo=${this.activeMemo.size}`,
         `schemaMemoHits=${this.schemaMemoHits}`,
-        `topDocs=${topDocs}`,
+        TRAVERSE_DIAGNOSTICS
+          ? `topDocs=${topDocs}`
+          : "topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)",
       ]);
     }
     if (error !== undefined) {
@@ -2584,11 +2820,13 @@ export class SchemaObjectTraverser<V extends FabricValue>
     this.traverseWithSchemaCalls++;
     this.currentDepth++;
     if (this.currentDepth > this.maxDepth) this.maxDepth = this.currentDepth;
-    // Track doc visits
     const docId = doc.address.id;
-    this.docVisits.set(docId, (this.docVisits.get(docId) ?? 0) + 1);
-    // Track unique doc+path combos
-    this.uniquePaths.add(docId + "/" + doc.address.path.join("/"));
+    if (TRAVERSE_DIAGNOSTICS) {
+      // Per-visit doc/path tracking for the slow-traverse log; the string
+      // building is too hot to leave on by default (see TRAVERSE_DIAGNOSTICS).
+      this.docVisits.set(docId, (this.docVisits.get(docId) ?? 0) + 1);
+      this.uniquePaths.add(docId + "/" + doc.address.path.join("/"));
+    }
     try {
       // Memoize by doc address + schema for the query path (traverseCells=true).
       // In the query path, StandardObjectCreator ignores the link param,
@@ -2641,32 +2879,101 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // There are a lot of valid logical schema flags, and we only handle
       // a very limited set here, with no support for combinations.
       if (resolved.anyOf) {
-        const anyOf = resolved.anyOf;
-        const restSchema = combinatorRestSchema(resolved, "anyOf");
-        // Consider items without asCell or asStream first, since if we aren't
-        // traversing cells, we consider them a match.
-        const sortedAnyOf = [
-          ...anyOf.filter((option) => !SchemaObjectTraverser.hasAsCell(option)),
-          ...anyOf.filter(SchemaObjectTraverser.hasAsCell),
-        ];
-
-        // Branch-by-branch traversal; fast-reject after merge so canBranchMatch
-        // sees the full merged constraints (type/required from restSchema too).
         const matches: Immutable<FabricValue>[] = [];
-        for (const optionSchema of sortedAnyOf) {
+        if (typeof resolved === "boolean" || !isInternedSchema(resolved)) {
+          // Non-interned schema: identity reuse is not guaranteed (frozen
+          // schemas can be freshly minted per evaluation), so the prepared
+          // form would be rebuilt per node - slower than this legacy loop.
+          const anyOf = resolved.anyOf;
+          const restSchema = combinatorRestSchema(resolved, "anyOf");
+          // Consider items without asCell or asStream first, since if we
+          // aren't traversing cells, we consider them a match.
+          const sortedAnyOf = [
+            ...anyOf.filter((option) =>
+              !SchemaObjectTraverser.hasAsCell(option)
+            ),
+            ...anyOf.filter(SchemaObjectTraverser.hasAsCell),
+          ];
+          for (const optionSchema of sortedAnyOf) {
+            this.anyOfBranches++;
+            if (ContextualFlowControl.isFalseSchema(optionSchema)) {
+              continue;
+            }
+            const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
+            if (!canBranchMatch(mergedSchema, doc.value)) {
+              this.anyOfFastRejects++;
+              continue;
+            }
+            const { ok: val, error } = this.traverseWithSchema(
+              doc,
+              mergedSchema,
+              link,
+            );
+            if (error === undefined) {
+              matches.push(val);
+            }
+          }
+          const merged = this.objectCreator.mergeMatches(
+            matches as FabricValue[],
+            resolved,
+          );
+          if (matches.length > 0) {
+            return { ok: merged };
+          }
+          logger.info(
+            "traverse",
+            () => [
+              "No matching anyOf",
+              doc,
+              sortedAnyOf,
+              this.getDebugValue(doc),
+            ],
+          );
+          return fail(TRAVERSE_FAILURES.noMatchingAnyOf);
+        }
+        // Branch order, merges, and canBranchMatch's static derivations are
+        // precomputed per schema identity; the inlined prefilter below is
+        // semantically identical to canBranchMatch(merged, doc.value).
+        const prepared = prepareAnyOf(resolved, resolved.anyOf);
+        const valueIsLink = isSigilLink(doc.value);
+        const actualType = getJsonType(doc.value);
+        const valueIsRecord = isRecord(doc.value);
+        for (const branch of prepared) {
           this.anyOfBranches++;
-          if (ContextualFlowControl.isFalseSchema(optionSchema)) {
+          if (branch.optionIsFalse) {
             continue;
           }
-          const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
-          if (!canBranchMatch(mergedSchema, doc.value)) {
+          let match: boolean;
+          if (branch.constant !== undefined) {
+            match = branch.constant;
+          } else if (branch.hasAsCell || valueIsLink) {
+            // Never reject asCell/asStream branches; link values reveal
+            // nothing until dereferenced during traversal.
+            match = true;
+          } else if (
+            branch.types !== undefined && actualType !== null &&
+            !branch.types.includes(actualType)
+          ) {
+            match = false;
+          } else if (branch.required !== undefined && valueIsRecord) {
+            match = true;
+            for (const req of branch.required) {
+              if (!(req in (doc.value as Record<string, unknown>))) {
+                match = false;
+                break;
+              }
+            }
+          } else {
+            match = true;
+          }
+          if (!match) {
             this.anyOfFastRejects++;
             continue;
           }
           // TODO(@ubik2): do i need to merge the link schema?
           const { ok: val, error } = this.traverseWithSchema(
             doc,
-            mergedSchema,
+            branch.merged,
             link,
           );
           if (error === undefined) {
@@ -2690,7 +2997,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
           () => [
             "No matching anyOf",
             doc,
-            sortedAnyOf,
+            prepared,
             this.getDebugValue(doc),
           ],
         );
@@ -2895,7 +3202,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       newValue.length = entries.length;
       return { ok: this.objectCreator.createObject(newLink, newValue) };
     } else if (isRecord(doc.value)) {
-      if (isPrimitiveCellLink(doc.value)) {
+      if (isSigilLink(doc.value)) {
         this.tx.read(doc.address, READ_FOR_SCHEDULING);
         // When traversing a pointer, use the unresolved schema, so we have
         // the same values in the schema tracker.
@@ -3163,7 +3470,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // work as expected. Handle boolean items values for element schema
       // let createdDataURI = false;
       // const maybeLink = parseLink(item, arrayLink);
-      if (isPrimitiveCellLink(item)) {
+      if (isSigilLink(item)) {
         const alreadyTracked = this.isLinkedDocumentCovered(
           curDoc,
           curSelector,
@@ -3246,7 +3553,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // If the target is not written yet, still return a cell for it instead
         // of invalidating the parent array; downstream consumers can subscribe
         // to the child cell and observe it when the target materializes.
-        const isLink = isPrimitiveCellLink(curDoc.value);
+        const isLink = isSigilLink(curDoc.value);
         if (isLink) this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         const cellLink = isLink
           ? getNextCellLink(curDoc, curSelector.schema!)
@@ -3364,7 +3671,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       if (
         !this.traverseCells &&
         SchemaObjectTraverser.hasAsCell(propSchema) &&
-        !isPrimitiveCellLink(propValue)
+        !isSigilLink(propValue)
       ) {
         // Intentionally treat asCell/asStream as an opaque boundary in
         // traverseCells=false mode for inline object values. We create a cell
@@ -3505,7 +3812,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       ) {
         const schema = combineOptionalSchema(
           redirSelector?.schema,
-          doc.value && isPrimitiveCellLink(doc.value)
+          doc.value && isSigilLink(doc.value)
             ? parseLink(doc.value, doc.address)?.schema
             : undefined,
         ) ?? redirSelector?.schema;
@@ -3550,7 +3857,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // For my cell link, redirDoc currently points to the last redirect
       // target, but we want cell properties to be based on the link value at
       // that location, so we effectively follow one more link if available.
-      if (isPrimitiveCellLink(redirDoc.value)) {
+      if (isSigilLink(redirDoc.value)) {
         this.tx.read(redirDoc.address, READ_FOR_SCHEDULING);
       }
       const cellLink = getNextCellLink(redirDoc, combinedSchema);
@@ -3697,7 +4004,7 @@ export function canBranchMatch(
   // If the value is an object that could be a link/pointer, bail out entirely.
   // Links are dereferenced during traversal, so the current shape of the value
   // tells us nothing about the resolved type or properties.
-  if (isPrimitiveCellLink(value)) return true;
+  if (isSigilLink(value)) return true;
 
   let resolved: JSONSchema | undefined = branch;
   if ("$ref" in branch) {

@@ -13,7 +13,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     user: __cfHelpers.Cell<{ name: string; age: number; }>;
-}, string | false>({
+}, string | false>(({ user }) => (user.get().name.length > 0 && user.get().name), {
     type: "object",
     properties: {
         user: {
@@ -35,10 +35,10 @@ const __cfLift_1 = __cfHelpers.lift<{
             type: "boolean",
             "enum": [false]
         }]
-} as const satisfies __cfHelpers.JSONSchema, ({ user }) => (user.get().name.length > 0 && user.get().name));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     defaultMessage: __cfHelpers.Cell<string>;
-}, string>({
+}, string>(({ defaultMessage }) => defaultMessage.get(), {
     type: "object",
     properties: {
         defaultMessage: {
@@ -49,10 +49,10 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["defaultMessage"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ defaultMessage }) => defaultMessage.get());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     user: __cfHelpers.Cell<{ name: string; age: number; }>;
-}, boolean>({
+}, boolean>(({ user }) => user.get().age > 18, {
     type: "object",
     properties: {
         user: {
@@ -69,10 +69,10 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["user"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().age > 18);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     user: __cfHelpers.Cell<{ name: string; age: number; }>;
-}, string>({
+}, string>(({ user }) => user.get().name, {
     type: "object",
     properties: {
         user: {
@@ -89,10 +89,11 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["user"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().name);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_5 = __cfHelpers.lift<{
     user: __cfHelpers.Cell<{ name: string; age: number; }>;
-}, string | false>({
+}, string | false>(({ user }) => (user.get().name.length > 0 && `Hello ${user.get().name}`) ||
+    (user.get().age > 0 && `Age: ${user.get().age}`), {
     type: "object",
     properties: {
         user: {
@@ -117,8 +118,7 @@ const __cfLift_5 = __cfHelpers.lift<{
             type: "boolean",
             "enum": [false]
         }]
-} as const satisfies __cfHelpers.JSONSchema, ({ user }) => (user.get().name.length > 0 && `Hello ${user.get().name}`) ||
-    (user.get().age > 0 && `Age: ${user.get().age}`));
+} as const satisfies __cfHelpers.JSONSchema);
 // Tests mixed && and || operators: (a && b) || c
 // The && should use when, the || should use unless
 // FIXTURE: logical-mixed-and-or

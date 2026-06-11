@@ -16,7 +16,7 @@ import type { AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
-import { trustedFlowPrecisionSchemaForBuiltin } from "../cfc/flow-precision.ts";
+import { listResultSchema } from "./list-result-schema.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import {
@@ -88,12 +88,7 @@ export function filter(
     ]);
 
     if (!result || result.getAsNormalizedFullLink().scope !== outputScope) {
-      const resultSchema = trustedFlowPrecisionSchemaForBuiltin(
-        tx.getCfcState().implementationIdentity,
-        "filter",
-        undefined,
-        argumentUsage,
-      );
+      const resultSchema = listResultSchema();
       // CT-1623: identify the result container by the reserved output spot
       // (stable, program-independent). See map.ts for rationale.
       const outputSpot = outputSpotFromBinding(outputBinding);

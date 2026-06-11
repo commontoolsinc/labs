@@ -33,16 +33,12 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernCellRep: false,
-          // Explicit so the assertion is deterministic regardless of the
-          // CF_ESM_MODULE_LOADER env (e.g. during the flag-on cross-check).
-          esmModuleLoader: false,
         },
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
         persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,
-        esmModuleLoader: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -55,14 +51,12 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernCellRep: true,
-          esmModuleLoader: false, // explicit: deterministic regardless of env
         },
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: true,
         persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,
-        esmModuleLoader: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -73,15 +67,12 @@ describe("ExperimentalOptions", () => {
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
-        experimental: {
-          esmModuleLoader: false, // explicit: deterministic regardless of env
-        },
+        experimental: {},
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
         persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,
-        esmModuleLoader: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -110,7 +101,6 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernCellRep: true,
-          esmModuleLoader: false, // explicit: deterministic regardless of env
         },
       });
 

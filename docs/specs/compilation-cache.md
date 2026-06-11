@@ -1,6 +1,11 @@
 # Compilation Cache Design
 
-**Status**: Implemented
+**Status**: Removed — this cache stored whole AMD bundles (`CachedCompiler` +
+memory/fs/IDB storages + git fingerprint) and was deleted together with the AMD
+bundle loader. The compiled-pattern cache is now the content-addressed cell
+cache of the ESM module-record path (`compilation-cache/cell-cache.ts`; see
+`module-loading.md` Phase 4). This document is kept as historical design
+context. Originally:
 **Author**: Mike
 **Date**: 2026-03-09
 

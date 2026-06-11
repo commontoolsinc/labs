@@ -100,7 +100,6 @@ export default pattern<State>((state) => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { esmModuleLoader: true },
     });
     try {
       const compiled = await runtime.patternManager.compilePattern(PROGRAM);
@@ -158,7 +157,6 @@ export default pattern<State>((state) => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { esmModuleLoader: true },
     });
     try {
       const compiled = await runtime.patternManager.compilePattern(program);
@@ -180,7 +178,6 @@ export default pattern<State>((state) => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { esmModuleLoader: true },
     });
     try {
       expect(

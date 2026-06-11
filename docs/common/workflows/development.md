@@ -15,6 +15,9 @@ deno task cf piece setsrc ... --piece PIECE_ID pattern.tsx
 
 # Inspect data
 deno task cf piece inspect ... --piece PIECE_ID
+
+# Link data between deployed pieces (shares cells across patterns)
+deno task cf piece link ... editor-id/items viewer-id/items
 ```
 
 **Tips:**

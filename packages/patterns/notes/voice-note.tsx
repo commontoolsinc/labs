@@ -77,7 +77,7 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
           <cf-card>
             <div style={{ padding: "1rem" }}>
               <h3 style={{ marginTop: 0 }}>Record a Voice Note</h3>
-              <p style={{ color: "var(--cf-color-gray-600)" }}>
+              <p style={{ color: "var(--cf-colors-gray-600)" }}>
                 Hold the microphone button to record. Release to transcribe.
               </p>
 
@@ -95,13 +95,13 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
                   style={{
                     marginTop: "1rem",
                     padding: "1rem",
-                    backgroundColor: "var(--cf-color-blue-50)",
+                    backgroundColor: "var(--cf-colors-blue-50)",
                     borderRadius: "0.375rem",
                   }}
                 >
                   <strong>Latest Transcription:</strong>
                   <p>{transcriptionText}</p>
-                  <small style={{ color: "var(--cf-color-gray-600)" }}>
+                  <small style={{ color: "var(--cf-colors-gray-600)" }}>
                     Duration: {transcriptionDuration.toFixed(1)}s
                   </small>
                 </div>
@@ -117,7 +117,7 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
 
               {!hasNotes
                 ? (
-                  <p style={{ color: "var(--cf-color-gray-500)" }}>
+                  <p style={{ color: "var(--cf-colors-gray-500)" }}>
                     No voice notes yet. Record one above!
                   </p>
                 )
@@ -127,7 +127,7 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
                       <div
                         style={{
                           padding: "0.75rem",
-                          border: "1px solid var(--cf-color-gray-200)",
+                          border: "1px solid var(--cf-colors-gray-200)",
                           borderRadius: "0.375rem",
                           position: "relative",
                         }}
@@ -146,7 +146,7 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
                             </p>
                             <small
                               style={{
-                                color: "var(--cf-color-gray-600)",
+                                color: "var(--cf-colors-gray-600)",
                                 display: "block",
                               }}
                             >

@@ -30,7 +30,9 @@ const adder = handler(false as const satisfies __cfHelpers.JSONSchema, {
 });
 const __cfLift_1 = __cfHelpers.lift<{
     values: unknown[];
-}, void>({
+}, void>(({ values }) => {
+    console.log("values#", values?.length);
+}, {
     type: "object",
     properties: {
         values: {
@@ -43,9 +45,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["values"]
 } as const satisfies __cfHelpers.JSONSchema, {
     asCell: ["opaque"]
-} as const satisfies __cfHelpers.JSONSchema, ({ values }) => {
-    console.log("values#", values?.length);
-});
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const value = __cf_pattern_input.key("element");
     const index = __cf_pattern_input.key("index");

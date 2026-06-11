@@ -67,7 +67,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         sections: __cfHelpers.ReadonlyCell<unknown[]>;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.sections.get().length > 0, {
     type: "object",
     properties: {
         state: {
@@ -87,12 +87,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.sections.get().length > 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     task: {
         note?: string | undefined;
     };
-}, boolean>({
+}, boolean>(({ task }) => task.note !== undefined, {
     type: "object",
     properties: {
         task: {
@@ -107,11 +107,11 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["task"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ task }) => task.note !== undefined);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     tagIndex: number;
     taskIndex: number;
-}, boolean>({
+}, boolean>(({ tagIndex, taskIndex }) => tagIndex === taskIndex, {
     type: "object",
     properties: {
         tagIndex: {
@@ -124,7 +124,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["tagIndex", "taskIndex"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ tagIndex, taskIndex }) => tagIndex === taskIndex);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const tag = __cf_pattern_input.key("element");
     const tagIndex = __cf_pattern_input.key("index");
@@ -399,7 +399,13 @@ const __cfLift_4 = __cfHelpers.lift<{
         };
         title: string;
     };
-}, __cfHelpers.JSXElement>({
+}, __cfHelpers.JSXElement>(({ section }) => 
+// [TRANSFORM] ternary preserved inside the ifElse(expanded) false branch:
+//   section.tasks.length > 0 ? <small>...collapsed</small> : <small>empty</small>
+//   → plain local ternary inside the JSX branch
+section.tasks.length > 0
+    ? <small>{section.title} collapsed</small>
+    : <small>empty</small>, {
     type: "object",
     properties: {
         section: {
@@ -442,13 +448,7 @@ const __cfLift_4 = __cfHelpers.lift<{
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ section }) => 
-// [TRANSFORM] ternary preserved inside the ifElse(expanded) false branch:
-//   section.tasks.length > 0 ? <small>...collapsed</small> : <small>empty</small>
-//   → plain local ternary inside the JSX branch
-section.tasks.length > 0
-    ? <small>{section.title} collapsed</small>
-    : <small>empty</small>);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
     const section = __cf_pattern_input.key("element");
     const sectionIndex = __cf_pattern_input.key("index");

@@ -14,7 +14,10 @@ const __cfAmdHooks = undefined;
 // FIXTURE: builder-input-path-shrink
 // Verifies: builder input schemas shrink to observed paths when reads/writes are specific,
 // including explicit type arguments and interprocedural helper calls.
-const liftOptional = lift({
+const liftOptional = lift((input: Writable<{
+    foo: string | undefined;
+    bar: string;
+}>) => input.key("foo").get(), {
     type: "object",
     properties: {
         foo: {
@@ -24,15 +27,12 @@ const liftOptional = lift({
     asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, (input: Writable<{
-    foo: string | undefined;
-    bar: string;
-}>) => input.key("foo").get());
+} as const satisfies __cfHelpers.JSONSchema);
 const deriveInput = __cfHelpers.__cf_data({} as Writable<{
     foo: string;
     bar: string;
 }>);
-const __cfLift_1 = __cfHelpers.lift(false, () => deriveInput.key("foo").get());
+const __cfLift_1 = __cfHelpers.lift(() => deriveInput.key("foo").get(), false);
 const computedObserved = __cfHelpers.__cf_data(__cfLift_1().for("computedObserved", true));
 const handlerObserved = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
@@ -82,7 +82,10 @@ const helper = __cfHardenFn((value: Writable<{
     foo: string;
     bar: string;
 }>) => value.key("foo").get());
-const liftInterprocedural = lift({
+const liftInterprocedural = lift((input: Writable<{
+    foo: string;
+    bar: string;
+}>) => helper(input), {
     type: "object",
     properties: {
         foo: {
@@ -93,11 +96,14 @@ const liftInterprocedural = lift({
     asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, (input: Writable<{
+} as const satisfies __cfHelpers.JSONSchema);
+const liftWriteOnly = lift((input: Writable<{
     foo: string;
     bar: string;
-}>) => helper(input));
-const liftWriteOnly = lift({
+}>) => {
+    input.key("foo").set("updated");
+    return 1;
+}, {
     type: "object",
     properties: {
         foo: {
@@ -108,14 +114,8 @@ const liftWriteOnly = lift({
     asCell: ["writeonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, (input: Writable<{
-    foo: string;
-    bar: string;
-}>) => {
-    input.key("foo").set("updated");
-    return 1;
-});
-const liftExplicit = lift({
+} as const satisfies __cfHelpers.JSONSchema);
+const liftExplicit = lift((input) => input.key("foo").get(), {
     type: "object",
     properties: {
         foo: {
@@ -126,7 +126,7 @@ const liftExplicit = lift({
     asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, (input) => input.key("foo").get());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {

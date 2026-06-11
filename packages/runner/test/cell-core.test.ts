@@ -617,7 +617,7 @@ describe("Cell", () => {
         type: "object",
         properties: { output: { type: "number" } },
       },
-      result: { output: { $alias: { cell: "internal", path: ["doubled"] } } },
+      result: { output: { $alias: { partialCause: "doubled", path: [] } } },
       nodes: [
         {
           module: {
@@ -625,7 +625,7 @@ describe("Cell", () => {
             implementation: (args: { input: number }) => (args.input * 2),
           },
           inputs: { input: { $alias: { cell: "argument", path: ["input"] } } },
-          outputs: { $alias: { cell: "internal", path: ["doubled"] } },
+          outputs: { $alias: { partialCause: "doubled", path: [] } },
         },
       ],
     } as Pattern);
@@ -675,7 +675,7 @@ describe("Cell", () => {
         type: "object",
         properties: { output: { type: "number" } },
       },
-      result: { output: { $alias: { cell: "internal", path: ["doubled"] } } },
+      result: { output: { $alias: { partialCause: "doubled", path: [] } } },
       nodes: [
         {
           module: {
@@ -683,7 +683,7 @@ describe("Cell", () => {
             implementation: (args: { input: number }) => args.input * 2,
           },
           inputs: { input: { $alias: { cell: "argument", path: ["input"] } } },
-          outputs: { $alias: { cell: "internal", path: ["doubled"] } },
+          outputs: { $alias: { partialCause: "doubled", path: [] } },
         },
       ],
     } as Pattern);

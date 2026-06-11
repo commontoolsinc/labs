@@ -78,7 +78,7 @@ The reactive dependency graph is **reconstructed at runtime**, not stored
 directly. What is persisted:
 
 - Cell values (including stream markers)
-- Result-cell metadata (`pattern`, `argument`, `internal`)
+- Result-cell metadata (`pattern`, `argument`, and the `internal` manifest)
 - Ownership links from generated cells back to their result cell
 
 From this persistent data, the system can reconstruct the dataflow graph by
@@ -141,8 +141,8 @@ This enables pieces to start on-demand when events arrive.
 ### The Ownership Metadata Chain
 
 The current runtime treats the result cell as the root of a piece. The result
-cell stores metadata links to the pattern and to the cells that hold argument
-and internal state:
+cell stores metadata links to the pattern and argument cell. Its `internal`
+metadata is not a direct link; it is a manifest of derived internal cells:
 
 ```
                  meta:pattern
@@ -150,7 +150,10 @@ and internal state:
               │
 result cell ──┼─ meta:argument ─> argument cell
               │
-              └─ meta:internal ─> internal cell
+              └─ meta:internal ─> [
+                                    { partialCause, link: internal cell },
+                                    ...
+                                  ]
 ```
 
 Cells created as implementation details of the piece store metadata pointing
@@ -159,7 +162,7 @@ back to that result cell. In code this is the `result` metadata link, set by
 
 ```
 argument cell ── meta:result ──┐
-internal cell ── meta:result ──┼──> result cell
+derived internal cell ─────────┼──> result cell
 child result ─── meta:result ──┘
 ```
 
@@ -175,7 +178,8 @@ to find and start the responsible piece.
 This chain enables:
 - Finding which pattern governs a cell
 - Lazy piece loading (traverse to find owner)
-- Schema-aware traversal of argument/internal/result metadata
+- Schema-aware traversal of argument metadata, internal manifest links, and
+  result metadata
 
 ### Handler Registration
 

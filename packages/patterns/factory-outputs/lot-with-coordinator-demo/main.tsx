@@ -110,7 +110,7 @@ export default pattern<Record<string, never>, Out>(() => {
             <span style="font-size: 0.875rem; font-weight: 600;">
               🔗 Composed demo
             </span>
-            <span style="font-size: 0.7rem; color: var(--cf-color-gray-600);">
+            <span style="font-size: 0.7rem; color: var(--cf-colors-gray-600);">
               These two patterns share the same `people` cell. Tag a plate as
               "Gideon's car" in Lot Watch and Gideon appears in Parking
               Coordinator's people list.

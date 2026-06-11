@@ -397,7 +397,7 @@ const Note = pattern<NoteInput, NoteOutput>(
             gap="2"
             padding="4"
             style={{
-              borderBottom: "1px solid var(--cf-color-border, #e5e5e7)",
+              borderBottom: "1px solid var(--cf-theme-color-border, #e5e5e7)",
             }}
           >
             {/* Parent notebook chip */}
@@ -412,7 +412,7 @@ const Note = pattern<NoteInput, NoteOutput>(
               <span
                 style={{
                   fontSize: "13px",
-                  color: "var(--cf-color-text-secondary)",
+                  color: "var(--cf-theme-color-text-secondary)",
                 }}
               >
                 In:
@@ -505,8 +505,8 @@ const Note = pattern<NoteInput, NoteOutput>(
                   position: "fixed",
                   top: "112px",
                   right: "16px",
-                  background: "var(--cf-color-bg, white)",
-                  border: "1px solid var(--cf-color-border, #e5e5e7)",
+                  background: "var(--cf-theme-color-background, white)",
+                  border: "1px solid var(--cf-theme-color-border, #e5e5e7)",
                   borderRadius: "12px",
                   boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
                   minWidth: "180px",
@@ -536,7 +536,7 @@ const Note = pattern<NoteInput, NoteOutput>(
                   style={{
                     display: allNotesDividerDisplay,
                     height: "1px",
-                    background: "var(--cf-color-border, #e5e5e7)",
+                    background: "var(--cf-theme-color-border, #e5e5e7)",
                     margin: "4px 8px",
                   }}
                 />

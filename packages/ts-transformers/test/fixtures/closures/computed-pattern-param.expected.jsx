@@ -16,7 +16,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     config: {
         multiplier: number;
     };
-}, number>({
+}, number>(({ value, config }) => value.get() * config.multiplier, {
     type: "object",
     properties: {
         value: {
@@ -36,7 +36,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value", "config"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ value, config }) => value.get() * config.multiplier);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-pattern-param
 // Verifies: computed() inside a pattern captures the pattern parameter as a structured object
 //   computed(() => value.get() * config.multiplier) → lift(({ value, config }) => ...)({ value, config: { multiplier: config.key("multiplier") } })

@@ -1132,6 +1132,12 @@ Deno.test("lift can read session-scoped cell passed from pattern input", async (
     assertEquals(sessionTarget.get(), "a");
 
     const isSessionOpen = lift(
+      (
+        { sessionTarget, id }: {
+          sessionTarget: Cell<string | null>;
+          id: string;
+        },
+      ) => sessionTarget.get() === id,
       {
         type: "object",
         properties: {
@@ -1144,12 +1150,6 @@ Deno.test("lift can read session-scoped cell passed from pattern input", async (
         required: ["sessionTarget", "id"],
       },
       { type: "boolean" },
-      (
-        { sessionTarget, id }: {
-          sessionTarget: Cell<string | null>;
-          id: string;
-        },
-      ) => sessionTarget.get() === id,
     );
 
     const Root = pattern<{ sessionTarget: Cell<string | null> }>(
@@ -1225,9 +1225,9 @@ Deno.test("broad computed output links to narrower scoped result", async () => {
 
     const Root = pattern<{ secret: number }>(({ secret }) => ({
       value: lift(
-        { type: "number" },
-        { type: "number" },
         (x: number) => x + 1,
+        { type: "number" },
+        { type: "number" },
       )(secret),
     }));
 
@@ -1244,13 +1244,14 @@ Deno.test("broad computed output links to narrower scoped result", async () => {
     await runtime.storageManager.synced();
     await result.pull();
 
-    const internalLink = getMetaLink(result, "internal");
-    const internalCell = runtime.getCellFromLink(internalLink!);
-    // in this case, don't follow links before the getRaw, because the links
-    // take us all the way to the value, and then we can't see the scope
-    const rawValue = internalCell?.key("value").getRaw();
-    const valueLink = parseLink(rawValue, internalCell!);
-    assertEquals(valueLink?.scope, "user");
+    // Our result cell will have a link to a space scoped internal call
+    // that space scoped internal cell should then have a link to a user
+    // scoped cell with the value
+    const internalLink = parseLink(result.key("value").getRaw(), result)!;
+    const internalCell = runtime.getCellFromLink(internalLink);
+    assertEquals(internalLink.scope, "space");
+    const internalLinkUser = parseLink(internalCell.getRaw(), internalCell)!;
+    assertEquals(internalLinkUser.scope, "user");
     assertEquals(result.key("value").get() as unknown, 42);
   } finally {
     await runtime.dispose();
@@ -1283,14 +1284,14 @@ Deno.test("opaque JS action result uses narrowest effective output scope", async
     secret.set(41);
 
     const structured = lift(
+      (_x: number) => ({
+        nested: computed(() => 42),
+      }),
       { type: "number" },
       {
         type: "object",
         properties: { nested: { type: "number" } },
       },
-      (_x: number) => ({
-        nested: computed(() => 42),
-      }),
     );
     const Root = pattern<{ secret: number }>(({ secret }) => ({
       value: structured(secret),
@@ -1309,13 +1310,13 @@ Deno.test("opaque JS action result uses narrowest effective output scope", async
     await runtime.storageManager.synced();
     await result.pull();
 
-    const internalLink = getMetaLink(result, "internal");
-    const internalCell = runtime.getCellFromLink(internalLink!);
-    const rawValue = internalCell.key("value").getRaw();
-    const outputLink = parseLink(rawValue, internalCell!);
-    assertEquals(outputLink?.scope, "user");
+    const internalLink = parseLink(result.key("value").getRaw(), result)!;
+    const internalCell = runtime.getCellFromLink(internalLink);
+    assertEquals(internalLink.scope, "space");
+    const outputLink = parseLink(internalCell.getRaw(), internalCell)!;
+    assertEquals(outputLink.scope, "user");
 
-    const scopedOutputCell = runtime.getCellFromLink(outputLink!);
+    const scopedOutputCell = runtime.getCellFromLink(outputLink);
     const auxiliaryLink = parseLink(
       scopedOutputCell.getRaw(),
       scopedOutputCell,
@@ -1340,15 +1341,15 @@ Deno.test("opaque JS action result schema scope participates in effective output
     const { computed, lift, pattern } =
       createTrustedBuilder(runtime).commonfabric;
     const structured = lift(
+      (_x: number) => ({
+        nested: computed(() => 42),
+      }),
       { type: "number" },
       {
         type: "object",
         properties: { nested: { type: "number" } },
         scope: "session",
       },
-      (_x: number) => ({
-        nested: computed(() => 42),
-      }),
     );
     const Root = pattern<{ value: number }>(({ value }) => ({
       value: structured(value),
@@ -1405,9 +1406,9 @@ Deno.test("map keeps outer list scope and narrows per-element result cells", asy
     item.set(20);
 
     const increment = lift(
-      { type: "number" },
-      { type: "number" },
       (x: number) => x + 1,
+      { type: "number" },
+      { type: "number" },
     );
     const Root = pattern<{ values: number[] }>(({ values }) => ({
       mapped: (values as any).mapWithPattern(
@@ -1966,10 +1967,10 @@ Deno.test("map materializes list through session boxed space-scoped reference", 
           required: ["selectedRoomRef"],
         } as const;
         const messageCount = lift(
-          selectedRoomRefInputSchema,
-          { type: "number" } as const,
           (current: any) =>
             current.selectedRoomRef.get()?.messages?.length ?? 0,
+          selectedRoomRefInputSchema,
+          { type: "number" } as const,
         )({ selectedRoomRef });
         const isEmpty = lift(
           (current: number) => current === 0,
@@ -1981,10 +1982,10 @@ Deno.test("map materializes list through session boxed space-scoped reference", 
             "div",
             null,
             (lift(
-              selectedRoomRefInputSchema,
-              { type: "unknown" } as const,
               (current: any) =>
                 current.selectedRoomRef.get()?.messages as Message[],
+              selectedRoomRefInputSchema,
+              { type: "unknown" } as const,
             )({ selectedRoomRef }) as any).mapWithPattern(
               pattern(({ element, index, array }: Opaque<any>) =>
                 (((message: any) =>
@@ -2060,9 +2061,9 @@ Deno.test("filter narrows output list when scoped element controls cardinality",
     item.set(20);
 
     const positive = lift(
+      (x: number) => x > 0,
       { type: "number" },
       { type: "boolean" },
-      (x: number) => x > 0,
     );
     const Root = pattern<{ values: number[] }>(({ values }) => ({
       filtered: (values as any).filterWithPattern(
@@ -2123,9 +2124,9 @@ Deno.test("flatMap narrows output list when scoped element controls cardinality"
     item.set(20);
 
     const expand = lift(
+      (x: number) => [x, x + 1],
       { type: "number" },
       { type: "array", items: { type: "number" } },
-      (x: number) => [x, x + 1],
     );
     const Root = pattern<{ values: number[] }>(({ values }) => ({
       expanded: (values as any).flatMapWithPattern(
@@ -2268,6 +2269,12 @@ Deno.test("session scoped derived chains update when broad inputs change", async
       },
     } as const;
     const selectMessages = lift(
+      (
+        { conversation, room }: {
+          conversation: Conversation;
+          room: RoomId;
+        },
+      ) => conversation.rooms[room] ?? [],
       {
         type: "object",
         properties: {
@@ -2277,27 +2284,21 @@ Deno.test("session scoped derived chains update when broad inputs change", async
         required: ["conversation", "room"],
       } as const,
       messageListSchema,
-      (
-        { conversation, room }: {
-          conversation: Conversation;
-          room: RoomId;
-        },
-      ) => conversation.rooms[room] ?? [],
     );
     const countMessages = lift(
+      (messages: { body: string }[]) => messages.length,
       messageListSchema,
       { type: "number" } as const,
-      (messages: { body: string }[]) => messages.length,
     );
     const countLobby = lift(
+      (conversation: Conversation) => conversation.rooms.lobby.length,
       conversationSchema,
       { type: "number" } as const,
-      (conversation: Conversation) => conversation.rooms.lobby.length,
     );
     const isZero = lift(
+      (count: number) => count === 0,
       { type: "number" } as const,
       { type: "boolean" } as const,
-      (count: number) => count === 0,
     );
     const conversation = runtime.getCell<Conversation>(
       space,

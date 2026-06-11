@@ -32,7 +32,7 @@ function visibleEntries(entries: Writable<Default<Entry[], [
 __cfHardenFn(visibleEntries);
 const __cfLift_1 = __cfHelpers.lift<{
     path: __cfHelpers.Cell<string[]>;
-}, readonly string[]>({
+}, readonly string[]>(({ path }) => path.get(), {
     type: "object",
     properties: {
         path: {
@@ -49,12 +49,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ path }) => path.get());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     entries: Writable<Default<Entry[], [
     ]>>;
     p: readonly string[];
-}, Entry[]>({
+}, Entry[]>(({ entries, p }) => visibleEntries(entries, p[0] || ""), {
     type: "object",
     properties: {
         entries: {
@@ -100,13 +100,13 @@ const __cfLift_2 = __cfHelpers.lift<{
             required: ["name"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ entries, p }) => visibleEntries(entries, p[0] || ""));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     entry: {
         name: string;
     };
     labelPrefix: __cfHelpers.Cell<string>;
-}, boolean>({
+}, boolean>(({ entry, labelPrefix }) => entry.name.startsWith(`${labelPrefix}`), {
     type: "object",
     properties: {
         entry: {
@@ -126,7 +126,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["entry", "labelPrefix"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ entry, labelPrefix }) => entry.name.startsWith(`${labelPrefix}`));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const entry = __cf_pattern_input.key("element");
     const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");

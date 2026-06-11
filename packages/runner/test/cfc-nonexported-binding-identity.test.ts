@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
 // CT-1665: An owner-protected field bound by `WriteAuthorizedBy<T, typeof fn>`
@@ -69,26 +70,31 @@ function recordedBindingPaths(rt: Runtime): string[][] {
     .filter((p): p is string[] => Array.isArray(p));
 }
 
-// Capture the binding metadata resolved through the PUBLIC harness API while a
-// handler runs — the exact lookup the CFC verifier performs at commit. Returns
-// the bindingPaths that resolved to a non-empty result during `fn()`.
+// Capture the bindingPaths of the writer identities STAMPED on transactions
+// while a handler runs — the value the CFC verifier consumes at commit.
+// Channel-agnostic: the identity may resolve through the content-addressed
+// provenance WeakMap or the legacy implementationRef registry; what matters
+// is the identity (with its bindingPath) reaching the transaction.
 async function bindingPathsResolvedDuring(
   rt: Runtime,
   fn: () => void,
 ): Promise<string[][]> {
-  const harness = rt.harness as any;
-  const orig = harness.getVerifiedBindingMetadata.bind(harness);
+  const proto = ExtendedStorageTransaction.prototype as unknown as {
+    setCfcImplementationIdentity: (identity: unknown) => void;
+  };
+  const orig = proto.setCfcImplementationIdentity;
   const resolved: string[][] = [];
-  harness.getVerifiedBindingMetadata = (ref: string) => {
-    const res = orig(ref);
-    if (res?.bindingPath) resolved.push(res.bindingPath);
-    return res;
+  proto.setCfcImplementationIdentity = function (identity: unknown) {
+    const bindingPath = (identity as { bindingPath?: string[] } | undefined)
+      ?.bindingPath;
+    if (Array.isArray(bindingPath)) resolved.push(bindingPath);
+    return orig.call(this, identity);
   };
   try {
     fn();
     await (rt as any).idle?.();
   } finally {
-    harness.getVerifiedBindingMetadata = orig;
+    proto.setCfcImplementationIdentity = orig;
   }
   return resolved;
 }
@@ -96,12 +102,11 @@ async function bindingPathsResolvedDuring(
 describe("CT-1665: verified binding metadata for non-exported handlers", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
-  const newRuntime = (esm: boolean) =>
+  const newRuntime = () =>
     new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "observe",
-      ...(esm ? { experimental: { esmModuleLoader: true } } : {}),
     });
 
   beforeEach(() => {
@@ -111,55 +116,53 @@ describe("CT-1665: verified binding metadata for non-exported handlers", () => {
     await storageManager?.close();
   });
 
-  for (const esm of [false, true]) {
-    for (
-      const [label, src] of [["internal", INTERNAL_SRC], [
-        "exported",
-        EXPORTED_SRC,
-      ]] as const
-    ) {
-      it(`resolves the writer identity when ${label} handlers run (esm=${esm})`, async () => {
-        const rt = newRuntime(esm);
-        try {
-          const tx = rt.edit();
-          const pattern = await rt.patternManager.compilePattern(
-            programFor(src),
-            { space, tx },
-          );
-          const resultCell = rt.getCell<Record<string, unknown>>(
-            space,
-            `ct1665-${label}-${esm}`,
-            undefined,
-            tx,
-          );
-          const r = rt.run(tx, pattern, {}, resultCell);
-          await tx.commit();
-          await r.pull();
+  for (
+    const [label, src] of [["internal", INTERNAL_SRC], [
+      "exported",
+      EXPORTED_SRC,
+    ]] as const
+  ) {
+    it(`resolves the writer identity when ${label} handlers run`, async () => {
+      const rt = newRuntime();
+      try {
+        const tx = rt.edit();
+        const pattern = await rt.patternManager.compilePattern(
+          programFor(src),
+          { space, tx },
+        );
+        const resultCell = rt.getCell<Record<string, unknown>>(
+          space,
+          `ct1665-${label}`,
+          undefined,
+          tx,
+        );
+        const r = rt.run(tx, pattern, {}, resultCell);
+        await tx.commit();
+        await r.pull();
 
-          // The metadata is registered for both siblings...
-          const paths = recordedBindingPaths(rt);
-          expect(paths).toContainEqual(["setName"]);
-          expect(paths).toContainEqual(["setAvatar"]);
+        // The metadata is registered for both siblings...
+        const paths = recordedBindingPaths(rt);
+        expect(paths).toContainEqual(["setName"]);
+        expect(paths).toContainEqual(["setAvatar"]);
 
-          // ...and resolves through the verifier's lookup as each handler runs.
-          const onName = await bindingPathsResolvedDuring(rt, () => {
-            r.key("setName").send({ name: "Alice" });
-          });
-          expect(onName).toContainEqual(["setName"]);
+        // ...and resolves through the verifier's lookup as each handler runs.
+        const onName = await bindingPathsResolvedDuring(rt, () => {
+          r.key("setName").send({ name: "Alice" });
+        });
+        expect(onName).toContainEqual(["setName"]);
 
-          const onAvatar = await bindingPathsResolvedDuring(rt, () => {
-            r.key("setAvatar").send({ avatar: "🦊" });
-          });
-          expect(onAvatar).toContainEqual(["setAvatar"]);
-        } finally {
-          await rt.dispose();
-        }
-      });
-    }
+        const onAvatar = await bindingPathsResolvedDuring(rt, () => {
+          r.key("setAvatar").send({ avatar: "🦊" });
+        });
+        expect(onAvatar).toContainEqual(["setAvatar"]);
+      } finally {
+        await rt.dispose();
+      }
+    });
   }
 
-  it("registers binding metadata for real profile-home setName/setAvatar/addElement", async () => {
-    const rt = newRuntime(true);
+  it("registers binding metadata for real profile-home setName/setAvatar/mutateElements", async () => {
+    const rt = newRuntime();
     try {
       const tx = rt.edit();
       const pattern = await rt.patternManager.compilePattern(
@@ -179,15 +182,15 @@ describe("CT-1665: verified binding metadata for non-exported handlers", () => {
       const paths = recordedBindingPaths(rt);
       expect(paths).toContainEqual(["setName"]);
       expect(paths).toContainEqual(["setAvatar"]);
-      expect(paths).toContainEqual(["addElement"]);
+      expect(paths).toContainEqual(["mutateElements"]);
     } finally {
       await rt.dispose();
     }
   });
 
   it("registers binding metadata after resume-by-identity (source-free reload)", async () => {
-    const rt1 = newRuntime(true);
-    const rt2 = newRuntime(true);
+    const rt1 = newRuntime();
+    const rt2 = newRuntime();
     try {
       const tx1 = rt1.edit();
       const pm1 = rt1.patternManager;

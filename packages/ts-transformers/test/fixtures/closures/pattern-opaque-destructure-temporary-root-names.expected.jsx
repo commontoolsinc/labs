@@ -13,7 +13,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     messages: string[];
-}, string>({
+}, string>(({ messages }) => messages[0] ?? "", {
     type: "object",
     properties: {
         messages: {
@@ -26,16 +26,16 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["messages"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ messages }) => messages[0] ?? "");
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     result: any;
-}, any>({
+}, any>(({ result }) => result?.title ?? "Untitled", {
     type: "object",
     properties: {
         result: true
     },
     required: ["result"]
-} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ result }) => result?.title ?? "Untitled");
+} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-opaque-destructure-temporary-root-names
 // Verifies: destructured opaque temporaries preserve generated root suffixes
 //   const { result } = generateObject(...) uses the synthesized __cf_destructure_* binding consistently

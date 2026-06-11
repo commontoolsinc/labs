@@ -16,7 +16,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         count: number;
     };
-}, number>({
+}, number>(({ state }) => double(state.count + 1), {
     type: "object",
     properties: {
         state: {
@@ -32,7 +32,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => double(state.count + 1));
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-local-helper-call-roots
 // Verifies: top-level ordinary local helper calls with reactive inputs are
 //   lifted as whole calls, while plain inputs stay plain.

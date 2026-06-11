@@ -29,7 +29,6 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { createRef } from "../create-ref.ts";
 import {
   hardenVerifiedFunction,
-  registerVerifiedBindingCandidate,
   registerVerifiedFunctionImplementation,
 } from "../sandbox/function-hardening.ts";
 
@@ -157,20 +156,6 @@ export function createNodeFactory<T = any, R = any>(
   // look-alike never acquires the brand. (Patterns brand separately in
   // builder/pattern.ts.)
   brandTrustedBuilderArtifact(factory);
-  // CT-1665: surface the factory so the legacy/AMD eval path can register verified
-  // binding metadata for non-exported lift/derive/computed bindings (the ESM loader
-  // instead reuses `__cfReg`; see handlerInternal and Engine.evaluate).
-  // Only JS-function modules can be trusted-binding writers (and carry
-  // `__cfVerifiedBindingIdentity`); `type: "ref"` builtins never do — so the guard
-  // is semantically correct. It is also load-safe: an implementation-less builtin
-  // node factory is created at module-load time (e.g. builtins/sqlite/query-node.ts)
-  // and is reached via a module.ts import cycle BEFORE module.ts has evaluated its
-  // own `import` of function-hardening.ts, so calling the registrar there would hit
-  // its still-uninitialized module-scope `let` (a TDZ throw). Function modules are
-  // only ever built later, at pattern-build time, well clear of that window.
-  if (typeof module.implementation === "function") {
-    registerVerifiedBindingCandidate(factory);
-  }
   return factory;
 }
 
@@ -335,67 +320,50 @@ export function resolveSourceLocationFromStack(
  *
  * @returns A module node factory that also serializes as module.
  */
-// Two-arg form: lift(argumentSchema, fn). Listed before the three-arg overload
-// so `lift(false, fn)` resolves here (the impl in slot 2) rather than matching
-// the three-arg signature and erroring on a missing resultSchema. Used by the
-// transformer to emit no-input lifts as `lift(false, fn)()`.
-export function lift<T extends JSONSchema = JSONSchema, R = any>(
-  argumentSchema: T,
-  implementation: (input: Schema<T>) => R,
-  options?: DeriveSchedulerOptions,
-): ModuleFactory<SchemaWithoutCell<T>, R>;
-export function lift<
-  T extends JSONSchema = JSONSchema,
-  R extends JSONSchema = JSONSchema,
->(
-  argumentSchema: T,
-  resultSchema: R,
-  implementation: (input: Schema<T>) => Schema<R>,
-  options?: DeriveSchedulerOptions,
-): ModuleFactory<SchemaWithoutCell<T>, SchemaWithoutCell<R>>;
+// Function-first form, matching pattern()/handler() convention: the callback
+// leads, schemas trail and are optional. The argument/result schemas are plain
+// JSONSchema values that are NOT materialized into the callback input type — the
+// callback's own (or transformer-inferred) type stands. The no-input form is
+// `lift(fn, false)`: argumentSchema:false makes the no-arg application valid
+// (the runner's isValidArgument check passes on `argumentSchema === false`),
+// which is how computed-origin (zero-capture) lifts lower.
 export function lift<T, R>(
   implementation: (input: T) => R,
+  argumentSchema?: JSONSchema,
+  resultSchema?: JSONSchema,
   options?: DeriveSchedulerOptions,
-): ModuleFactory<T, R>;
+): ModuleFactory<StripCell<T>, StripCell<R>>;
 export function lift<T>(
   implementation: (input: T) => any,
+  argumentSchema?: JSONSchema,
+  resultSchema?: JSONSchema,
   options?: DeriveSchedulerOptions,
-): ModuleFactory<T, ReturnType<typeof implementation>>;
+): ModuleFactory<StripCell<T>, StripCell<ReturnType<typeof implementation>>>;
 export function lift<T extends (...args: any[]) => any>(
   implementation: T,
+  argumentSchema?: JSONSchema,
+  resultSchema?: JSONSchema,
   options?: DeriveSchedulerOptions,
-): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
+): ModuleFactory<StripCell<Parameters<T>[0]>, StripCell<ReturnType<T>>>;
 export function lift<T, R>(
-  argumentSchema?: JSONSchema | ((input: any) => any),
-  resultSchema?: JSONSchema | ((input: any) => any) | DeriveSchedulerOptions,
   implementation?: ((input: T) => R) | DeriveSchedulerOptions,
+  argumentSchema?: JSONSchema | DeriveSchedulerOptions,
+  resultSchema?: JSONSchema | DeriveSchedulerOptions,
   options?: DeriveSchedulerOptions,
 ): ModuleFactory<T, R> {
-  if (typeof argumentSchema === "function") {
-    // lift(fn)
-    implementation = argumentSchema;
-    options = resultSchema as DeriveSchedulerOptions | undefined;
-    argumentSchema = resultSchema = undefined;
-  } else if (typeof resultSchema === "function") {
-    // lift(argumentSchema, fn) — two-arg form. The middle slot is the
-    // implementation, not a result schema. Used by the transformer to emit
-    // no-input lifts as `lift(false, fn)()`: argumentSchema:false makes the
-    // application valid with no input (see runner's isValidArgument check),
-    // which is how computed-origin (zero-capture) lifts lower without the
-    // legacy `lift(fn)({})` empty-object stopgap.
-    options = implementation as DeriveSchedulerOptions | undefined;
-    implementation = resultSchema;
-    resultSchema = undefined;
-  }
-  const resolvedImplementation = implementation as
-    | ((input: T) => R)
-    | undefined;
+  const resolvedImplementation =
+    (typeof implementation === "function" ? implementation : undefined) as
+      | ((input: T) => R)
+      | undefined;
+  const resolvedArgumentSchema = argumentSchema as JSONSchema | undefined;
   const resolvedResultSchema = resultSchema as JSONSchema | undefined;
 
   return createNodeFactory({
     type: "javascript",
     implementation: resolvedImplementation,
-    ...(argumentSchema !== undefined ? { argumentSchema } : {}),
+    ...(resolvedArgumentSchema !== undefined
+      ? { argumentSchema: resolvedArgumentSchema }
+      : {}),
     ...(resolvedResultSchema !== undefined
       ? { resultSchema: resolvedResultSchema }
       : {}),
@@ -492,14 +460,13 @@ function handlerInternal<E, T>(
     return eventStream;
   }, module);
 
-  // CT-1665: surface the factory so the legacy/AMD eval path can register its
-  // verified binding metadata after evaluation (the ESM loader instead reuses the
-  // transformer's `__cfReg` registrations — see Engine.evaluate vs evaluateGraph).
-  // The transformer-emitted `__cfBindVerifiedBinding` annotates THIS object (the
-  // builder's return value) once the module body finishes; a non-exported binding
-  // is otherwise unreachable from the export-namespace capture walk and CFC would
-  // reject its owner-protected writes.
-  registerVerifiedBindingCandidate(factory);
+  // Provenance brand, like every factory from `createNodeFactory` (whose
+  // comment always claimed handler coverage — handler factories are built
+  // here and bypassed it): only a branded artifact may acquire a
+  // content-addressed `{ identity, symbol }` reference via `__cfReg`
+  // indexing, and a non-exported handler's `$implRef`/CFC provenance depends
+  // on exactly that registration.
+  brandTrustedBuilderArtifact(factory);
 
   return factory;
 }
@@ -723,18 +690,42 @@ function ensureImplementationRef(
   implementation: (...args: any[]) => unknown,
   kind: "fn" | "handler",
 ): string {
-  const frame = getTopFrame();
   const existing = (implementation as { implementationRef?: string })
     .implementationRef;
   const implementationRef = existing ?? (() => {
+    // Purely content-derived: `src` is the canonical content-addressed source
+    // location (`cf:module/<hash>/<path>:line:col`) under the ESM loader, and
+    // the builder-call-hoisting transformer + SES verifier guarantee one
+    // builder call per module-scope declaration, so (source, preview)
+    // uniquely identifies the implementation. (An order-dependent `ordinal`
+    // used to be folded in as a defense against inline duplicate
+    // declarations, which made refs build-order-dependent.)
     const source = (implementation as { src?: string }).src ??
       implementation.name;
     const minted = createRef({
       kind,
       source,
       preview: implementation.toString(),
-      ...(frame ? { ordinal: frame.generatedIdCounter++ } : {}),
     }, "verified implementation").toString();
+
+    // Transition shim: graphs persisted before the ordinal removal carry
+    // ordinal-bearing refs, and `moduleToJSON` omits the function body for
+    // admitted (verified) modules — those stored refs only resolve if a fresh
+    // evaluation re-registers the implementation under the legacy form too.
+    // Consuming the frame counter HERE (first mint per function, same call
+    // sites as before) reproduces the pre-removal ordinal sequence exactly.
+    // Removed together with `implementationRef` itself — see
+    // docs/specs/content-addressed-action-identity.md.
+    const frame = getTopFrame();
+    if (frame) {
+      const legacy = createRef({
+        kind,
+        source,
+        preview: implementation.toString(),
+        ordinal: frame.generatedIdCounter++,
+      }, "verified implementation").toString();
+      registerVerifiedFunctionImplementation(legacy, implementation);
+    }
 
     if (Object.isExtensible(implementation)) {
       Object.defineProperty(implementation, "implementationRef", {

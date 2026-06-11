@@ -1,10 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
-import {
-  isOpaqueRef,
-  isPattern,
-  type Opaque,
-  unsafe_originalPattern,
-} from "./types.ts";
+import { isOpaqueRef, isPattern, type Opaque } from "./types.ts";
+import { noteDerivedCopy } from "./pattern-metadata.ts";
 import { isCell } from "../cell.ts";
 import { isCellResultForDereferencing } from "../query-result-proxy.ts";
 
@@ -44,16 +40,13 @@ export function traverseValue(
           [key, v],
         ) => [key, traverseValue(v, fn, seen)]),
       );
-      // `Object.entries` drops symbol keys, so a pattern copied here would lose
-      // its link back to the original (branded, content-addressed) factory —
-      // severing `findOriginalPattern`/`getArtifactEntryRef`, which is how a
-      // pattern passed as an `op` is later identified by `{ identity, symbol }`.
-      // Preserve that link (the deepest original) on the copy. Mirrors the same
-      // `unsafe_originalPattern` retention in `toJSONWithLegacyAliases`.
-      if (isPattern(value)) {
-        (copy as Record<symbol, unknown>)[unsafe_originalPattern] =
-          (value as Record<symbol, unknown>)[unsafe_originalPattern] ?? value;
-      }
+      // A pattern copied here must keep its link back to the original
+      // (branded, content-addressed) factory — otherwise
+      // `resolveOriginal`/`getArtifactEntryRef` would be severed, which is how
+      // a pattern passed as an `op` is later identified by
+      // `{ identity, symbol }`. Mirrors the registration in
+      // `toJSONWithLegacyAliases`.
+      if (isPattern(value)) noteDerivedCopy(copy, value);
       return copy;
     }
   } else {

@@ -10,8 +10,8 @@ import { verifyCompiledModuleBody } from "../src/sandbox/module-record-verifier.
 import {
   brandTrustedBuilderArtifact,
   isTrustedBuilderArtifact,
+  noteDerivedCopy,
 } from "../src/builder/pattern-metadata.ts";
-import { unsafe_originalPattern } from "../src/builder/types.ts";
 
 // Security invariants for the `__cfReg` content-addressed registration mechanism
 // (CT-1623). The compiled module body is treated as UNTRUSTED; defenses live in
@@ -79,21 +79,26 @@ describe("isTrustedBuilderArtifact rejects forged values", () => {
     expect(isTrustedBuilderArtifact(forged)).toBe(false);
   });
 
-  it("is not fooled by a STRING-keyed 'unsafe_originalPattern'", () => {
-    // The trust chain follows the module-private SYMBOL `unsafe_originalPattern`,
-    // which authored code cannot reference. A string property of the same name
-    // is inert, so it cannot launder trust onto a forged object.
+  it("is not fooled by ANY own property pointing at a branded value", () => {
+    // Trust lives exclusively in runner-private WeakSets/WeakMaps
+    // (pattern-metadata.ts); no property an attacker can set on an object —
+    // string-keyed, symbol-keyed, or otherwise — can launder trust onto it.
     const branded = brandTrustedBuilderArtifact({});
-    const forged = { ["unsafe_originalPattern"]: branded };
+    const forged = {
+      ["unsafe_originalPattern"]: branded,
+      [Symbol("unsafe_originalPattern")]: branded,
+      original: branded,
+    };
     expect(isTrustedBuilderArtifact(forged)).toBe(false);
   });
 
-  it("accepts a genuinely branded artifact (and copies linking to it)", () => {
+  it("accepts a genuinely branded artifact (and registered derived copies)", () => {
     const artifact = brandTrustedBuilderArtifact({});
     expect(isTrustedBuilderArtifact(artifact)).toBe(true);
-    // A derivation copy whose symbol chain reaches the branded original inherits
-    // trust (this is the legitimate path the chain walk exists for).
-    const copy = { [unsafe_originalPattern]: artifact };
+    // A derivation copy registered by a runner-owned copy site inherits trust
+    // (the legitimate path noteDerivedCopy exists for).
+    const copy = {};
+    noteDerivedCopy(copy, artifact);
     expect(isTrustedBuilderArtifact(copy)).toBe(true);
   });
 });

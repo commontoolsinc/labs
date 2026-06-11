@@ -41,7 +41,10 @@ const __cfLift_1 = __cfHelpers.lift<{
     card: {
         description: string;
     };
-}, boolean | "">({
+}, boolean | "">(({ card }) => {
+    const desc = card.description;
+    return desc && desc.length > 0;
+}, {
     type: "object",
     properties: {
         card: {
@@ -57,10 +60,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["card"]
 } as const satisfies __cfHelpers.JSONSchema, {
     "enum": [false, true, ""]
-} as const satisfies __cfHelpers.JSONSchema, ({ card }) => {
-    const desc = card.description;
-    return desc && desc.length > 0;
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: action-in-ternary-branch
 // Verifies: action() result used in a ternary branch alongside computed() keeps
 //   local JSX rewrites instead of forcing a whole-branch lift-applied computation

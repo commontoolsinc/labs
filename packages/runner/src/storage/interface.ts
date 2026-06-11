@@ -38,6 +38,7 @@ import { Cell } from "../cell.ts";
 import type {
   CfcDereferenceTrace,
   CfcEnforcementMode,
+  CfcFlowLabelsMode,
   CfcTxState,
   ImplementationIdentity,
   PostCommitSideEffect,
@@ -160,6 +161,22 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * Remove a promise from the list of cross-space promises.
    */
   removeCrossSpacePromise(promise: Promise<void>): void;
+
+  /**
+   * Number of cross-space promises currently pending (async loads of link
+   * targets in other spaces, kicked during link resolution or read
+   * traversal). Zero in steady state — `Cell.pull()` uses this to decide
+   * whether a convergence round is needed at all (CT-1667).
+   */
+  pendingCrossSpacePromiseCount?(): number;
+
+  /**
+   * Wait for the currently pending cross-space promises (and any they
+   * transitively kick) to settle, WITHOUT waiting for full provider sync the
+   * way `synced()` does. Used by `Cell.pull()`'s convergence loop so pulls
+   * that kicked no loads keep their existing timing.
+   */
+  crossSpaceSettled?(): Promise<void>;
 
   /**
    * Load cell from storage. Will also subscribe to new changes.
@@ -582,6 +599,14 @@ export interface IStorageTransaction {
   getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
 
   /**
+   * Optional read details for the given space: the values this transaction
+   * observed for its reads (its read invariants). Available after commit or
+   * abort, since the underlying per-document snapshots are pinned for the
+   * transaction's lifetime.
+   */
+  getReadDetails?(space: MemorySpace): Iterable<TransactionReadDetail>;
+
+  /**
    * Describes current status of the transaction. Returns a union type with
    * status field indicating the current state:
    * - `"ready"`: Transaction is being built and ready for operations
@@ -697,6 +722,13 @@ export interface IExtendedStorageTransaction
 
   getCfcState(): Readonly<CfcTxState>;
   setCfcEnforcementMode(mode: CfcEnforcementMode): void;
+  setCfcFlowLabelsMode(mode: CfcFlowLabelsMode): void;
+  /**
+   * Record the addresses whose invalidating writes scheduled this run
+   * (§8.9.2 trigger reads). Their labels join the flow-label derivation
+   * even when the run never re-reads them.
+   */
+  addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void;
   markCfcRelevant(reason?: string): void;
   invalidateCfc(reason: string): void;
 
@@ -1210,6 +1242,11 @@ export interface TransactionWriteDetail {
   address: IMemorySpaceAddress;
   value?: Immutable<FabricValue>;
   previousValue?: Immutable<FabricValue>;
+}
+
+export interface TransactionReadDetail {
+  address: IMemorySpaceAddress;
+  value?: Immutable<FabricValue>;
 }
 
 export type NativeStorageCommitOperation =

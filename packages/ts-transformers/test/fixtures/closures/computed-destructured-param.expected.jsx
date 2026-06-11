@@ -18,7 +18,10 @@ interface Point {
 const __cfLift_1 = __cfHelpers.lift<{
     point: __cfHelpers.ReadonlyCell<Point>;
     multiplier: __cfHelpers.ReadonlyCell<number>;
-}, number>({
+}, number>(({ point, multiplier }) => {
+    const { x, y } = point.get();
+    return (x + y) * multiplier.get();
+}, {
     type: "object",
     properties: {
         point: {
@@ -47,10 +50,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ point, multiplier }) => {
-    const { x, y } = point.get();
-    return (x + y) * multiplier.get();
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-destructured-param
 // Verifies: a captured cell works alongside destructuring inside the computed body
 //   computed(() => { const { x, y } = point.get(); ... }) → lift(...)({ point, multiplier })

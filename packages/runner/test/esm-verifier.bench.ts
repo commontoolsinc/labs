@@ -2,12 +2,11 @@
  * ESM verifier body-vs-graph split benchmark (CT-1623).
  *
  * Isolates the per-module body scan (`verifyCompiledModuleBody` summed over all
- * authored bodies) from the whole-graph structural check (`verifyModuleGraph`)
- * and compares both against the AMD bundle verifier path, for a small synthetic
- * program and the real parking-coordinator pattern.
+ * authored bodies) from the whole-graph structural check (`verifyModuleGraph`),
+ * for a small synthetic program and the real parking-coordinator pattern.
  *
- * Pre-compile / pre-parse everything OUTSIDE the timed regions so the bench
- * measures only the security-verify step, not the TypeScript compile.
+ * Pre-compile everything OUTSIDE the timed regions so the bench measures only
+ * the security-verify step, not the TypeScript compile.
  *
  * Run:
  *   deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env \
@@ -22,8 +21,6 @@ import {
   verifyCompiledModuleBody,
   verifyModuleGraph,
 } from "../src/sandbox/module-record-verifier.ts";
-import { parseCompiledBundleSource } from "../src/sandbox/compiled-js-parser.ts";
-import { verifyParsedCompiledBundleModuleFactoriesWithParser } from "../src/sandbox/compiled-bundle-verifier.ts";
 import {
   type BindingInfo,
   classifyModuleItems,
@@ -36,7 +33,7 @@ import {
 import {
   isAllowedTsLibHelperDeclaration,
   normalizeExact,
-} from "../src/sandbox/bundle-preflight.ts";
+} from "../src/sandbox/tslib-helpers.ts";
 
 // ---------------------------------------------------------------------------
 // Pre-shadow-detection baseline: the single-pass verifyCompiledModuleBody from
@@ -126,16 +123,6 @@ async function compileToGraph(program: RuntimeProgram) {
   }
 }
 
-async function compileToBundle(program: RuntimeProgram) {
-  const { engine, runtime, storageManager } = createBenchEngine();
-  try {
-    return await engine.compile(program);
-  } finally {
-    await runtime.dispose();
-    await storageManager.close();
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Programs
 // ---------------------------------------------------------------------------
@@ -196,20 +183,10 @@ const parkingCoordinatorProgram = await loadParkingCoordinatorProgram();
 const [
   smallGraph,
   parkingGraph,
-  smallBundle,
-  parkingBundle,
 ] = await Promise.all([
   compileToGraph(smallProgram),
   compileToGraph(parkingCoordinatorProgram),
-  compileToBundle(smallProgram),
-  compileToBundle(parkingCoordinatorProgram),
 ]);
-
-// Pre-parse AMD bundles (outside bench timing)
-const smallParsedBundle = parseCompiledBundleSource(smallBundle.jsScript.js);
-const parkingParsedBundle = parseCompiledBundleSource(
-  parkingBundle.jsScript.js,
-);
 
 // Snapshot compiled bodies as plain arrays so the bench loop is allocation-free
 const smallBodies = [...smallGraph.graph.compiledBodies.entries()];
@@ -224,15 +201,11 @@ const parkingMainSpec = parkingGraph.mainSpecifier;
 // Log program sizes for reference
 console.log(
   `small: ${smallBodies.length} authored bodies, ` +
-    `total body bytes: ${smallBodies.reduce((s, [, b]) => s + b.length, 0)}, ` +
-    `AMD bundle: ${smallBundle.jsScript.js.length} chars`,
+    `total body bytes: ${smallBodies.reduce((s, [, b]) => s + b.length, 0)}`,
 );
 console.log(
   `parking-coordinator: ${parkingBodies.length} authored bodies, ` +
-    `total body bytes: ${
-      parkingBodies.reduce((s, [, b]) => s + b.length, 0)
-    }, ` +
-    `AMD bundle: ${parkingBundle.jsScript.js.length} chars`,
+    `total body bytes: ${parkingBodies.reduce((s, [, b]) => s + b.length, 0)}`,
 );
 
 // ---------------------------------------------------------------------------
@@ -257,17 +230,6 @@ Deno.bench(
   },
 );
 
-Deno.bench(
-  `AMD bundle verify: small [${smallBundle.jsScript.js.length} chars]`,
-  { group: "esm-verifier-small" },
-  () => {
-    verifyParsedCompiledBundleModuleFactoriesWithParser(
-      smallBundle.jsScript.js,
-      smallParsedBundle,
-    );
-  },
-);
-
 // ---------------------------------------------------------------------------
 // Benchmarks: parking-coordinator (large)
 // ---------------------------------------------------------------------------
@@ -287,17 +249,6 @@ Deno.bench(
   { group: "esm-verifier-parking" },
   () => {
     verifyModuleGraph(parkingRecords, parkingMainSpec);
-  },
-);
-
-Deno.bench(
-  `AMD bundle verify: parking-coordinator [${parkingBundle.jsScript.js.length} chars]`,
-  { group: "esm-verifier-parking" },
-  () => {
-    verifyParsedCompiledBundleModuleFactoriesWithParser(
-      parkingBundle.jsScript.js,
-      parkingParsedBundle,
-    );
   },
 );
 

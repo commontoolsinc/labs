@@ -25,7 +25,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         discount: number;
     };
-}, number>({
+}, number>(({ item, state }) => item.price * state.discount, {
     type: "object",
     properties: {
         item: {
@@ -50,7 +50,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["item", "state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price * state.discount);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -154,7 +154,7 @@ const __cfLift_2 = __cfHelpers.lift<{
         items: { price: number; }[];
         selectedIndex: __cfHelpers.Cell<number>;
     };
-}, number>({
+}, number>(({ state }) => state.items[state.selectedIndex.get()]?.price ?? 0, {
     type: "object",
     properties: {
         state: {
@@ -183,14 +183,14 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.selectedIndex.get()]?.price ?? 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         items: { price: number; }[];
         selectedIndex: __cfHelpers.Cell<number>;
         discount: number;
     };
-}, number>({
+}, number>(({ state }) => (state.items[state.selectedIndex.get()]?.price ?? 0) * state.discount, {
     type: "object",
     properties: {
         state: {
@@ -222,7 +222,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => (state.items[state.selectedIndex.get()]?.price ?? 0) * state.discount);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-and-handler
 // Verifies: .map() in JSX is transformed to .mapWithPattern() and inline handler inside map body is extracted
 //   state.items.map((item, index) => JSX) → state.key("items").mapWithPattern(pattern(...), { state: { discount, selectedIndex } })

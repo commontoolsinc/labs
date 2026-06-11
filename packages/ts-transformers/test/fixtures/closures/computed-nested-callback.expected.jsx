@@ -14,7 +14,7 @@ const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     numbers: __cfHelpers.ReadonlyCell<number[]>;
     multiplier: __cfHelpers.ReadonlyCell<number>;
-}, number[]>({
+}, number[]>(({ numbers, multiplier }) => numbers.get().map((n) => n * multiplier.get()), {
     type: "object",
     properties: {
         numbers: {
@@ -35,7 +35,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     items: {
         type: "number"
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ numbers, multiplier }) => numbers.get().map((n) => n * multiplier.get()));
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-nested-callback
 // Verifies: capture extraction works with a nested .map() over a captured cell's array value
 //   computed(() => numbers.get().map(n => n * multiplier.get())) → lift(...)({ numbers, multiplier })

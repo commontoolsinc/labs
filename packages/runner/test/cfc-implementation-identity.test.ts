@@ -237,12 +237,7 @@ describe("CFC builtin implementation identity", () => {
       }],
     };
 
-    const { id, jsScript } = await runtime.harness.compile(program);
-    const { main } = await runtime.harness.evaluate(
-      id,
-      jsScript,
-      program.files,
-    );
+    const { main } = await runtime.harness.compileAndEvaluateModules(program);
 
     expect(
       runtime.harness.getVerifiedBindingMetadata(

@@ -22,43 +22,6 @@ export function registerVerifiedFunctionImplementation(
   verifiedFunctionRegistrar?.(implementationRef, fn);
 }
 
-// CT-1665: A trusted-binding builder (handler/lift/...) returns a FACTORY object
-// that the transformer-emitted `__cfBindVerifiedBinding` annotates with the
-// verified binding identity (`__cfVerifiedBindingIdentity`). For an EXPORTED
-// binding that factory is reachable from the module namespace, so the
-// post-evaluation capture walk records its metadata. For a NON-exported
-// module-scope binding (the common shape — e.g. system/profile-home.tsx's
-// setName/setAvatar/addElement) the factory is reachable only through the
-// instantiated node graph, which retains the underlying module (sans metadata),
-// so the metadata is never registered and CFC `writeAuthorizedBy` rejects the
-// binding's own writes.
-//
-// This registrar is the LEGACY/AMD load path's channel for surfacing those
-// factories (Engine.evaluate): there is no `__cfReg` there, since identity
-// addressing is ESM-only. The ESM loader instead reuses the transformer's
-// `__cfReg` registrations (Engine.evaluateGraph reads `graph.registrationSink`),
-// so it installs no registrar and these builder calls are inert no-ops under it.
-// This whole channel retires with the legacy loader.
-type VerifiedBindingCandidateRegistrar = (candidate: unknown) => void;
-
-let verifiedBindingCandidateRegistrar:
-  | VerifiedBindingCandidateRegistrar
-  | undefined;
-
-export function setVerifiedBindingCandidateRegistrar(
-  registrar: VerifiedBindingCandidateRegistrar | undefined,
-): () => void {
-  const previous = verifiedBindingCandidateRegistrar;
-  verifiedBindingCandidateRegistrar = registrar;
-  return () => {
-    verifiedBindingCandidateRegistrar = previous;
-  };
-}
-
-export function registerVerifiedBindingCandidate(candidate: unknown): void {
-  verifiedBindingCandidateRegistrar?.(candidate);
-}
-
 export function hardenVerifiedFunction<T extends (...args: any[]) => unknown>(
   fn: T,
 ): T {

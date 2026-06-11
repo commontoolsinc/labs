@@ -29,7 +29,6 @@ describe("load by module identity (warm + version-bump recovery)", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { esmModuleLoader: true },
     });
     engine = runtime.harness as Engine;
     tx = runtime.edit();

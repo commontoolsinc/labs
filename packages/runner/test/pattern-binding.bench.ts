@@ -25,6 +25,7 @@
 
 import { unwrapOneLevelAndBindtoDoc } from "../src/pattern-binding.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
+import type { AnyCell } from "../src/cell.ts";
 import type { NormalizedFullLink } from "../src/link-types.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 
@@ -70,6 +71,21 @@ function link(
   };
 }
 
+function cell(
+  id: string,
+  schema: JSONSchema | undefined,
+): AnyCell<unknown> {
+  const cellLink = link(id, schema);
+  return {
+    getAsNormalizedFullLink: () => cellLink,
+    export: () => ({
+      cell: cellLink.id,
+      path: cellLink.path,
+      scope: cellLink.scope,
+    }),
+  } as unknown as AnyCell<unknown>;
+}
+
 // A $ref/$defs schema as the CTS transformer actually emits (recursive piece
 // shape + asCell markers), to test whether ref resolution in getSchemaAtPath is
 // what's slow.
@@ -103,18 +119,15 @@ const REF_SCHEMA: JSONSchema = {
 
 const withSchema = {
   arg: link("argument", ARG_SCHEMA),
-  internal: link("internal", ARG_SCHEMA),
-  result: link("result", undefined),
+  result: cell("result", undefined),
 };
 const refSchema = {
   arg: link("argument", REF_SCHEMA),
-  internal: link("internal", REF_SCHEMA),
-  result: link("result", undefined),
+  result: cell("result", undefined),
 };
 const noSchema = {
   arg: link("argument", undefined),
-  internal: link("internal", undefined),
-  result: link("result", undefined),
+  result: cell("result", undefined),
 };
 
 type BuildOpts = {
@@ -185,7 +198,6 @@ function op(binding: unknown, links: Links = withSchema): void {
     cfc,
     binding,
     links.arg,
-    links.internal,
     links.result,
   );
 }

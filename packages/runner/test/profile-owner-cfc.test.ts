@@ -195,14 +195,17 @@ describe("profile owner CFC policy", () => {
       expect(stored.cfc?.labelMap?.entries).toContainEqual({
         path: ["name"],
         label: { integrity: [ownerAtom(alice.did())] },
+        origin: "declared",
       });
       expect(stored.cfc?.labelMap?.entries).toContainEqual({
         path: ["avatar"],
         label: { integrity: [ownerAtom(alice.did())] },
+        origin: "declared",
       });
       expect(stored.cfc?.labelMap?.entries).toContainEqual({
         path: ["elements"],
         label: { integrity: [ownerAtom(alice.did())] },
+        origin: "declared",
       });
       verify.abort();
     } finally {

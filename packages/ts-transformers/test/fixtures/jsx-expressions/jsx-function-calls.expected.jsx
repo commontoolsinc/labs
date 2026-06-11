@@ -25,7 +25,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         a: number;
         b: number;
     };
-}, number>({
+}, number>(({ state }) => Math.max(state.a, state.b), {
     type: "object",
     properties: {
         state: {
@@ -44,12 +44,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.max(state.a, state.b));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         a: number;
     };
-}, number>({
+}, number>(({ state }) => Math.min(state.a, 10), {
     type: "object",
     properties: {
         state: {
@@ -65,13 +65,13 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.min(state.a, 10));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         a: number;
         b: number;
     };
-}, number>({
+}, number>(({ state }) => Math.abs(state.a - state.b), {
     type: "object",
     properties: {
         state: {
@@ -90,12 +90,12 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.abs(state.a - state.b));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         price: number;
     };
-}, number>({
+}, number>(({ state }) => Math.round(state.price), {
     type: "object",
     properties: {
         state: {
@@ -111,12 +111,12 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.round(state.price));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_5 = __cfHelpers.lift<{
     state: {
         price: number;
     };
-}, number>({
+}, number>(({ state }) => Math.floor(state.price), {
     type: "object",
     properties: {
         state: {
@@ -132,12 +132,12 @@ const __cfLift_5 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.floor(state.price));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_6 = __cfHelpers.lift<{
     state: {
         price: number;
     };
-}, number>({
+}, number>(({ state }) => Math.ceil(state.price), {
     type: "object",
     properties: {
         state: {
@@ -153,12 +153,12 @@ const __cfLift_6 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.ceil(state.price));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_7 = __cfHelpers.lift<{
     state: {
         a: number;
     };
-}, number>({
+}, number>(({ state }) => Math.sqrt(state.a), {
     type: "object",
     properties: {
         state: {
@@ -174,12 +174,12 @@ const __cfLift_7 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.sqrt(state.a));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_8 = __cfHelpers.lift<{
     state: {
         name: string;
     };
-}, string>({
+}, string>(({ state }) => state.name.toUpperCase(), {
     type: "object",
     properties: {
         state: {
@@ -195,12 +195,12 @@ const __cfLift_8 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.name.toUpperCase());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_9 = __cfHelpers.lift<{
     state: {
         name: string;
     };
-}, string>({
+}, string>(({ state }) => state.name.toLowerCase(), {
     type: "object",
     properties: {
         state: {
@@ -216,12 +216,12 @@ const __cfLift_9 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.name.toLowerCase());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_10 = __cfHelpers.lift<{
     state: {
         text: string;
     };
-}, string>({
+}, string>(({ state }) => state.text.substring(0, 5), {
     type: "object",
     properties: {
         state: {
@@ -237,12 +237,12 @@ const __cfLift_10 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.text.substring(0, 5));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_11 = __cfHelpers.lift<{
     state: {
         text: string;
     };
-}, string>({
+}, string>(({ state }) => state.text.replace("old", "new"), {
     type: "object",
     properties: {
         state: {
@@ -258,12 +258,12 @@ const __cfLift_11 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.text.replace("old", "new"));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_12 = __cfHelpers.lift<{
     state: {
         text: string;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.text.includes("test"), {
     type: "object",
     properties: {
         state: {
@@ -279,12 +279,12 @@ const __cfLift_12 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.text.includes("test"));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_13 = __cfHelpers.lift<{
     state: {
         name: string;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.name.startsWith("A"), {
     type: "object",
     properties: {
         state: {
@@ -300,12 +300,12 @@ const __cfLift_13 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.name.startsWith("A"));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_14 = __cfHelpers.lift<{
     state: {
         price: number;
     };
-}, string>({
+}, string>(({ state }) => state.price.toFixed(2), {
     type: "object",
     properties: {
         state: {
@@ -321,12 +321,12 @@ const __cfLift_14 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.price.toFixed(2));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_15 = __cfHelpers.lift<{
     state: {
         price: number;
     };
-}, string>({
+}, string>(({ state }) => state.price.toPrecision(4), {
     type: "object",
     properties: {
         state: {
@@ -342,12 +342,12 @@ const __cfLift_15 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.price.toPrecision(4));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_16 = __cfHelpers.lift<{
     state: {
         float: string;
     };
-}, number>({
+}, number>(({ state }) => parseInt(state.float), {
     type: "object",
     properties: {
         state: {
@@ -363,12 +363,12 @@ const __cfLift_16 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => parseInt(state.float));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_17 = __cfHelpers.lift<{
     state: {
         float: string;
     };
-}, number>({
+}, number>(({ state }) => parseFloat(state.float), {
     type: "object",
     properties: {
         state: {
@@ -384,12 +384,12 @@ const __cfLift_17 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => parseFloat(state.float));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_18 = __cfHelpers.lift<{
     state: {
         values: number[];
     };
-}, number>({
+}, number>(({ state }) => state.values.reduce((a, b) => a + b, 0), {
     type: "object",
     properties: {
         state: {
@@ -408,12 +408,12 @@ const __cfLift_18 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.values.reduce((a, b) => a + b, 0));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_19 = __cfHelpers.lift<{
     state: {
         values: number[];
     };
-}, number>({
+}, number>(({ state }) => Math.max(...state.values), {
     type: "object",
     properties: {
         state: {
@@ -432,12 +432,12 @@ const __cfLift_19 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.max(...state.values));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_20 = __cfHelpers.lift<{
     state: {
         values: number[];
     };
-}, string>({
+}, string>(({ state }) => state.values.join(", "), {
     type: "object",
     properties: {
         state: {
@@ -456,12 +456,12 @@ const __cfLift_20 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.values.join(", "));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_21 = __cfHelpers.lift<{
     state: {
         a: number;
     };
-}, number>({
+}, number>(({ state }) => Math.pow(state.a, 2), {
     type: "object",
     properties: {
         state: {
@@ -477,12 +477,12 @@ const __cfLift_21 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.pow(state.a, 2));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_22 = __cfHelpers.lift<{
     state: {
         a: number;
     };
-}, number>({
+}, number>(({ state }) => Math.round(Math.sqrt(state.a)), {
     type: "object",
     properties: {
         state: {
@@ -498,12 +498,12 @@ const __cfLift_22 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.round(Math.sqrt(state.a)));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_23 = __cfHelpers.lift<{
     state: {
         name: string;
     };
-}, string>({
+}, string>(({ state }) => state.name.trim().toUpperCase(), {
     type: "object",
     properties: {
         state: {
@@ -519,13 +519,13 @@ const __cfLift_23 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.name.trim().toUpperCase());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_24 = __cfHelpers.lift<{
     state: {
         a: number;
         b: number;
     };
-}, number>({
+}, number>(({ state }) => Math.max(state.a + 1, state.b * 2), {
     type: "object",
     properties: {
         state: {
@@ -544,7 +544,7 @@ const __cfLift_24 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.max(state.a + 1, state.b * 2));
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: jsx-function-calls
 // Verifies: function/method calls with reactive args in JSX are wrapped in a lift-applied computation
 //   Math.max(state.a, state.b)     → lift(({state}) => Math.max(state.a, state.b))({ a, b })

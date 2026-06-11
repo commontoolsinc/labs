@@ -16,7 +16,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     config: __cfHelpers.ReadonlyCell<{
         multiplier?: number;
     } | null>;
-}, number>({
+}, number>(({ value, config }) => value.get() * (config.get()?.multiplier ?? 1), {
     type: "object",
     properties: {
         value: {
@@ -40,7 +40,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value", "config"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ value, config }) => value.get() * (config.get()?.multiplier ?? 1));
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-optional-chaining
 // Verifies: computed() with optional chaining and nullish coalescing on captured cells
 //   computed(() => value.get() * (config.get()?.multiplier ?? 1)) → lift(({ value, config }) => ...)({ value, config })

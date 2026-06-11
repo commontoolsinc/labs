@@ -85,8 +85,7 @@ export class Builder extends EventTarget {
       }
 
       // Generate build manifest with content hashes of output files.
-      // Used for compilation cache fingerprinting.
-      // See docs/specs/compilation-cache.md Phase 3.
+      // Used by the shell to cache-bust the worker bundle URL (?v=<hash>).
       await this.writeBuildManifest();
 
       const buildTime = Math.round(performance.now() - startTime);
@@ -103,9 +102,8 @@ export class Builder extends EventTarget {
 
   /**
    * Write a build manifest containing SHA-256 hashes of each output file.
-   * The manifest is used by the shell to fingerprint the worker bundle
-   * for compilation cache invalidation.
-   * See docs/specs/compilation-cache.md Phase 3.
+   * The manifest is used by the shell to cache-bust the worker bundle URL
+   * (`?v=<hash>`), so a deploy always loads the fresh worker.
    */
   private async writeBuildManifest(): Promise<void> {
     const manifest: Record<string, string> = {};

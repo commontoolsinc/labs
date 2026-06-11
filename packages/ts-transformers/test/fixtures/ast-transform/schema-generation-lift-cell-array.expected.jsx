@@ -21,7 +21,10 @@ interface CharmEntry {
 // Context: Cell wrapper must produce `asCell: true` in the schema; output schema inferred from return type
 // Test that lift with single generic parameter preserves Cell wrapper
 // This was broken on main - Cell would be unwrapped to ProxyArray
-const logCharmsList = lift({
+const logCharmsList = lift(({ charmsList }) => {
+    console.log("logCharmsList: ", charmsList.get());
+    return charmsList;
+}, {
     type: "object",
     properties: {
         charmsList: {
@@ -67,10 +70,7 @@ const logCharmsList = lift({
             required: ["id", "name"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ charmsList }) => {
-    console.log("logCharmsList: ", charmsList.get());
-    return charmsList;
-});
+} as const satisfies __cfHelpers.JSONSchema);
 export default logCharmsList;
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }

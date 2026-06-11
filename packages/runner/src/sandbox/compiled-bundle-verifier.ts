@@ -3,8 +3,6 @@ import {
   findTopLevelArrow,
   findTopLevelEquals,
   locationFromOffset,
-  parseCompiledBundleSource,
-  type ParsedBundle,
   type ParsedDefineCall,
   parseFunctionText,
   splitTopLevelCommaList,
@@ -23,10 +21,6 @@ import {
 import { getLogger } from "@commonfabric/utils/logger";
 import { ModuleVerificationError } from "./module-verification-error.ts";
 import {
-  isAllowedCompiledDependencySpecifier,
-  isRuntimeModuleIdentifier,
-} from "./runtime-module-policy.ts";
-import {
   isTrustedBuilder,
   isTrustedDataHelper,
   SAFE_GLOBAL_IDENTIFIERS,
@@ -35,7 +29,6 @@ import {
 import {
   BINDING_IDENTITY_HELPER_NAME,
   createBindingIdentityHelperSource,
-  createFactoryShadowGuardSource,
   createFunctionHardeningHelperSource,
   RESERVED_FACTORY_BINDINGS,
 } from "@commonfabric/utils/sandbox-contract";
@@ -84,12 +77,6 @@ const CANONICAL_BINDING_IDENTITY_HELPER = stripJsTrivia(
 );
 
 const RESERVED_FACTORY_BINDING_SET = new Set<string>(RESERVED_FACTORY_BINDINGS);
-const CANONICAL_FACTORY_GUARD_STATEMENTS = createFactoryShadowGuardSource().map(
-  (statement: string) => stripJsTrivia(statement),
-);
-const CANONICAL_FACTORY_GUARD_SET = new Set<string>(
-  CANONICAL_FACTORY_GUARD_STATEMENTS,
-);
 const DEFAULT_EXPORT_ALLOWED_BINDING_ERROR =
   "Default exports must be trusted builders, direct functions, verified data, or import re-exports";
 
@@ -98,154 +85,6 @@ interface ParsedNormalizedCallReference {
   root: string;
   property?: string;
   properties?: string[];
-}
-
-export function verifyCompiledBundleModuleFactoriesWithParser(
-  source: string,
-  filename = "<bundle>",
-): void {
-  try {
-    logger.timeStart("parseBundle");
-    let bundle: ParsedBundle;
-    try {
-      bundle = parseCompiledBundleSource(source);
-    } finally {
-      logger.timeEnd("parseBundle");
-    }
-    verifyParsedCompiledBundleModuleFactoriesWithParser(
-      source,
-      bundle,
-      filename,
-    );
-  } catch (error) {
-    if (error instanceof ModuleVerificationError) {
-      throw error;
-    }
-    if (error instanceof CompiledJsParseError) {
-      throw verificationErrorAt(
-        source,
-        filename,
-        error.offset,
-        error.message,
-      );
-    }
-    throw error;
-  }
-}
-
-export function verifyParsedCompiledBundleModuleFactoriesWithParser(
-  source: string,
-  bundle: ParsedBundle,
-  filename = "<bundle>",
-): void {
-  logger.timeStart("collectModuleIds");
-  let compiledModuleIds: Set<string>;
-  try {
-    compiledModuleIds = new Set(
-      bundle.defineCalls.map(({ moduleId }) => moduleId),
-    );
-  } finally {
-    logger.timeEnd("collectModuleIds");
-  }
-
-  logger.timeStart("verifyDefineCalls");
-  try {
-    for (const defineCall of bundle.defineCalls) {
-      verifyDefineCall(source, filename, defineCall, compiledModuleIds);
-    }
-  } finally {
-    logger.timeEnd("verifyDefineCalls");
-  }
-}
-
-function verifyDefineCall(
-  source: string,
-  filename: string,
-  defineCall: ParsedDefineCall,
-  compiledModuleIds: ReadonlySet<string>,
-): void {
-  const start = performance.now();
-  try {
-    logger.timeStart("verifyDefineCall", "dependencies");
-    try {
-      for (const dependency of defineCall.dependencies) {
-        if (
-          !isAllowedCompiledDependencySpecifier(dependency) &&
-          !compiledModuleIds.has(dependency)
-        ) {
-          throw verificationErrorAt(
-            source,
-            filename,
-            defineCall.statement.start,
-            `Compiled AMD dependency '${dependency}' is not allowed in SES mode`,
-          );
-        }
-      }
-    } finally {
-      logger.timeEnd("verifyDefineCall", "dependencies");
-    }
-
-    verifyCanonicalRequireCapture(source, filename, defineCall);
-
-    logger.timeStart("verifyDefineCall", "authoredFactory");
-    try {
-      verifyAuthoredFactory(source, filename, defineCall);
-    } finally {
-      logger.timeEnd("verifyDefineCall", "authoredFactory");
-    }
-  } finally {
-    logger.time(start, "verifyDefineCall");
-  }
-}
-
-function verifyCanonicalRequireCapture(
-  source: string,
-  filename: string,
-  defineCall: ParsedDefineCall,
-): void {
-  const requireIndex = defineCall.dependencies.indexOf("require");
-  if (
-    requireIndex < 0 || defineCall.factory.params[requireIndex] !== "require"
-  ) {
-    throw verificationErrorAt(
-      source,
-      filename,
-      defineCall.statement.start,
-      "Compiled AMD factories must shadow outer require with a canonical 'require' dependency parameter",
-    );
-  }
-}
-
-function verifyAuthoredFactory(
-  source: string,
-  filename: string,
-  defineCall: ParsedDefineCall,
-): void {
-  const start = performance.now();
-  try {
-    const env = new Map<string, BindingInfo>();
-
-    logger.timeStart("verifyAuthoredFactory", "predeclareDependencies");
-    try {
-      predeclareFactoryDependencies(source, filename, defineCall, env);
-    } finally {
-      logger.timeEnd("verifyAuthoredFactory", "predeclareDependencies");
-    }
-
-    classifyModuleItems(
-      source,
-      filename,
-      defineCall.factory.body.statements,
-      env,
-      {
-        requiredGuards: CANONICAL_FACTORY_GUARD_SET,
-        reservedBindings: RESERVED_FACTORY_BINDING_SET,
-        missingGuardsErrorAt: defineCall.statement.start,
-      },
-    );
-  } finally {
-    logger.time(start, "verifyAuthoredFactory");
-  }
 }
 
 /**
@@ -430,44 +269,6 @@ export function classifyModuleItems(
     logger.timeEnd("classifyModuleItems", "statements");
   }
   return { hasHoistRegistration: sawHoistRegistration };
-}
-
-function predeclareFactoryDependencies(
-  source: string,
-  filename: string,
-  defineCall: ParsedDefineCall,
-  env: Map<string, BindingInfo>,
-): void {
-  const start = performance.now();
-  try {
-    for (
-      let index = 0;
-      index < Math.min(
-        defineCall.factory.params.length,
-        defineCall.dependencies.length,
-      );
-      index++
-    ) {
-      const parameter = defineCall.factory.params[index];
-      const dependency = defineCall.dependencies[index];
-      assertFactoryBindingIsNotReserved(
-        source,
-        filename,
-        defineCall.statement.start,
-        parameter,
-      );
-      env.set(parameter, {
-        kind: "import",
-        dependencySpecifier: dependency,
-        namespaceImport: true,
-        trustedRuntimeName: isRuntimeModuleIdentifier(dependency)
-          ? dependency
-          : undefined,
-      });
-    }
-  } finally {
-    logger.time(start, "predeclareFactoryDependencies");
-  }
 }
 
 function predeclareTopLevelBindings(
@@ -1171,28 +972,26 @@ function callbackIndexesForBuilder(
     case "computed":
       return args.length >= 1 ? [0] : [];
     case "lift": {
-      // `lift` is overloaded on the TYPE of its leading arguments, not on
-      // arity (see the runtime dispatch in builder/module.ts): the callback is
-      // whichever of the first few positions is the function.
-      //   lift(fn, options?)                         → callback at 0
-      //   lift(argSchema, fn, options?)              → callback at 1
-      //   lift(argSchema, resSchema, fn, options?)   → callback at 2
-      // So index purely on arity is wrong — `lift(fn, options)` is a valid
-      // 2-arg form with the callback at 0, while `lift(false, fn)` (the
-      // no-input form, PR #3709) is a 2-arg form with the callback at 1.
-      // Mirror the runtime: pick the first position that parses as a direct
-      // callback. (Newly reachable at module scope as of CT-1644, which hoists
-      // `lift(...)()` computations to a module-scope const; previously these
-      // only appeared inline inside a handler/pattern body, unverified here.)
+      // `lift` is function-first, matching pattern()/handler(): the callback
+      // leads and schemas trail (see the runtime dispatch in builder/module.ts).
+      //   lift(fn)                          → callback at 0
+      //   lift(fn, argSchema)               → callback at 0
+      //   lift(fn, argSchema, resSchema)    → callback at 0
+      //   lift(fn, false)                   → callback at 0 (no-input form)
+      // The callback is always position 0. Scan the leading position(s)
+      // defensively and pick the first that parses as a direct callback.
+      // (Reachable at module scope as of CT-1644, which hoists `lift(...)()`
+      // computations to a module-scope const; previously these only appeared
+      // inline inside a handler/pattern body, unverified here.)
       for (let i = 0; i < Math.min(args.length, 3); i++) {
         if (resolveTrustedBuilderCallback(source, args[i]!, env)) {
           return [i];
         }
       }
-      // No direct callback found in the leading positions; fall back to the
-      // canonical schema-prefixed slot so the caller still emits the
-      // "must receive a direct callback" diagnostic against the right argument.
-      return args.length >= 3 ? [2] : args.length >= 1 ? [args.length - 1] : [];
+      // No direct callback found; fall back to position 0 (where the callback
+      // belongs) so the caller still emits the "must receive a direct callback"
+      // diagnostic against the right argument.
+      return args.length >= 1 ? [0] : [];
     }
     case "handler":
       if (

@@ -20,7 +20,9 @@ type LiftResult = {
 // FIXTURE: schema-generation-lift
 // Verifies: lift() with generic type args generates input and output schemas
 //   lift<LiftArgs, LiftResult>(fn) → lift(inputSchema, outputSchema, fn)
-export const doubleValue = lift({
+export const doubleValue = lift(({ value }) => ({
+    doubled: value * 2,
+}), {
     type: "object",
     properties: {
         value: {
@@ -36,9 +38,7 @@ export const doubleValue = lift({
         }
     },
     required: ["doubled"]
-} as const satisfies __cfHelpers.JSONSchema, ({ value }) => ({
-    doubled: value * 2,
-}));
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

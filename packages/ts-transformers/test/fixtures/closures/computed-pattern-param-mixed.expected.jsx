@@ -19,7 +19,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     };
     offset: number;
     threshold: __cfHelpers.ReadonlyCell<number>;
-}, number>({
+}, number>(({ value, config, offset, threshold }) => (value.get() + config.base + offset) * config.multiplier + threshold.get(), {
     type: "object",
     properties: {
         value: {
@@ -49,7 +49,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value", "config", "offset", "threshold"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ value, config, offset, threshold }) => (value.get() + config.base + offset) * config.multiplier + threshold.get());
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-pattern-param-mixed
 // Verifies: computed() capturing a mix of cells, pattern params, and plain locals
 //   computed(() => (value.get() + config.base + offset) * config.multiplier + threshold.get()) → lift(...)({ value, config: { base, multiplier }, offset, threshold })

@@ -38,18 +38,29 @@ export default pattern<Input>(({ deck }) => {
 });
 ```
 
+Derived data belongs in `computed()`, not a writable cell — a
+`new Writable()` you fill from other values goes stale the moment its inputs
+change. Legitimate pattern-owned cells hold UI state that only handlers write:
+
 ```typescript
 // Creating new cells in pattern body
-export default pattern(({ inputItems }) => {
-  // Create new cells for local state
-  const filteredItems = new Writable<Item[]>([]);
+export default pattern(({ items }) => {
+  // Pattern-owned UI state, mutated by handlers
+  const editingMode = new Writable(false);
   const searchQuery = new Writable("");
   const selectedItem = new Writable<Item | null>(null);
+
+  // Derived data: computed(), never a writable cell.
+  // computed() bodies are plain JavaScript — read cells with .get()
+  const filteredItems = computed(() => {
+    const query = searchQuery.get();
+    return items.get().filter((item) => item.title.includes(query));
+  });
 
   return {
     [UI]: <div>...</div>,
     // Return cells so they're reactive and mutable
-    filteredItems,
+    editingMode,
     searchQuery,
     selectedItem,
   };

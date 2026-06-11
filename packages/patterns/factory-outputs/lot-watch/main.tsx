@@ -1436,7 +1436,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
           {/* Header with tab navigation */}
           <div
             slot="header"
-            style="padding: 0.75rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; border-bottom: 1px solid var(--cf-color-gray-200);"
+            style="padding: 0.75rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; border-bottom: 1px solid var(--cf-colors-gray-200);"
           >
             <cf-hstack justify="between" align="center">
               <cf-heading level={4}>Lot Watch</cf-heading>
@@ -1520,7 +1520,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                         gap="2"
                         wrap
                       >
-                        <span style="font-size: 0.75rem; color: var(--cf-color-gray-500); white-space: nowrap;">
+                        <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500); white-space: nowrap;">
                           Reporting as
                         </span>
                         {hasReporter
@@ -1561,7 +1561,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                             <cf-heading level={5}>
                               Step 1 of 3 — Take a photo
                             </cf-heading>
-                            <span style="text-align: center; font-size: 0.875rem; color: var(--cf-color-gray-500);">
+                            <span style="text-align: center; font-size: 0.875rem; color: var(--cf-colors-gray-500);">
                               Photograph the car. We'll read the plate
                               automatically while you pick the spot.
                             </span>
@@ -1695,7 +1695,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                               </span>
                               {extraction.pending
                                 ? (
-                                  <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
+                                  <span style="font-size: 0.875rem; color: var(--cf-colors-gray-500);">
                                     Reading the plate…
                                   </span>
                                 )
@@ -1715,7 +1715,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                                       {extraction.result?.plateNumber}{" "}
                                       {extraction.result?.plateState}
                                     </span>
-                                    <span style="font-size: 0.7rem; color: var(--cf-color-gray-500);">
+                                    <span style="font-size: 0.7rem; color: var(--cf-colors-gray-500);">
                                       confidence:{" "}
                                       {extraction.result?.confidence}
                                     </span>
@@ -1849,7 +1849,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                     {noSightings
                       ? (
                         <cf-card>
-                          <span style="color: var(--cf-color-gray-500); font-size: 0.875rem;">
+                          <span style="color: var(--cf-colors-gray-500); font-size: 0.875rem;">
                             No sightings yet. Use 📸 Capture to document a car
                             in one of your spots.
                           </span>
@@ -1876,10 +1876,10 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                                   <span style="font-weight: 600; font-family: monospace;">
                                     {g.plate} ({g.state})
                                   </span>
-                                  <span style="font-size: 0.75rem; color: var(--cf-color-gray-600);">
+                                  <span style="font-size: 0.75rem; color: var(--cf-colors-gray-600);">
                                     {g.description} · spots {g.spotsLabel}
                                   </span>
-                                  <span style="font-size: 0.7rem; color: var(--cf-color-gray-500);">
+                                  <span style="font-size: 0.7rem; color: var(--cf-colors-gray-500);">
                                     {g.firstSeen} → {g.lastSeen}
                                   </span>
                                 </cf-vstack>
@@ -1926,7 +1926,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                                   />
                                 )
                                 : (
-                                  <div style="width: 80px; height: 60px; background: var(--cf-color-gray-100); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 1.5rem;">
+                                  <div style="width: 80px; height: 60px; background: var(--cf-colors-gray-100); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 1.5rem;">
                                     🚗
                                   </div>
                                 )}
@@ -2005,7 +2005,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                             {/* Notes */}
                             {row.notes
                               ? (
-                                <span style="font-size: 0.75rem; color: var(--cf-color-gray-600); font-style: italic; padding: 0.375rem 0.5rem; background: var(--cf-color-gray-50); border-radius: 4px;">
+                                <span style="font-size: 0.75rem; color: var(--cf-colors-gray-600); font-style: italic; padding: 0.375rem 0.5rem; background: var(--cf-colors-gray-50); border-radius: 4px;">
                                   {row.notes}
                                 </span>
                               )
@@ -2156,7 +2156,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
 
                             {/* Footer: reporter + time + delete */}
                             <cf-hstack justify="between" align="center" wrap>
-                              <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                              <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                                 {row.reportedBy} — {row.dateStr} {row.timeStr}
                               </span>
 
@@ -2242,7 +2242,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                     <cf-card>
                       <cf-vstack gap="2">
                         <cf-heading level={6}>Spot Occupancy</cf-heading>
-                        <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                        <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                           Total sightings per spot, and how many were non-ours.
                         </span>
                         {spotOccupancy.map((row) => (
@@ -2250,13 +2250,13 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                             justify="between"
                             align="center"
                             gap="2"
-                            style="padding: 0.375rem 0.5rem; border: 1px solid var(--cf-color-gray-200); border-radius: 0.5rem;"
+                            style="padding: 0.375rem 0.5rem; border: 1px solid var(--cf-colors-gray-200); border-radius: 0.5rem;"
                           >
                             <span style="font-weight: 600;">
                               Spot #{row.spotNum}
                             </span>
                             <cf-hstack gap="2" align="center">
-                              <span style="font-size: 0.75rem; color: var(--cf-color-gray-600);">
+                              <span style="font-size: 0.75rem; color: var(--cf-colors-gray-600);">
                                 {row.total} total
                               </span>
                               {row.nonOursCount > 0
@@ -2330,7 +2330,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                                     <span style="font-weight: 600; font-family: monospace;">
                                       {g.plate}
                                     </span>
-                                    <span style="font-size: 0.7rem; color: var(--cf-color-gray-500);">
+                                    <span style="font-size: 0.7rem; color: var(--cf-colors-gray-500);">
                                       ({g.state})
                                     </span>
                                     <span
@@ -2353,12 +2353,12 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                                   </cf-hstack>
                                   {g.org
                                     ? (
-                                      <span style="font-size: 0.75rem; color: var(--cf-color-gray-600);">
+                                      <span style="font-size: 0.75rem; color: var(--cf-colors-gray-600);">
                                         {g.org}
                                       </span>
                                     )
                                     : null}
-                                  <span style="font-size: 0.7rem; color: var(--cf-color-gray-500);">
+                                  <span style="font-size: 0.7rem; color: var(--cf-colors-gray-500);">
                                     {g.description
                                       ? g.description + " · "
                                       : ""}spots {g.spotsLabel} · last{" "}
@@ -2391,7 +2391,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                         <cf-heading level={6}>Recent Activity</cf-heading>
                         {noRecentActivity
                           ? (
-                            <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
+                            <span style="font-size: 0.875rem; color: var(--cf-colors-gray-500);">
                               No sightings match the current filters.
                             </span>
                           )
@@ -2400,7 +2400,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                           <cf-hstack
                             gap="2"
                             align="center"
-                            style="padding: 0.375rem 0; border-bottom: 1px solid var(--cf-color-gray-100);"
+                            style="padding: 0.375rem 0; border-bottom: 1px solid var(--cf-colors-gray-100);"
                           >
                             {r.imgSrc
                               ? (
@@ -2411,7 +2411,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                                 />
                               )
                               : (
-                                <div style="width: 48px; height: 36px; background: var(--cf-color-gray-100); border-radius: 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 1rem;">
+                                <div style="width: 48px; height: 36px; background: var(--cf-colors-gray-100); border-radius: 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 1rem;">
                                   🚗
                                 </div>
                               )}
@@ -2442,7 +2442,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                                   </span>
                                 )
                                 : null}
-                              <span style="font-size: 0.7rem; color: var(--cf-color-gray-500);">
+                              <span style="font-size: 0.7rem; color: var(--cf-colors-gray-500);">
                                 {r.reportedBy} · {r.when}
                               </span>
                             </cf-vstack>

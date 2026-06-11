@@ -47,7 +47,11 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         isEditing: __cfHelpers.ReadonlyCell<boolean>;
     };
-}, __cfHelpers.JSXElement>({
+}, __cfHelpers.JSXElement>(({ state }) => (<cf-button onClick={__cfHandler_1({
+    state: {
+        isEditing: state.isEditing
+    }
+})}>Edit</cf-button>), {
     type: "object",
     properties: {
         state: {
@@ -82,11 +86,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => (<cf-button onClick={__cfHandler_1({
-    state: {
-        isEditing: state.isEditing
-    }
-})}>Edit</cf-button>));
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: inline-action-in-ternary-branch
 // Verifies: inline arrow handler inside explicit computed() in a ternary branch is extracted and captured in a lift-applied computation
 //   computed(() => <cf-button onClick={() => state.isEditing.set(true)} />) → lift(..., handler(...)(...))({ state: { isEditing: asCell } })

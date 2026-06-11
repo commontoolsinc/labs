@@ -14,7 +14,7 @@ const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     pending: boolean;
     result: unknown;
-}, boolean>({
+}, boolean>(({ pending, result }) => pending || !result, {
     type: "object",
     properties: {
         pending: {
@@ -27,10 +27,10 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["pending", "result"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ pending, result }) => pending || !result);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     result: unknown;
-}, boolean>({
+}, boolean>(({ result }) => !!result, {
     type: "object",
     properties: {
         result: {
@@ -40,7 +40,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["result"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ result }) => !!result);
+} as const satisfies __cfHelpers.JSONSchema);
 // Tests ifElse where ifTrue is explicitly undefined
 // This pattern is common: ifElse(pending, undefined, { result })
 // The transformer must handle this correctly - the undefined is a VALUE, not a missing argument

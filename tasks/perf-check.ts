@@ -40,6 +40,7 @@ import {
   MIN_ABSOLUTE_DELTA,
   MIN_REGRESSION_PCT,
   MIN_SAMPLES,
+  newestArtifactsByName,
   parseBaselineOverrides,
   PERF_METRICS_ARTIFACT_NAME,
   PERF_METRICS_BACKFILL_ARTIFACT_NAME,
@@ -201,9 +202,10 @@ async function main() {
   // Extract per-test metrics from JUnit artifacts
   try {
     const artifacts = await fetchArtifactsForRun(runIdNum);
-    const timingArtifacts = artifacts.filter(
+    // Newest per name: a re-run of a flagged test job must refresh its metric.
+    const timingArtifacts = newestArtifactsByName(artifacts.filter(
       (a) => a.name.startsWith("test-timing-") && !a.expired,
-    );
+    ));
     for (const artifact of timingArtifacts) {
       const suites = await downloadAndParseJUnit(artifact.id);
       const testMetrics = extractTestFileMetrics(

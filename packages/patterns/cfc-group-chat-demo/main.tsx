@@ -103,7 +103,7 @@ const SharedTranscript = pattern<
             <span
               style={{
                 fontSize: "12px",
-                color: "var(--cf-color-text-secondary)",
+                color: "var(--cf-theme-color-text-secondary)",
               }}
             >
               {messageCell.authorName}
@@ -123,11 +123,11 @@ const SharedTranscript = pattern<
                     ? "14px 14px 4px 14px"
                     : "14px 14px 14px 4px",
                   background: isMine
-                    ? "var(--cf-color-primary, #2563eb)"
-                    : "var(--cf-color-surface-raised, #f3f4f6)",
+                    ? "var(--cf-theme-color-primary, #2563eb)"
+                    : "var(--cf-theme-color-surface, #f3f4f6)",
                   color: isMine
-                    ? "var(--cf-color-on-primary, #ffffff)"
-                    : "var(--cf-color-text, #111827)",
+                    ? "var(--cf-theme-color-primary-foreground, #ffffff)"
+                    : "var(--cf-theme-color-text, #111827)",
                   overflowWrap: "anywhere",
                   whiteSpace: "pre-wrap",
                 }}

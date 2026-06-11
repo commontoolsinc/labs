@@ -13,6 +13,7 @@ export type {
   ChildNodeState,
   NodeState,
   ReconcileContext,
+  RenderDeclassificationPolicy,
   WorkerJSXElement,
   WorkerProps,
   WorkerReconcilerOptions,

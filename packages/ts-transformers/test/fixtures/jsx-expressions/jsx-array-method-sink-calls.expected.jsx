@@ -21,7 +21,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         items: number[];
         threshold: number;
     };
-}, string>({
+}, string>(({ state }) => state.items.filter((x) => x > state.threshold).join(", "), {
     type: "object",
     properties: {
         state: {
@@ -43,14 +43,14 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).join(", "));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         items: number[];
         threshold: number;
         factor: number;
     };
-}, string>({
+}, string>(({ state }) => state.items.filter((x) => x > state.threshold).map((x) => x * state.factor).join(", "), {
     type: "object",
     properties: {
         state: {
@@ -75,13 +75,13 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).map((x) => x * state.factor).join(", "));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         items: number[];
         threshold: number;
     };
-}, string>({
+}, string>(({ state }) => state.items.filter((x) => x > state.threshold).join(", ").toUpperCase(), {
     type: "object",
     properties: {
         state: {
@@ -103,13 +103,14 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).join(", ").toUpperCase());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         items: number[];
         threshold: number;
     };
-}, string>({
+}, string>(({ state }) => state.items.filter((x) => x > state.threshold).join(", ").toUpperCase()
+    .trim(), {
     type: "object",
     properties: {
         state: {
@@ -131,8 +132,7 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).join(", ").toUpperCase()
-    .trim());
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: jsx-array-method-sink-calls
 // Verifies: direct JSX sink receiver-methods over structural array-method chains can use the shared post-closure path
 //   state.items.filter(fn).join(", ")                        → shared post-closure lift-applied computation over the sink call

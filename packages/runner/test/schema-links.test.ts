@@ -1707,7 +1707,6 @@ describe("Schema - Link Resolution", () => {
         cellCSchema,
         tx,
       );
-      const cellCLink = cellC.getAsNormalizedFullLink();
       cellC.set({ internal: { "__#1": "You are a polite..." } });
 
       // of:baedreifyl2zipph2s75lxkbi6tttr4euo5bsmt53xwznkoc43tk5jqayse
@@ -1717,36 +1716,20 @@ describe("Schema - Link Resolution", () => {
         cellBSchema,
         tx,
       );
-      const cellBLink = cellB.getAsNormalizedFullLink();
       // cellB's argument.system points to cellC's internal.__#1
       cellB.setRawUntyped({
         "argument": {
-          "system": {
-            "$alias": {
-              "path": ["internal", "__#1"],
-              "cell": { "/": cellCLink.id.replace(/^of:/, "") },
-            },
-          },
+          "system": cellC.key("internal").key("__#1").getAsWriteRedirectLink({
+            includeSchema: true,
+          }),
         },
       } as FabricValue);
 
       // data cell's system points to cellB's argument.system
       const dataCellURI = createDataCellURI({
-        "system": {
-          "$alias": {
-            "path": [
-              "argument",
-              "system",
-            ],
-            "schema": {
-              "type": "string",
-              "$defs": {}, // the real case has a bunch here, but it doesn't matter
-            },
-            "cell": {
-              "/": cellBLink.id.replace(/^of:/, ""),
-            },
-          },
-        },
+        "system": cellB.key("argument").key("system").getAsWriteRedirectLink({
+          includeSchema: true,
+        }),
       });
       const cellA = runtime.getCellFromLink(
         {

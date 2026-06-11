@@ -22,7 +22,9 @@ type Output = {
 };
 const __cfLift_1 = __cfHelpers.lift<{
     value: number;
-}, string>({
+}, string>(({ value }) => {
+    return prefix.get() + String(value * multiplier.get());
+}, {
     type: "object",
     properties: {
         value: {
@@ -32,9 +34,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ value }) => {
-    return prefix.get() + String(value * multiplier.get());
-});
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = pattern((__cf_pattern_input: {
     value: number;
 }) => {
@@ -95,7 +95,6 @@ export default pattern(() => {
             properties: {
                 argumentSchema: true,
                 resultSchema: true,
-                internalSchema: true,
                 defaultScope: {
                     $ref: "#/$defs/CellScope"
                 }

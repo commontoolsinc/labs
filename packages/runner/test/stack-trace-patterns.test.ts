@@ -47,8 +47,7 @@ Deno.test("lift error through CTS pipeline has correct source line", async () =>
   ].join("\n");
 
   const program = makeProgram(source);
-  const { id, jsScript } = await runtime.harness.compile(program);
-  const { main } = await runtime.harness.evaluate(id, jsScript, program.files);
+  const { main } = await runtime.harness.compileAndEvaluateModules(program);
   const patternFn = main!["default"];
 
   let capturedError: Error | null = null;
@@ -126,8 +125,7 @@ Deno.test("handler error through CTS pipeline has correct source line", async ()
   ].join("\n");
 
   const program = makeProgram(source);
-  const { id, jsScript } = await runtime.harness.compile(program);
-  const { main } = await runtime.harness.evaluate(id, jsScript, program.files);
+  const { main } = await runtime.harness.compileAndEvaluateModules(program);
   const patternFn = main!["default"];
 
   let capturedError: Error | null = null;
@@ -207,8 +205,7 @@ Deno.test("lift error stack has multiple frames with correct source line", async
   ].join("\n");
 
   const program = makeProgram(source);
-  const { id, jsScript } = await runtime.harness.compile(program);
-  const { main } = await runtime.harness.evaluate(id, jsScript, program.files);
+  const { main } = await runtime.harness.compileAndEvaluateModules(program);
   const patternFn = main!["default"];
 
   let capturedError: Error | null = null;
@@ -276,11 +273,9 @@ Deno.test("mapWithPattern synthetic pattern callsite keeps authored source lines
   ].join("\n");
 
   const program = makeProgram(source);
-  const { id, jsScript } = await runtime.harness.compile(program);
-
   let capturedError: Error | null = null;
   try {
-    await runtime.harness.evaluate(id, jsScript, program.files);
+    await runtime.harness.compileAndEvaluateModules(program);
   } catch (error) {
     if (error instanceof Error) {
       capturedError = error;
@@ -292,7 +287,10 @@ Deno.test("mapWithPattern synthetic pattern callsite keeps authored source lines
   assertEquals(capturedError !== null, true, "error should have been caught");
   assertEquals(capturedError!.message, "map boom");
 
-  const stack = runtime.harness.parseStack(capturedError!.stack ?? "");
+  // The stack is already source-mapped when compileAndEvaluateModules
+  // surfaces a module-evaluation error (re-parsing a mapped stack would
+  // corrupt it — the per-module maps are keyed by the mapped source paths).
+  const stack = capturedError!.stack ?? "";
   const frames = stack.split("\n").filter((l) => l.trim().startsWith("at "));
   const sourceFrames = frames.filter((line) => line.includes("main.tsx"));
 

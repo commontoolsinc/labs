@@ -20,21 +20,21 @@ const __cfAmdHooks = undefined;
 // The trailing `__cfReg({ ... })` should therefore contain only `internalHelper`
 // and the synthetic `__cfPattern_1` (the `.map` op) — never `exportedLift`,
 // `reexportedLift`, or the default pattern.
-const internalHelper = lift({
+const internalHelper = lift((x: number) => x + 1, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, (x: number) => x + 1);
-export const exportedLift = lift({
+} as const satisfies __cfHelpers.JSONSchema);
+export const exportedLift = lift((x: number) => x * 2, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, (x: number) => x * 2);
-const reexportedLift = lift({
+} as const satisfies __cfHelpers.JSONSchema);
+const reexportedLift = lift((x: number) => x - 1, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, (x: number) => x - 1);
+} as const satisfies __cfHelpers.JSONSchema);
 export { reexportedLift };
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const x = __cf_pattern_input.key("element");

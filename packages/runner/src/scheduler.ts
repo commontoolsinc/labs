@@ -139,7 +139,10 @@ import {
   type PullDemandState,
   shouldRunFirstPullComputationInDemandContext,
 } from "./scheduler/demand.ts";
-import { type StorageNotificationState } from "./scheduler/notifications.ts";
+import {
+  addCfcTriggerRead,
+  type StorageNotificationState,
+} from "./scheduler/notifications.ts";
 import { processPullStorageNotification } from "./scheduler/pull-notifications.ts";
 import { processPushStorageNotification } from "./scheduler/push-notifications.ts";
 import {
@@ -271,6 +274,12 @@ export class Scheduler {
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel>();
   private triggerIndex = new SchedulerTriggerIndex();
+  // Pending CFC trigger reads per dirtied action (§8.9.2): addresses whose
+  // invalidating writes scheduled it, consumed by the action's next run.
+  private cfcTriggerReads = new WeakMap<
+    Action,
+    { addresses: IMemorySpaceAddress[]; keys: Set<string> }
+  >();
   private actionChangeGroups = new WeakMap<Action, ChangeGroup>();
   private retries = new WeakMap<Action, number>();
 
@@ -1854,6 +1863,7 @@ export class Scheduler {
   private createStorageNotificationState(): StorageNotificationState {
     return {
       triggerIndex: this.triggerIndex,
+      cfcTriggerReads: this.cfcTriggerReads,
       getDiagnosisEnabled: () => this.diagnosisEnabled,
       getCollectTriggerTrace: () => this.collectTriggerTrace,
       changeGroupToActionId: this.changeGroupToActionId,
@@ -2044,6 +2054,7 @@ export class Scheduler {
     return {
       cancels: this.cancels,
       dependencies: this.dependencies,
+      cfcTriggerReads: this.cfcTriggerReads,
       actionChangeGroups: this.actionChangeGroups,
       changeGroupToActionId: this.changeGroupToActionId,
       pending: this.pending,
@@ -2274,6 +2285,23 @@ export class Scheduler {
   private createActionRunState(): SchedulerActionRunState {
     return {
       runtime: this.runtime,
+      takeCfcTriggerReads: (target) => {
+        const pending = this.cfcTriggerReads.get(target);
+        if (pending === undefined) {
+          return undefined;
+        }
+        this.cfcTriggerReads.delete(target);
+        return pending.addresses;
+      },
+      restoreCfcTriggerReads: (target, addresses) => {
+        for (const address of addresses) {
+          addCfcTriggerRead(
+            { cfcTriggerReads: this.cfcTriggerReads },
+            target,
+            address,
+          );
+        }
+      },
       actionChangeGroups: this.actionChangeGroups,
       inFlightSourceState: this.inFlightSourceState,
       actionTimingState: this.actionTimingState,

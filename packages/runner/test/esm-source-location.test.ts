@@ -13,9 +13,9 @@ import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementa
 // (`/main.tsx:line:col`), not the raw concatenated-bundle coordinate
 // (`<loadId>.js:line:col`). Otherwise CFC verified-source identity fails closed
 // (`isVerifiedSourceInLoad` === false → kind "unsupported"), which breaks every
-// CFC trusted action under ESM. The fix composes a per-load bundle source map
+// CFC trusted action. The fix composes a per-load bundle source map
 // (see composeBundleSourceMap) and registers it so `mapPosition` can translate
-// the coordinate — parity with the AMD isolate path.
+// the coordinate.
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -47,7 +47,7 @@ interface HandlerIdentityProbe {
    * derived from `fn.src` via `harness.implementationHashForSource`. This is the
    * SECOND consumer of ESM source-location fidelity (the first is CFC
    * verified-source above): the scheduler keys reload-stable action identity on
-   * it, so it must resolve flag-on for the loader to be default-on safe.
+   * it, so it must resolve under the ESM loader.
    */
   implHash: string | undefined;
 }
@@ -67,14 +67,9 @@ function probeHandlerIdentity(
     throw new Error("no verified handler node found in compiled pattern");
   }
   const implementationRef = handlerModule.implementationRef!;
-  const patternId = runtime.patternManager.getPatternId(compiled);
-  const verifiedLoadId = runtime.harness.getVerifiedLoadId?.(
-    implementationRef,
-    patternId,
-  );
+  const verifiedLoadId = runtime.harness.getVerifiedLoadId?.(implementationRef);
   const fn = runtime.harness.getExecutableFunction?.(
     implementationRef,
-    patternId,
   ) as (((...a: unknown[]) => unknown) & { src?: string }) | undefined;
   const src = fn?.src;
   const match = typeof src === "string" ? /^(.*):(\d+):(\d+)$/.exec(src) : null;
@@ -106,12 +101,11 @@ describe("ESM loader: verified-source location resolution", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
-  const makeRuntime = (esmModuleLoader: boolean) => {
+  const makeRuntime = () => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { esmModuleLoader },
     });
   };
 
@@ -121,7 +115,7 @@ describe("ESM loader: verified-source location resolution", () => {
   });
 
   it("resolves a handler's src to its original source under the ESM loader", async () => {
-    makeRuntime(true);
+    makeRuntime();
     const compiled = await runtime.patternManager.compilePattern(program);
     const r = probeHandlerIdentity(runtime, compiled);
 
@@ -135,49 +129,10 @@ describe("ESM loader: verified-source location resolution", () => {
     expect(r.verifiedLoadId).toBeDefined();
     expect(r.isVerifiedSourceInLoad).toBe(true);
     expect(r.kind).toBe("verified");
-    // The scheduler's content-addressed implementation hash also resolves
-    // flag-on: `fn.src` reduces to the pure per-module code identity
-    // `cf:module/<hash>:line:col` (no `/path` segment). This is the second
-    // default-on prerequisite — without it, reload-stable action identity breaks.
+    // The scheduler's content-addressed implementation hash also resolves:
+    // `fn.src` reduces to the pure per-module code identity
+    // `cf:module/<hash>:line:col` (no `/path` segment). Without it,
+    // reload-stable action identity breaks.
     expect(r.implHash).toMatch(/^cf:module\/[^/]+:\d+:\d+$/);
-  });
-
-  it("matches AMD-path verified-source resolution (parity)", async () => {
-    makeRuntime(false);
-    const compiled = await runtime.patternManager.compilePattern(program);
-    const r = probeHandlerIdentity(runtime, compiled);
-
-    expect(r.src).toMatch(/(?:^|\/)main\.tsx:\d+:\d+$/);
-    expect(r.src).toMatch(/^cf:module\//);
-    expect(r.isVerifiedSourceInLoad).toBe(true);
-    expect(r.kind).toBe("verified");
-    expect(r.implHash).toMatch(/^cf:module\/[^/]+:\d+:\d+$/);
-  });
-
-  it("resolves the same source-LOCATION suffix flag-on and flag-off", async () => {
-    // The scheduler's implementation hash has two parts: the per-module code
-    // identity (`cf:module/<hash>`) and the source-location suffix
-    // (`:line:col`). This PR is about the LATTER — source-location fidelity — and
-    // it must resolve to the SAME authored coordinate under either loader.
-    //
-    // The per-module `<hash>` deliberately DIFFERS across loaders (ESM uses the
-    // prefix-free per-module `computeModuleIdentities` hash; AMD uses its legacy
-    // whole-program scheme), so a default-on flip re-keys action identity once.
-    // That is a module-identity / state-migration concern tracked under Phase 5
-    // (AMD removal), NOT a source-location regression — assert only the suffix.
-    const suffixOf = (h: string | undefined) => h?.match(/(:\d+:\d+)$/)?.[1];
-
-    makeRuntime(true);
-    const esmCompiled = await runtime.patternManager.compilePattern(program);
-    const esmHash = probeHandlerIdentity(runtime, esmCompiled).implHash;
-    await runtime.dispose();
-    await storageManager.close();
-
-    makeRuntime(false);
-    const amdCompiled = await runtime.patternManager.compilePattern(program);
-    const amdHash = probeHandlerIdentity(runtime, amdCompiled).implHash;
-
-    expect(suffixOf(esmHash)).toMatch(/^:\d+:\d+$/);
-    expect(suffixOf(esmHash)).toBe(suffixOf(amdHash));
   });
 });
