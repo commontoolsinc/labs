@@ -1052,3 +1052,23 @@ Additional non-fixture unit suites cover:
 This specification is a snapshot of current behavior. Any transformer code or
 fixture expectation changes should be treated as spec changes and reflected in
 this document.
+
+### 16.1 Keeping This Spec Current (Sources Of Truth)
+
+Several facts in this document are enumerations the implementation already
+centralizes. When they change, update the spec from the canonical source rather
+than hand-maintaining a parallel list — and prefer pointing at the source over
+re-listing it. The enforced sources of truth:
+
+| Spec content | Canonical source | Guard / note |
+| --- | --- | --- |
+| Pipeline stage set + order (§3) | `CFC_TRANSFORMER_STAGE_SPECS` / `CFC_TRANSFORMER_STAGE_NAMES` (`src/cf-pipeline.ts`) | the array literal is the order |
+| Cross-stage registries (§2.2) | `CrossStageState` (`src/core/cross-stage-state.ts`) | NodeLinks-shaped families |
+| Recognized runtime exports + which are reactive origins (§5, §6.3) | `COMMONFABRIC_RUNTIME_EXPORT_REGISTRY` (`src/core/commonfabric-runtime-registry.ts`) | `test/core/commonfabric-runtime-registry.test.ts` asserts coverage of the runner builder factory |
+| SES self-contained callback boundaries (§6.5) | `SES_SELF_CONTAINED_CALLBACK_BOUNDARIES` (`src/transformers/pattern-context-validation.ts`) | excludes `sqlite-row-label-rule` by design |
+| Lowerable expression-site container kinds (§6.7) | `getExpressionContainerKind` (`expression-site-policy.ts`) | — |
+| Diagnostic `type:` strings | the emitting transformer's `reportDiagnostic` calls | grep `type: "…"` per validator |
+
+A drift-resistant habit: when a section enumerates a set, cite the constant /
+function that defines it so a reader can confirm the live set, and keep prose
+lists explicitly labeled "as of this writing."
