@@ -221,6 +221,142 @@ describe("CFC flow labels: integrity propagation (phase C)", () => {
     }
   });
 
+  // TransformedBy is an attribution claim, and the flow stage operates at tx
+  // granularity (one join stamped on every written doc). The claim is only
+  // honest when every write in the tx was authored under the same defined
+  // identity — captured at write time, like `writePolicyInputIdentities`
+  // ("a later run in the same transaction may change the identity"). Any
+  // ambiguity omits the atom: a fail-safe under-claim, never a borrowed one.
+  const isTransformedBy = (atom: unknown): boolean =>
+    (atom as { type?: string } | null)?.type === CFC_ATOM_TYPE.TransformedBy;
+
+  it("omits TransformedBy when writes span multiple identities (no borrowing)", async () => {
+    const { storageManager, runtime } = makeRuntime();
+    try {
+      await seedDoc(runtime, "flow-tb-multi-src", [certified("p1")]);
+
+      const tx = runtime.edit();
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "writer.x",
+      });
+      const src = runtime.getCell(space, "flow-tb-multi-src", undefined, tx);
+      const raw = src.getRaw() as { n: number };
+      const out1 = runtime.getCell(space, "flow-tb-multi-out1", undefined, tx);
+      const out1Id = out1.getAsNormalizedFullLink().id;
+      tx.writeOrThrow(
+        { space, scope: "space", id: out1Id, path: ["value"] },
+        { copied: raw.n },
+      );
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "writer.y",
+      });
+      const out2 = runtime.getCell(space, "flow-tb-multi-out2", undefined, tx);
+      const out2Id = out2.getAsNormalizedFullLink().id;
+      tx.writeOrThrow(
+        { space, scope: "space", id: out2Id, path: ["value"] },
+        { copied: raw.n },
+      );
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      for (const id of [out1Id, out2Id]) {
+        const integrity = derivedIntegrity(storageManager, id);
+        // The hereditary meet still flows...
+        expect(integrity).toContainEqual(certified("p1"));
+        // ...but stamping the per-tx join with the last-active identity
+        // would attribute writer.x's output to writer.y.
+        expect(integrity.some(isTransformedBy)).toBe(false);
+      }
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("omits TransformedBy when a write predates the first identity (unattributed)", async () => {
+    const { storageManager, runtime } = makeRuntime();
+    try {
+      await seedDoc(runtime, "flow-tb-unattr-src", [certified("p1")]);
+
+      const tx = runtime.edit();
+      const src = runtime.getCell(space, "flow-tb-unattr-src", undefined, tx);
+      const raw = src.getRaw() as { n: number };
+      const out1 = runtime.getCell(space, "flow-tb-unattr-out1", undefined, tx);
+      const out1Id = out1.getAsNormalizedFullLink().id;
+      // Unattributed write: no implementation identity has been set yet.
+      tx.writeOrThrow(
+        { space, scope: "space", id: out1Id, path: ["value"] },
+        { copied: raw.n },
+      );
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "late-identity",
+      });
+      const out2 = runtime.getCell(space, "flow-tb-unattr-out2", undefined, tx);
+      const out2Id = out2.getAsNormalizedFullLink().id;
+      tx.writeOrThrow(
+        { space, scope: "space", id: out2Id, path: ["value"] },
+        { copied: raw.n },
+      );
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      // The unattributed write must not borrow the later trusted identity.
+      for (const id of [out1Id, out2Id]) {
+        const integrity = derivedIntegrity(storageManager, id);
+        expect(integrity).toContainEqual(certified("p1"));
+        expect(integrity.some(isTransformedBy)).toBe(false);
+      }
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("attributes TransformedBy to the identity that authored the writes, not the one current at prepare", async () => {
+    const { storageManager, runtime } = makeRuntime();
+    try {
+      await seedDoc(runtime, "flow-tb-author-src", [certified("p1")]);
+
+      const tx = runtime.edit();
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "the-author",
+      });
+      const src = runtime.getCell(space, "flow-tb-author-src", undefined, tx);
+      const raw = src.getRaw() as { n: number };
+      const out = runtime.getCell(space, "flow-tb-author-out", undefined, tx);
+      const outId = out.getAsNormalizedFullLink().id;
+      tx.writeOrThrow(
+        { space, scope: "space", id: outId, path: ["value"] },
+        { copied: raw.n },
+      );
+      // A later run in the same tx changes the identity but writes nothing:
+      // the write-authoring identity is still uniform.
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "the-bystander",
+      });
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const integrity = derivedIntegrity(storageManager, outId);
+      expect(integrity).toContainEqual({
+        type: CFC_ATOM_TYPE.TransformedBy,
+        identity: { kind: "builtin", builtinId: "the-author" },
+      });
+      expect(integrity).not.toContainEqual({
+        type: CFC_ATOM_TYPE.TransformedBy,
+        identity: { kind: "builtin", builtinId: "the-bystander" },
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("strips schema-forged PolicyCertified and TransformedBy (runtime-minted gate)", async () => {
     const { storageManager, runtime } = makeRuntime();
     try {

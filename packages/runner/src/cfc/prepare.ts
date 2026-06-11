@@ -1289,9 +1289,17 @@ const deriveFlowJoin = (
   const confidentiality = uniqueCfcAtoms(atoms);
   const integrity: unknown[] = [...(hereditaryMeet ?? [])];
   // Derivation provenance (§8.9.3 TransformedBy, staged: identity binding
-  // only — no per-input refs/witnesses yet). Minted only alongside an
-  // entry that exists anyway; runtime-minted (schema-forgery gated).
-  const identity = tx.getCfcState().implementationIdentity;
+  // only — no per-input refs/witnesses yet). The flow join is one per-tx
+  // label stamped on every written doc, so the identity must hold for the
+  // whole tx: minted only when every non-privileged write was authored
+  // under the same defined identity, captured at write time (see
+  // `CfcTxState.writeIdentity`) — not whichever identity is current at
+  // prepare, which a later run in the same tx may have changed and which
+  // an unattributed write must not borrow. Ambiguity omits the atom
+  // (fail-safe under-claim). Minted only alongside an entry that exists
+  // anyway; runtime-minted (schema-forgery gated).
+  const writeIdentity = tx.getCfcState().writeIdentity;
+  const identity = writeIdentity.multiple ? undefined : writeIdentity.identity;
   if (
     identity !== undefined &&
     (confidentiality.length > 0 || integrity.length > 0)
