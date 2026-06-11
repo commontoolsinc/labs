@@ -107,6 +107,53 @@ export const cfcObservationFitsCeiling = (
   );
 };
 
+/**
+ * The confidentiality atoms in `confidentiality` that fall OUTSIDE `ceiling`
+ * (the membership complement that makes `cfcObservationFitsCeiling` false). An
+ * `undefined` ceiling means "no ceiling" — nothing is outside it. A declared but
+ * empty ceiling is "public only", so every confidential atom is outside it.
+ *
+ * Shared by the prepare-time sink-request ceiling check so the gate and the
+ * fits-test agree on membership semantics (deep-equal over structured atoms).
+ */
+export const atomsOutsideCeiling = (
+  confidentiality: readonly unknown[],
+  ceiling: CfcObservationMaxConfidentiality,
+): ImmutableJSONValue[] => {
+  if (ceiling === undefined) {
+    return [];
+  }
+  return confidentiality.filter((value) =>
+    !ceiling.some((allowed) => deepEqual(allowed, value))
+  ) as ImmutableJSONValue[];
+};
+
+/**
+ * Meet two confidentiality ceilings (allowlists) into the effective bound that
+ * satisfies BOTH: a value fits the result iff it fits each input. Since fitting
+ * means "every atom is a ceiling member" (`cfcObservationFitsCeiling`), fitting
+ * both means the atom set sits within the set INTERSECTION of the two
+ * allowlists.
+ *
+ * Edge cases (each preserves `cfcObservationFitsCeiling` semantics):
+ * - `undefined` ceiling = "no ceiling" = allow everything, so it is the
+ *   identity: `meet(undefined, x) === x` and `meet(x, undefined) === x`.
+ * - A declared empty ceiling is "public only", and intersection with anything
+ *   stays empty, so `meet([], x)` is public-only — the strict bound wins.
+ *
+ * Used to fold a deployment per-sink ceiling into a pattern-supplied observation
+ * bound so post-commit LLM tool-loop reads cannot exceed the deployment ceiling
+ * (review follow-up to #3993).
+ */
+export const meetCfcObservationCeilings = (
+  a: CfcObservationMaxConfidentiality,
+  b: CfcObservationMaxConfidentiality,
+): CfcObservationMaxConfidentiality => {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return a.filter((value) => b.some((other) => deepEqual(other, value)));
+};
+
 export const cfcJsonPointerForPath = (
   path: readonly (string | number)[],
 ): string =>
