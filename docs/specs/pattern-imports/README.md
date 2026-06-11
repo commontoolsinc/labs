@@ -406,6 +406,14 @@ share compiled artifacts and live module namespaces
 (`modulesByIdentity`, `addressableByIdentity` in `pattern-manager.ts`) — the
 import costs nothing the deployed pattern hasn't already paid.
 
+**Availability is a compile-time concern only.** The compile's write-back
+copies the imported modules' source + compiled docs into the **compiling
+space** (content-addressed keys, idempotent), so both rehydration paths —
+warm (compiled-doc links) and cold (source docs re-fetched by hash) — read
+locally. The referenced space/host must be reachable when a ref is pinned or
+first compiled, never to reload a deployed importer. (This copy is exactly
+the provenance-relevant flow flagged under § Security.)
+
 ### 4. Cross-host references: no service surface at all
 
 A runtime is no longer bound to one memory host: `spaceHostMap`
