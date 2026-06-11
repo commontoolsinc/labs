@@ -1,5 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
-import type { Pattern } from "../builder/types.ts";
+import { isPattern, type Pattern } from "../builder/types.ts";
 import type { Runtime } from "../runtime.ts";
 
 /**
@@ -52,6 +52,10 @@ export function isPatternRefSentinel(
  *   mid-session — a sync Action cannot await `loadPatternByIdentity`), fall back
  *   to the sentinel's retained `$opFallback` graph so a running node never breaks
  *   just because its op rolled out of the bounded cache.
+ * - A pattern VALUE serialized by the dual-write boundary (PR E3) carries
+ *   `$patternRef` ALONGSIDE its full graph — sentinel-shaped, but with the
+ *   graph in the value itself rather than under `$opFallback`. On a cache
+ *   miss, resolve from the carried graph (same eviction rationale as above).
  * - Otherwise (legacy / ESM loader off / no entry ref), `op` is the embedded
  *   pattern graph itself, used as-is.
  */
@@ -68,6 +72,7 @@ export function resolveOpPattern(
     ) as Pattern | undefined;
     if (resolved) return resolved;
     if (rawOp.$opFallback) return rawOp.$opFallback;
+    if (isPattern(rawOp)) return rawOp as unknown as Pattern;
     throw new Error(
       `${builtinName}: op pattern ${identity}#${symbol} is not in the ` +
         `evaluated-module cache and has no embedded fallback`,
