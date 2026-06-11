@@ -2107,14 +2107,23 @@ export type FetchOptions = {
   method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS" | "HEAD";
   redirect?: "follow" | "error" | "manual";
 };
-export type FetchDataFunction = <T>(
+export type FetchDataFunction = <
+  T = never,
+  M extends "json" | "text" = "json",
+>(
   params: Opaque<{
     url: string;
-    mode?: "json" | "text";
+    mode?: M;
     options?: FetchOptions;
     result?: T;
   }>,
-) => OpaqueRef<{ pending: boolean; result: T; error?: any }>;
+) => OpaqueRef<{
+  pending: boolean;
+  // When the caller pins T (explicitly or via `result`), use it. Otherwise
+  // derive from mode: "text" -> string, "json"/omitted -> any.
+  result: [T] extends [never] ? ([M] extends ["json"] ? any : string) : T;
+  error?: any;
+}>;
 
 export type FetchProgramFunction = (
   params: Opaque<{ url: string }>,

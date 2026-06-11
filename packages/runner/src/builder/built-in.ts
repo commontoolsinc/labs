@@ -133,14 +133,23 @@ export const generateText = createNodeFactory({
 export const fetchData = createNodeFactory({
   type: "ref",
   implementation: "fetchData",
-}) as <T>(
+}) as <
+  T = never,
+  M extends "json" | "text" = "json",
+>(
   params: Opaque<{
     url: string;
-    mode?: "json" | "text";
+    mode?: M;
     options?: FetchOptions;
     result?: T;
   }>,
-) => OpaqueRef<{ pending: boolean; result: T; error?: unknown }>;
+) => OpaqueRef<{
+  pending: boolean;
+  // When the caller pins T (explicitly or via `result`), use it. Otherwise
+  // derive from mode: "text" -> string, "json"/omitted -> any.
+  result: [T] extends [never] ? ([M] extends ["json"] ? any : string) : T;
+  error?: unknown;
+}>;
 
 export const fetchProgram = createNodeFactory({
   type: "ref",
