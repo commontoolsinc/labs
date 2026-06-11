@@ -44,7 +44,7 @@ import {
 } from "../core/commonfabric-runtime-registry.ts";
 import {
   getCellKind,
-  isOpaqueRefType,
+  isBrandedCellType,
 } from "../transformers/opaque-ref/opaque-ref.ts";
 import { classifyOpaquePathTerminalCall } from "../transformers/opaque-roots.ts";
 import {
@@ -59,24 +59,6 @@ const ARRAY_OWNER_NAMES = new Set([
   "ReadonlyArray",
 ]);
 
-// Owners of OpaqueRef-style method declarations (array-method detection).
-const OPAQUE_REF_OWNER_NAMES = spellingsWhere({
-  OpaqueRefMethods: true,
-  OpaqueRef: true,
-  // Identity alias — can never own method declarations; row matches OpaqueRef.
-  Reactive: true,
-  Cell: false,
-  Writable: false,
-  ReadonlyCell: false,
-  WriteonlyCell: false,
-  ComparableCell: false,
-  OpaqueCell: false,
-  Stream: false,
-  SqliteDb: false,
-  CellTypeConstructor: false,
-  ScopedCellTypeConstructor: false,
-});
-
 // Wrapper spellings whose method calls classify as cell-like (get/set/etc.).
 const CELL_LIKE_CLASSES = spellingsWhere({
   Cell: true,
@@ -89,9 +71,8 @@ const CELL_LIKE_CLASSES = spellingsWhere({
   CellTypeConstructor: true,
   ScopedCellTypeConstructor: true,
   SqliteDb: false,
-  OpaqueRef: false, // owner detection handled via OPAQUE_REF_OWNER_NAMES
-  Reactive: false, // same as OpaqueRef
-  OpaqueRefMethods: false,
+  OpaqueRef: false,
+  Reactive: false,
 });
 
 const CELL_FACTORY_NAMES = new Set(["of"]);
@@ -982,7 +963,7 @@ export function isReactiveValueExpression(
 
       try {
         const type = checker.getTypeAtLocation(target);
-        if (isOpaqueRefType(type, checker)) {
+        if (isBrandedCellType(type, checker)) {
           return true;
         }
       } catch {
@@ -1091,7 +1072,7 @@ function hasReactiveCollectionProvenanceInternal(
       options.typeRegistry,
       options.logger,
     );
-    if (type && isOpaqueRefType(type, checker)) {
+    if (type && isBrandedCellType(type, checker)) {
       return true;
     }
   }
@@ -1927,10 +1908,7 @@ function resolveSymbolKind(
     const cellKind = detectCellMethodFromDeclaration(resolved, declaration);
     if (cellKind) return cellKind;
 
-    if (
-      isArrayMethodDeclaration(declaration) ||
-      isOpaqueRefMethodDeclaration(declaration)
-    ) {
+    if (isArrayMethodDeclaration(declaration)) {
       return { kind: "array-method", symbol: resolved };
     }
     if (
@@ -2142,14 +2120,6 @@ function isArrayMethodDeclaration(declaration: ts.Declaration): boolean {
     declaration,
     isKnownArrayMethodName,
     ARRAY_OWNER_NAMES,
-  );
-}
-
-function isOpaqueRefMethodDeclaration(declaration: ts.Declaration): boolean {
-  return isMethodDeclarationOwnedBy(
-    declaration,
-    isKnownArrayMethodName,
-    OPAQUE_REF_OWNER_NAMES,
   );
 }
 

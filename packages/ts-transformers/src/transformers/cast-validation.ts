@@ -27,7 +27,6 @@ const CELL_LIKE_TYPE_NAMES = spellingsWhere({
   SqliteDb: false,
   OpaqueRef: false, // error, not warning — see FORBIDDEN_CAST_TYPE_NAMES
   Reactive: false, // error, not warning — see FORBIDDEN_CAST_TYPE_NAMES
-  OpaqueRefMethods: false,
 });
 
 /**
@@ -45,7 +44,6 @@ const FORBIDDEN_CAST_TYPE_NAMES = spellingsWhere({
   OpaqueCell: false,
   Stream: false,
   SqliteDb: false,
-  OpaqueRefMethods: false,
   CellTypeConstructor: false,
   ScopedCellTypeConstructor: false,
 });

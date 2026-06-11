@@ -1,7 +1,7 @@
 import ts from "typescript";
 import {
   getCellKind,
-  isOpaqueRefType,
+  isBrandedCellType,
 } from "../transformers/opaque-ref/opaque-ref.ts";
 import { isReactiveValueExpression } from "../ast/call-kind.ts";
 import type { ReactiveContextKind } from "../ast/reactive-context.ts";
@@ -17,7 +17,7 @@ export function classifyReactiveReceiverKind(
   type: ts.Type | undefined,
   checker: ts.TypeChecker,
 ): ReactiveReceiverKind {
-  if (type && isOpaqueRefType(type, checker)) {
+  if (type && isBrandedCellType(type, checker)) {
     const kind = getCellKind(type, checker);
     if (kind === "cell" || kind === "stream") {
       return "celllike_requires_rewrite";
