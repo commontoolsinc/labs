@@ -10,7 +10,10 @@ import {
   serializePatternGraph,
   toJSONWithLegacyAliases,
 } from "../src/builder/json-utils.ts";
-import { resolveOpPattern } from "../src/builtins/op-pattern-ref.ts";
+import {
+  resolveOpPattern,
+  resolveStoredPattern,
+} from "../src/builtins/op-pattern-ref.ts";
 import type { Opaque } from "../src/builder/types.ts";
 
 /**
@@ -151,5 +154,55 @@ describe("resolveOpPattern dual-read", () => {
         "map",
       )
     ).toThrow(/not in the/);
+  });
+});
+
+describe("resolveStoredPattern (llm-dialog stored tool patterns)", () => {
+  const refValue = {
+    $patternRef: { identity: "cf:module/abc", symbol: "default" },
+    argumentSchema: true,
+    resultSchema: true,
+    result: {},
+    nodes: [],
+  } as never;
+
+  it("prefers the live canonical pattern when the identity cache hits", () => {
+    const live = { argumentSchema: true } as never;
+    const fakeRuntime = {
+      patternManager: {
+        artifactFromIdentitySync: (identity: string, symbol: string) => {
+          expect(identity).toBe("cf:module/abc");
+          expect(symbol).toBe("default");
+          return live;
+        },
+      },
+    } as never;
+    expect(resolveStoredPattern(fakeRuntime, refValue)).toBe(live);
+  });
+
+  it("falls back to the carried graph on a cache miss", () => {
+    const fakeRuntime = {
+      patternManager: { artifactFromIdentitySync: () => undefined },
+    } as never;
+    expect(resolveStoredPattern(fakeRuntime, refValue)).toBe(refValue);
+  });
+
+  it("yields undefined for a bare unresolvable ref", () => {
+    const fakeRuntime = {
+      patternManager: { artifactFromIdentitySync: () => undefined },
+    } as never;
+    expect(
+      resolveStoredPattern(
+        fakeRuntime,
+        { $patternRef: { identity: "cf:module/miss", symbol: "s" } },
+      ),
+    ).toBeUndefined();
+  });
+
+  it("passes plain stored graphs and nullish values through", () => {
+    const graph = { nodes: [], result: {} };
+    expect(resolveStoredPattern({} as never, graph)).toBe(graph);
+    expect(resolveStoredPattern({} as never, undefined)).toBeUndefined();
+    expect(resolveStoredPattern({} as never, null)).toBeUndefined();
   });
 });
