@@ -334,6 +334,45 @@ available).
   satisfy stored bundleId-only claims. The provenance field and the arm retire
   together, next cycle, gated on stored-data evidence.
 
+### E2 — legacy machinery deletion (landed after E1; scoped by gate 2)
+
+Deleted: ALL loadId machinery (`Frame.verifiedLoadId` + threading,
+`set/getVerifiedLoadId` side tables, `seedVerifiedLoadIds`,
+`patternToVerifiedLoadId`, per-load registry partitions, `beginVerifiedLoad`
+repair, `verifiedLoadSources`/`verifiedLoadBundleIds`/`verifiedBindingMetadata`
+maps and their capture walks, five loadId-scoped `Harness` methods), the CFC
+legacy `implementationRef`×`verifiedLoadId` arm (provenance is the only source
+of `kind: "verified"`; CT-1665 binding identity rides on provenance), the
+`FunctionCache` + prewarm walk, and `EvaluateResult.loadId` (engine evals key
+their synthetic source-map names on a renamed `evalId`).
+
+KEPT, per gate 2 (each explicitly justified, retiring with design Phase 4):
+
+- `ensureImplementationRef` + ordinal-alias shim (+ `implementation-ref`
+  test) and the `registerVerifiedFunctionImplementation`/
+  `setVerifiedFunctionRegistrar` builder channel — they repopulate…
+- …the ONE retained string-keyed global executable index
+  (`ExecutableRegistry.verifiedFunctionIndex`, 2-arg
+  `registerVerifiedFunction`) + `getExecutableFunction` + the runner's legacy
+  resolution arm — the read path for pre-flip stored graphs, host-trusted
+  values, and dynamic in-action artifacts.
+- The bundleId-only `writeAuthorizedBy` verification arm (stored pre-#4009
+  claims) + `ImplementationIdentity.bundleId` — the field cannot be dropped
+  before the arm, since the arm compares against the LIVE identity's value
+  (now sourced from provenance). New claims are stamped with `moduleIdentity`
+  only. Claims stamped with a RAW `verifiedLoadId` (the historical
+  getVerifiedBundleId-miss corner) are no longer served: load ids embed a
+  per-session counter, so such claims never verified across sessions anyway,
+  and same-session claims since #4009 carry `moduleIdentity`, which wins arm
+  selection.
+- **`unsafe-host:` decision**: the synthetic-identity host registrar (design
+  §5) is DEFERRED to the cycle that retires the legacy read path. Host trust
+  is in-repo a test-only surface (`test/support/trusted-builder.ts`, one piece
+  test; production `createBuilder()` passes no trust token), and it rides on
+  exactly the `implementationRef` channel gate 2 keeps — replacing it now
+  would add a new trust surface without removing the old one. They retire
+  together.
+
 ### E1 — writer flip (landed as this series' first PR)
 
 Writers stop emitting `implementationRef`/stringified `implementation` exactly
