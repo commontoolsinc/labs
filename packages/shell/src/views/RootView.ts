@@ -31,7 +31,6 @@ type CommonfabricDebugState = Partial<ReturnType<typeof createDebugUtils>> & {
   rt?: RuntimeClient;
   vdom?: ReturnType<typeof createVDomDebugHelpers>;
   detectNonIdempotent?: (durationMs?: number) => Promise<unknown>;
-  space?: DID;
 };
 
 function getCommonfabricGlobal(): typeof globalThis & {
@@ -106,7 +105,6 @@ export class XRootView extends BaseView {
           const global = getCommonfabricGlobal();
           if (global.commonfabric) {
             global.commonfabric.rt = undefined;
-            global.commonfabric.space = undefined;
           }
           return undefined;
         }
@@ -128,7 +126,6 @@ export class XRootView extends BaseView {
           const global = getCommonfabricGlobal();
           if (global.commonfabric) {
             global.commonfabric.rt = undefined;
-            global.commonfabric.space = undefined;
           }
           return;
         }
@@ -242,9 +239,6 @@ export class XRootView extends BaseView {
     }
     if (token !== this.#resolveSpaceToken) return;
     this.space = space;
-    const global = getCommonfabricGlobal();
-    global.commonfabric ??= {};
-    global.commonfabric.space = space;
   }
 
   private _onThemeChanged = (e: Event) => {

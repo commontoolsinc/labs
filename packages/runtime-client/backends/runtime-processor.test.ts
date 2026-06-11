@@ -1707,6 +1707,23 @@ describe("RuntimeProcessor per-space piece contexts", () => {
     }
   });
 
+  it("handleRuntimeSynced awaits every opened space, naming none", async () => {
+    const { processor, runtime } = await makeProcessorState();
+    const spaceB = (await Identity.fromPassphrase(
+      "runtime-processor-space-b",
+    )).did();
+    const handleRuntimeSynced =
+      (RuntimeProcessor.prototype as any).handleRuntimeSynced;
+    try {
+      processor.getSpaceCtx(spaceB);
+      // Resolves across home + spaceB over loopback storage; the request
+      // carries no space at all.
+      await handleRuntimeSynced.call(processor);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("managerFor returns only existing contexts (no lazy create)", async () => {
     const { processor, runtime, homeSpace } = await makeProcessorState();
     const spaceB = (await Identity.fromPassphrase(

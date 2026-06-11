@@ -455,16 +455,13 @@ export async function waitForRuntimeSynced(
 ) {
   await waitFor(async () => {
     return await page.evaluate(async () => {
-      const cf = (globalThis as typeof globalThis & {
-        commonfabric?: {
-          rt?: { synced?: (space: string) => Promise<void> };
-          space?: string;
-        };
-      }).commonfabric;
-      // Page operations require an explicit space; the shell exposes
-      // its bound space next to the debug client.
-      if (!cf?.rt?.synced || !cf.space) return false;
-      await cf.rt.synced(cf.space);
+      const rt = (globalThis as typeof globalThis & {
+        commonfabric?: { rt?: { allSynced?: () => Promise<void> } };
+      }).commonfabric?.rt;
+      // Quiescence isn't a per-space question: allSynced awaits every
+      // space the worker has opened.
+      if (!rt?.allSynced) return false;
+      await rt.allSynced();
       return true;
     });
   }, { timeout, delay: 250 });

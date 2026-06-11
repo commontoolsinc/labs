@@ -282,6 +282,17 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     });
   }
 
+  /**
+   * Wait for convergence across EVERY space this worker has opened.
+   * Spaceless by design (like idle) — for quiescence checks that don't
+   * care about any particular space, e.g. test/debug harnesses.
+   */
+  async allSynced(): Promise<void> {
+    await this.#conn.request<RequestType.RuntimeSynced>({
+      type: RequestType.RuntimeSynced,
+    });
+  }
+
   async getGraphSnapshot(): Promise<SchedulerGraphSnapshot> {
     const res = await this.#conn.request<RequestType.GetGraphSnapshot>({
       type: RequestType.GetGraphSnapshot,

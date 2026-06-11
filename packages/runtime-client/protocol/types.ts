@@ -49,6 +49,7 @@ export enum RequestType {
   GetHomeSpaceCell = "runtime:getHomeSpaceCell",
   EnsureHomePatternRunning = "runtime:ensureHomePatternRunning",
   Idle = "runtime:idle",
+  RuntimeSynced = "runtime:synced",
   FlushCompileCacheWrites = "runtime:flushCompileCacheWrites",
   GetGraphSnapshot = "runtime:getGraphSnapshot",
   SetPullMode = "runtime:setPullMode",
@@ -221,6 +222,15 @@ export interface EnsureHomePatternRunningRequest extends BaseRequest {
 
 export interface IdleRequest extends BaseRequest {
   type: RequestType.Idle;
+}
+
+/**
+ * Await storage/piece-manager convergence for EVERY space this worker
+ * has opened. Genuinely spaceless — like Idle — unlike PageSynced,
+ * which awaits one named space's piece context.
+ */
+export interface RuntimeSyncedRequest extends BaseRequest {
+  type: RequestType.RuntimeSynced;
 }
 
 /**
@@ -630,6 +640,7 @@ export type IPCClientRequest =
   | PageStopRequest
   | PageGetAllRequest
   | PageSyncedRequest
+  | RuntimeSyncedRequest
   | VDomEventRequest
   | VDomMountRequest
   | VDomUnmountRequest
@@ -910,6 +921,10 @@ export type Commands = {
   };
   [RequestType.PageSynced]: {
     request: PageSyncedRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.RuntimeSynced]: {
+    request: RuntimeSyncedRequest;
     response: EmptyResponse;
   };
   [RequestType.PageGet]: {

@@ -864,6 +864,15 @@ export class RuntimeProcessor {
     await pieceManager.synced();
   }
 
+  /** Convergence across every opened space — no space named, none implied. */
+  async handleRuntimeSynced(): Promise<void> {
+    await Promise.all(
+      [...this.spaces.values()].map(({ pieceManager }) =>
+        pieceManager.synced()
+      ),
+    );
+  }
+
   getGraphSnapshot(_: GetGraphSnapshotRequest): GraphSnapshotResponse {
     return { snapshot: this.runtime.scheduler.getGraphSnapshot() };
   }
@@ -1152,6 +1161,8 @@ export class RuntimeProcessor {
         return await this.handlePageGetAll(request);
       case RequestType.PageSynced:
         return await this.handlePageSynced(request);
+      case RequestType.RuntimeSynced:
+        return await this.handleRuntimeSynced();
       case RequestType.GetGraphSnapshot:
         return this.getGraphSnapshot(request);
       case RequestType.SetPullMode:
