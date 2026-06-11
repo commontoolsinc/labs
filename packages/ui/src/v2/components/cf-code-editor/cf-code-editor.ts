@@ -1529,7 +1529,11 @@ export class CFCodeEditor extends BaseElement {
 
     if (!runtime || !space) {
       this.emit("cf-error", {
-        error: new Error("Runtime is not available for pasted image storage"),
+        error: new Error(
+          !runtime
+            ? "Runtime is not available for pasted image storage"
+            : "Space is not available for pasted image storage",
+        ),
         message: "Runtime is not available for pasted image storage",
       });
       return;

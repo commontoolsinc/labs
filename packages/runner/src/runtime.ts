@@ -389,7 +389,13 @@ export class Runtime {
         );
       }
     }
-    this.spaceHostMap = options.spaceHostMap;
+    // Snapshot + freeze: the map is fixed for the runtime's lifetime
+    // (the per-space provider cache and routing decisions assume
+    // space → host never changes), so a caller mutating their object
+    // after construction must not change routing.
+    this.spaceHostMap = options.spaceHostMap
+      ? Object.freeze({ ...options.spaceHostMap })
+      : undefined;
     this.staticCache = isDeno()
       ? new StaticCacheFS()
       : new StaticCacheHTTP(new URL("/static", this.apiUrl));
