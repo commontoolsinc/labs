@@ -73,6 +73,30 @@ export default pattern(() => {
     list.addItemByText.send({ text: "   " });
   });
 
+  // Duplicate-label fuzzy semantics: updateItemByText touches the FIRST match.
+  // The two dups are distinguished by the declared `done` field (NOT an extra —
+  // extras don't survive a full-array set, see the EditableListItem doc).
+  const add_dup_a = action(() => {
+    list.addItem.send({ item: { label: "Dup", done: false } });
+  });
+  const add_dup_b = action(() => {
+    list.addItem.send({ item: { label: "Dup", done: true } });
+  });
+  const update_dup_by_text = action(() => {
+    list.updateItemByText.send({ text: "Dup", newText: "DupChanged" });
+  });
+
+  // No-op safety: mutating an absent id changes nothing.
+  const remove_absent_id = action(() => {
+    list.removeItem.send({ id: "does-not-exist" });
+  });
+  const update_absent_id = action(() => {
+    list.updateItem.send({
+      id: "does-not-exist",
+      changes: { label: "ghost" },
+    });
+  });
+
   // ==========================================================================
   // Assertions
   // ==========================================================================
@@ -130,6 +154,31 @@ export default pattern(() => {
   const assert_blank_ignored = computed(() => list.total === 1);
 
   const assert_empty_after_clear = computed(() => list.total === 0);
+
+  // Duplicate-label first-match assertions. After clearDone the list is empty;
+  // we add two items both labelled "Dup" (the first not-done, the second done).
+  const assert_two_dups = computed(() => list.total === 2);
+  // updateItemByText("Dup") must change ONLY the first match (the not-done one):
+  // exactly one item now reads "DupChanged" and it is the not-done one; the
+  // done one still reads "Dup".
+  const assert_first_dup_changed = computed(() => {
+    const changed = list.items.filter((i: EditableListItem) =>
+      i.label === "DupChanged"
+    );
+    return changed.length === 1 && changed[0]?.done === false;
+  });
+  const assert_second_dup_unchanged = computed(() => {
+    const still = list.items.filter((i: EditableListItem) => i.label === "Dup");
+    return still.length === 1 && still[0]?.done === true;
+  });
+
+  // No-op: removing/updating an absent id leaves the list untouched.
+  const assert_noop_count = computed(() => list.total === 2);
+  const assert_noop_labels = computed(() =>
+    list.items.find((i: EditableListItem) => i.label === "DupChanged") !==
+      undefined &&
+    list.items.find((i: EditableListItem) => i.label === "Dup") !== undefined
+  );
 
   // ==========================================================================
   // Test Sequence
@@ -190,6 +239,20 @@ export default pattern(() => {
       // clearDone wipes the (done) Beta2
       { action: clear_done },
       { assertion: assert_empty_after_clear },
+
+      // Duplicate-label fuzzy semantics: updateItemByText hits the first match.
+      { action: add_dup_a },
+      { action: add_dup_b },
+      { assertion: assert_two_dups },
+      { action: update_dup_by_text },
+      { assertion: assert_first_dup_changed },
+      { assertion: assert_second_dup_unchanged },
+
+      // No-op safety: absent-id remove/update changes nothing.
+      { action: remove_absent_id },
+      { action: update_absent_id },
+      { assertion: assert_noop_count },
+      { assertion: assert_noop_labels },
     ],
     list,
   };

@@ -45,7 +45,9 @@
  * ### What the DEFAULT UI assumes about item shape (headless does not)
  *
  * The item type is intentionally minimal-but-extensible (an index signature
- * lets callers carry extra fields). The default row reads exactly two keys:
+ * lets callers carry extra PLAIN-DATA fields — see the EditableListItem doc:
+ * live-cell / Writable extras are NOT supported through the passthrough). The
+ * default row reads exactly two keys:
  *   - `done: boolean`  → the checkbox
  *   - `label: string`  → the editable text
  * A headless caller may ignore `label` entirely and key its own rows off
@@ -91,8 +93,16 @@ import {
  * Required by the model: a stable `id` and a `done` flag.
  * Read by the DEFAULT UI only: `label`.
  * The index signature lets callers carry arbitrary extra fields (priority,
- * dueDate, refs, ...) that the model passes through untouched and that headless
- * rows can render.
+ * dueDate, plain refs, ...) that the model passes through untouched and that
+ * headless rows can render.
+ *
+ * IMPORTANT — extras pass through as PLAIN DATA only. The index signature emits
+ * `additionalProperties: true`, which carries no `asCell` marker, so a
+ * `Writable<>` / cell-link extra read back through this schema will NOT be
+ * re-hydrated as a live Cell (the "any → true schema → can't distinguish
+ * Writable from computed" gotcha). Scalars and plain objects round-trip fine; a
+ * primitive that needs a nested *live* cell must declare it as a typed field
+ * with `asCell` rather than relying on the passthrough.
  */
 export interface EditableListItem {
   /** Stable identity. Minted by addItem if not provided. Never an index. */
@@ -271,16 +281,6 @@ const removeItemByTextHandler = handler<
   items.set(current.toSpliced(idx, 1));
 });
 
-// ===== Default-UI row helpers (per-item streams keyed by id) =====
-
-const rowDeleteHandler = handler<
-  unknown,
-  { id: string; items: Writable<EditableListItem[]> }
->((_, { id, items }) => {
-  const current = items.get() ?? [];
-  items.set(current.filter((i) => i.id !== id));
-});
-
 // ===== The primitive =====
 
 export const EditableList = pattern<EditableListInput, EditableListOutput>(
@@ -310,7 +310,8 @@ export const EditableList = pattern<EditableListInput, EditableListOutput>(
 
     // Default rows. Checkbox + text use $checked/$value two-way binding
     // (no setter handler — that would just write the same value back). Delete
-    // is keyed by the item's stable id, NOT its array index.
+    // reuses the already-exposed `removeItem` stream (remove-by-id lives in ONE
+    // place), keyed by the item's stable id, NOT its array index.
     const rows = items.map((item: EditableListItem) => (
       <cf-hstack gap="2" align="center" style="padding: 4px 0;">
         <cf-checkbox $checked={item.done} />
@@ -318,7 +319,8 @@ export const EditableList = pattern<EditableListInput, EditableListOutput>(
         <cf-button
           variant="ghost"
           size="sm"
-          onClick={rowDeleteHandler({ id: item.id, items })}
+          onClick={() =>
+            removeItem.send({ id: item.id })}
         >
           x
         </cf-button>

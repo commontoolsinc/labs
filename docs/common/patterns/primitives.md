@@ -54,13 +54,17 @@ genuinely cannot mutate its input, e.g. a cross-space owner-protected cell —
 would instead expose Streams the parent wires to its own handlers. EditableList
 does not need this; same-space `Writable<T[]>` mutation works.)
 
-## Identity, not index, not title
+## Identity, not index, not title (collection primitives)
 
-Core mutations address an item by a **stable id** carried on the item, never by
-its array position. Index-based selection/mutation breaks under reordering and
-concurrent edits — it is the central fragility this composition overhaul
-removes. `addItem` mints an id when the caller omits one; `removeItem` /
-`updateItem` / `toggleItem` all take `{ id }`.
+For **collection** primitives — ones that own a list/set of items
+(`EditableList`, `MasterDetail`) — core mutations address an item by a **stable
+id** carried on the item, never by its array position. Index-based
+selection/mutation breaks under reordering and concurrent edits — it is the
+central fragility this composition overhaul removes. `addItem` mints an id when
+the caller omits one; `removeItem` / `updateItem` / `toggleItem` all take
+`{ id }`. Primitives with no collection (e.g. `ConfirmAction`, a single-gate
+primitive) have nothing to address by id and this section does not apply to
+them.
 
 Title/text addressing, where offered, is a **separate, explicit convenience
 layer** (e.g. `removeItemByText`) for agent-driveability — fuzzy
@@ -97,6 +101,14 @@ identity core; it is not the identity model.
   A headless caller may ignore the default UI's shape assumptions entirely and
   key rows off whatever extra fields it added to its items (the item type carries
   an index signature so extra fields pass through the model untouched).
+
+  Caveat: extras pass through as **plain data only**. An index signature emits
+  `additionalProperties: true`, which has no `asCell` marker, so a `Writable<>` /
+  cell-link extra is **not** re-hydrated as a live Cell when read back through
+  the item schema (the "any → true schema → can't distinguish Writable from
+  computed" gotcha). Scalars and plain objects round-trip fine; an item that
+  needs a nested *live* cell must declare it as a typed field with `asCell`
+  rather than relying on the index-signature passthrough.
 
 ### Why no render-prop / VNode input
 
