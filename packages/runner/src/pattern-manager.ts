@@ -1,5 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import { isPattern, Module, Pattern, Schema } from "./builder/types.ts";
+import { Module, Pattern, Schema } from "./builder/types.ts";
 import {
   getArtifactEntryRef,
   getPatternProgram,
@@ -30,7 +30,6 @@ import {
   writeCompiledDocs,
   writeSourceDocs,
 } from "./compilation-cache/cell-cache.ts";
-import { getTopFrame } from "./builder/pattern.ts";
 import { URI } from "./sigil-types.ts";
 import { toURI } from "./uri-utils.ts";
 import { parseLink } from "./link-utils.ts";
