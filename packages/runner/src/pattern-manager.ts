@@ -104,9 +104,17 @@ export class PatternManager {
   // `artifactFromIdentitySync` (the inverse of the forward `valueToEntryRef`),
   // populated by ONE path (`indexArtifact`) from BOTH a module's `__cfReg`
   // registrations (hoists + non-exported top-level) AND its exports — so callers
-  // never look in two places. Bounded (FIFO); a miss returns undefined and
-  // callers fall back (e.g. to an embedded op graph or a source reload).
+  // never look in two places. SESSION-LIFETIME, deliberately unbounded (design
+  // § Open questions 2, resolved): the sync resolution the list builtins and
+  // refs-only pattern JSON depend on must never lose an artifact whose module
+  // evaluated this session. Entries are live builder artifacts of evaluated
+  // modules — the same order of retention the engine's strong implementation
+  // index (E1) already committed to for their implementation functions.
   private addressableByIdentity = new Map<string, Map<string, unknown>>();
+  // Bound for the module-NAMESPACE cache below (`modulesByIdentity`) only; its
+  // misses recover through the async storage-backed load. Instance field so
+  // tests can shrink it.
+  private maxEvaluatedModuleCacheSize = MAX_EVALUATED_MODULE_CACHE_SIZE;
   // Pending metadata set before the meta cell exists (e.g., spec, parents)
   private pendingMetaById = new Map<URI, Partial<PatternMeta>>();
   // ESM content-addressed compile-cache instrumentation.
@@ -1033,7 +1041,7 @@ export class PatternManager {
           this.indexArtifact(identity, exportName, exports[exportName]);
         }
       }
-      while (this.modulesByIdentity.size > MAX_EVALUATED_MODULE_CACHE_SIZE) {
+      while (this.modulesByIdentity.size > this.maxEvaluatedModuleCacheSize) {
         const oldest = this.modulesByIdentity.keys().next().value;
         if (oldest === undefined) break;
         this.modulesByIdentity.delete(oldest);
@@ -1051,11 +1059,9 @@ export class PatternManager {
       }
     }
 
-    while (this.addressableByIdentity.size > MAX_EVALUATED_MODULE_CACHE_SIZE) {
-      const oldest = this.addressableByIdentity.keys().next().value;
-      if (oldest === undefined) break;
-      this.addressableByIdentity.delete(oldest);
-    }
+    // No eviction for `addressableByIdentity` — the artifact index is
+    // session-lifetime (see its declaration): sync by-identity resolution
+    // must keep working for every module evaluated this session.
   }
 
   /**
@@ -1077,14 +1083,15 @@ export class PatternManager {
     value: unknown,
   ): void {
     if (!isTrustedBuilderArtifact(value)) return;
-    // Reverse index, refreshing recency (FIFO ~ LRU). Overwrite an existing
-    // symbol so a re-evaluation of the same identity resolves to the FRESH
-    // artifact instance, not a stale one from a prior eval.
+    // Reverse index. Overwrite an existing symbol so a re-evaluation of the
+    // same identity resolves to the FRESH artifact instance, not a stale one
+    // from a prior eval.
     let bucket = this.addressableByIdentity.get(identity);
-    if (bucket) this.addressableByIdentity.delete(identity);
-    else bucket = new Map<string, unknown>();
+    if (!bucket) {
+      bucket = new Map<string, unknown>();
+      this.addressableByIdentity.set(identity, bucket);
+    }
     bucket.set(symbol, value);
-    this.addressableByIdentity.set(identity, bucket);
     // Forward map is FIRST-WRITE-WINS, deliberately, on two grounds:
     //   - One artifact instance legitimately reachable under two refs (e.g. both
     //     a `__cfReg` entry AND an export, or set first by `patternFromMain`)
@@ -1106,23 +1113,19 @@ export class PatternManager {
   /**
    * Resolve a content-addressed `{ identity, symbol }` reference to its live
    * builder artifact, synchronously, from the single in-memory index — or
-   * `undefined` on a miss (never registered, or rolled out of the bounded cache;
-   * callers fall back, e.g. to an embedded op graph or a source reload). Public
-   * so the list builtins can resolve a map/filter/flatMap `op` during a
-   * synchronous Action.
+   * `undefined` on a miss (the module never evaluated in this session; callers
+   * fall back to a stored graph vintage or an async source reload). The index
+   * is session-lifetime, so a hit is guaranteed for any module evaluated this
+   * session — what the list builtins rely on to resolve a map/filter/flatMap
+   * `op` during a synchronous Action without an embedded fallback graph.
    */
   artifactFromIdentitySync(
     identity: string,
     symbol: string,
   ): unknown {
-    const bucket = this.addressableByIdentity.get(identity);
-    if (!bucket || !bucket.has(symbol)) return undefined;
-    // Refresh recency.
-    this.addressableByIdentity.delete(identity);
-    this.addressableByIdentity.set(identity, bucket);
     // Returns the live builder artifact (pattern / lift / handler). Callers know
     // the kind they expect from the symbol's origin and cast accordingly.
-    return bucket.get(symbol);
+    return this.addressableByIdentity.get(identity)?.get(symbol);
   }
 
   /**
