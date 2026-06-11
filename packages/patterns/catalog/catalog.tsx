@@ -40,6 +40,7 @@ interface CatalogInput {
           { id: "button"; label: "Button" },
           { id: "checkbox"; label: "Checkbox" },
           { id: "code-editor"; label: "Code Editor" },
+          { id: "field"; label: "Field" },
           { id: "input"; label: "Input" },
           { id: "picker"; label: "Picker" },
           { id: "textarea"; label: "Textarea" },
