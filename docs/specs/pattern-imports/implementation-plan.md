@@ -94,7 +94,12 @@ Reload paths:
 
 - **fabric ref / fabric specifier** — an authored import specifier under the
   `cf:` grammar (`cf:pattern:<hash>`, `cf:/kitchen/todo-list@<hash>`, …).
-- **pin** — the trailing `@<hex>` entry-module identity on a mutable ref.
+- **pin** — the trailing `@<hash>` entry-module identity on a mutable ref.
+- **hash** — 43 base64url chars (`[A-Za-z0-9_-]`, case-SENSITIVE, no
+  padding), the unprefixed output of `hashStringOf`/`hashOf`
+  (`packages/data-model/src/value-hash.ts:553`). NOT hex — e.g.
+  `Avcny13Rj8q-2ClANy_-k0ikWWQcXx7QTdsiqGfrC1c`. Never lowercase or
+  otherwise normalize a hash.
 - **terminal identity** — the entry-module identity a ref resolves to.
 - **subtree** — the source closure of one imported pattern (its own program).
 - **mount** — a subtree's files spliced into a compilation under
@@ -117,10 +122,13 @@ export interface FabricRef {
   space?: string;
   ref:
     | { kind: "slug"; slug: string }
+    // "of" = entity URI (stored/spelled "of:fid1:<hash>"); "pattern" =
+    // entry-module identity ("pattern:<hash>"). hash is the bare base64url
+    // part (no "fid1:" tag) in both cases.
     | { kind: "uri"; scheme: "of" | "pattern"; hash: string };
   /** Path inside the target program (phase 4; parsed, rejected downstream). */
   subpath?: string;
-  /** Trailing @<hex> pin. */
+  /** Trailing @<hash> pin (base64url — see glossary; never normalized). */
   pin?: string;
 }
 
@@ -176,9 +184,16 @@ Parsing algorithm — implement exactly this order:
    - otherwise: no host, no space; all of `rest` per step 6.
 6. **Ref + subpath**: of the remaining `"/"`-separated segments, the FIRST is
    the ref token; the rest (joined by `"/"`) is `subpath` (omit when empty).
-   - Ref token contains `":"` → URI form: must match
-     `/^(of|pattern):([0-9a-f]+)$/` with the hash matching `HASH_RE`;
-     anything else with a colon throws `"unsupported cell URI scheme"`.
+   - Ref token contains `":"` → URI form. Accepted shapes (hash part must
+     match `HASH_RE`):
+     - `pattern:<hash>` → `{ scheme: "pattern", hash }`
+     - `of:fid1:<hash>` → `{ scheme: "of", hash }` (what `toURI` emits —
+       `packages/runner/src/uri-utils.ts:12`; the `fid1:` tag is required
+       inside `of:`)
+     - `fid1:<hash>` → alias for `of:fid1:<hash>` (the shell's bare piece-id
+       form); `formatFabricRef` canonicalizes to `of:fid1:<hash>`.
+     Anything else with a colon throws `"unsupported cell URI scheme"`
+     (including `of:<hash>` without the `fid1:` tag, and `data:`).
    - No colon → slug form: validate with `validateSlug` from
      `packages/runner/src/slugs.ts` (re-throw its message wrapped in
      FabricRefError).
@@ -189,9 +204,19 @@ Parsing algorithm — implement exactly this order:
    the URI hash throws `"conflicting pin"`. (Equal is allowed, normalized to
    pin-absent by `formatFabricRef`.)
 
-`HASH_RE`: lowercase hex, length 32–128: `/^[0-9a-f]{32,128}$/`. Add a unit
-test that feeds a REAL hash from `computeModuleHashes` (import it, hash a
-tiny program) and asserts it matches — do not guess the emitted length.
+`HASH_RE`: **base64url, exactly 43 chars, case-sensitive**:
+`/^[A-Za-z0-9_-]{43}$/`. This is the unprefixed `hashStringOf` output
+(SHA-256 → 43 unpadded base64url chars; `value-hash.ts:553`) — NOT hex.
+Add two canary unit tests pinning the real formats so a future hash-encoding
+change fails here first:
+1. feed a REAL module identity from `computeModuleHashes` (import it, hash a
+   tiny one-file program) → `HASH_RE` matches, and
+   `parseFabricRef("cf:pattern:" + h)` succeeds;
+2. feed a REAL entity URI from `createRef(...)`+`toURI(...)`
+   (`uri-utils.ts`) → it has the `of:fid1:` shape and
+   `parseFabricRef("cf:/somespace/" + uri)` succeeds.
+Never lowercase, trim, or re-encode hashes anywhere in parsing or
+formatting — they compare byte-exact.
 
 ### M0.2 Policy: `packages/runner/src/sandbox/runtime-module-policy.ts`
 
@@ -229,15 +254,25 @@ Table-driven. Minimum cases (✓ = parses, ✗ = throws, ∅ = undefined):
 | `cf://host.example/kitchen/todo-list` | ✓ host + space |
 | `cf://host.example:8000/kitchen/todo-list` | ✓ host with port |
 | `cf://host.example/todo-list` | ✗ host requires space |
-| `cf:/kitchen/todo-list@<hex64>` | ✓ pin |
-| `cf:todo-list@deadbeef` (too short) | ✗ malformed pin |
-| `cf:pattern:<hex64>` | ✓ uri/pattern; `pinnedIdentity` = hash |
-| `cf:pattern:<hex64>@<same>` | ✓ normalizes (format drops pin) |
-| `cf:pattern:<hexA>@<hexB>` | ✗ conflicting pin |
-| `cf:/kitchen/of:<hex64>` | ✓ uri/of |
-| `cf:of:<hex64>` | ✓ uri/of, no space |
-| `cf:fid1:abc` | ✗ unsupported scheme |
-| `cf:module/<hex64>` | ✗ reserved |
+(`<b64u43>` below = a 43-char base64url hash, e.g.
+`Avcny13Rj8q-2ClANy_-k0ikWWQcXx7QTdsiqGfrC1c` — note it exercises uppercase,
+`-`, and `_`.)
+
+| `cf:/kitchen/todo-list@<b64u43>` | ✓ pin |
+| `cf:todo-list@abc` (too short) | ✗ malformed pin |
+| `cf:todo-list@<b64u43 with "=" appended>` | ✗ malformed pin (no padding) |
+| `cf:todo-list@<44 chars>` | ✗ malformed pin (length) |
+| `cf:pattern:<b64u43>` | ✓ uri/pattern; `pinnedIdentity` = hash |
+| `cf:pattern:<b64u43, hex-only chars>` | ✓ (hex-looking hashes are legal base64url) |
+| `cf:pattern:<b64u43>@<same>` | ✓ normalizes (format drops pin) |
+| `cf:pattern:<b64uA>@<b64uB>` | ✗ conflicting pin |
+| `cf:pattern:<UPPERCASED b64u43>@<original>` | ✗ conflicting pin (case-sensitive — no normalization) |
+| `cf:/kitchen/of:fid1:<b64u43>` | ✓ uri/of |
+| `cf:of:fid1:<b64u43>` | ✓ uri/of, no space |
+| `cf:fid1:<b64u43>` | ✓ uri/of alias; formats as `cf:of:fid1:<b64u43>` |
+| `cf:of:<b64u43>` (no fid1 tag) | ✗ unsupported cell URI scheme |
+| `cf:data:abc` | ✗ unsupported cell URI scheme |
+| `cf:module/<b64u43>` | ✗ reserved |
 | `cf:cache-root/x` | ✗ reserved |
 | `cf:Has_Upper` | ✗ slug grammar |
 | `cf:` / `cf:/` / `cf://` | ✗ |
@@ -326,7 +361,8 @@ File: `packages/runner/src/sandbox/module-record-compiler.ts`.
    so `export * from "cf:pattern:<h>"` re-exports correctly.
 
 Tests: extend the existing module-record-compiler test file: program of
-`/a.tsx` (imports `"cf:pattern:deadbeef…"`) + `/~cf/<h>/main.tsx`, alias map +
+`/a.tsx` (imports `"cf:pattern:<b64u43>"`, any valid-shape hash) +
+`/~cf/<h>/main.tsx`, alias map +
 an `identityByPath` where the mounted file's identity is a fixed fake hash;
 assert the record for `/a.tsx` has
 `resolutions["cf:pattern:…"] === "cf:module/<fake>"`, and a star-re-export
@@ -724,7 +760,10 @@ Algorithm (spec § Resolution rule — implement hops exactly):
    use a DID"` (names are NOT in M2 scope — spec open question).
 2. Start cell:
    - slug → M2.1 resolver (wrap `SlugResolutionError` with the chain so far).
-   - `of:` URI → `runtime.getCellFromEntityId(space, {"/": hash})`, `sync()`.
+   - `of:` URI → reconstruct the entity id from the parsed hash via the
+     `uri-utils.ts` helpers (`fromURI("of:fid1:" + hash)` / the `{"/": id}`
+     shape — mirror an existing `getCellFromEntityId` call site rather than
+     hand-building the string), then `sync()`.
    - `pattern:` → already terminal (return immediately; callers normally
      short-circuit via `pinnedIdentity` and never get here).
 3. Piece hop: if the cell has pattern metadata — use the SAME accessors the
@@ -823,7 +862,7 @@ file layout, e.g. how `dev.ts` registers).
   pattern meta). Before writing the program: run `rewriteFabricPins` over
   every file, with `resolvePin` = M2.2 chase via the connected runtime; if
   any rewrite happened, print each (`pinned cf:/kitchen/todo-list →
-  @9f2ab…`). The STORED program is the pinned one. Deploying with an
+  @AvcnyZ…`). The STORED program is the pinned one. Deploying with an
   unresolvable ref fails the deploy with the chase's error.
 - **`cf deps update [file] [--import <specifier>]`**: new command; operates
   on the local working files (filesystem), not deployed state: parse, chase

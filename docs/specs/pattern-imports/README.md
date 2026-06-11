@@ -4,7 +4,7 @@ Letting authored patterns import other patterns published in the fabric:
 
 ```tsx
 import { TodoItem, todoSchema } from "cf:/kitchen/todo-list";  // a slug — names a piece OR a published pattern
-import { TodoItem } from "cf:pattern:9f2ab…e41";               // a content-addressed source, directly
+import { TodoItem } from "cf:pattern:AvcnyZ…rC1c";               // a content-addressed source, directly
 ```
 
 A reference names a **starting cell** — by slug or by cell URI, optionally
@@ -83,7 +83,7 @@ Design.
 
 Because both come up, and only one is the pin:
 
-- **`of:<patternId>`** — the pattern **meta cell**'s entity URI
+- **`of:fid1:<patternId>`** — the pattern **meta cell**'s entity URI
   (`toURI(createRef(...))`, `packages/runner/src/uri-utils.ts:12`). A *causal*
   ref: resolvable (it's a cell address) but not re-hash-verifiable from fetched
   content alone, and its derivation is not purely source-content in all paths.
@@ -110,12 +110,21 @@ cf:/<space>/<ref>[/<subpath>][@<pin>]              ; explicit space
 cf://<host>/<space>/<ref>[/<subpath>][@<pin>]      ; explicit toolshed
 
 ref     = slug                ; no ":" — isSlugAddress convention
-        | "of:" hash          ; cell URI (pattern meta cell, or a piece's entity id)
+        | "of:fid1:" hash     ; cell URI (pattern meta cell, or a piece's entity id)
         | "pattern:" hash     ; entry-module identity (content-addressed source)
 space   = space-name | space-did
 host    = domain[":"port]     ; a toolshed
-pin     = entry-module identity hex
+pin     = "@" hash            ; entry-module identity
+hash    = 43 base64url chars  ; hashStringOf/hashOf output (value-hash.ts):
+                              ; [A-Za-z0-9_-], case-SENSITIVE, no padding —
+                              ; e.g. Avcny13Rj8q-2ClANy_-k0ikWWQcXx7QTdsiqGfrC1c
 ```
+
+(Hashes are **not** hex: `hashStringOf` emits unprefixed base64url
+(`packages/data-model/src/value-hash.ts:553`), and entity URIs carry the
+`fid1:` tag inside `of:` — `of:fid1:<hash>` is what `toURI` produces. The
+base64url alphabet contains no `/`, `@`, or `:`, so pin-splitting and
+segment-splitting stay unambiguous.)
 
 Examples:
 
@@ -125,11 +134,11 @@ import { todoSchema } from "cf:todo-list/schemas";                  // subpath (
 import { TodoItem } from "cf:/kitchen/todo-list";                   // space by name
 import { TodoItem } from "cf:/did:key:z6Mk…/todo-list";             // space by DID
 import { TodoItem } from "cf://toolshed.common.tools/kitchen/todo-list";  // explicit toolshed
-import { TodoItem } from "cf:pattern:9f2ab…e41";                    // content-addressed, space-free
-import { TodoItem } from "cf:/kitchen/of:bafy…";                    // pattern meta cell by URI
+import { TodoItem } from "cf:pattern:AvcnyZ…rC1c";                    // content-addressed, space-free
+import { TodoItem } from "cf:/kitchen/of:fid1:ZwjMI…A2Os";          // pattern meta cell by URI
 
 // What a deployed importer actually stores (§ Snapshot semantics):
-import { TodoItem } from "cf:/kitchen/todo-list@9f2ab…e41";
+import { TodoItem } from "cf:/kitchen/todo-list@AvcnyZ…rC1c";
 ```
 
 Parsing rules (each form is disjoint by prefix; no segment counting needed):
@@ -220,7 +229,7 @@ Mechanics:
    the specifier in the stored source** to the pinned form:
 
    ```tsx
-   import { TodoItem } from "cf:/kitchen/todo-list@9f2ab…e41";
+   import { TodoItem } from "cf:/kitchen/todo-list@AvcnyZ…rC1c";
    ```
 
    The stored program is then fully deterministic: compilation, identity, and
