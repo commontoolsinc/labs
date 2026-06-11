@@ -2151,6 +2151,17 @@ const isNonEndorsementProvenanceAtom = (atom: unknown): boolean =>
 // confidentiality, or any genuine endorsement integrity atom, stays in the gate
 // — that keeps the cross-cell prompt-injection screen sound (its briefing reads
 // carry confidentiality; its endorsement reads carry real integrity).
+//
+// TODO(data-flow): this exemption is an incremental scoping, not the end state
+// (both follow-ons deliberately deferred by #4015): (a) per-write data-flow
+// provenance — gate each protected write on the reads that actually fed it,
+// not the transaction-global consumed set — via the dedicated write-attempt
+// logging sketched in docs/plans/runner_cfc_implementation.md under "Potential
+// and Final Write Sets"; (b) the audit #14 vacuous-pass tightening (a
+// requiredIntegrity gate whose consumed set is empty passes today; see the
+// "vacuous-pass S7 / Wave 2 #14" row in
+// docs/specs/cfc-s16-default-transition-design.md §10), which is unsound to
+// apply without (a) — it would over-reject.
 const isProvenanceOnlyConsumedLabel = (label: IFCLabel): boolean => {
   if ((label.confidentiality?.length ?? 0) > 0) return false;
   const integrity = label.integrity ?? [];
@@ -2175,7 +2186,10 @@ const verifyInputRequirements = (
     path: readonly string[],
   ) => ImplementationIdentity | undefined,
 ): string | undefined => {
-  const consumed = [...(tx.getReadActivities?.() ?? [])].filter((read) =>
+  // The consumed reads this gate quantifies over (provenance-only reads
+  // excluded). Distinct from the egress side's transaction-global consumed
+  // set (collectConsumedConfidentiality), which keeps every labeled read.
+  const gatedReads = [...(tx.getReadActivities?.() ?? [])].filter((read) =>
     !isInternalVerifierRead(read.meta)
   ).map((read) => ({
     ...read,
@@ -2238,8 +2252,8 @@ const verifyInputRequirements = (
       return writeAuthorizedByFailure;
     }
     const requiredIntegrity = ifc?.requiredIntegrity ?? [];
-    if (requiredIntegrity.length > 0 && consumed.length > 0) {
-      const ok = consumed.every((read) =>
+    if (requiredIntegrity.length > 0 && gatedReads.length > 0) {
+      const ok = gatedReads.every((read) =>
         requiredIntegrity.every((required) =>
           (read.label?.integrity ?? []).some((actual) =>
             deepEqual(actual, required)
@@ -2254,8 +2268,8 @@ const verifyInputRequirements = (
     // undefined means no ceiling; a declared (even empty) ceiling is enforced.
     // An empty ceiling is "public only": any consumed confidential atom fails.
     const maxConfidentiality = ifc?.maxConfidentiality;
-    if (maxConfidentiality !== undefined && consumed.length > 0) {
-      const ok = consumed.every((read) =>
+    if (maxConfidentiality !== undefined && gatedReads.length > 0) {
+      const ok = gatedReads.every((read) =>
         (read.label?.confidentiality ?? []).every((value) =>
           maxConfidentiality.some((allowed) => deepEqual(allowed, value))
         )

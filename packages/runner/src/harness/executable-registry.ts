@@ -13,6 +13,13 @@ interface AssociatedFunction {
   implementation: HarnessedFunction;
 }
 
+// Reserved `verifiedFunctions` partition for loadId-less dynamic
+// registrations ({@link ExecutableRegistry.registerDynamicVerifiedFunction}).
+// Engine-issued load ids always contain an `:esm:` segment
+// (`${prefix}:esm:${n}`), so this key can never collide with a real load and
+// `beginVerifiedLoad` is never called with it.
+const DYNAMIC_REGISTRATION_PARTITION = "dynamic:in-action";
+
 export class ExecutableRegistry {
   private readonly verifiedFunctions = new Map<
     string,
@@ -32,6 +39,21 @@ export class ExecutableRegistry {
   >();
   private trustedHostFunctionRefs = new WeakMap<HarnessedFunction, string>();
   private nextTrustedHostFunctionId = 0;
+  // Content-addressed implementation index: module identity → symbol → the
+  // implementation function recorded by `Engine.recordModuleProvenance` during
+  // a verified evaluation. Deliberately STRONG and session-unbounded, like the
+  // legacy `verifiedFunctionIndex` whose eviction insurance it replaces: the
+  // bounded artifact index (`PatternManager.addressableByIdentity`, FIFO 1000)
+  // can roll a running pattern's module out mid-session, and a post-flip
+  // serialized graph carries ONLY `$implRef` — no legacy ref, and no body when
+  // the writer proved this index admits the ref. Retention is bounded by the
+  // set of DISTINCT verified implementations evaluated this session, strictly
+  // less than the legacy per-load registries held (one entry per content
+  // identity instead of one per load).
+  private readonly verifiedImplementationsByEntryRef = new Map<
+    string,
+    Map<string, HarnessedFunction>
+  >();
 
   clear(): void {
     this.verifiedFunctions.clear();
@@ -43,6 +65,68 @@ export class ExecutableRegistry {
     this.trustedHostFunctionIndex.clear();
     this.trustedHostFunctionRefs = new WeakMap();
     this.nextTrustedHostFunctionId = 0;
+    this.verifiedImplementationsByEntryRef.clear();
+  }
+
+  /**
+   * Record a verified implementation under its content-addressed
+   * `{ identity, symbol }` entry ref. Overwrites: a re-evaluation of the same
+   * identity resolves to the fresh function (mirroring the artifact index;
+   * any two instances of one module identity are interchangeable — the SES
+   * verifier forbids module-scope mutable state).
+   */
+  registerVerifiedImplementation(
+    identity: string,
+    symbol: string,
+    implementation: HarnessedFunction,
+  ): void {
+    let bucket = this.verifiedImplementationsByEntryRef.get(identity);
+    if (!bucket) {
+      bucket = new Map();
+      this.verifiedImplementationsByEntryRef.set(identity, bucket);
+    }
+    bucket.set(symbol, implementation);
+  }
+
+  getVerifiedImplementation(
+    identity: string,
+    symbol: string,
+  ): HarnessedFunction | undefined {
+    return this.verifiedImplementationsByEntryRef.get(identity)?.get(symbol);
+  }
+
+  /**
+   * Admit a DYNAMIC (in-action-created) artifact into the global verified
+   * index under its minted content-derived ref, without a load id. The
+   * loadId-less counterpart of {@link registerVerifiedFunction} for actions
+   * resolved through post-flip `$implRef`-only modules: it keeps the
+   * artifact's serialized module on the legacy
+   * `{ implementationRef, body omitted }` form, whose
+   * `getExecutableFunction` lookup is the live-closure rehydration channel.
+   * Re-registration on a later run of the creating action overwrites to the
+   * fresh function, matching per-load registration.
+   *
+   * The registration is held in a RESERVED partition of `verifiedFunctions`
+   * (never a real load id — engine ids always carry an `:esm:` segment) so
+   * that `beginVerifiedLoad`'s cross-load repair sees an owner for a shared
+   * ref and repoints the index to the dynamic function instead of deleting
+   * it (cubic P1 on PR #4053). `verifiedFunctionLoadIds` is deliberately NOT
+   * written: there is no load to resolve, and surfacing the partition key as
+   * a `verifiedLoadId` would leak it into CFC bundle-id derivation — the
+   * loadId-less CFC path must keep flowing through provenance.
+   */
+  registerDynamicVerifiedFunction(
+    implementationRef: string,
+    implementation: HarnessedFunction,
+  ): void {
+    let partition = this.verifiedFunctions.get(DYNAMIC_REGISTRATION_PARTITION);
+    if (!partition) {
+      partition = new Map();
+      this.verifiedFunctions.set(DYNAMIC_REGISTRATION_PARTITION, partition);
+    }
+    partition.set(implementationRef, implementation);
+    this.verifiedFunctionIndex.set(implementationRef, implementation);
+    this.recordVerifiedBindingMetadata(implementationRef, implementation);
   }
 
   beginVerifiedLoad(loadId: string): void {

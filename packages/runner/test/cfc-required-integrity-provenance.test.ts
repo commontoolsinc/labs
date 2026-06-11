@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import { parseLink } from "../src/link-utils.ts";
 import type { URI } from "@commonfabric/memory/interface";
 import type { JSONSchema } from "../src/builder/types.ts";
 
@@ -160,6 +161,106 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
         signer.did(),
         "ri-mixed-sink",
         SINK_SCHEMA,
+        tx,
+      );
+      sink.set({ out: "derived" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(String((result.error as Error | undefined)?.message)).toContain(
+        "requiredIntegrity failed",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("an author-forged provenance atom is stripped and cannot satisfy the gate", async () => {
+    // Misuse direction of the S7 exemption: a pattern author self-attaches the
+    // LinkReference provenance atom through the only surface untrusted code
+    // has — an ifc.integrity schema declaration (NOT the privileged metadata
+    // seeding used by the other steps; mirrors cfc-integrity-mint-gate). The
+    // S4 mint gate (gateRuntimeMintedIntegrity) strips it at persist time, so
+    // (a) the stored label keeps only the confidentiality — the read is NOT
+    // provenance-only and still gates — and (b) the forged atom cannot
+    // satisfy a requiredIntegrity gate keyed to LinkReference. Were the strip
+    // bypassed, the forged atom would persist AND satisfy that gate (the
+    // commit below would succeed) — both assertions catch it.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const seed = runtime.edit();
+      const srcSchema = {
+        type: "string",
+        ifc: {
+          // The confidentiality atom keeps the read labeled (and in the gate)
+          // after the forged integrity is stripped, mirroring the mint-gate
+          // suite's author-side declaration.
+          confidentiality: ["s"],
+          integrity: [LINK_REFERENCE_ATOM],
+        },
+      } as const satisfies JSONSchema;
+      const src = runtime.getCell(
+        signer.did(),
+        "ri-forged-prov-src",
+        srcSchema,
+        seed,
+      );
+      src.set("attacker-controlled");
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      // Non-vacuity anchor: assert the S4 strip actually ran — the persisted
+      // labelMap kept the confidentiality but NOT the forged LinkReference.
+      const persistedId = parseLink(src.getAsLink()).id!;
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          cfc?: {
+            labelMap?: {
+              entries: Array<{
+                path: string[];
+                label: {
+                  confidentiality?: unknown[];
+                  integrity?: Array<{ type?: string }>;
+                };
+              }>;
+            };
+          };
+        } | undefined;
+      };
+      const entries = replica.getDocument(persistedId)?.cfc?.labelMap
+        ?.entries ?? [];
+      expect(
+        entries.flatMap((e) => e.label.integrity ?? [])
+          .some((a) => a?.type?.endsWith("/LinkReference")),
+      ).toBe(false);
+      expect(
+        entries.flatMap((e) => e.label.confidentiality ?? []).includes("s"),
+      ).toBe(true);
+
+      // A sink keyed to the very atom the author tried to mint. The stripped
+      // read still gates (confidentiality-bearing, so not provenance-only)
+      // and its integrity no longer carries LinkReference: the write fails.
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "ri-forged-prov-src", srcSchema, tx).get();
+      const sink = runtime.getCell(
+        signer.did(),
+        "ri-forged-prov-sink",
+        {
+          type: "object",
+          properties: {
+            out: {
+              type: "string",
+              ifc: { requiredIntegrity: [LINK_REFERENCE_ATOM] },
+            },
+          },
+          required: ["out"],
+        } as const satisfies JSONSchema,
         tx,
       );
       sink.set({ out: "derived" });

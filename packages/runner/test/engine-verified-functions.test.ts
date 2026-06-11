@@ -79,4 +79,41 @@ describe("Engine verified function cleanup", () => {
     expect(executableRegistry.verifiedFunctionIndex.has(only.implementationRef))
       .toBe(false);
   });
+
+  it("load restarts repoint shared refs to the dynamic registration instead of deleting them", () => {
+    // PR #4053 follow-up (cubic P1 on registerDynamicVerifiedFunction):
+    // dynamic (loadId-less) registrations share the implementationRef
+    // keyspace with per-load registrations. If a ref registered by a load is
+    // ALSO dynamically registered, a restart of that load must repoint the
+    // global index at the dynamic function — a bare index write without a
+    // partition entry would instead be DELETED by the cross-load repair
+    // (`findVerifiedFunctionInOtherLoads` finds no owner), severing the
+    // rehydration channel mid-session.
+    const fromLoad = Object.assign(() => "from-load", {
+      implementationRef: "main.tsx#000:handler",
+    });
+    const dynamic = Object.assign(() => "dynamic", {
+      implementationRef: "main.tsx#000:handler",
+    });
+    const executableRegistry = getExecutableRegistry();
+
+    executableRegistry.registerVerifiedFunction(
+      "load:restarting",
+      fromLoad.implementationRef,
+      fromLoad,
+    );
+    executableRegistry.registerDynamicVerifiedFunction(
+      dynamic.implementationRef,
+      dynamic,
+    );
+    expect(
+      executableRegistry.getExecutableFunction(dynamic.implementationRef),
+    ).toBe(dynamic);
+
+    executableRegistry.beginVerifiedLoad("load:restarting");
+
+    expect(
+      executableRegistry.getExecutableFunction(dynamic.implementationRef),
+    ).toBe(dynamic);
+  });
 });

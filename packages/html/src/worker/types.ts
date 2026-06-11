@@ -211,9 +211,6 @@ export interface ReconcileContext {
 }
 
 /**
- * Options for the worker reconciler.
- */
-/**
  * Whether author-supplied `declassifyConfidentiality` on a
  * `<cf-cfc-render-boundary>` is honored.
  *
@@ -233,6 +230,25 @@ export interface ReconcileContext {
  */
 export type RenderDeclassificationPolicy = "allow" | "deny";
 
+/**
+ * Normalize an untrusted render-declassification policy value.
+ *
+ * The policy is a security knob that crosses postMessage seams (e.g.
+ * `InitializationData`) with no runtime validation, so a typo'd host config or
+ * a version-skewed peer could otherwise silently fail OPEN to `"allow"`. A
+ * present-but-unknown value therefore normalizes to `"deny"` (fail closed);
+ * only an absent value keeps the documented `"allow"` default.
+ */
+export function normalizeRenderDeclassificationPolicy(
+  value: unknown,
+): RenderDeclassificationPolicy {
+  if (value === undefined) return "allow";
+  return value === "allow" ? "allow" : "deny";
+}
+
+/**
+ * Options for the worker reconciler.
+ */
 export interface WorkerReconcilerOptions {
   /** Callback when operations are ready to send to main thread */
   onOps: (

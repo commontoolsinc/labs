@@ -628,10 +628,8 @@ export class Engine extends EventTarget implements Harness {
       // a from-zero scan, and any mis-attribution degrades fail-closed at the
       // CFC identity layer — see the fn.src note in the design doc.)
       const script = [...graph.compiledBodies.values()].join("\n");
-      this.executableRegistry.setVerifiedLoadBundleId(
-        loadId,
-        hashOf(script).toString(),
-      );
+      const bundleId = hashOf(script).toString();
+      this.executableRegistry.setVerifiedLoadBundleId(loadId, bundleId);
       // Register a composed bundle source map for `${loadId}.js` so that
       // `fn.src` / CFC verified-source coordinates (resolved against `script`)
       // map back to the original authored sources — without this the ESM loader
@@ -781,7 +779,11 @@ export class Engine extends EventTarget implements Harness {
       // through `PatternManager.compilePattern`. Keyed by the implementation
       // function object; gated on the same `isTrustedBuilderArtifact` brand the
       // index uses, so forged values get nothing.
-      this.recordModuleProvenance(exportsByIdentity, graph.registrationSink);
+      this.recordModuleProvenance(
+        exportsByIdentity,
+        graph.registrationSink,
+        bundleId,
+      );
 
       // `graph.registrationSink` was populated by each module's `__cfReg` during
       // the `importNow` loop above (committed only for modules that evaluated
@@ -810,6 +812,7 @@ export class Engine extends EventTarget implements Harness {
   private recordModuleProvenance(
     exportsByIdentity: Map<string, Exports>,
     registrationSink: Map<string, Map<string, unknown>>,
+    bundleId: string,
   ): void {
     const record = (identity: string, symbol: string, value: unknown) => {
       if (!isTrustedBuilderArtifact(value)) return;
@@ -836,8 +839,17 @@ export class Engine extends EventTarget implements Harness {
       recordVerifiedProvenance(implementation, {
         identity,
         symbol,
+        bundleId,
         ...(bindingIdentity ? { bindingIdentity } : {}),
       });
+      // The strong content-addressed implementation index — the resolution
+      // (and eviction-insurance) backing for serialized `$implRef`s; see
+      // `ExecutableRegistry.registerVerifiedImplementation`.
+      this.executableRegistry.registerVerifiedImplementation(
+        identity,
+        symbol,
+        implementation as HarnessedFunction,
+      );
     };
     for (const [identity, namespace] of exportsByIdentity) {
       for (const [exportName, value] of Object.entries(namespace)) {
@@ -1036,6 +1048,23 @@ export class Engine extends EventTarget implements Harness {
     implementationRef: string,
   ): HarnessedFunction | undefined {
     return this.executableRegistry.getExecutableFunction(implementationRef);
+  }
+
+  getVerifiedImplementation(
+    identity: string,
+    symbol: string,
+  ): HarnessedFunction | undefined {
+    return this.executableRegistry.getVerifiedImplementation(identity, symbol);
+  }
+
+  registerDynamicVerifiedFunction(
+    implementationRef: string,
+    implementation: HarnessedFunction,
+  ): void {
+    this.executableRegistry.registerDynamicVerifiedFunction(
+      implementationRef,
+      implementation,
+    );
   }
 
   unsafeTrustHostValue(

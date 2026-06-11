@@ -176,9 +176,15 @@ const resolveProvenanceImplementationIdentity = (
   // `undefined` on a `getVerifiedBundleId` miss and fail those legacy claims
   // closed. The `moduleIdentity` arm remains the primary; this only keeps the
   // legacy arm symmetric with the path that produced those claims.
-  const bundleId = typeof verifiedLoadId === "string" && verifiedLoadId.length
-    ? harness?.getVerifiedBundleId?.(verifiedLoadId) ?? verifiedLoadId
-    : undefined;
+  //
+  // Post-flip graphs carry no `implementationRef`, so their rehydrated modules
+  // resolve WITHOUT a `verifiedLoadId` — the provenance-recorded bundle id
+  // (stamped at evaluation time) then keeps stored bundleId-only claims
+  // verifying. Retires with the bundleId arm.
+  const bundleId =
+    (typeof verifiedLoadId === "string" && verifiedLoadId.length
+      ? harness?.getVerifiedBundleId?.(verifiedLoadId) ?? verifiedLoadId
+      : undefined) ?? provenance.bundleId;
 
   return {
     kind: "verified",

@@ -421,7 +421,7 @@ describe("Engine.evaluateRecordGraph()", () => {
     expect(typeof utilExports["triple"]).toBe("function");
   });
 
-  it("serializes verified javascript modules by stable implementationRef", async () => {
+  it("serializes verified javascript modules by stable $implRef", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [
@@ -447,18 +447,37 @@ describe("Engine.evaluateRecordGraph()", () => {
     );
 
     const module = serialized.nodes[0].module as {
+      $implRef?: { identity: string; symbol: string };
       implementationRef?: string;
       implementation?: string;
     };
-    expect(typeof module.implementationRef).toBe("string");
+    // Since the flip the serialized identity is the content-addressed
+    // `$implRef`; the legacy `implementationRef` is runtime-only and the body
+    // is omitted because this engine's implementation index resolves the ref.
+    expect(module.$implRef).toBeDefined();
+    expect(typeof module.$implRef!.identity).toBe("string");
+    expect(typeof module.$implRef!.symbol).toBe("string");
+    expect("implementationRef" in module).toBe(false);
     expect(module.implementation).toBeUndefined();
     expect(
-      (engine as any).getVerifiedFunction(module.implementationRef),
+      engine.getVerifiedImplementation(
+        module.$implRef!.identity,
+        module.$implRef!.symbol,
+      ),
+    ).toBeDefined();
+    // The legacy read path (kept for pre-flip persisted graphs) still admits
+    // the in-memory module's content-derived ref.
+    const liveModule = (main!.default as { nodes: Array<{ module: unknown }> })
+      .nodes[0].module as { implementationRef?: string };
+    expect(typeof liveModule.implementationRef).toBe("string");
+    expect(
+      // deno-lint-ignore no-explicit-any
+      (engine as any).getVerifiedFunction(liveModule.implementationRef),
     )
       .toBeDefined();
   });
 
-  it("keeps implementationRef stable across separate load sessions of the same source", async () => {
+  it("keeps the serialized identity stable across separate load sessions of the same source", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [
@@ -489,10 +508,22 @@ describe("Engine.evaluateRecordGraph()", () => {
       ),
     );
 
-    expect(firstSerialized.nodes[0].module.implementationRef).toBeDefined();
-    expect(firstSerialized.nodes[0].module.implementationRef).toBe(
-      secondSerialized.nodes[0].module.implementationRef,
+    // Content-addressed `$implRef` is byte-derived, so two loads of identical
+    // source serialize the identical ref.
+    expect(firstSerialized.nodes[0].module.$implRef).toBeDefined();
+    expect(firstSerialized.nodes[0].module.$implRef).toEqual(
+      secondSerialized.nodes[0].module.$implRef,
     );
+    // The in-memory legacy ref (still minted for the kept pre-flip read path)
+    // is content-derived too — same stability, pinned until the path retires.
+    const firstLive = (first.main!.default as {
+      nodes: Array<{ module: { implementationRef?: string } }>;
+    }).nodes[0].module.implementationRef;
+    const secondLive = (second.main!.default as {
+      nodes: Array<{ module: { implementationRef?: string } }>;
+    }).nodes[0].module.implementationRef;
+    expect(firstLive).toBeDefined();
+    expect(firstLive).toBe(secondLive);
   });
 
   it("rejects authored local-module namespace imports in SES mode", async () => {
