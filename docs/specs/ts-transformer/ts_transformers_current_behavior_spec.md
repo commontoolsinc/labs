@@ -452,10 +452,13 @@ This inference runs through `collectFunctionSchemaTypeNodes` via
 
 ### 6.7 Lowerable Expression-Site Categories
 
-The shared expression-site policy recognizes six authored container kinds via
-`getExpressionContainerKind`:
+The shared expression-site policy recognizes seven authored container kinds via
+`getExpressionContainerKind` (the `ExpressionContainerKind` union in
+`expression-site-types.ts`):
 
 - `jsx-expression`
+- `template-span` (an interpolated `${…}` span inside a tagged template, e.g.
+  a `str`-tagged template)
 - `return-expression`
 - `variable-initializer`
 - `call-argument`
@@ -551,22 +554,34 @@ canonical lift-applied form:
 - `computed(fn)` -> `__cfHelpers.lift(fn)({})` before schema injection
 - no-input computed-origin calls are schema-injected as
   `__cfHelpers.lift(false, fn)()`
-- preserves call type arguments
+- **does not** forward `computed`'s type argument to `lift`: `computed<R>` has a
+  single result type param, while `lift<T, R>` takes input `T` first, so
+  forwarding `[R]` would place `R` in `lift`'s input slot. Type args are
+  recomputed downstream (LiftAppliedStrategy / SchemaInjection) from the
+  callback's parameter and return types.
 - does not additionally validate callback shape in this pass
-- preserves type information through `typeRegistry`
+- preserves type information through `typeRegistry` (the original call's type is
+  re-registered on the lowered lift-applied node)
 
 It runs only when source text contains `computed` or AST scan finds computed
 calls.
 
 ## 9. Closure Transformation
 
-`ClosureTransformer` runs only when helper import is present. Strategy order:
+`ClosureTransformer` runs only when helper import is present. It applies the
+first matching strategy (the strategies array in `closures/transformer.ts`), in
+order:
 
 1. handler JSX attribute strategy
 2. action strategy
 3. array-method strategy
-4. patternTool strategy
-5. lift-applied strategy
+4. lift-applied strategy
+
+There is no longer a separate patternTool closure strategy (CT-1655, #3862):
+`patternTool` now requires an explicit `pattern(...)` first argument (see
+§6.5 `pattern-context:patterntool-requires-pattern`), so the captures live on
+that authored pattern and the call is hoisted by `BuilderCallHoisting` (§11)
+rather than capture-rewritten here.
 
 ### 9.1 Capture model
 
@@ -648,17 +663,21 @@ Behavior:
 
 If no captures are found, the lift-applied call is left unchanged.
 
-### 9.6 patternTool strategy
+### 9.6 patternTool (no closure strategy)
 
-Transforms `patternTool(fn[, extraParams])` to capture module-scoped reactive
-values:
+There is no patternTool closure strategy in the current pipeline. The former
+strategy auto-wrapped a bare callback as `pattern(fn)` and auto-captured
+module-scoped reactive values into the call; both were removed in CT-1655
+(#3862) in favor of an explicit, addressable pattern.
 
-- collects module-scoped cell-like captures (including nested callback usage)
-- merges captures into `extraParams` (captures win on key conflicts)
-- extends callback object binding/type literal with capture properties (added
-  types default to `unknown` when synthesized)
+Current behavior:
 
-If no qualifying captures exist, call is unchanged.
+- `patternTool(...)`'s first argument **must** be an explicit `pattern(...)`; a
+  bare callback reports `pattern-context:patterntool-requires-pattern` (§6.5).
+- the captures live on the authored `pattern(...)` (module-scoped reads are
+  absorbed by the pattern; per-instance values go in `extraParams`).
+- the bare `pattern(...)` inside `patternTool(...)` is hoisted to module scope
+  by `BuilderCallHoisting` (§11, argument-position pattern case).
 
 ### 9.7 Pattern callback lowering
 
