@@ -5,7 +5,10 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { Pattern } from "../src/builder/types.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import { resolveOpPattern } from "../src/builtins/op-pattern-ref.ts";
+import {
+  resolveOpPattern,
+  resolveStoredPattern,
+} from "../src/builtins/op-pattern-ref.ts";
 
 /**
  * PR E3 stored-pattern-value canary (docs/specs/content-addressed-action-
@@ -124,9 +127,74 @@ describe("pre-E3 stored pattern-value canary", () => {
     const value = structuredClone(
       fixture.serialized.dualWrite,
     ) as unknown as Pattern;
-    // Fresh runtime: nothing is in the bounded identity cache, so the
-    // sentinel-shaped value must resolve from the graph it carries.
+    // Fresh runtime: nothing is in the identity index, so the sentinel-shaped
+    // value must resolve from the graph it carries.
     const resolved = resolveOpPattern(runtime!, value, "map");
     expect(resolved).toBe(value);
+  });
+
+  it("refs-only vintage (E4) resolves to the live canonical once its module evaluated", async () => {
+    setup();
+    const stored = structuredClone(fixture.serialized.refsOnly);
+    expect("nodes" in stored).toBe(false);
+
+    // The module evaluates in this session (the by-construction case: any
+    // piece whose pattern mentions this one loads it as part of its bundle).
+    const compiled = await runtime!.patternManager.compilePattern(
+      fixture.program,
+    );
+    const resolved = resolveStoredPattern(runtime!, stored);
+    expect(resolved).toBe(compiled);
+
+    const vs = await runGraph(resolved as Pattern, "canary-refs-only-run");
+    expect(vs).toEqual([7, 8, 9]);
+  });
+
+  it("refs-only vintage loads by identity from storage when the module never evaluated (async net)", async () => {
+    // Session 1 compiles WITH the space cache: compiled artifacts persist
+    // in-space as an expected part of compilation (E4 invariant). It stays
+    // open while session 2 reads — the emulated storage tears down replica
+    // state on dispose (same structure as resume-by-identity.test.ts).
+    storageManager = StorageManager.emulate({ as: signer });
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    try {
+      const tx1 = rt1.edit();
+      await rt1.patternManager.compilePattern(fixture.program, {
+        space,
+        tx: tx1,
+      });
+      await tx1.commit();
+      await rt1.patternManager.flushCompileCacheWrites();
+      await rt1.storageManager.synced();
+
+      // Session 2 never evaluates the module; the stored refs-only value's
+      // sync resolution misses, and the async fallback (what llm-dialog does)
+      // loads source-free by identity from the persisted compiled artifacts.
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      const stored = structuredClone(
+        fixture.serialized.refsOnly,
+      ) as unknown as {
+        $patternRef: { identity: string; symbol: string };
+      };
+      expect(resolveStoredPattern(runtime, stored)).toBeUndefined();
+
+      const loaded = await runtime.patternManager.loadPatternByIdentity(
+        stored.$patternRef.identity,
+        stored.$patternRef.symbol,
+        space,
+      );
+      expect(loaded).toBeDefined();
+
+      const vs = await runGraph(loaded as Pattern, "canary-refs-only-async");
+      expect(vs).toEqual([7, 8, 9]);
+    } finally {
+      await rt1.dispose();
+    }
   });
 });
