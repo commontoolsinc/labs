@@ -3526,6 +3526,20 @@ export class Runner {
   private getFallbackJavaScriptImplementation(
     module: Module,
   ): (...args: any[]) => any {
+    const implRef =
+      (module as { $implRef?: { identity: string; symbol: string } }).$implRef;
+    if (implRef || module.implementationRef) {
+      // The module carries a content-addressed `$implRef` and/or a legacy
+      // `implementationRef` — it was expected to resolve through the verified
+      // registries — yet resolution fell through to here. The action will run
+      // SES-recompiled and CFC-unverified (`writeAuthorizedBy` sees
+      // `unsupported`), so leave a breadcrumb for enforcement-mode debugging.
+      logger.debug("verified-fallback-downgrade", () => [
+        "Verified function resolution missed; running SES-recompiled," +
+        " CFC-unverified fallback",
+        { implementationRef: module.implementationRef, $implRef: implRef },
+      ]);
+    }
     if (typeof module.implementation === "function") {
       return this.runtime.harness.getInvocation(
         Function.prototype.toString.call(module.implementation),
