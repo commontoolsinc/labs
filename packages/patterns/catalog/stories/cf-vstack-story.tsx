@@ -122,6 +122,59 @@ export default pattern<VStackStoryInput, VStackStoryOutput>(() => {
             </cf-vstack>
           </cf-hstack>
         </div>
+
+        <div>
+          <div
+            style={{
+              fontSize: "14px",
+              fontWeight: "600",
+              marginBottom: "8px",
+              color: "#2e3438",
+            }}
+          >
+            Directional Padding
+          </div>
+          <cf-hstack gap="4">
+            <cf-vstack
+              gap="1"
+              padding="4"
+              style="border: 1px dashed #cbd5e1; border-radius: 4px; flex: 1; background: #f1f5f9;"
+            >
+              <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                padding=4
+              </span>
+              <div style="background: #e0e7ff; padding: 4px 8px; border-radius: 4px;">
+                Uniform
+              </div>
+            </cf-vstack>
+            <cf-vstack
+              gap="1"
+              padding="4"
+              pt="1"
+              style="border: 1px dashed #cbd5e1; border-radius: 4px; flex: 1; background: #f1f5f9;"
+            >
+              <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                padding=4 pt=1
+              </span>
+              <div style="background: #bbf7d0; padding: 4px 8px; border-radius: 4px;">
+                pt overrides top
+              </div>
+            </cf-vstack>
+            <cf-vstack
+              gap="1"
+              px="6"
+              py="2"
+              style="border: 1px dashed #cbd5e1; border-radius: 4px; flex: 1; background: #f1f5f9;"
+            >
+              <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                px=6 py=2
+              </span>
+              <div style="background: #bfdbfe; padding: 4px 8px; border-radius: 4px;">
+                Axis padding
+              </div>
+            </cf-vstack>
+          </cf-hstack>
+        </div>
       </div>
     ),
     controls: (

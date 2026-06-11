@@ -211,8 +211,8 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
                         <cf-text
                           variant="caption"
                           tone="muted"
-                          block
-                          style="font-style: italic; margin-top: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;"
+                          truncate
+                          style="font-style: italic; margin-top: 0.25rem;"
                         >
                           {item.notes}
                         </cf-text>

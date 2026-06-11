@@ -116,7 +116,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-heading` | Theme-compliant heading replacing `h1`–`h6` | |
 | `cf-hgroup` | Horizontal group with automatic gap management | |
 | `cf-hscroll` | Horizontal scroll container | |
-| `cf-hstack` | Horizontal stack layout (flexbox) | |
+| `cf-hstack` | Horizontal stack layout (flexbox) (see [stacks](#cf-vstack--cf-hstack)) | |
 | `cf-iframe` | Iframe for executing arbitrary scripts | |
 | `cf-image-input` | Image capture/upload with compression, EXIF, camera support | |
 | `cf-input` | Text input with validation and reactive binding | `$value` |
@@ -169,7 +169,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-table` | Semantic table with striped/hover/bordered styling | |
 | `cf-tabs` | Container managing ARIA tab navigation and panels | `$value` |
 | `cf-tags` | Tag pills with add/remove functionality | |
-| `cf-text` | Generic text primitive for non-label typography | |
+| `cf-text` | Generic text primitive for non-label typography (see [cf-text](#cf-text)) | |
 | `cf-textarea` | Multi-line text input with auto-resize and reactive binding | `$value` |
 | `cf-theme` | Provides a theme to a subtree and applies CSS variables | |
 | `cf-tile` | Page/item preview tile with click handling | |
@@ -184,7 +184,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-vgroup` | Vertical group with automatic gap management | |
 | `cf-voice-input` | Voice recording and transcription | `$transcription` |
 | `cf-vscroll` | Vertical scroll container (snap-to-bottom, fade edges) | |
-| `cf-vstack` | Vertical stack layout (flexbox) | |
+| `cf-vstack` | Vertical stack layout (flexbox) (see [stacks](#cf-vstack--cf-hstack)) | |
 | `cf-webhook` | Webhook integration: receives payloads into a stream | `$inbox`, `$config` |
 
 ---
@@ -416,6 +416,63 @@ slot. Optional `icon` and `action` slots render above and below the message.
     Add first item
   </cf-button>
 </cf-empty-state>
+```
+
+---
+
+## cf-text
+
+Generic text primitive for non-label typography: captions, helper copy,
+metadata, descriptions. Use `cf-label` only when text labels a specific
+control.
+
+- `variant` — typography role: `caption`, `body-compact`, `body` (default),
+  `body-large`, `heading-sm`, `heading-md`, `heading-lg`
+- `tone` — semantic color: `default`, `muted`, `tertiary`, `disabled`,
+  `primary`, `success`, `warning`, `error`
+- `block` — render as block text instead of inline text
+- `truncate` — clip overflowing text to a single line with an ellipsis. Use
+  instead of ad-hoc
+  `style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"`.
+  `truncate` implies block display, so combining it with `block` is allowed
+  but redundant. The host also gets `min-width: 0` so it shrinks and
+  truncates correctly inside flex rows like `cf-hstack`.
+
+```tsx
+// Truncated note next to fixed-width siblings in a row
+<cf-hstack gap="2" align="center">
+  <cf-text truncate tone="muted">{item.notes}</cf-text>
+  <cf-badge size="xs">{item.status}</cf-badge>
+</cf-hstack>
+```
+
+---
+
+## cf-vstack / cf-hstack
+
+Vertical and horizontal flexbox stacks. Shared layout props:
+
+- `gap` — space between items (`0`–`24` numeric scale or `xs`–`xl`)
+- `align` / `justify` — flexbox alignment
+- `reverse` — reverse the direction (`wrap` is cf-hstack only)
+- `padding` — uniform padding around the stack (same scale as `gap`)
+- `px` / `py` — horizontal / vertical axis padding (same scale)
+- `pt` / `pr` / `pb` / `pl` — single-side padding (same scale)
+
+Padding precedence: single-side props (`pt`/`pr`/`pb`/`pl`) override the axis
+props (`px`/`py`) on their side, which override the uniform `padding`. Use
+these instead of inline `style="padding-top: ..."` overrides.
+
+```tsx
+// Uniform padding, but tighter on top
+<cf-vstack gap="2" padding="4" pt="2">
+  {items}
+</cf-vstack>
+
+// Axis-only padding
+<cf-hstack gap="2" px="4" py="1">
+  {toolbarButtons}
+</cf-hstack>
 ```
 
 ---

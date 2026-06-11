@@ -38,6 +38,7 @@ export default pattern<TextStoryInput, TextStoryOutput>(() => {
   const variant = new Writable<TextVariant>("body");
   const tone = new Writable<TextTone>("default");
   const block = new Writable(true);
+  const truncate = new Writable(false);
   const content = new Writable("Text content");
 
   return {
@@ -77,9 +78,26 @@ export default pattern<TextStoryInput, TextStoryOutput>(() => {
           </cf-text>
         </cf-vstack>
 
+        <cf-hstack
+          gap="2"
+          align="center"
+          style="max-width: 240px; border: 1px dashed #cbd5e1; border-radius: 4px; padding: 4px;"
+        >
+          <cf-text truncate>
+            Truncated text clips to a single line with an ellipsis, even inside
+            a flex row like cf-hstack.
+          </cf-text>
+          <cf-badge size="xs" color="neutral">tag</cf-badge>
+        </cf-hstack>
+
         <cf-card>
           <cf-vstack slot="content" gap="2">
-            <cf-text variant={variant} tone={tone} block={block}>
+            <cf-text
+              variant={variant}
+              tone={tone}
+              block={block}
+              truncate={truncate}
+            >
               {content}
             </cf-text>
             <cf-text variant="caption" tone="muted" block>
@@ -128,6 +146,12 @@ export default pattern<TextStoryInput, TextStoryOutput>(() => {
             description="Display as block text"
             defaultValue="true"
             checked={block}
+          />
+          <SwitchControl
+            label="truncate"
+            description="Single-line ellipsis (implies block)"
+            defaultValue="false"
+            checked={truncate}
           />
           <TextControl
             label="children"
