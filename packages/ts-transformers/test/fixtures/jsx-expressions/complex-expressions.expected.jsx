@@ -19,7 +19,7 @@ interface Problem {
 const __cfLift_1 = __cfHelpers.lift<{
     price: number;
     discount: number;
-}, number>({
+}, number>(({ price, discount }) => price - discount, {
     type: "object",
     properties: {
         price: {
@@ -32,12 +32,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["price", "discount"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ price, discount }) => price - discount);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     price: number;
     discount: number;
     tax: number;
-}, number>({
+}, number>(({ price, discount, tax }) => (price - discount) * (1 + tax), {
     type: "object",
     properties: {
         price: {
@@ -53,7 +53,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["price", "discount", "tax"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ price, discount, tax }) => (price - discount) * (1 + tax));
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: complex-expressions
 // Verifies: multi-variable arithmetic in JSX is wrapped in a lift-applied computation with captured refs
 //   {price - discount}             → lift((...) => price - discount)({ price, discount })

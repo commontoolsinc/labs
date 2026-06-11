@@ -437,10 +437,7 @@ describe("Engine.evaluateRecordGraph()", () => {
     };
 
     const { main } = await engine.compileAndEvaluateModules(program);
-    const patternId = runtime.patternManager.registerPattern(
-      main!.default as never,
-      program,
-    );
+    runtime.patternManager.registerPattern(main!.default as never, program);
     const pattern = main!.default as { nodes: Array<{ module: unknown }> };
     const serialized = JSON.parse(
       JSON.stringify(
@@ -456,7 +453,7 @@ describe("Engine.evaluateRecordGraph()", () => {
     expect(typeof module.implementationRef).toBe("string");
     expect(module.implementation).toBeUndefined();
     expect(
-      (engine as any).getVerifiedFunction(module.implementationRef, patternId),
+      (engine as any).getVerifiedFunction(module.implementationRef),
     )
       .toBeDefined();
   });

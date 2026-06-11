@@ -15,7 +15,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         score: number;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.score > 100, {
     type: "object",
     properties: {
         state: {
@@ -31,7 +31,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.score > 100);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: boolean-result-schema-normalization
 // Verifies: boolean result schemas stay normalized as `type: "boolean"` instead
 // of expanding into literal `true` / `false` enums.

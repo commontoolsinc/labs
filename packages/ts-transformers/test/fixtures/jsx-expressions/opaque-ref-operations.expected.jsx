@@ -13,7 +13,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     count: __cfHelpers.Cell<number>;
-}, number>({
+}, number>(({ count }) => count.get() + 1, {
     type: "object",
     properties: {
         count: {
@@ -24,10 +24,10 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["count"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ count }) => count.get() + 1);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     count: __cfHelpers.Cell<number>;
-}, number>({
+}, number>(({ count }) => count.get() * 2, {
     type: "object",
     properties: {
         count: {
@@ -38,10 +38,10 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["count"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ count }) => count.get() * 2);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     price: __cfHelpers.Cell<number>;
-}, number>({
+}, number>(({ price }) => price.get() * 1.1, {
     type: "object",
     properties: {
         price: {
@@ -52,7 +52,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["price"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ price }) => price.get() * 1.1);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: opaque-ref-operations
 // Verifies: arithmetic on cell-backed OpaqueRefs in JSX is wrapped in a lift-applied computation with asCell schema
 //   {count}           → {count}  (bare ref, no transform)

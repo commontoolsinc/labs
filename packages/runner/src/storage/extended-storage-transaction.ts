@@ -61,6 +61,7 @@ import {
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
   flowLabelWorkExists,
+  flowReadExcluded,
   type ImplementationIdentity,
   type PostCommitSideEffect,
   prepareBoundaryCommit,
@@ -193,12 +194,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.invalidateCfc("trigger-reads-after-prepare");
     }
     for (const read of reads) {
-      // Surface exclusion keys on the RAW storage path before
-      // canonicalization loses the raw/value distinction: triggers from the
-      // runtime-internal root surfaces (`["cfc",…]`/`["source",…]`) don't
-      // join the flow derivation, while a user field literally named
-      // `source` (raw `["value","source"]`) does (#4011 review).
-      if (read.path[0] === "cfc" || read.path[0] === "source") {
+      // Runtime-surface exclusion keys on the RAW notification path; this
+      // is the only point where it still exists (storage below holds the
+      // canonical form, where a user `value.source` is indistinguishable
+      // from the raw `["source"]` surface).
+      if (flowReadExcluded(read.id, read.path)) {
         continue;
       }
       this.cfcState.triggerReads.push(deepFreeze({

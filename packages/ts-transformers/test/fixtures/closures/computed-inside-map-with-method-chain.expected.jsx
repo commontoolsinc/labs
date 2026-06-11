@@ -28,7 +28,10 @@ const __cfLift_1 = __cfHelpers.lift<{
     item: {
         subItems: SubItem[];
     };
-}, string>({
+}, string>(({ item }) => item.subItems
+    .filter((s) => s.active)
+    .map((s) => s.name)
+    .join(", "), {
     type: "object",
     properties: {
         item: {
@@ -64,10 +67,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.subItems
-    .filter((s) => s.active)
-    .map((s) => s.name)
-    .join(", "));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return (<div>

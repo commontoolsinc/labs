@@ -13,7 +13,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     layout: __cfHelpers.Writable<string>;
-}, number>({
+}, number>(({ layout }) => layout.get().trim().length, {
     type: "object",
     properties: {
         layout: {
@@ -24,7 +24,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["layout"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ layout }) => layout.get().trim().length);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: cell-get-binding-autowrap
 // Verifies: a bare `cell.get()` that feeds a computation at a variable-initializer
 //   binding is auto-wrapped into a lift, the same way it is in a JSX expression.

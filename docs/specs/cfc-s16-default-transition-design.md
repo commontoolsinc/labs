@@ -72,6 +72,10 @@ J(tx) = ⋃ { resolveReadLabel(r).confidentiality
   mirror of the write-side exclusions (`["cfc"]`, `["source"]`, `cid:` docs).
   Program text and schema docs do not taint outputs (profile decision, SC-6;
   revisit when label-metadata confidentiality — invariant 12 — lands).
+  The `["cfc"]`/`["source"]` patterns match the **raw** document paths (root
+  siblings of `value`), not canonicalized logical paths — a user field named
+  `source` lives at raw `["value","source"]` and is *not* excluded, on either
+  the read or the write side (PR #4011 review).
 - Content labels and flow labels deliberately collapse into one join (§8.11.4
   stores them in one array; at tx granularity the distinction is conceptual).
 

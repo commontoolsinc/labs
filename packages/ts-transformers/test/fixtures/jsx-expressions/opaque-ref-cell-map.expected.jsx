@@ -49,13 +49,7 @@ const SimplePattern = pattern(() => ({
     }
 } as const satisfies __cfHelpers.JSONSchema);
 // Create a cell to store an array of charms
-const createCellRef = lift({
-    type: "object",
-    properties: {
-        isInitialized: { type: "boolean", "default": false, asCell: ["cell"] },
-        storedCellRef: { type: "object", asCell: ["cell"] },
-    },
-}, undefined, ({ isInitialized, storedCellRef }) => {
+const createCellRef = lift(({ isInitialized, storedCellRef }) => {
     if (!isInitialized.get()) {
         console.log("Creating cellRef - first time");
         const newCellRef = Cell.for<any[]>("charmsArray").asSchema({
@@ -63,7 +57,10 @@ const createCellRef = lift({
             items: true
         } as const satisfies __cfHelpers.JSONSchema);
         newCellRef.set([]);
-        storedCellRef.set(newCellRef);
+        // Local cast: the schema types storedCellRef as a cell of a generic object,
+        // but this fixture stores an array cell into it; the schema accuracy isn't
+        // what this transformer fixture exercises.
+        (storedCellRef as Cell<unknown>).set(newCellRef);
         isInitialized.set(true);
         return {
             cellRef: newCellRef,
@@ -76,20 +73,20 @@ const createCellRef = lift({
     return {
         cellRef: storedCellRef,
     };
+}, {
+    type: "object",
+    properties: {
+        isInitialized: { type: "boolean", "default": false, asCell: ["cell"] },
+        storedCellRef: { type: "object", asCell: ["cell"] },
+    },
+    required: ["isInitialized", "storedCellRef"],
 });
 // Add a charm to the array and navigate to it
 // we get a new isInitialized passed in for each
 // charm we add to the list. this makes sure
 // we only try to add the charm once to the list
 // and we only call navigateTo once
-const addCharmAndNavigate = lift({
-    type: "object",
-    properties: {
-        charm: { type: "object" },
-        cellRef: { type: "array", asCell: ["cell"] },
-        isInitialized: { type: "boolean", asCell: ["cell"] },
-    },
-}, undefined, ({ charm, cellRef, isInitialized }) => {
+const addCharmAndNavigate = lift(({ charm, cellRef, isInitialized }) => {
     if (!isInitialized.get()) {
         if (cellRef) {
             cellRef.push(charm);
@@ -101,6 +98,14 @@ const addCharmAndNavigate = lift({
         }
     }
     return undefined;
+}, {
+    type: "object",
+    properties: {
+        charm: { type: "object" },
+        cellRef: { type: "array", asCell: ["cell"] },
+        isInitialized: { type: "boolean", asCell: ["cell"] },
+    },
+    required: ["charm", "isInitialized"],
 });
 // Create a new SimplePattern and add it to the array
 const createSimplePattern = handler({
@@ -143,7 +148,7 @@ const goToCharm = handler({
 });
 const __cfLift_1 = __cfHelpers.lift<{
     cellRef: unknown[];
-}, boolean>({
+}, boolean>(({ cellRef }) => !cellRef?.length, {
     type: "object",
     properties: {
         cellRef: {
@@ -156,16 +161,16 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["cellRef"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ cellRef }) => !cellRef?.length);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     charm: any;
-}, any>({
+}, any>(({ charm }) => charm[__cfHelpers.NAME], {
     type: "object",
     properties: {
         charm: true
     },
     required: ["charm"]
-} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ charm }) => charm[__cfHelpers.NAME]);
+} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const charm = __cf_pattern_input.key("element");
     const index = __cf_pattern_input.key("index");

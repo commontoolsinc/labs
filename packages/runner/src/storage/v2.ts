@@ -623,6 +623,16 @@ export class StorageManager implements IStorageManager {
     this.#crossSpacePromises.delete(promise);
   }
 
+  pendingCrossSpacePromiseCount(): number {
+    return this.#crossSpacePromises.size;
+  }
+
+  crossSpaceSettled(): Promise<void> {
+    const { resolve, promise } = Promise.withResolvers<void>();
+    void this.resolveCrossSpace(resolve);
+    return promise;
+  }
+
   subscribe(subscription: IStorageNotification): void {
     this.#subscription.subscribe(subscription);
   }

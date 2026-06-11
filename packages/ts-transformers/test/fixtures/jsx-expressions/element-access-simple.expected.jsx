@@ -23,7 +23,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         items: string[];
         index: number;
     };
-}, string | undefined>({
+}, string | undefined>(({ state }) => state.items[state.index], {
     type: "object",
     properties: {
         state: {
@@ -45,12 +45,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.index]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         items: string[];
     };
-}, string | undefined>({
+}, string | undefined>(({ state }) => state.items[state.items.length - 1], {
     type: "object",
     properties: {
         state: {
@@ -69,14 +69,14 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.items.length - 1]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         matrix: number[][];
         row: number;
         col: number;
     };
-}, number | undefined>({
+}, number | undefined>(({ state }) => state.matrix[state.row]![state.col], {
     type: "object",
     properties: {
         state: {
@@ -104,7 +104,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.matrix[state.row]![state.col]);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: element-access-simple
 // Verifies: dynamic element access on reactive arrays is wrapped in a lift-applied computation
 //   state.items[state.index]            → lift(({state}) => state.items[state.index])({ items, index })

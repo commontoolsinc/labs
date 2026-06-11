@@ -25,7 +25,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     msg: {
         reactions?: Reaction[] | undefined;
     };
-}, Reaction[]>({
+}, Reaction[]>(({ msg }) => (msg.reactions ?? []) as Reaction[], {
     type: "object",
     properties: {
         msg: {
@@ -68,7 +68,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["emoji"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ msg }) => (msg.reactions ?? []) as Reaction[]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const reaction = __cf_pattern_input.key("element");
     const msg = __cf_pattern_input.key("params", "msg");

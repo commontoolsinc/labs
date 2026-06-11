@@ -18,6 +18,7 @@ import {
 } from "./types.ts";
 import { getTopFrame } from "./pattern.ts";
 import { getPatternProgram, noteDerivedCopy } from "./pattern-metadata.ts";
+import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { Runtime } from "../runtime.ts";
 import {
@@ -405,6 +406,20 @@ export function moduleToJSON(module: Module) {
         "JavaScript function modules must carry implementationRef before serialization",
       );
     }
+    // Content-addressed reference (dual-write with implementationRef until
+    // the flip — see docs/specs/content-addressed-action-identity.md): when
+    // the implementation function has module-scope provenance, serialize its
+    // `{ identity, symbol }` so a rehydrated module resolves by identity.
+    // `toJSON` runs at cell-write time — post-evaluation, after provenance was
+    // recorded by the module indexing. Dynamic (in-action-created) artifacts
+    // have no symbol and serialize without a ref (in-session only, as before).
+    const provenance = module.type === "javascript"
+      ? getVerifiedProvenance(implementation)
+      : undefined;
+    const implRefValue = provenance?.symbol
+      ? { identity: provenance.identity, symbol: provenance.symbol }
+      : undefined;
+    const implRef = implRefValue ? { $implRef: implRefValue } : {};
     const preview = (implementation as { preview?: string }).preview ??
       implementation.toString().slice(0, 200);
     const location = (implementation as { src?: string }).src;
@@ -421,9 +436,25 @@ export function moduleToJSON(module: Module) {
           module.implementationRef,
         )
       : undefined;
+    // Omit the stringified body only when the implementation is resolvable on
+    // load BY THE RUNTIME THAT WILL READ IT — either THIS runtime's identity
+    // index already resolves the `$implRef` (content-addressed), or the legacy
+    // verified-function registry admits it. Provenance is process-global, so
+    // a `$implRef` being PRESENT does not by itself prove the reading runtime
+    // can resolve it: a pattern compiled by a standalone Engine and registered
+    // on another runtime carries `$implRef`, but that runtime's index never saw
+    // the artifact (no `compilePattern`/`registerEvaluatedModules`), so it must
+    // keep the stringified body as the fallback or reload throws. Stringify
+    // whenever NEITHER resolution path applies.
+    const implRefResolvable = implRefValue !== undefined &&
+      frame?.runtime?.patternManager?.artifactFromIdentitySync?.(
+          implRefValue.identity,
+          implRefValue.symbol,
+        ) !== undefined;
     return {
       ...rest,
-      ...(module.type === "javascript" &&
+      ...implRef,
+      ...(module.type === "javascript" && !implRefResolvable &&
           admittedImplementation !== implementation
         ? {
           implementation: Function.prototype.toString.call(implementation),

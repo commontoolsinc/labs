@@ -67,7 +67,7 @@ const jumpToComment = handler({
     required: ["selectedCommentId", "threadId", "commentId", "lane", "outerIndex", "innerIndex"]
 } as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
 // [TRANSFORM] lift: input and output schemas injected
-const passthroughLabels = lift({
+const passthroughLabels = lift((labels: string[]) => labels, {
     type: "array",
     items: {
         type: "string"
@@ -77,13 +77,21 @@ const passthroughLabels = lift({
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema, (labels: string[]) => labels);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         threads: Thread[];
         showFlagged: boolean;
     };
-}, { thread: Thread; outerIndex: number; visibleComments: Comment[]; }[]>({
+}, { thread: Thread; outerIndex: number; visibleComments: Comment[]; }[]>(({ state }) => 
+// [TRANSFORM] .map() stays plain: state.threads is a captured input, plain inside this computed
+state.threads.map((thread, outerIndex) => ({
+    thread,
+    outerIndex,
+    visibleComments: state.showFlagged
+        ? thread.comments.filter((comment) => comment.flagged)
+        : thread.comments,
+})), {
     type: "object",
     properties: {
         state: {
@@ -211,18 +219,10 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["id", "title", "muted", "comments"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => 
-// [TRANSFORM] .map() stays plain: state.threads is a captured input, plain inside this computed
-state.threads.map((thread, outerIndex) => ({
-    thread,
-    outerIndex,
-    visibleComments: state.showFlagged
-        ? thread.comments.filter((comment) => comment.flagged)
-        : thread.comments,
-})));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     visibleComments: Comment[];
-}, Comment[]>({
+}, Comment[]>(({ visibleComments }) => visibleComments, {
     type: "object",
     properties: {
         visibleComments: {
@@ -284,11 +284,11 @@ const __cfLift_2 = __cfHelpers.lift<{
             required: ["id", "text", "flagged", "reactions"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ visibleComments }) => visibleComments);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     reboundIndex: number;
     outerIndex: number;
-}, boolean>({
+}, boolean>(({ reboundIndex, outerIndex }) => reboundIndex === outerIndex, {
     type: "object",
     properties: {
         reboundIndex: {
@@ -301,7 +301,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["reboundIndex", "outerIndex"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ reboundIndex, outerIndex }) => reboundIndex === outerIndex);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         lane: string;
@@ -309,7 +309,7 @@ const __cfLift_4 = __cfHelpers.lift<{
     comment: {
         id: string;
     };
-}, string>({
+}, string>(({ state, comment }) => `${state.lane}:${comment.id}`, {
     type: "object",
     properties: {
         state: {
@@ -334,7 +334,7 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["state", "comment"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state, comment }) => `${state.lane}:${comment.id}`);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const comment = __cf_pattern_input.key("element");
     const reboundIndex = __cf_pattern_input.key("index");
@@ -423,7 +423,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 const __cfLift_5 = __cfHelpers.lift<{
     edgeIndex: number;
     outerIndex: number;
-}, boolean>({
+}, boolean>(({ edgeIndex, outerIndex }) => edgeIndex === outerIndex, {
     type: "object",
     properties: {
         edgeIndex: {
@@ -436,13 +436,13 @@ const __cfLift_5 = __cfHelpers.lift<{
     required: ["edgeIndex", "outerIndex"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ edgeIndex, outerIndex }) => edgeIndex === outerIndex);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_6 = __cfHelpers.lift<{
     state: {
         lane: string;
     };
     edge: string;
-}, string>({
+}, string>(({ state, edge }) => `${state.lane}:${edge}`, {
     type: "object",
     properties: {
         state: {
@@ -461,7 +461,7 @@ const __cfLift_6 = __cfHelpers.lift<{
     required: ["state", "edge"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state, edge }) => `${state.lane}:${edge}`);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const edge = __cf_pattern_input.key("element");
     const edgeIndex = __cf_pattern_input.key("index");
@@ -555,7 +555,69 @@ const __cfLift_7 = __cfHelpers.lift<{
     state: {
         lane: string;
     };
-}, __cfHelpers.JSXElement[]>({
+}, __cfHelpers.JSXElement[]>(({ visibleThreads, selectedCommentId, state }) => 
+// [TRANSFORM] .map() stays plain: visibleThreads is a captured input, plain inside this computed
+visibleThreads.map(({ thread, outerIndex, visibleComments }) => {
+    // [TRANSFORM] .map() stays plain: ["top","bottom"] is a literal array
+    const plainSeparators = ["top", "bottom"].map((edge) => `${thread.title}-${edge}`);
+    const liftedSeparators = passthroughLabels(plainSeparators).for("liftedSeparators", true);
+    // [TRANSFORM] computed() → lift() (nested): captures visibleComments from outer computed scope
+    const reboundComments = __cfLift_2({ visibleComments: visibleComments }).for("reboundComments", true);
+    return (<article>
+          <h2>{thread.title}</h2>
+          {/* [TRANSFORM] .map() stays plain: visibleComments is destructured from captured computed input */}
+          {visibleComments.map((comment, innerIndex) => (<div>
+              <button type="button" onClick={jumpToComment({
+                selectedCommentId: selectedCommentId,
+                threadId: thread.id,
+                commentId: comment.id,
+                lane: state.lane,
+                outerIndex,
+                innerIndex,
+            })}>
+                {comment.flagged
+                ? <strong>{comment.text}</strong>
+                : /* [TRANSFORM] ifElse: schema-injected authored ifElse(thread.muted, ..., ...) */ ifElse({
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    anyOf: [{}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    anyOf: [{}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, thread.muted, <em>{comment.text}</em>, <span>{comment.text}</span>)}
+              </button>
+              {/* [TRANSFORM] .map() stays plain: comment.reactions is compute-owned nested array data */}
+              {comment.reactions.map((reaction, reactionIndex) => (<span>
+                  {reactionIndex === innerIndex
+                    ? `${state.lane}:${reaction}`
+                    : reaction}
+                </span>))}
+            </div>))}
+          {/* [TRANSFORM] .map() → mapWithPattern: reboundComments is output of nested computed() — reactive even inside outer computed */}
+          {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
+          {reboundComments.mapWithPattern(__cfPattern_1, {
+            outerIndex: outerIndex,
+            state: {
+                lane: state.lane
+            }
+        })}
+          {/* [TRANSFORM] .map() → mapWithPattern: liftedSeparators is output of lift() — reactive even inside outer computed */}
+          {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
+          {liftedSeparators.mapWithPattern(__cfPattern_2, {
+            outerIndex: outerIndex,
+            state: {
+                lane: state.lane
+            }
+        })}
+          {/* [TRANSFORM] .map() stays plain: plainSeparators is a local literal array */}
+          {plainSeparators.map((edge) => <small>{edge}</small>)}
+        </article>);
+}), {
     type: "object",
     properties: {
         visibleThreads: {
@@ -654,72 +716,10 @@ const __cfLift_7 = __cfHelpers.lift<{
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ visibleThreads, selectedCommentId, state }) => 
-// [TRANSFORM] .map() stays plain: visibleThreads is a captured input, plain inside this computed
-visibleThreads.map(({ thread, outerIndex, visibleComments }) => {
-    // [TRANSFORM] .map() stays plain: ["top","bottom"] is a literal array
-    const plainSeparators = ["top", "bottom"].map((edge) => `${thread.title}-${edge}`);
-    const liftedSeparators = passthroughLabels(plainSeparators).for("liftedSeparators", true);
-    // [TRANSFORM] computed() → lift() (nested): captures visibleComments from outer computed scope
-    const reboundComments = __cfLift_2({ visibleComments: visibleComments }).for("reboundComments", true);
-    return (<article>
-          <h2>{thread.title}</h2>
-          {/* [TRANSFORM] .map() stays plain: visibleComments is destructured from captured computed input */}
-          {visibleComments.map((comment, innerIndex) => (<div>
-              <button type="button" onClick={jumpToComment({
-                selectedCommentId: selectedCommentId,
-                threadId: thread.id,
-                commentId: comment.id,
-                lane: state.lane,
-                outerIndex,
-                innerIndex,
-            })}>
-                {comment.flagged
-                ? <strong>{comment.text}</strong>
-                : /* [TRANSFORM] ifElse: schema-injected authored ifElse(thread.muted, ..., ...) */ ifElse({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{}, {
-                            type: "object",
-                            properties: {}
-                        }]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{}, {
-                            type: "object",
-                            properties: {}
-                        }]
-                } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, thread.muted, <em>{comment.text}</em>, <span>{comment.text}</span>)}
-              </button>
-              {/* [TRANSFORM] .map() stays plain: comment.reactions is compute-owned nested array data */}
-              {comment.reactions.map((reaction, reactionIndex) => (<span>
-                  {reactionIndex === innerIndex
-                    ? `${state.lane}:${reaction}`
-                    : reaction}
-                </span>))}
-            </div>))}
-          {/* [TRANSFORM] .map() → mapWithPattern: reboundComments is output of nested computed() — reactive even inside outer computed */}
-          {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
-          {reboundComments.mapWithPattern(__cfPattern_1, {
-            outerIndex: outerIndex,
-            state: {
-                lane: state.lane
-            }
-        })}
-          {/* [TRANSFORM] .map() → mapWithPattern: liftedSeparators is output of lift() — reactive even inside outer computed */}
-          {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
-          {liftedSeparators.mapWithPattern(__cfPattern_2, {
-            outerIndex: outerIndex,
-            state: {
-                lane: state.lane
-            }
-        })}
-          {/* [TRANSFORM] .map() stays plain: plainSeparators is a local literal array */}
-          {plainSeparators.map((edge) => <small>{edge}</small>)}
-        </article>);
-}));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_8 = __cfHelpers.lift<{
     labelIndex: number;
-}, boolean>({
+}, boolean>(({ labelIndex }) => labelIndex === 0, {
     type: "object",
     properties: {
         labelIndex: {
@@ -729,13 +729,13 @@ const __cfLift_8 = __cfHelpers.lift<{
     required: ["labelIndex"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ labelIndex }) => labelIndex === 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_9 = __cfHelpers.lift<{
     state: {
         lane: string;
     };
     label: string;
-}, string>({
+}, string>(({ state, label }) => `${state.lane}:${label}`, {
     type: "object",
     properties: {
         state: {
@@ -754,7 +754,7 @@ const __cfLift_9 = __cfHelpers.lift<{
     required: ["state", "label"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state, label }) => `${state.lane}:${label}`);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
     const label = __cf_pattern_input.key("element");
     const labelIndex = __cf_pattern_input.key("index");

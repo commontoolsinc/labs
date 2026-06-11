@@ -13,7 +13,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     list: __cfHelpers.Cell<string[]>;
-}, boolean>({
+}, boolean>(({ list }) => list.get().length > 0, {
     type: "object",
     properties: {
         list: {
@@ -27,7 +27,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["list"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ list }) => list.get().length > 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const name = __cf_pattern_input.key("element");
     return (<span>{name}</span>);

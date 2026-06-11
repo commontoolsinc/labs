@@ -364,14 +364,16 @@ export default pattern(() => {
       { action: action_set_room_bob },
       { action: bobChat.addTrustedRoom, trustedUi: roomGesture },
       { assertion: assert_bob_cannot_add_room_after_lockdown },
-      // Skipped under single-runtime wiring: granting Bob admin writes the
-      // RequiresIntegrity admins list, but this test colocates registry,
-      // profiles and messages in one doc, so the grant transaction's
-      // participant-row reads carry non-admin integrity labels and CFC's
-      // requiredIntegrity (which quantifies over every labeled read) rejects
-      // the write. The piece-shaped wiring is covered under enforcement by
-      // integration/cfc-group-chat-demo-multi-runtime.test.ts ("admins can
-      // grant admin to another user by name").
+      // Granting Bob admin writes the RequiresIntegrity admins list. The CFC
+      // requiredIntegrity over-rejection that used to block this (audit S7 —
+      // the grant's provenance-only participant-row reads quantified into the
+      // gate) is now FIXED (see cfc-required-integrity-provenance.test.ts), so
+      // the grant transaction commits. The steps stay skipped only for the same
+      // single-doc subject-matching limitation as the removal block above (the
+      // self-match misses when registry and profiles share one doc, so the
+      // post-grant admin lookups don't reflect the grant); the piece-shaped
+      // wiring is covered under enforcement by
+      // integration/cfc-group-chat-demo-multi-runtime.test.ts.
       {
         action: chat.toggleParticipantAdmin,
         event: { name: "Bob" },

@@ -919,6 +919,15 @@ export type TraversalContext = {
   schemaTracker: MapSet<string, SchemaPathSelector>;
   includeMeta: boolean;
   metaDocsVisited: Set<string>;
+  /**
+   * Reports a followed link whose target document is absent from the local
+   * replica and lives in ANOTHER space. Per-space server queries cannot
+   * follow links across space boundaries, so such a target is never covered
+   * by the subscription that loaded the source doc — the client must fetch
+   * it itself (see `Runtime.ensureLinkedDocLoaded`). Optional: server-side
+   * schema traversals have no replica gap.
+   */
+  onMissingLinkTarget?: (link: NormalizedFullLink) => void;
 };
 
 export function createTraversalContext(
@@ -927,6 +936,7 @@ export function createTraversalContext(
   schemaTracker: MapSet<string, SchemaPathSelector>,
   includeMeta: boolean = false,
   metaDocsVisited: Set<string> = new Set<string>(),
+  onMissingLinkTarget?: (link: NormalizedFullLink) => void,
 ): TraversalContext {
   return {
     tracker,
@@ -934,6 +944,7 @@ export function createTraversalContext(
     schemaTracker,
     includeMeta,
     metaDocsVisited,
+    onMissingLinkTarget,
   };
 }
 
@@ -942,6 +953,7 @@ export function createDefaultTraversalContext(
   schemaTracker: MapSet<string, SchemaPathSelector> =
     new MapSetStringToPathSelectors(true),
   metaDocsVisited: Set<string> = new Set<string>(),
+  onMissingLinkTarget?: (link: NormalizedFullLink) => void,
 ): TraversalContext {
   return createTraversalContext(
     new CompoundCycleTracker<
@@ -952,6 +964,7 @@ export function createDefaultTraversalContext(
     schemaTracker,
     includeMeta,
     metaDocsVisited,
+    onMissingLinkTarget,
   );
 }
 
@@ -1859,6 +1872,32 @@ function followPointer(
         "traverse",
         () => ["followPointer found missing/retracted fact", valueEntry],
       );
+      // A CROSS-SPACE target absent from the replica cannot have been
+      // covered by the source doc's per-space subscription — report it for
+      // an async load. This read still resolves notFound; the absent doc is
+      // a tracked read, so the reader re-runs when it arrives. Same-space
+      // absent targets are NOT reported: they are either covered by the
+      // originating query or genuinely absent, and kicking them turns every
+      // read of an optional value into a server query. The reported link
+      // carries the selector's target-rooted path (minus its "value"
+      // prefix) and schema so the fetch covers the shape this read needs.
+      if (link.space !== doc.address.space) {
+        context.onMissingLinkTarget?.({
+          space: link.space,
+          id: link.id,
+          path: selector !== undefined
+            ? selector.path.slice(1) as readonly string[]
+            : link.path,
+          scope: link.scope,
+          ...(selector?.schema !== undefined || link.schema !== undefined
+            ? {
+              schema: (selector?.schema ?? link.schema) as
+                | JSONSchema
+                | undefined,
+            }
+            : {}),
+        } as NormalizedFullLink);
+      }
       // We include the path in the address, so that information is available,
       return [notFound(target), selector];
     } else if (error.name !== "NotFoundError") {
@@ -2055,6 +2094,7 @@ function traverseMetaLinkedDoc(
     context.schemaTracker,
     context.includeMeta,
     context.metaDocsVisited,
+    context.onMissingLinkTarget,
   );
   const traverser = new SchemaObjectTraverser(
     tx,

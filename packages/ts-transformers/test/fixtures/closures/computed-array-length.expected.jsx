@@ -29,7 +29,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     allCharms: {
         length: number;
     };
-}, string>({
+}, string>(({ allCharms }) => `Charms (${allCharms.length})`, {
     type: "object",
     properties: {
         allCharms: {
@@ -45,12 +45,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["allCharms"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ allCharms }) => `Charms (${allCharms.length})`);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     allCharms: {
         length: number;
     };
-}, number>({
+}, number>(({ allCharms }) => allCharms.length, {
     type: "object",
     properties: {
         allCharms: {
@@ -66,7 +66,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["allCharms"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ allCharms }) => allCharms.length);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const charm = __cf_pattern_input.key("element");
     return (<li>{charm.key("name")}</li>);

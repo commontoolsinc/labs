@@ -14,7 +14,7 @@ const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     value: __cfHelpers.ReadonlyCell<number>;
     factors: number[];
-}, number>({
+}, number>(({ value, factors }) => value.get() * factors[1]!, {
     type: "object",
     properties: {
         value: {
@@ -31,7 +31,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value", "factors"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ value, factors }) => value.get() * factors[1]!);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-array-element-access
 // Verifies: an array variable accessed by index inside a computed is captured as a whole array
 //   computed(() => expr) → lift(schema, schema)({ value, factors })

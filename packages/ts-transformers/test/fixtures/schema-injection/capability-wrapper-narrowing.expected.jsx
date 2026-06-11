@@ -28,7 +28,7 @@ type State = {
 // FIXTURE: capability-wrapper-narrowing
 // Verifies: lift inputs narrow from Writable<> to the least capable cell
 // wrapper required by callback usage.
-const readOnly = lift({
+const readOnly = lift((input: Writable<State>) => input.key("foo").get(), {
     type: "object",
     properties: {
         foo: {
@@ -39,8 +39,11 @@ const readOnly = lift({
     asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, (input: Writable<State>) => input.key("foo").get());
-const setOnly = lift({
+} as const satisfies __cfHelpers.JSONSchema);
+const setOnly = lift((input: Writable<State>) => {
+    input.key("foo").set("updated");
+    return 1;
+}, {
     type: "object",
     properties: {
         foo: {
@@ -51,11 +54,11 @@ const setOnly = lift({
     asCell: ["writeonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, (input: Writable<State>) => {
-    input.key("foo").set("updated");
+} as const satisfies __cfHelpers.JSONSchema);
+const updateOnly = lift((input: Writable<State>) => {
+    input.key("profile").update({ name: "Ada" });
     return 1;
-});
-const updateOnly = lift({
+}, {
     type: "object",
     properties: {
         profile: {
@@ -80,11 +83,11 @@ const updateOnly = lift({
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, (input: Writable<State>) => {
-    input.key("profile").update({ name: "Ada" });
+} as const satisfies __cfHelpers.JSONSchema);
+const pushOnly = lift((input: Writable<State>) => {
+    input.key("items").push({ id: "1", label: "First" });
     return 1;
-});
-const pushOnly = lift({
+}, {
     type: "object",
     properties: {
         items: {
@@ -112,11 +115,11 @@ const pushOnly = lift({
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, (input: Writable<State>) => {
-    input.key("items").push({ id: "1", label: "First" });
+} as const satisfies __cfHelpers.JSONSchema);
+const readWrite = lift((input: Writable<State>) => {
+    input.key("foo").set(input.key("foo").get().toUpperCase());
     return 1;
-});
-const readWrite = lift({
+}, {
     type: "object",
     properties: {
         foo: {
@@ -127,16 +130,13 @@ const readWrite = lift({
     asCell: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, (input: Writable<State>) => {
-    input.key("foo").set(input.key("foo").get().toUpperCase());
-    return 1;
-});
-const comparable = lift({
+} as const satisfies __cfHelpers.JSONSchema);
+const comparable = lift((input: Writable<State>) => input.equals(input), {
     type: "unknown",
     asCell: ["comparable"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, (input: Writable<State>) => input.equals(input));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return item.key("id");
@@ -165,7 +165,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const opaqueMap = lift({
+const opaqueMap = lift((input: Writable<Item[]>) => input.mapWithPattern(__cfPattern_1, {}), {
     type: "array",
     items: {
         $ref: "#/$defs/Item"
@@ -190,7 +190,7 @@ const opaqueMap = lift({
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema, (input: Writable<Item[]>) => input.mapWithPattern(__cfPattern_1, {}));
+} as const satisfies __cfHelpers.JSONSchema);
 export { comparable, opaqueMap, pushOnly, readOnly, readWrite, setOnly, updateOnly, };
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }

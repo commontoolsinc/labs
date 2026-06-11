@@ -29,7 +29,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         name: string;
         type: string;
     };
-}, void>({
+}, void>(({ file }) => console.log("mapping", file.name, file.type), {
     type: "object",
     properties: {
         file: {
@@ -48,7 +48,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["file"]
 } as const satisfies __cfHelpers.JSONSchema, {
     asCell: ["opaque"]
-} as const satisfies __cfHelpers.JSONSchema, ({ file }) => console.log("mapping", file.name, file.type));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const file = __cf_pattern_input.key("element");
     __cfLift_1({ file: {

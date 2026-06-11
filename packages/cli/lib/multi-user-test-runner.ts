@@ -355,6 +355,8 @@ export async function runMultiUserTestPattern(
     // participant opting out must not mask another participant's failures —
     // so the aggregate result reports only unallowed entries with the flags
     // left off.
+    let anyExpectNonIdempotent = false;
+    let expectedNonIdempotentDetected = false;
     for (const participant of participants) {
       const health = await participant.worker.call("health") as {
         runtimeErrors: string[];
@@ -365,11 +367,30 @@ export async function runMultiUserTestPattern(
           ...health.runtimeErrors.map((e) => `[${participant.spec.name}] ${e}`),
         );
       }
-      if (!participant.expectNonIdempotent) {
+      if (participant.expectNonIdempotent) {
+        anyExpectNonIdempotent = true;
+        if (health.nonIdempotent.length > 0) {
+          expectedNonIdempotentDetected = true;
+        }
+      } else {
         nonIdempotent.push(
           ...health.nonIdempotent.map((e) => `[${participant.spec.name}] ${e}`),
         );
       }
+    }
+    // expectNonIdempotent asserts the detector fires. Which runtime re-runs
+    // the offending computation depends on sync/scheduling, so the
+    // expectation is satisfied when ANY flagged participant saw a violation;
+    // it fails as a synthetic result when none did (the aggregate's flag
+    // field stays unset, so runTests applies no result-level expectation).
+    if (anyExpectNonIdempotent && !expectedNonIdempotentDetected) {
+      results.push({
+        name: "expectNonIdempotent",
+        passed: false,
+        afterAction: null,
+        error: "expected non-idempotent computation(s), none detected",
+        durationMs: 0,
+      });
     }
 
     return {

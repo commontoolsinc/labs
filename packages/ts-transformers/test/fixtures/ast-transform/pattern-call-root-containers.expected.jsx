@@ -16,7 +16,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         done: boolean;
     };
-}, "Done" | "Pending">({
+}, "Done" | "Pending">(({ state }) => identity(state.done ? "Done" : "Pending"), {
     type: "object",
     properties: {
         state: {
@@ -32,12 +32,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     "enum": ["Done", "Pending"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => identity(state.done ? "Done" : "Pending"));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         done: boolean;
     };
-}, "Done" | "Pending">({
+}, "Done" | "Pending">(({ state }) => identity(state.done ? "Done" : "Pending"), {
     type: "object",
     properties: {
         state: {
@@ -53,7 +53,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     "enum": ["Done", "Pending"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => identity(state.done ? "Done" : "Pending"));
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-call-root-containers
 // Verifies: top-level ordinary call roots whole-wrap consistently across
 //   non-JSX container kinds instead of lowering only their nested conditional
@@ -101,7 +101,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     state: {
         done: boolean;
     };
-}, "Done" | "Pending">({
+}, "Done" | "Pending">(({ state }) => identity(state.done ? "Done" : "Pending"), {
     type: "object",
     properties: {
         state: {
@@ -117,7 +117,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     "enum": ["Done", "Pending"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => identity(state.done ? "Done" : "Pending"));
+} as const satisfies __cfHelpers.JSONSchema);
 export default pattern((state) => __cfLift_3({ state: {
         done: state.key("done")
     } }).for("__patternResult", true), {

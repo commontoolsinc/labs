@@ -21,7 +21,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         required: number;
         unionUndefined?: number | undefined;
     };
-}, number>({
+}, number>(({ value, config }) => value.get() + config.required + (config.unionUndefined ?? 0), {
     type: "object",
     properties: {
         value: {
@@ -44,7 +44,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value", "config"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ value, config }) => value.get() + config.required + (config.unionUndefined ?? 0));
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-union-undefined
 // Verifies: captured properties with `number | undefined` union types produce correct schemas
 //   computed(() => ...) → lift(...)({ value, config: { required, unionUndefined } })

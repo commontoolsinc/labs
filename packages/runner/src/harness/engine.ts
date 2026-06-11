@@ -63,6 +63,12 @@ import {
 import { setVerifiedFunctionRegistrar } from "../sandbox/function-hardening.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 import { ExecutableRegistry } from "./executable-registry.ts";
+import { isTrustedBuilderArtifact } from "../builder/pattern-metadata.ts";
+import {
+  identityFromCanonicalSource,
+  readBindingIdentity,
+  recordVerifiedProvenance,
+} from "./verified-provenance.ts";
 
 const logger = getLogger("engine");
 
@@ -768,6 +774,15 @@ export class Engine extends EventTarget implements Harness {
       this.executableRegistry.captureVerifiedValue(loadId, exportMap);
       this.runtimeInternals?.exportsCallback(exportsByValue);
 
+      // Content-addressed CFC provenance: record it HERE, where functions
+      // become verified (this evaluation), rather than in the PatternManager's
+      // later indexing - so provenance covers every load path, including a
+      // pattern compiled by a standalone Engine and registered without going
+      // through `PatternManager.compilePattern`. Keyed by the implementation
+      // function object; gated on the same `isTrustedBuilderArtifact` brand the
+      // index uses, so forged values get nothing.
+      this.recordModuleProvenance(exportsByIdentity, graph.registrationSink);
+
       // `graph.registrationSink` was populated by each module's `__cfReg` during
       // the `importNow` loop above (committed only for modules that evaluated
       // cleanly).
@@ -780,6 +795,60 @@ export class Engine extends EventTarget implements Harness {
       };
     } finally {
       logger.timeEnd("evaluateRecordGraph");
+    }
+  }
+
+  /**
+   * Record content-addressed CFC provenance for every trusted builder artifact
+   * surfaced by a verified evaluation — its exports (keyed by export name) and
+   * its `__cfReg` hoist/non-export registrations (keyed by the hoist symbol).
+   * Keyed by the artifact's implementation function object; the same gate the
+   * artifact index uses (`isTrustedBuilderArtifact`) keeps forged values out.
+   * First-write-wins (see `recordVerifiedProvenance`), so an export and a
+   * `__cfReg` entry for one artifact agree on a single canonical symbol.
+   */
+  private recordModuleProvenance(
+    exportsByIdentity: Map<string, Exports>,
+    registrationSink: Map<string, Map<string, unknown>>,
+  ): void {
+    const record = (identity: string, symbol: string, value: unknown) => {
+      if (!isTrustedBuilderArtifact(value)) return;
+      const implementation =
+        (value as { implementation?: unknown }).implementation ?? value;
+      if (typeof implementation !== "function") return;
+      // Reject a CONFIRMED cross-module mismatch: a re-exporting module
+      // (`export { setName } from "./defn"`) surfaces the same function under
+      // its own identity, but the function's canonical `fn.src` names its
+      // defining module. Provenance is first-write-wins and CFC fails closed on
+      // an identity/`fn.src` mismatch, so letting a re-exporter (possibly
+      // visited first) stamp its identity would make a valid verified artifact
+      // resolve as `unsupported`; dropping the re-exporter's record leaves the
+      // defining module's (matching) record to stick. A non-canonical `src`
+      // (e.g. a standalone-engine load whose src isn't rewritten to
+      // `cf:module/<hash>`) is left ALONE — recording it is harmless (CFC then
+      // fail-closes on its own src check), and blocking it would needlessly
+      // strip the `$implRef` such a module can still resolve by.
+      const srcIdentity = identityFromCanonicalSource(
+        (implementation as { src?: string }).src,
+      );
+      if (srcIdentity !== undefined && srcIdentity !== identity) return;
+      const bindingIdentity = readBindingIdentity(value);
+      recordVerifiedProvenance(implementation, {
+        identity,
+        symbol,
+        ...(bindingIdentity ? { bindingIdentity } : {}),
+      });
+    };
+    for (const [identity, namespace] of exportsByIdentity) {
+      for (const [exportName, value] of Object.entries(namespace)) {
+        if (exportName === "__esModule") continue;
+        record(identity, exportName, value);
+      }
+    }
+    for (const [identity, entries] of registrationSink) {
+      for (const [symbol, value] of entries) {
+        record(identity, symbol, value);
+      }
     }
   }
 
@@ -927,12 +996,8 @@ export class Engine extends EventTarget implements Harness {
 
   getVerifiedFunction(
     implementationRef: string,
-    patternId?: string,
   ): HarnessedFunction | undefined {
-    return this.executableRegistry.getVerifiedFunction(
-      implementationRef,
-      patternId,
-    );
+    return this.executableRegistry.getVerifiedFunction(implementationRef);
   }
 
   getVerifiedFunctionInLoad(
@@ -963,26 +1028,14 @@ export class Engine extends EventTarget implements Harness {
 
   getVerifiedLoadId(
     implementationRef: string,
-    patternId?: string,
   ): string | undefined {
-    return this.executableRegistry.getVerifiedLoadId(
-      implementationRef,
-      patternId,
-    );
+    return this.executableRegistry.getVerifiedLoadId(implementationRef);
   }
 
   getExecutableFunction(
     implementationRef: string,
-    patternId?: string,
   ): HarnessedFunction | undefined {
-    return this.executableRegistry.getExecutableFunction(
-      implementationRef,
-      patternId,
-    );
-  }
-
-  associatePattern(patternId: string, value: unknown, loadId?: string): void {
-    this.executableRegistry.associatePattern(patternId, value, loadId);
+    return this.executableRegistry.getExecutableFunction(implementationRef);
   }
 
   unsafeTrustHostValue(

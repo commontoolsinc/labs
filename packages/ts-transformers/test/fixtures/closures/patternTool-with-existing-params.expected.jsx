@@ -25,7 +25,9 @@ type Output = {
 const __cfLift_1 = __cfHelpers.lift<{
     value: number;
     offset: number;
-}, number>({
+}, number>(({ value, offset }) => {
+    return value * multiplier.get() + offset;
+}, {
     type: "object",
     properties: {
         value: {
@@ -38,9 +40,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value", "offset"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ value, offset }) => {
-    return value * multiplier.get() + offset;
-});
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = pattern((__cf_pattern_input: {
     value: number;
     offset: number;
