@@ -26,6 +26,7 @@ import ToolbarStory from "../stories/cf-toolbar-story.tsx";
 import HeadingStory from "../stories/cf-heading-story.tsx";
 import TextStory from "../stories/cf-text-story.tsx";
 import LabelStory from "../stories/cf-label-story.tsx";
+import FieldStory from "../stories/cf-field-story.tsx";
 import ChipStory from "../stories/cf-chip-story.tsx";
 import BadgeStory from "../stories/cf-badge-story.tsx";
 import AvatarStory from "../stories/cf-avatar-story.tsx";
@@ -131,6 +132,8 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return TextStory({});
         case "label":
           return LabelStory({});
+        case "field":
+          return FieldStory({});
         case "chip":
           return ChipStory({});
         case "badge":

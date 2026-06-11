@@ -2989,6 +2989,7 @@ interface CFToggleGroupElement extends CFHTMLElement {}
 interface CFRadioElement extends CFHTMLElement {}
 interface CFInputOTPElement extends CFHTMLElement {}
 interface CFLabelElement extends CFHTMLElement {}
+interface CFFieldElement extends CFHTMLElement {}
 
 // Display components
 interface CFTextElement extends CFHTMLElement {}
@@ -4168,6 +4169,13 @@ interface CFLabelAttributes<T> extends CFHTMLAttributes<T> {
   }>;
 }
 
+interface CFFieldAttributes<T> extends CFHTMLAttributes<T> {
+  "label"?: string | CellLike<string>;
+  "required"?: boolean | CellLike<boolean>;
+  "error"?: string | CellLike<string>;
+  "help"?: string | CellLike<string>;
+}
+
 // Display component attributes
 interface CFTextAttributes<T> extends CFHTMLAttributes<T> {
   "variant"?:
@@ -5250,6 +5258,10 @@ declare global {
       "cf-label": CFDOM.DetailedHTMLProps<
         CFLabelAttributes<CFLabelElement>,
         CFLabelElement
+      >;
+      "cf-field": CFDOM.DetailedHTMLProps<
+        CFFieldAttributes<CFFieldElement>,
+        CFFieldElement
       >;
 
       // Display components

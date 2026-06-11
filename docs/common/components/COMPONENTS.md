@@ -105,6 +105,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-draggable` | Absolutely-positioned draggable container (x/y) | |
 | `cf-drop-zone` | Droppable region emitting `cf-drop` events (see [drag-and-drop](../patterns/meta/drag-and-drop.md)) | |
 | `cf-fab` | Morphing floating action button that expands into a panel | |
+| `cf-field` | Labeled field wrapper: muted label, optional required/error/help text (see [cf-field](#cf-field)) | |
 | `cf-file-download` | File download button (encapsulates blob/anchor download) | `$data`, `$filename` |
 | `cf-file-input` | Generic file upload | |
 | `cf-form` | Transactional form wrapper buffering field writes until submit (see [cf-form](#cf-form)) | |
@@ -272,6 +273,58 @@ array indices, which drift when lists change.
 Contributor-facing internals (FormFieldController, file organization, design
 decisions) live in
 [`packages/ui/docs/forms-internals.md`](../../../packages/ui/docs/forms-internals.md).
+
+---
+
+## cf-field
+
+`cf-field` is a layout/typography wrapper for labeled form fields. It replaces
+the hand-rolled label-above-control stack repeated throughout patterns:
+
+```tsx
+// Before
+<cf-vstack gap="1">
+  <label style={{ fontSize: "12px", color: "#6b7280" }}>Email</label>
+  <cf-input type="email" $value={address} />
+</cf-vstack>
+
+// After
+<cf-field label="Email">
+  <cf-input type="email" $value={address} />
+</cf-field>
+```
+
+Attributes:
+
+- `label` — small muted label rendered above the control
+- `required` — appends a danger-colored asterisk to the label
+- `error` — error text below the control in the danger color (replaces `help`
+  while set)
+- `help` — muted helper text below the control
+
+The default slot takes any control (`cf-input`, `cf-select`, `cf-textarea`,
+…). All colors and sizes come from theme tokens, so fields adapt to the
+ambient `cf-theme`.
+
+```tsx
+<cf-field label="Username" required error={usernameError}>
+  <cf-input $value={username} placeholder="Pick a username" />
+</cf-field>
+
+<cf-field label="Bio" help="Shown on your public profile.">
+  <cf-textarea $value={bio} />
+</cf-field>
+```
+
+Notes:
+
+- `cf-field` is presentation only — it renders whatever `error` string it is
+  given. Validation logic and submit gating belong to
+  [`cf-form`](#cf-form) or the pattern.
+- Shadow DOM prevents a native `for`/`id` association with the slotted
+  control, so clicking the label focuses (and for custom elements, clicks)
+  the first slotted element instead — same approach as `cf-label`. For full
+  assistive-technology support, also set `aria-label` on the control itself.
 
 ---
 
