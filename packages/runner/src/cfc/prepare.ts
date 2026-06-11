@@ -88,6 +88,14 @@ const labelAtPath = (
     if (!isPrefix(entry.path, path)) {
       continue;
     }
+    // Structure entries label the container's SHAPE: they apply when the
+    // container node itself is observed (read at exactly the entry path),
+    // not to reads strictly below it — slot pointer reads and dereferences
+    // are pointer handling, and tainting them with shape would re-smear
+    // the pointwise split the structure component exists to preserve.
+    if (entry.origin === "structure" && entry.path.length !== path.length) {
+      continue;
+    }
     const component = entry.origin ?? "legacy";
     const match = matches.get(component);
     if (match === undefined || match.path.length < entry.path.length) {
@@ -308,12 +316,13 @@ const metadataAppliesToPath = (
   // applies on this path"; do NOT filter on `hasLabelValues` here, or
   // claim-only entries get silently bypassed.
   //
-  // Derived (flow-label) entries are the exception: they record taint, not
-  // authored policy. A plain value write replacing a flow-labeled path is an
-  // ordinary overwrite (the derived component is replaced/cleared by the
-  // flow stage), so it must not demand a schema write-policy input.
+  // Derived/structure (flow-label) entries are the exception: they record
+  // taint, not authored policy. A plain value write replacing a
+  // flow-labeled path is an ordinary overwrite (the flow components are
+  // replaced/cleared by the flow stage), so it must not demand a schema
+  // write-policy input.
   return metadata.labelMap.entries.some((entry) =>
-    entry.origin !== "derived" &&
+    entry.origin !== "derived" && entry.origin !== "structure" &&
     (isPrefix(entry.path, logicalPath) || isPrefix(logicalPath, entry.path))
   );
 };
@@ -1039,11 +1048,13 @@ const flowReadExcluded = (
 
 // A written value made entirely of references (links at every leaf, or
 // empty structure) carries no readable content of its own: the per-slot
-// link entries label each reference precisely, so stamping the per-tx join
-// on the shell would smear unrelated taint across everything a routing
-// transaction shuffles — and feed a reconciler's own output taint back
-// into its next run's J when it reads its previous output. Any non-link
-// leaf (string, number, boolean, null) makes the value content.
+// link entries label each reference precisely, so stamping the covering
+// per-tx join on the shell would smear unrelated taint across everything
+// a routing transaction shuffles — and feed a reconciler's own output
+// taint back into its next run's J when it reads its previous output. Any
+// non-link leaf (string, number, boolean, null) makes the value content.
+// Such writes get `structure` (shape-only) stamps instead of covering
+// `derived` ones — see `pureLinkContainerPaths`.
 const isPureLinkStructure = (value: unknown): boolean => {
   if (value === undefined) return true;
   if (isPrimitiveCellLink(value)) return true;
@@ -1054,6 +1065,38 @@ const isPureLinkStructure = (value: unknown): boolean => {
     return Object.values(value).every((member) => isPureLinkStructure(member));
   }
   return false;
+};
+
+// Container nodes (arrays/records — including empty ones) inside a
+// pure-link-structure value. Their SHAPE — membership, key set, order,
+// length — is information the writing transaction computed (a filter's
+// predicate decides which slots survive, §8.5.6.1/SC-7), so each container
+// node gets an exact-path `structure` stamp with the per-tx join. Bare
+// link leaves get nothing: a pointer read at the leaf's own path is blind
+// passing, and the link entry already carries the target's transport
+// label. `undefined` (a removal) gets nothing either — "this path was
+// cleared" stays in the SC-4 existence-channel residual.
+const pureLinkContainerPaths = (
+  value: unknown,
+  path: readonly string[],
+  out: (readonly string[])[],
+): void => {
+  if (isPrimitiveCellLink(value) || value === undefined) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    out.push(path);
+    value.forEach((member, index) =>
+      pureLinkContainerPaths(member, [...path, String(index)], out)
+    );
+    return;
+  }
+  if (isRecord(value)) {
+    out.push(path);
+    for (const [key, member] of Object.entries(value)) {
+      pureLinkContainerPaths(member, [...path, key], out);
+    }
+  }
 };
 
 const forEachFlowObservation = (
@@ -2567,8 +2610,16 @@ const collectConsumedConfidentiality = (
     // false-reject valid commits (review round 2 on #3993).
     for (const entry of metadata.labelMap.entries) {
       const entryPath = canonicalizeLogicalPath(entry.path);
-      const overlapsRead = isPrefix(entryPath, path) ||
-        (read.nonRecursive !== true && isPrefix(path, entryPath));
+      // Structure entries label only the container node's shape: an
+      // ancestor structure entry does not apply to a read strictly below
+      // it (same exact-path rule as `labelAtPath`); as a descendant of a
+      // recursive read it does apply (the read materializes the shape).
+      const overlapsRead = entry.origin === "structure"
+        ? (entryPath.length === path.length
+          ? isPrefix(entryPath, path)
+          : read.nonRecursive !== true && isPrefix(path, entryPath))
+        : (isPrefix(entryPath, path) ||
+          (read.nonRecursive !== true && isPrefix(path, entryPath)));
       if (!overlapsRead) continue;
       for (const atom of entry.label.confidentiality ?? []) addAtom(atom);
     }
@@ -2718,7 +2769,8 @@ export const prepareBoundaryCommit = (
       );
       if (
         existingMeta?.labelMap.entries.some((entry) =>
-          (entry.origin === "derived" || entry.origin === "link") &&
+          (entry.origin === "derived" || entry.origin === "link" ||
+            entry.origin === "structure") &&
           target.paths.some((written) => isPrefix(written, entry.path))
         )
       ) {
@@ -2896,13 +2948,14 @@ export const prepareBoundaryCommit = (
         continue;
       }
       // Per-value components track the current value: a write at-or-above
-      // them replaced that value, so stale derived/link entries under any
-      // written path are dropped (fresh ones for this tx are appended
-      // below / by the link machinery). Declared and legacy entries are
-      // never cleared here.
+      // them replaced that value, so stale derived/link/structure entries
+      // under any written path are dropped (fresh ones for this tx are
+      // appended below / by the link machinery). Declared and legacy
+      // entries are never cleared here.
       if (
         flowPersist &&
-        (entry.origin === "derived" || entry.origin === "link") &&
+        (entry.origin === "derived" || entry.origin === "link" ||
+          entry.origin === "structure") &&
         flowWrittenPaths.some((written) => isPrefix(written, entryPath))
       ) {
         flowCleared = true;
@@ -2976,9 +3029,18 @@ export const prepareBoundaryCommit = (
       // transaction passes along with everything else it routed (the list
       // builtins' coordinators being the canonical case); the per-slot
       // link labels are exactly the pointwise answer.
+      //
+      // Pure-link-structure writes split per the pointer/content rule:
+      // the references carry per-slot link labels (no covering stamp —
+      // that would smear), but the container SHAPE (which slots exist —
+      // a filter's membership decision, §8.5.6.1/SC-7) was computed by
+      // this tx, so each container node gets an exact-path `structure`
+      // stamp with J. Shape observers (reading the container itself,
+      // length, enumeration) join it; slot pointer reads below it don't.
       const flowWrittenValues = flowTargets?.get(key)?.valuesByPath;
       const seenFlowPaths = new Set<string>();
-      const stampablePaths: (readonly string[])[] = [];
+      const derivedStampPaths: (readonly string[])[] = [];
+      const structureStampPaths: (readonly string[])[] = [];
       for (const path of flowWrittenPaths) {
         const flowKey = pathKey(path);
         if (seenFlowPaths.has(flowKey)) {
@@ -2988,16 +3050,18 @@ export const prepareBoundaryCommit = (
         if (currentLinkWritePaths.has(flowKey)) {
           continue;
         }
-        if (isPureLinkStructure(flowWrittenValues?.get(flowKey))) {
+        const written = flowWrittenValues?.get(flowKey);
+        if (isPureLinkStructure(written)) {
+          pureLinkContainerPaths(written, path, structureStampPaths);
           continue;
         }
-        stampablePaths.push(path);
+        derivedStampPaths.push(path);
       }
-      for (const path of stampablePaths) {
+      for (const path of derivedStampPaths) {
         // Deeper stamped paths are redundant with a stamped ancestor; only
-        // collapse against paths that actually receive an entry.
+        // collapse against paths that actually receive a covering entry.
         if (
-          stampablePaths.some((other) =>
+          derivedStampPaths.some((other) =>
             other.length < path.length && isPrefix(other, path)
           )
         ) {
@@ -3007,6 +3071,23 @@ export const prepareBoundaryCommit = (
           path,
           label: { confidentiality: [...flowConfidentiality] },
           origin: "derived",
+        });
+      }
+      for (const path of structureStampPaths) {
+        // A covering derived stamp at-or-above already labels the shape;
+        // structure stamps don't cover each other (exact-path semantics),
+        // so they only collapse against derived ancestors-or-equal.
+        if (
+          derivedStampPaths.some((other) =>
+            other.length <= path.length && isPrefix(other, path)
+          )
+        ) {
+          continue;
+        }
+        persistedLabelEntries.push({
+          path,
+          label: { confidentiality: [...flowConfidentiality] },
+          origin: "structure",
         });
       }
     }

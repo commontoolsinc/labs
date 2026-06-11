@@ -360,9 +360,26 @@ currently the only thing carrying taint across value overwrites.
   write derived → read back unlabeled) lands first as a failing test, plus
   do-not-regress tests for map element/container split.
 - **A2**: trigger labels via scheduler invalidation sources.
-- **B (precision/relief)**: audit+narrow builtin coordinator reads to links;
-  decide flowPrecisionClaim's fate (consume for non-decomposable ops vs delete);
-  pin container-vs-element taint tests for filter/flatMap membership.
+- **B (precision/relief)** — **done, this branch**: the pointer/content split
+  (SC-8). Link-resolution reads are probe-marked and skipped by the flow
+  derivation; link-origin labelMap entries are excluded from J
+  (`effectiveReadLabel({excludeLinkOrigin})`); link-covered writes aren't
+  stamped (per-slot link labels are the pointwise answer);
+  `flowPrecisionClaim` minting deleted (§13.3). Membership taint (§8.5.6.1):
+  pure-link-structure container writes get exact-path **`structure`** stamps
+  with J — a fourth labelMap component labeling the container's shape
+  (membership/key set/order/length). Shape observers (reads at exactly the
+  container path, recursive ancestor reads) join it; reads strictly below
+  (slot pointer reads, dereferences, per-slot triggers) don't — that
+  asymmetry closes the filter length/enumeration channel without re-smearing
+  the per-element split, and keeps a reconciler's batch-first-run residue
+  confined to shape taint instead of feeding back into later per-element
+  results. Bare link leaves and removals stay unstamped (blind passing;
+  SC-4 existence residual). Pre-component readers treat `structure` as
+  covering — over-taint, fail-safe. Residual: observing WHICH element sits
+  at a slot via pointer identity alone (no dereference) escapes the shape
+  stamp — placement rides the slot's link entry only; full closure needs
+  observation classes (SC-4/SC-8).
 - **C (integrity)**: propagation-class registry (§15 + SC-10); hereditary meet;
   TransformedBy minting on implementation identity; reconcile §4.6.1 vs §8.9.3
   (SC-15); requires Wave 2 #17 (integrity-union fix) and Wave 1 #10 (mint
