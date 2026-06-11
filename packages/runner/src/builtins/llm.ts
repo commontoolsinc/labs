@@ -227,7 +227,14 @@ async function executeWithToolsLoop(params: {
       requestParams.tools = toolCatalog.llmTools;
     }
 
-    const llmResult = await client.sendRequest(requestParams, updatePartial);
+    // Route the call to the executing space's host — one runtime spans
+    // hosts, and an LLM call belongs to the space whose pattern made it.
+    const llmResult = await client.sendRequest(
+      requestParams,
+      updatePartial,
+      undefined,
+      { endpoint: new URL("/api/ai/llm", runtime.hostForSpace(space)) },
+    );
 
     if (thisRun !== getCurrentRun()) return;
 
@@ -1338,6 +1345,13 @@ export function generateObject<T extends Record<string, unknown>>(
                 const llmResult = await client.sendRequest(
                   requestParams,
                   updatePartial,
+                  undefined,
+                  {
+                    endpoint: new URL(
+                      "/api/ai/llm",
+                      runtime.hostForSpace(parentCell.space),
+                    ),
+                  },
                 );
 
                 if (isRunCancelled()) return;
@@ -1635,11 +1649,20 @@ export function generateObject<T extends Record<string, unknown>>(
                 ...liveContextDocs.observedConfidentiality,
               ]).length,
             });
-            const response = await client.generateObject({
-              ...generateObjectParams,
-              system: ((system ?? "") + liveContextDocs.docs).trim() ||
-                "You are a helpful assistant.",
-            }) as {
+            const response = await client.generateObject(
+              {
+                ...generateObjectParams,
+                system: ((system ?? "") + liveContextDocs.docs).trim() ||
+                  "You are a helpful assistant.",
+              },
+              undefined,
+              {
+                endpoint: new URL(
+                  "/api/ai/llm",
+                  runtime.hostForSpace(parentCell.space),
+                ),
+              },
+            ) as {
               object: T;
             };
             logGenerateObject("client-generateObject-complete", {
