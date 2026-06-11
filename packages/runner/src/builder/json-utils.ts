@@ -17,7 +17,11 @@ import {
   type toJSON,
 } from "./types.ts";
 import { getTopFrame } from "./pattern.ts";
-import { getPatternProgram, noteDerivedCopy } from "./pattern-metadata.ts";
+import {
+  getArtifactEntryRef,
+  getPatternProgram,
+  noteDerivedCopy,
+} from "./pattern-metadata.ts";
 import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
 import { Runtime } from "../runtime.ts";
 import { isCellLink, isLegacyAlias, parseLink } from "../link-utils.ts";
@@ -122,11 +126,16 @@ export function toJSONWithLegacyAliases(
     if (depth > 0) return {}; // Actually circular
     seen.set(value as object, depth + 1);
 
-    // If this is a pattern, call its toJSON method to get the properly
-    // serialized version.
+    // If this is a pattern, serialize it through the INTERNAL graph
+    // serializer (its toJSON under the internal-serialization context): this
+    // function builds the in-memory node representation, so embedded
+    // sub-pattern graphs must stay bare — no boundary `$patternRef`.
     const valueToProcess = (isPattern(value) &&
         typeof (value as unknown as toJSON).toJSON === "function")
-      ? (value as unknown as toJSON).toJSON() as Record<string, any>
+      ? serializePatternGraph(value as unknown as Pattern) as Record<
+        string,
+        any
+      >
       : (value as Record<string, any>);
 
     const result: any = {};
@@ -443,6 +452,45 @@ export function moduleToJSON(module: Module) {
   };
 }
 
+// Ambient context: true while serializing the runtime-INTERNAL graph
+// representation (builder-time node serialization via
+// `toJSONWithLegacyAliases`, and through it the `$opFallback` eviction
+// fallback graphs). The JSON boundary (`Pattern.toJSON()`, fired by
+// JSON.stringify and by cell writes via native-conversion's HasToJSON) adds
+// the content-addressed `$patternRef` on top of the graph; internal
+// serialization must NOT, or in-memory `Pattern.nodes` would grow refs for
+// any sub-pattern whose module is already indexed (e.g. builder calls inside
+// a running action referencing an imported, already-evaluated pattern) and
+// the eviction fallback would silently become a ref (design §7's $opFallback
+// trap). Synchronous push/pop — serialization never awaits.
+let internalGraphSerialization = false;
+
+/**
+ * Serialize a pattern's full node-graph — the runtime-internal representation
+ * (design §7: the graph is internal; the boundary speaks refs-first). Used by
+ * `toJSONWithLegacyAliases` (builder-time node serialization, which the
+ * `$opFallback` graphs descend from) and debug tooling.
+ *
+ * Calls the pattern's own `toJSON` rather than `patternToJSON` directly:
+ * factory `toJSON` closures deliberately serialize the ROOT factory (which
+ * carries `.program`, set after construction — see builder/pattern.ts), so
+ * the indirection is load-bearing.
+ */
+export function serializePatternGraph(
+  pattern: Pattern,
+): Record<string, unknown> {
+  const previous = internalGraphSerialization;
+  internalGraphSerialization = true;
+  try {
+    const withToJSON = pattern as unknown as Partial<toJSON>;
+    return (typeof withToJSON.toJSON === "function"
+      ? withToJSON.toJSON()
+      : patternToJSON(pattern)) as Record<string, unknown>;
+  } finally {
+    internalGraphSerialization = previous;
+  }
+}
+
 export function patternToJSON(pattern: Pattern) {
   // Serialize only the STABLE program identity ({main, mainExport}), never the
   // authored `files`. The `files` array serializes non-canonically (two
@@ -463,7 +511,7 @@ export function patternToJSON(pattern: Pattern) {
         : {}),
     }
     : undefined;
-  return {
+  const graph = {
     argumentSchema: pattern.argumentSchema,
     resultSchema: pattern.resultSchema,
     ...(pattern.derivedInternalCells
@@ -473,4 +521,22 @@ export function patternToJSON(pattern: Pattern) {
     nodes: pattern.nodes,
     ...(programIdentity ? { program: programIdentity } : {}),
   };
+  if (internalGraphSerialization) return graph;
+  // JSON boundary (cell writes, JSON.stringify): dual-write the pattern's
+  // content-addressed entry ref alongside the graph (design §7, scoped — see
+  // the implementation plan's E3 section). The ref is content-derived, so
+  // identical bytes re-emit the identical ref across sessions; readers
+  // (resolveOpPattern, llm-dialog tool invocation) prefer it to resolve the
+  // live canonical pattern and fall back to the carried graph. Refs-ONLY
+  // emission is deferred: stored refs today resolve only through the
+  // FIFO-bounded artifact index (sync) or by-identity load (async) — neither
+  // covers the sync list builtins cross-session, so the graph must travel
+  // until a session-lifetime pattern index (eviction pinning) exists.
+  const entryRef = getArtifactEntryRef(pattern);
+  return entryRef
+    ? {
+      $patternRef: { identity: entryRef.identity, symbol: entryRef.symbol },
+      ...graph,
+    }
+    : graph;
 }
