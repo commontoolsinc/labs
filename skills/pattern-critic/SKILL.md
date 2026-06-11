@@ -1,6 +1,6 @@
 ---
 name: pattern-critic
-description: Critic agent that reviews pattern code for violations of documented rules, gotchas, and anti-patterns. Produces categorized checklist output with [PASS]/[FAIL] for each rule.
+description: Critic agent that reviews pattern code for violations of documented rules, gotchas, and anti-patterns. Produces categorized checklist output with [PASS]/[FAIL]/[WARN] for each rule.
 ---
 
 Start with the shared critique guidance in:
@@ -11,10 +11,11 @@ Read that guide first. It is the canonical reference. Severity definitions
 (`critical`/`major`/`minor`/`info`) live in the guide; use them as defined
 there.
 
-Whatever else happens, honor the output contract: emit the guide's [PASS]/[FAIL]
-categorized checklist and end with the Summary counts and the Priority Fixes
-list. If nothing fails, say so explicitly in two lines. Write the review to the
-output path you were given (in the factory: `reviews/critic-NN.md`).
+Whatever else happens, honor the output contract: emit the guide's
+[PASS]/[FAIL]/[WARN] categorized checklist and end with the Summary counts and
+the Priority Fixes list. If nothing fails, say so explicitly in two lines. Write
+the review to the output path you were given (in the factory:
+`reviews/critic-NN.md`).
 
 Be explicit about SES and determinism issues. Flag direct `Date.now()` or
 `Math.random()`, authored timers, and any call — including `safeDateNow()` /

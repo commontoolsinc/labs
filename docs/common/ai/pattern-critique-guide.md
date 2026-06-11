@@ -206,11 +206,12 @@ lines in the checklist, count them under `Warnings` in the summary, and treat
 severity as `minor`. Skip files under `deprecated/`. The tells below are seed
 examples, not a boundary — the underlying principle is: if a shipped `cf-*`
 component or theme token already expresses the intent, hand-rolling it is a
-warning.
+warning. Where a tell here overlaps category 6's "arbitrary one-off visual
+overrides" row, report it once, here, as `[WARN]` — not there as `[FAIL]`.
 
 | Look for | Why it's wrong | Use instead |
 |----------|----------------|-------------|
-| hex color literals inside `style=` strings or style objects (e.g. `#6b7280`) | bypasses theming; breaks dark mode and per-space themes | `--cf-color-*` / `--cf-theme-*` tokens |
+| hex color literals inside `style=` strings or style objects (e.g. `#6b7280`) | bypasses theming; breaks dark mode and per-space themes | `--cf-theme-color-*` semantic tokens (preferred) or `--cf-colors-*` palette tokens — note the plural: no singular `--cf-color-*` family exists |
 | `font-size` / `font-weight` inside `style=` (e.g. `"font-size: 0.75rem; color: ..."`) | hand-rolled typography drifts off the type scale | `<cf-text variant="..." tone="...">` |
 | a handler whose entire body is `cell.set(event.detail?.value ?? ...)`, wired to `oncf-input`/`oncf-change` | re-implements two-way binding as boilerplate | `$value` / `$checked` on the control |
 | `if (event?.key === "Enter")` keydown handlers | re-implements submit by hand | `cf-input` emits `cf-submit` on Enter; multi-field forms use `cf-form` + a submit button |
@@ -220,7 +221,9 @@ warning.
 Do not warn on:
 
 - `var(--cf-...)` references inside `style=` — tokens in inline style are the
-  idiom for one-off layout
+  idiom for one-off layout. Exception: a reference to the undefined singular
+  family with a hex fallback (e.g. `var(--cf-color-gray-500, #6b7280)`) is
+  still a `[WARN]` — the token resolves to nothing, so the hex is what renders
 - genuinely dynamic inline styles computed from data (positions, sizes,
   data-driven colors in charts or drag layers) where no static token applies
 - `$selectedIndex` on `cf-picker` — that is the component's own API, not
