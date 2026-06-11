@@ -13,6 +13,7 @@ import {
   brandTrustedBuilderArtifact,
   isTrustedBuilderArtifact,
 } from "../src/builder/pattern-metadata.ts";
+import { ExecutableRegistry } from "../src/harness/executable-registry.ts";
 import type { JSONSchema, Module, Pattern } from "../src/builder/types.ts";
 import type { HarnessedFunction } from "../src/harness/types.ts";
 
@@ -792,6 +793,389 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         unknown
       >;
       expect(json.$implRef).toBeUndefined();
+    });
+  });
+
+  // ===========================================================================
+  // E2 red-team gate. The attacks below target the surfaces PR E2 introduced
+  // (provenance-only verified identity, the now-LIVE bundleId verification arm,
+  // the strong content-addressed implementation index, and the loadId-less
+  // dynamic registrar). They are the negative complement to the happy-path
+  // tests in content-addressed-identity.test.ts.
+  // ===========================================================================
+
+  // A claim/identity driver matching attack 5's, lifted to the outer scope so
+  // the E2 bundleId-arm attacks can reuse it.
+  const driveE2Claim = async (
+    claim: Record<string, unknown>,
+    identity: Record<string, unknown>,
+    name: string,
+  ) => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      trustSnapshotProvider: () => ({
+        id: `ts-${name}`,
+        actingPrincipal: signer.did(),
+      }),
+    });
+    const tx = runtime.edit();
+    const schema = {
+      type: "object",
+      properties: {
+        owned: { type: "string", ifc: { writeAuthorizedBy: claim } },
+      },
+      required: ["owned"],
+    } as unknown as JSONSchema;
+    const cell = runtime.getCell(signer.did(), name, schema, tx);
+    tx.setCfcImplementationIdentity(identity as never);
+    cell.set({ owned: "x" });
+    const digest = tx.prepareCfc();
+    const result = await tx.commit();
+    return { digest, result };
+  };
+
+  // ---------------------------------------------------------------------------
+  // Attack 8 — the bundleId verification arm is now LIVE (provenance carries a
+  // bundleId), so it becomes an attack target. It must stay strictly bounded:
+  // it serves ONLY stored legacy bundleId-only claims, never lets a bundleId
+  // back-door a moduleIdentity-bearing claim, and never matches on empty ids.
+  // (attack 5 line 646 already pins the OTHER direction: a bundleId-only claim
+  // vs a bundleId-less identity. These pin the inverse + the empties.)
+  // ---------------------------------------------------------------------------
+  describe("attack 8: bundleId arm cannot launder a moduleIdentity claim", () => {
+    it("a claim carrying BOTH ids selects the moduleIdentity arm: matching bundleId + WRONG moduleIdentity fails closed", async () => {
+      // The claim has moduleIdentity, so `identityArmMatches` consults ONLY the
+      // moduleIdentity arm — a matching bundleId must NOT be a fallback that
+      // satisfies it (no cross-arm confusion in the new live-bundleId world).
+      const { digest, result } = await driveE2Claim(
+        {
+          __ctWriterIdentityOf: {
+            moduleIdentity: "owner-module",
+            bundleId: "shared-bundle",
+            file: "/owner.tsx",
+            path: ["ownerHandler"],
+          },
+        },
+        {
+          kind: "verified",
+          moduleIdentity: "attacker-module", // selected arm: MISMATCH
+          bundleId: "shared-bundle", // matches, but must be ignored
+          sourceFile: "/owner.tsx",
+          bindingPath: ["ownerHandler"],
+        },
+        "attack8-bothids-modmismatch",
+      );
+      expect(digest).toBe("");
+      expect(result.error).toBeDefined();
+    });
+
+    it("a legacy bundleId-only claim fails closed against a verified writer with a DIFFERENT bundleId", async () => {
+      const { digest, result } = await driveE2Claim(
+        {
+          __ctWriterIdentityOf: {
+            bundleId: "owner-bundle",
+            file: "/owner.tsx",
+            path: ["ownerHandler"],
+          },
+        },
+        {
+          kind: "verified",
+          moduleIdentity: "attacker-module",
+          bundleId: "attacker-bundle", // does NOT match the claim's bundleId
+          sourceFile: "/owner.tsx",
+          bindingPath: ["ownerHandler"],
+        },
+        "attack8-wrong-bundle",
+      );
+      expect(digest).toBe("");
+      expect(result.error).toBeDefined();
+    });
+
+    it("an empty-string bundleId on both sides does NOT match (length>0 guard, no vacuous bundle)", async () => {
+      const { digest, result } = await driveE2Claim(
+        {
+          __ctWriterIdentityOf: {
+            bundleId: "",
+            file: "/owner.tsx",
+            path: ["ownerHandler"],
+          },
+        },
+        {
+          kind: "verified",
+          moduleIdentity: "m",
+          bundleId: "", // empty == empty, but the arm requires length > 0
+          sourceFile: "/owner.tsx",
+          bindingPath: ["ownerHandler"],
+        },
+        "attack8-empty-bundle",
+      );
+      expect(digest).toBe("");
+      expect(result.error).toBeDefined();
+    });
+
+    it("a legacy bundleId-only claim with matching bundleId but WRONG path fails closed (path still checked)", async () => {
+      const { digest, result } = await driveE2Claim(
+        {
+          __ctWriterIdentityOf: {
+            bundleId: "shared-bundle",
+            file: "/owner.tsx",
+            path: ["ownerHandler"],
+          },
+        },
+        {
+          kind: "verified",
+          moduleIdentity: "m",
+          bundleId: "shared-bundle", // arm matches
+          sourceFile: "/owner.tsx", // file matches
+          bindingPath: ["attackerHandler"], // path does NOT
+        },
+        "attack8-bundle-pathmismatch",
+      );
+      expect(digest).toBe("");
+      expect(result.error).toBeDefined();
+    });
+
+    it("control: a legacy bundleId-only claim with fully-matching bundleId+file+path is accepted (arm is not vacuous)", async () => {
+      const { digest, result } = await driveE2Claim(
+        {
+          __ctWriterIdentityOf: {
+            bundleId: "match-bundle",
+            file: "/owner.tsx",
+            path: ["ownerHandler"],
+          },
+        },
+        {
+          kind: "verified",
+          moduleIdentity: "any-module", // irrelevant: claim has no moduleIdentity
+          bundleId: "match-bundle",
+          sourceFile: "/owner.tsx",
+          bindingPath: ["ownerHandler"],
+        },
+        "attack8-bundle-accept",
+      );
+      // The bundleId arm passes; any residual failure must not be writeAuthorizedBy.
+      expect(typeof digest).toBe("string");
+      if (result.error) {
+        expect(String(result.error)).not.toContain("writeAuthorizedBy");
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Attack 9 — dynamic (in-action) artifacts inherit the invoker's bundleId.
+  // A dynamic identity carries a bundleId but NO symbol and NO bindingPath, so
+  // it can never satisfy a verified-BINDING (bindingPath) claim, and its
+  // inherited bundleId cannot be aimed at a foreign owner's protected field.
+  // ---------------------------------------------------------------------------
+  describe("attack 9: dynamic-artifact bundleId inheritance cannot escalate", () => {
+    it("a dynamic provenance fn resolves verified with the inherited bundleId but NO bindingPath/symbol", () => {
+      const fn = Object.assign(() => undefined, {
+        src: "cf:module/DYN_INHERIT/main.tsx:3:2",
+      });
+      // Mirrors the in-action registrar: identity from canonical src, dynamic,
+      // inheriting the verified invoker's bundleId — but no export symbol.
+      recordVerifiedProvenance(fn, {
+        identity: "DYN_INHERIT",
+        dynamic: true,
+        bundleId: "INHERITED_BUNDLE",
+      });
+      const identity = resolvePolicyFacingImplementationIdentity(
+        { type: "javascript" } as Module,
+        { harness: runtime?.harness, implementation: fn },
+      );
+      expect(identity?.kind).toBe("verified");
+      const v = identity as {
+        kind: "verified";
+        bundleId?: string;
+        symbol?: string;
+        bindingPath?: string[];
+      };
+      expect(v.bundleId).toBe("INHERITED_BUNDLE");
+      expect(v.symbol).toBeUndefined();
+      // The absence of bindingPath is what stops it satisfying a binding claim.
+      expect(v.bindingPath).toBeUndefined();
+    });
+
+    it("a dynamic identity (bundleId only, NO file/path) cannot satisfy a legacy bundleId claim aimed at an owner's field", async () => {
+      // Even though the inherited bundleId matches, the dynamic identity has no
+      // sourceFile/bindingPath, so the file/path equality checks reject — a
+      // dynamic artifact can never reach into a foreign owner's protected cell.
+      const { digest, result } = await driveE2Claim(
+        {
+          __ctWriterIdentityOf: {
+            bundleId: "INHERITED_BUNDLE",
+            file: "/victim.tsx",
+            path: ["ownerHandler"],
+          },
+        },
+        {
+          kind: "verified",
+          moduleIdentity: "DYN_INHERIT",
+          bundleId: "INHERITED_BUNDLE", // arm matches...
+          // ...but no sourceFile and no bindingPath (a dynamic artifact).
+        },
+        "attack9-dynamic-nopath",
+      );
+      expect(digest).toBe("");
+      expect(result.error).toBeDefined();
+    });
+
+    it("a verified-BINDING claim cannot be satisfied by a dynamic (bindingPath-less) identity", async () => {
+      const { digest, result } = await driveE2Claim(
+        {
+          __ctWriterIdentityOf: {
+            moduleIdentity: "DYN_INHERIT",
+            file: "/victim.tsx",
+            path: ["ownerHandler"],
+          },
+        },
+        {
+          kind: "verified",
+          moduleIdentity: "DYN_INHERIT", // even module matches
+          bundleId: "INHERITED_BUNDLE",
+          // no bindingPath → rejected at the `!identity.bindingPath` gate.
+        },
+        "attack9-dynamic-binding-claim",
+      );
+      expect(digest).toBe("");
+      expect(result.error).toBeDefined();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Attack 10 — the strong content-addressed implementation index
+  // (verifiedImplementationsByEntryRef, surfaced as
+  // harness.getVerifiedImplementation). A replayed/forged $implRef must MISS,
+  // and a genuine one returns the REAL recorded function — never attacker data.
+  // ---------------------------------------------------------------------------
+  describe("attack 10: $implRef replay against the strong implementation index", () => {
+    it("a forged identity, or the genuine identity with an unregistered symbol, misses; the genuine pair returns the real fn", async () => {
+      const pattern = await setup();
+      const mod = handlerModules(pattern)[0];
+      const fn = mod.implementation as HarnessedFunction;
+      const prov = getVerifiedProvenance(fn)!;
+      const harness = runtime!.harness as unknown as {
+        getVerifiedImplementation?: (
+          identity: string,
+          symbol: string,
+        ) => unknown;
+      };
+      // Never-evaluated identity → miss.
+      expect(
+        harness.getVerifiedImplementation?.("forged-identity", prov.symbol!),
+      ).toBeUndefined();
+      // Genuine identity, symbol that was never registered under it → miss.
+      expect(
+        harness.getVerifiedImplementation?.(prov.identity, "unregistered-symbol"),
+      ).toBeUndefined();
+      // The genuine pair returns the EXACT recorded function (a trust-gated
+      // artifact's implementation), never attacker-controlled data.
+      const resolved = harness.getVerifiedImplementation?.(
+        prov.identity,
+        prov.symbol!,
+      );
+      expect(resolved).toBe(fn);
+      // And that resolved fn is itself verified (its provenance is intact).
+      expect(getVerifiedProvenance(resolved)).toBeDefined();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Attack 11 — the loadId-less dynamic registrar must not leak a load id (that
+  // would feed CFC bundle-id derivation) and must not be evicted by a real
+  // load that shares its ref. Pinned at the registry seam.
+  // ---------------------------------------------------------------------------
+  describe("attack 11: dynamic registrar never leaks a verifiedLoadId", () => {
+    it("a dynamic ref has NO verifiedLoadId and its partition has NO bundleId (cannot feed bundle-id derivation)", () => {
+      const reg = new ExecutableRegistry();
+      const fn = (() => {}) as unknown as HarnessedFunction;
+      reg.registerDynamicVerifiedFunction("dyn-ref-leak", fn);
+      // It IS executable (the live-closure rehydration channel)...
+      expect(reg.getExecutableFunction("dyn-ref-leak")).toBe(fn);
+      // ...but carries NO load id: surfacing the reserved partition key as a
+      // verifiedLoadId would leak it into CFC bundle-id derivation.
+      expect(reg.getVerifiedLoadId("dyn-ref-leak")).toBeUndefined();
+      // The reserved partition key itself is not a resolvable bundle.
+      expect(reg.getVerifiedBundleId("dynamic:in-action")).toBeUndefined();
+    });
+
+    it("a real load that shares a dynamic ref does NOT evict it (cross-load repair finds the dynamic owner)", () => {
+      const reg = new ExecutableRegistry();
+      const dyn = (() => {}) as unknown as HarnessedFunction;
+      reg.registerDynamicVerifiedFunction("shared-ref", dyn);
+      // A real (esm) load registers the same ref, then re-begins.
+      reg.registerVerifiedFunction(
+        "space:esm:1",
+        "shared-ref",
+        (() => {}) as unknown as HarnessedFunction,
+      );
+      reg.beginVerifiedLoad("space:esm:1");
+      // The ref still resolves — repointed to the dynamic owner, not deleted.
+      expect(reg.getExecutableFunction("shared-ref")).toBe(dyn);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Attack 12 — host-artifact escalation. A host-trusted callable EXECUTES but
+  // yields NO `kind:"verified"` CFC identity, by two independent defenses: the
+  // `unsafe-host:` debugName short-circuit AND the absence of provenance. A
+  // genuine canonical `fn.src` on a host fn does NOT manufacture verification.
+  // ---------------------------------------------------------------------------
+  describe("attack 12: host artifacts execute but never resolve verified", () => {
+    it("an unsafe-host: debugName resolves undefined (never verified)", () => {
+      const hostFn = Object.assign(() => 42, {
+        // Even carrying a genuine-looking canonical src...
+        src: "cf:module/SOME_MODULE/main.tsx:1:1",
+      });
+      expect(getVerifiedProvenance(hostFn)).toBeUndefined();
+      const identity = resolvePolicyFacingImplementationIdentity(
+        { type: "javascript", debugName: "unsafe-host:7" } as unknown as Module,
+        { harness: runtime?.harness, implementation: hostFn },
+      );
+      expect(identity).toBeUndefined();
+    });
+
+    it("a host fn with an EMPTY debugName falls into the provenance arm and resolves undefined (src alone is not proof)", () => {
+      const hostFn = Object.assign(() => 42, {
+        src: "cf:module/SOME_MODULE/main.tsx:1:1",
+      });
+      const identity = resolvePolicyFacingImplementationIdentity(
+        { type: "javascript", debugName: "" } as unknown as Module,
+        { harness: runtime?.harness, implementation: hostFn },
+      );
+      // No provenance WeakMap entry → undefined, NOT verified — the canonical
+      // src is an own-property the resolver never trusts on its own.
+      expect(identity).toBeUndefined();
+    });
+
+    it("a host fn given a forged BUILTIN debugName resolves builtin (not verified) and so cannot satisfy a verified-binding claim", async () => {
+      const hostFn = Object.assign(() => 42, {
+        src: "cf:module/SOME_MODULE/main.tsx:1:1",
+      });
+      const identity = resolvePolicyFacingImplementationIdentity(
+        { type: "javascript", debugName: "forgedBuiltin" } as unknown as Module,
+        { harness: runtime?.harness, implementation: hostFn },
+      );
+      expect(identity?.kind).toBe("builtin");
+      // A builtin identity is rejected by a verified-BINDING writeAuthorizedBy
+      // claim (it demands `identity.kind === "verified"`), so the forged-builtin
+      // dodge buys no ownership.
+      const { digest, result } = await driveE2Claim(
+        {
+          __ctWriterIdentityOf: {
+            moduleIdentity: "owner-module",
+            file: "/owner.tsx",
+            path: ["ownerHandler"],
+          },
+        },
+        { kind: "builtin", builtinId: "forgedBuiltin" },
+        "attack12-builtin-vs-binding",
+      );
+      expect(digest).toBe("");
+      expect(result.error).toBeDefined();
     });
   });
 });
