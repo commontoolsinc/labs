@@ -381,6 +381,8 @@ export interface SetBreakpointsRequest extends BaseRequest {
 
 export interface UploadBlobRequest extends BaseRequest {
   type: RequestType.UploadBlob;
+  /** The space the blob belongs to — uploads target ITS host. */
+  space: DID;
   contentType: string;
   body: number[];
   suffix?: string;

@@ -500,12 +500,14 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   async uploadBlob(options: {
+    space: DID;
     contentType: string;
     body: Uint8Array;
     suffix?: string;
   }): Promise<UploadBlobResponse> {
     return await this.#conn.request<RequestType.UploadBlob>({
       type: RequestType.UploadBlob,
+      space: options.space,
       contentType: options.contentType,
       body: Array.from(options.body),
       suffix: options.suffix,

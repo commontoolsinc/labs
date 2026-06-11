@@ -69,7 +69,8 @@ import { stringSchema } from "@commonfabric/runner/schemas";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
-import { runtimeContext } from "../../runtime-context.ts";
+import { runtimeContext, spaceContext } from "../../runtime-context.ts";
+import type { DID } from "@commonfabric/identity";
 import { type StoredFile, uploadFile } from "../../utils/file-cell-storage.ts";
 import {
   Mentionable,
@@ -232,6 +233,10 @@ export class CFCodeEditor extends BaseElement {
   @consume({ context: runtimeContext, subscribe: true })
   @property({ attribute: false })
   accessor runtime: RuntimeClient | undefined = undefined;
+
+  @consume({ context: spaceContext, subscribe: true })
+  @property({ attribute: false })
+  accessor contextSpace: DID | undefined = undefined;
 
   private _editorView: EditorView | undefined;
   private _lang = new Compartment();
@@ -1516,8 +1521,13 @@ export class CFCodeEditor extends BaseElement {
     const runtime = isCellHandle(this.value)
       ? this.value.runtime()
       : this.runtime;
+    // The pasted image's blob belongs to the edited cell's space; fall
+    // back to the view's space from context.
+    const space = isCellHandle(this.value)
+      ? this.value.space()
+      : this.contextSpace;
 
-    if (!runtime) {
+    if (!runtime || !space) {
       this.emit("cf-error", {
         error: new Error("Runtime is not available for pasted image storage"),
         message: "Runtime is not available for pasted image storage",
@@ -1528,7 +1538,7 @@ export class CFCodeEditor extends BaseElement {
     try {
       const storedFiles: StoredFile[] = [];
       for (const file of files) {
-        storedFiles.push(await uploadFile({ file, runtime }));
+        storedFiles.push(await uploadFile({ file, runtime, space }));
       }
 
       const markdown = storedFiles

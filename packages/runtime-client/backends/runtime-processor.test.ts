@@ -746,14 +746,16 @@ describe("RuntimeProcessor blob upload IPC", () => {
     // The constructor performs full runtime initialization; this focused unit
     // test calls the handler with the fields it reads directly.
     const processor = {
-      apiUrl: new URL("http://toolshed.test/base"),
-      space: "did:key:test-space",
+      runtime: {
+        hostForSpace: () => new URL("http://toolshed.test/base"),
+      },
     } as unknown as RuntimeProcessor;
 
     try {
       await expect(
         RuntimeProcessor.prototype.handleUploadBlob.call(processor, {
           type: RequestType.UploadBlob,
+          space: "did:key:test-space" as never,
           contentType: "image/png",
           body: [1, 2, 3],
           suffix: "png",

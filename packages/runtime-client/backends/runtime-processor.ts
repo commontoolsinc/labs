@@ -1023,9 +1023,12 @@ export class RuntimeProcessor {
   ): Promise<UploadBlobResponse> {
     const suffix = (request.suffix ?? "bin").replace(/^\./, "") || "bin";
     const bytes = Uint8Array.from(request.body);
+    // The blob belongs to the named space, so it uploads to — and its
+    // returned URL resolves against — THAT space's host.
+    const host = this.runtime.hostForSpace(request.space);
     const target = new URL(
-      `/${this.space}/blobs/upload.${encodeURIComponent(suffix)}`,
-      this.apiUrl,
+      `/${request.space}/blobs/upload.${encodeURIComponent(suffix)}`,
+      host,
     );
     // Blob upload payloads must preserve FabricBytes even when the wider
     // process is running with legacy memory JSON flags.
@@ -1049,7 +1052,7 @@ export class RuntimeProcessor {
     }
     return {
       id: result.id,
-      url: resolveBlobUrl(result.url, this.apiUrl, this.space),
+      url: resolveBlobUrl(result.url, host, request.space),
     };
   }
 
