@@ -29,7 +29,7 @@ interface ReadingItemDetailInput {
 /** Output shape of the reading item piece - this is what gets stored in lists
  * #book #article #reading
  */
-interface ReadingItemDetailOutput {
+export interface ReadingItemDetailOutput {
   [NAME]: string;
   [UI]: VNode;
   title: string;

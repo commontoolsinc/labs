@@ -81,6 +81,7 @@ import {
   type PageSyncedRequest,
   type PatternSourcesResponse,
   type RecreateSpaceRootPatternRequest,
+  type RegisterSpaceHostRequest,
   RequestType,
   type SetActionRunTraceEnabledRequest,
   type SetBreakpointsRequest,
@@ -105,6 +106,11 @@ import {
 } from "../protocol/mod.ts";
 import { HttpProgramResolver, Program } from "@commonfabric/js-compiler";
 import { setLLMUrl } from "@commonfabric/llm";
+import {
+  type SiteTable,
+  siteTableCause,
+  siteTableSchema,
+} from "@commonfabric/home-schemas";
 import {
   createCellRef,
   createPageRef,
@@ -137,6 +143,7 @@ export function runtimeOptionsFromInitializationData(
   const apiUrlObj = new URL(data.apiUrl);
   return {
     apiUrl: apiUrlObj,
+    spaceHostMap: data.spaceHostMap,
     storageManager,
     patternEnvironment: { apiUrl: apiUrlObj },
     telemetry,
@@ -282,8 +289,6 @@ export class RuntimeProcessor {
   private pieceManager: PieceManager;
   private cc: PiecesController;
   private spaces = new Map<DID, SpaceContext>();
-  private apiUrl: URL;
-  private space: DID;
   private identity: Identity;
   private _isDisposed = false;
   private disposingPromise: Promise<void> | undefined;
@@ -305,17 +310,14 @@ export class RuntimeProcessor {
     runtime: Runtime,
     pieceManager: PieceManager,
     cc: PiecesController,
-    apiUrl: URL,
-    space: DID,
+    initSpace: DID,
     identity: Identity,
     telemetry: RuntimeTelemetry,
   ) {
     this.runtime = runtime;
     this.pieceManager = pieceManager;
     this.cc = cc;
-    this.spaces.set(space, { pieceManager, cc });
-    this.apiUrl = apiUrl;
-    this.space = space;
+    this.spaces.set(initSpace, { pieceManager, cc });
     this.identity = identity;
     this.telemetry = telemetry;
     this.telemetry.addEventListener("telemetry", this.#onTelemetry);
@@ -428,7 +430,6 @@ export class RuntimeProcessor {
       runtime,
       pieceManager,
       cc,
-      apiUrlObj,
       space,
       identity,
       telemetry,
@@ -438,7 +439,93 @@ export class RuntimeProcessor {
     // any present-but-unknown value becomes "deny"; absent stays "allow".
     processor.renderDeclassificationPolicy =
       normalizeRenderDeclassificationPolicy(data.renderDeclassificationPolicy);
+    // Site-table v0: the home space carries did → host hints; the
+    // runtime reads them as its live host lookup (2026-06-09 federation
+    // session — "move the lookup into the runtime itself"). Refusals
+    // (seeded differently / space already open) are by design; failures
+    // here must not block worker boot.
+    processor.watchSiteTable();
     return processor;
+  }
+
+  #siteTableCancel: Cancel | undefined;
+  #siteTableWarned = new Set<string>();
+
+  /**
+   * Subscribe to the home-space site table and register each entry as
+   * a host hint. Fire-and-forget: resolution hints are an enhancement,
+   * never a boot dependency.
+   *
+   * ORDERING CONTRACT for embedders: this subscription races the first
+   * mount. An embedder about to mount a space it just learned the host
+   * for must push the hint via the RegisterSpaceHost IPC BEFORE that
+   * mount — once a space opens against the default host, the
+   * opened-space rule pins it for the session. The table is the
+   * durable record; the IPC is the ordering guarantee.
+   */
+  watchSiteTable(): void {
+    try {
+      const userDid = this.runtime.userIdentityDID;
+      const table = this.runtime.getCell(
+        userDid,
+        siteTableCause(userDid),
+        siteTableSchema,
+      );
+      Promise.resolve(table.sync()).then(() => {
+        // dispose() may have run while sync was in flight — installing
+        // the sink then would leak a live subscription past disposal.
+        if (this._isDisposed) return;
+        this.#siteTableCancel = table.sink(
+          (entries: Readonly<SiteTable> | undefined) => {
+            for (const entry of entries ?? []) {
+              if (!entry?.did || !entry.host) continue;
+              if (!String(entry.did).startsWith("did:")) continue;
+              try {
+                const accepted = this.runtime.registerSpaceHost(
+                  entry.did as DID,
+                  entry.host,
+                );
+                // The dual of "never silently re-point": never silently
+                // fail to take effect. Warn (once per fact) when the
+                // hint lost — usually the boot race: the space opened
+                // against the default host first.
+                if (!accepted) {
+                  const key = `${entry.did}|${entry.host}`;
+                  const effective = this.runtime.hostForSpace(
+                    entry.did as DID,
+                  ).toString();
+                  if (
+                    effective !== new URL(entry.host).toString() &&
+                    !this.#siteTableWarned.has(key)
+                  ) {
+                    this.#siteTableWarned.add(key);
+                    console.warn(
+                      `[RuntimeProcessor] Site-table hint for ${entry.did} not in effect ` +
+                        `(space already open or seeded elsewhere); using ${effective}`,
+                    );
+                  }
+                }
+              } catch (error) {
+                console.warn(
+                  `[RuntimeProcessor] Ignoring invalid site-table entry for ${entry.did}:`,
+                  error instanceof Error ? error.message : error,
+                );
+              }
+            }
+          },
+        );
+      }).catch((error: unknown) => {
+        console.warn(
+          "[RuntimeProcessor] Site table unavailable (continuing without hints):",
+          error instanceof Error ? error.message : error,
+        );
+      });
+    } catch (error) {
+      console.warn(
+        "[RuntimeProcessor] Site table watch failed to start:",
+        error instanceof Error ? error.message : error,
+      );
+    }
   }
 
   /**
@@ -457,6 +544,8 @@ export class RuntimeProcessor {
     this.disposingPromise = (async () => {
       this.telemetry.removeEventListener("telemetry", this.#onTelemetry);
       try {
+        this.#siteTableCancel?.();
+        this.#siteTableCancel = undefined;
         for (const cancel of this.subscriptions.values()) {
           cancel();
         }
@@ -900,6 +989,14 @@ export class RuntimeProcessor {
     await pieceManager.synced();
   }
 
+  handleRegisterSpaceHost(
+    request: RegisterSpaceHostRequest,
+  ): BooleanResponse {
+    return {
+      value: this.runtime.registerSpaceHost(request.space, request.host),
+    };
+  }
+
   /** Convergence across every opened space — no space named, none implied. */
   async handleRuntimeSynced(): Promise<void> {
     await Promise.all(
@@ -1036,11 +1133,20 @@ export class RuntimeProcessor {
   async handleUploadBlob(
     request: UploadBlobRequest,
   ): Promise<UploadBlobResponse> {
+    // Guard for untyped callers: the request must name the blob's space
+    // (required since the federation work) — fail with a named error
+    // rather than a confusing server 404 on /undefined/blobs/….
+    if (!request.space || !String(request.space).startsWith("did:")) {
+      throw new Error("uploadBlob requires a space DID");
+    }
     const suffix = (request.suffix ?? "bin").replace(/^\./, "") || "bin";
     const bytes = Uint8Array.from(request.body);
+    // The blob belongs to the named space, so it uploads to — and its
+    // returned URL resolves against — THAT space's host.
+    const host = this.runtime.hostForSpace(request.space);
     const target = new URL(
-      `/${this.space}/blobs/upload.${encodeURIComponent(suffix)}`,
-      this.apiUrl,
+      `/${request.space}/blobs/upload.${encodeURIComponent(suffix)}`,
+      host,
     );
     // Blob upload payloads must preserve FabricBytes even when the wider
     // process is running with legacy memory JSON flags.
@@ -1064,7 +1170,7 @@ export class RuntimeProcessor {
     }
     return {
       id: result.id,
-      url: resolveBlobUrl(result.url, this.apiUrl, this.space),
+      url: resolveBlobUrl(result.url, host, request.space),
     };
   }
 
@@ -1199,6 +1305,8 @@ export class RuntimeProcessor {
         return await this.handlePageSynced(request);
       case RequestType.RuntimeSynced:
         return await this.handleRuntimeSynced();
+      case RequestType.RegisterSpaceHost:
+        return this.handleRegisterSpaceHost(request);
       case RequestType.GetGraphSnapshot:
         return this.getGraphSnapshot(request);
       case RequestType.SetPullMode:

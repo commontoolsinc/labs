@@ -3,8 +3,11 @@
 Companion to [`content-addressed-action-identity.md`](./content-addressed-action-identity.md)
 (the design). One PR per letter; each lands green and is independently
 revertible. Phase 0 (ordinal-free `implementationRef` + legacy-alias shim)
-shipped in #3997; A–D shipped in #4006/#4008/#4009/#4013; E is in flight (see
-"PR E — the flip" for the recorded gating decisions and the E1 status).
+shipped in #3997; A–D shipped in #4006/#4008/#4009/#4013; E shipped in three
+PRs — E1 #4053, E2 #4064, E3 (pattern JSON boundary, scoped to dual-write) —
+see "PR E — the flip" for the recorded gating decisions per part. Phase 4
+(retire the legacy read path + the refs-only pattern-JSON flip) is the open
+remainder.
 
 ## Last Updated
 
@@ -334,6 +337,45 @@ available).
   satisfy stored bundleId-only claims. The provenance field and the arm retire
   together, next cycle, gated on stored-data evidence.
 
+### E2 — legacy machinery deletion (landed after E1; scoped by gate 2)
+
+Deleted: ALL loadId machinery (`Frame.verifiedLoadId` + threading,
+`set/getVerifiedLoadId` side tables, `seedVerifiedLoadIds`,
+`patternToVerifiedLoadId`, per-load registry partitions, `beginVerifiedLoad`
+repair, `verifiedLoadSources`/`verifiedLoadBundleIds`/`verifiedBindingMetadata`
+maps and their capture walks, five loadId-scoped `Harness` methods), the CFC
+legacy `implementationRef`×`verifiedLoadId` arm (provenance is the only source
+of `kind: "verified"`; CT-1665 binding identity rides on provenance), the
+`FunctionCache` + prewarm walk, and `EvaluateResult.loadId` (engine evals key
+their synthetic source-map names on a renamed `evalId`).
+
+KEPT, per gate 2 (each explicitly justified, retiring with design Phase 4):
+
+- `ensureImplementationRef` + ordinal-alias shim (+ `implementation-ref`
+  test) and the `registerVerifiedFunctionImplementation`/
+  `setVerifiedFunctionRegistrar` builder channel — they repopulate…
+- …the ONE retained string-keyed global executable index
+  (`ExecutableRegistry.verifiedFunctionIndex`, 2-arg
+  `registerVerifiedFunction`) + `getExecutableFunction` + the runner's legacy
+  resolution arm — the read path for pre-flip stored graphs, host-trusted
+  values, and dynamic in-action artifacts.
+- The bundleId-only `writeAuthorizedBy` verification arm (stored pre-#4009
+  claims) + `ImplementationIdentity.bundleId` — the field cannot be dropped
+  before the arm, since the arm compares against the LIVE identity's value
+  (now sourced from provenance). New claims are stamped with `moduleIdentity`
+  only. Claims stamped with a RAW `verifiedLoadId` (the historical
+  getVerifiedBundleId-miss corner) are no longer served: load ids embed a
+  per-session counter, so such claims never verified across sessions anyway,
+  and same-session claims since #4009 carry `moduleIdentity`, which wins arm
+  selection.
+- **`unsafe-host:` decision**: the synthetic-identity host registrar (design
+  §5) is DEFERRED to the cycle that retires the legacy read path. Host trust
+  is in-repo a test-only surface (`test/support/trusted-builder.ts`, one piece
+  test; production `createBuilder()` passes no trust token), and it rides on
+  exactly the `implementationRef` channel gate 2 keeps — replacing it now
+  would add a new trust surface without removing the old one. They retire
+  together.
+
 ### E1 — writer flip (landed as this series' first PR)
 
 Writers stop emitting `implementationRef`/stringified `implementation` exactly
@@ -366,7 +408,82 @@ loading AND executing; it must stay green until the legacy read path retires.
    the `$opFallback` decision (explicit `serializePatternGraph()` escape
    hatch vs eviction pinning). This piece can split into its own PR if the
    blast radius (json round-trip consumers, `pattern-binding` deserialization)
-   warrants.
+   warrants. (It did — see E3 below.)
+
+### E3 — pattern JSON boundary (landed SCOPED: dual-write, not refs-only)
+
+#### Gating decisions (recorded 2026-06-11)
+
+- **`$opFallback` / escape-hatch decision: option (a).**
+  `serializePatternGraph()` (builder/json-utils.ts) is the internal graph
+  serializer; `toJSONWithLegacyAliases` routes pattern values through it
+  under an ambient internal-serialization context that suppresses
+  `$patternRef`. The fallback keeps embedding a full graph and
+  `map-op-by-identity.test.ts` stays meaningful (sentinel resolves by
+  identity; eviction falls back to the graph). The context flag (not just a
+  separate function) is required because factory `toJSON` closures
+  deliberately serialize the ROOT factory — the one carrying `.program` set
+  post-construction — so internal serialization must keep calling `toJSON`
+  and steer its behavior, not bypass it.
+- **Refs-only emission: DEFERRED to Phase 4.** Pattern artifacts have no
+  session-lifetime strong index (E1's
+  `verifiedImplementationsByEntryRef` is function-object-keyed, javascript
+  modules only): a stored `$patternRef` resolves only via the FIFO-bounded
+  `addressableByIdentity` (sync) or `loadPatternByIdentity` (async).
+  Production graph consumers found by the read audit: the list builtins'
+  `resolveOpPattern` (sync Action — cannot await) and llm-dialog tool
+  invocation (cross-session; compiled-artifact presence in the reading
+  space not guaranteed for arbitrary pattern values). Cross-session
+  resolvability could not be measured (no production-space sample — the
+  same blocker as gate 2). The flip needs: a session-lifetime pattern
+  index or refcount pinning (design open question 2), async-capable or
+  pre-resolved reads at the two consumers, and stored-data aging evidence
+  (dual-written values are now measurable, like `$implRef` was).
+- **Write/read audit (2026-06-11):** pattern graphs reach storage at three
+  cell-write sites — pattern values in piece arguments
+  (`runner.ts updateArgument`), the list-builtin inputs sentinel
+  (`getImmutableCell` after `substituteOpPatternRefs`), nested sub-pattern
+  arguments — plus stdout-only CLI `--pattern-json`. No wire/IPC protocol
+  field carries pattern graphs (`getPatternSources` is source-based; shell/
+  runtime-client move pattern ids + sources). `pattern-binding` operates on
+  in-memory bound copies only (no stored-JSON deserialization).
+
+#### What landed
+
+- `patternToJSON` dual-writes `$patternRef: { identity, symbol }` (from the
+  module-level `getArtifactEntryRef`, content-derived → byte-stable across
+  sessions) alongside the unchanged graph; internal serialization
+  (`serializePatternGraph`) emits the bare graph, keeping `Pattern.nodes`
+  and `$opFallback` ref-free.
+- Dual-read: `resolveOpPattern` resolves a ref+graph value from its carried
+  graph on a cache miss (instead of hard-failing a running node);
+  `resolveStoredPattern` (shared helper) gives llm-dialog's two raw
+  toolDef-pattern reads the prefer-live-canonical behavior — the resolved
+  factory carries the trust brand and entry ref a deserialized graph lacks.
+- Canary: `test/pre-e3-pattern-value-canary.test.ts` + committed fixture
+  (`test/fixtures/pre-e3-serialized-pattern.json`, capture script alongside)
+  pins BOTH stored vintages — pre-E3 bare graph and dual-write ref+graph —
+  loading and EXECUTING through `runtime.run` and `resolveOpPattern`,
+  without the module ever evaluating in the reading session. It must stay
+  green until the graph read path retires.
+
+One-time effect: stored pattern-bearing values gain a `$patternRef` key, so
+the first re-serialization after upgrade diffs once per value (same class as
+E1's serialized-module change).
+
+Known dual-write gap (deliberate, flagged by Codex review): STRUCTURAL
+pattern copies — the plain bound copies `unwrapOneLevelAndBindtoDoc` builds
+from `pattern.nodes`-derived bindings — persist without `$patternRef`, since
+they carry no `toJSON` and `getImmutableCell` stringifies them directly. The
+load-bearing instance (the list-builtin `op`) is already covered by the
+`substituteOpPatternRefs` sentinel, which stamps the ref from the copy's
+derivation chain at instantiation. Stamping refs into the remaining bound
+copies would change the content of immutable inputs cells (the CT-1623
+id-churn class) for a vintage that rewrites on every re-instantiation anyway
+— so they stay bare until the Phase 4 flip changes the internal serializer
+itself. The aging signal dual-write exists for is the LIVE-factory boundary
+writes (llm toolDef patterns, patterns passed directly in piece arguments),
+which are the values that persist across sessions.
 
 ## Sequencing & parallelism
 

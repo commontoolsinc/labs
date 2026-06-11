@@ -7,7 +7,12 @@ import { Engine } from "../src/harness/engine.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
-describe("Engine verified function cleanup", () => {
+// The global executable index — the retained legacy read path (gate-2
+// decision, PR E2): pre-flip stored graphs, host-trusted values, and dynamic
+// in-action artifacts all resolve by `implementationRef` through it. The
+// former per-load partitions and the `beginVerifiedLoad` cross-load repair
+// are gone; the index is global, strong, and overwrite-on-re-registration.
+describe("Engine verified function registry", () => {
   let runtime: Runtime;
   let engine: Engine;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -27,93 +32,57 @@ describe("Engine verified function cleanup", () => {
   });
 
   function getExecutableRegistry() {
+    // deno-lint-ignore no-explicit-any
     return (engine as any).executableRegistry;
   }
 
-  it("restores verifiedFunctionIndex entries from other loads when one load resets", () => {
-    const previous = Object.assign(() => "previous", {
-      implementationRef: "main.tsx#000:handler",
-    });
-    const surviving = Object.assign(() => "surviving", {
+  it("admits registered functions through the global index", () => {
+    const fn = Object.assign(() => "value", {
       implementationRef: "main.tsx#000:handler",
     });
     const executableRegistry = getExecutableRegistry();
 
-    executableRegistry.verifiedFunctions.set(
-      "load:previous",
-      new Map([[previous.implementationRef, previous]]),
-    );
-    executableRegistry.verifiedFunctions.set(
-      "load:surviving",
-      new Map([[surviving.implementationRef, surviving]]),
-    );
-    executableRegistry.verifiedFunctionIndex.set(
-      previous.implementationRef,
-      previous,
-    );
+    executableRegistry.registerVerifiedFunction(fn.implementationRef, fn);
 
-    executableRegistry.beginVerifiedLoad("load:previous");
-
-    expect(executableRegistry.verifiedFunctions.get("load:previous")).toEqual(
-      new Map(),
-    );
-    expect(
-      executableRegistry.verifiedFunctionIndex.get(previous.implementationRef),
-    ).toBe(surviving);
+    expect(executableRegistry.getVerifiedFunction(fn.implementationRef))
+      .toBe(fn);
+    expect(executableRegistry.getExecutableFunction(fn.implementationRef))
+      .toBe(fn);
   });
 
-  it("removes verifiedFunctionIndex entries when no other load owns the ref", () => {
-    const only = Object.assign(() => "only", {
+  it("re-registration of a content-derived ref points the index at the fresh function", () => {
+    // Two evaluations of the same module mint the same content-derived ref
+    // for behaviorally interchangeable functions (SES forbids module-scope
+    // mutable state); the index resolves to the latest.
+    const first = Object.assign(() => "first", {
+      implementationRef: "main.tsx#000:handler",
+    });
+    const second = Object.assign(() => "second", {
       implementationRef: "main.tsx#000:handler",
     });
     const executableRegistry = getExecutableRegistry();
 
-    executableRegistry.verifiedFunctions.set(
-      "load:only",
-      new Map([[only.implementationRef, only]]),
-    );
-    executableRegistry.verifiedFunctionIndex.set(only.implementationRef, only);
-
-    executableRegistry.beginVerifiedLoad("load:only");
-
-    expect(executableRegistry.verifiedFunctionIndex.has(only.implementationRef))
-      .toBe(false);
-  });
-
-  it("load restarts repoint shared refs to the dynamic registration instead of deleting them", () => {
-    // PR #4053 follow-up (cubic P1 on registerDynamicVerifiedFunction):
-    // dynamic (loadId-less) registrations share the implementationRef
-    // keyspace with per-load registrations. If a ref registered by a load is
-    // ALSO dynamically registered, a restart of that load must repoint the
-    // global index at the dynamic function — a bare index write without a
-    // partition entry would instead be DELETED by the cross-load repair
-    // (`findVerifiedFunctionInOtherLoads` finds no owner), severing the
-    // rehydration channel mid-session.
-    const fromLoad = Object.assign(() => "from-load", {
-      implementationRef: "main.tsx#000:handler",
-    });
-    const dynamic = Object.assign(() => "dynamic", {
-      implementationRef: "main.tsx#000:handler",
-    });
-    const executableRegistry = getExecutableRegistry();
-
+    executableRegistry.registerVerifiedFunction(first.implementationRef, first);
     executableRegistry.registerVerifiedFunction(
-      "load:restarting",
-      fromLoad.implementationRef,
-      fromLoad,
+      second.implementationRef,
+      second,
     );
-    executableRegistry.registerDynamicVerifiedFunction(
+
+    expect(executableRegistry.getExecutableFunction(first.implementationRef))
+      .toBe(second);
+  });
+
+  it("dynamic in-action registrations admit through the same index (Harness channel)", () => {
+    const dynamic = Object.assign(() => "dynamic", {
+      implementationRef: "fid1:dynamic-artifact",
+    });
+
+    engine.registerDynamicVerifiedFunction(
       dynamic.implementationRef,
       dynamic,
     );
-    expect(
-      executableRegistry.getExecutableFunction(dynamic.implementationRef),
-    ).toBe(dynamic);
 
-    executableRegistry.beginVerifiedLoad("load:restarting");
-
-    expect(
-      executableRegistry.getExecutableFunction(dynamic.implementationRef),
-    ).toBe(dynamic);
+    expect(engine.getExecutableFunction(dynamic.implementationRef))
+      .toBe(dynamic);
   });
 });

@@ -290,7 +290,6 @@ export default pattern<{ out: string }>(({ out }) => ({
     const fn = module.implementation as HarnessedFunction;
 
     const identity = resolvePolicyFacingImplementationIdentity(module, {
-      harness: runtime!.harness,
       implementation: fn,
     });
     expect(identity).toBeDefined();
@@ -310,19 +309,18 @@ export default pattern<{ out: string }>(({ out }) => ({
     const fn = module.implementation as HarnessedFunction;
 
     // Byte-identical source text, constructed OUTSIDE verified evaluation:
-    // no provenance entry, no registry entry — `unsupported`, never
-    // `verified`.
+    // no provenance entry — NO identity at all (fail closed), never
+    // `verified`. (Pre-E2 the legacy registry arm reported `unsupported`;
+    // with the arm gone an unproven function simply resolves to nothing.)
     const forged = new Function(
       `return ${Function.prototype.toString.call(fn)}`,
     )() as HarnessedFunction;
     expect(getVerifiedProvenance(forged)).toBeUndefined();
 
     const identity = resolvePolicyFacingImplementationIdentity(module, {
-      harness: runtime!.harness,
-      verifiedLoadId: "load:forged",
       implementation: forged,
     });
-    expect(identity?.kind).toBe("unsupported");
+    expect(identity).toBeUndefined();
   });
 
   it("$implRef from a stale/foreign ref resolves nothing executable", async () => {
@@ -350,40 +348,12 @@ describe("provenance bundleId fallback (legacy claim compat)", () => {
     storageManager = undefined;
   });
 
-  it("falls back to verifiedLoadId when the bundle id is unregistered", async () => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-      cfcEnforcementMode: "observe",
-    });
-    const pattern = await runtime.patternManager.compilePattern(PROGRAM);
-    await runtime.idle();
-    const node = pattern.nodes.find((n) =>
-      (n.module as Module).type === "javascript" &&
-      (n.module as Module).wrapper === "handler"
-    );
-    const module = node!.module as Module;
-    const fn = module.implementation as HarnessedFunction;
-
-    // A harness whose getVerifiedBundleId MISSES (legacy stamp-time scenario):
-    // the resolved identity's bundleId must mirror the legacy resolver and
-    // fall back to the raw verifiedLoadId, so a legacy bundleId-only
-    // writeAuthorizedBy claim stamped with that value still verifies.
-    const identity = resolvePolicyFacingImplementationIdentity(module, {
-      harness: {
-        getVerifiedBundleId: () => undefined,
-      } as never,
-      verifiedLoadId: "load:legacy-bundle",
-      implementation: fn,
-    });
-    expect(identity?.kind).toBe("verified");
-    expect((identity as { bundleId?: string }).bundleId).toBe(
-      "load:legacy-bundle",
-    );
-  });
-
-  it("carries the evaluation's bundleId via provenance when no verifiedLoadId is available", async () => {
+  // NOTE (PR E2): the former "falls back to verifiedLoadId when the bundle id
+  // is unregistered" behavior is deliberately GONE with the loadId machinery.
+  // Claims stamped with a raw load id could never verify across sessions
+  // anyway (load ids embed a per-session counter), and same-session claims
+  // written since #4009 carry moduleIdentity, which wins arm selection.
+  it("carries the evaluation's bundleId via provenance", async () => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -406,7 +376,6 @@ describe("provenance bundleId fallback (legacy claim compat)", () => {
     // provenance recorded at evaluation time.
     expect(getVerifiedProvenance(fn)?.bundleId).toBeDefined();
     const identity = resolvePolicyFacingImplementationIdentity(module, {
-      harness: runtime.harness,
       implementation: fn,
     });
     expect(identity?.kind).toBe("verified");

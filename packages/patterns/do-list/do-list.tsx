@@ -29,7 +29,7 @@ interface DoListInput {
   items?: Writable<DoItem[] | Default<[]>>;
 }
 
-interface DoListOutput {
+export interface DoListOutput {
   [NAME]: string;
   [UI]: VNode;
   compactUI: VNode;

@@ -332,19 +332,19 @@ export function lift<T, R>(
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
   options?: DeriveSchedulerOptions,
-): ModuleFactory<StripCell<T>, StripCell<R>>;
+): ModuleFactory<StripCell<T>, R>;
 export function lift<T>(
   implementation: (input: T) => any,
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
   options?: DeriveSchedulerOptions,
-): ModuleFactory<StripCell<T>, StripCell<ReturnType<typeof implementation>>>;
+): ModuleFactory<StripCell<T>, ReturnType<typeof implementation>>;
 export function lift<T extends (...args: any[]) => any>(
   implementation: T,
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
   options?: DeriveSchedulerOptions,
-): ModuleFactory<StripCell<Parameters<T>[0]>, StripCell<ReturnType<T>>>;
+): ModuleFactory<StripCell<Parameters<T>[0]>, ReturnType<T>>;
 export function lift<T, R>(
   implementation?: ((input: T) => R) | DeriveSchedulerOptions,
   argumentSchema?: JSONSchema | DeriveSchedulerOptions,

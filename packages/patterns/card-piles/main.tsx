@@ -53,7 +53,7 @@ interface CardPilesInput {
   pile2: Writable<Card[] | Default<typeof defaultPile2>>;
 }
 
-interface CardPilesOutput {
+export interface CardPilesOutput {
   [NAME]: string;
   [UI]: VNode;
   pile1: Card[];

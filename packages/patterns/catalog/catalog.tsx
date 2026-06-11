@@ -133,7 +133,7 @@ interface CatalogInput {
     ]>;
 }
 
-interface CatalogOutput {
+export interface CatalogOutput {
   [NAME]: string;
   [UI]: VNode;
   selectedStory: string;

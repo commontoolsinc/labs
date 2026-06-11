@@ -57,7 +57,7 @@ type LLMMessage = {
 };
 
 /** Represents a chat-enabled note with inline LLM conversations. */
-type Output = {
+export type Output = {
   [NAME]?: string;
   [UI]: VNode;
   mentioned: Array<MentionablePiece> | Default<[]>;

@@ -65,7 +65,7 @@ interface StoryRendererInput {
   selected: string;
 }
 
-interface StoryRendererOutput {
+export interface StoryRendererOutput {
   [NAME]: string;
   [UI]: VNode;
   controls?: VNode;

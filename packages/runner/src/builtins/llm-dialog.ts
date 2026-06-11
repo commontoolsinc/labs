@@ -27,6 +27,7 @@ import { isBoolean, isObject, isRecord } from "@commonfabric/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import { isCell, isStream } from "../cell.ts";
 import { type CellScope, ID, NAME, type Pattern } from "../builder/types.ts";
+import { resolveStoredPattern } from "./op-pattern-ref.ts";
 import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
 import { Runtime } from "../runtime.ts";
 import { spaceCellSchema } from "../runtime.ts";
@@ -2249,6 +2250,14 @@ async function handleInvoke(
     handler = resolved.handler;
   }
 
+  // A pattern read raw from a cell is the boundary serialization: prefer
+  // resolving the live canonical pattern via its $patternRef (trust brand +
+  // entry ref intact), fall back to the stored graph (pre-dual-write data or
+  // evicted module).
+  pattern = resolveStoredPattern(runtime, pattern) as
+    | Readonly<Pattern>
+    | undefined;
+
   const input = traverseAndCellify(runtime, space, toolCall.input) as object;
 
   const { resolve, promise } = Promise.withResolvers<any>();
@@ -2989,7 +2998,16 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
     };
 
   // TODO(bf): sendRequest must be given a callback, even if it does nothing
-  const doWork = () => client.sendRequest(llmParams, () => {}, abortSignal);
+  const mappedLlmHost = runtime.mappedHostFor(space);
+  const doWork = () =>
+    client.sendRequest(
+      llmParams,
+      () => {},
+      abortSignal,
+      mappedLlmHost
+        ? { endpoint: new URL("/api/ai/llm", mappedLlmHost) }
+        : undefined,
+    );
 
   const resultPromise = queueName
     ? runtime.getOrCreateQueue(queueName).enqueue(doWork)

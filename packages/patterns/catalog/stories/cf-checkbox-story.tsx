@@ -4,7 +4,7 @@ import { Controls, SwitchControl } from "../ui/controls/index.ts";
 
 // deno-lint-ignore no-empty-interface
 interface CheckboxStoryInput {}
-interface CheckboxStoryOutput {
+export interface CheckboxStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

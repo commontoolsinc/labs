@@ -7,7 +7,7 @@ import {
 
 // deno-lint-ignore no-empty-interface
 interface RadioStoryInput {}
-interface RadioStoryOutput {
+export interface RadioStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

@@ -87,7 +87,7 @@ interface RecordInput {
   trashedSubPieces?: TrashedSubPieceEntry[] | Default<[]>;
 }
 
-interface RecordOutput {
+export interface RecordOutput {
   title?: string | Default<"">;
   subPieces?: SubPieceEntry[] | Default<[]>;
   trashedSubPieces?: TrashedSubPieceEntry[] | Default<[]>;

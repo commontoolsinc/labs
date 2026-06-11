@@ -299,6 +299,22 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   /**
+   * Record a runtime-learned host hint for a space (site-table v0):
+   * makes a just-learned `space → host` fact effective on the live
+   * runtime. The durable record belongs in the home-space site table;
+   * this is the immediate, in-session half. Returns whether the hint
+   * is in effect (seed wins; an opened space is never re-pointed).
+   */
+  async registerSpaceHost(space: DID, host: string): Promise<boolean> {
+    const res = await this.#conn.request<RequestType.RegisterSpaceHost>({
+      type: RequestType.RegisterSpaceHost,
+      space,
+      host,
+    });
+    return res.value;
+  }
+
+  /**
    * Wait for convergence across EVERY space this worker has opened.
    * Spaceless by design (like idle) — for quiescence checks that don't
    * care about any particular space, e.g. test/debug harnesses.
@@ -515,12 +531,14 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   async uploadBlob(options: {
+    space: DID;
     contentType: string;
     body: Uint8Array;
     suffix?: string;
   }): Promise<UploadBlobResponse> {
     return await this.#conn.request<RequestType.UploadBlob>({
       type: RequestType.UploadBlob,
+      space: options.space,
       contentType: options.contentType,
       body: Array.from(options.body),
       suffix: options.suffix,

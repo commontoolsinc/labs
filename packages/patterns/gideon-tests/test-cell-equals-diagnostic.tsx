@@ -24,7 +24,7 @@ interface Item {
   value: number;
 }
 
-interface DiagInput {
+export interface DiagInput {
   items: Item[] | Default<[]>;
   selectedItem: Item | null | Default<null>;
   log: string[] | Default<[]>;

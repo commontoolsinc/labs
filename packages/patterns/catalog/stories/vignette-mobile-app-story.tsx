@@ -3,7 +3,7 @@ import MobileAppDemo from "../../mobile-app-demo.tsx";
 
 // deno-lint-ignore no-empty-interface
 interface VignetteMobileAppInput {}
-interface VignetteMobileAppOutput {
+export interface VignetteMobileAppOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

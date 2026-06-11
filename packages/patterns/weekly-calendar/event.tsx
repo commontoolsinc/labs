@@ -55,7 +55,7 @@ interface Input {
 }
 
 /** Represents a calendar event with a date, time, and notes. */
-interface Output {
+export interface Output {
   title: string;
   date: string;
   startTime: string;

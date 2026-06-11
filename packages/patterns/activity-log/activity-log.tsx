@@ -41,7 +41,7 @@ interface ActivityLogInput {
 }
 
 /** An #activity-log for recording structured agent events. */
-interface ActivityLogOutput {
+export interface ActivityLogOutput {
   [NAME]: string;
   [UI]: VNode;
   logEvent: unknown;

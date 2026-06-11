@@ -187,7 +187,7 @@ interface PatternInput {
 }
 
 /** Email notes manager for quick notes sent to self. #emailNotes */
-interface PatternOutput {
+export interface PatternOutput {
   notes: Note[];
   noteCount: number;
   previewUI: unknown;

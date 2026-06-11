@@ -291,7 +291,7 @@ interface PatternInput {
 }
 
 /** BAM School Dashboard - At-a-glance view of school events and announcements. #bamSchool */
-interface PatternOutput {
+export interface PatternOutput {
   emails: Email[];
   events: SchoolEvent[];
   urgentEvents: SchoolEvent[];

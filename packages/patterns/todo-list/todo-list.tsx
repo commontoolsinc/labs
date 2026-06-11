@@ -23,7 +23,7 @@ interface TodoListInput {
   items?: Writable<TodoItem[] | Default<[]>>;
 }
 
-interface TodoListOutput {
+export interface TodoListOutput {
   [NAME]: string;
   [UI]: VNode;
   items: TodoItem[];

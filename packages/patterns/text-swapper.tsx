@@ -15,7 +15,7 @@ interface Input {
   rightText: Writable<string | Default<"World">>;
 }
 
-interface Output {
+export interface Output {
   leftText: string;
   rightText: string;
 }

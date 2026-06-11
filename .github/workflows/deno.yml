@@ -786,12 +786,36 @@ jobs:
           cache: false
 
       - name: 🚀 Deploy application to Toolshed (Staging)
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@1530429296e979861824d74fb800013190b5dee0
         with:
           host: ${{ secrets.BASTION_HOST }}
           username: bastion
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
           script: /opt/cf/deploy.sh ${{ vars.DEPLOYMENT_ENVIRONMENT }} ${{ github.sha }}
+
+  # Automatic deployment to rapids during toolshed migration
+  deploy-rapids:
+    name: "Deploy to Rapids (Staging)"
+    if: github.ref == 'refs/heads/main'
+    needs: ["attest-binaries"]
+    runs-on: ubuntu-latest
+    environment: toolshed
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+        with:
+          cache: false
+
+      - name: 🚀 Deploy application to Rapids (Staging)
+        uses: appleboy/ssh-action@1530429296e979861824d74fb800013190b5dee0
+        with:
+          host: ${{ secrets.BASTION_HOST }}
+          username: bastion
+          key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
+          script: /opt/cf/deploy.sh rapids ${{ github.sha }} --skip-clusterduck
 
   # Deploy shell static assets to staging GCS bucket
   deploy-shell-staging:
@@ -855,7 +879,7 @@ jobs:
       - name: 🧩 Run post-deploy Patterns integration tests against Toolshed (Staging)
         id: run_tests
         continue-on-error: true
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@1530429296e979861824d74fb800013190b5dee0
         with:
           host: ${{ secrets.BASTION_HOST }}
           username: bastion
@@ -868,7 +892,7 @@ jobs:
 
       - name: 📥 Retrieve test logs on failure
         if: steps.run_tests.outcome == 'failure'
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@1530429296e979861824d74fb800013190b5dee0
         with:
           host: ${{ secrets.BASTION_HOST }}
           username: bastion

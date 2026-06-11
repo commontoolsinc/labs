@@ -8,7 +8,7 @@ import {
 
 // deno-lint-ignore no-empty-interface
 interface HGroupStoryInput {}
-interface HGroupStoryOutput {
+export interface HGroupStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

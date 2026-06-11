@@ -16,7 +16,7 @@ type SummaryInput = {
   context?: Record<string, any> | Default<Record<string, never>>;
 };
 
-type SummaryOutput = {
+export type SummaryOutput = {
   [NAME]: string;
   [UI]: VNode;
   topic: string;

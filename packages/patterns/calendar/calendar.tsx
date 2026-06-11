@@ -22,7 +22,7 @@ interface CalendarInput {
   events?: Writable<EventPiece[] | Default<[]>>;
 }
 
-interface CalendarOutput {
+export interface CalendarOutput {
   [NAME]: string;
   [UI]: VNode;
   events: EventPiece[];

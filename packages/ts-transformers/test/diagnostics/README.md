@@ -30,8 +30,6 @@ From `packages/ts-transformers/`:
 
 ```sh
 deno run --allow-read --allow-env test/diagnostics/probe-element-param-analyzer.ts > /tmp/probe.tsv
-deno run --allow-read --allow-env test/diagnostics/probe-derive-closure-captures.ts > /tmp/probe.tsv
-deno run --allow-read --allow-env test/diagnostics/probe-derive-callback-captures.ts > /tmp/probe.tsv
 ```
 
 Each prints a header row to stdout, then one data row per finding. A summary
@@ -55,41 +53,12 @@ Used during the element-binding analyzer fix (PR #3550) to scope the bug:
 identified 16 cases the analyzer was silent on across the fixture suite, of
 which PR #3539 covered only 1.
 
-### `probe-derive-closure-captures.ts`
-
-Walks every `.expected.jsx` / `.expected.js` fixture, finds every
-`__cfHelpers.derive(...)` call, and reports any identifiers its callback body
-references via closure capture (not destructured from its parameters, not
-module-scope, not a known runtime helper).
-
-Used during PR #3550 to audit a class of closure-capture correctness bugs in
-expected fixtures: derive callbacks that close over reactive (opaque) values not
-declared in their inputs object. Surfaced 5 bugs across 5 fixtures, all
-confirmed with the transformer area owner.
-
-After PR #3550 lands, the probe still has 4 hits: plain-JS captures
-(`const suffix = "!"`, primitive elements from non-reactive `.map`s, etc.).
-Berni confirmed those are _also_ a real bug class — derive callbacks shouldn't
-close over plain-JS values either; they should be passed in as explicit inputs
-so the callback stays self-contained. Fixing that is a separate follow-up; see
-`probe-derive-callback-captures.ts` for the post-pipeline view.
-
-### `probe-derive-callback-captures.ts`
-
-Runs the full transformer pipeline on every fixture input and walks the
-_emitted_ `__cfHelpers.derive(...)` calls in the output. Reports every free
-identifier in the callback body that isn't covered by the destructured params,
-inner locals, output module scope, or a known runtime helper.
-
-Differs from `probe-derive-closure-captures.ts` in that this one operates on the
-post-pipeline AST (clean symbol resolution; no original-node provenance
-confusion from source-side rewrites) and runs the actual pipeline rather than
-walking pre-baked expected files. Both probes converged on the same 4-fixture
-population for the plain-JS-captures bug class, which is a useful cross-check.
-
-Used during PR #3550 follow-up planning to scope the plain-JS-captures fix: 4
-hits across 3 fixtures, all real instances of the bug. Will be the test
-population for the follow-up wrap-path fix.
+(Two former probes from the PR #3550 derive closure-capture investigations —
+`probe-derive-closure-captures.ts` and `probe-derive-callback-captures.ts` —
+were deleted after the `derive` builder was retired in CT-1643; the pipeline no
+longer emits `__cfHelpers.derive(...)`, so the question they answered is closed.
+Recover them from git history if a similar capture audit is needed for the
+lift-applied form.)
 
 ## When to add a new probe
 

@@ -37,7 +37,7 @@ type Input = {
   allPieces: MentionableCell[];
 };
 
-type Output = {
+export type Output = {
   mentionable: MentionableCell[];
 };
 

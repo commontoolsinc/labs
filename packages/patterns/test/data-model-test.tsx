@@ -45,7 +45,7 @@ interface Input {
   evalTime: Writable<string | Default<"(never)">>;
 }
 
-interface Output {
+export interface Output {
   [NAME]: string;
   [UI]: VNode;
   value: any;

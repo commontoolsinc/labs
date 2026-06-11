@@ -29,23 +29,32 @@ describe("shell blob upload", () => {
     );
 
     const result = await shell.page().evaluate(async () => {
-      const rt = (globalThis as unknown as {
+      const g = globalThis as unknown as {
         commonfabric?: {
           rt?: {
             uploadBlob(options: {
+              space: string;
               contentType: string;
               body: Uint8Array;
               suffix?: string;
             }): Promise<{ id: string; url: string }>;
           };
-          space?: string;
         };
-      }).commonfabric?.rt;
+        app?: { state?: () => { identity?: { did?: () => string } } };
+      };
+      const rt = g.commonfabric?.rt;
       if (!rt) {
         throw new Error("Runtime client was not exposed");
       }
+      // Blob uploads name their space; the home space (= identity DID)
+      // is this test's target.
+      const space = g.app?.state?.()?.identity?.did?.();
+      if (!space) {
+        throw new Error("No identity available to derive the home space");
+      }
 
       const upload = await rt.uploadBlob({
+        space,
         contentType: "image/gif",
         suffix: "gif",
         body: new Uint8Array([

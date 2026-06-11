@@ -28,7 +28,7 @@ type TextTone =
 
 // deno-lint-ignore no-empty-interface
 interface TextStoryInput {}
-interface TextStoryOutput {
+export interface TextStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

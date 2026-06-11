@@ -746,15 +746,21 @@ describe("RuntimeProcessor blob upload IPC", () => {
     };
     // The constructor performs full runtime initialization; this focused unit
     // test calls the handler with the fields it reads directly.
+    const hostForSpaceCalls: string[] = [];
     const processor = {
-      apiUrl: new URL("http://toolshed.test/base"),
-      space: "did:key:test-space",
+      runtime: {
+        hostForSpace: (space: string) => {
+          hostForSpaceCalls.push(space);
+          return new URL("http://toolshed.test/base");
+        },
+      },
     } as unknown as RuntimeProcessor;
 
     try {
       await expect(
         RuntimeProcessor.prototype.handleUploadBlob.call(processor, {
           type: RequestType.UploadBlob,
+          space: "did:key:test-space" as never,
           contentType: "image/png",
           body: [1, 2, 3],
           suffix: "png",
@@ -770,6 +776,8 @@ describe("RuntimeProcessor blob upload IPC", () => {
     expect(requestedUrl).toBe(
       "http://toolshed.test/did:key:test-space/blobs/upload.png",
     );
+    // The host is resolved for the REQUEST's space, not any init space.
+    expect(hostForSpaceCalls).toEqual(["did:key:test-space"]);
     expect(requestedPayload).toEqual({
       type: "image/png",
       body: new FabricBytes(new Uint8Array([1, 2, 3])),
@@ -1770,6 +1778,84 @@ describe("RuntimeProcessor per-space piece contexts", () => {
     } finally {
       await runtime.dispose();
     }
+  });
+
+  it("watchSiteTable registers table entries, isolating bad ones", async () => {
+    const { runtime } = createRuntime();
+    const { siteTableCause, siteTableSchema } = await import(
+      "@commonfabric/home-schemas"
+    );
+    const registered: Array<[string, string]> = [];
+    Object.assign(runtime, {
+      registerSpaceHost: (space: string, host: string) => {
+        registered.push([space, host]);
+        // Malformed hosts throw in the real registry — simulate to
+        // assert per-entry isolation.
+        if (host === "not a url") throw new Error("Invalid host");
+        return host !== "http://refused.test/";
+      },
+    });
+    const userDid = runtime.userIdentityDID;
+    const table = runtime.getCell(
+      userDid,
+      siteTableCause(userDid),
+      siteTableSchema,
+    );
+    const tx = runtime.edit();
+    table.withTx(tx).set([
+      { did: "did:key:z6Mk-table-a", host: "http://host-a.test/" },
+      { did: "not-a-did", host: "http://ignored.test/" },
+      { did: "did:key:z6Mk-table-bad", host: "not a url" },
+      { did: "did:key:z6Mk-table-b", host: "http://refused.test/" },
+      { did: "did:key:z6Mk-table-c", host: "http://host-c.test/" },
+    ]);
+    await tx.commit();
+
+    const processor = { runtime } as unknown as RuntimeProcessor;
+    try {
+      (RuntimeProcessor.prototype as unknown as {
+        watchSiteTable(): void;
+      }).watchSiteTable.call(processor);
+      await runtime.idle();
+      // Microtask drain: sync() resolution + first sink fire.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(registered).toEqual([
+        ["did:key:z6Mk-table-a", "http://host-a.test/"],
+        ["did:key:z6Mk-table-bad", "not a url"],
+        ["did:key:z6Mk-table-b", "http://refused.test/"],
+        ["did:key:z6Mk-table-c", "http://host-c.test/"],
+      ]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("handleRegisterSpaceHost forwards to the runtime and reports the verdict", () => {
+    const calls: Array<[string, string]> = [];
+    const processor = {
+      runtime: {
+        registerSpaceHost: (space: string, host: string) => {
+          calls.push([space, host]);
+          return host === "http://accepted.test/";
+        },
+      },
+    } as unknown as RuntimeProcessor;
+    const handle = (RuntimeProcessor.prototype as unknown as {
+      handleRegisterSpaceHost(
+        r: { type: RequestType; space: string; host: string },
+      ): { value: boolean };
+    }).handleRegisterSpaceHost;
+    expect(handle.call(processor, {
+      type: RequestType.RegisterSpaceHost,
+      space: "did:key:z6Mk-ipc-a",
+      host: "http://accepted.test/",
+    })).toEqual({ value: true });
+    expect(handle.call(processor, {
+      type: RequestType.RegisterSpaceHost,
+      space: "did:key:z6Mk-ipc-b",
+      host: "http://refused.test/",
+    })).toEqual({ value: false });
+    expect(calls.length).toBe(2);
   });
 
   it("managerFor returns only existing contexts (no lazy create)", async () => {

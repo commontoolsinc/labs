@@ -211,7 +211,7 @@ interface Input {
 }
 
 /** Airtable OAuth authentication for Airtable APIs. #airtableAuth */
-interface Output {
+export interface Output {
   auth: AirtableAuth;
   scopes: string[];
   selectedScopes: SelectedScopes;

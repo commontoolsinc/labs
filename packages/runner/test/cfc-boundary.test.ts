@@ -2532,6 +2532,77 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("labels a SAME-TRANSACTION link source from its setup-written schema meta", async () => {
+    // A piece instantiated by this transaction gets its result schema written
+    // at the doc's ["schema"] meta during setup (updateResultSchemaMeta). A
+    // handler that materializes such a piece and links it into a protected
+    // list in ONE commit (profile-home's addElement, CT-1698) leaves the
+    // source with no stored CFC metadata and no pending schema input — the
+    // setup-written schema, read back read-your-writes, is what keeps the
+    // link write from failing closed. The persisted link label must derive
+    // from the SOURCE's own schema: the target-schema child-doc fallback
+    // (previous test) could only produce ["personal-space"] here, so
+    // ["card-space"] proves the setup-schema hatch supplied the label.
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      seed.setCfcEnforcementMode("enforce-explicit");
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-link-setup-schema-target",
+        {
+          type: "object",
+          ifc: { confidentiality: ["personal-space"] },
+        },
+        seed,
+      );
+      target.set({ existing: true });
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const piece = runtime.getCell(
+        signer.did(),
+        "cfc-link-setup-schema-source",
+        undefined,
+        tx,
+      );
+      piece.set({ title: "fresh card" });
+      // What piece setup writes for a fresh instance (updateResultSchemaMeta).
+      piece.setMetaRaw("schema", {
+        type: "object",
+        ifc: { confidentiality: ["card-space"] },
+        properties: { title: { type: "string" } },
+      });
+      const linkedTarget = runtime.getCell(
+        signer.did(),
+        "cfc-link-setup-schema-target",
+        undefined,
+        tx,
+      );
+      linkedTarget.set(piece);
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error).toBeUndefined();
+
+      const verify = runtime.edit();
+      const metadata = readStoredCfcMetadata(verify, {
+        space: signer.did(),
+        id: linkedTarget.getAsNormalizedFullLink().id,
+        scope: "space",
+      });
+      const rootEntry = metadata?.labelMap.entries.find((entry) =>
+        entry.path.length === 0 && entry.origin === "link"
+      );
+      expect(rootEntry?.label.confidentiality).toEqual(["card-space"]);
+      verify.abort?.();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("validates link writes against affected stored schema claims", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
@@ -5071,7 +5142,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       });
       tx.setCfcImplementationIdentity({
         kind: "verified",
-        bundleId: "bundle-hash-1",
+        moduleIdentity: "module-hash-1",
         sourceFile: "/main.tsx",
         bindingPath: ["localFunction"],
       });
@@ -5120,7 +5191,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       });
       tx.setCfcImplementationIdentity({
         kind: "verified",
-        bundleId: "bundle-hash-1",
+        moduleIdentity: "module-hash-1",
         sourceFile: "/trusted.tsx",
         bindingPath: ["commitTrustedProfileSave"],
       });
@@ -5220,7 +5291,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       });
       tx.setCfcImplementationIdentity({
         kind: "verified",
-        bundleId: "bundle-hash-1",
+        moduleIdentity: "module-hash-1",
         sourceFile: "/trusted.tsx",
         bindingPath: ["commitTrustedMessageSend"],
       });
@@ -5473,7 +5544,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       });
       tx.setCfcImplementationIdentity({
         kind: "verified",
-        bundleId: "bundle-hash-1",
+        moduleIdentity: "module-hash-1",
         sourceFile: "/trusted.tsx",
         bindingPath: ["commitTrustedMessageSend"],
       });
@@ -5528,7 +5599,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       });
       tx.setCfcImplementationIdentity({
         kind: "verified",
-        bundleId: "bundle-hash-1",
+        moduleIdentity: "module-hash-1",
         sourceFile: "/trusted.tsx",
         bindingPath: ["commitTrustedMessageSend"],
       });

@@ -85,7 +85,7 @@ type FactCheckHostInput = {
   fakeStatus: Writable<string>;
 };
 
-type DisclosureExampleOutput = {
+export type DisclosureExampleOutput = {
   [NAME]: string;
   [UI]: unknown;
   content: string;

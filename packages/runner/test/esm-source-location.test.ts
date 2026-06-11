@@ -11,9 +11,9 @@ import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementa
 // Regression: under the ESM module-record loader, a verified handler's
 // `implementation.src` must resolve back to its ORIGINAL authored source
 // (`/main.tsx:line:col`), not the raw concatenated-bundle coordinate
-// (`<loadId>.js:line:col`). Otherwise CFC verified-source identity fails closed
-// (`isVerifiedSourceInLoad` === false → kind "unsupported"), which breaks every
-// CFC trusted action. The fix composes a per-load bundle source map
+// (`<evalId>.js:line:col`). Otherwise the CFC provenance src check fails
+// closed (canonical-source mismatch → kind "unsupported"), which breaks every
+// CFC trusted action. The fix composes a per-evaluation bundle source map
 // (see composeBundleSourceMap) and registers it so `mapPosition` can translate
 // the coordinate.
 
@@ -39,8 +39,6 @@ const program: RuntimeProgram = {
 
 interface HandlerIdentityProbe {
   src: string | undefined;
-  verifiedLoadId: string | undefined;
-  isVerifiedSourceInLoad: boolean | undefined;
   kind: string | undefined;
   /**
    * The scheduler's content-addressed implementation hash for this handler,
@@ -67,22 +65,11 @@ function probeHandlerIdentity(
     throw new Error("no verified handler node found in compiled pattern");
   }
   const implementationRef = handlerModule.implementationRef!;
-  const verifiedLoadId = runtime.harness.getVerifiedLoadId?.(implementationRef);
   const fn = runtime.harness.getExecutableFunction?.(
     implementationRef,
   ) as (((...a: unknown[]) => unknown) & { src?: string }) | undefined;
   const src = fn?.src;
-  const match = typeof src === "string" ? /^(.*):(\d+):(\d+)$/.exec(src) : null;
-  const rawPath = match ? match[1] : undefined;
-  const normalizedPath = rawPath
-    ? (rawPath.startsWith("/") ? rawPath : `/${rawPath}`)
-    : undefined;
-  const isVerifiedSourceInLoad = (verifiedLoadId && normalizedPath)
-    ? runtime.harness.isVerifiedSourceInLoad?.(verifiedLoadId, normalizedPath)
-    : undefined;
   const identity = resolvePolicyFacingImplementationIdentity(handlerModule, {
-    verifiedLoadId,
-    harness: runtime.harness,
     implementation: fn as never,
   });
   const implHash = typeof src === "string"
@@ -90,8 +77,6 @@ function probeHandlerIdentity(
     : undefined;
   return {
     src,
-    verifiedLoadId,
-    isVerifiedSourceInLoad,
     kind: identity?.kind,
     implHash,
   };
@@ -126,8 +111,6 @@ describe("ESM loader: verified-source location resolution", () => {
     // form still resolves through CFC verified-source (set + lookup agree after
     // normalization — they both gain the same leading slash).
     expect(r.src).toMatch(/^cf:module\//);
-    expect(r.verifiedLoadId).toBeDefined();
-    expect(r.isVerifiedSourceInLoad).toBe(true);
     expect(r.kind).toBe("verified");
     // The scheduler's content-addressed implementation hash also resolves:
     // `fn.src` reduces to the pure per-module code identity

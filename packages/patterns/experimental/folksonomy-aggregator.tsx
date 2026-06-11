@@ -61,7 +61,7 @@ interface Input {
  *
  * The #folksonomy-aggregator tag is how folksonomy-tags instances discover this charm via wish().
  */
-interface Output {
+export interface Output {
   events: TagEvent[];
   suggestions: Record<string, CommunityTagSuggestion[]>;
   postEvent: Stream<TagEvent>;

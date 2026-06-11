@@ -21,7 +21,7 @@ export type SummaryIndexEntry = {
 
 type Input = Record<string, never>;
 
-type Output = {
+export type Output = {
   entries: SummaryIndexEntry[];
   search: PatternToolResult<{ entries: SummaryIndexEntry[] }>;
 };

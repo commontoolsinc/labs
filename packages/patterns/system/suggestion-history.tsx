@@ -18,7 +18,7 @@ export type SuggestionHistoryEntry = {
 };
 
 type Input = Record<string, never>;
-type Output = {
+export type Output = {
   entries: SuggestionHistoryEntry[];
   search: PatternToolResult<{ entries: SuggestionHistoryEntry[] }>;
   [UI]: VNode;

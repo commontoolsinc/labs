@@ -2,11 +2,7 @@ import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { isPattern, type JSONSchema, type JSONValue } from "./builder/types.ts";
-import {
-  getVerifiedLoadId,
-  noteDerivedCopy,
-  setVerifiedLoadId,
-} from "./builder/pattern-metadata.ts";
+import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
 import { type AnyCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -459,10 +455,6 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
       // the bound copy so a pattern value re-bound here still resolves its
       // `{ identity, symbol }` and stays trusted.
       if (isPattern(binding)) noteDerivedCopy(result, binding);
-      const verifiedLoadId = getVerifiedLoadId(binding);
-      if (verifiedLoadId) {
-        setVerifiedLoadId(result, verifiedLoadId);
-      }
       return result;
     } else return binding;
   }

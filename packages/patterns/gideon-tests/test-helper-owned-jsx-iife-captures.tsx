@@ -23,7 +23,7 @@ interface Input {
   entries: Writable<Entry[] | Default<[]>>;
 }
 
-interface Output {
+export interface Output {
   [UI]: VNode;
 }
 

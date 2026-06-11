@@ -17,7 +17,7 @@ interface CounterInput {
   value?: Writable<number | Default<0>>;
 }
 
-interface CounterOutput {
+export interface CounterOutput {
   [NAME]: string;
   [UI]: VNode;
   value: number;

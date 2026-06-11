@@ -35,7 +35,7 @@ interface ProductIdea {
   price: number;
 }
 
-interface Input {
+export interface Input {
   userInput: string | Default<"a self-watering plant pot">;
 }
 

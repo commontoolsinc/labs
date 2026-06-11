@@ -26,7 +26,7 @@ type AuthoredMessageWithIntegrity<
   { integrity: readonly [AuthorshipIntegrity<IntegrityAuthor>] }
 >;
 
-type AuthorshipChatOutput = {
+export type AuthorshipChatOutput = {
   [NAME]: string;
   [UI]: unknown;
   verifiedAuthor: string;

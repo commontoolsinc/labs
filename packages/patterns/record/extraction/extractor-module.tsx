@@ -95,7 +95,7 @@ interface ExtractorModuleInput {
   errorDetailsExpanded: Writable<boolean | Default<false>>;
 }
 
-interface ExtractorModuleOutput {
+export interface ExtractorModuleOutput {
   sourceSelections?: Record<number, boolean> | Default<Record<number, never>>;
   trashSelections?: Record<number, boolean> | Default<Record<number, never>>;
   selections?: Record<string, boolean> | Default<Record<string, never>>;

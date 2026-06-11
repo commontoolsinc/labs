@@ -4,7 +4,7 @@ interface ControlsInput {
   children?: VNode;
 }
 
-interface ControlsOutput {
+export interface ControlsOutput {
   [NAME]: string;
   [UI]: VNode;
 }

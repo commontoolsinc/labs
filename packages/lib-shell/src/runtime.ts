@@ -306,12 +306,19 @@ export class RuntimeInternals extends EventTarget {
     await this.#client.synced(space);
   }
 
+  /** See RuntimeClient.registerSpaceHost — the site-table v0 hint API. */
+  async registerSpaceHost(space: DID, host: string): Promise<boolean> {
+    this.#check();
+    return await this.#client.registerSpaceHost(space, host);
+  }
+
   async idle(): Promise<void> {
     this.#check();
     await this.#client.idle();
   }
 
   async uploadBlob(options: {
+    space: DID;
     contentType: string;
     body: Uint8Array;
     suffix?: string;

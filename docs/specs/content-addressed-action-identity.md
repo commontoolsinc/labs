@@ -12,19 +12,56 @@ tables, `unsafe_originalPattern` deleted), #4009 (C: `$implRef` dual-write +
 CFC provenance), #4013 (D: pattern-scoped registries deleted, provenance
 recording in `Engine.recordModuleProvenance`).
 
-Phase 3 in progress — **E1 (writer flip)**: writers emit `$implRef` only;
-`implementationRef` and the stringified body are no longer written where the
-reading runtime's engine proves the `$implRef` resolvable through its strong
-content-addressed implementation index
-(`ExecutableRegistry.registerVerifiedImplementation`, the resolution of open
-question 1 — see § Open questions). The legacy `implementationRef` is still
-written for exactly one category: registry-admitted artifacts the `$implRef`
-cannot cover — host-trusted values (`trustedHostFunctionIndex`, whose closures
-cannot survive a stringified round-trip) and dynamic in-action-created
-artifacts (no provenance symbol). Their replacement is the §5 synthetic-identity
-registrar (PR E2). All read paths are retained; `VerifiedProvenance` carries
-the evaluating load's `bundleId` so stored bundleId-only `writeAuthorizedBy`
-claims keep verifying for modules resolved without a `verifiedLoadId`.
+Phase 3 shipped in two PRs:
+
+- **E1 (#4053, writer flip)**: writers emit `$implRef` only;
+  `implementationRef` and the stringified body are no longer written where
+  the reading runtime's engine proves the `$implRef` resolvable through its
+  strong content-addressed implementation index
+  (`ExecutableRegistry.registerVerifiedImplementation`, the resolution of
+  open question 1 — see § Open questions). The legacy `implementationRef` is
+  still written for exactly one category: registry-admitted artifacts the
+  `$implRef` cannot cover — host-trusted values (`trustedHostFunctionIndex`,
+  whose closures cannot survive a stringified round-trip) and dynamic
+  in-action-created artifacts (no provenance symbol). `VerifiedProvenance`
+  carries the evaluating load's `bundleId` so stored bundleId-only
+  `writeAuthorizedBy` claims keep verifying without a `verifiedLoadId`.
+- **E2 (legacy machinery deletion)**: every loadId surface is gone — frame
+  threading, side tables, `seedVerifiedLoadIds`, per-load registry
+  partitions and capture walks, the loadId-scoped `Harness` methods, the
+  CFC `implementationRef`×`verifiedLoadId` arm (provenance is the only
+  source of `kind: "verified"`), `FunctionCache`, and the prewarm walk. New
+  `writeAuthorizedBy` claims are stamped with `moduleIdentity` only. What
+  remains of the legacy machinery is exactly the gate-2 retained read path —
+  `ensureImplementationRef` (+ ordinal shim) feeding ONE string-keyed global
+  executable index behind `getExecutableFunction`, the bundleId-only
+  verification arm for stored pre-#4009 claims, and the `unsafe-host:`
+  minting that rides the same channel (the §5 synthetic-identity registrar is
+  deferred to the cycle that retires this read path; decisions recorded in
+  the implementation plan).
+
+- **E3 (pattern JSON boundary, scoped to dual-write)**: `Pattern.toJSON()`
+  emits the pattern's content-addressed `$patternRef: { identity, symbol }`
+  ALONGSIDE the full graph; internal graph serialization
+  (`serializePatternGraph`, the §7 escape hatch — used by builder-time node
+  serialization and thus the `$opFallback` graphs) stays a bare graph, so the
+  in-memory representation and the eviction fallback can never silently
+  become refs. Readers dual-read: `resolveOpPattern` and llm-dialog's tool
+  invocation (`resolveStoredPattern`) prefer the live canonical pattern by
+  identity and fall back to the carried graph. Refs-ONLY emission was
+  assessed and deferred (see §7 below and the implementation plan's E3
+  gating record): there is no session-lifetime strong index for pattern
+  artifacts — E1's implementation index is function-keyed, javascript
+  modules only — so stored refs resolve solely through the FIFO-bounded
+  artifact index (sync) or `loadPatternByIdentity` (async), neither of which
+  covers the sync list builtins or cross-session llm-dialog reads.
+  Canary: `test/pre-e3-pattern-value-canary.test.ts` pins both stored
+  vintages (bare graph; ref+graph) loading and executing.
+
+Phase 4 (drop the retained read path + the §7 refs-only pattern JSON flip)
+remains open, gated on stored-data evidence or a runtime-version cutoff —
+and, for the pattern-JSON flip, on a session-lifetime pattern artifact index
+(eviction pinning, open question 2).
 
 The design assumes the shipped state after the AMD-loader removal: the ESM
 module-record loader is the only loader, every module has a content-addressed
@@ -336,22 +373,48 @@ but `toJSON` runs when a value is *written to a cell* — after
 - `Pattern.nodes` / `result` / `initial` stay as the in-memory instantiation
   representation only; nothing outside the runner consumes them as JSON.
 
-Known things this trips (each becomes a work item):
+Status (E3, 2026-06-11): shipped as DUAL-WRITE, not refs-only. The boundary
+now emits `$patternRef` alongside the graph; the escape hatch below landed;
+the refs-only flip is deferred to Phase 4. The gating finding: unlike
+javascript functions (E1's session-lifetime
+`verifiedImplementationsByEntryRef`), pattern artifacts have NO strong index —
+a stored `$patternRef` resolves only through the FIFO-bounded
+`addressableByIdentity` (sync) or `loadPatternByIdentity` (async). The
+write-path audit found pattern graphs persist at exactly three cell-write
+sites (pattern values in piece arguments, the list-builtin inputs sentinel,
+nested sub-pattern arguments; no wire/IPC surface carries graphs), and the
+read-path audit found two production consumers of stored graphs: the list
+builtins' `resolveOpPattern` (a sync Action — cannot await a by-identity
+load) and llm-dialog's tool invocation (cross-session: the toolDef pattern's
+module may never re-evaluate in the reading session, and its compiled
+artifact being loadable from the space is not guaranteed for arbitrary
+pattern values). Refs-only emission therefore needs eviction pinning (open
+question 2) plus stored-data evidence first — the same shape as gate 2.
+
+Known things this trips (each was a work item; states recorded inline):
 
 - **`$opFallback`** embeds a full serialized graph *on purpose* (eviction
   resilience). Refs-only `toJSON` would silently turn the fallback into a ref
-  too, defeating it. Either give the fallback an explicit
-  `serializePatternGraph()` escape hatch (internal serializer, not `toJSON`),
-  or drop the fallback and solve eviction pinning first (open question 2 —
-  these two decisions are now coupled).
+  too, defeating it. RESOLVED via the explicit `serializePatternGraph()`
+  escape hatch (json-utils): `toJSONWithLegacyAliases` — the builder-time
+  node serializer the `$opFallback` graphs descend from — routes pattern
+  values through it under an internal-serialization context that suppresses
+  `$patternRef`, making the internal/boundary split structural. Without it,
+  builder calls inside a running action that reference an already-indexed
+  imported pattern would embed refs into `Pattern.nodes`.
 - Anything that JSON-round-trips patterns and expects a graph: json-utils
   round-trip tests, pattern-as-value deserialization in `pattern-binding`,
   debug tooling. Deserialization of a ref requires the module to be loadable
   by identity (in-memory, or storage-backed via the compile cache) — which is
   the whole point, but makes by-identity load the only rehydration path.
+  UNDER DUAL-WRITE: readers prefer the ref (`resolveStoredPattern`) and keep
+  the graph as fallback, so nothing requires by-identity load yet; the
+  remaining graph consumers are pinned by
+  `test/pre-e3-pattern-value-canary.test.ts`.
 - Wire/IPC surfaces that today receive pattern JSON (runtime-client
-  `getPatternSources` is source-based and unaffected; audit any other
-  protocol field carrying serialized patterns).
+  `getPatternSources` is source-based and unaffected; the E3 audit found no
+  other protocol field carrying serialized pattern graphs — IPC carries
+  pattern ids/sources only).
 
 ## Persisted-data compatibility
 

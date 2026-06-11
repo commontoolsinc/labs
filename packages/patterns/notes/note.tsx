@@ -34,7 +34,7 @@ export { NotePiece };
 // ===== Output Type =====
 
 /** Represents a small #note a user took to remember some text. */
-interface NoteOutput extends NotePiece {
+export interface NoteOutput extends NotePiece {
   [NAME]: string;
   [UI]: VNode;
   [FS]: FsProjection;

@@ -8,7 +8,7 @@ import {
 
 // deno-lint-ignore no-empty-interface
 interface ModalStoryInput {}
-interface ModalStoryOutput {
+export interface ModalStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

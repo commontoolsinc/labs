@@ -116,7 +116,7 @@ type Settings = {
 };
 
 /** Gmail email importer for fetching and viewing emails. #gmailEmails */
-interface Output {
+export interface Output {
   [NAME]: string;
   [UI]: VNode;
   /** Array of imported emails */

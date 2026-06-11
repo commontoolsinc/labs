@@ -43,7 +43,7 @@ export interface PhotoModuleInput {
 
 // Output interface with unknown for UI properties to prevent OOM (CT-1148)
 // TypeScript infers deeply nested VNode types without this, causing memory explosion
-interface PhotoModuleOutput {
+export interface PhotoModuleOutput {
   [NAME]: unknown;
   [UI]: unknown;
   settingsUI: unknown;

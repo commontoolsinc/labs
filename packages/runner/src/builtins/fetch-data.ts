@@ -358,8 +358,14 @@ async function startFetch(
   // Body preprocessing (stringify non-string bodies) is handled by the
   // snapshotInputs callback in tryClaimMutex, so options is ready to use.
   try {
+    // Relative URLs resolve against the executing space's host when the
+    // space is host-mapped (federation: one runtime spans hosts). An
+    // unmapped space keeps the pattern environment's api base — which on
+    // some deployments (toolshed) deliberately differs from the runtime's
+    // default memory host, so hostForSpace's fallback is NOT used here.
+    const mappedHost = runtime.mappedHostFor(inputsCell.space);
     const response = await fetch(
-      new URL(url, getPatternEnvironment().apiUrl),
+      new URL(url, mappedHost ?? getPatternEnvironment().apiUrl),
       {
         signal: abortSignal,
         ...options,

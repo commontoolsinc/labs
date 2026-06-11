@@ -56,7 +56,7 @@ interface Input {
   myName?: PerUser<string | Default<"">>;
 }
 
-interface Output {
+export interface Output {
   [NAME]: string;
   [UI]: VNode;
 }

@@ -19,7 +19,7 @@ type Person = {
   };
 };
 
-type PersonListOutput = {
+export type PersonListOutput = {
   [NAME]: string;
   [UI]: VNode;
   people: Person[];

@@ -15,7 +15,7 @@ const increment = handler<unknown, { value: Writable<number> }>((_, state) => {
 interface Input {
   value: number | Default<0>;
 }
-interface Output {
+export interface Output {
   value: number;
   [UI]: VNode;
 }

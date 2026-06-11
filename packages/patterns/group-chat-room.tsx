@@ -71,7 +71,7 @@ interface RoomInput {
   currentSessionId: Writable<string | Default<"">>;
 }
 
-interface RoomOutput {
+export interface RoomOutput {
   myName: string | Default<"">;
 }
 
