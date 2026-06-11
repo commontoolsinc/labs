@@ -2,6 +2,7 @@ import ts from "typescript";
 import { getPropertyNameText } from "@commonfabric/schema-generator/property-name";
 import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";
 import {
+  cloneTypeNodeDeepForEmission,
   createRegisteredTypeLiteral,
   typeToTypeNodeWithRegistry,
 } from "../ast/type-building.ts";
@@ -1264,7 +1265,12 @@ function buildShrunkTypeNodeFromTypeNode(
       if (isUnchangedShrink(members, shrunk)) {
         return node;
       }
-      return shrunk;
+      // The projection reuses declaration member nodes, which may live in a
+      // different source file than the one being emitted. Deep-clone the
+      // result position-free so literal types (e.g. `Default<string, "">`)
+      // print from their own text instead of extracting garbage tokens from
+      // the emit file by position.
+      return cloneTypeNodeDeepForEmission(shrunk, typeRegistry);
     }
     // Could not resolve to concrete members — let the caller fall back.
     return undefined;

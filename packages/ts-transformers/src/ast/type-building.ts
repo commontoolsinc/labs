@@ -590,6 +590,55 @@ export function cloneTypeNode<T extends ts.TypeNode>(typeNode: T): T {
 }
 
 /**
+ * Deep-clones a TypeNode for emission, stripping source positions throughout.
+ *
+ * Declaration members resolved through a TypeReference may live in a different
+ * source file than the one being emitted. The printer extracts literal text
+ * (e.g. the `""` in `Default<string, "">`) by source position from the file it
+ * is currently printing, so reusing those nodes verbatim emits garbage tokens.
+ * A position-free deep clone makes every node synthetic, forcing the printer
+ * to print structurally (literals fall back to their `.text`).
+ *
+ * Pass `typeRegistry` to carry each node's registered Type onto its clone.
+ */
+export function cloneTypeNodeDeepForEmission<T extends ts.TypeNode>(
+  typeNode: T,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): T {
+  const nullContext = (ts as typeof ts & {
+    nullTransformationContext?: ts.TransformationContext;
+  }).nullTransformationContext;
+  if (!nullContext) return typeNode;
+  const cloneShallow = (ts.factory as typeof ts.factory & {
+    cloneNode<TNode extends ts.Node>(node: TNode): TNode;
+  }).cloneNode;
+
+  const visit = <N extends ts.Node>(node: N): N => {
+    // Post-order: children first, so leaf nodes (identifiers, literals,
+    // keywords) get cloned explicitly while composite nodes are recreated by
+    // visitEachChild's update calls when any child changed.
+    let result = ts.visitEachChild(
+      node,
+      (child) => visit(child),
+      nullContext,
+    ) as N;
+    if (result === node) {
+      result = cloneShallow(node);
+    }
+    // update* calls copy the original's text range for source maps; strip it
+    // so the printer treats the node as synthesized everywhere.
+    ts.setTextRange(result, { pos: -1, end: -1 });
+    const registered = typeRegistry?.get(node);
+    if (registered) {
+      typeRegistry!.set(result, registered);
+    }
+    return result;
+  };
+
+  return visit(typeNode);
+}
+
+/**
  * Builds TypeScript type elements from a capture tree structure.
  * Works for both nested properties within a tree node and root-level entries.
  * Recursively builds nested type literals for hierarchical captures.
