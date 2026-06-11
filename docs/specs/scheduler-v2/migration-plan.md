@@ -153,20 +153,19 @@ memory-engine component — coordinate with the memory owners from the start.
 2. Memory engine: create-only precondition on the handling's result cell
    for receipt-gated classes, with a distinct permanent rejection
    (receipt-exists).
-3. Runner: receipt-gated classes materialize the result cell
-   unconditionally (it is the `{ resultFor: cause }` cell a
-   pattern-launching handler already creates — no new document kind); on
-   receipt-exists rejection the client drops the event (lost race — no
-   retry) and emits telemetry. Non-gated classes keep
-   materialize-only-when-launching.
+3. Runner: every handling materializes the result cell unconditionally
+   (default-on for all events — it is the `{ resultFor: cause }` cell a
+   pattern-launching handler already creates; no new document kind and no
+   class machinery); on receipt-exists rejection the client drops the
+   event (lost race — no retry) and emits telemetry.
 4. Single-handler enforcement: replace `queueSchedulerEvent`'s silent
    one-event-per-matching-handler fanout with one handler per stream link
    at registration (dev-mode error on concurrent duplicates; audit
    existing registrations first). Multi-handler dispatch = future opt-in
    feature (handler id would join the result-cell derivation).
-5. Class surface: declare the opt-in (stream/ingress annotation — spec open
-   question 2); default on for webhook ingress and background delivery,
-   off for renderer-local UI events.
+5. Future layering deferred (spec open question 2): per-class refinements,
+   receipt retention/GC, and CFC exactly-once scope alignment land later;
+   E2 ships with no class surface at all.
 
 **Fixtures (red first, per repo practice):**
 
@@ -307,7 +306,7 @@ Coordinate with memory-layer owners (observation rows live in memory v2):
 | A side-writer the transformer's capability analysis missed (write outside the registered surface) | 1 | Dev-mode actual-writes-within-surface assertion (phase 1.4) surfaces declaration gaps; idempotency validator covers the contract side |
 | Parked cross-space follow-up head-blocks the single global lane for a confirmation round trip | E | Accepted (same slowness class as the cross-space write protocol); the agreed per-space lane split confines it when it bites (spec open question 1) |
 | Permanent-vs-retryable rejection taxonomy leaks wrong behavior (a permanent rejection retried, or a conflict dropped) | E | Taxonomy lands first (E0) with focused tests on both retry paths (`events.ts` unshift, `action-run.ts` watch) before lineage/receipts build on it |
-| Receipt write traffic on high-frequency event classes | E | Per-class opt-in with UI-local classes off by default; measure commit volume on enabled classes before widening defaults |
+| Default-on receipts add one create per handling; high-frequency programmatic event streams could bite | E | Measure commit volume after E2; per-class layering and retention/GC (spec open question 2) are the escape hatch |
 | Single-handler enforcement breaks a stream silently relying on multi-match fanout | E | Registration audit before enforcement; dev-mode error first, prod telemetry; multi-handler returns later as an explicit opt-in feature |
 | Event-causal handler-frame ids change id derivation for documents created in handlers | E | Uniqueness per gesture is preserved (event ids unique per send); fixture sweep over handler-heavy patterns before the cause swap |
 | Conditional-effect parity (effects running more often than v1's watermark filter allowed) | 2–3 | Run-count parity fixtures on the v1 conditional-effect tests; the §7.2 closure-ordering must land with the watermark deletion, not after |

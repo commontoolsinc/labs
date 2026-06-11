@@ -672,8 +672,8 @@ outbox would serialize every handler→event hop behind a server round trip
 resend chains that are common in practice. A "pure forwarder" fast path
 (dispatch immediately iff the handler made no writes and launched nothing)
 avoids that but bifurcates dispatch semantics on handler internals, and the
-class becomes nearly empty once receipts exist, since every receipt-gated
-handling transaction writes at least the receipt. The outbox remains the
+class becomes empty once receipts exist, since every handling transaction
+writes at least the receipt (default-on). The outbox remains the
 right tool for what it was built for: external side effects that *want*
 server confirmation.
 
@@ -704,14 +704,17 @@ handler per stream link instead.
    are unique per send, retries of the same event reuse the same ids
    instead of minting fresh ones per attempt, and duplicate handlings
    elsewhere derive the same ids — colliding exactly where intended.
-2. For receipt-gated event classes (declared on the stream/ingress;
-   webhook-ingress, background-delivery, and cross-runtime classes default
-   on; renderer-local UI events default off — they cannot race and keep
-   today's materialize-only-when-launching behavior), the handling
-   transaction creates the result cell **unconditionally**, under a
-   create-only commit precondition. If it already exists, the commit fails
-   with a *permanent* rejection: the client lost the race and must **not**
-   retry — the event was handled elsewhere.
+2. **Default-on for all events** (no class machinery for now): every
+   handling transaction creates its result cell **unconditionally**, under
+   a create-only commit precondition. If it already exists, the commit
+   fails with a *permanent* rejection: the client lost the race and must
+   **not** retry — the event was handled elsewhere. Renderer-local UI
+   events cannot race, so for them the precondition is inert and the cost
+   is one small create per handling — accepted for uniformity (UI text
+   input flows through two-way cell binding, not events, so the volume is
+   gesture-scale). Layering — per-class refinements, receipt retention,
+   alignment with the CFC exactly-once scope — is deliberately deferred
+   (open question 2).
 3. Retryable conflicts on other documents re-run the handler as usual; the
    re-run derives the same result-cell id from the same event id, so a
    handler's own retries never collide with themselves (the losing attempt
@@ -910,12 +913,12 @@ are cancelled client-side or permanently rejected at commit, and are never
 retried. A retried parent emits fresh launches under its new attempt. See
 §7.6.
 
-**I11 — Receipt-gated events are handled at most once.** For event classes
-with receipts enabled, at most one handling transaction system-wide ever
-commits for a given event id: the create of the handling's result cell
-(whose id is causal to the event id) is the witness. A receipt-exists
-rejection is permanent: the losing client does not retry. Each event has
-exactly one handler. See §7.6.
+**I11 — Events are handled at most once.** At most one handling
+transaction system-wide ever commits for a given event id: the create of
+the handling's result cell (whose id is causal to the event id) is the
+witness; receipts are on for all events. A receipt-exists rejection is
+permanent: the losing client does not retry. Each event has exactly one
+handler. See §7.6.
 
 ---
 
@@ -1050,7 +1053,7 @@ Summary table; the full per-mechanism walkthrough with file references is in
    (receipt doc, id causal to the event id, create-precondition, lost-race
    = permanent rejection, no retry) is specified alongside lineage because
    the two share identity, precondition, and rejection machinery (§7.6,
-   I11). Per-event-class opt-in; renderer-local UI events off by default.
+   I11). Default-on for all events per decision 14.
 9. **Zombie pieces on exhausted retries.** Accepted (bounded, rare,
    pre-existing); no reaper. Implementation leaves a watch-this comment at
    the retry-exhaustion sites.
@@ -1082,6 +1085,11 @@ Summary table; the full per-mechanism walkthrough with file references is in
     result cell and all handler-frame-minted ids event-causal (retries
     reuse ids; duplicates collide; per-gesture uniqueness preserved since
     event ids are unique per send).
+14. **Receipts default-on for everything.** Every event handling creates
+    its result cell under the create-only precondition — no class
+    machinery for now. UI-local events cannot race (the precondition is
+    inert for them; the cost is one small create per handling). Future
+    layering stays open as open question 2.
 
 ### Open
 
@@ -1092,10 +1100,9 @@ Summary table; the full per-mechanism walkthrough with file references is in
    handler-closure-overlap) make ordering data-dependent and are deferred
    until real contention data exists. Pairing question when lanes split:
    the consistency gate also becomes per-lane.
-2. **Receipt class declaration surface.** With receipts unified into the
-   result cell (resolved decision 13), the cost concern is mostly gone —
-   what remains is purely where the create-precondition opt-in is declared
-   (stream schema annotation, ingress configuration, or handler
-   registration) and which classes default on (webhook ingress and
-   background delivery clearly; cross-runtime UI streams less clear).
-   Needs alignment with the CFC spec's exactly-once requirement scope.
+2. **Receipt layering (future, CFC alignment).** Receipts are default-on
+   everywhere (decision 14); this question holds the later layers: whether
+   the CFC spec's exactly-once scope introduces classes with
+   weaker/stronger guarantees, retention/GC policy for receipt cells, and
+   whether any class should ever opt out (high-frequency programmatic
+   event streams being the plausible candidate).
