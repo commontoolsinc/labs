@@ -164,4 +164,82 @@ describe("mayContainCfcRenderBoundary", () => {
     }
     expect(mayContainCfcRenderBoundary(tree)).toBe(true);
   });
+
+  it("treats an object with a throwing getter as may-contain", () => {
+    const hostile = {
+      get boom(): unknown {
+        throw new Error("hostile getter");
+      },
+    };
+    expect(mayContainCfcRenderBoundary(hostile)).toBe(true);
+    // Same when nested inside an otherwise benign tree.
+    expect(
+      mayContainCfcRenderBoundary(vnode("div", { content: hostile })),
+    ).toBe(true);
+  });
+
+  it("treats a throwing `name` getter as may-contain", () => {
+    const hostile = {
+      get name(): unknown {
+        throw new Error("hostile name getter");
+      },
+    };
+    expect(mayContainCfcRenderBoundary(hostile)).toBe(true);
+  });
+
+  it("treats proxies with throwing traps as may-contain", () => {
+    const throwingOwnKeys = new Proxy({}, {
+      ownKeys() {
+        throw new Error("hostile ownKeys");
+      },
+    });
+    expect(mayContainCfcRenderBoundary(throwingOwnKeys)).toBe(true);
+
+    const throwingGet = new Proxy({ child: "x" }, {
+      get() {
+        throw new Error("hostile get");
+      },
+    });
+    expect(mayContainCfcRenderBoundary(throwingGet)).toBe(true);
+
+    const throwingGetPrototypeOf = new Proxy({}, {
+      getPrototypeOf() {
+        // Trips the `instanceof CellHandle` brand check.
+        throw new Error("hostile getPrototypeOf");
+      },
+    });
+    expect(mayContainCfcRenderBoundary(throwingGetPrototypeOf)).toBe(true);
+
+    // And nested inside an otherwise benign tree.
+    expect(
+      mayContainCfcRenderBoundary(vnode("div", {}, [throwingOwnKeys])),
+    ).toBe(true);
+  });
+
+  it("treats a revoked proxy as may-contain", () => {
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    expect(mayContainCfcRenderBoundary(proxy)).toBe(true);
+  });
+
+  it("still scans normally around hostile siblings", () => {
+    const hostile = {
+      get boom(): unknown {
+        throw new Error("hostile getter");
+      },
+    };
+    // The guard is scoped per object: a hostile sibling does not stop a real
+    // boundary elsewhere in the tree from being found...
+    expect(
+      mayContainCfcRenderBoundary(
+        vnode("div", {}, [hostile, vnode("cf-cfc-render-boundary")]),
+      ),
+    ).toBe(true);
+    // ...and a fully benign tree is still certified boundary-free.
+    expect(
+      mayContainCfcRenderBoundary(
+        vnode("div", { id: "x" }, [vnode("span", {}, ["plain"])]),
+      ),
+    ).toBe(false);
+  });
 });

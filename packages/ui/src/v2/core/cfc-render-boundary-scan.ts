@@ -45,31 +45,49 @@ function scan(value: unknown, visited: Set<object>, depth: number): boolean {
   if (visited.has(value)) return false;
   visited.add(value);
 
-  if (isCellHandle(value)) {
-    let resolved: unknown;
-    try {
+  // Every direct inspection of `value` below is guarded: throwing getters,
+  // proxies with throwing traps, and revoked proxies make the value
+  // uninspectable, and an uninspectable value cannot be certified
+  // boundary-free (fail closed). Each guard covers only this object's own
+  // accesses — recursion happens outside it, so a boundary found deeper
+  // returns `true` the normal way and a genuine bug in the scan itself is
+  // not swallowed.
+
+  let isCell = false;
+  let resolved: unknown;
+  try {
+    // `instanceof` inside `isCellHandle` can throw via a hostile
+    // `getPrototypeOf` trap or a revoked proxy.
+    if (isCellHandle(value)) {
+      isCell = true;
       resolved = value.get();
-    } catch {
-      // The renderer would still try to render this cell; refuse to certify
-      // what we cannot inspect.
-      return true;
     }
-    return scan(resolved, visited, depth + 1);
+  } catch {
+    // The renderer would still try to render this value; refuse to certify
+    // what we cannot inspect.
+    return true;
+  }
+  if (isCell) return scan(resolved, visited, depth + 1);
+
+  // Materialize this object's own values up front (guarded), then recurse.
+  let entries: unknown[];
+  try {
+    if (Array.isArray(value)) {
+      entries = Array.from(value);
+    } else {
+      const record = value as Record<string, unknown>;
+      // Flag on the node name alone (no `type === "vnode"` requirement): the
+      // legacy renderer is lenient about shape, and a false positive only
+      // costs the fancy preview.
+      if (record.name === CFC_RENDER_BOUNDARY_TAG) return true;
+
+      // Generic enumeration covers `children`, `props` values, and `$UI`
+      // chains.
+      entries = Object.keys(record).map((key) => record[key]);
+    }
+  } catch {
+    return true;
   }
 
-  if (Array.isArray(value)) {
-    return value.some((entry) => scan(entry, visited, depth + 1));
-  }
-
-  const record = value as Record<string, unknown>;
-  // Flag on the node name alone (no `type === "vnode"` requirement): the
-  // legacy renderer is lenient about shape, and a false positive only costs
-  // the fancy preview.
-  if (record.name === CFC_RENDER_BOUNDARY_TAG) return true;
-
-  // Generic recursion covers `children`, `props` values, and `$UI` chains.
-  for (const key of Object.keys(record)) {
-    if (scan(record[key], visited, depth + 1)) return true;
-  }
-  return false;
+  return entries.some((entry) => scan(entry, visited, depth + 1));
 }
