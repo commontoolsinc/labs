@@ -265,6 +265,14 @@ BEFORE C2 and assert it still loads (legacy-read canary, kept until PR E).
 
 ## PR D — delete pattern-scoped registries + host/test registrar
 
+Status: split. D1 — items 1 + 3 (registry deletion + regression guard,
+`multi-instance-resolution.test.ts`) — landed in #4013, which also moved CFC
+provenance recording from `PatternManager.indexArtifact` to
+`Engine.evaluateGraph` / `recordModuleProvenance` so it covers loads that
+bypass `PatternManager.compilePattern`. D2 — item 2 (the host registrar) —
+has NOT landed: `unsafe-host:` counter refs + `trustedHostFunctionIndex` are
+still live in `harness/executable-registry.ts`.
+
 1. Delete `verifiedPatternFunctions`, `verifiedPatternLoadIds`,
    `associatePattern` (registry + `Harness` + engine passthrough +
    `pattern-manager.ts associateVerifiedFunctions` caller), and the
@@ -287,8 +295,9 @@ runtimes exercise repeated loads of identical programs).
 
 ## PR E — the flip (gated; not scheduled yet)
 
-Gate: B–D soaked on main; stored-data aging assessed (graphs rewrite on piece
-re-instantiation, so legacy refs age out; sample production spaces if
+Gate: B–D soaked on main — D is split, so this means D1 (#4013) soaked AND
+the D2 host registrar landed; stored-data aging assessed (graphs rewrite on
+piece re-instantiation, so legacy refs age out; sample production spaces if
 available).
 
 1. Writers stop emitting `implementationRef` and the stringified
