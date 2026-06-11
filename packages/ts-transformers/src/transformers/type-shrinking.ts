@@ -698,6 +698,7 @@ const CELL_LIKE_TYPE_NODE_NAMES = spellingsWhere({
   Writable: true,
   OpaqueCell: true,
   OpaqueRef: true,
+  Reactive: true,
   ComparableCell: true,
   ReadonlyCell: true,
   WriteonlyCell: true,

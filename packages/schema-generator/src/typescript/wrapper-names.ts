@@ -27,6 +27,7 @@ export type WrapperSpelling =
   | "Stream"
   | "SqliteDb"
   | "OpaqueRef"
+  | "Reactive"
   | "OpaqueRefMethods"
   | "CellTypeConstructor"
   | "ScopedCellTypeConstructor";
@@ -48,6 +49,9 @@ export const WRAPPER_SPELLING_TO_KIND = {
   SqliteDb: "SqliteDb",
   // Deprecation intended — see the note on CellWrapperKind in cell-brand.ts.
   OpaqueRef: "OpaqueRef",
+  // Successor spelling for OpaqueRef (api will alias OpaqueRef = Reactive);
+  // classified identically everywhere until OpaqueRef is removed.
+  Reactive: "OpaqueRef",
   // Internal methods-owner interface behind OpaqueRef, not a type reference.
   OpaqueRefMethods: undefined,
   // The interface typing the `Cell` constructor/namespace value (api/index.ts).

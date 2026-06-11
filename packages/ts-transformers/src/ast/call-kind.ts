@@ -63,6 +63,8 @@ const ARRAY_OWNER_NAMES = new Set([
 const OPAQUE_REF_OWNER_NAMES = spellingsWhere({
   OpaqueRefMethods: true,
   OpaqueRef: true,
+  // Identity alias — can never own method declarations; row matches OpaqueRef.
+  Reactive: true,
   Cell: false,
   Writable: false,
   ReadonlyCell: false,
@@ -88,6 +90,7 @@ const CELL_LIKE_CLASSES = spellingsWhere({
   ScopedCellTypeConstructor: true,
   SqliteDb: false,
   OpaqueRef: false, // owner detection handled via OPAQUE_REF_OWNER_NAMES
+  Reactive: false, // same as OpaqueRef
   OpaqueRefMethods: false,
 });
 
