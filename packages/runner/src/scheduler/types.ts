@@ -44,6 +44,15 @@ export type EventHandler =
       tx: IExtendedStorageTransaction,
       event: any,
     ) => void;
+    /**
+     * Optional callback to ensure the handler's input docs are locally
+     * available before the handler body runs. A handler reads its asCell
+     * inputs (e.g. a SqliteDb handle) synchronously from the local replica;
+     * the scheduler awaits this before dispatching the event so those reads
+     * don't race the doc-carrying storage responses. The event is passed so
+     * inputs reachable only through the event can be covered too.
+     */
+    presyncInputs?: (event: any) => Promise<void>;
   };
 export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
 

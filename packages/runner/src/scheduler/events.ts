@@ -426,6 +426,21 @@ export async function dispatchQueuedEvent(state: {
   });
   state.eventQueue.shift();
 
+  // Ensure the handler's input docs are locally available before the body
+  // runs (see EventHandler.presyncInputs). Fail open: a presync error should
+  // surface as the handler's own read failure, not silently drop the event.
+  if (typeof handler.presyncInputs === "function") {
+    try {
+      await handler.presyncInputs(eventValue);
+    } catch (error) {
+      logger.warn(
+        "scheduler",
+        "handler input presync failed; dispatching anyway",
+        { error, handlerId },
+      );
+    }
+  }
+
   const tx = state.runtime.edit();
   tx.tx.immediate = true;
   const actionId = state.getActionId(action);

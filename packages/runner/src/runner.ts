@@ -3131,11 +3131,65 @@ export class Runner {
       setRunnableName(handler, `handler:${name}`, { setSrc: true });
     }
 
+    // Ensure the handler's input docs are locally available before the body
+    // runs: materialize the argument the same way the handler will (asCell
+    // fields surface as Cells WITHOUT reading their backing docs), then await
+    // sync() on each collected Cell. The scheduler awaits this before
+    // dispatching the event. Without it, a synchronous in-handler read of an
+    // asCell input (e.g. SqliteDb.exec reading the handle doc) races the
+    // doc-carrying storage response on a cold replica — piece-start sync
+    // (syncCellsForRunningPattern) covers node binding docs, not the docs
+    // behind link VALUES like a builtin's result handle. Steady-state this is
+    // ~free: covered selectors resolve without a server round trip.
+    const presyncInputs = module.argumentSchema !== undefined
+      ? async (event: any): Promise<void> => {
+        const eventInputs = {
+          ...(inputs as Record<string, any>),
+          $event: event,
+        };
+        const inputsCell = this.runtime.getImmutableCell(
+          processCell.space,
+          eventInputs,
+          undefined,
+        );
+        const argument = inputsCell.asSchema(module.argumentSchema!).get();
+        const promises: Promise<unknown>[] = [];
+        const seen = new Set<unknown>();
+        const collect = (value: unknown, depth: number): void => {
+          if (depth > 16) return;
+          if (isCell(value)) {
+            const maybePromise = value.sync();
+            if (maybePromise instanceof Promise) promises.push(maybePromise);
+            return;
+          }
+          // NOTE: materialized records all carry the back-to-cell symbol, so
+          // there is no cheap way to tell a lazy query-result proxy from an
+          // annotated plain object — descend both. Property access on a proxy
+          // is an ambient local read (it may kick off, but never await, a
+          // sync); guard each access so one lazy read failing doesn't abort
+          // the rest of the presync.
+          if (!isRecord(value)) return;
+          if (seen.has(value)) return;
+          seen.add(value);
+          for (const key of Object.keys(value)) {
+            try {
+              collect((value as Record<string, unknown>)[key], depth + 1);
+            } catch {
+              // A lazy read through a not-yet-synced link may throw; skip.
+            }
+          }
+        };
+        collect(argument, 0);
+        await Promise.all(promises);
+      }
+      : undefined;
+
     const wrappedHandler = Object.assign(handler, {
       reads,
       writes,
       module,
       pattern,
+      ...(presyncInputs !== undefined && { presyncInputs }),
     });
 
     const schedulerReads = this.collectArgumentSchedulerReadLinks(
