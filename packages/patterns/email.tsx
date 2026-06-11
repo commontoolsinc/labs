@@ -55,9 +55,8 @@ export const EmailModule = pattern<EmailModuleInput, EmailModuleInput>(
         () => `${MODULE_METADATA.icon} ${label}: ${displayText}`,
       ),
       [UI]: (
-        <cf-vstack style={{ gap: "12px" }}>
-          <cf-vstack style={{ gap: "4px" }}>
-            <label style={{ fontSize: "12px", color: "#6b7280" }}>Label</label>
+        <cf-vstack gap="3">
+          <cf-field label="Label">
             <cf-autocomplete
               $value={label}
               items={labelItems}
@@ -65,15 +64,14 @@ export const EmailModule = pattern<EmailModuleInput, EmailModuleInput>(
               allowCustom
               style={{ width: "100%" }}
             />
-          </cf-vstack>
-          <cf-vstack style={{ gap: "4px" }}>
-            <label style={{ fontSize: "12px", color: "#6b7280" }}>Email</label>
+          </cf-field>
+          <cf-field label="Email">
             <cf-input
               type="email"
               $value={address}
               placeholder="email@example.com"
             />
-          </cf-vstack>
+          </cf-field>
         </cf-vstack>
       ),
       label,

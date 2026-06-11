@@ -1,6 +1,6 @@
 # Reusable Handlers
 
-Use `handler()` when you need to define event-handling logic once and bind it to different state at multiple call sites. For most cases, prefer [`action()`](./action.md) which is simpler and closes over pattern state directly.
+Use `handler()` when you need to define event-handling logic once and bind it to different state at multiple call sites. **Default to [`action()`](./action.md)** — see that doc for the full decision guide.
 
 ## When to Use `handler()`
 
@@ -103,7 +103,11 @@ instead of hiding it in module-scoped mutable variables.
 
 ## Exporting Handlers as Streams
 
-Bound handlers become `Stream<T>` and can be exported for other patterns to call:
+Handlers exposed in Output interfaces must be typed as `Stream<T>` — a
+write-only channel that other pieces can trigger via `.send()` when linked.
+Don't try to create streams directly: a bound handler **is** a
+`Stream<EventType>`. Binding state to a module-scope handler produces the
+stream, which you export in the return object:
 
 ```tsx
 import { handler, pattern, Stream, Writable, UI } from "commonfabric";
@@ -125,31 +129,19 @@ export default pattern<{}, Output>(({ items }) => ({
 
 Other patterns can then link to this pattern and call `linkedPattern.addItem.send({ title: "New" })`.
 
-## Handlers with Event Data
+## Event Data and Void Handlers
 
-The first parameter receives data passed to `.send()`:
+The first type parameter is the event payload passed to `.send()`; use `void`
+when the handler needs no event data:
 
 ```typescript
-const addItem = handler<{ title: string }, { items: Writable<Item[]> }>(
-  ({ title }, { items }) => {
-    items.push({ title, done: false });
-  }
-);
-
-// Call with event data
+// With event data
 addItem({ items }).send({ title: "My Item" });
-```
 
-## Void Handlers
-
-For handlers that don't need event data, use `void`:
-
-```typescript
+// Void handler - call .send() without arguments
 const clearAll = handler<void, { items: Writable<Item[]> }>(
   (_, { items }) => items.set([])
 );
-
-// Call without arguments
 clearAll({ items }).send();
 ```
 
@@ -172,12 +164,4 @@ See [Testing Handlers via CLI](../workflows/handlers-cli-testing.md) for the ful
 
 ## Summary
 
-| Feature | `action()` | `handler()` |
-|---------|------------|-------------|
-| Defined | Inside pattern | Module scope |
-| State access | Closure | Explicit binding |
-| Reusable with different state | No | Yes |
-| Returns Stream | Yes | Yes |
-| Simpler syntax | Yes | No |
-
-Both `action()` and `handler()` return `Stream<T>` and can be exported in the Output type. **Default to `action()`** - only use `handler()` when you need to reuse the same logic with different state bindings.
+**Default to `action()`** — only use `handler()` when you need to reuse the same logic with different state bindings or export it for other patterns. See [Handling Events](./action.md) for the decision table.

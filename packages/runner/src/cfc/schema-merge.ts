@@ -14,6 +14,10 @@ const IFC_KEYS = [
   "exactCopyOf",
   "projection",
   "collection",
+  // Reserved legacy key: no longer minted (the list builtins' per-element
+  // transactions make pointwise precision structural) and consumed by
+  // nothing, but already-persisted link schemas embed it, so merging must
+  // keep tolerating it.
   "flowPrecisionClaim",
   "uiContract",
 ] as const;
@@ -51,6 +55,71 @@ const mergeArraySet = (
     }
   }
   return result;
+};
+
+type WriterIdentityClaim = {
+  __ctWriterIdentityOf: Record<string, unknown>;
+};
+
+const isWriterIdentityClaim = (value: unknown): value is WriterIdentityClaim =>
+  isRecord(value) && isRecord(value.__ctWriterIdentityOf);
+
+// The per-input provenance fields a verified write stamps onto a
+// writer-identity claim (new claims carry BOTH — see
+// implementation-identity.ts `resolveProvenanceImplementationIdentity`). The
+// BINDING (file + path) is what the claim means; these fields only record
+// which verified load produced the input.
+const WRITER_CLAIM_STAMP_KEYS = ["bundleId", "moduleIdentity"] as const;
+
+const writerClaimIsStamped = (identity: Record<string, unknown>): boolean =>
+  WRITER_CLAIM_STAMP_KEYS.some((key) => identity[key] !== undefined);
+
+const writerClaimWithoutStamp = (
+  identity: Record<string, unknown>,
+): Record<string, unknown> => {
+  const rest = { ...identity };
+  for (const key of WRITER_CLAIM_STAMP_KEYS) delete rest[key];
+  return rest;
+};
+
+/**
+ * Reconcile two `writeAuthorizedBy` writer-identity claims that differ only
+ * by the presence of the provenance stamp (`bundleId`/`moduleIdentity` — one
+ * side recorded under a verified identity, the other without one). Returns
+ * the stamped claim, or `undefined` when the claims genuinely conflict
+ * (different bindings, or two different stamps).
+ */
+const reconcileWriterClaimStamp = (
+  existing: unknown,
+  candidate: unknown,
+): unknown | undefined => {
+  if (!isWriterIdentityClaim(existing) || !isWriterIdentityClaim(candidate)) {
+    return undefined;
+  }
+  const existingIdentity = existing.__ctWriterIdentityOf;
+  const candidateIdentity = candidate.__ctWriterIdentityOf;
+  const existingStamped = writerClaimIsStamped(existingIdentity);
+  const candidateStamped = writerClaimIsStamped(candidateIdentity);
+  // Exactly one side stamped — otherwise deepEqual already decided (equal
+  // stamps) or this is a genuine conflict (two different stamps).
+  if (existingStamped === candidateStamped) {
+    return undefined;
+  }
+  if (
+    !deepEqual(
+      {
+        ...existing,
+        __ctWriterIdentityOf: writerClaimWithoutStamp(existingIdentity),
+      },
+      {
+        ...candidate,
+        __ctWriterIdentityOf: writerClaimWithoutStamp(candidateIdentity),
+      },
+    )
+  ) {
+    return undefined;
+  }
+  return existingStamped ? existing : candidate;
 };
 
 const mergeSetLikeIfcArray = (
@@ -92,6 +161,19 @@ const mergeSetLikeIfcArray = (
         !candidate.every((entry) => typeof entry === "string")
       ) {
         if (!deepEqual(existing, candidate)) {
+          // One transaction can record the same protected field through a
+          // schema input whose `writeAuthorizedBy` claim was rebound with the
+          // authoring identity's provenance stamp and one recorded without an
+          // identity (unstamped). The BINDING (file + path) is what the claim
+          // means; the stamp is provenance added per input — keep the stamped
+          // claim. Two DIFFERENT stamps (or different bindings) still
+          // conflict.
+          if (key === "writeAuthorizedBy") {
+            const reconciled = reconcileWriterClaimStamp(existing, candidate);
+            if (reconciled !== undefined) {
+              return reconciled;
+            }
+          }
           throw new Error(`${key} must remain stable at ${path || "/"}`);
         }
         return existing;

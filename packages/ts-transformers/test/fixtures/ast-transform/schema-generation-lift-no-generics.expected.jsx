@@ -21,7 +21,9 @@ type LiftResult = {
 // Verifies: lift() with no generic type args infers schemas from inline param and return type
 //   lift((args: LiftArgs): LiftResult => ...) → lift(inputSchema, outputSchema, fn)
 // Context: Types come from function parameter and return type annotations, not generic args
-export const doubleValue = lift({
+export const doubleValue = lift((args: LiftArgs): LiftResult => ({
+    doubled: args.value * 2,
+}), {
     type: "object",
     properties: {
         value: {
@@ -37,9 +39,7 @@ export const doubleValue = lift({
         }
     },
     required: ["doubled"]
-} as const satisfies __cfHelpers.JSONSchema, (args: LiftArgs): LiftResult => ({
-    doubled: args.value * 2,
-}));
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

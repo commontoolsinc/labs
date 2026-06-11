@@ -26,7 +26,7 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { outputSpotFromBinding } from "./scope-policy.ts";
-import { trustedFlowPrecisionSchemaForBuiltin } from "../cfc/flow-precision.ts";
+import { listResultSchema } from "./list-result-schema.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import {
@@ -120,12 +120,7 @@ export function map(
     const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
 
     if (!result || result.getAsNormalizedFullLink().scope !== listScope) {
-      const resultSchema = trustedFlowPrecisionSchemaForBuiltin(
-        tx.getCfcState().implementationIdentity,
-        "map",
-        opPattern.resultSchema,
-        argumentUsage,
-      );
+      const resultSchema = listResultSchema(opPattern.resultSchema);
       // CT-1623: identify the result container by the reserved output spot —
       // the fully-resolved write-redirect target the runner supplies as the
       // `outputBinding`. It is a stable, position-derived, program-independent

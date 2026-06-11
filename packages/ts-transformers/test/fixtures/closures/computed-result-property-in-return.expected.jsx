@@ -24,7 +24,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: string[];
     };
-}, string>({
+}, string>(({ state }) => state.items.join(", "), {
     type: "object",
     properties: {
         state: {
@@ -43,12 +43,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.join(", "));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     summary: {
         length: number;
     };
-}, number>({
+}, number>(({ summary }) => summary.length, {
     type: "object",
     properties: {
         summary: {
@@ -64,7 +64,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["summary"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ summary }) => summary.length);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-result-property-in-return
 // Verifies: .length on a computed() string result is captured via .key("length") in a subsequent lift-applied computation
 //   computed(() => summary.length) → lift(({ summary }) => summary.length)({ summary: { length: summary.key("length") } })

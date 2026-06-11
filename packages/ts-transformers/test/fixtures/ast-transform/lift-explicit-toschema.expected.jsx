@@ -15,9 +15,12 @@ interface CharmEntry {
     id: string;
     name: string;
 }
-// Test: Explicit toSchema with undefined result schema
-// This overload pattern: lift(toSchema<T>(), undefined, fn)
-const logCharmsList = lift({
+// Test: Explicit toSchema, function-first order.
+// This overload pattern: lift(fn, toSchema<T>())  (result schema omitted)
+const logCharmsList = lift(({ charmsList }) => {
+    console.log("logCharmsList: ", charmsList.get());
+    return charmsList;
+}, {
     type: "object",
     properties: {
         charmsList: {
@@ -25,7 +28,7 @@ const logCharmsList = lift({
             items: {
                 $ref: "#/$defs/CharmEntry"
             },
-            asCell: ["readonly"]
+            asCell: ["cell"]
         }
     },
     required: ["charmsList"],
@@ -43,25 +46,26 @@ const logCharmsList = lift({
             required: ["id", "name"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, undefined, ({ charmsList }) => {
-    console.log("logCharmsList: ", charmsList.get());
-    return charmsList;
-});
-const getStatus = lift({
+} as const satisfies __cfHelpers.JSONSchema);
+const getStatus = lift(({ status }) => status, {
     type: "object",
     properties: {
         status: {
             "enum": ["open", "closed"]
+        },
+        ignored: {
+            type: "string",
+            "enum": ["draft"]
         }
     },
-    required: ["status"],
+    required: ["status", "ignored"],
     description: "Status input"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ status }) => status);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: lift-explicit-toschema
 // Verifies: lift() with explicit toSchema<T>() is replaced by the generated JSON schema
-//   lift(toSchema<{ charmsList: Cell<CharmEntry[]> }>(), undefined, fn) → lift(generatedSchema, undefined, fn)
+//   lift(fn, toSchema<{ charmsList: Cell<CharmEntry[]> }>()) → lift(fn, generatedSchema)
 // Context: The toSchema() call is compiled away and replaced with the actual JSON schema object
 export default __cfHelpers.__cf_data({ logCharmsList, getStatus });
 // @ts-ignore: Internals

@@ -47,10 +47,11 @@ When the destructure root is a fresh opaque-origin call
   `isOpaqueSourceExpression` didn't recognize `<opaque>.for(...)` as a source,
   so downstream walker tracking broke.
 
-Without this cause attachment, the cell falls back to a counter-based
-`["internal", "__#N"]` path that drifts when surrounding code changes —
-invalidating any persisted state keyed on the old path. See
-`packages/runner/test/pattern.test.ts:101-128` for the path-naming behavior.
+Without this cause attachment, the cell falls back to a generated internal
+`partialCause`. That avoids collisions with user-provided names, but the
+generated cause can still drift when surrounding generated cells change,
+invalidating any persisted state keyed on the old generated cause. See
+`packages/runner/test/pattern.test.ts:101-128` for the generated-cause behavior.
 
 ### 2. `.for(...)` is only attached when the root is a FRESH opaque origin
 

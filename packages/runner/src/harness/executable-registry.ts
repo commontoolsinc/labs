@@ -30,11 +30,6 @@ export class ExecutableRegistry {
     string,
     { sourceFile?: string; bindingPath?: string[] }
   >();
-  private readonly verifiedPatternFunctions = new Map<
-    string,
-    Map<string, HarnessedFunction>
-  >();
-  private readonly verifiedPatternLoadIds = new Map<string, string>();
   private readonly trustedHostFunctionIndex = new Map<
     string,
     HarnessedFunction
@@ -49,8 +44,6 @@ export class ExecutableRegistry {
     this.verifiedFunctionIndex.clear();
     this.verifiedFunctionLoadIds.clear();
     this.verifiedBindingMetadata.clear();
-    this.verifiedPatternFunctions.clear();
-    this.verifiedPatternLoadIds.clear();
     this.trustedHostFunctionIndex.clear();
     this.trustedHostFunctionRefs = new WeakMap();
     this.nextTrustedHostFunctionId = 0;
@@ -124,14 +117,12 @@ export class ExecutableRegistry {
 
   getVerifiedFunction(
     implementationRef: string,
-    patternId?: string,
   ): HarnessedFunction | undefined {
-    if (patternId) {
-      const registry = this.verifiedPatternFunctions.get(patternId);
-      if (registry?.has(implementationRef)) {
-        return registry.get(implementationRef);
-      }
-    }
+    // Single global index: under content addressing any live instance of the
+    // same module is interchangeable (the SES verifier forbids module-scope
+    // mutable state, so two evaluations of one module identity differ only in
+    // object identity — never behavior). The former per-pattern registry that
+    // disambiguated equal refs across loads is therefore unnecessary.
     return this.verifiedFunctionIndex.get(implementationRef);
   }
 
@@ -190,35 +181,15 @@ export class ExecutableRegistry {
 
   getVerifiedLoadId(
     implementationRef: string,
-    patternId?: string,
   ): string | undefined {
-    return this.verifiedFunctionLoadIds.get(implementationRef) ??
-      (patternId ? this.verifiedPatternLoadIds.get(patternId) : undefined);
+    return this.verifiedFunctionLoadIds.get(implementationRef);
   }
 
   getExecutableFunction(
     implementationRef: string,
-    patternId?: string,
   ): HarnessedFunction | undefined {
-    return this.getVerifiedFunction(implementationRef, patternId) ??
+    return this.getVerifiedFunction(implementationRef) ??
       this.trustedHostFunctionIndex.get(implementationRef);
-  }
-
-  associatePattern(patternId: string, value: unknown, loadId?: string): void {
-    const registry = new Map<string, HarnessedFunction>();
-    this.collectAssociatedFunctions(
-      value,
-      registry,
-      new Set(),
-      (implementationRef) => this.getVerifiedFunction(implementationRef),
-    );
-    this.verifiedPatternFunctions.set(patternId, registry);
-    if (loadId) {
-      for (const [implementationRef, implementation] of registry) {
-        this.storeVerifiedFunction(loadId, implementationRef, implementation);
-      }
-      this.verifiedPatternLoadIds.set(patternId, loadId);
-    }
   }
 
   trustHostValue(

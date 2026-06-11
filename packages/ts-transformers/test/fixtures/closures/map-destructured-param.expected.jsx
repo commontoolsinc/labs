@@ -24,7 +24,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         scale: number;
     };
-}, number>({
+}, number>(({ x, state }) => x * state.scale, {
     type: "object",
     properties: {
         x: {
@@ -43,13 +43,13 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["x", "state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ x, state }) => x * state.scale);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     y: number;
     state: {
         scale: number;
     };
-}, number>({
+}, number>(({ y, state }) => y * state.scale, {
     type: "object",
     properties: {
         y: {
@@ -68,7 +68,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["y", "state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ y, state }) => y * state.scale);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const x = __cf_pattern_input.key("element", "x");
     const y = __cf_pattern_input.key("element", "y");

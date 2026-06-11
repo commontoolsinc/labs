@@ -98,14 +98,17 @@ cell:
 {
   pattern: SigilLink,  // link to pattern
   argument: SigilLink, // link to input data cell
-  internal: SigilLink, // link to working state cell
+  internal: Array<{
+    partialCause: JSONValue,
+    link: SigilLink
+  }>,                 // manifest of derived internal cells
   schema?: JSONSchema
 }
 ```
 
-Argument and internal cells are value cells with reciprocal `result` metadata
-links back to their owning result cell. See [Storage Format](./2-storage-format.md)
-for details.
+The argument cell and each derived internal cell are value cells with reciprocal
+`result` metadata links back to their owning result cell. See
+[Storage Format](./2-storage-format.md) for details.
 
 #### Precious Data Cells
 

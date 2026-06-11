@@ -1,7 +1,8 @@
 // CFC Phase 3 (3.a-spec): the per-row label rule — builder helpers -> serialized
 // AST on the table schema, AST validation (fail-closed at authoring), and the
 // shared evaluator. Pure unit tests: no FFI, no server, no runner.
-// Design: docs/specs/sqlite-builtin/plans/cfc-phase3-per-row.md §4-§6, §9, §12.
+// Spec: docs/specs/sqlite-builtin/06-cfc.md ("Per-row labels": authoring
+// surface, serialized spec + evaluator, fail-closed rules).
 
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { table } from "../v2/sqlite/schema.ts";

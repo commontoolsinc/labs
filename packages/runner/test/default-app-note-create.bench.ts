@@ -46,7 +46,10 @@ const noteSchema = {
     content: { type: "string" },
     tags: { type: "array", items: { type: "string" } },
   },
-  required: ["title"],
+  // All three fields are always populated by noteValue(); marking them required
+  // makes the schema-materialized callback input match the `Note` type under
+  // lift's function-first schema-mode overload (CT-1625).
+  required: ["title", "content", "tags"],
   additionalProperties: false,
 } as const satisfies JSONSchema;
 
@@ -132,10 +135,10 @@ async function setupNoteCreateGraph(
 
   // Derived home view: reads (and therefore resolves + traverses) every note.
   const titlesOf = lift(
-    noteListSchema,
-    { type: "array", items: { type: "string" } } as const satisfies JSONSchema,
     (items: Note[]) =>
       items.map((note) => `${note.title} (${note.tags?.length ?? 0})`),
+    noteListSchema,
+    { type: "array", items: { type: "string" } } as const satisfies JSONSchema,
   );
   const homeView = pattern<{ items: Note[] }, unknown>(
     ({ items }) => ({ titles: titlesOf(items) }),

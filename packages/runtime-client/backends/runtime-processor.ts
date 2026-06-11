@@ -110,9 +110,12 @@ import {
 } from "./utils.ts";
 import { cellRefToKey } from "../shared/utils.ts";
 import { RemoteResponse } from "@commonfabric/runtime-client";
-import { WorkerReconciler } from "@commonfabric/html/worker";
+import {
+  type RenderDeclassificationPolicy,
+  WorkerReconciler,
+} from "@commonfabric/html/worker";
 import type { VDomOp } from "../protocol/types.ts";
-import type { RuntimeOptions, URI } from "@commonfabric/runner";
+import type { JSONValue, RuntimeOptions, URI } from "@commonfabric/runner";
 
 const MAX_SERIALIZATION_DEPTH = 5;
 const blobUploadEncoding = new JsonEncodingContext();
@@ -290,6 +293,9 @@ export class RuntimeProcessor {
     { reconciler: WorkerReconciler; cancel: Cancel }
   >();
   private vdomBatchIdCounter = 0;
+  // Render-boundary declassification policy applied to every mount's
+  // reconciler. Set from InitializationData; "allow" preserves prior behavior.
+  private renderDeclassificationPolicy: RenderDeclassificationPolicy = "allow";
 
   private constructor(
     runtime: Runtime,
@@ -423,6 +429,8 @@ export class RuntimeProcessor {
       identity,
       telemetry,
     );
+    processor.renderDeclassificationPolicy =
+      data.renderDeclassificationPolicy ?? "allow";
     return processor;
   }
 
@@ -520,12 +528,24 @@ export class RuntimeProcessor {
     let cell = getCell(this.runtime, request.cell);
     if (request.meta !== undefined) {
       const rootCell = getCell(this.runtime, { ...request.cell, path: [] });
-      const link = getMetaLink(rootCell, request.meta);
-      if (link === undefined) return { value: undefined };
-      cell = this.runtime.getCellFromLink({
-        ...link,
-        path: [...link.path, ...request.cell.path],
-      });
+      if (
+        request.meta === "pattern" || request.meta === "argument" ||
+        request.meta === "result"
+      ) {
+        // For the meta link fields, use the meta linked cell instead
+        const rootCell = getCell(this.runtime, { ...request.cell, path: [] });
+        const link = getMetaLink(rootCell, request.meta);
+        if (link === undefined) return { value: undefined };
+        cell = this.runtime.getCellFromLink({
+          ...link,
+          path: [...link.path, ...request.cell.path],
+        });
+      } else {
+        // For meta cells that aren't link cells, return the raw data
+        return {
+          value: rootCell.getMetaRaw(request.meta) as JSONValue | undefined,
+        };
+      }
     }
     const value = cell.get();
     const converted = convertCellsToLinks(value, {
@@ -1252,6 +1272,7 @@ export class RuntimeProcessor {
 
     // Create a reconciler that sends ops to the main thread
     const reconciler = new WorkerReconciler({
+      renderDeclassificationPolicy: this.renderDeclassificationPolicy,
       onOps: (ops: VDomOp[]) => {
         const batchId = this.vdomBatchIdCounter++;
         self.postMessage({
@@ -1302,9 +1323,10 @@ export class RuntimeProcessor {
 }
 
 /**
- * Sync a root cell and each meta cell reachable from it.
+ * Sync a root cell and each direct metadata-linked cell reachable from it.
  *
- * Callers that need a transactional root cell can create it first and pass it.
+ * `internal` is raw manifest metadata, not a direct metadata link. Callers that
+ * need a transactional root cell can create it first and pass it.
  */
 async function syncMetaLinkedDocs(
   cell: Cell<any>,
@@ -1315,7 +1337,7 @@ async function syncMetaLinkedDocs(
   while (pendingCells.length > 0) {
     const currentCell = pendingCells.shift()!;
     await currentCell.sync();
-    for (const meta of ["pattern", "argument", "internal"] as const) {
+    for (const meta of ["pattern", "argument"] as const) {
       const link = getMetaLink(currentCell, meta);
       if (link === undefined) continue;
       const linkedCell = currentCell.runtime.getCellFromLink(link, undefined);

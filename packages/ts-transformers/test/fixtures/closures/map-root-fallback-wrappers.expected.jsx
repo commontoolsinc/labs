@@ -16,7 +16,7 @@ interface Item {
 }
 const __cfLift_1 = __cfHelpers.lift<{
     items?: Item[] | undefined;
-}, Item[]>({
+}, Item[]>(({ items }) => items ?? [], {
     type: "object",
     properties: {
         items: {
@@ -53,7 +53,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["id"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items ?? []);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return <span data-inline-id={item.key("id")}>{item.key("id")}</span>;
@@ -99,7 +99,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     items?: Item[] | undefined;
-}, Item[]>({
+}, Item[]>(({ items }) => (items as Item[] | undefined) ?? [], {
     type: "object",
     properties: {
         items: {
@@ -136,7 +136,7 @@ const __cfLift_2 = __cfHelpers.lift<{
             required: ["id"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ items }) => (items as Item[] | undefined) ?? []);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return (<span data-cast-id={item.key("id")}>{item.key("id")}</span>);
@@ -182,7 +182,7 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     items?: Item[] | undefined;
-}, Item[]>({
+}, Item[]>(({ items }) => (items satisfies Item[] | undefined) ?? [], {
     type: "object",
     properties: {
         items: {
@@ -219,7 +219,7 @@ const __cfLift_3 = __cfHelpers.lift<{
             required: ["id"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ items }) => (items satisfies Item[] | undefined) ?? []);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return (<span data-satisfies-id={item.key("id")}>{item.key("id")}</span>);

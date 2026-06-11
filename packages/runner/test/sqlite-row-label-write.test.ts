@@ -3,7 +3,8 @@
 // (prospective row label) and verifies no-laundering: every labeled input must
 // be captured by the computed row label. Everything unattributable on a
 // rule-bearing table fails closed (server-side commit evaluation, 3.c, is the
-// follow-up that lifts this). Design §8, §9.6.
+// follow-up that lifts this).
+// Spec: docs/specs/sqlite-builtin/06-cfc.md ("Write — the runner gate").
 
 import { describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";

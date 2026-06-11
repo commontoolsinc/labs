@@ -418,10 +418,11 @@ Cells already have schemas, which provide the cell-level scope-setting surface.
 Local schemas on pattern inputs, result schemas, or cell schemas override the
 factory default for the specific value or cell they describe.
 
-Pattern internal cells start in the pattern's default scope. This includes
-argument and internal cells reached from result-cell metadata. If a computation
-inside the pattern reads narrower scoped data, its output handling follows the
-computation rules below.
+Pattern-owned cells start in the pattern's default scope. This includes the
+argument cell reached from result-cell metadata and the derived internal cells
+listed in the result cell's `internal` manifest. If a computation inside the
+pattern reads narrower scoped data, its output handling follows the computation
+rules below.
 
 ## Computation Rules
 
@@ -484,11 +485,11 @@ potentially narrower data, so the output list itself must narrow.
 
 ## Metadata Links
 
-Top-level metadata links such as `pattern`, `argument`, `internal`, and `result`
-are system metadata used for rehydration, debugging, and graph reconstruction.
-They are not normal user data reads. Metadata/provenance traversal must always
-follow what is needed for rehydration and must not be blocked by data-scope
-filtering.
+Top-level metadata links such as `pattern`, `argument`, and `result`, plus the
+links listed in the result cell's `internal` manifest, are system metadata used
+for rehydration, debugging, and graph reconstruction. They are not normal user
+data reads. Metadata/provenance traversal must always follow what is needed for
+rehydration and must not be blocked by data-scope filtering.
 
 Source/provenance links still carry and preserve scope because the referenced
 source document can differ by scope. The exemption is only from normal data-read

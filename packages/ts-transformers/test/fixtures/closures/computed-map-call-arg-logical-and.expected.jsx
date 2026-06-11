@@ -22,7 +22,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: Item[];
     };
-}, Item[]>({
+}, Item[]>(({ state }) => state.items, {
     type: "object",
     properties: {
         state: {
@@ -66,12 +66,12 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["done"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     row: {
         done: boolean;
     };
-}, unknown>({
+}, unknown>(({ row }) => identity(row.done && "Done"), {
     type: "object",
     properties: {
         row: {
@@ -87,7 +87,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["row"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ({ row }) => identity(row.done && "Done"));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const row = __cf_pattern_input.key("element");
     const label = __cfLift_2({ row: {

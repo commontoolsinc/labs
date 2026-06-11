@@ -27,7 +27,26 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         messages: Message[];
     };
-}, string | null>({
+}, string | null>(({ state }) => {
+    const messages = state.messages;
+    if (!messages || messages.length === 0)
+        return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i]!;
+        if (msg.role === "assistant") {
+            // This map call inside the computed callback was the key issue
+            const content = typeof msg.content === "string"
+                ? msg.content
+                : msg.content.map((part) => {
+                    if (part.type === "text")
+                        return part.text || "";
+                    return "";
+                }).join("");
+            return content;
+        }
+    }
+    return null;
+}, {
     type: "object",
     properties: {
         state: {
@@ -86,26 +105,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         }, {
             type: "null"
         }]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => {
-    const messages = state.messages;
-    if (!messages || messages.length === 0)
-        return null;
-    for (let i = messages.length - 1; i >= 0; i--) {
-        const msg = messages[i]!;
-        if (msg.role === "assistant") {
-            // This map call inside the computed callback was the key issue
-            const content = typeof msg.content === "string"
-                ? msg.content
-                : msg.content.map((part) => {
-                    if (part.type === "text")
-                        return part.text || "";
-                    return "";
-                }).join("");
-            return content;
-        }
-    }
-    return null;
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-map-union-return
 // Verifies: a computed returning a union type (string | null) with a nested .map() infers the correct output schema
 //   computed(() => { ...; return content }) → lift(schema, anyOf[string, null])({ messages })

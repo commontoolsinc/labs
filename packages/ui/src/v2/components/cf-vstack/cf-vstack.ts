@@ -13,6 +13,15 @@ import { layoutSpacingUtilityStyles } from "../../styles/layout-spacing.ts";
  * @attr {string} justify - Justify content (start, center, end, between, around, evenly)
  * @attr {boolean} reverse - Reverse the direction
  * @attr {string} padding - Padding around the stack (0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, xs, sm, md, lg, xl)
+ * @attr {string} px - Horizontal (left/right) padding; same scale as padding
+ * @attr {string} py - Vertical (top/bottom) padding; same scale as padding
+ * @attr {string} pt - Padding-top; same scale as padding
+ * @attr {string} pr - Padding-right; same scale as padding
+ * @attr {string} pb - Padding-bottom; same scale as padding
+ * @attr {string} pl - Padding-left; same scale as padding
+ *
+ * Directional padding overrides the uniform `padding` on its side, and the
+ * single-side props (pt/pr/pb/pl) override the axis props (px/py) on theirs.
  *
  * @slot - Content to be stacked vertically
  *
@@ -90,6 +99,12 @@ export class CFVStack extends BaseElement {
     justify: { type: String },
     reverse: { type: Boolean },
     padding: { type: String },
+    px: { type: String },
+    py: { type: String },
+    pt: { type: String },
+    pr: { type: String },
+    pb: { type: String },
+    pl: { type: String },
   };
 
   declare gap: string;
@@ -97,6 +112,12 @@ export class CFVStack extends BaseElement {
   declare justify: string;
   declare reverse: boolean;
   declare padding: string;
+  declare px: string;
+  declare py: string;
+  declare pt: string;
+  declare pr: string;
+  declare pb: string;
+  declare pl: string;
 
   constructor() {
     super();
@@ -105,6 +126,12 @@ export class CFVStack extends BaseElement {
     this.justify = "start";
     this.reverse = false;
     this.padding = "0";
+    this.px = "";
+    this.py = "";
+    this.pt = "";
+    this.pr = "";
+    this.pb = "";
+    this.pl = "";
   }
 
   override render() {
@@ -114,6 +141,12 @@ export class CFVStack extends BaseElement {
       [`align-${this.align}`]: true,
       [`justify-${this.justify}`]: true,
       [`p-${this.padding}`]: true,
+      [`px-${this.px}`]: !!this.px,
+      [`py-${this.py}`]: !!this.py,
+      [`pt-${this.pt}`]: !!this.pt,
+      [`pr-${this.pr}`]: !!this.pr,
+      [`pb-${this.pb}`]: !!this.pb,
+      [`pl-${this.pl}`]: !!this.pl,
       reverse: this.reverse,
     };
 

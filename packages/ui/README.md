@@ -6,8 +6,8 @@ security constraints.
 
 ## 🚀 Features
 
-- **39 Production-Ready Components** (v2) - Complete implementation of a
-  shadcn/ui-inspired component library
+- **The Full v2 Component Set** - Production-ready implementation of a
+  shadcn/ui-inspired component library (see `src/v2/components/`)
 - **Security-First Design** - Built for sandboxed environments with strict
   isolation
 - **Zero External Dependencies** - No remote resources, fully self-contained

@@ -31,7 +31,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: Item[];
     };
-}, Item[]>({
+}, Item[]>(({ state }) => [...state.items].sort((a, b) => a.value - b.value), {
     type: "object",
     properties: {
         state: {
@@ -81,14 +81,14 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["name", "value"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => [...state.items].sort((a, b) => a.value - b.value));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         items: {
             length: number;
         };
     };
-}, number>({
+}, number>(({ state }) => state.items.length, {
     type: "object",
     properties: {
         state: {
@@ -110,10 +110,10 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.length);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     state: any;
-}, boolean>({
+}, boolean>(({ state }) => state.recentEvents.length === 0, {
     type: "object",
     properties: {
         state: true
@@ -121,7 +121,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.recentEvents.length === 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const event = __cf_pattern_input.key("element");
     const idx = __cf_pattern_input.key("index");

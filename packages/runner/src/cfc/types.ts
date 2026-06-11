@@ -3,6 +3,7 @@ import type { FabricValue, MemorySpace } from "@commonfabric/memory/interface";
 import type { Immutable } from "@commonfabric/utils/types";
 import type { Metadata } from "../storage/interface.ts";
 import type { CfcLabelView, IFCLabel } from "./label-view-core.ts";
+import type { SinkMaxConfidentiality } from "./sink-inventory.ts";
 
 export type { CfcLabelView, IFCLabel } from "./label-view-core.ts";
 
@@ -128,15 +129,33 @@ export type CfcSandboxResult = {
   diagnostics?: CfcSandboxDiagnostic[];
 };
 
+/**
+ * Provenance component of a persisted labelMap entry. Components follow
+ * distinct update disciplines (S16 design):
+ * - `declared`: schema store policy — monotone (grow-only) per §8.12.
+ * - `link`: reference-carried label — replaced when the link at the path
+ *   is rewritten.
+ * - `derived`: default-transition flow label — replaced when the value at
+ *   the path is overwritten; an ancestor overwrite clears derived
+ *   descendants.
+ * Entries without an origin are legacy (pre-component) entries and are
+ * treated as one combined component with the historical update rules.
+ * The effective label at a path is the join of all components.
+ */
+export type LabelEntryOrigin = "declared" | "link" | "derived";
+
+export type LabelMapEntry = {
+  path: readonly string[];
+  label: IFCLabel;
+  origin?: LabelEntryOrigin;
+};
+
 export type CfcMetadata = {
   version: 1;
   schemaHash: string;
   labelMap: {
     version: 1;
-    entries: Array<{
-      path: readonly string[];
-      label: IFCLabel;
-    }>;
+    entries: Array<LabelMapEntry>;
   };
 };
 
@@ -178,6 +197,16 @@ export type ImplementationIdentity =
   | { kind: "builtin"; builtinId: string }
   | {
     kind: "verified";
+    /**
+     * Content-addressed module identity (prefix-free `cf:module/<hash>`
+     * hash) — reload-stable and robust to unrelated module changes in the
+     * same program. Present on provenance-resolved identities; `bundleId`
+     * (the per-program concatenated-script hash) is retained alongside for
+     * stored writeAuthorizedBy claims written before the switch.
+     */
+    moduleIdentity?: string;
+    /** Export/`__cfReg` symbol of the registered factory, when module-scope. */
+    symbol?: string;
     bundleId?: string;
     sourceFile?: string;
     bindingPath?: string[];
@@ -244,6 +273,7 @@ export type PreparedDigestInput = {
   readonly attemptedWrites: readonly AttemptedWrite[];
   readonly writes: readonly AttemptedWrite[];
   readonly dereferenceTraces: readonly CfcDereferenceTrace[];
+  readonly triggerReads: readonly CfcAddress[];
   readonly writePolicyInputs: readonly WritePolicyInput[];
   readonly implementationIdentity?: ImplementationIdentity;
   readonly trustSnapshot?: TrustSnapshot;
@@ -261,11 +291,30 @@ export type CfcPrepareState =
   | { status: "prepared"; digest: string; input: PreparedDigestInput }
   | { status: "invalidated"; digest?: string; reasons: string[] };
 
+/**
+ * Flow-label propagation dial (S16 default transition), orthogonal to the
+ * enforcement ladder: `off` = no derivation; `observe` = compute the per-tx
+ * conservative join and emit diagnostics, persist nothing; `persist` = write
+ * derived label components for every value write target. Propagation never
+ * rejects by itself — enforcement stays with the existing consumers.
+ */
+export type CfcFlowLabelsMode = "off" | "observe" | "persist";
+
+export const DEFAULT_CFC_FLOW_LABELS_MODE: CfcFlowLabelsMode = "off";
+
 export type CfcTxState = {
   relevant: boolean;
   enforcementMode: CfcEnforcementMode;
+  flowLabelsMode: CfcFlowLabelsMode;
   prepare: CfcPrepareState;
   dereferenceTraces: CfcDereferenceTrace[];
+  // Addresses whose invalidating writes scheduled this run (§8.9.2 trigger
+  // reads): the decision to run *now* was influenced by their values, so
+  // they join the flow-label derivation even when the run never re-reads
+  // them. Recorded by the scheduler when it consumes the pending trigger
+  // set for an action; empty for non-scheduled (manual/event) transactions
+  // whose triggers are in-journal anyway.
+  triggerReads: CfcAddress[];
   writePolicyInputs: WritePolicyInput[];
   // Implementation identity active when each write-policy input was recorded.
   // A single transaction may legitimately span multiple trust contexts (e.g. a
@@ -279,4 +328,14 @@ export type CfcTxState = {
   implementationIdentity?: ImplementationIdentity;
   outbox: PostCommitSideEffect[];
   diagnostics: string[];
+  // Per-sink confidentiality ceilings consulted by prepareBoundaryCommit for
+  // every recorded sink-request input (set once by the Runtime at tx creation;
+  // see SinkMaxConfidentiality). Undefined = no ceilings declared.
+  sinkMaxConfidentiality?: SinkMaxConfidentiality;
+  // Addresses of writes to a document's ["cfc"] label-map path made OUTSIDE the
+  // runtime's privileged persistence scope (audit S18). The runtime's own label
+  // writes in prepareBoundaryCommit run privileged and never land here; anything
+  // that does is forging metadata that drives derivation for other writes, so
+  // prepareBoundaryCommit turns each into a fail-closed reason.
+  unprivilegedSystemWrites: string[];
 };

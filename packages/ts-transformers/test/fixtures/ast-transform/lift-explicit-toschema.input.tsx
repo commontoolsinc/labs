@@ -5,27 +5,26 @@ interface CharmEntry {
   name: string;
 }
 
-// Test: Explicit toSchema with undefined result schema
-// This overload pattern: lift(toSchema<T>(), undefined, fn)
+// Test: Explicit toSchema, function-first order.
+// This overload pattern: lift(fn, toSchema<T>())  (result schema omitted)
 const logCharmsList = lift(
-  toSchema<{ charmsList: Cell<CharmEntry[]> }>(),
-  undefined,
   ({ charmsList }) => {
     console.log("logCharmsList: ", charmsList.get());
     return charmsList;
   },
+  toSchema<{ charmsList: Cell<CharmEntry[]> }>(),
 );
 
 const getStatus = lift(
+  ({ status }) => status,
   toSchema<{ status: "open" | "closed"; ignored: "draft" }>({
     description: "Status input",
   }),
   toSchema<string>(),
-  ({ status }) => status,
 );
 
 // FIXTURE: lift-explicit-toschema
 // Verifies: lift() with explicit toSchema<T>() is replaced by the generated JSON schema
-//   lift(toSchema<{ charmsList: Cell<CharmEntry[]> }>(), undefined, fn) → lift(generatedSchema, undefined, fn)
+//   lift(fn, toSchema<{ charmsList: Cell<CharmEntry[]> }>()) → lift(fn, generatedSchema)
 // Context: The toSchema() call is compiled away and replaced with the actual JSON schema object
 export default { logCharmsList, getStatus };

@@ -15,8 +15,14 @@
  * frame stack).
  */
 
-import { type Cell, Engine, type Pattern, Runtime } from "@commonfabric/runner";
+import {
+  type Cell,
+  type Engine,
+  type Pattern,
+  Runtime,
+} from "@commonfabric/runner";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { buildActionEvent } from "./trusted-test-event.ts";
 import {
   createSession,
   Identity,
@@ -80,6 +86,14 @@ const stepPeekSchema = {
     assertion: { type: "unknown" },
     label: { type: "string" },
     await: { type: "string" },
+    event: { type: "unknown" },
+    trustedUi: {
+      type: "object",
+      properties: {
+        surface: { type: "string" },
+        action: { type: "string" },
+      },
+    },
     skip: { type: "boolean" },
   },
 } as const;
@@ -137,14 +151,17 @@ const handlers: Record<
     });
     runtime = new Runtime({
       storageManager: storageManager as never,
-      // Same default as single-runtime pattern tests: actions are invoked
-      // directly rather than through the trusted renderer event path.
-      cfcEnforcementMode: "observe",
+      // Same default as single-runtime pattern tests: enforce explicitly
+      // declared `ifc` policies (the production runtime default).
+      cfcEnforcementMode: "enforce-explicit",
       apiUrl: new URL(import.meta.url),
       errorHandlers: [(error: Error) => runtimeErrors.push(String(error))],
     });
     runtime.enableIdempotencyCheck();
-    engine = new Engine(runtime);
+    // Use the runtime's own harness (see test-runner.ts): a second Engine
+    // splits verified-load/source-map state and breaks CFC verified-binding
+    // identities under enforcement.
+    engine = runtime.harness;
 
     const program = await engine.resolve(
       new FileSystemProgramResolver(
@@ -259,7 +276,11 @@ const handlers: Record<
     if (typeof stream?.send !== "function") {
       throw new Error(`Test step ${index} action is not a stream`);
     }
-    stream.send(undefined);
+    const meta = stepCell.asSchema(stepPeekSchema).get() as {
+      event?: unknown;
+      trustedUi?: unknown;
+    };
+    stream.send(buildActionEvent(meta?.event, meta?.trustedUi));
     await settle();
     return {};
   },
@@ -282,17 +303,22 @@ const handlers: Record<
   health() {
     return Promise.resolve({
       runtimeErrors: [...runtimeErrors],
-      nonIdempotent: rt().getIdempotencyViolations?.()?.map((violation) =>
-        String(
-          (violation as { actionId?: string }).actionId ?? violation,
-        )
-      ) ?? [],
+      nonIdempotent: rt().getIdempotencyViolations?.()?.map((violation) => {
+        const { actionId, differingWriteKeys } = violation as {
+          actionId?: string;
+          differingWriteKeys?: string[];
+        };
+        const id = String(actionId ?? violation);
+        return differingWriteKeys?.length
+          ? `${id} (differing writes: ${differingWriteKeys.join(", ")})`
+          : id;
+      }) ?? [],
     });
   },
 
   async dispose() {
     stepCells = [];
-    engine?.dispose();
+    // `engine` is the runtime's own harness; runtime.dispose() disposes it.
     await runtime?.dispose();
     await storageManager?.close();
     runtime = undefined;

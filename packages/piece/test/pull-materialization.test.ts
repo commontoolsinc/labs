@@ -22,8 +22,9 @@ function doublePattern(): Pattern {
         output: { type: "number" },
       },
     },
+    derivedInternalCells: [{ partialCause: "output" }],
     result: {
-      output: { $alias: { cell: "internal", path: ["output"] } },
+      output: { $alias: { partialCause: "output", path: [] } },
     },
     nodes: [
       {
@@ -32,7 +33,7 @@ function doublePattern(): Pattern {
           implementation: (input: number) => input * 2,
         },
         inputs: { $alias: { cell: "argument", path: ["input"] } },
-        outputs: { $alias: { cell: "internal", path: ["output"] } },
+        outputs: { $alias: { partialCause: "output", path: [] } },
       },
     ],
   };
@@ -52,8 +53,9 @@ function tenfoldPattern(): Pattern {
         output: { type: "number" },
       },
     },
+    derivedInternalCells: [{ partialCause: "output" }],
     result: {
-      output: { $alias: { cell: "internal", path: ["output"] } },
+      output: { $alias: { partialCause: "output", path: [] } },
     },
     nodes: [
       {
@@ -62,7 +64,7 @@ function tenfoldPattern(): Pattern {
           implementation: (input: number) => input * 10,
         },
         inputs: { $alias: { cell: "argument", path: ["input"] } },
-        outputs: { $alias: { cell: "internal", path: ["output"] } },
+        outputs: { $alias: { partialCause: "output", path: [] } },
       },
     ],
   };
@@ -84,9 +86,10 @@ function namedPattern(name: string, multiplier: number): Pattern {
       },
       required: [NAME, "output"],
     },
+    derivedInternalCells: [{ partialCause: "output" }],
     result: {
       [NAME]: name,
-      output: { $alias: { cell: "internal", path: ["output"] } },
+      output: { $alias: { partialCause: "output", path: [] } },
     },
     nodes: [
       {
@@ -95,7 +98,7 @@ function namedPattern(name: string, multiplier: number): Pattern {
           implementation: (input: number) => input * multiplier,
         },
         inputs: { $alias: { cell: "argument", path: ["input"] } },
-        outputs: { $alias: { cell: "internal", path: ["output"] } },
+        outputs: { $alias: { partialCause: "output", path: [] } },
       },
     ],
   };

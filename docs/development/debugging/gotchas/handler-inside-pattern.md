@@ -87,4 +87,4 @@ These are fine inside pattern context:
 ## See Also
 
 - [@handler](../../../common/concepts/handler.md) - Handler basics and module scope
-- [@lift](../../../common/concepts/lift.md) - Lift basics and module scope
+- [@computed](../../../common/concepts/computed/computed.md) - lift() basics and module scope (see "Reusable Computations: lift()")

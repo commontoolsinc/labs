@@ -24,30 +24,10 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     secondToggle: __cfHelpers.ReadonlyCell<boolean>;
-}, { background: string; }>({
-    type: "object",
-    properties: {
-        secondToggle: {
-            type: "boolean",
-            asCell: ["readonly"]
-        }
-    },
-    required: ["secondToggle"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        background: {
-            type: "string"
-        }
-    },
-    required: ["background"]
-} as const satisfies __cfHelpers.JSONSchema, ({ secondToggle }) => {
+}, { background: string; }>(({ secondToggle }) => {
     const val = secondToggle.get();
     return { background: val ? "green" : "red" };
-});
-const __cfLift_2 = __cfHelpers.lift<{
-    secondToggle: __cfHelpers.ReadonlyCell<boolean>;
-}, { background: string; }>({
+}, {
     type: "object",
     properties: {
         secondToggle: {
@@ -64,11 +44,31 @@ const __cfLift_2 = __cfHelpers.lift<{
         }
     },
     required: ["background"]
-} as const satisfies __cfHelpers.JSONSchema, ({ secondToggle }) => {
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_2 = __cfHelpers.lift<{
+    secondToggle: __cfHelpers.ReadonlyCell<boolean>;
+}, { background: string; }>(({ secondToggle }) => {
     // This .get() should NOT be wrapped in an extra lift-applied computation
     const val = secondToggle.get();
     return { background: val ? "green" : "red" };
-});
+}, {
+    type: "object",
+    properties: {
+        secondToggle: {
+            type: "boolean",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["secondToggle"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        background: {
+            type: "string"
+        }
+    },
+    required: ["background"]
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: nested-computed-in-ifelse
 // Verifies: computed() inside ifElse branches transforms to the lift-applied form without double-wrapping .get()
 //   computed(() => { secondToggle.get(); ... }) → lift(({ secondToggle }) => { secondToggle.get(); ... })({ secondToggle })

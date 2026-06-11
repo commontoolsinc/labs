@@ -1,0 +1,273 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { Runtime } from "../src/runtime.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
+import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
+import type { SinkMaxConfidentiality } from "../src/cfc/mod.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
+
+const signer = await Identity.fromPassphrase("runner-cfc-sink-ceiling");
+
+// §5.2.1 / §7.3-7.5 egress gate (audit item 21): a sink request must not carry
+// confidentiality outside the sink's declared ceiling. Each case seeds a
+// confidential cell, reads it through its schema (marking the tx CFC-relevant
+// and producing a confidential consumed read), enqueues a fetchData sink
+// request, then prepares + commits under a configured ceiling.
+const CONFIDENTIAL_SCHEMA = internSchema(
+  {
+    type: "object",
+    properties: {
+      secret: { type: "string", ifc: { confidentiality: ["medical"] } },
+    },
+    required: ["secret"],
+  } satisfies JSONSchema,
+  true,
+);
+
+const seedConfidentialCell = async (
+  runtime: Runtime,
+  id: string,
+): Promise<void> => {
+  const seed = runtime.edit();
+  const target = runtime.getCell(signer.did(), id, undefined, seed);
+  const targetId = target.getAsNormalizedFullLink().id;
+  seed.writeOrThrow({
+    space: signer.did(),
+    scope: "space",
+    id: targetId,
+    path: [],
+  }, {
+    value: { secret: "rosebud" },
+    cfc: {
+      version: 1,
+      schemaHash: CONFIDENTIAL_SCHEMA.taggedHashString,
+      labelMap: {
+        version: 1,
+        entries: [{
+          path: ["secret"],
+          label: { confidentiality: ["medical"] },
+        }],
+      },
+    },
+  });
+  seed.writeOrThrow({
+    space: signer.did(),
+    scope: "space",
+    id: `cid:${CONFIDENTIAL_SCHEMA.taggedHashString}`,
+    path: [],
+  }, { value: CONFIDENTIAL_SCHEMA.schema });
+  expect((await seed.commit()).ok).toBeDefined();
+};
+
+// Read the confidential cell through its schema and enqueue a fetchData sink
+// request in the same transaction, then prepare. Returns the prepare reasons.
+const readConfidentialThenSink = (
+  runtime: Runtime,
+  id: string,
+  sink = "fetchData",
+): { commit: () => Promise<{ ok?: unknown; error?: unknown }> } => {
+  const tx = runtime.edit();
+  const cell = runtime.getCell(
+    signer.did(),
+    id,
+    CONFIDENTIAL_SCHEMA.schema,
+    tx,
+  );
+  // Reading the labeled field marks the tx CFC-relevant and records the
+  // confidential consumed read.
+  expect(cell.key("secret").get()).toBe("rosebud");
+  enqueueSinkRequestPostCommitEffect(
+    tx,
+    sink,
+    `${sink}:ceiling-test`,
+    createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
+    `${sink}-start`,
+    () => {},
+  );
+  tx.prepareCfc();
+  return { commit: () => tx.commit() };
+};
+
+const withRuntime = async (
+  opts: {
+    mode?: "observe" | "enforce-explicit";
+    ceilings?: SinkMaxConfidentiality;
+  },
+  body: (runtime: Runtime) => Promise<void>,
+): Promise<void> => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL("https://example.com"),
+    storageManager,
+    cfcEnforcementMode: opts.mode ?? "enforce-explicit",
+    cfcSinkMaxConfidentiality: opts.ceilings,
+  });
+  try {
+    await body(runtime);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+};
+
+describe("CFC sink-request confidentiality ceiling", () => {
+  it("rejects a confidential request to a public-only sink (enforce)", async () => {
+    await withRuntime(
+      { mode: "enforce-explicit", ceilings: { fetchData: [] } },
+      async (runtime) => {
+        await seedConfidentialCell(runtime, "sink-ceiling-reject");
+        const { commit } = readConfidentialThenSink(
+          runtime,
+          "sink-ceiling-reject",
+        );
+        const result = await commit();
+        expect(result.error).toBeDefined();
+        expect(String((result.error as Error).message)).toContain(
+          "exceeds ceiling for fetchData",
+        );
+      },
+    );
+  });
+
+  it("rejects when the confidential field is a descendant of the read path", async () => {
+    // Reading the WHOLE object (path []) and building a request from it must
+    // still see the confidentiality on a child field (/secret) — labelAtPath
+    // alone only matches ancestor-or-equal entries and would miss it, letting
+    // `cell.get()` then sending `value.secret` slip a public-only ceiling
+    // (review on #3993).
+    await withRuntime(
+      { mode: "enforce-explicit", ceilings: { fetchData: [] } },
+      async (runtime) => {
+        await seedConfidentialCell(runtime, "sink-ceiling-descendant");
+        const tx = runtime.edit();
+        const cell = runtime.getCell(
+          signer.did(),
+          "sink-ceiling-descendant",
+          CONFIDENTIAL_SCHEMA.schema,
+          tx,
+        );
+        // Read the whole object, not cell.key("secret").
+        expect(cell.get()).toEqual({ secret: "rosebud" });
+        enqueueSinkRequestPostCommitEffect(
+          tx,
+          "fetchData",
+          "fetchData:descendant",
+          createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
+          "fetchData-start",
+          () => {},
+        );
+        tx.prepareCfc();
+        const result = await tx.commit();
+        expect(result.error).toBeDefined();
+        expect(String((result.error as Error).message)).toContain(
+          "exceeds ceiling for fetchData",
+        );
+      },
+    );
+  });
+
+  it("allows the same flow in observe mode but records the diagnostic", async () => {
+    await withRuntime(
+      { mode: "observe", ceilings: { fetchData: [] } },
+      async (runtime) => {
+        await seedConfidentialCell(runtime, "sink-ceiling-observe");
+        const tx = runtime.edit();
+        const cell = runtime.getCell(
+          signer.did(),
+          "sink-ceiling-observe",
+          CONFIDENTIAL_SCHEMA.schema,
+          tx,
+        );
+        expect(cell.key("secret").get()).toBe("rosebud");
+        enqueueSinkRequestPostCommitEffect(
+          tx,
+          "fetchData",
+          "fetchData:observe",
+          createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
+          "fetchData-start",
+          () => {},
+        );
+        tx.prepareCfc();
+        const result = await tx.commit();
+        expect(result.ok).toBeDefined();
+        expect(
+          tx.getCfcState().diagnostics.some((d) =>
+            // The diagnostic must name the offending atom so a deployment can
+            // identify which (sink, atom) pair needs a ceiling entry (#3993).
+            d.includes("exceeds ceiling for fetchData") && d.includes("medical")
+          ),
+        ).toBe(true);
+      },
+    );
+  });
+
+  it("allows a confidential request when the atom is within the ceiling", async () => {
+    await withRuntime(
+      { mode: "enforce-explicit", ceilings: { fetchData: ["medical"] } },
+      async (runtime) => {
+        await seedConfidentialCell(runtime, "sink-ceiling-within");
+        const { commit } = readConfidentialThenSink(
+          runtime,
+          "sink-ceiling-within",
+        );
+        expect((await commit()).ok).toBeDefined();
+      },
+    );
+  });
+
+  it("does not gate a sink with no declared ceiling", async () => {
+    await withRuntime(
+      // A ceiling on a DIFFERENT sink must not gate fetchData.
+      { mode: "enforce-explicit", ceilings: { llm: [] } },
+      async (runtime) => {
+        await seedConfidentialCell(runtime, "sink-ceiling-ungated");
+        const { commit } = readConfidentialThenSink(
+          runtime,
+          "sink-ceiling-ungated",
+        );
+        expect((await commit()).ok).toBeDefined();
+      },
+    );
+  });
+
+  it("does not gate when no ceilings are configured at all (default)", async () => {
+    await withRuntime(
+      { mode: "enforce-explicit" },
+      async (runtime) => {
+        await seedConfidentialCell(runtime, "sink-ceiling-default");
+        const { commit } = readConfidentialThenSink(
+          runtime,
+          "sink-ceiling-default",
+        );
+        expect((await commit()).ok).toBeDefined();
+      },
+    );
+  });
+
+  it("allows a public (unlabeled) request to a public-only sink", async () => {
+    await withRuntime(
+      { mode: "enforce-explicit", ceilings: { fetchData: [] } },
+      async (runtime) => {
+        // No confidential read this time — just enqueue a sink request.
+        const tx = runtime.edit();
+        // Touch a labeled cell's schema so the tx is CFC-relevant, but read a
+        // non-confidential path... simplest: mark relevant via a public write.
+        enqueueSinkRequestPostCommitEffect(
+          tx,
+          "fetchData",
+          "fetchData:public",
+          createFrozenRequestSnapshot({ url: "https://example.com/ok" }),
+          "fetchData-start",
+          () => {},
+        );
+        tx.prepareCfc();
+        // With no CFC-relevant activity the boundary check is skipped entirely;
+        // either way the public request must commit.
+        expect((await tx.commit()).ok).toBeDefined();
+      },
+    );
+  });
+});

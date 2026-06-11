@@ -478,7 +478,7 @@ ${notesXml}
                             style={{
                               fontSize: "11px",
                               fontWeight: "500",
-                              color: "var(--cf-color-gray-500)",
+                              color: "var(--cf-colors-gray-500)",
                               textTransform: "uppercase",
                               letterSpacing: "0.05em",
                             }}
@@ -491,7 +491,7 @@ ${notesXml}
                                 style={{
                                   padding: "6px 8px",
                                   borderRadius: "6px",
-                                  background: "var(--cf-color-gray-50)",
+                                  background: "var(--cf-colors-gray-50)",
                                   fontSize: "13px",
                                 }}
                               >
@@ -499,7 +499,7 @@ ${notesXml}
                                 {" — "}
                                 <span
                                   style={{
-                                    color: "var(--cf-color-gray-600)",
+                                    color: "var(--cf-colors-gray-600)",
                                   }}
                                 >
                                   {theme.detail}
@@ -520,7 +520,7 @@ ${notesXml}
                               style={{
                                 fontSize: "11px",
                                 fontWeight: "500",
-                                color: "var(--cf-color-gray-500)",
+                                color: "var(--cf-colors-gray-500)",
                                 textTransform: "uppercase",
                                 letterSpacing: "0.05em",
                               }}
@@ -552,7 +552,7 @@ ${notesXml}
                               style={{
                                 fontSize: "11px",
                                 fontWeight: "500",
-                                color: "var(--cf-color-gray-500)",
+                                color: "var(--cf-colors-gray-500)",
                                 textTransform: "uppercase",
                                 letterSpacing: "0.05em",
                               }}
@@ -580,7 +580,7 @@ ${notesXml}
                             margin: 0,
                             fontSize: "13px",
                             fontStyle: "italic",
-                            color: "var(--cf-color-gray-600)",
+                            color: "var(--cf-colors-gray-600)",
                           }}
                         >
                           {weeklyRollup?.mood}
@@ -589,7 +589,7 @@ ${notesXml}
                       <div
                         style={{
                           textAlign: "center",
-                          color: "var(--cf-color-gray-500)",
+                          color: "var(--cf-colors-gray-500)",
                           padding: "0.5rem",
                           fontSize: "13px",
                         }}
@@ -615,7 +615,7 @@ ${notesXml}
                       style={{
                         fontSize: "11px",
                         fontWeight: "500",
-                        color: "var(--cf-color-gray-500)",
+                        color: "var(--cf-colors-gray-500)",
                         textTransform: "uppercase",
                         letterSpacing: "0.05em",
                       }}
@@ -647,7 +647,7 @@ ${notesXml}
               style={{
                 margin: 0,
                 fontSize: "13px",
-                color: "var(--cf-color-text-secondary)",
+                color: "var(--cf-theme-color-text-secondary)",
               }}
             >
               Available variables: {"{{date}}"}, {"{{dayOfWeek}}"},

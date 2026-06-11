@@ -289,7 +289,10 @@ export function resolveLink(
       if (crossSpace) {
         const maybePromise = runtime.getCellFromLink(link).sync();
         if (maybePromise instanceof Promise) {
-          const promise = maybePromise.finally(() => {
+          // Swallow sync failures: this kick is best-effort (the read still
+          // resolves from the local replica) and an unhandled rejection here
+          // would otherwise escape the resolution path.
+          const promise = maybePromise.catch(() => {}).finally(() => {
             runtime.storageManager.removeCrossSpacePromise(promise);
           }) as unknown as Promise<void>;
           runtime.storageManager.addCrossSpacePromise(promise);

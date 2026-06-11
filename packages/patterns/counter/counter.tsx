@@ -87,7 +87,7 @@ const Counter = pattern<CounterInput, CounterOutput>(({ value }) => {
 
           <div
             id="counter-result"
-            style={{ color: "var(--cf-color-gray-500)" }}
+            style={{ color: "var(--cf-colors-gray-500)" }}
           >
             Counter is the {ordinalDisplay} number
           </div>

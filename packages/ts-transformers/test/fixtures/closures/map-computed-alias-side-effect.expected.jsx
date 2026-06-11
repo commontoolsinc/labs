@@ -22,7 +22,7 @@ interface State {
 const __cfLift_1 = __cfHelpers.lift<{
     element: any;
     __cf_amount_key: any;
-}, number | undefined>({
+}, number | undefined>(({ element, __cf_amount_key }) => element[__cf_amount_key], {
     type: "object",
     properties: {
         element: true,
@@ -31,7 +31,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["element", "__cf_amount_key"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ element, __cf_amount_key }) => element[__cf_amount_key]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const element = __cf_pattern_input.key("element");
     const __cf_amount_key = nextKey();

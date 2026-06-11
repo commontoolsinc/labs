@@ -13,7 +13,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     config: __cfHelpers.Cell<{ timeout: number | null; retries: number | undefined; }>;
-}, number>({
+}, number>(({ config }) => (config.get().timeout ?? 30), {
     type: "object",
     properties: {
         config: {
@@ -34,10 +34,10 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["config"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ config }) => (config.get().timeout ?? 30));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     config: __cfHelpers.Cell<{ timeout: number | null; retries: number | undefined; }>;
-}, boolean>({
+}, boolean>(({ config }) => (config.get().retries ?? 3) > 0, {
     type: "object",
     properties: {
         config: {
@@ -53,10 +53,10 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["config"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ config }) => (config.get().retries ?? 3) > 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     items: __cfHelpers.Cell<string[]>;
-}, string | false>({
+}, string | false>(({ items }) => items.get().length > 0 && (items.get()[0] ?? "empty"), {
     type: "object",
     properties: {
         items: {
@@ -75,7 +75,7 @@ const __cfLift_3 = __cfHelpers.lift<{
             type: "boolean",
             "enum": [false]
         }]
-} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().length > 0 && (items.get()[0] ?? "empty"));
+} as const satisfies __cfHelpers.JSONSchema);
 // Tests nullish coalescing (??) interaction with && and ||
 // ?? should NOT be transformed to when/unless (different semantics)
 // FIXTURE: logical-nullish-coalescing

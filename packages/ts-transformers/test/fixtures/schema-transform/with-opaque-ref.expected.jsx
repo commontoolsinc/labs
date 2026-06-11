@@ -31,7 +31,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     cell: {
         value: __cfHelpers.Cell<number>;
     };
-}, number>({
+}, number>(({ cell }) => cell.value.get() * 2, {
     type: "object",
     properties: {
         cell: {
@@ -48,7 +48,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ cell }) => cell.value.get() * 2);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: with-opaque-ref
 // Verifies: Cell<> fields generate asCell in schema and a reactive builder gets input/output schemas injected
 //   Cell<number> → { type: "number", asCell: true }

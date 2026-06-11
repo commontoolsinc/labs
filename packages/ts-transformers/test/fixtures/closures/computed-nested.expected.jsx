@@ -14,7 +14,7 @@ const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     a: __cfHelpers.ReadonlyCell<number>;
     b: __cfHelpers.ReadonlyCell<number>;
-}, number>({
+}, number>(({ a, b }) => a.get() + b.get(), {
     type: "object",
     properties: {
         a: {
@@ -29,10 +29,10 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["a", "b"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ a, b }) => a.get() + b.get());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     sum: number;
-}, number>({
+}, number>(({ sum }) => sum * 2, {
     type: "object",
     properties: {
         sum: {
@@ -42,7 +42,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["sum"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ sum }) => sum * 2);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-nested
 // Verifies: chained computed() calls where the second captures the result of the first
 //   computed(() => a.get() + b.get()) → lift(({ a, b }) => a.get() + b.get())({ a, b })

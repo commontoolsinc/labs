@@ -37,7 +37,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         row: number;
         col: number;
     };
-}, number | undefined>({
+}, number | undefined>(({ state }) => state.matrix[state.row]![state.col], {
     type: "object",
     properties: {
         state: {
@@ -65,7 +65,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.matrix[state.row]![state.col]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         nested: {
@@ -74,7 +74,7 @@ const __cfLift_2 = __cfHelpers.lift<{
         };
         row: number;
     };
-}, string | undefined>({
+}, string | undefined>(({ state }) => state.nested.arrays[state.nested.index]![state.row], {
     type: "object",
     properties: {
         state: {
@@ -108,12 +108,12 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.nested.arrays[state.nested.index]![state.row]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         items: string[];
     };
-}, string | undefined>({
+}, string | undefined>(({ state }) => state.items[state.items.length - 1], {
     type: "object",
     properties: {
         state: {
@@ -132,12 +132,12 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.items.length - 1]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         arr: number[];
     };
-}, number>({
+}, number>(({ state }) => state.arr[0]! + state.arr[state.arr.length - 1]!, {
     type: "object",
     properties: {
         state: {
@@ -156,14 +156,14 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.arr[0]! + state.arr[state.arr.length - 1]!);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_5 = __cfHelpers.lift<{
     state: {
         arr: number[];
         a: number;
         b: number;
     };
-}, number | undefined>({
+}, number | undefined>(({ state }) => state.arr[state.a + state.b], {
     type: "object",
     properties: {
         state: {
@@ -188,13 +188,13 @@ const __cfLift_5 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.arr[state.a + state.b]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_6 = __cfHelpers.lift<{
     state: {
         items: string[];
         row: number;
     };
-}, string | undefined>({
+}, string | undefined>(({ state }) => state.items[state.row % state.items.length], {
     type: "object",
     properties: {
         state: {
@@ -216,13 +216,13 @@ const __cfLift_6 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.row % state.items.length]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_7 = __cfHelpers.lift<{
     state: {
         arr: number[];
         a: number;
     };
-}, number | undefined>({
+}, number | undefined>(({ state }) => state.arr[Math.min(state.a * 2, state.arr.length - 1)], {
     type: "object",
     properties: {
         state: {
@@ -244,14 +244,14 @@ const __cfLift_7 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.arr[Math.min(state.a * 2, state.arr.length - 1)]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_8 = __cfHelpers.lift<{
     state: {
         users: { name: string; scores: number[]; }[];
         selectedUser: number;
         selectedScore: number;
     };
-}, number | undefined>({
+}, number | undefined>(({ state }) => state.users[state.selectedUser]!.scores[state.selectedScore], {
     type: "object",
     properties: {
         state: {
@@ -288,13 +288,13 @@ const __cfLift_8 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.users[state.selectedUser]!.scores[state.selectedScore]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_9 = __cfHelpers.lift<{
     state: {
         items: string[];
         indices: number[];
     };
-}, string | undefined>({
+}, string | undefined>(({ state }) => state.items[state.indices[0]!], {
     type: "object",
     properties: {
         state: {
@@ -319,12 +319,12 @@ const __cfLift_9 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.indices[0]!]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_10 = __cfHelpers.lift<{
     state: {
         arr: number[];
     };
-}, number | undefined>({
+}, number | undefined>(({ state }) => state.arr[state.arr[0]!], {
     type: "object",
     properties: {
         state: {
@@ -343,7 +343,7 @@ const __cfLift_10 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.arr[state.arr[0]!]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_11 = __cfHelpers.lift<{
     state: {
         nested: {
@@ -351,7 +351,7 @@ const __cfLift_11 = __cfHelpers.lift<{
             index: number;
         };
     };
-}, number>({
+}, number>(({ state }) => state.nested.arrays[state.nested.index]!.length, {
     type: "object",
     properties: {
         state: {
@@ -382,13 +382,13 @@ const __cfLift_11 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.nested.arrays[state.nested.index]!.length);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_12 = __cfHelpers.lift<{
     state: {
         users: { name: string; scores: number[]; }[];
         selectedUser: number;
     };
-}, number>({
+}, number>(({ state }) => state.users[state.selectedUser]!.name.length, {
     type: "object",
     properties: {
         state: {
@@ -422,13 +422,13 @@ const __cfLift_12 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.users[state.selectedUser]!.name.length);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_13 = __cfHelpers.lift<{
     state: {
         arr: number[];
         a: number;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.arr[state.a]! > 10, {
     type: "object",
     properties: {
         state: {
@@ -450,13 +450,13 @@ const __cfLift_13 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.arr[state.a]! > 10);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_14 = __cfHelpers.lift<{
     state: {
         items: string[];
         b: number;
     };
-}, string>({
+}, string>(({ state }) => state.items[state.b]!, {
     type: "object",
     properties: {
         state: {
@@ -478,14 +478,14 @@ const __cfLift_14 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.b]!);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_15 = __cfHelpers.lift<{
     state: {
         matrix: number[][];
         row: number;
         col: number;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.matrix[state.row]![state.col]! > 0, {
     type: "object",
     properties: {
         state: {
@@ -513,14 +513,14 @@ const __cfLift_15 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.matrix[state.row]![state.col]! > 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_16 = __cfHelpers.lift<{
     state: {
         arr: number[];
         a: number;
         b: number;
     };
-}, number>({
+}, number>(({ state }) => state.arr[state.a]! * state.arr[state.b]!, {
     type: "object",
     properties: {
         state: {
@@ -545,13 +545,13 @@ const __cfLift_16 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.arr[state.a]! * state.arr[state.b]!);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_17 = __cfHelpers.lift<{
     state: {
         items: string[];
         indices: number[];
     };
-}, string>({
+}, string>(({ state }) => state.items[0]! + " - " + state.items[state.indices[0]!]!, {
     type: "object",
     properties: {
         state: {
@@ -576,12 +576,12 @@ const __cfLift_17 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[0]! + " - " + state.items[state.indices[0]!]!);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_18 = __cfHelpers.lift<{
     state: {
         arr: number[];
     };
-}, number>({
+}, number>(({ state }) => state.arr[0]! + state.arr[1]! + state.arr[2]!, {
     type: "object",
     properties: {
         state: {
@@ -600,7 +600,7 @@ const __cfLift_18 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.arr[0]! + state.arr[1]! + state.arr[2]!);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: element-access-complex
 // Verifies: complex element-access patterns (nested, computed, chained, conditional) are wrapped in a lift-applied computation
 //   state.matrix[state.row]![state.col]         → lift(...)({ matrix, row, col })

@@ -30,7 +30,12 @@ const __cfLift_1 = __cfHelpers.lift<{
         name: string;
     };
     todayDate: string;
-}, boolean>({
+}, boolean>(({ logs, habit, todayDate }) => {
+    const logList = logs.get();
+    return logList.some((log) => log.habitName === habit.name &&
+        log.date === todayDate &&
+        log.completed);
+}, {
     type: "object",
     properties: {
         logs: {
@@ -73,12 +78,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ logs, habit, todayDate }) => {
-    const logList = logs.get();
-    return logList.some((log) => log.habitName === habit.name &&
-        log.date === todayDate &&
-        log.completed);
-});
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const habit = __cf_pattern_input.key("element");
     const logs = __cf_pattern_input.key("params", "logs");

@@ -497,7 +497,7 @@ export interface SessionRevokedMessage {
   type: "session/revoked";
   space: string;
   sessionId: SessionId;
-  reason: "taken-over";
+  reason: "taken-over" | "unauthorized";
 }
 
 export interface V2Error {

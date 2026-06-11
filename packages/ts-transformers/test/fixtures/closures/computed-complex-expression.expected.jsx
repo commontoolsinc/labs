@@ -15,7 +15,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     a: __cfHelpers.ReadonlyCell<number>;
     b: __cfHelpers.ReadonlyCell<number>;
     c: __cfHelpers.ReadonlyCell<number>;
-}, number>({
+}, number>(({ a, b, c }) => (a.get() * b.get() + c.get()) / 2, {
     type: "object",
     properties: {
         a: {
@@ -34,7 +34,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["a", "b", "c"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ a, b, c }) => (a.get() * b.get() + c.get()) / 2);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-complex-expression
 // Verifies: computed(() => expr) with three cell captures in an arithmetic expression
 //   computed(() => (a.get() * b.get() + c.get()) / 2) → lift(({ a, b, c }) => ...)({ a, b, c })

@@ -396,7 +396,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
             <span
               style={{
                 fontSize: "13px",
-                color: "var(--cf-color-gray-500)",
+                color: "var(--cf-colors-gray-500)",
                 flex: 1,
               }}
             >
@@ -448,7 +448,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                       <div
                         style={{
                           textAlign: "center",
-                          color: "var(--cf-color-gray-500)",
+                          color: "var(--cf-colors-gray-500)",
                           padding: "2rem",
                         }}
                       >
@@ -535,8 +535,8 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                                 fontSize: "12px",
                                 padding: "4px 8px",
                                 borderRadius: "4px",
-                                background: "var(--cf-color-green-100)",
-                                color: "var(--cf-color-green-700)",
+                                background: "var(--cf-colors-green-100)",
+                                color: "var(--cf-colors-green-600)",
                               }}
                             >
                               {itemWithAisle.item.aisleOverride}
@@ -559,8 +559,8 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                                 fontSize: "12px",
                                 padding: "4px 8px",
                                 borderRadius: "4px",
-                                background: "var(--cf-color-blue-100)",
-                                color: "var(--cf-color-blue-700)",
+                                background: "var(--cf-colors-blue-100)",
+                                color: "var(--cf-colors-blue-600)",
                               }}
                             >
                               {itemWithAisle.aisle.result?.location || "Other"}

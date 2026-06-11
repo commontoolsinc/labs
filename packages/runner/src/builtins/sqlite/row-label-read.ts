@@ -3,7 +3,8 @@
 // sqliteQuery flush (sqlite-builtins.ts) feeds this real results; everything
 // here is side-effect free and fail-closed — any unresolvable input refuses
 // the query rather than under-labeling.
-// Design: docs/specs/sqlite-builtin/plans/cfc-phase3-per-row.md §7, §9.
+// Spec: docs/specs/sqlite-builtin/06-cfc.md ("Read — re-derive per row,
+// attach, ceiling"; "Fail-closed rules").
 
 import {
   evaluateRowLabel,
@@ -60,7 +61,7 @@ const isRecord = (x: unknown): x is Record<string, unknown> =>
 /**
  * Compute each result row's per-row label from the declared rules and the
  * projection's TRUE column origins, then apply the declared output ceiling.
- * Fail-closed refusals (design §9): invalid wire spec; missing provenance;
+ * Fail-closed refusals (spec "Fail-closed rules"): invalid wire spec; missing provenance;
  * any null-origin (aggregate/expression) column while a row rule is declared;
  * a rule input column missing from or ambiguous in the projection; an
  * evaluator error on any row; a ceiling miss under onExceed:"fail"; skip on a
@@ -187,7 +188,7 @@ export function computeRowLabelRead(
 
   // Declared output ceiling — the consumer's contract on what the result may
   // carry. Applies to per-row AND static per-column confidentiality; not
-  // reader-clearance (none exists), a declared contract (design §7a).
+  // reader-clearance (none exists), a declared contract (06-cfc.md ceiling).
   let keep: boolean[] | undefined;
   if (ceiling !== undefined) {
     if (onExceed === "skip" && nullOrigin) {

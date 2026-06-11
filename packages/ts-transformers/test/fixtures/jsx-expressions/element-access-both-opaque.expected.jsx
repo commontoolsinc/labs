@@ -14,7 +14,7 @@ const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     items: __cfHelpers.Cell<string[]>;
     index: __cfHelpers.Cell<number>;
-}, string | undefined>({
+}, string | undefined>(({ items, index }) => items.get()[index.get()], {
     type: "object",
     properties: {
         items: {
@@ -32,7 +32,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["items", "index"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ items, index }) => items.get()[index.get()]);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: element-access-both-opaque
 // Verifies: element access where both array and index are cell-backed OpaqueRefs is wrapped in a lift-applied computation
 //   items.get()[index.get()] → lift(({items, index}) => items.get()[index.get()])({ items, index })

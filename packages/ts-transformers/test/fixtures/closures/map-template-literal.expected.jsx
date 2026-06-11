@@ -28,7 +28,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     item: {
         name: string;
     };
-}, string>({
+}, string>(({ state, item }) => `${state.prefix} ${item.name} ${state.suffix}`, {
     type: "object",
     properties: {
         state: {
@@ -56,7 +56,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state", "item"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state, item }) => `${state.prefix} ${item.name} ${state.suffix}`);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");

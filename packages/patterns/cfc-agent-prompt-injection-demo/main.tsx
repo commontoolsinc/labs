@@ -147,9 +147,9 @@ const AGENT_PANEL_STYLE = {
   height: AGENT_PANEL_HEIGHT,
   minHeight: "0",
   overflow: "hidden",
-  border: "1px solid var(--cf-color-gray-200, #eaecf0)",
+  border: "1px solid var(--cf-colors-gray-200, #eaecf0)",
   borderRadius: "12px",
-  background: "var(--cf-color-background, #fff)",
+  background: "var(--cf-theme-color-background, #fff)",
   padding: "1rem",
 };
 const AGENT_PANEL_STACK_STYLE = {
@@ -164,7 +164,7 @@ const PRIMARY_CONTROL_STYLE = {
   border: "0",
   borderRadius: "8px",
   padding: "0.6rem 0.85rem",
-  background: "var(--cf-color-blue-600, #4f6df5)",
+  background: "var(--cf-colors-blue-600, #4f6df5)",
   color: "white",
   cursor: "pointer",
   font: "inherit",
@@ -172,8 +172,8 @@ const PRIMARY_CONTROL_STYLE = {
 
 const SECONDARY_CONTROL_STYLE = {
   ...PRIMARY_CONTROL_STYLE,
-  background: "var(--cf-color-gray-100, #f2f4f7)",
-  color: "var(--cf-color-gray-900, #101828)",
+  background: "var(--cf-colors-gray-100, #f2f4f7)",
+  color: "var(--cf-colors-gray-900, #101828)",
 };
 
 type LabelPreviewProps = {
@@ -193,9 +193,9 @@ function LabelPreview(
         display: "grid",
         gap: "0.5rem",
         padding: "0.75rem",
-        border: "1px solid var(--cf-color-gray-200, #eaecf0)",
+        border: "1px solid var(--cf-colors-gray-200, #eaecf0)",
         borderRadius: "12px",
-        background: "var(--cf-color-gray-25, #fcfcfd)",
+        background: "var(--cf-colors-gray-50, #fcfcfd)",
       }}
     >
       {integrity.length > 0
@@ -482,10 +482,10 @@ Your job in this half is to fail visibly when the document tries to seize contro
           style={{
             flex: 1,
             minHeight: "0",
-            border: "1px solid var(--cf-color-gray-200)",
+            border: "1px solid var(--cf-colors-gray-200)",
             borderRadius: "12px",
             padding: "0.75rem",
-            background: "var(--cf-color-gray-25, #fcfcfd)",
+            background: "var(--cf-colors-gray-50, #fcfcfd)",
           }}
         >
           {unsafeHasMessages
@@ -493,7 +493,7 @@ Your job in this half is to fail visibly when the document tries to seize contro
             : (
               <div
                 style={{
-                  color: "var(--cf-color-gray-500)",
+                  color: "var(--cf-colors-gray-500)",
                   padding: "2rem 1rem",
                   textAlign: "center",
                 }}
@@ -606,10 +606,10 @@ string.`;
           style={{
             flex: 1,
             minHeight: "0",
-            border: "1px solid var(--cf-color-gray-200)",
+            border: "1px solid var(--cf-colors-gray-200)",
             borderRadius: "12px",
             padding: "0.75rem",
-            background: "var(--cf-color-gray-25, #fcfcfd)",
+            background: "var(--cf-colors-gray-50, #fcfcfd)",
           }}
         >
           {safeHasMessages
@@ -617,7 +617,7 @@ string.`;
             : (
               <div
                 style={{
-                  color: "var(--cf-color-gray-500)",
+                  color: "var(--cf-colors-gray-500)",
                   padding: "2rem 1rem",
                   textAlign: "center",
                 }}
@@ -779,7 +779,7 @@ string.`;
                       lineHeight: "1.5",
                       padding: "0.75rem",
                       borderRadius: "12px",
-                      background: "var(--cf-color-gray-50)",
+                      background: "var(--cf-colors-gray-50)",
                     }}
                   >
                     {DEMO_PROMPT}
@@ -808,7 +808,7 @@ string.`;
                       lineHeight: "1.5",
                       padding: "0.75rem",
                       borderRadius: "12px",
-                      background: "var(--cf-color-gray-50)",
+                      background: "var(--cf-colors-gray-50)",
                     }}
                   >
                   {HOSTILE_BRIEFING_BODY}
@@ -851,7 +851,7 @@ string.`;
                     : (
                       <div
                         style={{
-                          color: "var(--cf-color-gray-500)",
+                          color: "var(--cf-colors-gray-500)",
                           padding: "1rem 0",
                         }}
                       >

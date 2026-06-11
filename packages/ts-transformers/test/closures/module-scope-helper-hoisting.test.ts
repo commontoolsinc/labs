@@ -42,8 +42,10 @@ Deno.test("Closure Transformer hoists nested computed callbacks that close over 
   // const is module-scope, which is the property this test guards: a computed
   // closing over the module-scoped helper `formatDateShort` becomes a named,
   // module-scope, self-contained unit.
+  // lift is function-first: the callback leads, schemas trail. The hoisted call
+  // carries explicit `<In, Out>` type args, so match `lift<…>(` then the callback.
   const hoistedMatch = normalized.match(
-    /const (__cfLift_\d+) = __cfHelpers\.lift[\s\S]*?, \(\{ dateStr \}\) => formatDateShort\(dateStr\)\);/,
+    /const (__cfLift_\d+) = __cfHelpers\.lift<[\s\S]*?>\(\(\{ dateStr \}\) => formatDateShort\(dateStr\)/,
   );
 
   assert(hoistedMatch, `expected hoisted lift in output:\n${output}`);

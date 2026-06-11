@@ -27,7 +27,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         wishes: [{ id: string; status: string; }, { id: string; status: string; }];
     };
-}, string>({
+}, string>(({ state }) => JSON.stringify(state.wishes[1]), {
     type: "object",
     properties: {
         state: {
@@ -55,12 +55,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => JSON.stringify(state.wishes[1]));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         wishes: [{ id: string; status: string; }, { id: string; status: string; }];
     };
-}, string[]>({
+}, string[]>(({ state }) => Object.keys(state.wishes[1]), {
     type: "object",
     properties: {
         state: {
@@ -91,12 +91,12 @@ const __cfLift_2 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => Object.keys(state.wishes[1]));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         wishes: [{ id: string; status: string; }, { id: string; status: string; }];
     };
-}, string[]>({
+}, string[]>(({ state }) => Object.values(state.wishes[1]), {
     type: "object",
     properties: {
         state: {
@@ -127,12 +127,12 @@ const __cfLift_3 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => Object.values(state.wishes[1]));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         wishes: [{ id: string; status: string; }, { id: string; status: string; }];
     };
-}, [string, string][]>({
+}, [string, string][]>(({ state }) => Object.entries(state.wishes[1]), {
     type: "object",
     properties: {
         state: {
@@ -166,7 +166,7 @@ const __cfLift_4 = __cfHelpers.lift<{
             type: "string"
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => Object.entries(state.wishes[1]));
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: non-jsx-wildcard-traversal-call-roots
 // Verifies: wildcard traversal calls lower as whole call roots outside JSX
 export default pattern((state) => ({
