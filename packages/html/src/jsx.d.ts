@@ -3306,6 +3306,18 @@ type TailwindNumberType =
 interface CFStackAttributes<T> extends CFHTMLAttributes<T> {
   "gap"?: TailwindNumberType;
   "padding"?: TailwindNumberType;
+  /** Horizontal (left/right) padding; overrides `padding` on those sides. */
+  "px"?: TailwindNumberType;
+  /** Vertical (top/bottom) padding; overrides `padding` on those sides. */
+  "py"?: TailwindNumberType;
+  /** Padding-top; overrides `padding`/`py` on that side. */
+  "pt"?: TailwindNumberType;
+  /** Padding-right; overrides `padding`/`px` on that side. */
+  "pr"?: TailwindNumberType;
+  /** Padding-bottom; overrides `padding`/`py` on that side. */
+  "pb"?: TailwindNumberType;
+  /** Padding-left; overrides `padding`/`px` on that side. */
+  "pl"?: TailwindNumberType;
   "align"?: "start" | "center" | "end" | "stretch" | "baseline";
   "justify"?: "start" | "center" | "end" | "between" | "around" | "evenly";
   "wrap"?: boolean;
@@ -4216,6 +4228,8 @@ interface CFTextAttributes<T> extends CFHTMLAttributes<T> {
       | "error"
     >;
   "block"?: boolean | CellLike<boolean>;
+  /** Single-line ellipsis truncation. Implies block display. */
+  "truncate"?: boolean | CellLike<boolean>;
 }
 
 interface CFBadgeAttributes<T> extends CFHTMLAttributes<T> {

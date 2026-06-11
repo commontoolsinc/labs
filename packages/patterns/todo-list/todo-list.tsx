@@ -158,7 +158,7 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
                     Completed ({computed(() => completedItems.length)})
                   </cf-text>
                 </summary>
-                <cf-vstack gap="2" style="padding-top: 0.5rem;">
+                <cf-vstack gap="2" pt="2">
                   {completedCards}
                   <cf-hstack justify="end">
                     <cf-button
