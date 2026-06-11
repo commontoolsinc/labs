@@ -335,6 +335,8 @@ export class Runtime {
   readonly experimental: ExperimentalOptions;
   readonly apiUrl: URL;
   readonly spaceHostMap?: Record<string, string>;
+  /** Runtime-learned host hints (site table); see registerSpaceHost. */
+  #dynamicHosts = new Map<string, string>();
   readonly userIdentityDID: DID;
   /** Cache of resolved PatternFactory.inSpace("name") space DIDs. */
   private readonly spaceNameToDid = new Map<string, MemorySpace>();
@@ -1135,13 +1137,38 @@ export class Runtime {
   }
 
   /**
+   * The host explicitly known to serve a space, if any: the seed map
+   * wins, then runtime-learned hints (site table). Undefined means
+   * "no per-space fact" — callers choose their own default (storage
+   * and hostForSpace use apiUrl; LLM/fetch keep their module-level
+   * defaults, which may deliberately differ from apiUrl).
+   */
+  mappedHostFor(space: MemorySpace): string | undefined {
+    return this.spaceHostMap?.[space] ?? this.#dynamicHosts.get(space);
+  }
+
+  /**
    * The host that serves a space's space-bound work (LLM, fetch, blob).
-   * A space in `spaceHostMap` resolves to its mapped host; everything
-   * else to the default `apiUrl`. The single compute-side analogue of
-   * the storage layer's per-space address resolver.
+   * A mapped space resolves to its host; everything else to the
+   * default `apiUrl`. The single compute-side analogue of the storage
+   * layer's per-space address resolver.
    */
   hostForSpace(space: MemorySpace): URL {
-    return new URL(this.spaceHostMap?.[space] ?? this.apiUrl);
+    return new URL(this.mappedHostFor(space) ?? this.apiUrl);
+  }
+
+  /**
+   * Record a runtime-learned host hint for a space (the v0 site-table
+   * flow). Storage decides first — the seed map wins and an opened
+   * space is never silently re-pointed — and compute routing follows
+   * exactly when storage accepted, keeping the two layers in agreement.
+   * Returns whether the hint is in effect.
+   */
+  registerSpaceHost(space: MemorySpace, host: string): boolean {
+    const accept = this.storageManager.registerSpaceHost?.(space, host);
+    if (accept === undefined) return false; // manager has no remote resolution
+    if (accept) this.#dynamicHosts.set(space, host);
+    return accept;
   }
 
   /**
@@ -1151,7 +1178,12 @@ export class Runtime {
    */
   async healthCheck(): Promise<boolean> {
     const hosts = new Set([this.apiUrl.toString()]);
-    for (const host of Object.values(this.spaceHostMap ?? {})) {
+    for (
+      const host of [
+        ...Object.values(this.spaceHostMap ?? {}),
+        ...this.#dynamicHosts.values(),
+      ]
+    ) {
       try {
         hosts.add(new URL(host).toString());
       } catch {

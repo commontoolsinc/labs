@@ -2989,7 +2989,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
     };
 
   // TODO(bf): sendRequest must be given a callback, even if it does nothing
-  const mappedLlmHost = runtime.spaceHostMap?.[space];
+  const mappedLlmHost = runtime.mappedHostFor(space);
   const doWork = () =>
     client.sendRequest(
       llmParams,

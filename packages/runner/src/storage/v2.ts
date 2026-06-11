@@ -541,15 +541,26 @@ export class StorageManager implements IStorageManager {
   #crossSpacePromises = new Set<Promise<void>>();
   #sessionFactory: SessionFactory;
   #spaceIdentity?: Signer;
+  /** Seed map from Options — fixed for the manager's lifetime. */
+  #seedHosts: Record<string, string>;
+  /** Late-bound host hints; see registerSpaceHost. */
+  #dynamicHosts = new Map<string, string>();
 
   static open(options: Options) {
-    return new this(
+    const dynamicHosts = new Map<string, string>();
+    const manager = new this(
       options,
       new RemoteSessionFactory(
-        createStorageAddressResolver(options.memoryHost, options.spaceHostMap),
+        createStorageAddressResolver(
+          options.memoryHost,
+          options.spaceHostMap,
+          dynamicHosts,
+        ),
         options.as,
       ),
     );
+    manager.#dynamicHosts = dynamicHosts;
+    return manager;
   }
 
   protected constructor(
@@ -561,6 +572,43 @@ export class StorageManager implements IStorageManager {
     this.#settings = options.settings ?? defaultSettings;
     this.#sessionFactory = sessionFactory;
     this.#spaceIdentity = options.spaceIdentity;
+    this.#seedHosts = options.spaceHostMap ?? {};
+  }
+
+  /**
+   * Record a runtime-learned host hint for a space (e.g. from the
+   * home-space site table). Returns true when the hint is (now) in
+   * effect for the space's storage connection. Refusals, by design:
+   *
+   * - The seed map wins: a seeded space cannot be re-pointed.
+   * - An already-OPENED space keeps its connection — a hint must never
+   *   silently re-point live storage (re-pointing requires an explicit
+   *   close, which is lifecycle follow-up work).
+   *
+   * Idempotent when the hint matches what is already in effect.
+   */
+  registerSpaceHost(space: MemorySpace, host: string): boolean {
+    let normalized: string;
+    try {
+      normalized = new URL(host).toString();
+    } catch (cause) {
+      throw new Error(
+        `Invalid host for space ${space}: "${host}"`,
+        { cause },
+      );
+    }
+    const seeded = this.#seedHosts[space];
+    if (seeded !== undefined) {
+      return new URL(seeded).toString() === normalized;
+    }
+    const existing = this.#dynamicHosts.get(space);
+    if (this.#providers.has(space)) {
+      // Connection already established — only confirmable, not changeable.
+      return existing !== undefined &&
+        new URL(existing).toString() === normalized;
+    }
+    this.#dynamicHosts.set(space, host);
+    return true;
   }
 
   open(space: MemorySpace): IStorageProviderWithReplica {

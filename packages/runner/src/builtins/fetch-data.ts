@@ -363,7 +363,7 @@ async function startFetch(
     // unmapped space keeps the pattern environment's api base — which on
     // some deployments (toolshed) deliberately differs from the runtime's
     // default memory host, so hostForSpace's fallback is NOT used here.
-    const mappedHost = runtime.spaceHostMap?.[inputsCell.space];
+    const mappedHost = runtime.mappedHostFor(inputsCell.space);
     const response = await fetch(
       new URL(url, mappedHost ?? getPatternEnvironment().apiUrl),
       {
