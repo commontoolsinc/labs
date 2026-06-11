@@ -384,9 +384,41 @@ Diagnostics emitted in all modes:
     wrappers
   - validation first checks the shared lowerable-expression-site policy; only
     non-lowerable computation sites still report this error
-- **Error** `pattern-context:map-on-fallback`
-  - `(opaqueExpr ?? fallback).map(...)` or `(opaqueExpr || fallback).map(...)`
-    where left is reactive and right is not
+- **Error** `pattern-context:callback-container`
+  - a callback passed to an **unsupported container** in pattern-facing JSX
+    (the callback-boundary decision is `unsupported` with
+    `boundaryDiagnostic === "callback-container"`) — e.g. a foreign imperative
+    container root like `[0, 1].forEach(() => list.map(...))`. This is the
+    diagnostic counterpart of the target-language spec's "foreign callback /
+    imperative container roots" unsupported bucket. Guidance: use a supported
+    array-method/value call, an event handler, or move the work into
+    `computed(() => ...)`, module-scope `lift()`, or a helper.
+- **Error** `pattern-context:patterntool-requires-pattern`
+  - `patternTool(fn, ...)` where the first argument is a bare callback (arrow /
+    function expression) rather than a `pattern(...)`. The runtime/transformer
+    auto-wrapping (`pattern(fn)`) and auto-capture were removed in CT-1655;
+    authors now wrap explicitly: `patternTool(pattern(fn), extraParams?)`. The
+    diagnostic is reported on the bare-callback argument.
+- **Error** `ses-callback:callable-capture`
+  - a callback at an SES-self-contained boundary captures a **callable**
+    declared in an enclosing function scope. The boundary kinds that require
+    self-containment are `SES_SELF_CONTAINED_CALLBACK_BOUNDARIES`:
+    `event-handler`, `reactive-array-method`, `pattern-tool`, `pattern-builder`,
+    `render-builder`, `lift-applied`, `computed-builder`, `action-builder`,
+    `lift-builder`, `handler-builder`. (`sqlite-row-label-rule` is deliberately
+    excluded — `table()` evaluates its rule callback eagerly at pattern build
+    into a serialized AST, so capture is harmless there.) SES callback
+    implementations must be self-contained. Guidance: move callable helpers to
+    module scope, or pass serializable data through explicit inputs/state.
+    Capturing non-callable reactive data is still allowed.
+
+Removed diagnostic (behavior change, PR #3154 pattern-language-boundary): the
+former `pattern-context:map-on-fallback` error no longer exists.
+Fallback-guarded reactive collection forms such as `(items ?? []).map(...)`,
+`(items || []).filter(...)`, and `(items ?? []).flatMap(...)` — including
+cast-/`satisfies`-wrapped reactive left sides — are now **supported** and emit no
+fallback-specific diagnostic. `test/validation.test.ts` retains these as
+regression guards asserting the forms validate clean.
 
 ### 6.6 Pattern Result Schema Inference
 

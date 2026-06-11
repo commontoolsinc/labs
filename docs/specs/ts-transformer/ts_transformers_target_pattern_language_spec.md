@@ -371,6 +371,13 @@ The intended rule is:
 
 This distinction is part of the language, not an incidental optimizer detail.
 
+A reactive receiver guarded by a nullish/`||` array fallback —
+`(items ?? []).map(...)`, `(items || []).filter(...)`,
+`(items ?? []).flatMap(...)`, including cast-/`satisfies`-wrapped reactive left
+sides — is **supported** and lowers as a reactive collection operator. (An
+earlier `pattern-context:map-on-fallback` error rejected this shape; it was
+removed when this boundary was drawn.)
+
 ## 5.4 Callback / Container Boundary Is Four-Way Split
 
 The callback/container boundary should be read in four distinct buckets:
