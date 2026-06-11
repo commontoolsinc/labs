@@ -85,6 +85,21 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     transport: RuntimeTransport,
     options: RuntimeClientOptions,
   ): Promise<RuntimeClient> {
+    // renderDeclassificationPolicy is a security knob: reject unknown values
+    // loudly here, where the host's own config error can surface early. The
+    // worker side additionally fails CLOSED (treats unknown as "deny") for
+    // peers that don't go through this entry point.
+    const renderPolicy = options.renderDeclassificationPolicy;
+    if (
+      renderPolicy !== undefined && renderPolicy !== "allow" &&
+      renderPolicy !== "deny"
+    ) {
+      throw new Error(
+        `Invalid renderDeclassificationPolicy: ${
+          JSON.stringify(renderPolicy)
+        } (expected "allow" or "deny")`,
+      );
+    }
     const initialized = await (new RuntimeConnection(transport)).initialize({
       apiUrl: options.apiUrl.toString(),
       spaceHostMap: options.spaceHostMap,

@@ -41,7 +41,10 @@ import type {
   WorkerRenderNode,
   WorkerVNode,
 } from "./types.ts";
-import { isWorkerVNode } from "./types.ts";
+import {
+  isWorkerVNode,
+  normalizeRenderDeclassificationPolicy,
+} from "./types.ts";
 import {
   type CfcLabelView,
   cfcLabelViewForCell,
@@ -107,8 +110,11 @@ export class WorkerReconciler {
   constructor(options: WorkerReconcilerOptions) {
     this.onOps = options.onOps;
     this.onError = options.onError;
-    this.renderDeclassificationPolicy = options.renderDeclassificationPolicy ??
-      "allow";
+    // Security knob: a present-but-unknown value fails closed to "deny";
+    // only an absent option keeps the documented "allow" default.
+    this.renderDeclassificationPolicy = normalizeRenderDeclassificationPolicy(
+      options.renderDeclassificationPolicy,
+    );
   }
 
   /**

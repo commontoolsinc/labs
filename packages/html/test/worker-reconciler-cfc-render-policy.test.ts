@@ -4,6 +4,7 @@ import { isCell as isRuntimeCell, Runtime } from "@commonfabric/runner";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { WorkerVNode } from "../src/worker/types.ts";
+import { normalizeRenderDeclassificationPolicy } from "../src/worker/types.ts";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
 import type { VDomOp } from "../src/vdom-ops.ts";
 
@@ -484,6 +485,226 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             renderedText.includes("Sensitive diagnosis: migraine"),
             true,
           );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "treats an unknown render policy value as deny (fail closed)",
+      async () => {
+        // The policy crosses postMessage seams (InitializationData) with no
+        // runtime validation; a typo'd host config or version-skewed peer must
+        // not silently fail OPEN to "allow". Absent stays "allow" — covered by
+        // the 'declassifies that label' step above, which passes no option.
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderDeclassificationPolicy: "allow-all" as never,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: {
+            maxConfidentiality: [],
+            declassifyConfidentiality: [healthRecordAtom],
+          },
+          children: [confidential as never],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            false,
+          );
+          assertEquals(
+            renderedText.includes("Content hidden by policy"),
+            true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "deny ignores declassification carried by reactive policy props",
+      async () => {
+        // Mirror of "renders materialized children when reactive policy props
+        // declassify": the boundary's props (including the author's
+        // declassifyConfidentiality) arrive through a Cell, and under "deny"
+        // they must NOT release the labeled value.
+        const propsTx = runtime.edit();
+        const propsCell = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-deny-declassify-props",
+          undefined,
+          propsTx,
+        );
+        propsCell.setRawUntyped({
+          maxConfidentiality: [],
+          declassifyConfidentiality: [healthRecordAtom],
+          $value: confidential.getAsLink({ includeSchema: true }),
+        });
+        const propsCommitResult = await propsTx.commit();
+        assertEquals(propsCommitResult.ok !== undefined, true);
+
+        const boundaryProps = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-deny-declassify-props",
+        );
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderDeclassificationPolicy: "deny",
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: boundaryProps as never,
+          children: [{
+            type: "vnode",
+            name: "div",
+            props: { id: "deny-reactive-policy-secret" },
+            children: ["Sensitive diagnosis: migraine"],
+          }],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            false,
+          );
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "deny keeps children blocked when a boundary update adds declassification",
+      async () => {
+        // Mirror of "reveals materialized children when boundary updates to
+        // declassify": under "deny" the post-mount update that adds
+        // declassifyConfidentiality must NOT release the labeled value.
+        // Deliberately no collector.clear(): the secret must never appear in
+        // the op stream, before or after the update.
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderDeclassificationPolicy: "deny",
+        });
+        const rootCell = new MockCell(
+          {
+            type: "vnode",
+            name: "cf-cfc-render-boundary",
+            props: {
+              maxConfidentiality: [],
+              $value: confidential,
+            },
+            children: [{
+              type: "vnode",
+              name: "div",
+              props: { id: "deny-initially-blocked-secret" },
+              children: ["Sensitive diagnosis: migraine"],
+            }],
+          } satisfies WorkerVNode,
+        );
+
+        const cancel = reconciler.mount(rootCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          rootCell.set(
+            {
+              type: "vnode",
+              name: "cf-cfc-render-boundary",
+              props: {
+                maxConfidentiality: [],
+                declassifyConfidentiality: [healthRecordAtom],
+                $value: confidential,
+              },
+              children: [{
+                type: "vnode",
+                name: "div",
+                props: { id: "deny-still-blocked-secret" },
+                children: ["Sensitive diagnosis: migraine"],
+              }],
+            } satisfies WorkerVNode,
+          );
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            false,
+          );
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "deny keeps children blocked when a reactive prop update adds declassification",
+      async () => {
+        // Mirror of "reveals materialized children when reactive policy props
+        // update": the props Cell gains declassifyConfidentiality after mount;
+        // under "deny" the children must stay blocked. No collector.clear():
+        // the secret must never appear in the op stream.
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderDeclassificationPolicy: "deny",
+        });
+        const propsCell = new MockPropsCell({
+          maxConfidentiality: [],
+          $value: confidential,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: propsCell as never,
+          children: [{
+            type: "vnode",
+            name: "div",
+            props: { id: "deny-reactive-props-updated-secret" },
+            children: ["Sensitive diagnosis: migraine"],
+          }],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          propsCell.set({
+            maxConfidentiality: [],
+            declassifyConfidentiality: [healthRecordAtom],
+            $value: confidential,
+          });
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            false,
+          );
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
         } finally {
           cancel();
         }
@@ -1909,4 +2130,23 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     await runtime.dispose();
     await storageManager.close();
   }
+});
+
+Deno.test("normalizeRenderDeclassificationPolicy", async (t) => {
+  await t.step("absent value keeps the documented 'allow' default", () => {
+    assertEquals(normalizeRenderDeclassificationPolicy(undefined), "allow");
+  });
+
+  await t.step("known values pass through", () => {
+    assertEquals(normalizeRenderDeclassificationPolicy("allow"), "allow");
+    assertEquals(normalizeRenderDeclassificationPolicy("deny"), "deny");
+  });
+
+  await t.step("present-but-unknown values fail closed to 'deny'", () => {
+    assertEquals(normalizeRenderDeclassificationPolicy("allow-all"), "deny");
+    assertEquals(normalizeRenderDeclassificationPolicy(""), "deny");
+    assertEquals(normalizeRenderDeclassificationPolicy(null), "deny");
+    assertEquals(normalizeRenderDeclassificationPolicy(0), "deny");
+    assertEquals(normalizeRenderDeclassificationPolicy({}), "deny");
+  });
 });
