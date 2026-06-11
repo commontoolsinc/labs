@@ -11,6 +11,7 @@ import type { CacheableModule } from "../src/harness/types.ts";
 
 import {
   buildSourceDocs,
+  COMPILE_CACHE_RUNTIME_VERSION,
   compiledDocKey,
   compiledIntegrityAtom,
   loadCompiledClosure,
@@ -70,6 +71,56 @@ function toModules(
 
 const identityOf = (program: typeof PROGRAM, path: string) =>
   computeModuleHashes(program).get(path)!;
+
+function fabricLinkedModules(): {
+  modules: CacheableModule[];
+  importerIdentity: string;
+  depIdentity: string;
+  fabricSpecifier: string;
+} {
+  const depProgram = {
+    main: "/dep.ts",
+    files: [
+      { name: "/dep.ts", contents: "export const x = 1;" },
+    ],
+  };
+  const depIdentity = computeModuleHashes(depProgram).get("/dep.ts")!;
+  const fabricSpecifier = `cf:pattern:${depIdentity}`;
+  const importerProgram = {
+    main: "/main.tsx",
+    files: [
+      {
+        name: "/main.tsx",
+        contents:
+          `import { x } from "${fabricSpecifier}";\nexport function y() { return x + 1; }`,
+      },
+    ],
+  };
+  const importerIdentity = computeModuleHashes(importerProgram).get(
+    "/main.tsx",
+  )!;
+  return {
+    importerIdentity,
+    depIdentity,
+    fabricSpecifier,
+    modules: [
+      {
+        identity: importerIdentity,
+        filename: "/main.tsx",
+        source: importerProgram.files[0].contents,
+        js: "/* compiled importer */",
+        imports: [{ specifier: fabricSpecifier, targetIdentity: depIdentity }],
+      },
+      {
+        identity: depIdentity,
+        filename: "/dep.ts",
+        source: depProgram.files[0].contents,
+        js: "/* compiled dependency */",
+        imports: [],
+      },
+    ],
+  };
+}
 
 describe("cell-cache: keys", () => {
   it("formats source and compiled document keys", () => {
@@ -241,13 +292,32 @@ describe("cell-cache: source-set store (per space, link-following)", () => {
     );
     expect(tampered).toBe(undefined);
   });
+
+  it("does not store fabric imports as source links", async () => {
+    const { modules, importerIdentity, fabricSpecifier } =
+      fabricLinkedModules();
+    const tx = runtime.edit();
+    writeSourceDocs(runtime, spaceA, modules, importerIdentity, tx);
+
+    const loaded = await loadVerifiedSourceClosure(
+      runtime,
+      spaceA,
+      importerIdentity,
+      tx,
+    );
+
+    expect(loaded?.size).toBe(1);
+    const importer = loaded?.get(importerIdentity);
+    expect(importer?.imports.map((imp) => imp.specifier)).not.toContain(
+      fabricSpecifier,
+    );
+  });
 });
 
 describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   const spaceA = signer.did();
-  const compilerDid = signer.did();
   const RTVER = "rt-test-1";
 
   beforeEach(() => {
@@ -267,7 +337,10 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     await storageManager?.close();
   });
 
-  const opts = () => ({ runtimeVersion: RTVER, compilerDid });
+  const opts = () => ({
+    runtimeVersion: RTVER,
+    compilerDid: runtime.userIdentityDID,
+  });
 
   it("writes compiled docs with integrity and loads them back (warm hit)", async () => {
     const { modules, entryIdentity } = toModules(PROGRAM);
@@ -366,7 +439,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
 
     const otherDid = "did:key:someone-else";
     expect(compiledIntegrityAtom(otherDid)).not.toBe(
-      compiledIntegrityAtom(compilerDid),
+      compiledIntegrityAtom(opts().compilerDid),
     );
     const rtx = runtime.edit();
     const loaded = await loadCompiledClosure(
@@ -378,5 +451,88 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     );
     rtx.abort?.();
     expect(loaded.size).toBe(0);
+  });
+
+  it("keeps fabric imports as compiled links", async () => {
+    const { modules, importerIdentity, depIdentity, fabricSpecifier } =
+      fabricLinkedModules();
+    const wtx = runtime.edit();
+    writeCompiledDocs(runtime, spaceA, modules, importerIdentity, opts(), wtx);
+    wtx.prepareCfc();
+    await wtx.commit();
+
+    const rtx = runtime.edit();
+    const loaded = await loadCompiledClosure(
+      runtime,
+      spaceA,
+      importerIdentity,
+      opts(),
+      rtx,
+    );
+    rtx.abort?.();
+
+    expect(loaded.has(importerIdentity)).toBe(true);
+    expect(loaded.has(depIdentity)).toBe(true);
+    expect(loaded.get(importerIdentity)?.imports).toContainEqual({
+      specifier: fabricSpecifier,
+      identity: depIdentity,
+    });
+  });
+
+  it("replicates fabric dependencies even though source closures exclude them", async () => {
+    const spaceB = "did:key:z6MkCellCacheFabricReplicationTarget";
+    const { modules, importerIdentity, depIdentity } = fabricLinkedModules();
+    const replicationOpts = {
+      runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
+      compilerDid: runtime.userIdentityDID,
+    };
+    const wtx = runtime.edit();
+    writeSourceDocs(runtime, spaceA, modules, importerIdentity, wtx);
+    writeCompiledDocs(
+      runtime,
+      spaceA,
+      modules,
+      importerIdentity,
+      replicationOpts,
+      wtx,
+    );
+    wtx.prepareCfc();
+    await wtx.commit();
+
+    const manager = runtime.patternManager as unknown as {
+      replicateClosures(
+        entryIdentity: string,
+        fromSpace: string,
+        toSpace: string,
+      ): Promise<void>;
+    };
+    await manager.replicateClosures(importerIdentity, spaceA, spaceB);
+
+    const rtx = runtime.edit();
+    const importerSource = await loadVerifiedSourceClosure(
+      runtime,
+      spaceB,
+      importerIdentity,
+      rtx,
+    );
+    const depSource = await loadVerifiedSourceClosure(
+      runtime,
+      spaceB,
+      depIdentity,
+      rtx,
+    );
+    const compiled = await loadCompiledClosure(
+      runtime,
+      spaceB,
+      importerIdentity,
+      replicationOpts,
+      rtx,
+    );
+    rtx.abort?.();
+
+    expect(importerSource?.has(importerIdentity)).toBe(true);
+    expect(depSource?.has(depIdentity)).toBe(true);
+    expect(compiled.has(importerIdentity)).toBe(true);
+    expect(compiled.has(depIdentity)).toBe(true);
   });
 });

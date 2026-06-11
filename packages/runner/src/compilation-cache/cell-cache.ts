@@ -6,6 +6,7 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { type Cell, isCell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { readStoredCfcMetadata } from "../cfc/metadata.ts";
+import { isFabricImportSpecifier } from "../sandbox/fabric-import-specifier.ts";
 
 const logger = getLogger("cell-cache");
 
@@ -120,11 +121,16 @@ function storedImportRefs(
   module: CacheableModule,
   entryIdentity: string,
   extraRoots: readonly string[],
+  options: { includeFabricEdges: boolean },
 ): ModuleImportRef[] {
-  const refs: ModuleImportRef[] = module.imports.map((imp) => ({
-    specifier: imp.specifier,
-    identity: imp.targetIdentity,
-  }));
+  const refs: ModuleImportRef[] = module.imports
+    .filter((imp) =>
+      options.includeFabricEdges || !isFabricImportSpecifier(imp.specifier)
+    )
+    .map((imp) => ({
+      specifier: imp.specifier,
+      identity: imp.targetIdentity,
+    }));
   if (module.identity === entryIdentity) {
     for (const rootIdentity of extraRoots) {
       refs.push({
@@ -154,7 +160,9 @@ export function buildSourceDocs(
       kind: "source",
       code: module.source,
       filename: module.filename,
-      imports: storedImportRefs(module, entryIdentity, extraRoots),
+      imports: storedImportRefs(module, entryIdentity, extraRoots, {
+        includeFabricEdges: false,
+      }),
     });
   }
   return out;
@@ -539,17 +547,17 @@ export function writeCompiledDocs(
       ...(module.sourceMap !== undefined
         ? { sourceMap: module.sourceMap }
         : {}),
-      imports: storedImportRefs(module, entryIdentity, extraRoots).map(
-        (ref) => ({
-          specifier: ref.specifier,
-          link: runtime.getCell(
-            space,
-            compiledDocKey(opts.runtimeVersion, ref.identity),
-            undefined,
-            tx,
-          ).getAsLink(),
-        }),
-      ),
+      imports: storedImportRefs(module, entryIdentity, extraRoots, {
+        includeFabricEdges: true,
+      }).map((ref) => ({
+        specifier: ref.specifier,
+        link: runtime.getCell(
+          space,
+          compiledDocKey(opts.runtimeVersion, ref.identity),
+          undefined,
+          tx,
+        ).getAsLink(),
+      })),
     } as StoredCompiledDoc);
   }
 }

@@ -1,4 +1,9 @@
+import ts from "typescript";
 import { getLogger } from "@commonfabric/utils/logger";
+import {
+  collectImportSpecifiers,
+  type Source,
+} from "@commonfabric/js-compiler";
 import { Module, Pattern, Schema } from "./builder/types.ts";
 import {
   getArtifactEntryRef,
@@ -27,9 +32,15 @@ import {
   loadCompiledClosure,
   loadVerifiedSourceClosure,
   ROOT_LINK_SPECIFIER,
+  type SourceDoc,
   writeCompiledDocs,
   writeSourceDocs,
 } from "./compilation-cache/cell-cache.ts";
+import {
+  isFabricImportSpecifier,
+  parseFabricRef,
+  pinnedIdentity,
+} from "./sandbox/fabric-import-specifier.ts";
 import { URI } from "./sigil-types.ts";
 import { toURI } from "./uri-utils.ts";
 import { parseLink } from "./link-utils.ts";
@@ -48,6 +59,46 @@ const MAX_PATTERN_CACHE_SIZE = 100;
 // bundle is ~10 modules), and entries are cheap (a reference to an already-live
 // namespace).
 const MAX_EVALUATED_MODULE_CACHE_SIZE = 1000;
+const FABRIC_IMPORT_SCAN_TARGET = ts.ScriptTarget.ES2023;
+
+function fabricImportRefsFromSource(
+  doc: SourceDoc,
+): CacheableModule["imports"] {
+  const source: Source = { name: doc.filename, contents: doc.code };
+  const refs: CacheableModule["imports"] = [];
+  const seen = new Set<string>();
+  for (
+    const specifier of collectImportSpecifiers(
+      source,
+      FABRIC_IMPORT_SCAN_TARGET,
+    )
+  ) {
+    if (!isFabricImportSpecifier(specifier)) continue;
+    const ref = parseFabricRef(specifier);
+    if (ref === undefined) continue;
+    const targetIdentity = pinnedIdentity(ref);
+    if (targetIdentity === undefined) continue;
+    const key = `${specifier}\0${targetIdentity}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    refs.push({ specifier, targetIdentity });
+  }
+  return refs;
+}
+
+function uniqueCacheableImports(
+  imports: CacheableModule["imports"],
+): CacheableModule["imports"] {
+  const seen = new Set<string>();
+  const out: CacheableModule["imports"] = [];
+  for (const imp of imports) {
+    const key = `${imp.specifier}\0${imp.targetIdentity}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(imp);
+  }
+  return out;
+}
 
 export const patternMetaSchema = internSchema(
   {
@@ -523,7 +574,12 @@ export class PatternManager {
     entryIdentity: string,
     fromSpace: MemorySpace,
     toSpace: MemorySpace,
+    visited = new Set<string>(),
   ): Promise<void> {
+    const visitKey = `${fromSpace}\0${toSpace}\0${entryIdentity}`;
+    if (visited.has(visitKey)) return;
+    visited.add(visitKey);
+
     // The origin-space closure may have been produced by THIS session's cold
     // compile, whose write-back is itself fire-and-forget and may not have
     // committed yet. A lost race would throw here — and for a handler-created
@@ -565,10 +621,15 @@ export class PatternManager {
       throw new Error("source closure unavailable in origin space");
     }
     const modules: CacheableModule[] = [];
+    const fabricDependencies = new Set<string>();
     for (const [identity, doc] of sourceDocs) {
       const compiled = compiledDocs.get(identity);
       if (!compiled) {
         throw new Error(`compiled doc missing for ${identity}`);
+      }
+      const fabricImports = fabricImportRefsFromSource(doc);
+      for (const imp of fabricImports) {
+        fabricDependencies.add(imp.targetIdentity);
       }
       modules.push({
         identity,
@@ -580,12 +641,15 @@ export class PatternManager {
           : {}),
         // The write functions re-derive the entry's root links; keep only the
         // real import edges.
-        imports: doc.imports
-          .filter((imp) => !imp.specifier.startsWith(ROOT_LINK_SPECIFIER))
-          .map((imp) => ({
-            specifier: imp.specifier,
-            targetIdentity: imp.identity,
-          })),
+        imports: uniqueCacheableImports([
+          ...doc.imports
+            .filter((imp) => !imp.specifier.startsWith(ROOT_LINK_SPECIFIER))
+            .map((imp) => ({
+              specifier: imp.specifier,
+              targetIdentity: imp.identity,
+            })),
+          ...fabricImports,
+        ]),
       });
     }
     const { error } = await this.runtime.editWithRetry((tx) => {
@@ -600,6 +664,15 @@ export class PatternManager {
       );
     });
     if (error) throw error;
+
+    for (const dependencyIdentity of fabricDependencies) {
+      await this.replicateClosures(
+        dependencyIdentity,
+        fromSpace,
+        toSpace,
+        visited,
+      );
+    }
   }
 
   private async syncLinkedPatternSource(
