@@ -362,6 +362,14 @@ Compute wrappers override restrictions:
 - inline JSX `on*` handlers
 - standalone function definitions
 - JSX expressions (handled by opaque-ref JSX transformer)
+- the SQLite `table(columns, (row) => ({...}))` row-label rule callback —
+  classified as the supported `sqlite-row-label-rule` compute boundary
+  (`callback-boundary.ts`). `table()` is recognized by name **plus** the
+  `SqliteTableFunction` type alias from Common Fabric's own typings (so an
+  unrelated user function named `table` does not match). The rule callback is
+  evaluated eagerly at pattern build into a serialized JSON AST, so it is
+  compute-owned and is deliberately exempt from SES self-containment validation
+  (see the `ses-callback:callable-capture` exclusion below).
 
 Diagnostics emitted in all modes:
 
@@ -490,6 +498,37 @@ recursive lowering. That boundary does not disappear just because the callback
 returns JSX: ternaries and logical control flow inside the compute callback
 body stay authored JavaScript rather than recursively lowered helper control
 flow.
+
+### 6.8 WriteAuthorizedBy validation (CFC, validation-only)
+
+`WriteAuthorizedByValidationTransformer` (pipeline stage 10) is the one piece of
+the CFC authoring contract that has landed on `main`, and it is **validation
+only** — there is no CFC schema lowering yet (no `ifc.integrity` / `ifc.opaque` /
+`ifc.collection` emission anywhere in `src/`; the draft lowering rules in
+`cfc_authoring_contract.md` remain unimplemented — see §14).
+
+It scans `toSchema<T>()` (one type arg) and `pattern<I, R>()` (the result type
+arg) for `WriteAuthorizedBy<T, typeof binding>` references, resolving through
+local type aliases and type-parameter substitution
+(`findWriteAuthorizedByReferences`). For each reference it emits
+**`cfc-write-authorized-by`** when usage is malformed:
+
+- the second type argument is not a `typeof` binding (`TypeQueryNode`)
+- the `typeof` target is not a simple identifier
+- the bound name is not a supported origin — a local `handler()` / `module()` /
+  `requireEventIntegrity()` initializer, or a local function declaration
+
+Well-formed `WriteAuthorizedBy` usage passes validation; the base schema still
+lowers as `T` (the `WriteAuthorizedBy` wrapper contributes no schema metadata on
+current `main`). This stage is exercised by `test/cfc-authoring.test.ts`,
+`test/cfc-transformer-coverage.test.ts`, and pipeline regressions.
+
+`ts-transformers` also re-exports the canonical CFC alias-name set
+(`CFC_CANONICAL_ALIAS_NAMES`, from `@commonfabric/api/cfc`) via
+`src/cfc-authoring.ts` — `Cfc`, `Confidential`, `Integrity`, `OpaqueInput`,
+`WriteAuthorizedBy`, the `TrustedAction*` family, the projection aliases, etc.
+These names are recognized as CFC vocabulary but, apart from `WriteAuthorizedBy`
+validation above, are not yet lowered.
 
 ## 7. JSX Expression Site Routing And Early Rewriting
 
@@ -824,6 +863,16 @@ Injected behaviors:
   - ensure options object has `schema` property (merge/spread as needed)
   - explicit or contextual unresolved generic result types degrade to
     `{ type: "unknown" }`
+- `sqliteQuery<Row>(...)`:
+  - the **typed** form lowers the `Row` type argument to an injected `rowSchema`
+    property on the options object (parallel to `generateObject`'s `schema`);
+    the runtime builtin composes `result.items = rowSchema`. Two call shapes
+    inject it: the free function `sqliteQuery<Row>({ db, sql, ... })` (options at
+    arg 0) and a method form. Idempotent (skips when `rowSchema` already
+    present).
+  - untyped `sqliteQuery(...)` is not injected. Other SQLite builtins
+    (`sqliteDatabase`, etc.) are recognized reactive-origin `runtime-call`s (§5)
+    but receive no dedicated schema injection.
 
 ### 10.6 Conditional helpers
 
@@ -1037,9 +1086,16 @@ pipeline. Current built-in behavior:
    declaration is analyzable in-proc (arrow/function
    expression/declaration/method); external/unresolved calls remain
    conservative.
-6. The CFC authoring and trusted-UI helper contracts now documented under
-   `docs/specs/ts-transformer/cfc_*.md` are draft contracts only; the current
-   implemented pipeline on `main` does not yet lower those forms.
+6. The CFC authoring and trusted-UI helper contracts under
+   `docs/specs/ts-transformer/cfc_*.md` are draft **lowering** contracts: the
+   current pipeline on `main` does not lower those forms (no `ifc.*` schema
+   metadata emission). The one landed exception is **`WriteAuthorizedBy`
+   validation** (§6.8) — usage is validated (`cfc-write-authorized-by`) even
+   though the wrapper is not yet lowered. The canonical CFC alias names are
+   re-exported but otherwise inert. Note: the authoring draft says the schema
+   generator validates `WriteAuthorizedBy`; on `main` that validation is a
+   separate stage-10 `WriteAuthorizedByValidationTransformer`, not the schema
+   generator.
 
 ## 15. Test Coverage Snapshot
 
