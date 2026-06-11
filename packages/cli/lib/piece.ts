@@ -26,6 +26,7 @@ import { dirname, join } from "@std/path";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { setLLMUrl } from "@commonfabric/llm";
 import { isRecord } from "@commonfabric/utils/types";
+import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
 import { isHandlerCell } from "../../fuse/callables.ts";
 import { awaitSyncWithTimeout, experimentalOptionsFromEnv } from "./utils.ts";
 import {
@@ -271,7 +272,7 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
   });
 }
 
-async function getProgramFromFile(
+export async function getProgramFromFile(
   manager: PieceManager,
   entry: EntryConfig,
 ): Promise<RuntimeProgram> {
@@ -282,6 +283,22 @@ async function getProgramFromFile(
     program.mainExport = entry.mainExport;
   }
   return program;
+}
+
+async function getPinnedProgramFromFile(
+  manager: PieceManager,
+  entry: EntryConfig,
+): Promise<RuntimeProgram> {
+  const program = await getProgramFromFile(manager, entry);
+  const result = await pinProgramFabricImports(
+    manager.runtime,
+    manager.getSpace(),
+    program,
+  );
+  for (const rewrite of result.rewrites) {
+    console.error(renderPinRewrite(rewrite));
+  }
+  return result.program;
 }
 
 // Returns an array of metadata about pieces to display.
@@ -393,7 +410,7 @@ export async function newPiece(
 
   const program = await timeCliPhase(
     "newPiece.getProgramFromFile",
-    () => getProgramFromFile(manager, entry),
+    () => getPinnedProgramFromFile(manager, entry),
   );
   const PIECE_START_TIMEOUT_MS = 60_000;
   const piece = await timeCliPhase("newPiece.create", () => {
@@ -494,7 +511,7 @@ export async function setPiecePattern(
     undefined,
     resolvedConfig.pieceScope,
   );
-  await piece.setPattern(await getProgramFromFile(manager, entry));
+  await piece.setPattern(await getPinnedProgramFromFile(manager, entry));
 }
 
 export async function savePiecePattern(

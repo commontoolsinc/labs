@@ -8,8 +8,9 @@ import {
 } from "@commonfabric/js-compiler";
 import { TARGET } from "@commonfabric/js-compiler/typescript";
 import { Identity } from "@commonfabric/identity";
-import { Runtime } from "@commonfabric/runner";
+import { type MemorySpace, Runtime } from "@commonfabric/runner";
 import { experimentalOptionsFromEnv } from "./utils.ts";
+import { renderPinRewrite } from "./fabric-deps.ts";
 
 const FABRIC_IMPORTS_REQUIRE_SPACE_MESSAGE =
   "fabric imports require a space context (options.fabricImports)";
@@ -37,6 +38,7 @@ export interface ProcessOptions {
   showTransformed?: boolean;
   mainExport?: string;
   verboseErrors?: boolean;
+  space?: string;
 }
 
 export async function process(
@@ -54,22 +56,43 @@ export async function process(
     options.main,
     options.rootPath,
   );
-  await assertNoFabricImportsWithoutSpace(resolver);
-  const program = await engine.resolve(resolver);
+  const program = options.space
+    ? await resolveLocalProgramAllowingFabric(resolver)
+    : await engine.resolve(await assertNoFabricImportsWithoutSpace(resolver));
   if (options.mainExport) {
     program.mainExport = options.mainExport;
   }
   const getTransformedProgram = options.showTransformed
     ? renderTransformed
     : undefined;
-  const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
-    program,
-    {
-      noCheck: !options.check,
-      getTransformedProgram,
-      verboseErrors: options.verboseErrors,
-    },
-  );
+  const { id, graph, mainSpecifier, resolvedPins } = await engine
+    .compileToRecordGraph(
+      program,
+      {
+        noCheck: !options.check,
+        getTransformedProgram,
+        verboseErrors: options.verboseErrors,
+        fabricImports: options.space
+          ? {
+            space: options.space as MemorySpace,
+            allowUnpinned: true,
+          }
+          : undefined,
+      },
+    );
+  for (const pin of resolvedPins) {
+    console.error(
+      `${
+        renderPinRewrite({
+          file: program.main,
+          line: 0,
+          pinned: `${pin.specifier}@${pin.resolvedIdentity}`,
+          specifier: pin.specifier,
+          resolvedIdentity: pin.resolvedIdentity,
+        })
+      } (not pinned - deploy or run cf deps update)`,
+    );
+  }
 
   // Concatenated per-module compiled bodies (the same composition the SES
   // loader evaluates), for inspection via --output.
@@ -102,7 +125,7 @@ function renderTransformed(program: Program) {
 
 async function assertNoFabricImportsWithoutSpace(
   resolver: ProgramResolver,
-): Promise<void> {
+): Promise<ProgramResolver> {
   const main = await resolver.main();
   const pending = [main];
   const seen = new Set<string>();
@@ -125,6 +148,36 @@ async function assertNoFabricImportsWithoutSpace(
       if (resolved !== undefined) pending.push(resolved);
     }
   }
+  return resolver;
+}
+
+async function resolveLocalProgramAllowingFabric(
+  resolver: ProgramResolver,
+): Promise<Program> {
+  const main = await resolver.main();
+  const pending = [main];
+  const seen = new Set<string>();
+  const files: Source[] = [];
+
+  while (pending.length > 0) {
+    const source = pending.shift()!;
+    if (seen.has(source.name)) continue;
+    seen.add(source.name);
+    files.push(source);
+
+    for (const specifier of collectImportSpecifiers(source, TARGET)) {
+      if (isFabricImportSpecifier(specifier)) continue;
+
+      const identifier = resolveImportSpecifier(specifier, source);
+      if (!isFileSystemSourceIdentifier(identifier) || seen.has(identifier)) {
+        continue;
+      }
+      const resolved = await resolver.resolveSource(identifier);
+      if (resolved !== undefined) pending.push(resolved);
+    }
+  }
+
+  return { main: main.name, files };
 }
 
 function isFabricImportSpecifier(specifier: string): boolean {

@@ -2,6 +2,7 @@ import { Command } from "@cliffy/command";
 import { HelpCommand } from "@cliffy/command/help";
 import { acl } from "./acl.ts";
 import { check, dev } from "./dev.ts";
+import { deps } from "./deps.ts";
 import { exec } from "./exec.ts";
 import { fuse } from "./fuse.ts";
 import { init } from "./init.ts";
@@ -70,6 +71,7 @@ export const main = new Command()
   .command("piece", piece)
   .command("check", check)
   .command("dev", dev)
+  .command("deps", deps)
   .command("exec", exec)
   // @ts-ignore for the above type issue
   .command("fuse", fuse)

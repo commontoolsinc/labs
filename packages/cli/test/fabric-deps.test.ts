@@ -1,0 +1,103 @@
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { createRef } from "../../runner/src/create-ref.ts";
+import {
+  type PatternMeta,
+  patternMetaSchema,
+} from "../../runner/src/pattern-manager.ts";
+import { slugIdForSpace } from "../../runner/src/slugs.ts";
+import type { Cell } from "../../runner/src/cell.ts";
+import type { URI } from "../../runner/src/sigil-types.ts";
+import { fromURI, toURI } from "../../runner/src/uri-utils.ts";
+import { pinProgramFabricImports } from "../lib/fabric-deps.ts";
+import { cf } from "./utils.ts";
+
+const signer = await Identity.fromPassphrase("cli fabric deps test");
+const space = signer.did();
+const ENTRY = "Avcny13Rj8q-2ClANy_-k0ikWWQcXx7QTdsiqGfrC1c";
+
+describe("cli fabric deps", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  function newPatternId(): URI {
+    return toURI(createRef({ pattern: "dep" }, "cli fabric deps test"));
+  }
+
+  function patternMetaCell(patternId: URI): Cell<PatternMeta> {
+    return runtime.getCellFromEntityId(
+      space,
+      { "/": fromURI(patternId) },
+      [],
+      patternMetaSchema,
+    );
+  }
+
+  async function writePatternSlug(slug: string): Promise<void> {
+    const patternId = newPatternId();
+    const meta = patternMetaCell(patternId);
+    await runtime.editWithRetry((tx) => {
+      meta.withTx(tx).set(
+        { spec: "pattern", entryIdentity: ENTRY } as PatternMeta,
+      );
+    });
+    const slugCell = runtime.getCellFromEntityId(space, {
+      "/": slugIdForSpace(space, slug),
+    });
+    await runtime.editWithRetry((tx) => {
+      const slugWithTx = slugCell.withTx(tx);
+      slugWithTx.setRawUntyped(
+        meta.withTx(tx).getAsWriteRedirectLink({ base: slugWithTx }),
+      );
+    });
+  }
+
+  it("pins mutable fabric imports in a runtime program", async () => {
+    await writePatternSlug("dep");
+    const result = await pinProgramFabricImports(runtime, space, {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: `import dep from "cf:dep";\nexport default dep;`,
+        },
+      ],
+    });
+
+    expect(result.program.files[0].contents).toBe(
+      `import dep from "cf:dep@${ENTRY}";\nexport default dep;`,
+    );
+    expect(result.rewrites).toEqual([
+      {
+        file: "/main.tsx",
+        specifier: "cf:dep",
+        pinned: `cf:dep@${ENTRY}`,
+        resolvedIdentity: ENTRY,
+        line: 1,
+      },
+    ]);
+  });
+
+  it("exposes deps update help", async () => {
+    const { code, stdout } = await cf("deps update --help");
+
+    expect(code).toBe(0);
+    expect(stdout.join("\n")).toContain("--check");
+  });
+});

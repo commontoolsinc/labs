@@ -38,6 +38,7 @@ async function devAction(
     verboseErrors?: boolean;
     patternJson?: boolean;
     root?: string;
+    space?: string;
   },
   ...files: string[]
 ) {
@@ -60,6 +61,7 @@ async function devAction(
         showTransformed: options.showTransformed,
         mainExport: options.mainExport,
         verboseErrors: options.verboseErrors,
+        space: options.space,
       });
       // Only print JSON output when --pattern-json is used
       // (and not when --show-transformed is used, as that already prints to stdout)
@@ -150,9 +152,10 @@ function createDevCommand(cmdName: string): Command<any> {
       "--root <path:string>",
       "Root directory for resolving imports. Allows imports from parent directories within this root.",
     )
-    // TODO(M2): add explicit space selection for fabric imports when CLI
-    // dependency pinning/update support lands. M1 intentionally does not add
-    // a new --space flag.
+    .option(
+      "--space <did:string>",
+      "Space DID for resolving fabric imports.",
+    )
     .arguments("<files...:string>")
     .action(devAction);
 }
