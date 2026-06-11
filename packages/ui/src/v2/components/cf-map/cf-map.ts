@@ -84,7 +84,7 @@ const mapValueSchema: JSONSchema = {
           description: { type: "string" },
           icon: { type: "string" },
           draggable: { type: "boolean" },
-          // popup is OpaqueRef, left unspecified to preserve as-is
+          // popup is Reactive, left unspecified to preserve as-is
         },
       },
     },
@@ -100,7 +100,7 @@ const mapValueSchema: JSONSchema = {
           strokeWidth: { type: "number" },
           title: { type: "string" },
           description: { type: "string" },
-          // popup is OpaqueRef, left unspecified to preserve as-is
+          // popup is Reactive, left unspecified to preserve as-is
         },
       },
     },
@@ -1116,7 +1116,7 @@ export class CFMap extends BaseElement {
   ): HTMLElement {
     const container = document.createElement("div");
 
-    // Check if we have an OpaqueRef popup (advanced mode)
+    // Check if we have an Reactive popup (advanced mode)
     if (feature.popup) {
       // Create a cf-render element for the popup content
       const cfRender = document.createElement("cf-render");

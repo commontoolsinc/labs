@@ -5,8 +5,8 @@ import {
   handler,
   ifElse,
   NAME,
-  OpaqueRef,
   pattern,
+  Reactive,
   Stream,
   UI,
   type VNode,
@@ -39,14 +39,14 @@ export interface DoListOutput {
   summary: string;
   mentionable: { [NAME]: string; summary: string; [UI]: VNode }[];
   // UI handlers (use cell references via equals())
-  addItem: OpaqueRef<
+  addItem: Reactive<
     Stream<{ title: string; indent?: number; attachments?: Writable<any>[] }>
   >;
-  removeItem: OpaqueRef<Stream<{ item: DoItem }>>;
-  updateItem: OpaqueRef<
+  removeItem: Reactive<Stream<{ item: DoItem }>>;
+  updateItem: Reactive<
     Stream<{ item: DoItem; title?: string; done?: boolean }>
   >;
-  addItems: OpaqueRef<
+  addItems: Reactive<
     Stream<{
       items: Array<{
         title: string;
@@ -57,9 +57,9 @@ export interface DoListOutput {
   >;
   // LLM-friendly handlers (use title matching)
   /** Remove a task and its subtasks by title */
-  removeItemByTitle: OpaqueRef<Stream<{ title: string }>>;
+  removeItemByTitle: Reactive<Stream<{ title: string }>>;
   /** Update a task by title. Set done to mark complete, newTitle to rename, attachments to add references. */
-  updateItemByTitle: OpaqueRef<
+  updateItemByTitle: Reactive<
     Stream<{
       title: string;
       newTitle?: string;
@@ -67,7 +67,7 @@ export interface DoListOutput {
       attachments?: Writable<any>[];
     }>
   >;
-  archiveCompleted: OpaqueRef<Stream<unknown>>;
+  archiveCompleted: Reactive<Stream<unknown>>;
 }
 
 // ===== Module-scope Handlers =====

@@ -15,9 +15,9 @@ import {
   handler,
   NAME,
   navigateTo,
-  OpaqueRef,
   pattern,
   patternTool,
+  Reactive,
   Stream,
   UI,
   Writable,
@@ -51,9 +51,9 @@ export interface Output {
   remainingCount: number;
   storeLayout: string;
   // Omnibot handlers
-  addItem: OpaqueRef<Stream<{ detail: { message: string } }>>;
-  addItemForOmnibot: OpaqueRef<Stream<{ itemText: string }>>;
-  addItems: OpaqueRef<Stream<{ itemNames: string[] }>>;
+  addItem: Reactive<Stream<{ detail: { message: string } }>>;
+  addItemForOmnibot: Reactive<Stream<{ itemText: string }>>;
+  addItems: Reactive<Stream<{ itemNames: string[] }>>;
 }
 
 // Demo store layout from Andronico's on Shattuck (community-patterns)

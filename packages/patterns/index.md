@@ -361,16 +361,16 @@ interface DoListOutput {
   items: DoItem[];
   itemCount: number;
   compactUI: VNode;
-  addItem: OpaqueRef<Stream<{ title: string; indent?: number }>>;
-  removeItem: OpaqueRef<Stream<{ item: DoItem }>>;
-  updateItem: OpaqueRef<
+  addItem: Reactive<Stream<{ title: string; indent?: number }>>;
+  removeItem: Reactive<Stream<{ item: DoItem }>>;
+  updateItem: Reactive<
     Stream<{ item: DoItem; title?: string; done?: boolean }>
   >;
-  addItems: OpaqueRef<
+  addItems: Reactive<
     Stream<{ items: Array<{ title: string; indent?: number }> }>
   >;
-  removeItemByTitle: OpaqueRef<Stream<{ title: string }>>;
-  updateItemByTitle: OpaqueRef<
+  removeItemByTitle: Reactive<Stream<{ title: string }>>;
+  updateItemByTitle: Reactive<
     Stream<{ title: string; newTitle?: string; done?: boolean }>
   >;
 }
@@ -469,8 +469,8 @@ interface Output {
   doneCount: number;
   remainingCount: number;
   storeLayout: string;
-  addItem: OpaqueRef<Stream<{ detail: { message: string } }>>;
-  addItems: OpaqueRef<Stream<{ itemNames: string[] }>>;
+  addItem: Reactive<Stream<{ detail: { message: string } }>>;
+  addItems: Reactive<Stream<{ itemNames: string[] }>>;
 }
 ```
 
