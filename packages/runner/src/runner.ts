@@ -3577,8 +3577,9 @@ export class Runner {
     // carry no legacy ref — by the resolved function's content-addressed
     // provenance. An unverified function (fallback-resolved or forged) has
     // neither, so it can never register dynamic artifacts as verified.
+    const invokerProvenance = getVerifiedProvenance(fn);
     const verifiedContext = verifiedLoadId !== undefined ||
-      getVerifiedProvenance(fn) !== undefined;
+      invokerProvenance !== undefined;
     if (!verifiedContext) {
       return invoke();
     }
@@ -3591,17 +3592,43 @@ export class Runner {
             implementationRef,
             implementation as (input: any) => void,
           );
+        } else {
+          // loadId-less verified context (the invoker resolved through a
+          // post-flip `$implRef`-only module): admit the dynamic artifact
+          // into the GLOBAL executable index under its minted content-derived
+          // ref, so its serialized module keeps the legacy
+          // `{ implementationRef, body omitted }` form — the live-closure
+          // rehydration channel the per-load registration provides on the
+          // loadId-ful path (PR #4053 review finding). A `$implRef` is not an
+          // option here: a dynamic function frequently has NO canonical
+          // `fn.src` (action-time stacks don't resolve under tamed SES, only
+          // module-eval ones do), so the minted ref — which the builder hands
+          // this registrar directly — is the one deterministic, re-mintable
+          // key. Replaced wholesale by the synthetic-identity registrar in
+          // PR E2 (design §5).
+          this.runtime.harness.registerDynamicVerifiedFunction?.(
+            implementationRef,
+            implementation as (input: any) => void,
+          );
         }
         // Content-addressed provenance for artifacts created DURING a
         // verified action's execution: the identity derives from the new
         // function's canonical source location (it was compiled as part of a
-        // verified module). In-session only (`dynamic`), matching the legacy
-        // behavior — such artifacts never resolve across a reload.
+        // verified module) when one resolves. The inherited bundle id keeps
+        // stored bundleId-only `writeAuthorizedBy` claims verifying for the
+        // dynamic artifact's own writes when CFC identity resolves through
+        // provenance (mirrors the loadId-ful path's getVerifiedBundleId).
         const identity = identityFromCanonicalSource(
           (implementation as { src?: string }).src,
         );
         if (identity) {
-          recordVerifiedProvenance(implementation, { identity, dynamic: true });
+          recordVerifiedProvenance(implementation, {
+            identity,
+            dynamic: true,
+            ...(invokerProvenance?.bundleId
+              ? { bundleId: invokerProvenance.bundleId }
+              : {}),
+          });
         }
       },
     );

@@ -180,6 +180,109 @@ describe("content-addressed action identity", () => {
     expect(r.key("name").get()).toBe("resolved-after-eviction");
   });
 
+  it("in-action-created artifacts stay registry-admitted on the loadId-less path", async () => {
+    // PR #4053 review finding (Codex P1 / cubic P2): a rehydrated
+    // `$implRef`-only module resolves WITHOUT a verifiedLoadId, so the
+    // dynamic-artifact registrar used to skip registry admission entirely —
+    // an artifact minted DURING that action then serialized with a
+    // stringified body and no ref at all, losing the live-closure
+    // rehydration channel the legacy per-load registry provides on the
+    // loadId-ful path. A `$implRef` cannot cover this category (dynamic
+    // functions frequently have no canonical `fn.src` — action-time stacks
+    // don't resolve under tamed SES), so the registrar now admits them into
+    // the GLOBAL executable index under their minted content-derived ref,
+    // keeping the pre-flip `{ implementationRef, body omitted }` serialized
+    // form on both paths until E2's synthetic-identity registrar.
+    const DYNAMIC_PROGRAM = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `/// <cf-disable-transform />
+import { type Cell, handler, lift, pattern } from "commonfabric";
+
+export const dump = handler<Record<string, never>, { out: Cell<string> }>(
+  { type: "object", properties: {} },
+  {
+    type: "object",
+    properties: { out: { type: "string", asCell: ["cell"] } },
+    required: ["out"],
+  },
+  (_event, state) => {
+    const base = 1;
+    // Closure-bearing on purpose: a stringified round-trip would sever
+    // \`base\`, so only registry admission rehydrates this correctly.
+    const created = lift((value: number) => value + base);
+    state.out.set(JSON.stringify(created));
+  },
+);
+
+export default pattern<{ out: string }>(({ out }) => ({
+  out,
+  dump: dump({ out }),
+}));
+`,
+      }],
+    };
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "observe",
+    });
+    const pattern = await runtime.patternManager.compilePattern(
+      DYNAMIC_PROGRAM,
+    ) as Pattern;
+    await runtime.idle();
+
+    // Rehydrate the handler module from its serialized ($implRef-only) form
+    // so resolution yields NO verifiedLoadId — the exact path the finding is
+    // about.
+    const module = handlerModuleOf(pattern);
+    const json = (module as Module & { toJSON: () => unknown })
+      .toJSON() as Record<string, unknown>;
+    expect("implementationRef" in json).toBe(false);
+    const nodes = pattern.nodes.map((node) =>
+      (node.module as Module).type === "javascript" &&
+        (node.module as Module).wrapper === "handler"
+        ? { ...node, module: json as unknown as Module }
+        : node
+    );
+    const rehydrated = { ...pattern, nodes } as unknown as Pattern;
+
+    const tx = runtime.edit();
+    const resultCell = runtime.getCell<{ out: string }>(
+      signer.did(),
+      "dynamic-artifact-loadid-less",
+      undefined,
+      tx,
+    );
+    // deno-lint-ignore no-explicit-any
+    const r = runtime.run(tx, rehydrated, {}, resultCell) as any;
+    await tx.commit();
+    await r.pull();
+    r.key("dump").send({});
+    await runtime.idle();
+
+    const dumped = JSON.parse(r.key("out").get() as string) as {
+      $implRef?: { identity: string; symbol: string };
+      implementationRef?: string;
+      implementation?: string;
+    };
+    // The in-action artifact's serialized form: the legacy admitted shape —
+    // minted content-derived ref, body omitted (matching the loadId-ful
+    // path), no $implRef (no module-scope provenance symbol exists for it).
+    expect(typeof dumped.implementationRef).toBe("string");
+    expect("implementation" in dumped).toBe(false);
+    expect("$implRef" in dumped).toBe(false);
+    // ...and the ref resolves to the LIVE function through the global
+    // executable index (the closure-preserving rehydration channel).
+    expect(
+      typeof runtime.harness.getExecutableFunction?.(
+        dumped.implementationRef!,
+      ),
+    ).toBe("function");
+  });
+
   it("CFC identity resolves from provenance with a stable moduleIdentity", async () => {
     const pattern = await setup();
     const module = handlerModuleOf(pattern);

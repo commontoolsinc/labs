@@ -92,6 +92,26 @@ export class ExecutableRegistry {
     return this.verifiedImplementationsByEntryRef.get(identity)?.get(symbol);
   }
 
+  /**
+   * Admit a DYNAMIC (in-action-created) artifact into the global verified
+   * index under its minted content-derived ref, without a load id. The
+   * loadId-less counterpart of {@link registerVerifiedFunction} for actions
+   * resolved through post-flip `$implRef`-only modules: it keeps the
+   * artifact's serialized module on the legacy
+   * `{ implementationRef, body omitted }` form, whose
+   * `getExecutableFunction` lookup is the live-closure rehydration channel.
+   * No per-load partition entry and no load-id mapping are written (there is
+   * no load); re-registration on a later run of the creating action
+   * overwrites to the fresh function, matching per-load registration.
+   */
+  registerDynamicVerifiedFunction(
+    implementationRef: string,
+    implementation: HarnessedFunction,
+  ): void {
+    this.verifiedFunctionIndex.set(implementationRef, implementation);
+    this.recordVerifiedBindingMetadata(implementationRef, implementation);
+  }
+
   beginVerifiedLoad(loadId: string): void {
     const existing = this.verifiedFunctions.get(loadId);
     if (existing) {

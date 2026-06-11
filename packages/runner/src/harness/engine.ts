@@ -1057,6 +1057,16 @@ export class Engine extends EventTarget implements Harness {
     return this.executableRegistry.getVerifiedImplementation(identity, symbol);
   }
 
+  registerDynamicVerifiedFunction(
+    implementationRef: string,
+    implementation: HarnessedFunction,
+  ): void {
+    this.executableRegistry.registerDynamicVerifiedFunction(
+      implementationRef,
+      implementation,
+    );
+  }
+
   unsafeTrustHostValue(
     value: unknown,
     options: UnsafeHostTrustOptions,

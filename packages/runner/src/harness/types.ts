@@ -208,6 +208,19 @@ export interface Harness extends EventTarget {
     symbol: string,
   ): HarnessedFunction | undefined;
 
+  // Admit a DYNAMIC (in-action-created) artifact into the global executable
+  // index under its minted content-derived `implementationRef`, WITHOUT a
+  // load id. Used by the runner's in-action registrar when the invoking
+  // function resolved through a post-flip `$implRef`-only module (no
+  // `verifiedLoadId` to register under) — the global index is what lets the
+  // artifact's serialized module keep the legacy
+  // `{ implementationRef, body omitted }` live-closure rehydration channel.
+  // Replaced by the synthetic-identity registrar in PR E2 (design §5).
+  registerDynamicVerifiedFunction?(
+    implementationRef: string,
+    implementation: HarnessedFunction,
+  ): void;
+
   unsafeTrustHostValue(
     value: unknown,
     options: UnsafeHostTrustOptions,
