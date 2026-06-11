@@ -1,7 +1,9 @@
 import { css, html, PropertyValues } from "lit";
 import { createRef, type Ref, ref } from "lit/directives/ref.js";
 import { state } from "lit/decorators.js";
+import { ContextProvider } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
+import { spaceContext } from "../../runtime-context.ts";
 import { render } from "@commonfabric/html/client";
 import type { CellHandle } from "@commonfabric/runtime-client";
 import { type VNode } from "@commonfabric/runtime-client";
@@ -114,6 +116,13 @@ export class CFRender extends BaseElement {
   };
 
   declare cell: CellHandle;
+
+  // The render root of a piece knows the piece's space (its cell's),
+  // so it provides spaceContext for everything it renders — event
+  // handlers, uploads, and any cf-* inside the pattern act in the
+  // PIECE's space, not whatever view happens to host the render
+  // (seefeldb's #4058 note: get the space from the piece's own cells).
+  #spaceProvider = new ContextProvider(this, { context: spaceContext });
   declare variant: UIVariant | undefined;
 
   // Use Lit ref directive for stable container reference across re-renders
@@ -160,6 +169,17 @@ export class CFRender extends BaseElement {
 
     const cellChanged = changedProperties.has("cell");
     const variantChanged = changedProperties.has("variant");
+
+    if (cellChanged) {
+      // Keep the provided space in lockstep with the rendered piece.
+      let space;
+      try {
+        space = this.cell?.space();
+      } catch {
+        space = undefined;
+      }
+      this.#spaceProvider.setValue(space);
+    }
 
     if (cellChanged || variantChanged) {
       let shouldRerender = false;
