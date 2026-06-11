@@ -33,7 +33,6 @@ function setup() {
     apiUrl: new URL(import.meta.url),
     storageManager,
   });
-  runtime.scheduler.disablePullMode();
   const tx = runtime.edit();
   return { runtime, storageManager, tx };
 }

@@ -53,7 +53,6 @@ describe("event handling", () => {
   beforeEach(() => {
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
       import.meta.url,
-      { pullMode: "disabled" },
     ));
   });
 
@@ -282,8 +281,6 @@ describe("event handling", () => {
   });
 
   it("should dispatch queued event commits without waiting for server confirmation", async () => {
-    runtime.scheduler.enablePullMode();
-
     const eventCell = runtime.getCell<number>(
       space,
       "should dispatch queued event commits without waiting for server confirmation 1",
@@ -428,8 +425,6 @@ describe("event handling", () => {
   });
 
   it("should preserve queued event appends to multiple arrays", async () => {
-    runtime.scheduler.enablePullMode();
-
     const eventCell = runtime.getCell<number>(
       space,
       "should preserve queued event appends to multiple arrays 1",
@@ -479,8 +474,6 @@ describe("event handling", () => {
   });
 
   it("should recompute array length after rapid queued event appends", async () => {
-    runtime.scheduler.enablePullMode();
-
     const eventCell = runtime.getCell<number>(
       space,
       "should recompute array length after rapid queued event appends 1",
@@ -553,8 +546,6 @@ describe("event handling", () => {
   });
 
   it("should rerun demanded computation dirtied during an in-flight run", async () => {
-    runtime.scheduler.enablePullMode();
-
     const listCell = runtime.getCell<number[]>(
       space,
       "should rerun demanded computation dirtied during an in-flight run 1",
@@ -722,7 +713,7 @@ describe("event handling", () => {
       reads: [],
       shallowReads: [],
       writes: [],
-    }, {});
+    }, { isEffect: true });
     await eventResultCell.pull();
 
     runtime.scheduler.addEventHandler(
@@ -738,14 +729,19 @@ describe("event handling", () => {
     expect(eventCount).toBe(1);
     expect(eventResultCell.get()).toBe(1);
 
-    expect(actionCount).toBe(2);
+    // Pull mode currently runs event-reader effects twice per event
+    // commit: once from the synchronous commit notification and once
+    // from the post-ack onEventCommitWrites path (scheduler-v2
+    // inventory §4, channel #2). These counts drop back to 2/3 when
+    // phase 3c.ii deletes the duplicate channel — tighten them then.
+    expect(actionCount).toBe(3);
 
     runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 2);
     await eventResultCell.pull();
 
     expect(eventCount).toBe(2);
     expect(eventResultCell.get()).toBe(2);
-    expect(actionCount).toBe(3);
+    expect(actionCount).toBe(5);
     expect(lastEventSeen).toBe(2);
   });
 

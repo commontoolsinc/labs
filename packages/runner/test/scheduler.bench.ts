@@ -28,7 +28,6 @@ function setup() {
     apiUrl: new URL(import.meta.url),
     storageManager,
   });
-  runtime.scheduler.disablePullMode();
   const tx = runtime.edit();
   return { runtime, storageManager, tx };
 }
@@ -497,7 +496,6 @@ Deno.bench(
     const { runtime, storageManager, tx } = setup();
 
     // Enable pull mode for this test
-    runtime.scheduler.enablePullMode();
 
     const source = runtime.getCell<number>(
       space,

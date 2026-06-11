@@ -26,7 +26,6 @@ describe("reactive retries", () => {
   beforeEach(() => {
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
       import.meta.url,
-      { pullMode: "disabled" },
     ));
   });
 

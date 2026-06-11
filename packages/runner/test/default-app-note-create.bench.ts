@@ -104,10 +104,9 @@ let causeCounter = 0;
 
 async function setupNoteCreateGraph(
   prefix: string,
-  pullMode: boolean,
   initialNotes: number,
 ): Promise<NoteCreateGraph> {
-  const env = createSchedulerBenchEnv(pullMode);
+  const env = createSchedulerBenchEnv();
   const { runtime } = env;
   const { commonfabric } = createTrustedBuilder(runtime);
   const { lift, pattern } = commonfabric;
@@ -219,23 +218,19 @@ function noteCreateCycle(graph: NoteCreateGraph): Promise<void> {
   });
 }
 
-for (const pullMode of [true, false]) {
-  const mode = pullMode ? "pull" : "push";
-  for (const size of [0, 32, 128]) {
-    const graphPromise = setupNoteCreateGraph(
-      `default-app:${mode}:${size}`,
-      pullMode,
-      size,
-    );
-    Deno.bench({
-      name: `note create+remove cycle @${size} notes (${mode})`,
-      group: `note create (${mode})`,
-      baseline: size === 0,
-    }, async () => {
-      const graph = await graphPromise;
-      await noteCreateCycle(graph);
-    });
-  }
+for (const size of [0, 32, 128]) {
+  const graphPromise = setupNoteCreateGraph(
+    `default-app:pull:${size}`,
+    size,
+  );
+  Deno.bench({
+    name: `note create+remove cycle @${size} notes (pull)`,
+    group: "note create (pull)",
+    baseline: size === 0,
+  }, async () => {
+    const graph = await graphPromise;
+    await noteCreateCycle(graph);
+  });
 }
 
 // Note: graphs are deliberately kept alive for the whole bench process (the

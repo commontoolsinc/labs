@@ -1,8 +1,10 @@
 /**
- * Push vs pull benchmarks using real patterns and list builtins.
+ * Pull benchmarks using real patterns and list builtins.
  *
- * These benches go through createTrustedBuilder(runtime) + runtime.run() so they exercise the
- * actual map/filter/flatMap machinery instead of synthetic scheduler actions.
+ * Pull-only since scheduler-v2 phase 0 removed push mode.
+ * These benches go through createTrustedBuilder(runtime) + runtime.run() so
+ * they exercise the actual map/filter/flatMap machinery instead of synthetic
+ * scheduler actions.
  */
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -184,7 +186,7 @@ type BenchTimingSummary = {
 
 const benchTimingSummaries = new Map<string, BenchTimingSummary>();
 
-function benchOptions(group: string, baseline: boolean) {
+function benchOptions(group: string, baseline = false) {
   return {
     group,
     baseline,
@@ -339,7 +341,7 @@ addEventListener("unload", () => {
   }
 });
 
-function createEnv(pullMode: boolean): BenchEnv {
+function createEnv(): BenchEnv {
   const storageManager = StorageManager.emulate({
     as: signer,
   });
@@ -347,9 +349,6 @@ function createEnv(pullMode: boolean): BenchEnv {
     apiUrl: new URL(import.meta.url),
     storageManager,
   });
-
-  if (pullMode) runtime.scheduler.enablePullMode();
-  else runtime.scheduler.disablePullMode();
 
   const { commonfabric } = createTrustedBuilder(runtime);
   const { lift, pattern } = commonfabric;
@@ -802,14 +801,13 @@ async function setupFanoutScenario(
 async function runPullBench(
   b: Deno.BenchContext,
   options: {
-    pullMode: boolean;
     setupScenario: (env: BenchEnv, prefix: string) => Promise<ListScenario>;
     prefix: string;
     nextValue: (round: number) => number;
     rounds?: number;
   },
 ) {
-  const env = createEnv(options.pullMode);
+  const env = createEnv();
 
   try {
     resetAllTimingStats();
@@ -838,14 +836,13 @@ async function runPullBench(
 async function runSinkBench(
   b: Deno.BenchContext,
   options: {
-    pullMode: boolean;
     setupScenario: (env: BenchEnv, prefix: string) => Promise<ListScenario>;
     prefix: string;
     nextValue: (round: number) => number;
     rounds?: number;
   },
 ) {
-  const env = createEnv(options.pullMode);
+  const env = createEnv();
 
   try {
     resetAllTimingStats();
@@ -880,14 +877,13 @@ async function runSinkBench(
 async function runFanoutBench(
   b: Deno.BenchContext,
   options: {
-    pullMode: boolean;
     prefix: string;
     liveSinkCount: number;
     pulledOutputCount: number;
     rounds?: number;
   },
 ) {
-  const env = createEnv(options.pullMode);
+  const env = createEnv();
 
   try {
     resetAllTimingStats();
@@ -938,162 +934,146 @@ async function runFanoutBench(
   }
 }
 
-for (const pullMode of [false, true]) {
-  const mode = pullMode ? "pull" : "push";
+Deno.bench(
+  "Pattern pull - mapWithPattern single element update + pull",
+  benchOptions("pattern-map-pull"),
+  async (b) => {
+    await runPullBench(b, {
+      prefix: "bench:map:pull",
+      setupScenario: setupMapScenario,
+      nextValue: (round) => LIST_SIZE + round + 1,
+    });
+  },
+);
 
-  Deno.bench(
-    `Pattern push vs pull - mapWithPattern single element update + pull [${mode}]`,
-    benchOptions("pattern-map-pull", !pullMode),
-    async (b) => {
-      await runPullBench(b, {
-        pullMode,
-        prefix: `bench:map:pull:${mode}`,
-        setupScenario: setupMapScenario,
-        nextValue: (round) => LIST_SIZE + round + 1,
-      });
-    },
-  );
+Deno.bench(
+  "Pattern pull - filterWithPattern membership flip + pull",
+  benchOptions("pattern-filter-pull"),
+  async (b) => {
+    await runPullBench(b, {
+      prefix: "bench:filter:pull",
+      setupScenario: setupFilterScenario,
+      nextValue: (round) => (round % 2 === 0 ? TARGET_INDEX + 1 : -1),
+    });
+  },
+);
 
-  Deno.bench(
-    `Pattern push vs pull - filterWithPattern membership flip + pull [${mode}]`,
-    benchOptions("pattern-filter-pull", !pullMode),
-    async (b) => {
-      await runPullBench(b, {
-        pullMode,
-        prefix: `bench:filter:pull:${mode}`,
-        setupScenario: setupFilterScenario,
-        nextValue: (round) => (round % 2 === 0 ? TARGET_INDEX + 1 : -1),
-      });
-    },
-  );
+Deno.bench(
+  "Pattern pull - flatMapWithPattern expansion flip + pull",
+  benchOptions("pattern-flatmap-pull"),
+  async (b) => {
+    await runPullBench(b, {
+      prefix: "bench:flatmap:pull",
+      setupScenario: setupFlatMapScenario,
+      nextValue: (round) => (round % 2 === 0 ? TARGET_INDEX + 1 : 0),
+    });
+  },
+);
 
-  Deno.bench(
-    `Pattern push vs pull - flatMapWithPattern expansion flip + pull [${mode}]`,
-    benchOptions("pattern-flatmap-pull", !pullMode),
-    async (b) => {
-      await runPullBench(b, {
-        pullMode,
-        prefix: `bench:flatmap:pull:${mode}`,
-        setupScenario: setupFlatMapScenario,
-        nextValue: (round) => (round % 2 === 0 ? TARGET_INDEX + 1 : 0),
-      });
-    },
-  );
+Deno.bench(
+  "Pattern pull - mapWithPattern single element update + sink",
+  benchOptions("pattern-map-sink"),
+  async (b) => {
+    await runSinkBench(b, {
+      prefix: "bench:map:sink",
+      setupScenario: setupMapScenario,
+      nextValue: (round) => LIST_SIZE + round + 1,
+    });
+  },
+);
 
-  Deno.bench(
-    `Pattern push vs pull - mapWithPattern single element update + sink [${mode}]`,
-    benchOptions("pattern-map-sink", !pullMode),
-    async (b) => {
-      await runSinkBench(b, {
-        pullMode,
-        prefix: `bench:map:sink:${mode}`,
-        setupScenario: setupMapScenario,
-        nextValue: (round) => LIST_SIZE + round + 1,
-      });
-    },
-  );
+Deno.bench(
+  "Pattern pull - mapWithPattern object element.value update + pull",
+  benchOptions("pattern-map-object-pull"),
+  async (b) => {
+    await runPullBench(b, {
+      prefix: "bench:map:object:pull",
+      setupScenario: setupObjectMapScenario,
+      nextValue: (round) => LIST_SIZE + round + 1,
+    });
+  },
+);
 
-  Deno.bench(
-    `Pattern push vs pull - mapWithPattern object element.value update + pull [${mode}]`,
-    benchOptions("pattern-map-object-pull", !pullMode),
-    async (b) => {
-      await runPullBench(b, {
-        pullMode,
-        prefix: `bench:map:object:pull:${mode}`,
-        setupScenario: setupObjectMapScenario,
-        nextValue: (round) => LIST_SIZE + round + 1,
-      });
-    },
-  );
+Deno.bench(
+  "Pattern pull - filterWithPattern object element.value flip + pull",
+  benchOptions("pattern-filter-object-pull"),
+  async (b) => {
+    await runPullBench(b, {
+      prefix: "bench:filter:object:pull",
+      setupScenario: setupObjectFilterScenario,
+      nextValue: (round) => (round % 2 === 0 ? TARGET_INDEX + 1 : -1),
+    });
+  },
+);
 
-  Deno.bench(
-    `Pattern push vs pull - filterWithPattern object element.value flip + pull [${mode}]`,
-    benchOptions("pattern-filter-object-pull", !pullMode),
-    async (b) => {
-      await runPullBench(b, {
-        pullMode,
-        prefix: `bench:filter:object:pull:${mode}`,
-        setupScenario: setupObjectFilterScenario,
-        nextValue: (round) => (round % 2 === 0 ? TARGET_INDEX + 1 : -1),
-      });
-    },
-  );
+Deno.bench(
+  "Pattern pull - flatMapWithPattern object element.value flip + pull",
+  benchOptions("pattern-flatmap-object-pull"),
+  async (b) => {
+    await runPullBench(b, {
+      prefix: "bench:flatmap:object:pull",
+      setupScenario: setupObjectFlatMapScenario,
+      nextValue: (round) => (round % 2 === 0 ? TARGET_INDEX + 1 : 0),
+    });
+  },
+);
 
-  Deno.bench(
-    `Pattern push vs pull - flatMapWithPattern object element.value flip + pull [${mode}]`,
-    benchOptions("pattern-flatmap-object-pull", !pullMode),
-    async (b) => {
-      await runPullBench(b, {
-        pullMode,
-        prefix: `bench:flatmap:object:pull:${mode}`,
-        setupScenario: setupObjectFlatMapScenario,
-        nextValue: (round) => (round % 2 === 0 ? TARGET_INDEX + 1 : 0),
-      });
-    },
-  );
+Deno.bench(
+  "Pattern pull - mapWithPattern object element.value update + sink",
+  benchOptions("pattern-map-object-sink"),
+  async (b) => {
+    await runSinkBench(b, {
+      prefix: "bench:map:object:sink",
+      setupScenario: setupObjectMapScenario,
+      nextValue: (round) => LIST_SIZE + round + 1,
+    });
+  },
+);
 
-  Deno.bench(
-    `Pattern push vs pull - mapWithPattern object element.value update + sink [${mode}]`,
-    benchOptions("pattern-map-object-sink", !pullMode),
-    async (b) => {
-      await runSinkBench(b, {
-        pullMode,
-        prefix: `bench:map:object:sink:${mode}`,
-        setupScenario: setupObjectMapScenario,
-        nextValue: (round) => LIST_SIZE + round + 1,
-      });
-    },
-  );
+Deno.bench(
+  `Pattern pull - fanout ${FANOUT_WIDTH}, pull ${FANOUT_SPARSE_PULLS}`,
+  benchOptions("pattern-fanout-pull-sparse"),
+  async (b) => {
+    await runFanoutBench(b, {
+      prefix: "bench:fanout:pull-sparse",
+      liveSinkCount: 0,
+      pulledOutputCount: FANOUT_SPARSE_PULLS,
+    });
+  },
+);
 
-  Deno.bench(
-    `Pattern push vs pull - fanout ${FANOUT_WIDTH}, pull ${FANOUT_SPARSE_PULLS} [${mode}]`,
-    benchOptions("pattern-fanout-pull-sparse", !pullMode),
-    async (b) => {
-      await runFanoutBench(b, {
-        pullMode,
-        prefix: `bench:fanout:pull-sparse:${mode}`,
-        liveSinkCount: 0,
-        pulledOutputCount: FANOUT_SPARSE_PULLS,
-      });
-    },
-  );
+Deno.bench(
+  `Pattern pull - fanout ${FANOUT_WIDTH}, pull ${FANOUT_WIDE_PULLS}`,
+  benchOptions("pattern-fanout-pull-wide"),
+  async (b) => {
+    await runFanoutBench(b, {
+      prefix: "bench:fanout:pull-wide",
+      liveSinkCount: 0,
+      pulledOutputCount: FANOUT_WIDE_PULLS,
+    });
+  },
+);
 
-  Deno.bench(
-    `Pattern push vs pull - fanout ${FANOUT_WIDTH}, pull ${FANOUT_WIDE_PULLS} [${mode}]`,
-    benchOptions("pattern-fanout-pull-wide", !pullMode),
-    async (b) => {
-      await runFanoutBench(b, {
-        pullMode,
-        prefix: `bench:fanout:pull-wide:${mode}`,
-        liveSinkCount: 0,
-        pulledOutputCount: FANOUT_WIDE_PULLS,
-      });
-    },
-  );
+Deno.bench(
+  `Pattern pull - fanout ${FANOUT_WIDTH}, sink ${FANOUT_LIVE_SINKS}`,
+  benchOptions("pattern-fanout-sinks"),
+  async (b) => {
+    await runFanoutBench(b, {
+      prefix: "bench:fanout:sinks",
+      liveSinkCount: FANOUT_LIVE_SINKS,
+      pulledOutputCount: 0,
+    });
+  },
+);
 
-  Deno.bench(
-    `Pattern push vs pull - fanout ${FANOUT_WIDTH}, sink ${FANOUT_LIVE_SINKS} [${mode}]`,
-    benchOptions("pattern-fanout-sinks", !pullMode),
-    async (b) => {
-      await runFanoutBench(b, {
-        pullMode,
-        prefix: `bench:fanout:sinks:${mode}`,
-        liveSinkCount: FANOUT_LIVE_SINKS,
-        pulledOutputCount: 0,
-      });
-    },
-  );
-
-  Deno.bench(
-    `Pattern push vs pull - fanout ${FANOUT_WIDTH}, sink ${FANOUT_LIVE_SINKS} + pull ${FANOUT_SPARSE_PULLS} [${mode}]`,
-    benchOptions("pattern-fanout-mixed", !pullMode),
-    async (b) => {
-      await runFanoutBench(b, {
-        pullMode,
-        prefix: `bench:fanout:mixed:${mode}`,
-        liveSinkCount: FANOUT_LIVE_SINKS,
-        pulledOutputCount: FANOUT_SPARSE_PULLS,
-      });
-    },
-  );
-}
+Deno.bench(
+  `Pattern pull - fanout ${FANOUT_WIDTH}, sink ${FANOUT_LIVE_SINKS} + pull ${FANOUT_SPARSE_PULLS}`,
+  benchOptions("pattern-fanout-mixed"),
+  async (b) => {
+    await runFanoutBench(b, {
+      prefix: "bench:fanout:mixed",
+      liveSinkCount: FANOUT_LIVE_SINKS,
+      pulledOutputCount: FANOUT_SPARSE_PULLS,
+    });
+  },
+);

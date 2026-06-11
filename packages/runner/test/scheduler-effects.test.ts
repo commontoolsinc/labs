@@ -245,8 +245,6 @@ describe("effect/computation tracking", () => {
   });
 
   it("should track dependents for reverse dependency graph", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "dependents-source",
@@ -313,8 +311,6 @@ describe("effect/computation tracking", () => {
   });
 
   it("should backfill dependents when writer is added after effect subscribes", async () => {
-    runtime.scheduler.enablePullMode();
-
     const data = runtime.getCell<{ foo: number; bar: number }>(
       space,
       "backfill-writer-after-effect",
@@ -352,8 +348,6 @@ describe("effect/computation tracking", () => {
   });
 
   it("should backfill only when new writer paths overlap existing reads", async () => {
-    runtime.scheduler.enablePullMode();
-
     const data = runtime.getCell<{ foo: number; bar: number }>(
       space,
       "backfill-writer-paths",
@@ -403,8 +397,6 @@ describe("effect/computation tracking", () => {
   });
 
   it("should prune ignored scheduling writes from mightWrite and dependents", async () => {
-    runtime.scheduler.enablePullMode();
-
     const output = runtime.getCell<number>(
       space,
       "ignored-scheduling-output",
@@ -463,8 +455,6 @@ describe("effect/computation tracking", () => {
   });
 
   it("should drop stale dependents when writes move to a different cell", async () => {
-    runtime.scheduler.enablePullMode();
-
     const cellA = runtime.getCell<number>(
       space,
       "write-switch-cell-a",
@@ -513,8 +503,6 @@ describe("effect/computation tracking", () => {
   });
 
   it("should ignore attemptedWrites as scheduler dependency evidence", async () => {
-    runtime.scheduler.enablePullMode();
-
     const output = runtime.getCell<number>(
       space,
       "attempted-write-output",
@@ -552,8 +540,6 @@ describe("effect/computation tracking", () => {
   });
 
   it("should run dirty materializer computations without downstream demand", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "materializer-undemanded-source",
@@ -606,8 +592,6 @@ describe("effect/computation tracking", () => {
   });
 
   it("should schedule normal output readers when a materializer input dirties", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "materializer-normal-output-source",
@@ -701,8 +685,6 @@ describe("effect/computation tracking", () => {
   });
 
   it("should not make broad attempted writes into materializer dependents", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "materializer-fanout-source",
@@ -758,8 +740,6 @@ describe("effect/computation tracking", () => {
   });
 
   it("should coalesce dirty materializer runs behind manual debounce", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "materializer-debounce-source",
@@ -812,8 +792,6 @@ describe("effect/computation tracking", () => {
   });
 
   it("should fan out materializer changes only to actual changed readers", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "materializer-precise-source",
@@ -879,8 +857,6 @@ describe("effect/computation tracking", () => {
   });
 
   it("should promote dirty materializers before demand-root effects", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "materializer-demand-source",
@@ -945,8 +921,6 @@ describe("effect/computation tracking", () => {
   });
 
   it("should promote dirty materializers before event preflight handlers", async () => {
-    runtime.scheduler.enablePullMode();
-
     const eventStream = runtime.getCell<unknown>(
       space,
       "materializer-event-stream",
@@ -1011,8 +985,6 @@ describe("effect/computation tracking", () => {
   });
 
   it("should keep static declared writes demand-driven in pull mode", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "static-declared-source",
@@ -1052,8 +1024,6 @@ describe("effect/computation tracking", () => {
   });
 
   it("should keep push mode eager for materializer-annotated computations", async () => {
-    runtime.scheduler.disablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "materializer-push-source",

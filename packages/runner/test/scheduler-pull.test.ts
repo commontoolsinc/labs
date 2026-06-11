@@ -40,13 +40,7 @@ describe("pull-based scheduling", () => {
     await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
   });
 
-  it("should default to pull mode", () => {
-    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
-  });
-
   it("should dispatch schema-marked streams without a materialized stream marker", async () => {
-    runtime.scheduler.enablePullMode();
-
     const stream = runtime.getCell<{ amount: number }>(
       space,
       "schema-marked-stream-without-marker",
@@ -85,60 +79,9 @@ describe("pull-based scheduling", () => {
     expect(await result.pull()).toBe(7);
   });
 
-  it("should have unchanged behavior with pullMode = false", async () => {
-    // Explicitly set push mode for this test
-    runtime.scheduler.disablePullMode();
-    expect(runtime.scheduler.isPullModeEnabled()).toBe(false);
-
-    const source = runtime.getCell<number>(
-      space,
-      "push-mode-unchanged-source",
-      undefined,
-      tx,
-    );
-    source.set(1);
-    const result = runtime.getCell<number>(
-      space,
-      "push-mode-unchanged-result",
-      undefined,
-      tx,
-    );
-    result.set(0);
-    await tx.commit();
-    tx = runtime.edit();
-
-    let computationRuns = 0;
-    const computation: Action = (actionTx) => {
-      computationRuns++;
-      const val = source.withTx(actionTx).get();
-      result.withTx(actionTx).send(val * 10);
-    };
-
-    runtime.scheduler.subscribe(
-      computation,
-      { reads: [], shallowReads: [], writes: [] },
-      {},
-    );
-    await result.pull();
-
-    expect(computationRuns).toBe(1);
-    expect(result.get()).toBe(10);
-
-    // Change source - should trigger computation in push mode
-    source.withTx(tx).send(2);
-    await tx.commit();
-    tx = runtime.edit();
-    await result.pull();
-
-    expect(computationRuns).toBe(2);
-    expect(result.get()).toBe(20);
-  });
-
   it("should mark computations as dirty in pull mode when source changes", async () => {
     // This test verifies that in pull mode, computations are marked dirty
     // rather than scheduled when their inputs change.
-    runtime.scheduler.enablePullMode();
-    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
 
     const source = runtime.getCell<number>(
       space,
@@ -203,9 +146,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should preserve writes when collecting dependencies from ReactivityLog", async () => {
-    runtime.scheduler.enablePullMode();
-    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
-
     const target = runtime.getCell<number>(
       space,
       "reactivity-log-writes-target",
@@ -247,9 +187,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should not re-run an effect for unrelated pending dependency collection", async () => {
-    runtime.scheduler.enablePullMode();
-    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
-
     const observed = runtime.getCell<number>(
       space,
       "pending-dep-unrelated-observed",
@@ -327,9 +264,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should re-run an effect for transitively related pending dependency collection", async () => {
-    runtime.scheduler.enablePullMode();
-    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
-
     const source = runtime.getCell<number>(
       space,
       "pending-dep-transitive-source",
@@ -427,9 +361,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should not re-run an effect when pulled dirty computations do not change its inputs", async () => {
-    runtime.scheduler.enablePullMode();
-    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
-
     const source = runtime.getCell<number>(
       space,
       "pull-effect-unchanged-source",
@@ -519,7 +450,6 @@ describe("pull-based scheduling", () => {
   it("should schedule effects when affected by dirty computations", async () => {
     // This test verifies that scheduleAffectedEffects correctly finds and
     // schedules effects that depend on a dirty computation.
-    runtime.scheduler.enablePullMode();
 
     const source = runtime.getCell<number>(
       space,
@@ -602,8 +532,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should run dirty computations with live downstream effect demand", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "pull-demanded-dirty-source",
@@ -688,8 +616,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should demand dirty computations from dependency-bearing live effects", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "pull-demand-live-effect-source",
@@ -746,8 +672,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should discover writes for new child computations in demanded subgraphs", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "pull-demanded-child-source",
@@ -847,8 +771,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should continue a parent pull when a child writes a parent read", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "pull-continuation-source",
@@ -909,8 +831,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should clear pull continuation demand when unsubscribing", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "pull-continuation-unsubscribe-source",
@@ -957,8 +877,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should first-run child computations created by demand-root effects", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "pull-demanded-effect-child-source",
@@ -1019,8 +937,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should collect shared dirty dependencies consistently across effect seeds", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "pull-shared-seeds-source",
@@ -1152,8 +1068,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should recompute multi-hop chains before running effects in pull mode", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "pull-multihop-source",
@@ -1257,8 +1171,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should drop stale dependents when computation changes inputs", async () => {
-    runtime.scheduler.enablePullMode();
-
     const sourceA = runtime.getCell<number>(
       space,
       "pull-deps-source-a",
@@ -1374,8 +1286,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should track getStats with dirty count", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "stats-dirty-source",
@@ -1411,8 +1321,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should track direct dirty and transitive stale separately", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "stale-state-source",
@@ -1497,8 +1405,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should schedule a newly resubscribed shallow-read effect when its writer is stale", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "pull-shallow-resubscribe-source",
@@ -1573,8 +1479,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should clear downstream stale state when upstream recomputes unchanged", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "stale-noop-source",
@@ -1674,8 +1578,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should run downstream demand when upstream recompute changes output", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "stale-change-source",
@@ -1761,8 +1663,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should keep event handlers behind stale dependencies", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "stale-event-source",
@@ -1861,7 +1761,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should not recursively walk clean broad event preflight dependencies", async () => {
-    runtime.scheduler.enablePullMode();
     runtime.scheduler.setEventPreflightTelemetryEnabled(true);
 
     const preflights: EventPreflightMarker[] = [];
@@ -1998,8 +1897,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should update stale counts when dynamic dependencies change", async () => {
-    runtime.scheduler.enablePullMode();
-
     const selector = runtime.getCell<number>(
       space,
       "stale-dynamic-selector",
@@ -2093,8 +1990,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should clear stale counts when stale dependencies unsubscribe", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "stale-unsubscribe-source",
@@ -2159,8 +2054,6 @@ describe("pull-based scheduling", () => {
   });
 
   it("should handle stale cycles conservatively without negative counts", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "stale-cycle-source",
@@ -2233,13 +2126,5 @@ describe("pull-based scheduling", () => {
       .toBeGreaterThanOrEqual(
         0,
       );
-  });
-
-  it("should allow disabling pull mode", () => {
-    runtime.scheduler.enablePullMode();
-    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
-
-    runtime.scheduler.disablePullMode();
-    expect(runtime.scheduler.isPullModeEnabled()).toBe(false);
   });
 });
