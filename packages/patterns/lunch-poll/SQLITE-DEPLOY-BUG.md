@@ -1,11 +1,28 @@
 # SQLite builtin: `db.exec` fails on a _deployed_ piece — bug report
 
-**Status: RESOLVED 2026-06-09** (root cause found; fix in
-`packages/cli/lib/callable.ts`). Dates: found 06-04, re-verified 06-05 and
-06-09, fixed later on 06-09. **For:** the sqlite-builtin owner (Berni) — see the
-resolution below; one runtime-level follow-up remains open.
+**Status: RESOLVED 2026-06-10 by runtime PR #3967** (Berni-approved; handler
+asCell-input presync at dispatch plus a `pull()` covered-in-flight contract fix
+in `packages/runner`). Dates: found 06-04, re-verified 06-05 and 06-09, root
+cause and both fixes 06-09/10.
 
-## ✅ RESOLUTION 2026-06-09 — a client-side dispatch race, fully explained
+## ⚠️ Reviving this branch — checklist (written 2026-06-10)
+
+1. **Rebase onto main once #3967 is merged.** The runtime fix alone makes
+   lunch-poll work on deploy — verified on a testbed of main + this pattern with
+   NO local workaround.
+2. **Drop the `packages/cli/lib/callable.ts` hunk from commit `82ced8cee`**
+   (keep that commit's doc changes). It was the interim CLI-only drain (PR
+   #3962, closed as superseded — Berni: blanket "wait for everything to be
+   synced" is the wrong general shape). It is harmless but redundant under
+   #3967, and it adds a global drain to every `cf piece call`.
+3. **Re-test the separate minimal `reactOn: db` repro below** against the merged
+   runtime fix before carrying it forward as its own issue — it was never
+   re-tested after either fix and may or may not share the cause.
+4. Design discussion (options A/B/C, open questions: per-surface opt-out,
+   `isQueryResultProxy` predicate, the `synced`-flag inheritance white lie)
+   lives in PR #3967's description and comments.
+
+## ✅ RESOLUTION 2026-06-09/10 — a client-side dispatch race, fully explained
 
 **Root cause:** `cf piece call` dispatched the handler event while the watch
 batches issued during piece load were still in flight. The `SqliteDb` handle is
@@ -25,24 +42,30 @@ emulated `cf test` runner never fails because loopback storage always wins the
 race. The `lph-*` table, the P1–P8 build-ups, and the day-to-day flakiness of
 the minimal repros are all explained by this.
 
-**Fix:** in `executeResolvedCallable` (`packages/cli/lib/callable.ts`), await
-`runtime.idle()` + `manager.synced()` **before** dispatching the event (both the
-`send()` path and the `.set()` fallback). The pre-existing awaits after `send`
-cover the handler's writes, not its inputs.
+**Fix (the durable one — PR #3967, merged):** three coordinated runtime changes.
+(1) `storage/v2 pull()`: entries covered by an already-registered selector now
+AWAIT the covering watch's in-flight promise — restoring `cell.sync()`'s
+contract that resolved ⇒ data locally available (also fixed for concurrent
+same-key deduped pulls). (2) `EventHandler.presyncInputs`: the handler argument
+is materialized via the existing machinery (asCell fields surface as Cells
+without reading their docs) and every collected Cell's `sync()` is awaited. (3)
+`dispatchQueuedEvent` awaits presync before invoking the handler, fail-open.
+Targeted, not global: a handler waits only on ITS OWN input docs; steady-state
+coverage resolves in a microtask.
+
+(An interim CLI-only drain in `executeResolvedCallable` — PR #3962 — was
+verified first and then closed as superseded; a copy of it rides this branch in
+`82ced8cee` and should be dropped on rebase, see checklist above.)
 
 **Verified:** full unmodified lunch-poll on a freshly deployed piece —
 `clearHistory`, `logVisit`, `addOption` all succeed across repeated fresh CLI
 sessions; rows land in (and are deleted from) the per-piece sqlite file;
-`cf test` 17/17; cli suite 43/43.
+`cf test` 17/17; runner suite 553/553; cli suite 43/43.
 
-**Remaining follow-up (runtime owners):** the invariant "a handler's asCell
-input docs are locally synced before the handler body runs" is still unguarded
-in the scheduler/event dispatch itself — the CLI was the only cold-start surface
-poking handlers immediately, but other surfaces (e.g. bg-piece-service
-delivering a queued event right after starting a piece) could in principle hit
-the same race. Also untested against this fix: the separate minimal
-`reactOn: db` repro below. Full investigation log:
-`session_outputs/2026-06-09_lunch-poll-sqlite-fresh-eyes/`.
+**Still untested:** the separate minimal `reactOn: db` repro below was never
+re-tested against the merged fix. Full investigation log:
+`session_outputs/2026-06-09_lunch-poll-sqlite-fresh-eyes/` (01 = root cause +
+CLI fix, 02 = runtime prototype, pitfalls, design discussion).
 
 ---
 
