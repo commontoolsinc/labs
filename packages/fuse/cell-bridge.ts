@@ -6,6 +6,7 @@
 
 import type { Cell, PatternMeta } from "@commonfabric/runner";
 import { schemaToTypeString } from "@commonfabric/runner";
+import { nameSchema } from "@commonfabric/runner/schemas";
 import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
 import {
   type CfcLabel,
@@ -1898,6 +1899,10 @@ export class CellBridge {
     const allPieces = await pieces.getAllPieces();
     this.debugLog(`[${spaceName}] Found ${allPieces.length} pieces`);
 
+    // Warm the NAME docs in parallel so the awaited per-piece name sync in
+    // addPieceToSpace below doesn't serialize one roundtrip per piece.
+    await Promise.all(allPieces.map((piece) => this.syncPieceName(piece)));
+
     for (const piece of allPieces) {
       await this.addPieceToSpace(state, piece, spaceName);
     }
@@ -1990,6 +1995,22 @@ export class CellBridge {
   }
 
   /**
+   * Best-effort load of a piece's NAME doc through the same schema path that
+   * `piece.name()` reads synchronously. The piece list deliberately doesn't
+   * load linked piece docs (its items are `asCell`), so on a cold runtime
+   * `piece.name()` races the doc load and would fall back to the opaque
+   * id-derived directory name — permanently, if no later change event fires.
+   */
+  private async syncPieceName(piece: PieceController): Promise<void> {
+    if (typeof piece.getCell !== "function") return;
+    try {
+      await (piece.getCell() as Cell<unknown>).asSchema(nameSchema).sync();
+    } catch {
+      // Name stays unavailable; addPieceToSpace falls back to the piece id.
+    }
+  }
+
+  /**
    * Add a single piece to a space's tree.
    * Returns the assigned display name.
    */
@@ -1998,7 +2019,20 @@ export class CellBridge {
     piece: PieceController,
     spaceName: string,
   ): Promise<string> {
-    let name = resolveProjectedPieceName(piece.name(), piece.id);
+    // The piece list deliberately doesn't load the linked piece docs
+    // (pieceListSchema items are `asCell`), so on a cold runtime the
+    // synchronous `piece.name()` read races the doc load and the directory
+    // would be created under the opaque id-derived fallback name — and never
+    // renamed if no further change event arrives. Await the NAME through the
+    // same schema path `name()` reads before choosing the directory name.
+    await this.syncPieceName(piece);
+    const rawName = piece.name();
+    let name = resolveProjectedPieceName(rawName, piece.id);
+    this.debugLog(
+      `[${spaceName}] addPieceToSpace: id=${piece.id} rawName=${
+        JSON.stringify(rawName)
+      } resolved=${name}`,
+    );
     if (state.usedNames.has(name)) {
       let suffix = 2;
       while (state.usedNames.has(`${name}-${suffix}`)) suffix++;
@@ -2021,7 +2055,13 @@ export class CellBridge {
     await this.buildSourceTree(pieceIno, piece, state, name);
     await this.refreshPieceManifest(state, piece);
 
-    const subs = await this.subscribePiece(piece, pieceIno, name, spaceName);
+    const subs = await this.subscribePiece(
+      piece,
+      pieceIno,
+      name,
+      spaceName,
+      state,
+    );
     state.pieceSubs.set(name, subs);
 
     // Create a lightweight stub entity dir so `ls entities/` shows stable IDs
@@ -2151,6 +2191,9 @@ export class CellBridge {
     spaceName: string,
   ): Promise<void> {
     const allPieces = await state.pieces.getAllPieces();
+    this.debugLog(
+      `[${spaceName}] syncPieceListOnce: live=${allPieces.length} tracked=${state.pieceMap.size}`,
+    );
 
     // Build set of current entity IDs
     const liveIds = new Set(allPieces.map((p) => p.id));
@@ -2771,6 +2814,7 @@ export class CellBridge {
     pieceIno: bigint,
     pieceName: string,
     spaceName: string,
+    state: SpaceState,
   ): Promise<Cancel[]> {
     const cancels: Cancel[] = [];
 
@@ -2848,8 +2892,14 @@ export class CellBridge {
       const cancelRootSub = nameTrackingCell.sink((newValue: unknown) => {
         setTimeout(() => {
           try {
-            const state = this.spaces.get(spaceName);
-            if (!state) return;
+            // Use the state captured at subscription time, NOT
+            // this.spaces.get(): during the initial buildSpaceTree the space
+            // isn't registered in this.spaces yet, so a lookup would silently
+            // drop every name event that fires while the tree is being built
+            // (and a static piece may never fire again). Only bail if the
+            // space has since been disconnected or replaced.
+            const registered = this.spaces.get(spaceName);
+            if (registered !== undefined && registered !== state) return;
 
             // Find the piece's current FUSE name by searching pieceMap.
             let currentName: string | undefined;

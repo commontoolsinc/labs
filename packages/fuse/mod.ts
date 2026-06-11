@@ -327,7 +327,10 @@ export async function main(argv: string[] = Deno.args) {
     };
   }
 
-  const debug = args.debug;
+  // CF_FUSE_DEBUG=1 enables debug logging even when --debug isn't passed.
+  // The background supervisor doesn't forward --debug to the daemon child,
+  // but env vars are inherited, so this is the reliable switch in CI.
+  const debug = args.debug || Deno.env.get("CF_FUSE_DEBUG") === "1";
   const requestedCfcMode = String(args["cfc-mode"] ?? "");
   if (requestedCfcMode && !parseCfcMode(requestedCfcMode)) {
     console.warn(

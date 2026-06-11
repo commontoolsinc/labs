@@ -873,6 +873,19 @@ export class Runner {
         ? descriptor.schema.default as JSONValue | undefined
         : undefined;
       if (currentValue === undefined && schemaDefault !== undefined) {
+        if (manifestMatch !== -1) {
+          // The manifest already references this cell (a previous run
+          // materialized it), yet it reads undefined here — on a cold cache
+          // this usually means the doc just isn't loaded, and writing the
+          // default would clobber persisted state (CT-1666 class of bug).
+          logger.warn("internal-default-over-manifest", () => [
+            `materializeDerivedInternalCells: applying schema default over`,
+            `undefined for existing manifest entry`,
+            `partialCause=${JSON.stringify(descriptor.partialCause)}`,
+            `cell=${derivedCell.getAsNormalizedFullLink().id}`,
+            `result=${resultCell.getAsNormalizedFullLink().id}`,
+          ]);
+        }
         derivedCell.setRawUntyped(fabricFromNativeValue(schemaDefault));
       }
     }
