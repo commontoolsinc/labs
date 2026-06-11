@@ -294,6 +294,11 @@ export interface CompileSourcesOptions {
    * be consistent with `idPrefix` / `runtimeFingerprint`.
    */
   identityByPath?: Map<string, string>;
+  /**
+   * Maps an authored import specifier to a concrete file already present in the
+   * program. Used for scheme-prefixed fabric refs mounted under reserved paths.
+   */
+  specifierAliases?: ReadonlyMap<string, string>;
 }
 
 export interface CompiledModuleGraph {
@@ -418,9 +423,18 @@ export function compileSourcesToRecords(
       const source = sourceByName.get(current);
       if (!raw || !source) continue;
       for (const targetSpec of raw.starTargets) {
-        const resolved = resolveImportSpecifier(targetSpec, source);
-        const internal = findInternalTarget(fileNames, resolved);
+        const aliased = options.specifierAliases?.get(targetSpec);
+        const internal = aliased ??
+          findInternalTarget(
+            fileNames,
+            resolveImportSpecifier(targetSpec, source),
+          );
         if (internal !== undefined) {
+          if (!fileNames.has(internal)) {
+            throw new Error(
+              `specifier alias '${targetSpec}' -> '${internal}' does not name a program file`,
+            );
+          }
           reachableInternal.add(internal);
           stack.push(internal);
         } else {
@@ -496,6 +510,15 @@ export function compileSourcesToRecords(
         resolutions[spec] = specifierByPath.get(internal)!;
       } else if (spec in runtimeModules) {
         resolutions[spec] = `cf:runtime/${spec}`;
+      } else if (options.specifierAliases?.has(spec)) {
+        const target = options.specifierAliases.get(spec)!;
+        const targetSpecifier = specifierByPath.get(target);
+        if (targetSpecifier === undefined) {
+          throw new Error(
+            `specifier alias '${spec}' -> '${target}' does not name a program file`,
+          );
+        }
+        resolutions[spec] = targetSpecifier;
       } else {
         // Unknown external; leave as-is so a missing-record error is explicit.
         resolutions[spec] = spec;
