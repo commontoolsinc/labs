@@ -11,6 +11,10 @@ This directory mixes exemplars, capability demos, regression fixtures, and
 legacy experiments. They do NOT carry equal authority. Before imitating any
 pattern, check its tier here (tracked in CT-1701):
 
+- **primitive** — designed for embedding in other patterns (used as a JSX tag),
+  headless-able. Exposes streams + cells + an optional default `[UI]`. Copy
+  these idioms when building composable building blocks. See
+  `docs/common/patterns/primitives.md` for the composition contract.
 - **exemplar** — current best practice. Copy idioms from these.
 - **demo** — illustrates a specific capability or integration. The capability
   usage is real, but the surrounding wiring may be verbose, dated, or
@@ -22,6 +26,14 @@ pattern, check its tier here (tracked in CT-1701):
 
 Any pattern not listed below (newly added, or missed) should be treated as
 **demo** until triaged.
+
+## primitive
+
+Composable building blocks designed for embedding in other patterns
+(headless-able). Live under `primitives/`. See
+`docs/common/patterns/primitives.md`.
+
+`primitives/editable-list.tsx`.
 
 ## exemplar
 
@@ -104,6 +116,62 @@ intended as style references.
 Support files with no tier (not patterns): `deno.json`, `mod.ts`, `index.md`,
 `README.md`, `DEPRECATED_IDIOMS.md`, `PREEXISTING_BUGS.md`,
 `test-ui-helpers.ts`, `tools/` (codegen tooling).
+
+---
+
+## `primitives/editable-list.tsx`
+
+**Tier: primitive.** The first composable primitive — an editable, checkable
+list designed to be embedded as a JSX tag inside other patterns. Headless-able:
+render its `[UI]` for a default row experience (checkbox + editable text +
+delete, a cf-message-input adder, cf-empty-state when empty), or ignore the
+`[UI]` and `.map()` your own rows while driving the exposed streams/cells.
+Mutations are addressed by stable `id` (never array index); a separate fuzzy
+text-addressed layer (`*ByText`) exists for agent-driveability. See
+`docs/common/patterns/primitives.md` for the full composition contract.
+
+**Keywords:** primitive, composable, list, editable, headless, identity, stream,
+embed, sub-pattern
+
+### Input Schema
+
+```ts
+interface EditableListItem {
+  id: string; // stable identity (minted by addItem if omitted)
+  done: boolean | Default<false>;
+  label: Default<string, "">; // default row reads this key
+  [extra: string]: any; // pass-through extra fields for headless rows
+}
+
+interface EditableListInput {
+  items?: Writable<EditableListItem[] | Default<[]>>;
+  adder?: Default<"quick" | "none", "quick">;
+  emptyMessage?: Default<string, "No items yet">;
+}
+```
+
+### Output Schema
+
+```ts
+interface EditableListOutput {
+  [NAME]: string;
+  [UI]: VNode;
+  items: EditableListItem[];
+  total: number;
+  active: number;
+  done: number;
+  // CORE: identity-addressed
+  addItem: Stream<{ label?: string; item?: Partial<EditableListItem> }>;
+  removeItem: Stream<{ id: string }>;
+  updateItem: Stream<{ id: string; changes: Partial<EditableListItem> }>;
+  toggleItem: Stream<{ id: string; done?: boolean }>;
+  clearDone: Stream<unknown>;
+  // CONVENIENCE: fuzzy text-addressed (agent layer)
+  addItemByText: Stream<{ text: string }>;
+  updateItemByText: Stream<{ text: string; newText?: string; done?: boolean }>;
+  removeItemByText: Stream<{ text: string }>;
+}
+```
 
 ---
 
