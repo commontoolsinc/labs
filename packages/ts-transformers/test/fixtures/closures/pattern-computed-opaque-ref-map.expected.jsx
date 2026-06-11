@@ -13,7 +13,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     items: number[] & {} & { [SELF]: OpaqueRef<any>; };
-}, number[]>({
+}, number[]>(({ items }) => items.map((n) => n * 2), {
     type: "object",
     properties: {
         items: {
@@ -29,7 +29,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     items: {
         type: "number"
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.map((n) => n * 2));
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-computed-opaque-ref-map
 // Verifies: .map() on an OpaqueRef inside computed() is NOT transformed to mapWithPattern
 //   computed(() => items.map((n) => n * 2)) → lift(({ items }) => items.map((n) => n * 2))({ items })

@@ -37,7 +37,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         editingPersonName: string | null;
     };
     personName: string;
-}, boolean>({
+}, boolean>(({ state, personName }) => state.editingPersonName === personName, {
     type: "object",
     properties: {
         state: {
@@ -60,13 +60,13 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state", "personName"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state, personName }) => state.editingPersonName === personName);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         removePersonConfirmTarget: string | null;
     };
     personName: string;
-}, boolean>({
+}, boolean>(({ state, personName }) => state.removePersonConfirmTarget === personName, {
     type: "object",
     properties: {
         state: {
@@ -89,7 +89,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state", "personName"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state, personName }) => state.removePersonConfirmTarget === personName);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         spots: {
@@ -98,7 +98,12 @@ const __cfLift_3 = __cfHelpers.lift<{
             active: boolean;
         }[];
     };
-}, { label: string; value: string; }[]>({
+}, { label: string; value: string; }[]>(({ state }) => state.spots
+    .filter((s) => s.active)
+    .map((s) => ({
+    label: "#" + s.spotNumber + (s.label ? " - " + s.label : ""),
+    value: s.spotNumber,
+})), {
     type: "object",
     properties: {
         state: {
@@ -141,17 +146,12 @@ const __cfLift_3 = __cfHelpers.lift<{
         },
         required: ["label", "value"]
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.spots
-    .filter((s) => s.active)
-    .map((s) => ({
-    label: "#" + s.spotNumber + (s.label ? " - " + s.label : ""),
-    value: s.spotNumber,
-})));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     activeSpotOpts: {
         length: number;
     };
-}, boolean>({
+}, boolean>(({ activeSpotOpts }) => activeSpotOpts.length > 0, {
     type: "object",
     properties: {
         activeSpotOpts: {
@@ -167,10 +167,10 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["activeSpotOpts"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ activeSpotOpts }) => activeSpotOpts.length > 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_5 = __cfHelpers.lift<{
     spotPreferences: string[];
-}, boolean>({
+}, boolean>(({ spotPreferences }) => spotPreferences.length > 0, {
     type: "object",
     properties: {
         spotPreferences: {
@@ -183,10 +183,10 @@ const __cfLift_5 = __cfHelpers.lift<{
     required: ["spotPreferences"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ spotPreferences }) => spotPreferences.length > 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_6 = __cfHelpers.lift<{
     spotPreferences: string[];
-}, string>({
+}, string>(({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "), {
     type: "object",
     properties: {
         spotPreferences: {
@@ -199,7 +199,7 @@ const __cfLift_6 = __cfHelpers.lift<{
     required: ["spotPreferences"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const person = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");

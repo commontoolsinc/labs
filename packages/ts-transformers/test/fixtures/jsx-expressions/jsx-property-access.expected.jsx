@@ -48,7 +48,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             age: number;
         };
     };
-}, number>({
+}, number>(({ state }) => state.user.age + 1, {
     type: "object",
     properties: {
         state: {
@@ -70,14 +70,14 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.age + 1);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         user: {
             name: string;
         };
     };
-}, string>({
+}, string>(({ state }) => state.user.name.toUpperCase(), {
     type: "object",
     properties: {
         state: {
@@ -99,7 +99,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.name.toUpperCase());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         user: {
@@ -108,7 +108,7 @@ const __cfLift_3 = __cfHelpers.lift<{
             };
         };
     };
-}, boolean>({
+}, boolean>(({ state }) => state.user.profile.location.includes("City"), {
     type: "object",
     properties: {
         state: {
@@ -136,13 +136,13 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.profile.location.includes("City"));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         items: string[];
         index: number;
     };
-}, string | undefined>({
+}, string | undefined>(({ state }) => state.items[state.index], {
     type: "object",
     properties: {
         state: {
@@ -164,12 +164,12 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.index]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_5 = __cfHelpers.lift<{
     state: {
         items: string[];
     };
-}, string | undefined>({
+}, string | undefined>(({ state }) => state.items[state.items.length - 1], {
     type: "object",
     properties: {
         state: {
@@ -188,13 +188,13 @@ const __cfLift_5 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.items.length - 1]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_6 = __cfHelpers.lift<{
     state: {
         numbers: number[];
         index: number;
     };
-}, number | undefined>({
+}, number | undefined>(({ state }) => state.numbers[state.index], {
     type: "object",
     properties: {
         state: {
@@ -216,7 +216,7 @@ const __cfLift_6 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.numbers[state.index]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_7 = __cfHelpers.lift<{
     state: {
         config: {
@@ -225,7 +225,7 @@ const __cfLift_7 = __cfHelpers.lift<{
             };
         };
     };
-}, string>({
+}, string>(({ state }) => state.config.theme.fontSize + "px", {
     type: "object",
     properties: {
         state: {
@@ -253,7 +253,7 @@ const __cfLift_7 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.config.theme.fontSize + "px");
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_8 = __cfHelpers.lift<{
     state: {
         user: {
@@ -263,7 +263,7 @@ const __cfLift_8 = __cfHelpers.lift<{
             };
         };
     };
-}, string>({
+}, string>(({ state }) => state.user.name + " from " + state.user.profile.location, {
     type: "object",
     properties: {
         state: {
@@ -294,7 +294,7 @@ const __cfLift_8 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.name + " from " + state.user.profile.location);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_9 = __cfHelpers.lift<{
     state: {
         config: {
@@ -303,7 +303,7 @@ const __cfLift_9 = __cfHelpers.lift<{
             };
         };
     };
-}, number>({
+}, number>(({ state }) => state.config.theme.fontSize + 2, {
     type: "object",
     properties: {
         state: {
@@ -331,7 +331,7 @@ const __cfLift_9 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.config.theme.fontSize + 2);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: jsx-property-access
 // Verifies: nested property access chains in JSX are converted to .key() or wrapped in a lift-applied computation
 //   state.user.name                → state.key("user", "name")  (simple access, no lift)

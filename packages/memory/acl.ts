@@ -67,7 +67,7 @@ const CapabilityMap: Record<Capability, number> = {
   OWNER: 2,
 };
 
-function isCapable(
+export function isCapable(
   capability: Capability,
   requirement: Capability,
 ): boolean {

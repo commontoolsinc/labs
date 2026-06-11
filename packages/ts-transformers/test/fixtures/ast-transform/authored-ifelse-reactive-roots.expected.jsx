@@ -14,7 +14,7 @@ const __cfAmdHooks = undefined;
 const identity = __cfHardenFn(<T,>(value: T) => value);
 const __cfLift_1 = __cfHelpers.lift<{
     name: string;
-}, string>({
+}, string>(({ name }) => identity(name.trim()), {
     type: "object",
     properties: {
         name: {
@@ -24,10 +24,10 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["name"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ name }) => identity(name.trim()));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     count: number;
-}, number>({
+}, number>(({ count }) => count + 1, {
     type: "object",
     properties: {
         count: {
@@ -37,10 +37,10 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["count"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ count }) => count + 1);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     cell: __cfHelpers.Writable<number>;
-}, number>({
+}, number>(({ cell }) => cell.get(), {
     type: "object",
     properties: {
         cell: {
@@ -51,10 +51,10 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ cell }) => cell.get());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     name: string;
-}, string>({
+}, string>(({ name }) => name.trim(), {
     type: "object",
     properties: {
         name: {
@@ -64,10 +64,10 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["name"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ name }) => name.trim());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_5 = __cfHelpers.lift<{
     name: string;
-}, string>({
+}, string>(({ name }) => name.trim(), {
     type: "object",
     properties: {
         name: {
@@ -77,7 +77,7 @@ const __cfLift_5 = __cfHelpers.lift<{
     required: ["name"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ name }) => name.trim());
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: authored-ifelse-reactive-roots
 // Verifies: authored ifElse outside JSX and top-level receiver-method roots lower reactively
 //   ifElse(show, count + 1, 0)         → compute-wrapped branch

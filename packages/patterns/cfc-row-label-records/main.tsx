@@ -11,7 +11,8 @@
 // patient and the owner (but not "pii") accepts a diagnosis projection while
 // REFUSING an ssn projection of the very same rows.
 //
-// Design: docs/specs/sqlite-builtin/plans/cfc-phase3-per-row.md (§7)
+// Spec: docs/specs/sqlite-builtin/06-cfc.md ("Read — re-derive per row,
+// attach, ceiling")
 import {
   cfSqlite,
   computed,

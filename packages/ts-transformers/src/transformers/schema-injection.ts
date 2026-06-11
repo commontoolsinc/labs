@@ -2205,7 +2205,10 @@ function isSingleEmptyObjectInput(
 }
 
 function prependSchemaArguments(
-  context: Pick<TransformationContext, "factory" | "cfHelpers" | "sourceFile">,
+  context: Pick<
+    TransformationContext,
+    "factory" | "cfHelpers" | "sourceFile" | "markSchemaInjected"
+  >,
   node: ts.CallExpression,
   argumentTypeNode: ts.TypeNode,
   argumentType: ts.Type | undefined,
@@ -2241,25 +2244,35 @@ function prependSchemaArguments(
     }
   }
 
-  // For the lift-applied shape (__cfHelpers.lift(cb)(input)), schemas must
-  // be prepended to the INNER lift call's arguments, not the outer applied
-  // call's. The outer call's input stays at index 0; the inner call gains
-  // [argSchema, resSchema, ...originalInnerArgs].
+  // For the lift-applied shape (__cfHelpers.lift(cb)(input)), schemas are
+  // spliced into the INNER lift call's arguments in function-first order:
+  // `lift(cb, argSchema, resSchema, options?)`. The inner call's args are
+  // `[callback, ...trailingOptions]` (an optional DeriveSchedulerOptions object
+  // may follow the callback — see lift-applied-strategy). The schemas go AFTER
+  // the callback but BEFORE any trailing options, mirroring the runtime
+  // signature `lift(fn, argumentSchema?, resultSchema?, options?)`. The outer
+  // applied call's input stays untouched.
   const innerLiftCall = getLiftAppliedInnerCall(node);
   if (innerLiftCall) {
+    const [innerCallback, ...trailingInnerArgs] = innerLiftCall.arguments;
+    const calleeArgs = innerCallback ? [innerCallback] : [];
     // No-input case: a single empty object literal `{}` as the outer input
     // means a genuinely zero-capture computation (computed-origin). By this
     // stage ClosureTransformer has already reified any captures into the
     // input, so an empty input here is final. Emit the canonical no-input
-    // form `lift(false, cb)()`: `false` argument schema (matching computed's
+    // form `lift(cb, false)()`: `false` argument schema (matching computed's
     // runtime semantics — keeps the no-arg application valid) and no outer
     // input. We deliberately omit the result schema, again matching computed.
     if (isSingleEmptyObjectInput(node.arguments)) {
       const rebuiltInner = context.factory.createCallExpression(
         innerLiftCall.expression,
         innerLiftCall.typeArguments,
-        [context.factory.createFalse(), ...innerLiftCall.arguments],
+        [...calleeArgs, context.factory.createFalse(), ...trailingInnerArgs],
       );
+      // The inner lift is fully schema-injected now; mark it so the re-descent
+      // (which re-enters the rebuilt tree to reach the callback body) self-skips
+      // the builder-lift branch instead of injecting a second schema pair.
+      context.markSchemaInjected(rebuiltInner);
       return context.factory.createCallExpression(
         rebuiltInner,
         undefined,
@@ -2270,8 +2283,11 @@ function prependSchemaArguments(
     const rebuiltInner = context.factory.createCallExpression(
       innerLiftCall.expression,
       innerLiftCall.typeArguments,
-      [argSchemaCall, resSchemaCall, ...innerLiftCall.arguments],
+      [...calleeArgs, argSchemaCall, resSchemaCall, ...trailingInnerArgs],
     );
+    // The inner lift is fully schema-injected now; mark it so the re-descent
+    // does not re-enter the builder-lift branch and inject a second pair.
+    context.markSchemaInjected(rebuiltInner);
     return context.factory.createCallExpression(
       rebuiltInner,
       undefined,
@@ -2282,7 +2298,7 @@ function prependSchemaArguments(
   return context.factory.createCallExpression(
     node.expression,
     undefined,
-    [argSchemaCall, resSchemaCall, ...node.arguments],
+    [...node.arguments, argSchemaCall, resSchemaCall],
   );
 }
 

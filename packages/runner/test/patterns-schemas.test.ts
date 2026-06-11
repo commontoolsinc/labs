@@ -65,9 +65,9 @@ describe("Pattern Runner - Schemas", () => {
       multiplier: number;
     }>(({ settings, multiplier }) => {
       const result = lift(
+        ({ settings, multiplier }) => settings.value * multiplier!,
         schema,
         { type: "number" },
-        ({ settings, multiplier }) => settings.value * multiplier!,
       )({ settings, multiplier });
       return { result };
     });
@@ -135,13 +135,13 @@ describe("Pattern Runner - Schemas", () => {
     const sumPattern = pattern<{ data: { items: Array<{ value: number }> } }>(
       ({ data }) => {
         const result = lift(
-          schema,
-          { type: "number" },
           ({ data }) =>
             data.items.reduce(
               (sum: number, item: any) => sum + item.get().value,
               0,
             ),
+          schema,
+          { type: "number" },
         )({ data });
         return { result };
       },
@@ -195,13 +195,13 @@ describe("Pattern Runner - Schemas", () => {
     >(
       ({ context }) => {
         const result = lift(
-          schema,
-          { type: "number" },
-          ({ context }) =>
+          ({ context }: any) =>
             Object.values(context ?? {}).reduce(
-              (sum: number, val) => sum + val.get(),
+              (sum: number, val: any) => sum + val.get(),
               0,
             ),
+          schema,
+          { type: "number" },
         )({ context });
         return { result };
       },

@@ -38,8 +38,10 @@ describe("Engine implementation identity", () => {
     program: RuntimeProgram,
     modulePath: string,
   ): Promise<{ id: string; implementationId: string | undefined }> {
-    const { id, jsScript } = await engine.compile(program);
-    await engine.evaluate(id, jsScript, program.files);
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
+    engine.evaluateRecordGraph(id, graph, mainSpecifier, program.files);
     const implementationId = engine.implementationHashForSource(
       `/${id}${modulePath}:1:1`,
     );

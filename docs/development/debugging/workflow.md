@@ -87,7 +87,6 @@ See [console-commands](./console-commands.md) for the full reference.
 ## See Also
 
 - [@CELL_CONTEXT](../../common/components/CELL_CONTEXT.md) - Cell debugging tool details
-- [Logger System](./logger-system.md) - Logger architecture and API
 - [Console Commands](./console-commands.md) - Browser console reference
-- [cli-debugging](./cli-debugging.md) - CLI-based debugging workflows
-- [testing](./testing.md) - Testing patterns locally and deployed
+- [Logger Internals](../logger-internals.md) - Creating loggers in runtime code
+- [cli-debugging](./cli-debugging.md) - CLI-based debugging and testing workflows

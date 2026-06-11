@@ -180,9 +180,9 @@ export default pattern<AgentInput, AgentOutput>(
 
     const statusColor = computed(() => {
       const s = status.get();
-      if (s === "running") return "var(--cf-color-blue-500, #3b82f6)";
-      if (s === "error") return "var(--cf-color-red-500, #ef4444)";
-      return "var(--cf-color-gray-400, #9ca3af)";
+      if (s === "running") return "var(--cf-colors-blue-500, #3b82f6)";
+      if (s === "error") return "var(--cf-colors-red-500, #ef4444)";
+      return "var(--cf-colors-gray-400, #9ca3af)";
     });
 
     const summaryText = computed(() => {
@@ -236,7 +236,7 @@ export default pattern<AgentInput, AgentOutput>(
             style={{
               padding: "0.75rem 1rem",
               alignItems: "center",
-              borderBottom: "1px solid var(--cf-color-border, #e5e5e7)",
+              borderBottom: "1px solid var(--cf-theme-color-border, #e5e5e7)",
             }}
           >
             {/* Click-to-edit name */}
@@ -351,7 +351,7 @@ export default pattern<AgentInput, AgentOutput>(
                   gap="2"
                   style={{
                     fontSize: "13px",
-                    color: "var(--cf-color-text-secondary, #6b7280)",
+                    color: "var(--cf-theme-color-text-secondary, #6b7280)",
                     alignItems: "center",
                   }}
                 >

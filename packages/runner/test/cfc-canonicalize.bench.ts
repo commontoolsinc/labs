@@ -65,6 +65,7 @@ const warm = (input: PreparedDigestInput): PreparedDigestInput => {
         target: warmAddr(t.target),
       })
     ),
+    triggerReads: input.triggerReads.map(warmAddr),
     writePolicyInputs: input.writePolicyInputs,
     implementationIdentity: input.implementationIdentity,
     trustSnapshot: input.trustSnapshot,
@@ -86,6 +87,7 @@ const SMALL_INPUT: PreparedDigestInput = {
     makeAddress("a", "items", 0),
   ],
   dereferenceTraces: [],
+  triggerReads: [],
   writePolicyInputs: freezePolicies([
     {
       kind: "schema",
@@ -115,6 +117,7 @@ const LARGE_INPUT: PreparedDigestInput = {
     target: makeAddress(`d${i}`, "dst"),
     kind: i % 2 === 0 ? "value" as const : "write-redirect" as const,
   })),
+  triggerReads: [],
   writePolicyInputs: freezePolicies([
     {
       kind: "schema",
@@ -163,6 +166,7 @@ const TIEBREAK_HEAVY_INPUT: PreparedDigestInput = {
   attemptedWrites: [],
   writes: [],
   dereferenceTraces: [],
+  triggerReads: [],
   writePolicyInputs: freezePolicies(
     Array.from({ length: 8 }, (_, i) => ({
       kind: "custom" as const,
@@ -217,6 +221,7 @@ const PATH_HEAVY_INPUT: PreparedDigestInput = {
     },
     kind: i % 2 === 0 ? "value" as const : "write-redirect" as const,
   })),
+  triggerReads: [],
   writePolicyInputs: [],
   implementationIdentity: { kind: "builtin", builtinId: "test-builtin" },
   trustSnapshot: undefined,

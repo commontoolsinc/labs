@@ -26,7 +26,10 @@ const __cfLift_1 = __cfHelpers.lift<{
     items: {
         done: boolean;
     }[];
-}, { tasks: Item[]; view: string; }>({
+}, { tasks: Item[]; view: string; }>(({ items }) => ({
+    tasks: items.filter((i) => !i.done),
+    view: "inbox",
+}), {
     type: "object",
     properties: {
         items: {
@@ -71,13 +74,13 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["name", "done"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ items }) => ({
-    tasks: items.filter((i) => !i.done),
-    view: "inbox",
-}));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     result: { tasks: Item[]; view: string; };
-}, __cfHelpers.JSXElement[]>({
+}, __cfHelpers.JSXElement[]>(({ result }) => {
+    const { tasks } = result;
+    return tasks.map((task) => <li>{task.name}</li>);
+}, {
     type: "object",
     properties: {
         result: {
@@ -137,10 +140,7 @@ const __cfLift_2 = __cfHelpers.lift<{
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ result }) => {
-    const { tasks } = result;
-    return tasks.map((task) => <li>{task.name}</li>);
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-destructured-map
 // Verifies: .map() on a destructured property of a computed result inside another computed() is NOT transformed to .mapWithPattern()
 //   computed(() => { const { tasks } = result; return tasks.map(fn) }) → lift(({ result }) => { const { tasks } = result; return tasks.map(fn) })(...)

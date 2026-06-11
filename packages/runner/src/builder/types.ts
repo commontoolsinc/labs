@@ -186,6 +186,14 @@ declare module "@commonfabric/api" {
     type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
     implementation?: ((...args: any[]) => any) | Pattern | string;
     implementationRef?: string;
+    /**
+     * Content-addressed reference to the module-scope builder artifact whose
+     * implementation this module runs: the defining module's content identity
+     * and the artifact's export/`__cfReg` symbol. Dual-written alongside
+     * `implementationRef` during the migration; resolution prefers it
+     * (see docs/specs/content-addressed-action-identity.md).
+     */
+    $implRef?: { identity: string; symbol: string };
     wrapper?: "handler";
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;
@@ -228,10 +236,6 @@ export type DerivedInternalCellDescriptor = {
   scope?: CellScope;
 };
 
-// Used to get back to original pattern from a JSONified representation.
-export const unsafe_originalPattern = Symbol("unsafe_originalPattern");
-export const unsafe_parentPattern = Symbol("unsafe_parentPattern");
-
 declare module "@commonfabric/api" {
   interface Pattern {
     argumentSchema: JSONSchema;
@@ -239,12 +243,11 @@ declare module "@commonfabric/api" {
     derivedInternalCells?: DerivedInternalCellDescriptor[];
     result: JSONValue;
     nodes: Node[];
-    // NOTE: `program` (rehydration source) and the verified-load id are no
-    // longer stored on the pattern object — they live in WeakMaps in
-    // ./pattern-metadata.ts so exported patterns can be frozen. Use
-    // get/setPatternProgram and get/setVerifiedLoadId.
-    [unsafe_originalPattern]?: Pattern;
-    [unsafe_parentPattern]?: Pattern;
+    // NOTE: `program` (rehydration source), the verified-load id, and the
+    // derivation link to a copy's original all live in WeakMaps/WeakSets in
+    // ./pattern-metadata.ts (so exported patterns can be frozen, and so no
+    // own property can carry trust). Use get/setPatternProgram,
+    // get/setVerifiedLoadId, noteDerivedCopy/resolveOriginal.
   }
 }
 

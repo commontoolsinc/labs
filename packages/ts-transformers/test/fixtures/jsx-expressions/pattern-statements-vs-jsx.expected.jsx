@@ -46,7 +46,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         value: number;
     };
-}, number>({
+}, number>(({ state }) => state.value + 1, {
     type: "object",
     properties: {
         state: {
@@ -62,12 +62,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value + 1);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         value: number;
     };
-}, number>({
+}, number>(({ state }) => state.value - 1, {
     type: "object",
     properties: {
         state: {
@@ -83,12 +83,12 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value - 1);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         value: number;
     };
-}, number>({
+}, number>(({ state }) => state.value * 2, {
     type: "object",
     properties: {
         state: {
@@ -104,12 +104,12 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value * 2);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         value: number;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.value > 10, {
     type: "object",
     properties: {
         state: {
@@ -125,7 +125,7 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value > 10);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-statements-vs-jsx
 // Verifies: only JSX-context expressions are transformed; statement-context expressions are left alone
 //   const next = state.value + 1    → NOT transformed (statement context)

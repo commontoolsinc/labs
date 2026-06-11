@@ -14,7 +14,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     show: boolean;
-}, boolean>({
+}, boolean>(({ show }) => show, {
     type: "object",
     properties: {
         show: {
@@ -24,7 +24,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["show"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ show }) => show);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: safe-context-and-jsx
 // Verifies: && and || with JSX inside handler callbacks are transformed to when()/unless()
 //   computed(() => show) && <span> → when(computed(() => show), <span>)
@@ -122,7 +122,7 @@ const MyHandler = handler({
 });
 const __cfLift_2 = __cfHelpers.lift<{
     value: string | null;
-}, string | null>({
+}, string | null>(({ value }) => value, {
     type: "object",
     properties: {
         value: {
@@ -140,7 +140,7 @@ const __cfLift_2 = __cfHelpers.lift<{
         }, {
             type: "null"
         }]
-} as const satisfies __cfHelpers.JSONSchema, ({ value }) => value);
+} as const satisfies __cfHelpers.JSONSchema);
 // Test: || with JSX inside handler callback should transform to unless()
 const MyHandler2 = handler({
     type: "object",

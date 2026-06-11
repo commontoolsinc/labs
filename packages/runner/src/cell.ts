@@ -130,7 +130,7 @@ import {
   mergeCfcLabelViews,
   rebaseCfcLabelView,
 } from "./cfc/label-view-state.ts";
-import { flowPrecisionSchemaForBuiltin } from "./cfc/flow-precision.ts";
+import { listResultSchema } from "./builtins/list-result-schema.ts";
 import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
@@ -984,8 +984,29 @@ export class CellImpl<T extends FabricValue>
         isEffect: true,
       });
 
-      // Wait for the scheduler to process all pending work, then resolve
-      this.runtime.scheduler.idle().then(() => {
+      // Wait for the scheduler to process all pending work, then resolve.
+      // If the read kicked async loads of cross-space link targets, await
+      // them and re-idle — each arrival re-runs the read and can reveal the
+      // next hop — bounded. Pulls that kicked nothing take the
+      // zero-iteration path and keep their previous timing.
+      this.runtime.scheduler.idle().then(async () => {
+        const storage = this.runtime.storageManager;
+        // The pending pool is manager-global (same semantics as `synced()`):
+        // this pull may also wait on loads kicked by concurrent readers.
+        let round = 0;
+        for (; round < 10; round++) {
+          if ((storage.pendingCrossSpacePromiseCount?.() ?? 0) === 0) break;
+          await (storage.crossSpaceSettled?.() ?? Promise.resolve());
+          await this.runtime.scheduler.idle();
+        }
+        if (
+          round === 10 && (storage.pendingCrossSpacePromiseCount?.() ?? 0) > 0
+        ) {
+          logger.warn("pull", () => [
+            "pull() convergence bound exhausted with cross-space loads still",
+            `pending: ${this.sourceURI}`,
+          ]);
+        }
         cancel?.();
         resolve(result);
       });
@@ -2034,10 +2055,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    const schema = flowPrecisionSchemaForBuiltin("map", op.resultSchema);
-    if (schema !== undefined) {
-      result.setSchema(schema);
-    }
+    result.setSchema(listResultSchema(op.resultSchema));
     return result;
   }
 
@@ -2127,10 +2145,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    const schema = flowPrecisionSchemaForBuiltin("filter");
-    if (schema !== undefined) {
-      result.setSchema(schema);
-    }
+    result.setSchema(listResultSchema());
     return result;
   }
 
@@ -2170,10 +2185,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    const schema = flowPrecisionSchemaForBuiltin("flatMap");
-    if (schema !== undefined) {
-      result.setSchema(schema);
-    }
+    result.setSchema(listResultSchema());
     return result;
   }
 

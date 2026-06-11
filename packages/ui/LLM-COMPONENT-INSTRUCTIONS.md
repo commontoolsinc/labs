@@ -1,13 +1,19 @@
 # LLM Component Composition Guide
 
+> **Where this fits:**
+> [`docs/common/components/COMPONENTS.md`](../../docs/common/components/COMPONENTS.md)
+> is the agent-facing component index and usage narrative. This file remains the
+> HTML-attribute-table reference. For live, type-checked usage see the catalog
+> stories under `packages/patterns/catalog/stories/`.
+
 This document provides comprehensive component specifications for Language
 Models to assist with web component composition using the Common Fabric UI
 library.
 
 ## Component Library Overview
 
-The Common Fabric UI library provides 40 secure web components that follow the
-shadcn/ui design system. All components:
+The Common Fabric UI library provides a full set of secure web components that
+follow the shadcn/ui design system. All components:
 
 - Use custom element tags prefixed with `cf-`
 - Support Shadow DOM encapsulation

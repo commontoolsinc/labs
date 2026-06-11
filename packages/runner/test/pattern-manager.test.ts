@@ -8,11 +8,8 @@ import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { patternMetaSchema } from "../src/pattern-manager.ts";
-import {
-  CachedCompiler,
-  MemoryCompilationCache,
-} from "../src/compilation-cache/mod.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { getVerifiedLoadId } from "../src/builder/pattern-metadata.ts";
 import { getPatternProgram } from "../src/builder/pattern-metadata.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -307,10 +304,15 @@ describe("PatternManager.compileOrGetPattern", () => {
       simpleProgram,
     );
 
-    const initialLoadId = runtime.harness.getVerifiedLoadId?.(
-      "__missing__",
-      patternId,
-    );
+    // The established verified-load id is first-write-wins in the
+    // PatternManager's patternToVerifiedLoadId map (the channel that survived
+    // the pattern-scoped-registry deletion); a later registration under a
+    // different frame load id must not overwrite it.
+    // deno-lint-ignore no-explicit-any
+    const readEstablished = () =>
+      (runtime.patternManager as any).patternToVerifiedLoadId.get(compiled) ??
+        getVerifiedLoadId(compiled);
+    const initialLoadId = readEstablished();
     expect(initialLoadId).toBeDefined();
 
     const frame = pushFrame({ verifiedLoadId: "wrong-load-id" });
@@ -322,8 +324,7 @@ describe("PatternManager.compileOrGetPattern", () => {
       popFrame(frame);
     }
 
-    expect(runtime.harness.getVerifiedLoadId?.("__missing__", patternId))
-      .toEqual(initialLoadId);
+    expect(readEstablished()).toEqual(initialLoadId);
   });
 
   it("propagates verified load ids to nested compiled subpatterns", async () => {
@@ -343,33 +344,23 @@ describe("PatternManager.compileOrGetPattern", () => {
     };
 
     const externalEngine = new Engine(runtime);
-    const { jsScript, id } = await externalEngine.compile(nestedProgram);
-    const { main } = await externalEngine.evaluate(
-      id,
-      jsScript,
-      nestedProgram.files,
-    );
-    const compiled = main?.default as any;
-    const patternId = runtime.patternManager.registerPattern(
-      compiled,
+    const { main } = await externalEngine.compileAndEvaluateModules(
       nestedProgram,
     );
-    const initialLoadId = runtime.harness.getVerifiedLoadId?.(
-      "__missing__",
-      patternId,
-    );
+    const compiled = main?.default as any;
+    runtime.patternManager.registerPattern(compiled, nestedProgram);
+    const initialLoadId = getVerifiedLoadId(compiled);
     expect(initialLoadId).toBeDefined();
 
     const nestedPattern = (compiled.nodes.find((node: any) => node.inputs?.op)
       ?.inputs as { op?: unknown }).op;
     expect(nestedPattern).toBeDefined();
 
-    const nestedPatternId = runtime.patternManager.registerPattern(
-      nestedPattern as any,
-    );
+    runtime.patternManager.registerPattern(nestedPattern as any);
 
-    expect(runtime.harness.getVerifiedLoadId?.("__missing__", nestedPatternId))
-      .toEqual(initialLoadId);
+    // The nested subpattern inherits the parent's verified-load id through the
+    // seed walk (same per-value side table).
+    expect(getVerifiedLoadId(nestedPattern as object)).toEqual(initialLoadId);
   });
 
   it("compiles different patterns for different programs", async () => {
@@ -424,115 +415,5 @@ describe("PatternManager.compileOrGetPattern", () => {
     // And the pattern should have its program attached
     expect(getPatternProgram(pattern)).toBeDefined();
     expect(getPatternProgram(pattern)?.main).toEqual("/main.ts");
-  });
-});
-
-// AMD bundle-cache path (esmModuleLoader OFF): the persistent CachedCompiler
-// stores a whole-bundle jsScript keyed by program hash and skips evaluate-time
-// SES bundle validation on a hit. The ESM loader path uses an entirely
-// different cache — the per-module content-addressed cell cache — whose
-// cold→warm / cross-session / per-space(inSpace A→B) / CFC fail-closed behavior
-// is covered in esm-cell-cache-integration.test.ts.
-describe("PatternManager compilation cache integration (AMD bundle cache)", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
-  let cacheStorage: MemoryCompilationCache;
-  let cachedCompiler: CachedCompiler;
-  let runtime: Runtime;
-
-  const simpleProgram: RuntimeProgram = {
-    main: "/main.ts",
-    files: [
-      {
-        name: "/main.ts",
-        contents: [
-          "import { pattern } from 'commonfabric';",
-          "export default pattern<{ x: number }>(({ x }) => ({ doubled: x }));",
-        ].join("\n"),
-      },
-    ],
-  };
-
-  beforeEach(() => {
-    cacheStorage = new MemoryCompilationCache();
-    cachedCompiler = new CachedCompiler(cacheStorage, "test-fingerprint");
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-      cachedCompiler,
-      // Pin the AMD bundle-cache path regardless of CF_ESM_MODULE_LOADER: this
-      // suite asserts CachedCompiler behavior. The ESM cell-cache equivalent is
-      // covered in esm-cell-cache-integration.test.ts.
-      experimental: { esmModuleLoader: false },
-    });
-  });
-
-  afterEach(async () => {
-    await runtime?.dispose();
-    await storageManager?.close();
-  });
-
-  it("writes to cache on first compile, hits cache on second", async () => {
-    expect(await cacheStorage.count()).toBe(0);
-
-    // First compile — cache miss, should write an entry
-    const first = await runtime.patternManager.compilePattern(simpleProgram);
-    expect(first).toBeDefined();
-    expect(getPatternProgram(first)?.main).toEqual("/main.ts");
-    expect(await cacheStorage.count()).toBe(1);
-    expect(cachedCompiler.getStats().misses).toBe(1);
-    expect(cachedCompiler.getStats().writes).toBe(1);
-
-    // Second compile — cache hit, no new writes
-    const second = await runtime.patternManager.compilePattern(simpleProgram);
-    expect(second).toBeDefined();
-    expect(getPatternProgram(second)?.main).toEqual("/main.ts");
-    expect(await cacheStorage.count()).toBe(1);
-    expect(cachedCompiler.getStats().hits).toBe(1);
-    expect(cachedCompiler.getStats().writes).toBe(1);
-  });
-
-  it("skips evaluate-time bundle validation for SES-validated cache hits", async () => {
-    const first = await runtime.patternManager.compilePattern(simpleProgram);
-    expect(first).toBeDefined();
-
-    const originalEvaluate = runtime.harness.evaluate.bind(runtime.harness);
-    let evaluateOptions:
-      | Parameters<typeof runtime.harness.evaluate>[3]
-      | undefined;
-    runtime.harness.evaluate = ((id, jsScript, files, options) => {
-      evaluateOptions = options;
-      return originalEvaluate(id, jsScript, files, options);
-    }) as typeof runtime.harness.evaluate;
-
-    const second = await runtime.patternManager.compilePattern(simpleProgram);
-    expect(second).toBeDefined();
-    expect(evaluateOptions?.skipBundleValidation).toBe(true);
-  });
-
-  it("cache miss with wrong fingerprint triggers recompile", async () => {
-    // Seed the cache with a known key and fingerprint, then use a
-    // CachedCompiler with a different fingerprint to observe the mismatch.
-    // We test CachedCompiler directly (not via Runtime) because Runtime's
-    // constructor fires evictStale() which removes old-fingerprint entries
-    // before compilePattern() can observe them.
-    const programHash = "test-program-hash";
-    await cacheStorage.set(programHash, {
-      id: "stale-id",
-      jsScript: { js: "// stale" },
-      fingerprint: "old-fingerprint",
-      cachedAt: Date.now(),
-    });
-    expect(await cacheStorage.count()).toBe(1);
-
-    const compiler2 = new CachedCompiler(
-      cacheStorage,
-      "new-fingerprint",
-    );
-
-    const miss = await compiler2.get(programHash);
-    expect(miss).toBeUndefined();
-    expect(compiler2.getStats().misses).toBe(1);
-    expect(compiler2.getStats().missReasons.fingerprintMismatch).toBe(1);
   });
 });

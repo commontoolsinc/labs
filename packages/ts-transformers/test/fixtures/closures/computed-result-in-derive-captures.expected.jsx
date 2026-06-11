@@ -28,7 +28,10 @@ const __cfLift_1 = __cfHelpers.lift<{
             done: boolean;
         }[];
     };
-}, { count: number; total: number; }>({
+}, { count: number; total: number; }>(({ state }) => ({
+    count: state.items.filter((i) => i.done).length,
+    total: state.items.length,
+}), {
     type: "object",
     properties: {
         state: {
@@ -62,16 +65,13 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     },
     required: ["count", "total"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => ({
-    count: state.items.filter((i) => i.done).length,
-    total: state.items.length,
-}));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     stats: {
         count: number;
         total: number;
     };
-}, string>({
+}, string>(({ stats }) => `${stats.count} of ${stats.total} done`, {
     type: "object",
     properties: {
         stats: {
@@ -90,7 +90,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["stats"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ stats }) => `${stats.count} of ${stats.total} done`);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-result-in-derive-captures
 // Verifies: computed() result properties captured in a subsequent lift-applied computation use .key() access
 //   computed(() => `${stats.count} of ${stats.total} done`) → lift(({ stats }) => ...)({ stats: { count: stats.key("count"), total: stats.key("total") } })

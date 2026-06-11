@@ -107,23 +107,17 @@ export const EditPerson = pattern<
         >
           <cf-vstack gap="3">
             {/* Name field */}
-            <cf-vstack gap="1">
-              <label style="font-weight: 500; font-size: 0.875rem;">
-                Name *
-              </label>
+            <cf-field label="Name" required>
               <cf-input
                 name="name"
                 $value={formData.key("name")}
                 placeholder="Enter full name"
                 required
               />
-            </cf-vstack>
+            </cf-field>
 
             {/* Email field */}
-            <cf-vstack gap="1">
-              <label style="font-weight: 500; font-size: 0.875rem;">
-                Email *
-              </label>
+            <cf-field label="Email" required>
               <cf-input
                 name="email"
                 $value={formData.key("email")}
@@ -131,13 +125,10 @@ export const EditPerson = pattern<
                 placeholder="email@example.com"
                 required
               />
-            </cf-vstack>
+            </cf-field>
 
             {/* Role field */}
-            <cf-vstack gap="1">
-              <label style="font-weight: 500; font-size: 0.875rem;">
-                Role
-              </label>
+            <cf-field label="Role">
               <cf-select
                 name="role"
                 $value={formData.key("role")}
@@ -146,7 +137,7 @@ export const EditPerson = pattern<
                   { label: "Admin", value: "admin" },
                 ]}
               />
-            </cf-vstack>
+            </cf-field>
 
             {/* Form actions */}
             <cf-hstack gap="2" style="margin-top: 1rem;">
@@ -237,16 +228,16 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
         <cf-vstack slot="header" gap="2">
           <cf-hstack justify="between" align="center">
             <cf-heading level={4}>People Directory</cf-heading>
-            <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
+            <cf-text tone="tertiary">
               {peopleCount}{" "}
               {computed(() => people.get().length === 1 ? "person" : "people")}
-            </span>
+            </cf-text>
           </cf-hstack>
         </cf-vstack>
 
         {/* Main content - list of people */}
         <cf-vscroll flex showScrollbar fadeEdges>
-          <cf-vstack gap="2" style="padding: 1rem;">
+          <cf-vstack gap="2" padding="4">
             {people.map((person) => (
               <cf-card
                 style="cursor: pointer;"
@@ -259,29 +250,20 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
                 })}
               >
                 <cf-hstack gap="2" align="center">
-                  <cf-vstack gap="1" style="flex: 1;">
-                    <span style="font-weight: 600; font-size: 1rem;">
+                  <cf-vstack gap="1" style="flex: 1;" align="start">
+                    <cf-text variant="heading-sm">
                       {person.name || "(unnamed)"}
-                    </span>
-                    <span style="font-size: 0.875rem; color: var(--cf-color-gray-600);">
+                    </cf-text>
+                    <cf-text tone="muted">
                       {person.email}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "0.75rem",
-                        padding: "2px 8px",
-                        borderRadius: "4px",
-                        background: person.role === "admin"
-                          ? "var(--cf-color-blue-100)"
-                          : "var(--cf-color-gray-100)",
-                        color: person.role === "admin"
-                          ? "var(--cf-color-blue-700)"
-                          : "var(--cf-color-gray-700)",
-                        width: "fit-content",
-                      }}
+                    </cf-text>
+                    <cf-badge
+                      variant="outline"
+                      color={person.role === "admin" ? "primary" : "neutral"}
+                      size="sm"
                     >
                       {person.role}
-                    </span>
+                    </cf-badge>
                   </cf-vstack>
                   <cf-button
                     variant="ghost"
@@ -295,16 +277,14 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
 
             {ifElse(
               computed(() => people.get().length === 0),
-              <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
-                No people yet. Click "Add Person" to create one!
-              </div>,
+              <cf-empty-state message='No people yet. Click "Add Person" to create one!' />,
               null,
             )}
           </cf-vstack>
         </cf-vscroll>
 
         {/* Footer - Add button */}
-        <cf-hstack slot="footer" gap="2" style="padding: 1rem;">
+        <cf-hstack slot="footer" gap="2" padding="4">
           <cf-button
             variant="primary"
             onClick={startCreate}

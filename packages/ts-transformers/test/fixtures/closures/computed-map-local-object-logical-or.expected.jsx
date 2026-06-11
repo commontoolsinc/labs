@@ -21,7 +21,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: Item[];
     };
-}, Item[]>({
+}, Item[]>(({ state }) => state.items, {
     type: "object",
     properties: {
         state: {
@@ -65,7 +65,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["done"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const row = __cf_pattern_input.key("element");
     const view = { status: __cfHelpers.unless({

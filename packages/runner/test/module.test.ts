@@ -91,9 +91,10 @@ describe("module", () => {
       } as const satisfies JSONSchema;
 
       const greet = lift(
+        ({ name, age }: { name: string; age?: number }) =>
+          `Hello ${name}${age ? `, age ${age}` : ""}!`,
         schema,
         { type: "string" } as const satisfies JSONSchema,
-        ({ name, age }) => `Hello ${name}${age ? `, age ${age}` : ""}!`,
       );
 
       expect(isModule(greet)).toBe(true);
@@ -118,9 +119,10 @@ describe("module", () => {
       } as const satisfies JSONSchema;
 
       const greet = lift(
+        ({ name, age }: { name: string; age?: number }) =>
+          `Hello ${name}${age ? `, age ${age}` : ""}!`,
         inputSchema,
         outputSchema,
-        ({ name, age }) => `Hello ${name}${age ? `, age ${age}` : ""}!`,
       );
 
       expect(isModule(greet)).toBe(true);
@@ -426,8 +428,7 @@ describe("module", () => {
         files: [{ name: "/main.tsx", contents: source }],
       };
 
-      const { id, jsScript } = await runtime.harness.compile(program);
-      return await runtime.harness.evaluate(id, jsScript, program.files);
+      return await runtime.harness.compileAndEvaluateModules(program);
     };
 
     const findNodeByPreview = (

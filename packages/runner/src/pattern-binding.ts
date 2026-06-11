@@ -1,15 +1,10 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import {
-  type JSONSchema,
-  type JSONValue,
-  type Pattern,
-  unsafe_originalPattern,
-  unsafe_parentPattern,
-} from "./builder/types.ts";
+import { isPattern, type JSONSchema, type JSONValue } from "./builder/types.ts";
 import {
   getVerifiedLoadId,
+  noteDerivedCopy,
   setVerifiedLoadId,
 } from "./builder/pattern-metadata.ts";
 import { type AnyCell } from "./cell.ts";
@@ -385,9 +380,10 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           convert(value, cfc.getSchemaAtPath(targetSchema, [key])),
         ]),
       );
-      if (binding[unsafe_originalPattern]) {
-        result[unsafe_originalPattern] = binding[unsafe_originalPattern];
-      }
+      // Carry the derivation link (trust + content-addressed entry ref) onto
+      // the bound copy so a pattern value re-bound here still resolves its
+      // `{ identity, symbol }` and stays trusted.
+      if (isPattern(binding)) noteDerivedCopy(result, binding);
       const verifiedLoadId = getVerifiedLoadId(binding);
       if (verifiedLoadId) {
         setVerifiedLoadId(result, verifiedLoadId);
@@ -396,20 +392,6 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
     } else return binding;
   }
   return convert(binding, options?.targetSchema) as T;
-}
-
-export function unsafe_noteParentOnPatterns(
-  pattern: Pattern,
-  binding: unknown,
-): void {
-  // For now we just do top-level bindings
-  if (isRecord(binding)) {
-    for (const key in binding) {
-      if (isRecord(binding[key]) && binding[key][unsafe_originalPattern]) {
-        binding[key][unsafe_parentPattern] = pattern;
-      }
-    }
-  }
 }
 
 /**

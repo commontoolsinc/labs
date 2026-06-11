@@ -158,13 +158,12 @@ during design are marked **[resolved]** with the decision.
 
 ## CFC (future)
 
-16. **Row-label projection language.** Section [06](./06-cfc.md) proposes a pure
-    declarative projection (now `match(f.col, /re/)` / `principal(protocol, …)`
-    with explicit `any`/`all` clause combinators —
-    [plans/cfc-phase3-per-row.md](./plans/cfc-phase3-per-row.md) §4) so the
-    server can evaluate row labels at commit. Still open: is that expressive
-    enough for real policies (e.g. recipients stored as a join table rather
-    than a JSON column)?
+16. **Row-label projection language.** Section [06](./06-cfc.md) ships a pure
+    declarative projection (`match(f.col, /re/)` / `principal(protocol, …)` /
+    `whenMatches(…)` with explicit `any`/`all` clause combinators —
+    implemented as Phase 3.a) so the server can evaluate row labels at commit.
+    Still open: is that expressive enough for real policies (e.g. recipients
+    stored as a join table rather than a JSON column)?
 17. **Read-time filtering vs. fail-closed.** *(Adjudicated at the CFC spec
     level — CFC spec §8.17.2 and invariant 14.)* Fail-closed is the required
     default for any row-set read. Filtering ("skip") is a per-row release of

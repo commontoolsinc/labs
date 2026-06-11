@@ -17,6 +17,7 @@ import {
 } from "../src/builder/types.ts";
 import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
 import { Engine } from "../src/harness/engine.ts";
@@ -838,7 +839,7 @@ describe("moduleToJSON", () => {
     expect("implementation" in serialized).toBe(false);
   });
 
-  it("does not stringify verified compiled callbacks after standalone-engine registration", async () => {
+  it("keeps the fallback body when the registering runtime can't resolve the $implRef (standalone-engine registration)", async () => {
     const compileEngine = new Engine(runtime);
     const repoRoot = new URL("../../..", import.meta.url).pathname.replace(
       /\/$/,
@@ -854,8 +855,7 @@ describe("moduleToJSON", () => {
         repoRoot,
       ),
     );
-    const { jsScript, id } = await compileEngine.compile(program);
-    const { main } = await compileEngine.evaluate(id, jsScript, program.files);
+    const { main } = await compileEngine.compileAndEvaluateModules(program);
     const pattern = main?.default as any;
 
     const seen = new Set<unknown>();
@@ -906,22 +906,26 @@ describe("moduleToJSON", () => {
     expect(targetModule).toBeDefined();
 
     runtime.patternManager.registerPattern(pattern);
-    const patternId = runtime.patternManager.getPatternId(pattern);
 
+    // The implementation became verified during the STANDALONE Engine's
+    // evaluation, so it carries process-global content-addressed provenance
+    // (Engine.recordModuleProvenance) and `moduleToJSON` dual-writes a
+    // `$implRef`. But this pattern was registered WITHOUT going through
+    // `compilePattern`/`registerEvaluatedModules`, so the runtime's own
+    // identity index never saw the artifact and cannot resolve that `$implRef`
+    // on reload (the cross-engine path the deleted `associatePattern` bridge
+    // used to serve). The serializer must therefore KEEP the stringified body
+    // as the fallback — otherwise reload would miss the index, miss the
+    // registry, and throw.
+    expect(getVerifiedProvenance(targetModule.implementation)).toBeDefined();
     expect(
-      runtime.harness.getExecutableFunction(
-        targetModule.implementationRef,
-        patternId,
+      runtime.patternManager.artifactFromIdentitySync(
+        getVerifiedProvenance(targetModule.implementation)!.identity,
+        getVerifiedProvenance(targetModule.implementation)!.symbol!,
       ),
-    ).toBe(targetModule.implementation);
+    ).toBeUndefined();
 
-    const frame = pushFrame({
-      runtime,
-      verifiedLoadId: runtime.harness.getVerifiedLoadId(
-        targetModule.implementationRef,
-        patternId,
-      ),
-    });
+    const frame = pushFrame({ runtime });
     let serialized: ReturnType<typeof moduleToJSON>;
     try {
       serialized = moduleToJSON(targetModule);
@@ -932,6 +936,9 @@ describe("moduleToJSON", () => {
       type: "javascript",
       implementationRef: targetModule.implementationRef,
     });
-    expect("implementation" in serialized).toBe(false);
+    expect(serialized).toHaveProperty("$implRef");
+    // Body KEPT: this runtime cannot resolve the $implRef, so the fallback is
+    // required for a successful reload.
+    expect("implementation" in serialized).toBe(true);
   });
 });

@@ -13,7 +13,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     user: __cfHelpers.Cell<{ name: string; age: number; }>;
-}, boolean>({
+}, boolean>(({ user }) => user.get().name.length > 0, {
     type: "object",
     properties: {
         user: {
@@ -30,10 +30,10 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["user"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().name.length > 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     user: __cfHelpers.Cell<{ name: string; age: number; }>;
-}, string>({
+}, string>(({ user }) => `Hello, ${user.get().name}!`, {
     type: "object",
     properties: {
         user: {
@@ -50,10 +50,10 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["user"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ user }) => `Hello, ${user.get().name}!`);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     user: __cfHelpers.Cell<{ name: string; age: number; }>;
-}, boolean>({
+}, boolean>(({ user }) => user.get().age > 18, {
     type: "object",
     properties: {
         user: {
@@ -70,10 +70,10 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["user"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().age > 18);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     user: __cfHelpers.Cell<{ name: string; age: number; }>;
-}, number>({
+}, number>(({ user }) => user.get().age, {
     type: "object",
     properties: {
         user: {
@@ -90,7 +90,7 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["user"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().age);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: logical-and-non-jsx
 // Verifies: && with non-JSX right side still lowers through when(), with predicate/value derived separately
 //   user.get().name.length > 0 && `Hello...` → when(lift(...)(predicate), lift(...)(template))

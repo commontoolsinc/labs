@@ -23,7 +23,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     item: {
         name: string;
     };
-}, string>({
+}, string>(({ item }) => item.name.toUpperCase(), {
     type: "object",
     properties: {
         item: {
@@ -39,7 +39,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["item"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.name.toUpperCase());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     const index = __cf_pattern_input.key("index");

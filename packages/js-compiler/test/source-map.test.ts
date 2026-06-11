@@ -4,6 +4,7 @@ import {
   composeBundleSourceMap,
   getTypeScriptEnvironmentTypes,
   InMemoryProgram,
+  type SourceMap,
   SourceMapParser,
   TypeScriptCompiler,
 } from "../mod.ts";
@@ -15,6 +16,51 @@ const types = await getTypeScriptEnvironmentTypes(staticCache);
 types["commonfabric.d.ts"] = await staticCache.getText(
   "types/commonfabric.d.ts",
 );
+
+/** Compile a single-module program and return its emitted CommonJS + map. */
+async function compileMain(
+  compiler: TypeScriptCompiler,
+  program: InMemoryProgram,
+): Promise<{ js: string; sourceMap?: SourceMap }> {
+  const resolved = await compiler.resolveProgram(program);
+  return compiler.compileToModules(resolved).get("/main.tsx")!;
+}
+
+/**
+ * Mirror the ESM module-record loader's execution shape: wrap the compiled
+ * CommonJS body in the 1-line factory wrapper tagged with a `//# sourceURL`,
+ * eval it, and return the populated exports. Stack frames from inside the
+ * module then carry `<filename>:<line>:<column>` coordinates relative to the
+ * eval'd string (body line N = eval line N+1).
+ */
+function evaluateModule(
+  js: string,
+  filename: string,
+): Record<string, (...args: unknown[]) => unknown> {
+  const factory = (0, eval)(
+    `(function (exports, require, module) {\n${js}\n})\n//# sourceURL=${filename}`,
+  ) as (
+    exports: Record<string, unknown>,
+    require: (specifier: string) => Record<string, unknown>,
+    module: { exports: Record<string, unknown> },
+  ) => void;
+  const exports: Record<string, unknown> = {};
+  factory(exports, () => ({}), { exports });
+  return exports as Record<string, (...args: unknown[]) => unknown>;
+}
+
+/**
+ * The map the engine registers under a module's eval `//# sourceURL`: the
+ * per-module compiler map shifted by the 1-line factory wrapper, with the
+ * source path overridden to the full module path.
+ */
+function moduleSourceMap(map: SourceMap, sourceUrl: string): SourceMap {
+  return composeBundleSourceMap(
+    [{ body: "", map, source: "/main.tsx" }],
+    sourceUrl,
+    1, // the `(function (exports, require, module) {` wrapper line
+  )!;
+}
 
 describe("SourceMap", () => {
   it("inspects source map structure", async () => {
@@ -33,9 +79,7 @@ export default test;
 `,
     });
 
-    const compiled = await compiler.resolveAndCompile(program, {
-      filename: "test-error.js",
-    });
+    const compiled = await compileMain(compiler, program);
 
     console.log("=== Compiled Output ===");
     console.log(compiled.js);
@@ -51,23 +95,26 @@ export default test;
       compiled.sourceMap?.mappings?.slice(0, 200),
     );
 
-    // Parse the source map
-    if (compiled.sourceMap) {
-      const consumer = new SourceMapConsumer(compiled.sourceMap);
+    expect(compiled.sourceMap).toBeDefined();
 
-      console.log("\n=== Sample Position Mappings ===");
-      // Check what various line/column positions map to
-      for (let line = 1; line <= 10; line++) {
-        for (const col of [0, 10, 20, 30]) {
-          const pos = consumer.originalPositionFor({ line, column: col });
-          if (pos.source !== null) {
-            console.log(
-              `Line ${line}, Col ${col} -> ${pos.source}:${pos.line}:${pos.column} (name: ${pos.name})`,
-            );
-          }
+    // Parse the source map
+    const consumer = new SourceMapConsumer(compiled.sourceMap!);
+    let mapped = 0;
+
+    console.log("\n=== Sample Position Mappings ===");
+    // Check what various line/column positions map to
+    for (let line = 1; line <= 10; line++) {
+      for (const col of [0, 10, 20, 30]) {
+        const pos = consumer.originalPositionFor({ line, column: col });
+        if (pos.source !== null) {
+          mapped++;
+          console.log(
+            `Line ${line}, Col ${col} -> ${pos.source}:${pos.line}:${pos.column} (name: ${pos.name})`,
+          );
         }
       }
     }
+    expect(mapped).toBeGreaterThan(0);
   });
 
   it("parses error stack traces with source map", async () => {
@@ -86,73 +133,32 @@ export default test;
 `,
     });
 
-    const compiled = await compiler.resolveAndCompile(program, {
-      filename: "test-error.js",
-    });
+    const compiled = await compileMain(compiler, program);
 
     const parser = new SourceMapParser();
-    parser.load("test-error.js", compiled.sourceMap!);
+    parser.load(
+      "test-error.js",
+      moduleSourceMap(compiled.sourceMap!, "test-error.js"),
+    );
 
-    // Simulate executing the compiled code and getting an error
+    // Execute the compiled module the way the ESM loader does and get an error
+    let threw = false;
     try {
-      const fn = eval(compiled.js);
-      const exports = fn({});
+      const exports = evaluateModule(compiled.js, "test-error.js");
       exports.test();
     } catch (e: any) {
+      threw = true;
       console.log("\n=== Raw Error Stack ===");
       console.log(e.stack);
 
       const parsed = parser.parse(e.stack);
       console.log("\n=== Parsed (Source Mapped) Stack ===");
       console.log(parsed);
+
+      // The throw on source line 3 must resolve back to the authored source.
+      expect(parsed).toContain("main.tsx:3:");
     }
-  });
-
-  it("handles bundler line prepending correctly", async () => {
-    const compiler = new TypeScriptCompiler(types);
-    const program = new InMemoryProgram("/main.tsx", {
-      "/main.tsx": `
-// Line 2 in original source
-function userCode() {
-  // Line 4 in original source
-  throw new Error("user error"); // Line 5 in original source
-}
-
-export default function() {
-  userCode(); // Line 9 in original source
-}
-`,
-    });
-
-    const compiled = await compiler.resolveAndCompile(program, {
-      filename: "bundle.js",
-    });
-
-    // Count lines in the compiled output
-    const lines = compiled.js.split("\n");
-    console.log("\n=== Compiled Bundle Line Count ===");
-    console.log(`Total lines: ${lines.length}`);
-    console.log("\n=== First 10 lines ===");
-    lines.slice(0, 10).forEach((line, i) => {
-      console.log(
-        `${i + 1}: ${line.slice(0, 100)}${line.length > 100 ? "..." : ""}`,
-      );
-    });
-
-    // Check source map mappings for various positions
-    const consumer = new SourceMapConsumer(compiled.sourceMap!);
-    console.log("\n=== Source Map Mappings for Lines 1-5 ===");
-    for (let line = 1; line <= 5; line++) {
-      // Try different columns on each line
-      for (const col of [0, 50, 100, 150, 200]) {
-        const pos = consumer.originalPositionFor({ line, column: col });
-        if (pos.source !== null) {
-          console.log(
-            `Compiled L${line}:${col} -> Original ${pos.source}:${pos.line}:${pos.column}`,
-          );
-        }
-      }
-    }
+    expect(threw).toBe(true);
   });
 
   it("verifies error line mapping through full stack", async () => {
@@ -171,29 +177,31 @@ export default errorOnLine6;
 `,
     });
 
-    const compiled = await compiler.resolveAndCompile(program, {
-      filename: "known-line.js",
-    });
+    const compiled = await compileMain(compiler, program);
 
     const parser = new SourceMapParser();
-    parser.load("known-line.js", compiled.sourceMap!);
+    parser.load(
+      "known-line.js",
+      moduleSourceMap(compiled.sourceMap!, "known-line.js"),
+    );
 
+    let threw = false;
     try {
-      const fn = eval(compiled.js);
-      const exports = fn({});
+      const exports = evaluateModule(compiled.js, "known-line.js");
       // Call the default export which should throw
       exports.default();
     } catch (e: any) {
+      threw = true;
       const parsed = parser.parse(e.stack);
       console.log("\n=== Stack for known line 6 error ===");
       console.log("Raw:", e.stack);
       console.log("\nParsed:", parsed);
 
       // The error should mention line 6 from main.tsx
-      // Note: source map has "main.tsx" not "/main.tsx"
       expect(parsed).toContain("main.tsx");
       expect(parsed).toContain(":6:");
     }
+    expect(threw).toBe(true);
   });
 
   it("matches various stack trace formats", () => {
@@ -246,15 +254,23 @@ export default errorOnLine6;
 `,
     });
 
-    const compiled = await compiler.resolveAndCompile(program, {
-      filename: "known-line.js",
-    });
+    const compiled = await compileMain(compiler, program);
 
+    const map = moduleSourceMap(compiled.sourceMap!, "known-line.js");
     const parser = new SourceMapParser();
-    parser.load("known-line.js", compiled.sourceMap!);
+    parser.load("known-line.js", map);
+
+    // Find the eval-relative coordinate of the throw on authored line 6, so
+    // the synthetic frame below points at a real mapping.
+    const gen = new SourceMapConsumer(map).generatedPositionFor({
+      source: "/main.tsx",
+      line: 6,
+      column: 2,
+    });
+    expect(gen.line).not.toBeNull();
 
     const parsed = parser.parse(`Error: test
-    at ba4jcaraqictevfcqama4n7ugtfosjasodvm43iojcw4ss6m4y54d3uvn/main.tsx:3:19 (known-line.js, <anonymous>:5:15)`);
+    at ba4jcaraqictevfcqama4n7ugtfosjasodvm43iojcw4ss6m4y54d3uvn/main.tsx:3:19 (known-line.js, <anonymous>:${gen.line}:${gen.column})`);
 
     expect(parsed).toContain("main.tsx:6:");
   });

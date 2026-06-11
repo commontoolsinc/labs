@@ -11,7 +11,11 @@ import { handler, ifElse, lift, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const moduleHasSettings = lift({
+const moduleHasSettings = lift(({ piece }: {
+    piece: {
+        settingsUI?: string;
+    };
+}) => !!piece?.settingsUI, {
     type: "object",
     properties: {
         piece: {
@@ -26,11 +30,7 @@ const moduleHasSettings = lift({
     required: ["piece"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ piece }: {
-    piece: {
-        settingsUI?: string;
-    };
-}) => !!piece?.settingsUI);
+} as const satisfies __cfHelpers.JSONSchema);
 const selectMessage = handler({
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
@@ -121,7 +121,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     msg: {
         type: string;
     };
-}, boolean>({
+}, boolean>(({ msg }) => msg.type === "system", {
     type: "object",
     properties: {
         msg: {
@@ -137,7 +137,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["msg"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ msg }) => msg.type === "system");
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const msg = __cf_pattern_input.key("element");
     const selectedId = __cf_pattern_input.key("params", "selectedId");

@@ -2,39 +2,36 @@
 
 ## Status
 
-Partially implemented. This document specifies a replacement for the current
+**Shipped and exclusive.** The ESM module-record loader described here is the
+only loader: the `esmModuleLoader` / `CF_ESM_MODULE_LOADER` flag, the AMD
+bundle pipeline (bundler, whole-bundle verifier, `Engine.compile`/`evaluate`),
+and the AMD compilation cache (`CachedCompiler`) have been removed. References
+to the flag and to the AMD path below are historical context from the design
+phase.
+
+This document specifies a replacement for the former
 AMD-bundle module pipeline with (1) per-module content-addressed identity
 computed as a Merkle hash over each module's authored TypeScript source and the
 transitive import graph, and (2) ES-module loading into SES compartments. The
 motivating consumer is [persistent scheduler state](persistent-scheduler-state.md),
 whose action implementation fingerprint is currently unstable across reloads.
 
-Implemented so far (see the implementation plan for the per-phase status):
-identity decoupling (Phase 1, live behind `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`)
-is merged. The module-loading mechanism (Phases 2–4), behind the default-off
-`CF_ESM_MODULE_LOADER` flag, is implemented and Engine-integrated: a synchronous
-SES virtual-module-record loader, a TS→record adapter that runs the full CF
+All phases are complete. Identity decoupling (Phase 1, formerly behind
+`EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`) is merged. The module-loading
+mechanism (Phases 2–4) is the production path: a synchronous SES
+virtual-module-record loader, a TS→record adapter that runs the full CF
 transformer pipeline, per-load/per-module source maps with CFC verified-source
 identity (#3785, #3787), per-module SES classification wired into the compile
-path, and a structural graph verifier. (A per-module `ModuleRecordCache` exists
-but is **bypassed on the production ESM path** — precompiled CF-transformed
-bodies are authoritative — so flag-on compiles are not yet cached; see Phase 4.)
-Security
-hardening landed alongside (frozen exported patterns #3777, import-edge
-validation #3778, provenance brand #3779), and the flag is plumbed through to the
-browser client (#3796). The `cfc-group-chat-demo` end-to-end integration test
-passes flag-on (#3797).
-
-Remaining before default-on: the full-corpus verifier **parity oracle** (ESM
-verdicts must match AMD across the whole pattern corpus — the current parity test
-covers crafted fixtures only), a green **full-suite flag-on sweep**, **making the
-production ESM path cacheable and persisting it** as content-addressed cells
-(Phase 4), benchmarks, and the **default-on/AMD-removal rollout** (Phase 5). The
-AMD bundle path remains the default throughout.
+path, and a structural graph verifier. Security hardening landed alongside
+(frozen exported patterns #3777, import-edge validation #3778, provenance brand
+#3779). Compiled modules persist as content-addressed cells (Phase 4, the
+`cell-cache` compile cache). The default-on/AMD-removal rollout (Phase 5) is
+done: the flag was flipped, then the flag, the AMD bundle pipeline, and the AMD
+compilation cache were deleted.
 
 ## Last Updated
 
-2026-06-02
+2026-06-10
 
 ## Summary
 
@@ -436,6 +433,17 @@ The cache is designed around this:
   server**: the server becomes the sole acceptor of that write integrity (it
   only stamps the label from its own compilation step), making the label a hard
   guarantee — with no change to the read path, which already requires it.
+- **Cross-space closure replication (CT-1687).** Cache docs do not only live
+  where they compiled: when a pattern materializes a child piece in another
+  space (`Factory.inSpace(...)`), the runner replicates the child pattern's
+  source + compiled closures into the child's space so the piece is
+  independently loadable there (`PatternManager.replicatePatternToSpace`).
+  Chain-of-custody holds — compiled docs are read through the integrity-gated
+  loader (a user can only replicate docs already carrying their own stamp) and
+  re-stamped on the child-space write by a legitimate child-space writer. Note
+  for the server-compilation end state: a client can then no longer stamp
+  replicated compiled docs, so child spaces will need server-side replication
+  or by-identity source recovery instead.
 - **CFC verified-source derives from the source set, not the cached JS.** A
   poisoned-but-SES-safe JS document must not be able to spoof `fn.src` /
   authorship, so the CFC verified-source identity is anchored to the

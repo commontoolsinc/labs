@@ -19,7 +19,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: Item[];
     };
-}, Item[]>({
+}, Item[]>(({ state }) => [...state.items].sort((a, b) => a.value - b.value), {
     type: "object",
     properties: {
         state: {
@@ -69,14 +69,14 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["name", "value"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => [...state.items].sort((a, b) => a.value - b.value));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         items: {
             length: number;
         };
     };
-}, number>({
+}, number>(({ state }) => state.items.length, {
     type: "object",
     properties: {
         state: {
@@ -98,7 +98,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.length);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: ternary-hoisted-compute-plain-map-branch
 // Verifies: once a ternary JSX branch is wholly compute-wrapped, compute-owned
 // array maps inside that branch stay plain Array.map() calls.

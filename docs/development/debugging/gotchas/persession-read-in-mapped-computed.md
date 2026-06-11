@@ -77,10 +77,9 @@ Setting the perSession cell from an `onClick`/action is **not** affected — onl
 the nested *read* (when mapping a computed-produced list) is.
 
 **Verify:** deploy, click the per-row trigger, confirm the inline form opens
-*and* closes. The repro attached to `LINEAR-TICKET-scope-map-reactivity.md`
-isolates it: a per-row `computed` over a perSession cell, mapping a
-`computed(() => perSpaceCell.get())` list — perSpace control flips, perSession
-doesn't.
+*and* closes. The minimal repro: a per-row `computed` over a perSession cell,
+mapping a `computed(() => perSpaceCell.get())` list — perSpace control flips,
+perSession doesn't.
 
 **Known-good references:**
 `lot-watch/main.tsx` (`sightingRows`, spot picker) and

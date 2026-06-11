@@ -30,7 +30,7 @@ const visibleEntries = __cfHardenFn((entries: Entry[], prefix: string) => entrie
 const __cfLift_1 = __cfHelpers.lift<{
     entries: Entry[];
     prefix: string;
-}, Entry[]>({
+}, Entry[]>(({ entries, prefix }) => visibleEntries(entries, prefix), {
     type: "object",
     properties: {
         entries: {
@@ -71,7 +71,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["name"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ entries, prefix }) => visibleEntries(entries, prefix));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const entry = __cf_pattern_input.key("element");
     const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");

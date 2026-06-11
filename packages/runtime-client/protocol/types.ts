@@ -141,7 +141,6 @@ export interface InitializationData {
   experimental?: {
     modernCellRep?: boolean;
     persistentSchedulerState?: boolean;
-    esmModuleLoader?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.
   cfcEnforcementMode?:
@@ -149,16 +148,17 @@ export interface InitializationData {
     | "observe"
     | "enforce-explicit"
     | "enforce-strict";
+  // Whether author-supplied render-boundary declassification is honored.
+  // Defaults to "allow" (current behavior). "deny" ignores author-supplied
+  // `declassifyConfidentiality` so a pattern can't release a secret upward
+  // through a render boundary (audit S15).
+  renderDeclassificationPolicy?: "allow" | "deny";
   // Static trust snapshot applied to worker-owned transactions.
   trustSnapshot?: {
     id: string;
     actingPrincipal?: string;
     revision?: string;
   };
-  // Content hash of the worker bundle, used for compilation cache
-  // invalidation. If absent, the compilation cache is disabled.
-  // See docs/specs/compilation-cache.md Phase 3.
-  buildHash?: string;
 }
 
 export interface InitializeRequest extends BaseRequest {
@@ -449,46 +449,62 @@ export interface PageCreateRequest extends BaseRequest {
   run?: boolean;
 }
 
+/**
+ * Page operations resolve against one space's piece context. `space`
+ * is optional on every request: absent ⇒ the space the worker was
+ * initialized with (the home space), byte-identical to the
+ * single-space behavior. Present ⇒ the worker lazily builds a piece
+ * context for that space, sharing the one runtime/storage connection.
+ */
 export interface PageGetSpaceDefault extends BaseRequest {
   type: RequestType.GetSpaceRootPattern;
+  space?: DID;
 }
 
 export interface RecreateSpaceRootPatternRequest extends BaseRequest {
   type: RequestType.RecreateSpaceRootPattern;
+  space?: DID;
 }
 
 export interface PageGetRequest extends BaseRequest {
   type: RequestType.PageGet;
   pageId: string;
   runIt?: boolean;
+  space?: DID;
 }
 
 export interface PageGetSlugRequest extends BaseRequest {
   type: RequestType.PageGetSlug;
   pageId: string;
+  space?: DID;
 }
 
 export interface PageRemoveRequest extends BaseRequest {
   type: RequestType.PageRemove;
   pageId: string;
+  space?: DID;
 }
 
 export interface PageStartRequest extends BaseRequest {
   type: RequestType.PageStart;
   pageId: string;
+  space?: DID;
 }
 
 export interface PageStopRequest extends BaseRequest {
   type: RequestType.PageStop;
   pageId: string;
+  space?: DID;
 }
 
 export interface PageGetAllRequest extends BaseRequest {
   type: RequestType.PageGetAll;
+  space?: DID;
 }
 
 export interface PageSyncedRequest extends BaseRequest {
   type: RequestType.PageSynced;
+  space?: DID;
 }
 
 /**

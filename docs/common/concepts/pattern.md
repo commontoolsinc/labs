@@ -1,17 +1,6 @@
 # Patterns
 
-A pattern is a TypeScript/JSX program that defines reactive data transformations with an optional UI. You instantiate a pattern by binding it to specific cells.
-
-```mermaid
-flowchart TD
-        A["Result Cell"]
-        A --meta.argument--> B["Argument Cell"]
-        A --meta.internal manifest--> C@{ shape: procs, label: "Internal Cells}"
-        A --meta.pattern--> D["Pattern Cell"]
-        B --meta.result--> A
-        C --meta.result--> A
-        E@{ shape: procs, label: "Data Cells"} --meta.result--> A
-```
+A pattern is a TypeScript/JSX program that defines reactive data transformations with an optional UI. You instantiate a pattern by binding it to specific cells (see the cell-graph diagram under [Piece in the glossary](./glossary.md#piece)).
 
 ## Input and Output Types
 
@@ -41,19 +30,11 @@ export default pattern<TodoInput, TodoOutput>(({ items, title }) => {
 
 ### Input Types
 
-Input types describe what the pattern receives when instantiated. Use `Writable<>` for state the pattern intends to modify:
-
-```typescript
-interface MyInput {
-  count: Writable<number>;     // Pattern will call .set() or .update()
-  items: Writable<Item[]>;     // Pattern will call .push() or .set()
-  label: string;               // Read-only (still reactive!)
-}
-```
+Input types describe what the pattern receives when instantiated. Use `Writable<>` only for state the pattern intends to mutate — plain types are still reactive (see [Reactivity and Write Access](./reactivity.md)).
 
 **Guideline:**
 
-- Use `Writable<>` when you want to call .set(), .push(), .update(), etc on it. Use plain types otherwise. It's explicitly ok to pass a plain type to a pattern that requests Writable<>, the framework will handle write intent transparently.
+- It's explicitly ok to pass a plain type to a pattern that requests `Writable<>`; the framework handles write intent transparently.
 - Add `Type | Default<Value>` with a reasonable initial state for most inputs, unless it really makes no sense to use the pattern without that value being passed in.
 
 ### Output Types

@@ -65,7 +65,7 @@ Both patterns receive the same `items` cell - changes sync automatically.
 
 **When to use which:**
 - **Pattern Composition**: Multiple views in one UI, reusable components
-- **Linked Charms**: Independent deployments that communicate
+- **Linked Pieces**: Independent deployments that communicate
 
 ## Merging Complex Objects from Pattern Inputs
 
@@ -106,3 +106,4 @@ This pattern is useful when a sub-pattern needs to accept additional configurati
 
 - [View Switching](./view-switching.md) — dynamically switching between sub-patterns
 - [Navigation](./navigation.md) — `navigateTo()` for drill-down to detail views
+- [Self-Reference](../concepts/self-reference.md) — tree/parent-child structures where a pattern composes itself

@@ -36,7 +36,6 @@ import { type Action } from "./scheduler.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import {
   findAllWriteRedirectCells,
-  unsafe_noteParentOnPatterns,
   unwrapOneLevelAndBindtoDoc,
 } from "./pattern-binding.ts";
 import { resolveLink } from "./link-resolution.ts";
@@ -91,6 +90,10 @@ import {
   type ImplementationIdentity,
 } from "./cfc/types.ts";
 import { setVerifiedFunctionRegistrar } from "./sandbox/function-hardening.ts";
+import {
+  identityFromCanonicalSource,
+  recordVerifiedProvenance,
+} from "./harness/verified-provenance.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
@@ -2352,39 +2355,32 @@ export class Runner {
 
   private resolveJavaScriptFunction(
     module: Module,
-    pattern: Pattern,
   ): ResolvedJavaScriptModule {
     let fn: (...args: any[]) => any;
-    const patternId = this.runtime.patternManager.getPatternId(pattern);
     const verifiedLoadId = module.implementationRef
-      ? this.runtime.harness.getVerifiedLoadId?.(
-        module.implementationRef,
-        patternId,
-      )
+      ? this.runtime.harness.getVerifiedLoadId?.(module.implementationRef)
       : undefined;
 
-    if (module.implementationRef) {
-      const cached = this.functionCache.get(module);
-      if (cached) {
-        fn = cached;
-      } else {
-        const executable = this.runtime.harness.getExecutableFunction(
-          module.implementationRef,
-          patternId,
-        );
-        fn = executable
-          ? executable as (...args: any[]) => any
-          : this.getFallbackJavaScriptImplementation(module);
-        this.functionCache.set(module, fn);
-      }
+    const cached = this.functionCache.get(module);
+    if (cached) {
+      fn = cached;
     } else {
-      const cached = this.functionCache.get(module);
-      if (cached) {
-        fn = cached;
-      } else {
-        fn = this.getFallbackJavaScriptImplementation(module);
-        this.functionCache.set(module, fn);
-      }
+      // Resolution order (docs/specs/content-addressed-action-identity.md):
+      // 1. content-addressed `$implRef` — resolve the registered builder
+      //    artifact by `{ identity, symbol }` from the in-memory index (only
+      //    trust-gated artifacts are indexed, so whatever resolves is
+      //    builder-made) and run its implementation;
+      // 2. legacy `implementationRef` registry lookup (dual-read until the
+      //    flip);
+      // 3. the stringified-source fallback (SES-sandboxed, CFC-unverified).
+      fn = this.resolveByImplRef(module) ??
+        (module.implementationRef
+          ? this.runtime.harness.getExecutableFunction(
+            module.implementationRef,
+          ) as (...args: any[]) => any | undefined
+          : undefined) ??
+        this.getFallbackJavaScriptImplementation(module);
+      this.functionCache.set(module, fn);
     }
 
     const namedFn = fn as {
@@ -2401,6 +2397,36 @@ export class Runner {
     }
 
     return { fn, name, verifiedLoadId };
+  }
+
+  /**
+   * Resolve a module's implementation through its content-addressed
+   * `$implRef` (the defining module's content identity + the registered
+   * artifact's export/`__cfReg` symbol). Returns undefined on a miss (no ref,
+   * never registered, or rolled out of the bounded index) — callers fall back
+   * to the legacy ref or the stringified source.
+   */
+  private resolveByImplRef(
+    module: Module,
+  ): ((...args: any[]) => any) | undefined {
+    const ref = (module as { $implRef?: { identity: string; symbol: string } })
+      .$implRef;
+    if (
+      !ref || typeof ref.identity !== "string" ||
+      typeof ref.symbol !== "string"
+    ) {
+      return undefined;
+    }
+    const artifact = this.runtime.patternManager.artifactFromIdentitySync(
+      ref.identity,
+      ref.symbol,
+    );
+    if (!artifact) return undefined;
+    const implementation =
+      (artifact as { implementation?: unknown }).implementation ?? artifact;
+    return typeof implementation === "function"
+      ? implementation as (...args: any[]) => any
+      : undefined;
   }
 
   /**
@@ -2607,6 +2633,28 @@ export class Runner {
       resultPattern,
     );
     const crossSpace = resultSpace !== processCell.space;
+
+    // CT-1687: a handler that materializes a child piece in another space
+    // (`Factory.inSpace(...)`) leaves a piece that a fresh runtime must load
+    // FROM THAT SPACE — where neither the pattern meta nor the compiled
+    // closure exist (the handler's bundle artifacts live in the handler's own
+    // space). The whole result pattern materializes inside the target space,
+    // so the per-node cross-space hook in instantiatePatternNode never sees
+    // the transition; replicate here, where the originating space is known.
+    for (const { module } of resultPattern.nodes) {
+      if (
+        module.type === "pattern" &&
+        module.targetSpace !== undefined &&
+        module.targetSpace !== processCell.space &&
+        isPattern(module.implementation)
+      ) {
+        this.runtime.patternManager.replicatePatternToSpace(
+          module.implementation,
+          module.targetSpace,
+          processCell.space,
+        );
+      }
+    }
 
     if (deferForNavigate && result === undefined) {
       const resultCell = this.runtime.getCell(
@@ -3095,11 +3143,65 @@ export class Runner {
       setRunnableName(handler, `handler:${name}`, { setSrc: true });
     }
 
+    // Ensure the handler's input docs are locally available before the body
+    // runs: materialize the argument the same way the handler will (asCell
+    // fields surface as Cells WITHOUT reading their backing docs), then await
+    // sync() on each collected Cell. The scheduler awaits this before
+    // dispatching the event. Without it, a synchronous in-handler read of an
+    // asCell input (e.g. SqliteDb.exec reading the handle doc) races the
+    // doc-carrying storage response on a cold replica — piece-start sync
+    // (syncCellsForRunningPattern) covers node binding docs, not the docs
+    // behind link VALUES like a builtin's result handle. Steady-state this is
+    // ~free: covered selectors resolve without a server round trip.
+    const presyncInputs = module.argumentSchema !== undefined
+      ? async (event: any): Promise<void> => {
+        const eventInputs = {
+          ...(inputs as Record<string, any>),
+          $event: event,
+        };
+        const inputsCell = this.runtime.getImmutableCell(
+          processCell.space,
+          eventInputs,
+          undefined,
+        );
+        const argument = inputsCell.asSchema(module.argumentSchema!).get();
+        const promises: Promise<unknown>[] = [];
+        const seen = new Set<unknown>();
+        const collect = (value: unknown, depth: number): void => {
+          if (depth > 16) return;
+          if (isCell(value)) {
+            const maybePromise = value.sync();
+            if (maybePromise instanceof Promise) promises.push(maybePromise);
+            return;
+          }
+          // NOTE: materialized records all carry the back-to-cell symbol, so
+          // there is no cheap way to tell a lazy query-result proxy from an
+          // annotated plain object — descend both. Property access on a proxy
+          // is an ambient local read (it may kick off, but never await, a
+          // sync); guard each access so one lazy read failing doesn't abort
+          // the rest of the presync.
+          if (!isRecord(value)) return;
+          if (seen.has(value)) return;
+          seen.add(value);
+          for (const key of Object.keys(value)) {
+            try {
+              collect((value as Record<string, unknown>)[key], depth + 1);
+            } catch {
+              // A lazy read through a not-yet-synced link may throw; skip.
+            }
+          }
+        };
+        collect(argument, 0);
+        await Promise.all(promises);
+      }
+      : undefined;
+
     const wrappedHandler = Object.assign(handler, {
       reads,
       writes,
       module,
       pattern,
+      ...(presyncInputs !== undefined && { presyncInputs }),
     });
 
     const schedulerReads = this.collectArgumentSchedulerReadLinks(
@@ -3459,7 +3561,6 @@ export class Runner {
     );
     const { fn, name, verifiedLoadId } = this.resolveJavaScriptFunction(
       module,
-      pattern,
     );
     const context: JavaScriptNodeContext = {
       tx,
@@ -3537,6 +3638,17 @@ export class Runner {
           implementationRef,
           implementation as (input: any) => void,
         );
+        // Content-addressed provenance for artifacts created DURING a
+        // verified action's execution: the identity derives from the new
+        // function's canonical source location (it was compiled as part of a
+        // verified module). In-session only (`dynamic`), matching the legacy
+        // behavior — such artifacts never resolve across a reload.
+        const identity = identityFromCanonicalSource(
+          (implementation as { src?: string }).src,
+        );
+        if (identity) {
+          recordVerifiedProvenance(implementation, { identity, dynamic: true });
+        }
       },
     );
     try {
@@ -3561,10 +3673,10 @@ export class Runner {
    * The embedded graph is retained as `$opFallback` (correctness over the
    * bounded module cache — see `resolveOpPattern`). `inputBindings` here is the
    * freshly bound (mutable, unfrozen) copy produced by
-   * `unwrapOneLevelAndBindtoDoc`; its pattern values still carry the in-memory
-   * `unsafe_originalPattern` backref, so `getArtifactEntryRef` can resolve the ref
-   * (assigned post-eval by `registerEvaluatedModules`). With no known ref the op
-   * is left as the embedded graph (legacy / ESM-loader-off).
+   * `unwrapOneLevelAndBindtoDoc`; its pattern values carry their derivation
+   * link (`noteDerivedCopy`), so `getArtifactEntryRef` can resolve the ref
+   * (assigned post-eval by `registerEvaluatedModules`). With no known ref the
+   * op is left as the embedded graph.
    */
   private substituteOpPatternRefs(
     moduleRefName: string | undefined,
@@ -3628,15 +3740,11 @@ export class Runner {
       { derivedInternalCells: pattern.derivedInternalCells },
     );
 
-    // For `map` and future other node types that take closures, we need to
-    // note the parent pattern on the closure patterns.
-    unsafe_noteParentOnPatterns(pattern, mappedInputBindings);
-
     // CT-1623: for the list builtins, replace a pattern-valued input (the `op`)
     // with a compact `{ $patternRef }` sentinel when its content-addressed entry
     // ref is known. This is the post-eval moment where the in-memory op object
-    // (reachable via `unsafe_originalPattern`, preserved through binding) carries
-    // its `{ identity, symbol }`; the sentinel then survives the immutable-cell
+    // (linked to its original via `noteDerivedCopy`, preserved through binding)
+    // carries its `{ identity, symbol }`; the sentinel then survives the immutable-cell
     // JSON round-trip, so the builtin resolves the live canonical pattern by
     // identity instead of deserializing the embedded graph.
     this.substituteOpPatternRefs(moduleRefName, mappedInputBindings);
@@ -4050,6 +4158,15 @@ export class Runner {
       // identity. The journal allows the cross-space write once opted in.
       this.enableCrossSpaceChildCommit(
         tx,
+        childResultCell.space,
+        parentResultCell.space,
+      );
+      // CT-1687: a fresh runtime navigating to the child piece loads its
+      // pattern artifacts from `resultCell.space` (the child's own space),
+      // where neither the meta nor the compiled closure exist yet. Replicate
+      // them there (fire-and-forget) so the child is independently loadable.
+      this.runtime.patternManager.replicatePatternToSpace(
+        patternImpl,
         childResultCell.space,
         parentResultCell.space,
       );

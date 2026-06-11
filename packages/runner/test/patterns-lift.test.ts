@@ -78,44 +78,44 @@ describe("Pattern Runner - Lift", () => {
     };
 
     const multiply = lift(
-      {
-        type: "object",
-        properties: { x: { type: "number" }, y: { type: "number" } },
-        required: ["x", "y"],
-      } as const satisfies JSONSchema,
-      { type: "number" } as const satisfies JSONSchema,
       ({ x, y }) => {
         runCounts.multiply++;
         return x * y;
       },
+      {
+        type: "object",
+        properties: { x: { type: "number" }, y: { type: "number" } },
+        required: ["x", "y"],
+      } as const satisfies JSONSchema,
+      { type: "number" } as const satisfies JSONSchema,
     );
 
     const multiplyGenerator = lift(
-      {
-        type: "object",
-        properties: { x: { type: "number" }, y: { type: "number" } },
-        required: ["x", "y"],
-      } as const satisfies JSONSchema,
-      { type: "number" } as const satisfies JSONSchema,
-      (args) => {
+      (args: { x: number; y: number }) => {
         runCounts.multiplyGenerator++;
         return multiply(args);
       },
-    );
-
-    const multiplyGenerator2 = lift(
       {
         type: "object",
         properties: { x: { type: "number" }, y: { type: "number" } },
         required: ["x", "y"],
       } as const satisfies JSONSchema,
       { type: "number" } as const satisfies JSONSchema,
+    );
+
+    const multiplyGenerator2 = lift(
       ({ x, y }) => {
         runCounts.multiplyGenerator2++;
         // Now passing literals, so will hardcode values in pattern and hence
         // re-run when values change
         return multiply({ x, y });
       },
+      {
+        type: "object",
+        properties: { x: { type: "number" }, y: { type: "number" } },
+        required: ["x", "y"],
+      } as const satisfies JSONSchema,
+      { type: "number" } as const satisfies JSONSchema,
     );
 
     const multiplyPattern = pattern<{ x: number; y: number }>(
@@ -334,6 +334,12 @@ describe("Pattern Runner - Lift", () => {
     // - second: a Cell that we'll read with sample() (non-reactive)
     const computeWithSample = lift(
       // Input schema: first is reactive, second is asCell
+      ({ first, second }) => {
+        liftRunCount++;
+        // Use sample() to read the second cell non-reactively
+        const secondValue = second.sample();
+        return first + secondValue;
+      },
       {
         type: "object",
         properties: {
@@ -342,15 +348,7 @@ describe("Pattern Runner - Lift", () => {
         },
         required: ["first", "second"],
       } as const satisfies JSONSchema,
-      // Output schema
       { type: "number" },
-      // The lift function
-      ({ first, second }) => {
-        liftRunCount++;
-        // Use sample() to read the second cell non-reactively
-        const secondValue = second.sample();
-        return first + secondValue;
-      },
     );
 
     const sampleP = pattern<{ first: number; second: number }>(
@@ -439,12 +437,12 @@ describe("Pattern Runner - Lift", () => {
     const pattern1 = pattern<{ value: number }>(
       ({ value }) => {
         const doubled = lift(
-          { type: "number" } as const satisfies JSONSchema,
-          { type: "number" } as const satisfies JSONSchema,
           (x: number) => {
             lift1Runs++;
             return x * 2;
           },
+          { type: "number" } as const satisfies JSONSchema,
+          { type: "number" } as const satisfies JSONSchema,
         )(value);
         return { result: doubled };
       },
@@ -453,12 +451,12 @@ describe("Pattern Runner - Lift", () => {
     const pattern2 = pattern<{ value: number }>(
       ({ value }) => {
         const tripled = lift(
-          { type: "number" } as const satisfies JSONSchema,
-          { type: "number" } as const satisfies JSONSchema,
           (x: number) => {
             lift2Runs++;
             return x * 3;
           },
+          { type: "number" } as const satisfies JSONSchema,
+          { type: "number" } as const satisfies JSONSchema,
         )(value);
         return { result: tripled };
       },

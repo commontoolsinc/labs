@@ -1,3 +1,9 @@
+# LLM Generation
+
+LLM calls are reactive nodes, not promises: never `await` them. Call them in
+the pattern body and check `pending` / `error` / `result` reactively, as shown
+below.
+
 ## generateText
 
 Free-form text generation.

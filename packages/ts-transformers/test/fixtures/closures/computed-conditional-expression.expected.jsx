@@ -16,7 +16,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     threshold: __cfHelpers.ReadonlyCell<number>;
     a: __cfHelpers.ReadonlyCell<number>;
     b: __cfHelpers.ReadonlyCell<number>;
-}, number>({
+}, number>(({ value, threshold, a, b }) => value.get() > threshold.get() ? a.get() : b.get(), {
     type: "object",
     properties: {
         value: {
@@ -39,7 +39,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value", "threshold", "a", "b"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ value, threshold, a, b }) => value.get() > threshold.get() ? a.get() : b.get());
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-conditional-expression
 // Verifies: computed(() => expr) with four cell captures in a ternary expression
 //   computed(() => value.get() > threshold.get() ? a.get() : b.get()) → lift(({ value, threshold, a, b }) => ...)({ value, threshold, a, b })

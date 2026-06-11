@@ -16,7 +16,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         items: number[];
         threshold: number;
     };
-}, number>({
+}, number>(({ state }) => state.items.filter((x) => x > state.threshold).length, {
     type: "object",
     properties: {
         state: {
@@ -38,13 +38,13 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).length);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         items: number[];
         threshold: number;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.items.filter((x) => x > state.threshold).length > 0, {
     type: "object",
     properties: {
         state: {
@@ -66,13 +66,13 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).length > 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         items: number[];
         threshold: number;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.items.filter((x) => x > state.threshold).length > 0, {
     type: "object",
     properties: {
         state: {
@@ -94,7 +94,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).length > 0);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: jsx-filter-length-roots
 // Verifies: structural filter-length wrappers use the shared post-closure path
 //   instead of rewriting the filter callback itself to filterWithPattern().

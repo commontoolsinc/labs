@@ -15,7 +15,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     value: __cfHelpers.ReadonlyCell<number>;
     config: { multiplier: number; divisor: number; };
     key: string;
-}, number>({
+}, number>(({ value, config, key }) => value.get() * config[key], {
     type: "object",
     properties: {
         value: {
@@ -41,7 +41,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value", "config", "key"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ value, config, key }) => value.get() * config[key]);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-property-result
 // Verifies: computed property access with a dynamic key captures both the object and the key
 //   computed(() => expr) → lift(schema, schema)({ value, config, key })

@@ -85,28 +85,34 @@ full diagnosis checklist.
 
 ## Conditional Rendering Not Working
 
-**Issue:** Ternary operator doesn't work for conditional rendering
+**Issue:** A conditional section doesn't render or update as expected
 
-**Problem:** Ternaries don't work for conditional elements
-
-```typescript
-{showDetails ? <div>Details</div> : null}  {/* Won't work! */}
-```
-
-**Solution:** Use `ifElse()` for conditional rendering
+Plain authored ternaries ARE the idiom for conditional rendering — the
+transformer lowers them to `ifElse()` for you, so you usually do not need to
+author `ifElse()` directly. See
+[Conditional Rendering](../../common/patterns/conditional.md).
 
 ```typescript
-{ifElse(showDetails, <div>Details</div>, null)}  {/* Works! */}
-```
+// Preferred - the transformer handles this
+{showDetails ? <div>Details</div> : null}
 
-**Note:** Ternaries DO work in JSX attributes for simple values:
-
-```typescript
-// Ternaries work in attributes
+// Also fine in attributes and other value positions
 <span style={item.done ? { textDecoration: "line-through" } : {}}>
   {item.title}
 </span>
 ```
+
+If a conditional section still misbehaves, check:
+
+- **Eager branch evaluation:** both branches of the lowered `ifElse()` are
+  evaluated as arguments, so property access on a nullable reactive value
+  inside a branch can crash even when the condition is falsy. See
+  [Eager Ternary Branch Evaluation](gotchas/eager-ternary-branch-evaluation.md).
+- **Composed pattern cells:** condition cells taken directly from a composed
+  sub-pattern can hang the piece. See
+  [ifElse with Composed Pattern Cells](gotchas/quick.md#ifelse-with-composed-pattern-cells).
+- **Unusual sites:** inspect the lowering with
+  `deno task cf check <pattern>.tsx --show-transformed` rather than guessing.
 
 ## Variable Scoping in Reactive Contexts
 

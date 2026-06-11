@@ -26,7 +26,10 @@ const __cfLift_1 = __cfHelpers.lift<{
     items: {
         done: boolean;
     }[];
-}, { tasks: Item[]; view: string; }>({
+}, { tasks: Item[]; view: string; }>(({ items }) => ({
+    tasks: items.filter((i) => !i.done),
+    view: "inbox",
+}), {
     type: "object",
     properties: {
         items: {
@@ -71,17 +74,16 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["name", "done"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ items }) => ({
-    tasks: items.filter((i) => !i.done),
-    view: "inbox",
-}));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     result: {
         tasks: {
             name: string;
         }[];
     };
-}, __cfHelpers.JSXElement[]>({
+}, __cfHelpers.JSXElement[]>(({ result }) => {
+    return result.tasks.map((task) => <li>{task.name}</li>);
+}, {
     type: "object",
     properties: {
         result: {
@@ -130,9 +132,7 @@ const __cfLift_2 = __cfHelpers.lift<{
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ result }) => {
-    return result.tasks.map((task) => <li>{task.name}</li>);
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-property-access-map
 // Verifies: .map() on a property access of a computed result inside another computed() is NOT transformed to .mapWithPattern()
 //   computed(() => result.tasks.map(fn)) → lift(({ result }) => result.tasks.map(fn))({ result: { tasks: result.key("tasks") } })

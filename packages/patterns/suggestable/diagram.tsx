@@ -57,10 +57,10 @@ const Diagram = pattern<DiagramInput, DiagramOutput>(({ topic, context }) => {
         <cf-vstack gap="3" style="padding: 1.5rem;">
           {ifElse(
             response.pending,
-            <div style="color: var(--cf-color-text-secondary);">
+            <div style="color: var(--cf-theme-color-text-secondary);">
               <cf-loader show-elapsed /> Generating diagram...
             </div>,
-            <pre style="font-family: monospace; font-size: 0.85rem; line-height: 1.4; overflow-x: auto; white-space: pre; background: var(--cf-color-surface-secondary, #f5f5f5); padding: 1rem; border-radius: 0.5rem;">
+            <pre style="font-family: monospace; font-size: 0.85rem; line-height: 1.4; overflow-x: auto; white-space: pre; background: var(--cf-theme-color-surface, #f5f5f5); padding: 1rem; border-radius: 0.5rem;">
               {response.result}
             </pre>,
           )}

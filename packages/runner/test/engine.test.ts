@@ -9,14 +9,16 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import {
-  bundleWithCanonicalLoader,
-  FACTORY_SHADOW_GUARDS,
-} from "./support/amd-bundles.ts";
+import type { CompiledModuleGraph } from "../src/sandbox/module-record-compiler.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
-describe("Engine.compile()", () => {
+// All authored modules' compiled CommonJS bodies, joined — the ESM analogue of
+// the old single-bundle `jsScript.js` for transformer-output assertions.
+const joinedBodies = (graph: CompiledModuleGraph): string =>
+  [...graph.compiledBodies.values()].join("\n");
+
+describe("Engine.compileToRecordGraph()", () => {
   let runtime: Runtime;
   let engine: Engine;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -35,7 +37,7 @@ describe("Engine.compile()", () => {
     await storageManager?.close();
   });
 
-  it("compiles a simple program to JsScript", async () => {
+  it("compiles a simple program to a verified record graph", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [
@@ -46,13 +48,13 @@ describe("Engine.compile()", () => {
       ],
     };
 
-    const result = await engine.compile(program);
+    const result = await engine.compileToRecordGraph(program);
 
-    expect(result.jsScript).toBeDefined();
-    expect(result.jsScript.js).toBeDefined();
-    expect(typeof result.jsScript.js).toBe("string");
-    expect(result.jsScript.js.length).toBeGreaterThan(0);
     expect(result.id).toBeDefined();
+    expect(result.mainSpecifier.startsWith("cf:module/")).toBe(true);
+    expect(result.graph.records.has(result.mainSpecifier)).toBe(true);
+    expect(result.graph.compiledBodies.size).toBeGreaterThan(0);
+    expect(joinedBodies(result.graph).length).toBeGreaterThan(0);
   });
 
   it("compiles a multi-file program", async () => {
@@ -75,13 +77,12 @@ describe("Engine.compile()", () => {
       ],
     };
 
-    const result = await engine.compile(program);
+    const result = await engine.compileToRecordGraph(program);
 
-    expect(result.jsScript).toBeDefined();
-    expect(result.jsScript.js).toContain("double");
+    expect(joinedBodies(result.graph)).toContain("double");
   });
 
-  it("accepts default-import normalization in compiled SES bundles", async () => {
+  it("accepts default-import normalization in compiled module bodies", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
       files: [
@@ -96,14 +97,21 @@ describe("Engine.compile()", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
+    expect(joinedBodies(graph)).toContain("__importDefault");
 
-    expect(jsScript.js).toContain("__importDefault");
+    const { main } = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
     expect(main?.default).toBe(21);
   });
 
-  it("accepts top-level async function declarations in SES bundles", async () => {
+  it("accepts top-level async function declarations in SES modules", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
       files: [
@@ -119,8 +127,7 @@ describe("Engine.compile()", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
 
     expect(await main?.default()).toBe(21);
   });
@@ -147,12 +154,12 @@ describe("Engine.compile()", () => {
       ],
     };
 
-    const { jsScript } = await engine.compile(program);
+    const { graph } = await engine.compileToRecordGraph(program);
 
-    expect(jsScript.js).toContain("process");
+    expect(joinedBodies(graph)).toContain("process");
   });
 
-  it("produces a source map", async () => {
+  it("produces per-module source maps", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [
@@ -163,10 +170,12 @@ describe("Engine.compile()", () => {
       ],
     };
 
-    const { jsScript } = await engine.compile(program);
+    const { graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
 
-    expect(jsScript.sourceMap).toBeDefined();
-    expect(jsScript.filename).toBeDefined();
+    expect(graph.moduleSourceMaps.size).toBeGreaterThan(0);
+    expect(graph.moduleSourceMaps.get(mainSpecifier)).toBeDefined();
   });
 
   it("produces deterministic output for the same input", async () => {
@@ -180,11 +189,12 @@ describe("Engine.compile()", () => {
       ],
     };
 
-    const first = await engine.compile(program);
-    const second = await engine.compile(program);
+    const first = await engine.compileToRecordGraph(program);
+    const second = await engine.compileToRecordGraph(program);
 
-    expect(first.jsScript.js).toBe(second.jsScript.js);
     expect(first.id).toBe(second.id);
+    expect(first.mainSpecifier).toBe(second.mainSpecifier);
+    expect(joinedBodies(first.graph)).toBe(joinedBodies(second.graph));
   });
 
   it("resolves programs when host fetch is mocked before SES init", async () => {
@@ -222,7 +232,7 @@ describe("Engine.compile()", () => {
       ],
     };
 
-    await expect(engine.compile(program)).rejects.toThrow();
+    await expect(engine.compileToRecordGraph(program)).rejects.toThrow();
   });
 
   it("emits __cf_data for CTS top-level data and evaluates it at runtime", async () => {
@@ -239,11 +249,18 @@ describe("Engine.compile()", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
 
-    expect(jsScript.js).toContain("__cf_data");
+    expect(joinedBodies(graph)).toContain("__cf_data");
 
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
     expect(main?.default).toBe("Open");
   });
 
@@ -270,13 +287,21 @@ describe("Engine.compile()", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("safeDateNow");
-    expect(jsScript.js).toContain("nonPrivateRandom");
-    expect(jsScript.js).not.toContain("__cfHelpers.safeDateNow");
-    expect(jsScript.js).not.toContain("__cfHelpers.nonPrivateRandom");
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
+    const bodies = joinedBodies(graph);
+    expect(bodies).toContain("safeDateNow");
+    expect(bodies).toContain("nonPrivateRandom");
+    expect(bodies).not.toContain("__cfHelpers.safeDateNow");
+    expect(bodies).not.toContain("__cfHelpers.nonPrivateRandom");
 
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
     const result = main?.default();
 
     expect(typeof result?.startedAt).toBe("number");
@@ -286,7 +311,7 @@ describe("Engine.compile()", () => {
   });
 });
 
-describe("Engine.evaluate()", () => {
+describe("Engine.evaluateRecordGraph()", () => {
   let runtime: Runtime;
   let engine: Engine;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -305,7 +330,7 @@ describe("Engine.evaluate()", () => {
     await storageManager?.close();
   });
 
-  it("evaluates compiled JS and returns exports", async () => {
+  it("evaluates compiled modules and returns exports", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [
@@ -316,15 +341,14 @@ describe("Engine.evaluate()", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const result = await engine.evaluate(id, jsScript, program.files);
+    const result = await engine.compileAndEvaluateModules(program);
 
     expect(result.main).toBeDefined();
     expect(result.main!["default"]).toBe(42);
     expect(result.exportMap).toBeDefined();
   });
 
-  it("does not initialize the TypeScript compiler when evaluating precompiled JS", async () => {
+  it("does not initialize the TypeScript compiler when evaluating a precompiled graph", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [
@@ -335,7 +359,9 @@ describe("Engine.evaluate()", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
     const evaluateOnlyEngine = new class extends Engine {
       override initializeCompiler(): never {
         throw new Error("compiler initialized during evaluate");
@@ -343,90 +369,16 @@ describe("Engine.evaluate()", () => {
     }(runtime);
 
     try {
-      const result = await evaluateOnlyEngine.evaluate(
+      const result = evaluateOnlyEngine.evaluateRecordGraph(
         id,
-        jsScript,
+        graph,
+        mainSpecifier,
         program.files,
-        { skipBundleValidation: true },
       );
       expect(result.main!["default"]).toBe(42);
     } finally {
       evaluateOnlyEngine.dispose();
     }
-  });
-
-  it("rejects invalid bundles passed directly to evaluate()", async () => {
-    const jsScript = {
-      filename: "invalid-bundle.js",
-      js: bundleWithCanonicalLoader(`
-  const leaked = globalThis.process;
-  define("main", ["require", "exports"], function (require, exports) {
-    "use strict";
-    exports.default = leaked ? 42 : 0;
-  });
-  const main = require("main");
-  const exportMap = Object.create(null);
-  return { main, exportMap };
-`),
-    };
-
-    await expect(engine.evaluate("invalid", jsScript, [])).rejects.toThrow(
-      "unsupported top-level executable code",
-    );
-  });
-
-  it("re-verifies compiled bundles during evaluate()", async () => {
-    const program: RuntimeProgram = {
-      main: "/main.ts",
-      files: [
-        {
-          name: "/main.ts",
-          contents: "export default 42;",
-        },
-      ],
-    };
-
-    const { jsScript, id } = await engine.compile(program);
-    const poisonedJs = jsScript.js.replace(
-      "for (const [name, dep] of Object.entries(runtimeDeps)) {",
-      "const leaked = globalThis.process;for (const [name, dep] of Object.entries(runtimeDeps)) {",
-    );
-
-    expect(poisonedJs).not.toBe(jsScript.js);
-
-    await expect(
-      engine.evaluate(id, { ...jsScript, js: poisonedJs }, program.files),
-    ).rejects.toThrow("unsupported top-level executable code");
-  });
-
-  it("rejects duplicate AMD module registrations during evaluate()", async () => {
-    const jsScript = {
-      filename: "duplicate-define.js",
-      js: bundleWithCanonicalLoader(`
-  for (const [name, dep] of Object.entries(runtimeDeps)) {
-    define(name, ["exports"], exports => Object.assign(exports, dep));
-  }
-  const console = globalThis.console;
-  define("main", ["require", "exports"], function (require, exports) {
-    "use strict";
-${FACTORY_SHADOW_GUARDS}
-    exports.default = 1;
-  });
-  define("main", ["require", "exports"], function (require, exports) {
-    "use strict";
-${FACTORY_SHADOW_GUARDS}
-    exports.default = 2;
-  });
-  const main = require("main");
-  const exportMap = Object.create(null);
-  exportMap["main"] = require("main");
-  return { main, exportMap };
-`),
-    };
-
-    await expect(engine.evaluate("duplicate", jsScript, [])).rejects.toThrow(
-      "already defined",
-    );
   });
 
   it("correctly maps exports from multi-file programs", async () => {
@@ -450,8 +402,7 @@ ${FACTORY_SHADOW_GUARDS}
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const result = await engine.evaluate(id, jsScript, program.files);
+    const result = await engine.compileAndEvaluateModules(program);
 
     expect(result.main).toBeDefined();
     expect(result.main!["default"]()).toBe(42);
@@ -462,7 +413,7 @@ ${FACTORY_SHADOW_GUARDS}
     const files = Object.keys(result.exportMap!);
     expect(files.length).toBeGreaterThanOrEqual(2);
 
-    // Find the utils entry — key has the /${id} prefix stripped
+    // Find the utils entry — keys are normalized authored paths.
     const utilsKey = files.find((f) => f.includes("utils"));
     expect(utilsKey).toBeDefined();
     const utilExports = result.exportMap![utilsKey!];
@@ -485,16 +436,8 @@ ${FACTORY_SHADOW_GUARDS}
       ],
     };
 
-    const compiled = await engine.compile(program);
-    const { main } = await engine.evaluate(
-      compiled.id,
-      compiled.jsScript,
-      program.files,
-    );
-    const patternId = runtime.patternManager.registerPattern(
-      main!.default as never,
-      program,
-    );
+    const { main } = await engine.compileAndEvaluateModules(program);
+    runtime.patternManager.registerPattern(main!.default as never, program);
     const pattern = main!.default as { nodes: Array<{ module: unknown }> };
     const serialized = JSON.parse(
       JSON.stringify(
@@ -510,7 +453,7 @@ ${FACTORY_SHADOW_GUARDS}
     expect(typeof module.implementationRef).toBe("string");
     expect(module.implementation).toBeUndefined();
     expect(
-      (engine as any).getVerifiedFunction(module.implementationRef, patternId),
+      (engine as any).getVerifiedFunction(module.implementationRef),
     )
       .toBeDefined();
   });
@@ -530,19 +473,8 @@ ${FACTORY_SHADOW_GUARDS}
       ],
     };
 
-    const firstCompiled = await engine.compile(program);
-    const secondCompiled = await engine.compile(program);
-
-    const first = await engine.evaluate(
-      firstCompiled.id,
-      firstCompiled.jsScript,
-      program.files,
-    );
-    const second = await engine.evaluate(
-      secondCompiled.id,
-      secondCompiled.jsScript,
-      program.files,
-    );
+    const first = await engine.compileAndEvaluateModules(program);
+    const second = await engine.compileAndEvaluateModules(program);
 
     const firstSerialized = JSON.parse(
       JSON.stringify(
@@ -588,8 +520,8 @@ ${FACTORY_SHADOW_GUARDS}
       ],
     };
 
-    await expect(engine.compile(program)).rejects.toThrow(
-      "unsupported top-level executable code",
+    await expect(engine.compileToRecordGraph(program)).rejects.toThrow(
+      "Top-level mutable bindings are not allowed in SES mode",
     );
   });
 
@@ -612,8 +544,7 @@ ${FACTORY_SHADOW_GUARDS}
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
 
     expect(main).toBeDefined();
     expect(main!["default"]).toEqual({
@@ -642,8 +573,7 @@ ${FACTORY_SHADOW_GUARDS}
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
 
     expect(typeof main?.default?.startedAt).toBe("number");
     expect(typeof main?.default?.seed).toBe("number");
@@ -665,7 +595,7 @@ ${FACTORY_SHADOW_GUARDS}
       ],
     };
 
-    await expect(engine.compile(program)).rejects.toThrow();
+    await expect(engine.compileToRecordGraph(program)).rejects.toThrow();
   });
 
   it("rejects raw top-level helper calls without __cf_data()", async () => {
@@ -685,7 +615,7 @@ ${FACTORY_SHADOW_GUARDS}
       ],
     };
 
-    await expect(engine.compile(program)).rejects.toThrow(
+    await expect(engine.compileToRecordGraph(program)).rejects.toThrow(
       "Top-level call results must be wrapped in __cf_data() in SES mode",
     );
   });
@@ -709,7 +639,7 @@ ${FACTORY_SHADOW_GUARDS}
       ],
     };
 
-    await expect(engine.compile(program)).rejects.toThrow(
+    await expect(engine.compileToRecordGraph(program)).rejects.toThrow(
       "pattern() is not allowed inside standalone functions",
     );
   });
@@ -747,7 +677,7 @@ ${FACTORY_SHADOW_GUARDS}
         ],
       };
 
-      await expect(engine.compile(program)).rejects.toThrow(
+      await expect(engine.compileToRecordGraph(program)).rejects.toThrow(
         "pattern() is not allowed inside standalone functions",
       );
     }
@@ -767,7 +697,7 @@ ${FACTORY_SHADOW_GUARDS}
       ],
     };
 
-    await expect(engine.compile(program)).rejects.toThrow(
+    await expect(engine.compileToRecordGraph(program)).rejects.toThrow(
       "Default exports must be trusted builders, direct functions, verified data, or import re-exports",
     );
   });
@@ -787,7 +717,7 @@ ${FACTORY_SHADOW_GUARDS}
       ],
     };
 
-    await expect(engine.compile(program)).rejects.toThrow(
+    await expect(engine.compileToRecordGraph(program)).rejects.toThrow(
       "Default exports must be trusted builders, direct functions, verified data, or import re-exports",
     );
   });
@@ -810,8 +740,7 @@ ${FACTORY_SHADOW_GUARDS}
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
 
     expect(main?.default()).toBe(42);
   });
@@ -838,10 +767,17 @@ ${FACTORY_SHADOW_GUARDS}
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__cfHelpers.__cf_data(");
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
+    expect(joinedBodies(graph)).toContain("__cfHelpers.__cf_data(");
 
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
     expect(main?.default).toBe(25);
   });
 
@@ -875,10 +811,17 @@ ${FACTORY_SHADOW_GUARDS}
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__cfHelpers.__cf_data(");
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
+    expect(joinedBodies(graph)).toContain("__cfHelpers.__cf_data(");
 
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
     expect(main?.default).toBe(25);
   });
 
@@ -899,8 +842,7 @@ ${FACTORY_SHADOW_GUARDS}
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    await expect(engine.evaluate(id, jsScript, program.files)).rejects.toThrow(
+    await expect(engine.compileAndEvaluateModules(program)).rejects.toThrow(
       "Handler requires schemas or CTS transformer",
     );
   });
@@ -938,8 +880,7 @@ ${FACTORY_SHADOW_GUARDS}
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
     const handlerNode = main?.default?.nodes?.find((node: {
       module?: { wrapper?: string };
     }) => node.module?.wrapper === "handler");
@@ -986,8 +927,7 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
 
     expect(main?.default).toBe(42);
   });
@@ -1011,8 +951,7 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
 
     expect(main).toBeDefined();
     expect(main?.default).toBeDefined();
@@ -1034,10 +973,17 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__cf_data");
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
+    expect(joinedBodies(graph)).toContain("__cf_data");
 
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
     expect(main?.default).toBeDefined();
   });
 
@@ -1058,10 +1004,17 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__cf_data");
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
+    expect(joinedBodies(graph)).toContain("__cf_data");
 
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
     expect(main?.default).toBeDefined();
   });
 
@@ -1084,7 +1037,7 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    await expect(engine.compile(program)).rejects.toThrow(
+    await expect(engine.compileToRecordGraph(program)).rejects.toThrow(
       /Mutable top-level data must be wrapped in __cf_data|Only verified plain data|Only trusted builder calls/,
     );
   });
@@ -1107,10 +1060,17 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__cf_data");
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
+    expect(joinedBodies(graph)).toContain("__cf_data");
 
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
     expect(main?.default).toBeDefined();
   });
 
@@ -1130,12 +1090,20 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
+    const bodies = joinedBodies(graph);
 
-    expect(jsScript.js).toContain("__cfHelpers.h.fragment");
-    expect(jsScript.js).not.toContain(".fragment =");
+    expect(bodies).toContain("__cfHelpers.h.fragment");
+    expect(bodies).not.toContain(".fragment =");
 
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
     expect(main?.default).toBeDefined();
   });
 
@@ -1162,10 +1130,17 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__cf_data(buildYears())");
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
+    expect(joinedBodies(graph)).toContain("__cf_data(buildYears())");
 
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
     expect(main?.default).toHaveLength(3);
     expect(typeof main?.default?.[0]).toBe("string");
   });
@@ -1187,10 +1162,17 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__cf_data(Object.fromEntries(");
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
+    expect(joinedBodies(graph)).toContain("__cf_data(Object.fromEntries(");
 
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
     expect(main?.default).toEqual({
       gmail: { value: "gmail.readonly" },
     });
@@ -1210,10 +1192,17 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__cf_data(/^[a-z]+$/)");
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
+    expect(joinedBodies(graph)).toContain("__cf_data(/^[a-z]+$/)");
 
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
     expect(main?.default).toBeInstanceOf(RegExp);
     expect(main?.default?.test("hello")).toBe(true);
   });
@@ -1234,8 +1223,7 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
 
     expect(main?.default).toContain("# Aisle 1");
     expect(main?.default).toContain("Eggs");
@@ -1269,15 +1257,23 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toMatch(
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
+    const bodies = joinedBodies(graph);
+    expect(bodies).toMatch(
       /exports\.TEMPLATE_REGISTRY = commonfabric_\d+\.__cfHelpers\.__cf_data\(\{/,
     );
-    expect(jsScript.js).toMatch(
+    expect(bodies).toMatch(
       /exports\.INTERNAL_MODULE_TYPES = commonfabric_\d+\.__cfHelpers\.__cf_data\(new Set\(\["type-picker"\]\)\);/,
     );
 
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
     expect(main?.default).toBe("Person");
   });
 
@@ -1294,8 +1290,8 @@ describe("Engine in SES mode", () => {
       new FileSystemProgramResolver(sourcePath, repoRoot),
     );
 
-    const { jsScript } = await engine.compile(program);
-    expect(jsScript.js.length).toBeGreaterThan(0);
+    const { graph } = await engine.compileToRecordGraph(program);
+    expect(joinedBodies(graph).length).toBeGreaterThan(0);
   });
 
   it("rejects top-level mutable bindings", async () => {
@@ -1315,7 +1311,7 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    await expect(engine.compile(program)).rejects.toThrow(
+    await expect(engine.compileToRecordGraph(program)).rejects.toThrow(
       "Top-level mutable bindings are not allowed in SES mode",
     );
   });
@@ -1335,7 +1331,7 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    await expect(engine.compile(program)).rejects.toThrow(
+    await expect(engine.compileToRecordGraph(program)).rejects.toThrow(
       "Only trusted builder calls",
     );
   });
@@ -1354,7 +1350,7 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    await expect(engine.compile(program)).rejects.toThrow(
+    await expect(engine.compileToRecordGraph(program)).rejects.toThrow(
       "Only trusted builder calls",
     );
   });
@@ -1383,8 +1379,7 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
 
     expect(main?.default).toBeDefined();
   });
@@ -1407,8 +1402,7 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
 
     expect(main?.default).toBeDefined();
   });
@@ -1431,8 +1425,7 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
 
     expect(main?.default).toBeDefined();
   });
@@ -1454,7 +1447,7 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    await expect(engine.compile(program)).rejects.toThrow(
+    await expect(engine.compileToRecordGraph(program)).rejects.toThrow(
       "Only trusted builder calls",
     );
   });
@@ -1477,8 +1470,7 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
     expect(() => (main?.default as () => number)()).toThrow();
   });
 
@@ -1501,7 +1493,7 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    await expect(engine.compile(program)).rejects.toThrow();
+    await expect(engine.compileToRecordGraph(program)).rejects.toThrow();
   });
 
   it("hardens trusted builder callbacks against hidden mutable state", async () => {
@@ -1522,8 +1514,7 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
     const implementation = (main?.default as {
       implementation: () => number;
     }).implementation;
@@ -1636,14 +1627,13 @@ describe("Engine compile + evaluate", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const result = await engine.evaluate(id, jsScript, program.files);
+    const result = await engine.compileAndEvaluateModules(program);
 
     expect(result.main).toBeDefined();
     expect(result.main!["default"]).toBeDefined();
   });
 
-  it("compile returns JS, evaluate executes it", async () => {
+  it("compile returns a record graph, evaluate executes it", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [
@@ -1654,12 +1644,19 @@ describe("Engine compile + evaluate", () => {
       ],
     };
 
-    // compile() should not execute the JS
-    const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toBeDefined();
+    // compileToRecordGraph() should not execute the modules
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
+    expect(graph.compiledBodies.size).toBeGreaterThan(0);
 
-    // evaluate() should execute it
-    const result = await engine.evaluate(id, jsScript, program.files);
+    // evaluateRecordGraph() should execute them
+    const result = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
     expect(result.main!["default"]).toBe("hello");
   });
 
@@ -1677,8 +1674,7 @@ describe("Engine compile + evaluate", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
 
     expect(main).toBeDefined();
     expect(main!["default"]).toBeDefined();
@@ -1697,8 +1693,7 @@ describe("Engine compile + evaluate", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
 
     expect(main).toBeDefined();
     expect(main!["nonExistent"]).toBeUndefined();
@@ -1719,8 +1714,7 @@ describe("Engine compile + evaluate", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
 
     expect(main).toBeDefined();
     expect(main!["myPattern"]).toBeDefined();

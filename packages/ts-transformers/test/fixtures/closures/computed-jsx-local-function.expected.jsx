@@ -13,7 +13,10 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     count: number;
-}, __cfHelpers.JSXElement>({
+}, __cfHelpers.JSXElement>(({ count }) => {
+    const format = (value: number) => `Count: ${value}`;
+    return <span>{format(count)}</span>;
+}, {
     type: "object",
     properties: {
         count: {
@@ -41,10 +44,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ count }) => {
-    const format = (value: number) => `Count: ${value}`;
-    return <span>{format(count)}</span>;
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-jsx-local-function
 // Verifies: computed() with a locally-defined function inside the callback is closure-extracted
 //   computed(() => { const format = ...; return <span>{format(count)}</span> }) → lift(({ count }) => { ... })({ count })

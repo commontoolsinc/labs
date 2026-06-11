@@ -37,7 +37,8 @@ already does).
 
 **Start here:**
 
-- `docs/common/INTRODUCTION.md` - Overview of the pattern system
+- `docs/common/README.md` - Overview of the pattern system and index of all
+  pattern documentation
 - `packages/patterns/catalog/catalog.tsx` - Authoritative, type-checked
   component catalog; story files in `packages/patterns/catalog/stories/` show
   live usage for each component
@@ -63,7 +64,8 @@ already does).
 **Reference:**
 
 - `packages/patterns/index.md` - Catalog of all pattern examples with summaries,
-  data types, and keywords
+  data types, and keywords. Check its "Status tiers" section before imitating
+  any pattern — only `exemplar` entries are style references.
 
 **Important:** Ignore the top level `deprecated-patterns` folder - it is
 defunct.

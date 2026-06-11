@@ -20,6 +20,14 @@ export default pattern(() => {
     }
   });
 
+  // A remove event without a cell must be a no-op — the consolidated
+  // mutateElements writer dispatches on the instance's bound mode, so a
+  // malformed remove must never fall through to an add (cf-review on
+  // CT-1698).
+  const action_remove_with_empty_event = action(() => {
+    profile.removeElement.send({});
+  });
+
   const action_clear_name = action(() => {
     profile.setName.send({ name: "" });
   });
@@ -56,9 +64,16 @@ export default pattern(() => {
       { assertion: assert_name_set },
       { action: action_clear_name },
       { assertion: assert_name_cleared },
+      // Add/remove exercise the full owner-protected element write stack:
+      // the same-transaction card instantiation linked into the
+      // writeAuthorizedBy-protected list (prepare's setup-schema / child-doc
+      // link-label hatches) and the single authorized `mutateElements`
+      // writer behind every mutation surface (CT-1698).
       { action: action_add_catalog_element },
       { assertion: assert_added_element },
       { action: action_remove_catalog_element },
+      { assertion: assert_removed_element },
+      { action: action_remove_with_empty_event },
       { assertion: assert_removed_element },
     ],
   };

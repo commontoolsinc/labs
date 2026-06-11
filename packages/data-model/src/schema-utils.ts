@@ -408,6 +408,16 @@ export function internPathSelector(
   if (existingRef !== undefined) {
     const existing = existingRef.deref();
     if (existing !== undefined) {
+      // Preserve the pre-cache contract for callers that keep using their
+      // input object: a mutable input is still canonicalized and frozen in
+      // place even when a structurally-equal canonical instance exists.
+      if (existing !== selector && !Object.isFrozen(selector)) {
+        if (interned !== schema) {
+          selector.schema = interned;
+        }
+        Object.freeze(path);
+        Object.freeze(selector);
+      }
       return existing;
     }
     byPath.delete(pathK);

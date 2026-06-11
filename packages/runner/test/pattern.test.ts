@@ -114,9 +114,9 @@ describe("pattern", () => {
 
   it("uniquifies repeated stable internal paths with schemas", () => {
     const isPositive = lift(
+      (value: number) => value > 0,
       { type: "number" } as const satisfies JSONSchema,
       { type: "boolean" } as const satisfies JSONSchema,
-      (value: number) => value > 0,
     );
 
     const testPattern = pattern(() => {
@@ -224,9 +224,9 @@ describe("pattern", () => {
     } as const satisfies JSONSchema;
 
     const double = lift(
+      (x: number) => x * 2,
       inputSchema,
       outputSchema,
-      (x: number) => x * 2,
     );
 
     const patternInputSchema = {
@@ -362,12 +362,12 @@ describe("pattern", () => {
       required: ["double"],
     } as const satisfies JSONSchema;
 
-    const double = lift<JSONSchema, JSONSchema>(
-      ArgumentSchema,
-      ResultSchema,
-      ({ x }) => ({
+    const double = lift(
+      ({ x }: { x: number }) => ({
         double: x * 2,
       }),
+      ArgumentSchema,
+      ResultSchema,
     );
 
     const doublePattern = pattern<{ x: number }, { double: number }>(
@@ -465,12 +465,14 @@ describe("pattern", () => {
       required: ["capitalized"],
     } as const satisfies JSONSchema;
 
-    const capitalize = lift<JSONSchema, JSONSchema>(
-      ArgumentSchema,
-      ResultSchema,
-      ({ word }) => ({
+    // Input typed loosely (the original used the schema-first overload whose
+    // input was JSONSchema); this lift is applied below with `{ ssn }`.
+    const capitalize = lift(
+      ({ word }: any) => ({
         capitalized: word.charAt(0).toUpperCase() + word.slice(1),
       }),
+      ArgumentSchema,
+      ResultSchema,
     );
 
     const UserSchema = {

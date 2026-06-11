@@ -16,7 +16,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         label: string;
     };
     suffix: string;
-}, boolean>({
+}, boolean>(({ item, suffix }) => item.label.endsWith(suffix), {
     type: "object",
     properties: {
         item: {
@@ -35,7 +35,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["item", "suffix"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ item, suffix }) => item.label.endsWith(suffix));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     const suffix = __cf_pattern_input.params.suffix;
@@ -82,7 +82,7 @@ const __cfLift_2 = __cfHelpers.lift<{
         tags: string[];
     };
     prefix: string;
-}, string[]>({
+}, string[]>(({ item, prefix }) => [prefix + item.tags[0]], {
     type: "object",
     properties: {
         prefix: {
@@ -107,7 +107,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ item, prefix }) => [prefix + item.tags[0]]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     const prefix = __cf_pattern_input.params.prefix;

@@ -68,7 +68,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_1 = __cfHelpers.lift<{
     spotPreferences: string[];
-}, boolean>({
+}, boolean>(({ spotPreferences }) => spotPreferences.length > 0, {
     type: "object",
     properties: {
         spotPreferences: {
@@ -81,10 +81,10 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["spotPreferences"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ spotPreferences }) => spotPreferences.length > 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     spotPreferences: string[];
-}, string>({
+}, string>(({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "), {
     type: "object",
     properties: {
         spotPreferences: {
@@ -97,7 +97,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["spotPreferences"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const person = __cf_pattern_input.key("element");
     const name = person.key("name"), spotPreferences = person.key("spotPreferences");

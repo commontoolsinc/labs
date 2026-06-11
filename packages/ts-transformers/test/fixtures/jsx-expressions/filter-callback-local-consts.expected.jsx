@@ -28,7 +28,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     file: {
         type: string;
     };
-}, boolean>({
+}, boolean>(({ file }) => file.type === "folder", {
     type: "object",
     properties: {
         file: {
@@ -44,7 +44,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["file"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ file }) => file.type === "folder");
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const file = __cf_pattern_input.key("element");
     const isFolder = __cfLift_1({ file: {

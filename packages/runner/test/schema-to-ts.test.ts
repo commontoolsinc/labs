@@ -2,7 +2,14 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
 
-import { handler, lift } from "../src/builder/module.ts";
+import { handler } from "../src/builder/module.ts";
+// Bring lift's schema-bearing, type-materializing overloads into scope. They live
+// in `@commonfabric/api/schema` (CT-1625) — the facade module that augments
+// LiftFunction. The lift materialization test below is compile-time only and
+// declares a locally-typed `lift` (the facade `lift` is `declare const`, no
+// runtime value). (handler still materializes via its module.ts overloads.)
+import type { LiftFunction } from "@commonfabric/api";
+import "@commonfabric/api/schema";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import {
@@ -23,6 +30,11 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+// Compile-time-only handle to lift's schema-augmented facade type (CT-1625). The
+// runtime `lift` is `declare const` (no JS), and the materialization test uses this
+// purely for type-checking, never calling it at runtime.
+declare const lift: LiftFunction;
 
 // Helper function to check type compatibility at compile time
 // This doesn't run any actual tests, but ensures types are correct
@@ -646,7 +658,16 @@ describe("Schema-to-TS Type Conversion", () => {
   });
 
   it("should correctly infer types when using lift with JSON schema", () => {
-    // Define input and output schemas
+    // CT-1625: lift's schema-bearing overloads are now FUNCTION-FIRST and live in
+    // `commonfabric/schema` (api/schema.ts), where the callback's input type is
+    // MATERIALIZED from the supplied JSONSchema via Schema<> — same split as
+    // pattern()/handler(). `api/index.ts` only carries the schema-light callback-
+    // only form. This test pins the materialization: with the schema-augmented
+    // facade in scope, `lift(fn, argumentSchema, resultSchema)` types the callback's
+    // (un-annotated) input from `argumentSchema` and checks the return against
+    // `resultSchema`. The schema is the single source of truth, so a provided type
+    // and a provided schema can never contradict. Compile-time-only: uses the
+    // module-scope `declare const lift` (no runtime value needed).
     const inputSchema = {
       type: "object",
       properties: {
@@ -657,7 +678,7 @@ describe("Schema-to-TS Type Conversion", () => {
           items: { type: "string" },
         },
       },
-      required: ["name"],
+      required: ["name", "count"],
     } as const satisfies JSONSchema;
 
     const outputSchema = {
@@ -667,40 +688,45 @@ describe("Schema-to-TS Type Conversion", () => {
         nameLength: { type: "number" },
         firstTag: { type: "string" },
       },
-      //required: ["processed", "nameLength"],
+      required: ["processed", "nameLength", "firstTag"],
     } as const satisfies JSONSchema;
 
-    // Create a module using lift with JSON schemas
-    // This tests type inference - TypeScript should infer the correct input and output types
-    const processModule = lift(
-      inputSchema,
-      outputSchema,
-      (input) => {
-        // This will only compile if input is correctly typed according to inputSchema
-        const nameLength = input.name.length;
-        const firstTag = input.tags?.[0] || "";
-        const _count = input.count || 0;
+    // This is a compile-time type test (like the Schema<> tests above): the value
+    // lies entirely in type-checking. The assertions live in a function that is
+    // type-checked but NEVER invoked, because the facade `lift` has no runtime
+    // value (declare const). The test "passing" at runtime just confirms the file
+    // compiled.
+    const _typeAssertions = () => {
+      // Callback-first + two schemas. `input` is materialized from inputSchema:
+      // this only compiles if input.name is string, input.count is number, etc.
+      lift(
+        (input) => {
+          const nameLength = input.name.length;
+          const firstTag = input.tags?.[0] || "";
+          const _count = input.count + 1;
+          return {
+            processed: true,
+            nameLength,
+            firstTag,
+          };
+        },
+        inputSchema,
+        outputSchema,
+      );
 
-        // This will only compile if the return type matches outputSchema
-        return {
-          processed: true,
-          nameLength,
-          firstTag,
-        };
-      },
-    );
+      // Negative proof that materialization is actually active: `input.count` is
+      // `number` (from inputSchema), so a string method on it must error. If
+      // materialization were NOT happening (input typed `any`/unconstrained), this
+      // would compile and the @ts-expect-error would itself fail.
+      lift(
+        // @ts-expect-error count is number per inputSchema; .toUpperCase() invalid
+        (input) => input.count.toUpperCase(),
+        inputSchema,
+      );
+    };
+    void _typeAssertions; // referenced, never called
 
-    // Test with actual data
-    processModule({
-      name: "Test",
-      count: 5,
-      tags: ["important", "test"],
-    });
-
-    // Check that optional property works
-    processModule({
-      name: "NoTags",
-    });
+    expect(true).toBe(true); // marker: the value lies in compile-time type-checking
   });
 
   it("should correctly infer types when using handler with JSON schema", () => {

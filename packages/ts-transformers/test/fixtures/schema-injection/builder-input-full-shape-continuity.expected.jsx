@@ -14,7 +14,10 @@ const __cfAmdHooks = undefined;
 // FIXTURE: builder-input-full-shape-continuity
 // Verifies: builder input schemas stay conservative/full-shape when the authored contract
 // does not justify path shrinking.
-const liftWrapped = lift({
+const liftWrapped = lift((input: Writable<{
+    foo: string;
+    bar: string;
+}>) => input.get().foo, {
     type: "object",
     properties: {
         foo: {
@@ -25,10 +28,7 @@ const liftWrapped = lift({
     asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, (input: Writable<{
-    foo: string;
-    bar: string;
-}>) => input.get().foo);
+} as const satisfies __cfHelpers.JSONSchema);
 const patternFullShape = pattern((input: Writable<{
     foo: string;
     bar: string;
@@ -64,7 +64,10 @@ const patternExplicit = pattern((input) => input.key("foo"), {
     type: "string",
     asCell: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema);
-const liftPassthrough = lift({
+const liftPassthrough = lift((input: Writable<{
+    foo: string;
+    bar: string;
+}>) => input, {
     type: "object",
     properties: {
         foo: {
@@ -88,10 +91,7 @@ const liftPassthrough = lift({
     },
     required: ["foo", "bar"],
     asCell: ["cell"]
-} as const satisfies __cfHelpers.JSONSchema, (input: Writable<{
-    foo: string;
-    bar: string;
-}>) => input);
+} as const satisfies __cfHelpers.JSONSchema);
 const helper = __cfHardenFn((value: Writable<{
     foo: string;
     bar: string;
@@ -115,7 +115,14 @@ const patternHelper = pattern((input: Writable<{
     type: "string",
     asCell: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema);
-const wildcardLift = lift({
+const wildcardLift = lift((input: Writable<{
+    foo: string;
+    bar: string;
+}>) => {
+    const foo = input.key("foo").get();
+    Object.keys(input.get());
+    return foo;
+}, {
     type: "object",
     properties: {
         foo: {
@@ -129,14 +136,7 @@ const wildcardLift = lift({
     asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, (input: Writable<{
-    foo: string;
-    bar: string;
-}>) => {
-    const foo = input.key("foo").get();
-    Object.keys(input.get());
-    return foo;
-});
+} as const satisfies __cfHelpers.JSONSchema);
 export default __cfHelpers.__cf_data({
     liftWrapped,
     patternFullShape,

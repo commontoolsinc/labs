@@ -189,26 +189,6 @@ Both the home pattern and the default app pattern follow the same mechanism:
 4. `recreateDefaultPattern()` can replace it — either with a URL-based system
    pattern or a custom `RuntimeProgram` (used by `cf piece set-home`)
 
-## Implementation Details
 
-### Runtime Configuration
-
-The runtime accepts `userIdentityDID` in its options, which is the user's actual
-identity DID (distinct from the current space DID):
-
-```typescript
-const runtime = new Runtime({
-  apiUrl,
-  storageManager,
-  userIdentityDID: storageManager.as.did(), // User's identity
-});
-```
-
-### ACL Initialization
-
-The home space requires special ACL handling since there's no separate space
-identity to delegate from. When `space === runtime.userIdentityDID`, the
-PieceManager detects this as a home space and uses `runtime.getHomeSpaceCell()`.
-
-See `packages/piece/src/manager.ts` (home space detection) and
-`packages/runner/src/runtime.ts` `getHomeSpaceCell()` for implementation.
+Runtime internals (ACL initialization, PieceManager home-space detection) are
+documented in [docs/development/home-space-internals.md](../../development/home-space-internals.md).

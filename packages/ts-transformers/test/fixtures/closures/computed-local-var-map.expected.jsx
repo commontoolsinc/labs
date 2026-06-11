@@ -26,7 +26,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     items: {
         price: number;
     }[];
-}, Item[]>({
+}, Item[]>(({ items }) => items.filter((i) => i.price > 100), {
     type: "object",
     properties: {
         items: {
@@ -62,12 +62,15 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["name", "price"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.filter((i) => i.price > 100));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     filtered: {
         name: string;
     }[];
-}, __cfHelpers.JSXElement[]>({
+}, __cfHelpers.JSXElement[]>(({ filtered }) => {
+    const localVar = filtered;
+    return localVar.map((item) => <li>{item.name}</li>);
+}, {
     type: "object",
     properties: {
         filtered: {
@@ -110,10 +113,7 @@ const __cfLift_2 = __cfHelpers.lift<{
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ filtered }) => {
-    const localVar = filtered;
-    return localVar.map((item) => <li>{item.name}</li>);
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-local-var-map
 // Verifies: .map() on a local variable assigned from a computed result inside another computed() is NOT transformed to .mapWithPattern()
 //   computed(() => { const localVar = filtered; return localVar.map(fn) }) → lift(({ filtered }) => { const localVar = filtered; return localVar.map(fn) })(...)

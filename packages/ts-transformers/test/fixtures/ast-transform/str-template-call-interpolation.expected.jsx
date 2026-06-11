@@ -22,7 +22,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     cell: {
         value: number;
     };
-}, string>({
+}, string>(({ cell }) => format(cell.value), {
     type: "object",
     properties: {
         cell: {
@@ -38,12 +38,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ cell }) => format(cell.value));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     cell: {
         value: number;
     };
-}, number>({
+}, number>(({ cell }) => cell.value + 1, {
     type: "object",
     properties: {
         cell: {
@@ -59,7 +59,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ cell }) => cell.value + 1);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: str-template-call-interpolation
 // Verifies: reactive lowering of expressions interpolated into a str`` tagged template.
 //   The str runtime lifts its interpolation over the values it receives, so any value

@@ -24,11 +24,6 @@ import {
   resetPersistentSchedulerStateConfig,
   setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
-import {
-  getEsmModuleLoaderConfig,
-  resetEsmModuleLoaderConfig,
-  setEsmModuleLoaderConfig,
-} from "./sandbox/esm-loader-config.ts";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import type {
@@ -63,7 +58,11 @@ import { LINK_V1_TAG } from "./sigil-types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   type CfcEnforcementMode,
+  type CfcFlowLabelsMode,
   type CfcLabelView,
+  DEFAULT_SINK_MAX_CONFIDENTIALITY,
+  flowLabelWorkExists,
+  type SinkMaxConfidentiality,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
 import { PatternManager } from "./pattern-manager.ts";
@@ -77,7 +76,6 @@ import { isDeno } from "@commonfabric/utils/env";
 import { popFrame, pushFrame } from "./builder/pattern.ts";
 import type { Frame } from "./builder/types.ts";
 import type { ConsoleMessage } from "./interface.ts";
-import type { CachedCompiler } from "./compilation-cache/mod.ts";
 import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
@@ -186,13 +184,6 @@ export interface ExperimentalOptions {
   persistentSchedulerState?: boolean | undefined;
   /** Preserve cumulative scheduler write history instead of using current-known writes. */
   schedulerHistoricalMightWrite?: boolean | undefined;
-  /**
-   * Load compiled patterns as a graph of per-module records through the SES
-   * Compartment module system (synchronous `importNow`) instead of evaluating
-   * one flattened AMD bundle. Default off; the AMD path remains the default.
-   * See docs/specs/module-loading.md (Phases 2–5).
-   */
-  esmModuleLoader?: boolean | undefined;
 }
 
 export interface RuntimeOptions {
@@ -209,11 +200,19 @@ export interface RuntimeOptions {
   experimental?: ExperimentalOptions;
   /** Rollout mode for commit-boundary CFC enforcement. Defaults to `enforce-explicit`. */
   cfcEnforcementMode?: CfcEnforcementMode;
+  /**
+   * Flow-label propagation dial (S16 default transition). Defaults to `off`.
+   * Propagation requires enforcement mode ≥ `observe` to run at the commit
+   * boundary; it derives and persists labels but never rejects by itself.
+   */
+  cfcFlowLabels?: CfcFlowLabelsMode;
+  /** Per-sink confidentiality ceilings for the sink-request egress gate. A sink
+   *  absent from the map is ungated; a declared ceiling rejects (or, in observe
+   *  mode, flags) a request carrying confidentiality outside it. Defaults to
+   *  none declared (`DEFAULT_SINK_MAX_CONFIDENTIALITY`). */
+  cfcSinkMaxConfidentiality?: SinkMaxConfidentiality;
   /** Deterministic provider for the trust snapshot attached to each new tx. */
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
-  /** Optional compilation cache for persistent caching of compiled JS.
-   *  If absent, no persistent caching is performed (same as before). */
-  cachedCompiler?: CachedCompiler;
   /** Replace runner-owned frames with `<CF_INTERNAL>` in surfaced stacks. */
   hideInternalStackFrames?: boolean;
 }
@@ -318,11 +317,12 @@ export class Runtime {
   readonly pieceCreatedCallback?: PieceCreatedCallback;
   readonly cfc: ContextualFlowControl;
   readonly cfcEnforcementMode: CfcEnforcementMode;
+  readonly cfcFlowLabels: CfcFlowLabelsMode;
+  readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
   readonly telemetry: RuntimeTelemetry;
-  readonly cachedCompiler?: CachedCompiler;
   /** Resolved experimental flags (all properties present, defaulting to `false`). */
   readonly experimental: ExperimentalOptions;
   readonly apiUrl: URL;
@@ -339,7 +339,6 @@ export class Runtime {
       modernCellRep: undefined,
       persistentSchedulerState: undefined,
       schedulerHistoricalMightWrite: undefined,
-      esmModuleLoader: undefined,
       ...options.experimental,
     };
 
@@ -365,9 +364,6 @@ export class Runtime {
     );
     this.experimental.persistentSchedulerState =
       getPersistentSchedulerStateConfig();
-    // Env-seeded default (CF_ESM_MODULE_LOADER) unless an explicit option is set.
-    setEsmModuleLoaderConfig(this.experimental.esmModuleLoader);
-    this.experimental.esmModuleLoader = getEsmModuleLoaderConfig();
 
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
@@ -376,7 +372,6 @@ export class Runtime {
       : new StaticCacheHTTP(new URL("/static", this.apiUrl));
 
     this.telemetry = options.telemetry ?? new RuntimeTelemetry();
-    this.cachedCompiler = options.cachedCompiler;
 
     // Create harness first (no dependencies on other services)
     this.harness = new Engine(this, {
@@ -397,6 +392,17 @@ export class Runtime {
     this.cfc = new ContextualFlowControl();
     this.cfcEnforcementMode = options.cfcEnforcementMode ??
       "enforce-explicit";
+    this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
+    // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
+    // be able to mutate it (per-sink array or the map) after construction to
+    // change what egresses are allowed (review on #3993).
+    this.cfcSinkMaxConfidentiality = Object.freeze(
+      Object.fromEntries(
+        Object.entries(
+          options.cfcSinkMaxConfidentiality ?? DEFAULT_SINK_MAX_CONFIDENTIALITY,
+        ).map(([sink, atoms]) => [sink, Object.freeze([...atoms])]),
+      ),
+    );
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(
@@ -424,13 +430,6 @@ export class Runtime {
     // fallback in builder/env.ts. This is still a singleton. TODO(seefeld).
     if (options.patternEnvironment) {
       setPatternEnvironment(options.patternEnvironment);
-    }
-
-    // Fire-and-forget startup eviction for compilation cache
-    if (this.cachedCompiler) {
-      this.cachedCompiler.evictStale().catch((err) => {
-        console.warn("Compilation cache eviction failed:", err);
-      });
     }
 
     if (options.debug) {
@@ -551,7 +550,6 @@ export class Runtime {
     // Reset experimental config to defaults.
     resetModernCellRepConfig();
     resetPersistentSchedulerStateConfig();
-    resetEsmModuleLoaderConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern
@@ -602,8 +600,41 @@ export class Runtime {
       },
     });
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
+    wrapped.setCfcFlowLabelsMode(this.cfcFlowLabels);
+    wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     return wrapped;
+  }
+
+  // (space, id) pairs for which a missing-link-target load has been kicked
+  // this session. The kicked sync establishes a live per-doc subscription, so
+  // a later creation of the doc still arrives — one kick per doc suffices.
+  private missingDocLoadKicks = new Set<string>();
+
+  /**
+   * Asynchronously load a cross-space link target that a read found absent
+   * from the local replica (CT-1667): per-space server queries cannot follow
+   * links across space boundaries, so the client must fetch such targets
+   * itself. Fire-and-forget, but registered as a cross-space promise so
+   * `storageManager.synced()` and `Cell.pull()`'s convergence loop can await
+   * it; the absent doc is a tracked read, so the reader re-runs on arrival.
+   * Deduped per (space, id): the kicked sync leaves a live subscription
+   * behind, so repeat kicks add nothing.
+   */
+  ensureLinkedDocLoaded(link: NormalizedFullLink): void {
+    const key = `${link.space}\0${link.id}`;
+    if (this.missingDocLoadKicks.has(key)) return;
+    this.missingDocLoadKicks.add(key);
+    const maybePromise = this.getCellFromLink(link).sync();
+    if (maybePromise instanceof Promise) {
+      const promise = maybePromise.catch(() => {
+        // Allow a retry on failure (e.g. transient disconnect).
+        this.missingDocLoadKicks.delete(key);
+      }).finally(() => {
+        this.storageManager.removeCrossSpacePromise(promise);
+      }) as unknown as Promise<void>;
+      this.storageManager.addCrossSpacePromise(promise);
+    }
   }
 
   getCfcStats(): Readonly<CfcRuntimeStats> {
@@ -720,7 +751,19 @@ export class Runtime {
 
   prepareTxForCommit(tx: IExtendedStorageTransaction): void {
     const state = tx.getCfcState();
-    if (!state.relevant || state.enforcementMode === "disabled") {
+    if (state.enforcementMode === "disabled") {
+      return;
+    }
+    // Flow-label relevance is computed, not caller-marked (S16): the
+    // laundering txs are exactly the ones nothing marked relevant.
+    if (
+      !state.relevant &&
+      state.flowLabelsMode !== "off" &&
+      flowLabelWorkExists(tx)
+    ) {
+      tx.markCfcRelevant("flow-labels");
+    }
+    if (!state.relevant) {
       return;
     }
     if (state.prepare.status === "unprepared") {

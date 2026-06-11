@@ -1,17 +1,9 @@
 import type { CompilerOptions } from "typescript";
-import {
-  JsxEmit,
-  ModuleKind,
-  ScriptTarget,
-  versionMajorMinor,
-} from "typescript";
+import { JsxEmit, ModuleKind, ScriptTarget } from "typescript";
 
 export const TARGET_TYPE_LIB = "es2023";
-export const MODULE_KIND = ModuleKind.AMD;
+export const MODULE_KIND = ModuleKind.CommonJS;
 export const TARGET = ScriptTarget.ES2023;
-const IGNORE_DEPRECATIONS = Number(versionMajorMinor.split(".")[0] ?? "0") >= 6
-  ? "6.0"
-  : "5.0";
 
 export const getCompilerOptions = (): CompilerOptions => {
   return {
@@ -27,15 +19,9 @@ export const getCompilerOptions = (): CompilerOptions => {
      * Module
      */
 
-    // Emitting a concatenated/bundled output requires
-    // a compatible module type (AMD and SystemJS). Using
-    // AMD for ease of writing an inline bundler.
+    // Per-module CommonJS bodies — the inputs the ESM module-record loader
+    // and verifier consume.
     module: MODULE_KIND,
-    // TypeScript warns on the legacy AMD + outFile bundling path. We still
-    // rely on it today, so silence the deprecation for the active major.
-    // Note: this first surfaced in CI through the compiled `cf` default-pattern
-    // flow and was not fully reproducible in local harness tests.
-    ignoreDeprecations: IGNORE_DEPRECATIONS,
 
     /**
      * Emit

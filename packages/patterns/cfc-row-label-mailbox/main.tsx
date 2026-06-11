@@ -16,7 +16,8 @@
 // - every db.exec INSERT runs the same rule as a write gate (the computed
 //   row label is recorded as the write's CFC policy input before commit).
 //
-// Design: docs/specs/sqlite-builtin/plans/cfc-phase3-per-row.md
+// Spec: docs/specs/sqlite-builtin/06-cfc.md ("Per-row labels, derived from
+// row data")
 import {
   cfSqlite,
   computed,

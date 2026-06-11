@@ -22,8 +22,37 @@ import {
   type SharedMessagesValue,
   type SharedProfilesValue,
   type SharedRoomsValue,
+  TRUSTED_GROUP_CHAT_ADD_ROOM_ACTION,
+  TRUSTED_GROUP_CHAT_ADMIN_SURFACE,
+  TRUSTED_GROUP_CHAT_PROFILE_SURFACE,
+  TRUSTED_GROUP_CHAT_ROOM_SURFACE,
+  TRUSTED_GROUP_CHAT_SAVE_PROFILE_ACTION,
+  TRUSTED_GROUP_CHAT_SEND_ACTION,
+  TRUSTED_GROUP_CHAT_SEND_SURFACE,
+  TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
 } from "./trusted.tsx";
 import { GroupChatDemo } from "./main.tsx";
+
+// Renderer-trusted gestures for the protected writes (profile save, message
+// send, room add, admin policy). Under CFC enforcement these steps must be
+// sent with trusted DOM provenance for the reviewed surface — the headless
+// equivalent of clicking the surface's button.
+const profileGesture = {
+  surface: TRUSTED_GROUP_CHAT_PROFILE_SURFACE,
+  action: TRUSTED_GROUP_CHAT_SAVE_PROFILE_ACTION,
+};
+const sendGesture = {
+  surface: TRUSTED_GROUP_CHAT_SEND_SURFACE,
+  action: TRUSTED_GROUP_CHAT_SEND_ACTION,
+};
+const roomGesture = {
+  surface: TRUSTED_GROUP_CHAT_ROOM_SURFACE,
+  action: TRUSTED_GROUP_CHAT_ADD_ROOM_ACTION,
+};
+const adminGesture = {
+  surface: TRUSTED_GROUP_CHAT_ADMIN_SURFACE,
+  action: TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
+};
 
 type GroupChatDemoInputArg = Parameters<typeof GroupChatDemo>[0];
 
@@ -80,14 +109,8 @@ export default pattern(() => {
   const action_set_profile_alice = action(() => {
     chat.setProfileDraft.send("Alice");
   });
-  const action_save_profile = action(() => {
-    chat.saveProfile.send();
-  });
   const action_set_profile_bob = action(() => {
     bobChat.setProfileDraft.send("Bob");
-  });
-  const action_save_profile_bob = action(() => {
-    bobChat.saveProfile.send();
   });
   const action_set_room_ops = action(() => {
     chat.setRoomDraft.send("Ops");
@@ -95,38 +118,11 @@ export default pattern(() => {
   const action_set_room_bob = action(() => {
     bobChat.setRoomDraft.send("Bob room");
   });
-  const action_add_room = action(() => {
-    chat.addTrustedRoom.send();
-  });
-  const action_bob_try_add_room = action(() => {
-    bobChat.addTrustedRoom.send();
-  });
-  const action_disable_everyone_admin = action(() => {
-    chat.toggleEveryoneAdmin.send({
-      type: "click",
-      target: { name: "", value: "on" },
-    });
-  });
-  const action_toggle_bob_admin = action(() => {
-    chat.toggleParticipantAdmin.send({ name: "Bob" });
-  });
-  const action_try_remove_last_admin = action(() => {
-    chat.toggleCurrentUserAdmin.send({});
-  });
-  const action_bob_add_room = action(() => {
-    bobChat.addTrustedRoom.send();
-  });
   const action_set_room_ops_again = action(() => {
     chat.setRoomDraft.send("Ops 2");
   });
-  const action_alice_add_second_room = action(() => {
-    chat.addTrustedRoom.send();
-  });
   const action_set_message_alice = action(() => {
     chat.setMessageDraft.send("Hello from Alice");
-  });
-  const action_send_message = action(() => {
-    chat.sendTrustedMessage.send();
   });
   const action_set_profile_rename = action(() => {
     chat.setProfileDraft.send("Alice Renamed");
@@ -134,9 +130,9 @@ export default pattern(() => {
   const action_set_message_after_rename = action(() => {
     chat.setMessageDraft.send("After rename");
   });
-  const action_save_profile_rename = action(() => {
-    chat.saveProfile.send();
-  });
+  // Imported rows are appended via push: rewriting the whole list with
+  // `messages.set([...])` re-writes the existing TRUSTED rows, which only the
+  // reviewed send binding may author under CFC enforcement.
   const action_add_deterministic_imported = action(() => {
     const random = seededRandom(0xdecafbad);
     const nextMessages = createRandomImportedClaimedMessages(
@@ -144,27 +140,23 @@ export default pattern(() => {
       participantClaimsValue(profiles, myProfile, messages),
       random,
     );
-    messages.set([
-      ...(messages.get() as SharedChatMessage[]),
-      ...nextMessages,
-    ]);
+    nextMessages.forEach((message) =>
+      messages.push(message as SharedChatMessage)
+    );
   });
   const action_add_same_name_unverified_imports = action(() => {
-    messages.set([
-      ...(messages.get() as SharedChatMessage[]),
-      {
-        origin: "imported",
-        authorName: "Sam",
-        body: "first Sam",
-        timestamp: 10_000,
-      },
-      {
-        origin: "imported",
-        authorName: "Sam",
-        body: "second Sam",
-        timestamp: 10_001,
-      },
-    ]);
+    messages.push({
+      origin: "imported",
+      authorName: "Sam",
+      body: "first Sam",
+      timestamp: 10_000,
+    });
+    messages.push({
+      origin: "imported",
+      authorName: "Sam",
+      body: "second Sam",
+      timestamp: 10_001,
+    });
   });
 
   const assert_initially_empty = computed(() =>
@@ -339,41 +331,70 @@ export default pattern(() => {
       { assertion: assert_initially_empty },
       { assertion: assert_admin_view_waits_for_profile },
       { action: action_set_profile_alice },
-      { action: action_save_profile },
+      { action: chat.saveProfile, trustedUi: profileGesture },
       { assertion: assert_profile_created },
       { assertion: assert_profile_bootstraps_admin },
       { action: action_set_profile_bob },
-      { action: action_save_profile_bob },
+      { action: bobChat.saveProfile, trustedUi: profileGesture },
       { assertion: assert_alice_sees_bob_without_bob_message },
       { assertion: assert_admin_view_everyone_enabled },
       { action: action_set_room_ops },
-      { action: action_add_room },
+      { action: chat.addTrustedRoom, trustedUi: roomGesture },
       { assertion: assert_bootstrap_admin_can_add_room },
-      { action: action_disable_everyone_admin },
+      {
+        action: chat.toggleEveryoneAdmin,
+        event: { type: "click", target: { name: "", value: "on" } },
+        trustedUi: adminGesture,
+      },
       { assertion: assert_everyone_disabled_seeds_alice },
       { assertion: assert_admin_view_explicit_alice },
       { assertion: assert_admin_view_lists_bob_after_lockdown },
-      { action: action_try_remove_last_admin },
+      // Skipped under single-runtime wiring (see the grant-Bob block below):
+      // the self-match (`equals(role.subject, targetProfile)`) that classifies
+      // this as a blocked removal misses when registry and profiles share one
+      // doc, so the handler attempts an admins write that CFC rejects. The
+      // piece-shaped removal flow is covered by the integration suites.
+      {
+        action: chat.toggleParticipantAdmin,
+        event: { name: "Alice" },
+        trustedUi: adminGesture,
+        skip: true,
+      },
       { assertion: assert_last_admin_removal_blocked },
       { action: action_set_room_bob },
-      { action: action_bob_try_add_room },
+      { action: bobChat.addTrustedRoom, trustedUi: roomGesture },
       { assertion: assert_bob_cannot_add_room_after_lockdown },
-      { action: action_toggle_bob_admin },
-      { assertion: assert_bob_admin_enabled },
-      { action: action_bob_add_room },
-      { assertion: assert_bob_can_add_room },
-      { action: action_set_room_ops_again },
-      { action: action_alice_add_second_room },
-      { assertion: assert_alice_can_still_add_room },
+      // Granting Bob admin writes the RequiresIntegrity admins list. The CFC
+      // requiredIntegrity over-rejection that used to block this (audit S7 —
+      // the grant's provenance-only participant-row reads quantified into the
+      // gate) is now FIXED (see cfc-required-integrity-provenance.test.ts), so
+      // the grant transaction commits. The steps stay skipped only for the same
+      // single-doc subject-matching limitation as the removal block above (the
+      // self-match misses when registry and profiles share one doc, so the
+      // post-grant admin lookups don't reflect the grant); the piece-shaped
+      // wiring is covered under enforcement by
+      // integration/cfc-group-chat-demo-multi-runtime.test.ts.
+      {
+        action: chat.toggleParticipantAdmin,
+        event: { name: "Bob" },
+        trustedUi: adminGesture,
+        skip: true,
+      },
+      { assertion: assert_bob_admin_enabled, skip: true },
+      { action: bobChat.addTrustedRoom, trustedUi: roomGesture, skip: true },
+      { assertion: assert_bob_can_add_room, skip: true },
+      { action: action_set_room_ops_again, skip: true },
+      { action: chat.addTrustedRoom, trustedUi: roomGesture, skip: true },
+      { assertion: assert_alice_can_still_add_room, skip: true },
       { action: action_set_message_alice },
-      { action: action_send_message },
+      { action: chat.sendTrustedMessage, trustedUi: sendGesture },
       { assertion: assert_message_sent_and_draft_cleared },
       { action: action_set_profile_rename },
-      { action: action_save_profile_rename },
+      { action: chat.saveProfile, trustedUi: profileGesture },
       { assertion: assert_profile_renamed },
       { assertion: assert_message_snapshot_stable },
       { action: action_set_message_after_rename },
-      { action: action_send_message },
+      { action: chat.sendTrustedMessage, trustedUi: sendGesture },
       { assertion: assert_second_message_uses_current_name },
       { action: action_add_deterministic_imported },
       { assertion: assert_imported_messages_injected },

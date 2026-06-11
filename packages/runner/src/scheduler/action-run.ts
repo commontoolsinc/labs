@@ -144,6 +144,7 @@ export function watchReactiveActionCommit(state: {
     action: Action,
     tx: IExtendedStorageTransaction["tx"],
   ) => void;
+  readonly restoreCfcTriggerReads: () => void;
 }): void {
   state.commitPromise.then(({ error }) => {
     // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
@@ -163,6 +164,9 @@ export function watchReactiveActionCommit(state: {
         // Re-schedule the action to run again on conflict failure.
         // Use resubscribe to set up dependencies/triggers from the log,
         // then mark as dirty/pending to ensure it runs again.
+        // The retry run still exists only because of the consumed trigger
+        // reads (§8.9.2), so restore them for its transaction.
+        state.restoreCfcTriggerReads();
         state.resubscribe(state.action, state.log);
         state.markDirectDirty(state.action);
         state.pending.add(state.action);
@@ -228,6 +232,19 @@ export function appendActionRunTrace(state: {
 
 export interface SchedulerActionRunState {
   readonly runtime: Runtime;
+  // Consume (and clear) the pending CFC trigger reads for an action: the
+  // addresses whose invalidating writes scheduled this run (§8.9.2). The
+  // run's transaction joins their labels into the flow-label derivation.
+  readonly takeCfcTriggerReads: (
+    action: Action,
+  ) => readonly IMemorySpaceAddress[] | undefined;
+  // Re-insert consumed trigger reads when an aborted run is retried: the
+  // retry still exists only because of these triggers, so its transaction
+  // must join their labels too. Dedups against any newly recorded reads.
+  readonly restoreCfcTriggerReads: (
+    action: Action,
+    addresses: readonly IMemorySpaceAddress[],
+  ) => void;
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
   readonly inFlightSourceState: InFlightSourceState;
   readonly actionTimingState: ActionTimingState;
@@ -308,6 +325,15 @@ export async function runSchedulerAction(
   const tx = state.runtime.edit({
     changeGroup: state.actionChangeGroups.get(action),
   });
+  // §8.9.2 trigger reads: hand the addresses whose changes scheduled this
+  // run to the transaction so flow-label derivation can taint its writes
+  // even when this run's branch never re-reads them. Consumed once; if the
+  // run aborts and is retried (RetryImmediately, commit conflict) the
+  // consumed addresses are restored below so the retry inherits them.
+  const cfcTriggerReads = state.takeCfcTriggerReads(action);
+  if (cfcTriggerReads !== undefined && cfcTriggerReads.length > 0) {
+    tx.addCfcTriggerReads(cfcTriggerReads);
+  }
   (tx.tx as { debugActionId?: string }).debugActionId = actionId;
   addInFlightSource(state.inFlightSourceState, action, tx.tx);
   const actionStartTime = performance.now();
@@ -320,6 +346,7 @@ export async function runSchedulerAction(
         actionId,
         tx,
         actionStartTime,
+        cfcTriggerReads,
         result,
         error,
         resolve,
@@ -363,6 +390,7 @@ function finalizeSchedulerAction(
     readonly actionId: string;
     readonly tx: IExtendedStorageTransaction;
     readonly actionStartTime: number;
+    readonly cfcTriggerReads: readonly IMemorySpaceAddress[] | undefined;
     readonly result: unknown;
     readonly error?: unknown;
     readonly resolve: (value: unknown) => void;
@@ -403,6 +431,7 @@ function rescheduleActionForImmediateRetry(
     readonly action: Action;
     readonly actionId: string;
     readonly tx: IExtendedStorageTransaction;
+    readonly cfcTriggerReads: readonly IMemorySpaceAddress[] | undefined;
     readonly error?: unknown;
     readonly resolve: (value: unknown) => void;
   },
@@ -412,6 +441,11 @@ function rescheduleActionForImmediateRetry(
   const retries = (state.retries.get(args.action) ?? 0) + 1;
   state.retries.set(args.action, retries);
   if (retries < MAX_RETRIES_FOR_REACTIVE) {
+    // The retry run still exists only because of the consumed trigger
+    // reads (§8.9.2); restore them so its transaction joins their labels.
+    if (args.cfcTriggerReads !== undefined && args.cfcTriggerReads.length > 0) {
+      state.restoreCfcTriggerReads(args.action, args.cfcTriggerReads);
+    }
     state.markDirectDirty(args.action);
     state.pending.add(args.action);
     state.queueExecution();
@@ -435,6 +469,7 @@ function finalizeReactiveActionCommit(
     readonly action: Action;
     readonly actionId: string;
     readonly tx: IExtendedStorageTransaction;
+    readonly cfcTriggerReads: readonly IMemorySpaceAddress[] | undefined;
     readonly result: unknown;
     readonly resolve: (value: unknown) => void;
   },
@@ -483,6 +518,13 @@ function finalizeReactiveActionCommit(
         target,
         source,
       ),
+    restoreCfcTriggerReads: () => {
+      if (
+        args.cfcTriggerReads !== undefined && args.cfcTriggerReads.length > 0
+      ) {
+        state.restoreCfcTriggerReads(args.action, args.cfcTriggerReads);
+      }
+    },
   });
 
   logger.debug("schedule-run-complete", () => [

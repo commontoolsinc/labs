@@ -328,7 +328,7 @@ export const OccurrenceTrackerModule = pattern<
               <span
                 style={{
                   textAlign: "center",
-                  color: "var(--cf-color-gray-400)",
+                  color: "var(--cf-colors-gray-400)",
                   padding: "1rem 0",
                 }}
               >
@@ -347,7 +347,7 @@ export const OccurrenceTrackerModule = pattern<
               <span
                 style={{
                   fontSize: "0.875rem",
-                  color: "var(--cf-color-gray-500)",
+                  color: "var(--cf-colors-gray-500)",
                 }}
               >
                 Last recorded:
@@ -392,7 +392,7 @@ export const OccurrenceTrackerModule = pattern<
           justify="around"
           style={{
             padding: "0.75rem",
-            background: "var(--cf-color-gray-50)",
+            background: "var(--cf-colors-gray-50)",
             borderRadius: "8px",
           }}
         >
@@ -408,7 +408,7 @@ export const OccurrenceTrackerModule = pattern<
             <span
               style={{
                 fontSize: "0.75rem",
-                color: "var(--cf-color-gray-500)",
+                color: "var(--cf-colors-gray-500)",
               }}
             >
               Total
@@ -426,7 +426,7 @@ export const OccurrenceTrackerModule = pattern<
             <span
               style={{
                 fontSize: "0.75rem",
-                color: "var(--cf-color-gray-500)",
+                color: "var(--cf-colors-gray-500)",
               }}
             >
               Avg frequency
@@ -442,7 +442,7 @@ export const OccurrenceTrackerModule = pattern<
               style={{
                 cursor: "pointer",
                 fontSize: "0.875rem",
-                color: "var(--cf-color-gray-600)",
+                color: "var(--cf-colors-gray-600)",
                 padding: "0.5rem 0",
               }}
             >
@@ -462,7 +462,7 @@ export const OccurrenceTrackerModule = pattern<
                   align="center"
                   style={{
                     padding: "0.5rem",
-                    background: "var(--cf-color-gray-50)",
+                    background: "var(--cf-colors-gray-50)",
                     borderRadius: "6px",
                   }}
                 >
@@ -493,7 +493,7 @@ export const OccurrenceTrackerModule = pattern<
                     style={{
                       padding: "0.25rem 0.5rem",
                       fontSize: "1rem",
-                      color: "var(--cf-color-gray-400)",
+                      color: "var(--cf-colors-gray-400)",
                       minWidth: "auto",
                     }}
                     title="Delete"

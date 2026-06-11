@@ -21,7 +21,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: Item[];
     };
-}, Item[]>({
+}, Item[]>(({ state }) => state.items, {
     type: "object",
     properties: {
         state: {
@@ -65,10 +65,10 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["done"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     view: string[];
-}, string | undefined>({
+}, string | undefined>(({ view }) => view[0], {
     type: "object",
     properties: {
         view: {
@@ -81,7 +81,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["view"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ view }) => view[0]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const row = __cf_pattern_input.key("element");
     const view = [__cfHelpers.ifElse({

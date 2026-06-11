@@ -23,7 +23,7 @@ import {
   type UnsafeBinding,
 } from "./types.ts";
 import { opaqueRef } from "./opaque-ref.ts";
-import { brandTrustedPattern } from "./pattern-metadata.ts";
+import { brandTrustedPattern, noteDerivedCopy } from "./pattern-metadata.ts";
 import {
   applyArgumentIfcToResult,
   applyInputIfcToOutput,
@@ -538,10 +538,21 @@ function factoryFromPattern<T, R>(
       } as Pattern & toJSON,
     ) as PatternFactory<T, R>;
 
-    factory.asScope = (scope: CellScope) =>
-      makePatternFactory(scope, defaultSpace);
-    factory.inSpace = (space?: string | unknown) =>
-      makePatternFactory(defaultScope, space ?? "");
+    // `asScope` / `inSpace` mint fresh factory objects; record them as
+    // derivation copies so identity facts resolve through to the root factory
+    // — in particular the content-addressed artifact entry ref, which is what
+    // lets an `inSpace(...)` child piece carry `patternIdentity` meta and have
+    // its closures replicated into its own space (CT-1687).
+    factory.asScope = (scope: CellScope) => {
+      const derived = makePatternFactory(scope, defaultSpace);
+      noteDerivedCopy(derived, factory);
+      return derived;
+    };
+    factory.inSpace = (space?: string | unknown) => {
+      const derived = makePatternFactory(defaultScope, space ?? "");
+      noteDerivedCopy(derived, factory);
+      return derived;
+    };
     // Provenance brand: only the trusted builder stamps a pattern. Trust-granting
     // sites check `isTrustedPattern` so a `__cf_data`-forged pattern-shaped
     // object cannot acquire program / verified-load-id metadata.
