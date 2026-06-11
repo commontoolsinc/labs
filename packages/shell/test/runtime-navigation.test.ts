@@ -175,7 +175,6 @@ describe("RuntimeInternals navigation", () => {
     env.$EXPERIMENTAL_MODERN_CELL_REP = undefined;
 
     const { RuntimeInternals } = await import("../src/lib/runtime.ts");
-    const currentSpace = "did:key:z6Mk-shell-runtime-did-nav-current" as DID;
     const nextSpace = "did:key:z6Mk-shell-runtime-did-nav-next" as DID;
     const client = new MockRuntimeClient();
     const runtime = new (RuntimeInternals as any)(client);

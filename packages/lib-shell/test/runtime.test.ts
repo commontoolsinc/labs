@@ -168,7 +168,6 @@ describe("RuntimeInternals", () => {
 
   it("uses an injected navigation callback", async () => {
     const { RuntimeInternals } = await import("@commonfabric/lib-shell");
-    const currentSpace = "did:key:z6Mk-lib-shell-runtime-current" as DID;
     const nextSpace = "did:key:z6Mk-lib-shell-runtime-next" as DID;
     const client = new MockRuntimeClient();
     const navigationReceived = deferred<NavigationDetail>();
