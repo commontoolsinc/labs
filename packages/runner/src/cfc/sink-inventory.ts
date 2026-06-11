@@ -21,11 +21,6 @@ export const INITIAL_SINK_INVENTORY: readonly InitialSinkName[] = Object.freeze(
   [...INITIAL_SINK_NAMES],
 );
 
-export const INITIAL_SINK_ROLLOUT_GATE: readonly InitialSinkName[] = Object
-  .freeze(
-    [...INITIAL_SINK_NAMES],
-  );
-
 export const isInitialSinkInventoryName = (
   name: string,
 ): name is InitialSinkName =>

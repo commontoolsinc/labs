@@ -1,5 +1,5 @@
 import type { Immutable } from "@commonfabric/utils/types";
-import type { CellScope, ImmutableJSONValue } from "@commonfabric/api";
+import type { CellScope } from "@commonfabric/api";
 import type {
   EntityDocument,
   PatchOp,
@@ -100,17 +100,10 @@ export interface IReadOptions {
   nonRecursive?: boolean;
 }
 
-// This type is used to tag a document with any important metadata.
-// Currently, the only supported type is confidentiality.
-export type Labels = {
-  confidentiality?: ImmutableJSONValue[];
-};
-
 /** Immutable storage value container. */
 export interface StorageValue<T extends FabricValue = FabricValue> {
   readonly value: Immutable<T>;
   readonly source?: EntityId;
-  readonly labels?: Immutable<Labels>;
 }
 
 /** Optional `StorageValue<T>`. */

@@ -73,7 +73,6 @@ export { evaluateHarnessWriteFileAuthorization } from "./harness-write-policy.ts
 export {
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
   INITIAL_SINK_INVENTORY,
-  INITIAL_SINK_ROLLOUT_GATE,
   isInitialSinkInventoryName,
 } from "./sink-inventory.ts";
 export type { SinkMaxConfidentiality } from "./sink-inventory.ts";
