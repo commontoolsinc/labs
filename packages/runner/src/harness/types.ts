@@ -3,6 +3,7 @@ import type {
   ProgramResolver,
   Source,
 } from "@commonfabric/js-compiler";
+import type { MemorySpace } from "../runtime.ts";
 import type {
   CachedCompiledModule,
   CompiledModuleGraph,
@@ -57,6 +58,12 @@ export interface TypeScriptHarnessProcessOptions {
   // on a miss/partial hit: freshly compiled bodies are always SES-verified.
   // Never set for direct `precompiledModules` injection (untrusted bytes).
   trustedBodies?: boolean;
+  /**
+   * Enables fabric (cf:) imports for this compile: the space whose cell-cache
+   * source docs fabric refs are fetched from and verified against. Absent means
+   * any fabric specifier in the authored program is a compile error.
+   */
+  fabricImports?: { space: MemorySpace };
 }
 
 /** A cached/compiled per-module artifact: emitted JS plus optional source map. */
@@ -153,6 +160,7 @@ export interface Harness extends EventTarget {
   compileResolvedToRecordGraph(
     resolvedFiles: Source[],
     entryFilename: string,
+    options?: { fabricImports?: { space: MemorySpace } },
   ): Promise<{ modules: CacheableModule[]; entryIdentity: string }>;
 
   // Resolves a `ProgramResolver` into a `Program` using the engine's
