@@ -4133,6 +4133,11 @@ export class Runner {
       {
         targetSchema: patternImpl.argumentSchema,
         derivedInternalCells: pattern.derivedInternalCells,
+        // The links serialized into the sub-piece's argument doc must keep the
+        // containing pattern's declared slot scopes; the authored schema is
+        // the only place those declarations still exist (the meta link
+        // carries a sanitized schema). See foldDeclaredScopeIntoLinkSchema.
+        sourceSchemas: { argument: pattern.argumentSchema },
       },
     );
     const outputs = unwrapOneLevelAndBindtoDoc(
