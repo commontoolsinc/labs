@@ -63,8 +63,11 @@ describe("Engine fabric imports", () => {
     };
   }
 
-  async function publish(program: RuntimeProgram) {
-    const compiled = await engine.compileToRecordGraph(program);
+  async function publish(
+    program: RuntimeProgram,
+    options: Parameters<Engine["compileToRecordGraph"]>[1] = {},
+  ) {
+    const compiled = await engine.compileToRecordGraph(program, options);
     const tx = runtime.edit();
     writeSourceDocs(
       runtime,
@@ -372,6 +375,149 @@ describe("Engine fabric imports", () => {
         file.name === `${FABRIC_MOUNT_ROOT}${dependency.entryIdentity}/main.tsx`
       ),
     ).toBe(true);
+  });
+
+  it("compiles transitive fabric imports and mounts each subtree once", async () => {
+    const base = await publish(dependencyProgram(100));
+    const midProgram: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            `import { x } from "cf:pattern:${base.entryIdentity}";`,
+            `export function p() { return x + 1; }`,
+          ].join("\n"),
+        },
+      ],
+    };
+    const mid = await publish(midProgram, { fabricImports: { space } });
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            `import { p } from "cf:pattern:${mid.entryIdentity}";`,
+            `export function y() { return p() + 1; }`,
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const compiled = await engine.compileToRecordGraph(program, {
+      fabricImports: { space },
+    });
+
+    // Both subtrees are mounted under their PUBLISHED identities, once each.
+    expect(compiled.graph.records.has(`cf:module/${mid.entryIdentity}`))
+      .toBe(true);
+    expect(compiled.graph.records.has(`cf:module/${base.entryIdentity}`))
+      .toBe(true);
+    expect(
+      compiled.modules.filter((m) => m.identity === base.entryIdentity),
+    ).toHaveLength(1);
+    expect(
+      compiled.modules.filter((m) => m.identity === mid.entryIdentity),
+    ).toHaveLength(1);
+
+    // The mounted middle module's own fabric edge resolves in records AND in
+    // write-back form (matching what its own publish produced).
+    const midRecord = compiled.graph.records.get(
+      `cf:module/${mid.entryIdentity}`,
+    )!;
+    expect(midRecord.resolutions?.[`cf:pattern:${base.entryIdentity}`]).toBe(
+      `cf:module/${base.entryIdentity}`,
+    );
+    const midModule = compiled.modules.find((m) =>
+      m.identity === mid.entryIdentity
+    );
+    expect(midModule?.imports).toContainEqual({
+      specifier: `cf:pattern:${base.entryIdentity}`,
+      targetIdentity: base.entryIdentity,
+    });
+
+    const evaluated = engine.evaluateRecordGraph(
+      compiled.id,
+      compiled.graph,
+      compiled.mainSpecifier,
+      program.files,
+    );
+    expect(evaluated.main?.y()).toBe(102);
+  });
+
+  it("skips the TypeScript compile when every module, including mounts, is cached", async () => {
+    const dependency = await publish(dependencyProgram(6));
+    const program = importerProgram(`cf:pattern:${dependency.entryIdentity}`);
+
+    let firstTransformed = 0;
+    const first = await engine.compileToRecordGraph(program, {
+      fabricImports: { space },
+      getTransformedProgram: () => {
+        firstTransformed++;
+      },
+    });
+    expect(firstTransformed).toBe(1);
+
+    const artifacts = new Map(
+      first.modules.map((m) => [m.identity, {
+        js: m.js,
+        ...(m.sourceMap === undefined ? {} : { sourceMap: m.sourceMap }),
+      }]),
+    );
+    let requested: string[] | undefined;
+    let secondTransformed = 0;
+    const second = await engine.compileToRecordGraph(program, {
+      fabricImports: { space },
+      getTransformedProgram: () => {
+        secondTransformed++;
+      },
+      precompiledModulesFor: ({ identities }) => {
+        requested = identities;
+        return Promise.resolve(artifacts);
+      },
+    });
+
+    // The cache was queried for the mounted identity too, and the full hit
+    // skipped the TypeScript compile entirely (the transform callback only
+    // fires inside compileToModules).
+    expect(requested).toContain(dependency.entryIdentity);
+    expect(secondTransformed).toBe(0);
+    expect(second.entryIdentity).toBe(first.entryIdentity);
+
+    const evaluated = engine.evaluateRecordGraph(
+      second.id,
+      second.graph,
+      second.mainSpecifier,
+      program.files,
+    );
+    expect(evaluated.main?.y()).toBe(7);
+  });
+
+  it("refuses to write back modules from an unpinned (dev) compile", async () => {
+    const dependency = await publish(dependencyProgram(8));
+    const { cell } = await writePatternMeta(dependency.entryIdentity);
+    await writeSlug("dep", cell);
+
+    const compiled = await engine.compileToRecordGraph(
+      importerProgram("cf:dep"),
+      { fabricImports: { space, allowUnpinned: true } },
+    );
+
+    const tx = runtime.edit();
+    try {
+      expect(() =>
+        writeSourceDocs(
+          runtime,
+          space,
+          compiled.modules,
+          compiled.entryIdentity,
+          tx,
+        )
+      ).toThrow("unpinned fabric import 'cf:dep'");
+    } finally {
+      tx.abort?.();
+    }
   });
 
   it("compiles already-resolved stored sources with fabric imports", async () => {
