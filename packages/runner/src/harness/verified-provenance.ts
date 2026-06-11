@@ -51,14 +51,15 @@ export function recordVerifiedProvenance(
   if (!provenanceByFn.has(fn)) provenanceByFn.set(fn, provenance);
 }
 
-/** The provenance for a function registered during verified evaluation. */
+/**
+ * The provenance for a function registered during verified evaluation. Only
+ * functions are ever recorded (see `recordVerifiedProvenance`), so any
+ * non-function key is a guaranteed miss.
+ */
 export function getVerifiedProvenance(
   fn: unknown,
 ): VerifiedProvenance | undefined {
-  if (typeof fn !== "function" && (typeof fn !== "object" || fn === null)) {
-    return undefined;
-  }
-  return provenanceByFn.get(fn as object);
+  return typeof fn === "function" ? provenanceByFn.get(fn) : undefined;
 }
 
 /**

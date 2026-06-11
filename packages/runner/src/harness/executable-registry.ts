@@ -8,10 +8,6 @@ import { VERIFIED_BINDING_METADATA_FIELD } from "@commonfabric/utils/sandbox-con
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 import type { HarnessedFunction } from "./types.ts";
 
-type AssociatedLookup = (
-  implementationRef: string,
-) => HarnessedFunction | undefined;
-
 interface AssociatedFunction {
   implementationRef: string;
   implementation: HarnessedFunction;
@@ -202,13 +198,7 @@ export class ExecutableRegistry {
       throw new Error("unsafe host trust requires a non-empty reason");
     }
     const registry = new Map<string, HarnessedFunction>();
-    this.collectAssociatedFunctions(
-      value,
-      registry,
-      new Set(),
-      undefined,
-      true,
-    );
+    this.collectAssociatedFunctions(value, registry, new Set(), true);
     for (const [implementationRef, implementation] of registry) {
       this.trustedHostFunctionIndex.set(implementationRef, implementation);
     }
@@ -360,7 +350,6 @@ export class ExecutableRegistry {
     value: unknown,
     registry: Map<string, HarnessedFunction>,
     seen: Set<unknown>,
-    fallbackLookup?: AssociatedLookup,
     allowMintMissingRefs = false,
   ): void {
     if (!value || (typeof value !== "object" && typeof value !== "function")) {
@@ -373,7 +362,6 @@ export class ExecutableRegistry {
 
     const associated = this.extractAssociatedFunction(
       value,
-      fallbackLookup,
       allowMintMissingRefs,
     );
     if (associated) {
@@ -385,7 +373,6 @@ export class ExecutableRegistry {
         child,
         registry,
         seen,
-        fallbackLookup,
         allowMintMissingRefs,
       );
     }
@@ -393,7 +380,6 @@ export class ExecutableRegistry {
 
   private extractAssociatedFunction(
     value: unknown,
-    fallbackLookup?: AssociatedLookup,
     allowMintMissingRefs = false,
   ): AssociatedFunction | null {
     const record = value as {
@@ -428,17 +414,10 @@ export class ExecutableRegistry {
         }
         : null;
     }
-    if (typeof record.implementationRef !== "string") {
-      return null;
-    }
-
-    const rebound = fallbackLookup?.(record.implementationRef);
-    return rebound
-      ? {
-        implementationRef: record.implementationRef,
-        implementation: rebound,
-      }
-      : null;
+    // A ref-only record (no live implementation) carries nothing executable.
+    // The lookup that used to rebind such refs went away with the deleted
+    // pattern-scoped registries (#4013).
+    return null;
   }
 
   private ensureTrustedHostImplementationRef(

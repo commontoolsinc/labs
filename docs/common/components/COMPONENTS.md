@@ -104,7 +104,9 @@ cell means none confirmed — check the component source before assuming.
 | `cf-drag-source` | Wraps draggable content; pairs with `cf-drop-zone` (see [drag-and-drop](../patterns/meta/drag-and-drop.md)) | `$cell` |
 | `cf-draggable` | Absolutely-positioned draggable container (x/y) | |
 | `cf-drop-zone` | Droppable region emitting `cf-drop` events (see [drag-and-drop](../patterns/meta/drag-and-drop.md)) | |
+| `cf-empty-state` | Centered, muted placeholder for empty lists (see [cf-empty-state](#cf-empty-state)) | |
 | `cf-fab` | Morphing floating action button that expands into a panel | |
+| `cf-field` | Labeled field wrapper: muted label, optional required/error/help text (see [cf-field](#cf-field)) | |
 | `cf-file-download` | File download button (encapsulates blob/anchor download) | `$data`, `$filename` |
 | `cf-file-input` | Generic file upload | |
 | `cf-form` | Transactional form wrapper buffering field writes until submit (see [cf-form](#cf-form)) | |
@@ -114,7 +116,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-heading` | Theme-compliant heading replacing `h1`–`h6` | |
 | `cf-hgroup` | Horizontal group with automatic gap management | |
 | `cf-hscroll` | Horizontal scroll container | |
-| `cf-hstack` | Horizontal stack layout (flexbox) | |
+| `cf-hstack` | Horizontal stack layout (flexbox) (see [stacks](#cf-vstack--cf-hstack)) | |
 | `cf-iframe` | Iframe for executing arbitrary scripts | |
 | `cf-image-input` | Image capture/upload with compression, EXIF, camera support | |
 | `cf-input` | Text input with validation and reactive binding | `$value` |
@@ -167,7 +169,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-table` | Semantic table with striped/hover/bordered styling | |
 | `cf-tabs` | Container managing ARIA tab navigation and panels | `$value` |
 | `cf-tags` | Tag pills with add/remove functionality | |
-| `cf-text` | Generic text primitive for non-label typography | |
+| `cf-text` | Generic text primitive for non-label typography (see [cf-text](#cf-text)) | |
 | `cf-textarea` | Multi-line text input with auto-resize and reactive binding | `$value` |
 | `cf-theme` | Provides a theme to a subtree and applies CSS variables | |
 | `cf-tile` | Page/item preview tile with click handling | |
@@ -182,7 +184,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-vgroup` | Vertical group with automatic gap management | |
 | `cf-voice-input` | Voice recording and transcription | `$transcription` |
 | `cf-vscroll` | Vertical scroll container (snap-to-bottom, fade edges) | |
-| `cf-vstack` | Vertical stack layout (flexbox) | |
+| `cf-vstack` | Vertical stack layout (flexbox) (see [stacks](#cf-vstack--cf-hstack)) | |
 | `cf-webhook` | Webhook integration: receives payloads into a stream | `$inbox`, `$config` |
 
 ---
@@ -275,6 +277,58 @@ decisions) live in
 
 ---
 
+## cf-field
+
+`cf-field` is a layout/typography wrapper for labeled form fields. It replaces
+the hand-rolled label-above-control stack repeated throughout patterns:
+
+```tsx
+// Before
+<cf-vstack gap="1">
+  <label style={{ fontSize: "12px", color: "#6b7280" }}>Email</label>
+  <cf-input type="email" $value={address} />
+</cf-vstack>
+
+// After
+<cf-field label="Email">
+  <cf-input type="email" $value={address} />
+</cf-field>
+```
+
+Attributes:
+
+- `label` — small muted label rendered above the control
+- `required` — appends a danger-colored asterisk to the label
+- `error` — error text below the control in the danger color (replaces `help`
+  while set)
+- `help` — muted helper text below the control
+
+The default slot takes any control (`cf-input`, `cf-select`, `cf-textarea`,
+…). All colors and sizes come from theme tokens, so fields adapt to the
+ambient `cf-theme`.
+
+```tsx
+<cf-field label="Username" required error={usernameError}>
+  <cf-input $value={username} placeholder="Pick a username" />
+</cf-field>
+
+<cf-field label="Bio" help="Shown on your public profile.">
+  <cf-textarea $value={bio} />
+</cf-field>
+```
+
+Notes:
+
+- `cf-field` is presentation only — it renders whatever `error` string it is
+  given. Validation logic and submit gating belong to
+  [`cf-form`](#cf-form) or the pattern.
+- Shadow DOM prevents a native `for`/`id` association with the slotted
+  control, so clicking the label focuses (and for custom elements, clicks)
+  the first slotted element instead — same approach as `cf-label`. For full
+  assistive-technology support, also set `aria-label` on the control itself.
+
+---
+
 ## cf-render
 
 Renders pattern instances for composition.
@@ -336,6 +390,89 @@ fade-edges, or a styled/hidden scrollbar.
   </cf-vscroll>
   <cf-message-input slot="footer" />
 </cf-screen>
+```
+
+---
+
+## cf-empty-state
+
+Centered, muted placeholder for empty lists and regions. Use instead of ad-hoc
+`<div style="text-align: center; color: ...; padding: 2rem;">` blocks.
+
+The message comes from the `message` attribute (simple case) or the default
+slot. Optional `icon` and `action` slots render above and below the message.
+
+```tsx
+// Simple case — message attribute
+{items.get().length === 0
+  ? <cf-empty-state message="No items yet. Add one below!" />
+  : null}
+
+// With icon and a call to action
+<cf-empty-state>
+  <span slot="icon">📋</span>
+  Your shopping list is empty.
+  <cf-button slot="action" size="sm" onClick={addItem}>
+    Add first item
+  </cf-button>
+</cf-empty-state>
+```
+
+---
+
+## cf-text
+
+Generic text primitive for non-label typography: captions, helper copy,
+metadata, descriptions. Use `cf-label` only when text labels a specific
+control.
+
+- `variant` — typography role: `caption`, `body-compact`, `body` (default),
+  `body-large`, `heading-sm`, `heading-md`, `heading-lg`
+- `tone` — semantic color: `default`, `muted`, `tertiary`, `disabled`,
+  `primary`, `success`, `warning`, `error`
+- `block` — render as block text instead of inline text
+- `truncate` — clip overflowing text to a single line with an ellipsis. Use
+  instead of ad-hoc
+  `style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"`.
+  `truncate` implies block display, so combining it with `block` is allowed
+  but redundant. The host also gets `min-width: 0` so it shrinks and
+  truncates correctly inside flex rows like `cf-hstack`.
+
+```tsx
+// Truncated note next to fixed-width siblings in a row
+<cf-hstack gap="2" align="center">
+  <cf-text truncate tone="muted">{item.notes}</cf-text>
+  <cf-badge size="xs">{item.status}</cf-badge>
+</cf-hstack>
+```
+
+---
+
+## cf-vstack / cf-hstack
+
+Vertical and horizontal flexbox stacks. Shared layout props:
+
+- `gap` — space between items (`0`–`24` numeric scale or `xs`–`xl`)
+- `align` / `justify` — flexbox alignment
+- `reverse` — reverse the direction (`wrap` is cf-hstack only)
+- `padding` — uniform padding around the stack (same scale as `gap`)
+- `px` / `py` — horizontal / vertical axis padding (same scale)
+- `pt` / `pr` / `pb` / `pl` — single-side padding (same scale)
+
+Padding precedence: single-side props (`pt`/`pr`/`pb`/`pl`) override the axis
+props (`px`/`py`) on their side, which override the uniform `padding`. Use
+these instead of inline `style="padding-top: ..."` overrides.
+
+```tsx
+// Uniform padding, but tighter on top
+<cf-vstack gap="2" padding="4" pt="2">
+  {items}
+</cf-vstack>
+
+// Axis-only padding
+<cf-hstack gap="2" px="4" py="1">
+  {toolbarButtons}
+</cf-hstack>
 ```
 
 ---

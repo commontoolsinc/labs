@@ -186,25 +186,59 @@ describe("module", () => {
       expect(clickPattern.result).toEqual({
         click: {
           $alias: {
-            cell: "internal",
-            path: ["stream:click"],
+            partialCause: { stream: "click" },
+            path: [],
             schema: true,
             scope: "space",
           },
         },
       });
-      expect(clickPattern.initial).toEqual({
-        internal: {
-          "stream:click": { $stream: true },
-        },
-      });
+      expect(clickPattern.derivedInternalCells).toEqual([{
+        partialCause: { stream: "click" },
+        schema: { default: { $stream: true } },
+      }]);
       const handlerInputs = clickPattern.nodes[0].inputs as {
         $event: unknown;
       };
       expect(handlerInputs.$event).toEqual({
         $alias: {
-          cell: "internal",
-          path: ["stream:click"],
+          partialCause: { stream: "click" },
+          path: [],
+          schema: true,
+          scope: "space",
+        },
+      });
+    });
+
+    it("serializes anonymous stream roots with partial causes", () => {
+      const clickHandler = handler(
+        false,
+        false,
+        (_event: unknown, _state: unknown) => {},
+      );
+
+      const clickPattern = pattern(() => clickHandler({} as never));
+
+      const generatedStreamCause = { $generated: 0, $kind: "stream" };
+      expect(clickPattern.result).toEqual({
+        $alias: {
+          partialCause: generatedStreamCause,
+          path: [],
+          schema: true,
+          scope: "space",
+        },
+      });
+      expect(clickPattern.derivedInternalCells).toEqual([{
+        partialCause: generatedStreamCause,
+        schema: { default: { $stream: true } },
+      }]);
+      const handlerInputs = clickPattern.nodes[0].inputs as {
+        $event: unknown;
+      };
+      expect(handlerInputs.$event).toEqual({
+        $alias: {
+          partialCause: generatedStreamCause,
+          path: [],
           schema: true,
           scope: "space",
         },
@@ -216,10 +250,9 @@ describe("module", () => {
         const value = new CellImpl<number>(
           runtime,
           undefined,
-          { path: [], space },
+          { path: [], space, schema: { default: 1 } },
           false,
         );
-        value.setInitialValue(1);
         return {
           value: value.for(["a", "b"], true),
         };
@@ -227,12 +260,12 @@ describe("module", () => {
 
       expect(arrayCausePattern.result).toEqual({
         value: {
-          $alias: { cell: "internal", path: ['["a","b"]'], scope: "space" },
-        },
-      });
-      expect(arrayCausePattern.initial).toEqual({
-        internal: {
-          '["a","b"]': 1,
+          $alias: {
+            partialCause: ["a", "b"],
+            path: [],
+            schema: { default: 1 },
+            scope: "space",
+          },
         },
       });
     });

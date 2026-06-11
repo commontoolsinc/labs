@@ -62,6 +62,11 @@ interface SigilLink {
   };
 }
 
+interface InternalManifestEntry {
+  partialCause: FabricValue;
+  link: SigilLink;
+}
+
 type EntityDocumentField = FabricValue | SourceLink | SigilLink | undefined;
 
 interface EntityDocument {
@@ -69,7 +74,7 @@ interface EntityDocument {
   source?: SourceLink; // {"/":"<short-id>"} -> resolves to of:<short-id> in same space.
   pattern?: SigilLink; // Well-known metadata link to a pattern cell.
   argument?: SigilLink; // Well-known metadata link to an argument cell.
-  internal?: SigilLink; // Well-known metadata link to internal state.
+  internal?: InternalManifestEntry[]; // Manifest of derived internal cells.
   result?: SigilLink; // Well-known metadata link back to a result cell.
   schema?: FabricValue; // Optional schema metadata.
   slug?: string; // Optional URL/address metadata.
@@ -112,14 +117,16 @@ Canonical examples:
 | Explicit deletion | `Delete { type: "delete", id, parent }` | Tombstone; the entity is removed from the visible head |
 
 **Metadata links and short links**: The runtime metadata fields `pattern`,
-`argument`, `internal`, and `result` use the same sigil form as graph/entity
-links: `{"/":{"link@1":{...}}}`. The older `source` property, when present, uses
-the separate short-link form `{"/":"<short-id>"}` and resolves to
+`argument`, and `result` use the same sigil form as graph/entity links:
+`{"/":{"link@1":{...}}}`. The `internal` field is different: it is raw metadata
+containing a manifest array whose entries have a `partialCause` and a sigil
+`link` to one derived internal cell. The older `source` property, when present,
+uses the separate short-link form `{"/":"<short-id>"}` and resolves to
 `of:<short-id>` in the same space. CFC metadata also uses its own compact stored
 shape and is converted to a CID sigil link during traversal. When the server
 executes a subscription with graph traversal, it MUST follow metadata links such
-as `pattern`, `argument`, `internal`, and `result` transitively to include the
-full provenance chain.
+as `pattern`, `argument`, and `result`, and it MUST also follow each link listed
+in the `internal` manifest, transitively, to include the full provenance chain.
 
 **Document paths**: Transaction/storage reads and writes operate on full
 document paths. For example, metadata links live at top-level paths like

@@ -1,6 +1,5 @@
 import { App } from "../shared/mod.ts";
 import { type RuntimeClient } from "@commonfabric/runtime-client";
-
 declare global {
   var app: App;
   var commonfabric: {

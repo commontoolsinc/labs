@@ -697,10 +697,7 @@ describe("json-utils", () => {
         ],
       };
 
-      const result = toJSONWithLegacyAliases(
-        tree as any,
-        new Map(),
-      ) as any;
+      const result = toJSONWithLegacyAliases(tree as any) as any;
 
       // All 5 children should have the full style object
       for (let i = 0; i < 5; i++) {
@@ -716,10 +713,7 @@ describe("json-utils", () => {
       const circular: any = { name: "root", child: {} };
       circular.child.parent = circular; // true circular reference
 
-      const result = toJSONWithLegacyAliases(
-        circular as any,
-        new Map(),
-      ) as any;
+      const result = toJSONWithLegacyAliases(circular as any) as any;
 
       // The root should serialize, but the circular back-reference should be {}
       expect(result.name).toEqual("root");
@@ -736,10 +730,7 @@ describe("json-utils", () => {
         ],
       };
 
-      const result = toJSONWithLegacyAliases(
-        tree as any,
-        new Map(),
-      ) as any;
+      const result = toJSONWithLegacyAliases(tree as any) as any;
 
       expect(result.items[0].meta).toEqual({ author: "test", version: 1 });
       expect(result.items[1].meta).toEqual({ author: "test", version: 1 });
@@ -756,13 +747,18 @@ describe("json-utils", () => {
         path: [],
       });
 
-      const paths = new Map();
-      // Cast to any to bypass strict type checks for test purposes
-      paths.set(cellWithFalseSchema as any, ["path", "to", "cell"]);
-
       const result = toJSONWithLegacyAliases(
         cellWithFalseSchema as any,
-        paths,
+        (cell) => {
+          const { schema, scope } = cell.export();
+          return {
+            "$alias": {
+              path: ["path", "to", "cell"],
+              ...(schema !== undefined && { schema }),
+              ...(scope !== undefined && { scope }),
+            },
+          };
+        },
       );
 
       expect(result).toEqual({

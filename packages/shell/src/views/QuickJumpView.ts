@@ -2,6 +2,7 @@ import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
+import type { DID } from "@commonfabric/identity";
 import { Task } from "@lit/task";
 import { navigate } from "../../shared/mod.ts";
 import { PageHandle } from "@commonfabric/runtime-client";
@@ -96,6 +97,14 @@ export class XQuickJumpView extends BaseView {
   @property({ attribute: false })
   accessor rt: RuntimeInternals | undefined = undefined;
 
+  /** The resolved space DID of the current view (view state). */
+  @property({ attribute: false })
+  accessor space: DID | undefined = undefined;
+
+  /** Human-readable space name of the current view, when it has one. */
+  @property({ attribute: false })
+  accessor spaceName: string | undefined = undefined;
+
   @state()
   private accessor query = "";
 
@@ -105,11 +114,11 @@ export class XQuickJumpView extends BaseView {
   private inputEl?: HTMLInputElement | null;
 
   private _pieces = new Task(this, {
-    task: async ([rt]) => {
-      if (!rt) return undefined;
-      await rt.synced();
+    task: async ([rt, space]) => {
+      if (!rt || !space) return undefined;
+      await rt.synced(space);
 
-      const piecesListCell = await rt.getPiecesListCell();
+      const piecesListCell = await rt.getPiecesListCell(space);
       await piecesListCell.sync();
 
       const piecesList = piecesListCell.get() as any[];
@@ -130,7 +139,7 @@ export class XQuickJumpView extends BaseView {
       */
       return [];
     },
-    args: () => [this.rt],
+    args: () => [this.rt, this.space],
   });
 
   override updated(changed: Map<string, unknown>) {
@@ -244,9 +253,13 @@ export class XQuickJumpView extends BaseView {
   };
 
   private navigateTo(id: string) {
-    const spaceName = this.rt?.spaceName();
-    if (!spaceName) return;
-    navigate({ spaceName, pieceId: id });
+    if (this.spaceName) {
+      navigate({ spaceName: this.spaceName, pieceId: id });
+    } else if (this.space) {
+      navigate({ spaceDid: this.space, pieceId: id });
+    } else {
+      return;
+    }
     this.close();
   }
 

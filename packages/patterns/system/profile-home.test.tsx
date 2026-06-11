@@ -20,6 +20,14 @@ export default pattern(() => {
     }
   });
 
+  // A remove event without a cell must be a no-op — the consolidated
+  // mutateElements writer dispatches on the instance's bound mode, so a
+  // malformed remove must never fall through to an add (cf-review on
+  // CT-1698).
+  const action_remove_with_empty_event = action(() => {
+    profile.removeElement.send({});
+  });
+
   const action_clear_name = action(() => {
     profile.setName.send({ name: "" });
   });
@@ -56,19 +64,17 @@ export default pattern(() => {
       { assertion: assert_name_set },
       { action: action_clear_name },
       { assertion: assert_name_cleared },
-      // Skipped under CFC enforcement: addElement instantiates a fresh
-      // ProfileCatalogCard inside the handler and links it into the
-      // writeAuthorizedBy-protected `elements` list in the same transaction.
-      // The new instance's doc has no stored CFC metadata and no pending
-      // schema input yet, so the fail-closed link-write rule rejects the
-      // commit ("missing link source metadata ... at /elements/0").
-      // Re-enable once the runtime counts a same-transaction pattern
-      // instantiation as pending source metadata (or the pattern
-      // pre-materializes elements).
-      { action: action_add_catalog_element, skip: true },
-      { assertion: assert_added_element, skip: true },
-      { action: action_remove_catalog_element, skip: true },
-      { assertion: assert_removed_element, skip: true },
+      // Add/remove exercise the full owner-protected element write stack:
+      // the same-transaction card instantiation linked into the
+      // writeAuthorizedBy-protected list (prepare's setup-schema / child-doc
+      // link-label hatches) and the single authorized `mutateElements`
+      // writer behind every mutation surface (CT-1698).
+      { action: action_add_catalog_element },
+      { assertion: assert_added_element },
+      { action: action_remove_catalog_element },
+      { assertion: assert_removed_element },
+      { action: action_remove_with_empty_event },
+      { assertion: assert_removed_element },
     ],
   };
 });

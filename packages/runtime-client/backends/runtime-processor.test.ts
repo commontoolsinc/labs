@@ -18,6 +18,7 @@ import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { cellRefToSigilLink } from "./utils.ts";
 import { Runtime } from "@commonfabric/runner";
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import * as V2Storage from "../../runner/src/storage/v2.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
 
@@ -894,6 +895,60 @@ describe("RuntimeProcessor CFC label IPC", () => {
     });
   });
 
+  it("redacts Caveat.source from the introspection response (audit 28b)", async () => {
+    const ref: CellRef = {
+      id: "of:cfc-caveat-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink: () => ({
+          runtime: {
+            readTx: () => ({
+              readOrThrow: () => ({
+                value: "labelled data",
+                cfc: {
+                  version: 1,
+                  schemaHash: "test-schema",
+                  labelMap: {
+                    version: 1,
+                    entries: [{
+                      path: [],
+                      label: {
+                        confidentiality: [{
+                          type: CFC_ATOM_TYPE.Caveat,
+                          kind: "derived-from",
+                          source: "did:key:alice",
+                        }],
+                      },
+                    }],
+                  },
+                },
+              }),
+            }),
+          },
+          getAsNormalizedFullLink: () => ref,
+          getMetaRaw: () => undefined,
+          sync: () => Promise.resolve(),
+        }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    const response = await RuntimeProcessor.prototype.handleCellGetCfcLabel
+      .call(
+        processor,
+        { type: RequestType.CellGetCfcLabel, cell: ref },
+      );
+    const atom = response.cfcLabel?.entries[0].label.confidentiality
+      ?.[0] as Record<string, unknown>;
+    // The caveat survives with its kind/type, but the source identity is gone.
+    expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
+    expect(atom.kind).toBe("derived-from");
+    expect("source" in atom).toBe(false);
+  });
+
   it("returns label views on resolved cell refs", () => {
     const sourceRef: CellRef = {
       id: "of:cfc-label-source" as CellRef["id"],
@@ -1033,7 +1088,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     expect(sourceSynced).toBe(false);
   });
 
-  it("syncs pattern, argument, and internal metadata links before reading labels", async () => {
+  it("syncs pattern and argument metadata links before reading labels", async () => {
     const resultRef: CellRef = {
       id: "of:cfc-label-sync-result" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
@@ -1048,12 +1103,6 @@ describe("RuntimeProcessor CFC label IPC", () => {
     };
     const argumentRef: CellRef = {
       id: "of:cfc-label-sync-argument" as CellRef["id"],
-      space: "did:key:test" as CellRef["space"],
-      scope: "space",
-      path: [],
-    };
-    const internalRef: CellRef = {
-      id: "of:cfc-label-sync-internal" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
       scope: "space",
       path: [],
@@ -1081,7 +1130,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     const makeCell = (
       name: string,
       ref: CellRef,
-      links: Partial<Record<"pattern" | "argument" | "internal", CellRef>> = {},
+      links: Partial<Record<"pattern" | "argument", CellRef>> = {},
     ) => {
       let synced = false;
       return {
@@ -1089,10 +1138,11 @@ describe("RuntimeProcessor CFC label IPC", () => {
         sourceURI: `${ref.space}/${ref.scope}/${ref.id}`,
         runtime,
         getAsNormalizedFullLink: () => ref,
-        getMetaRaw: (metaField: "pattern" | "argument" | "internal") =>
-          synced && links[metaField] !== undefined
+        getMetaRaw: (metaField: "pattern" | "argument") => {
+          return synced && links[metaField] !== undefined
             ? cellRefToSigilLink(links[metaField]!)
-            : undefined,
+            : undefined;
+        },
         sync: () => {
           synced = true;
           syncLog.push(name);
@@ -1105,12 +1155,10 @@ describe("RuntimeProcessor CFC label IPC", () => {
       makeCell("result", resultRef, {
         pattern: patternRef,
         argument: argumentRef,
-        internal: internalRef,
       }),
     );
     cells.set(patternRef.id, makeCell("pattern", patternRef));
     cells.set(argumentRef.id, makeCell("argument", argumentRef));
-    cells.set(internalRef.id, makeCell("internal", internalRef));
     const processor = { runtime } as unknown as RuntimeProcessor;
 
     await expect(
@@ -1132,7 +1180,6 @@ describe("RuntimeProcessor CFC label IPC", () => {
       "result",
       "pattern",
       "argument",
-      "internal",
       "result",
     ]);
   });
@@ -1161,7 +1208,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     const makeCell = (
       name: string,
       ref: CellRef,
-      links: Partial<Record<"pattern" | "argument" | "internal", CellRef>> = {},
+      links: Partial<Record<"pattern" | "argument", CellRef>> = {},
     ) => {
       let synced = false;
       return {
@@ -1169,10 +1216,11 @@ describe("RuntimeProcessor CFC label IPC", () => {
         sourceURI: `${ref.space}/${ref.scope}/${ref.id}`,
         runtime,
         getAsNormalizedFullLink: () => ref,
-        getMetaRaw: (metaField: "pattern" | "argument" | "internal") =>
-          synced && links[metaField] !== undefined
+        getMetaRaw: (metaField: "pattern" | "argument") => {
+          return synced && links[metaField] !== undefined
             ? cellRefToSigilLink(links[metaField]!)
-            : undefined,
+            : undefined;
+        },
         sync: () => {
           synced = true;
           syncLog.push(name);
@@ -1189,7 +1237,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     cells.set(
       patternRef.id,
       makeCell("pattern", patternRef, {
-        internal: resultRef,
+        argument: resultRef,
       }),
     );
     const processor = { runtime } as unknown as RuntimeProcessor;
@@ -1640,26 +1688,30 @@ describe("RuntimeProcessor per-space piece contexts", () => {
       pieceManager,
       cc,
       getSpaceCtx,
-      checkRootPatternSpace:
-        (RuntimeProcessor.prototype as any).checkRootPatternSpace,
     };
     return { processor, runtime, homeSpace };
   }
 
-  it("resolves no-space and the home space to the initialize-time context", async () => {
+  it("resolves the home space to the initialize-time context and rejects a missing space", async () => {
     const { processor, runtime, homeSpace } = await makeProcessorState();
     try {
-      expect(processor.getSpaceCtx()).toBe(processor.spaces.get(homeSpace));
+      expect(processor.getSpaceCtx(homeSpace)).toBe(
+        processor.spaces.get(homeSpace),
+      );
       expect(processor.getSpaceCtx(homeSpace).pieceManager).toBe(
         processor.pieceManager,
       );
+      expect(() =>
+        (processor as { getSpaceCtx: (s?: string) => unknown })
+          .getSpaceCtx()
+      ).toThrow("name a space");
     } finally {
       await runtime.dispose();
     }
   });
 
   it("lazily builds a distinct, cached context for a foreign space", async () => {
-    const { processor, runtime } = await makeProcessorState();
+    const { processor, runtime, homeSpace } = await makeProcessorState();
     const spaceB = (await Identity.fromPassphrase(
       "runtime-processor-space-b",
     )).did();
@@ -1669,7 +1721,7 @@ describe("RuntimeProcessor per-space piece contexts", () => {
       expect(ctxB.pieceManager.getSpace()).toBe(spaceB);
       // Cached: the same context comes back, and the home context is intact.
       expect(processor.getSpaceCtx(spaceB)).toBe(ctxB);
-      expect(processor.getSpaceCtx().pieceManager).toBe(
+      expect(processor.getSpaceCtx(homeSpace).pieceManager).toBe(
         processor.pieceManager,
       );
     } finally {
@@ -1688,6 +1740,7 @@ describe("RuntimeProcessor per-space piece contexts", () => {
         type: RequestType.PageGet,
         pageId: "fid1-cross-space-probe",
         runIt: false,
+        space: homeSpace,
       });
       const resB = await handlePageGet.call(processor, {
         type: RequestType.PageGet,
@@ -1697,6 +1750,23 @@ describe("RuntimeProcessor per-space piece contexts", () => {
       });
       expect(resHome.page.cell.space).toBe(homeSpace);
       expect(resB.page.cell.space).toBe(spaceB);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("handleRuntimeSynced awaits every opened space, naming none", async () => {
+    const { processor, runtime } = await makeProcessorState();
+    const spaceB = (await Identity.fromPassphrase(
+      "runtime-processor-space-b",
+    )).did();
+    const handleRuntimeSynced =
+      (RuntimeProcessor.prototype as any).handleRuntimeSynced;
+    try {
+      processor.getSpaceCtx(spaceB);
+      // Resolves across home + spaceB over loopback storage; the request
+      // carries no space at all.
+      await handleRuntimeSynced.call(processor);
     } finally {
       await runtime.dispose();
     }
@@ -1715,29 +1785,6 @@ describe("RuntimeProcessor per-space piece contexts", () => {
       expect(managerFor.call(processor, spaceB)).toBeUndefined();
       const ctxB = processor.getSpaceCtx(spaceB);
       expect(managerFor.call(processor, spaceB)).toBe(ctxB.pieceManager);
-    } finally {
-      await runtime.dispose();
-    }
-  });
-
-  it("rejects root-pattern operations for foreign spaces", async () => {
-    const { processor, runtime, homeSpace } = await makeProcessorState();
-    const spaceB = (await Identity.fromPassphrase(
-      "runtime-processor-space-b",
-    )).did();
-    const handleGetSpaceRootPattern =
-      (RuntimeProcessor.prototype as any).handleGetSpaceRootPattern;
-    try {
-      await expect(handleGetSpaceRootPattern.call(processor, {
-        type: RequestType.GetSpaceRootPattern,
-        space: spaceB,
-      })).rejects.toThrow("home-space only");
-      // The home space (explicit or absent) stays permitted: the guard
-      // itself passes and the call proceeds into ensureDefaultPattern.
-      (processor as { checkRootPatternSpace: (s?: string) => void })
-        .checkRootPatternSpace(homeSpace);
-      (processor as { checkRootPatternSpace: (s?: string) => void })
-        .checkRootPatternSpace();
     } finally {
       await runtime.dispose();
     }

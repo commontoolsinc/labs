@@ -100,6 +100,90 @@ describe("event handling", () => {
     expect(eventResultCell.get()).toBe(2);
   });
 
+  it("awaits presyncInputs before running the handler body", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "presync before handler 1",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    const eventResultCell = runtime.getCell<number>(
+      space,
+      "presync before handler 2",
+      undefined,
+      tx,
+    );
+    eventResultCell.set(0);
+    tx.commit();
+
+    const order: string[] = [];
+    let releasePresync!: () => void;
+    const presyncDone = new Promise<void>((resolve) => {
+      releasePresync = resolve;
+    });
+
+    const eventHandler: EventHandler = (tx, event) => {
+      order.push("handler");
+      eventResultCell.withTx(tx).send(event);
+    };
+    eventHandler.presyncInputs = async (event) => {
+      order.push(`presync:${event}`);
+      await presyncDone;
+      order.push("presync-resolved");
+    };
+
+    runtime.scheduler.addEventHandler(
+      eventHandler,
+      eventCell.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 7);
+
+    // Give the scheduler a chance to dispatch; the handler must not run while
+    // presync is pending.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(order).toEqual(["presync:7"]);
+
+    releasePresync();
+    await eventResultCell.pull();
+
+    expect(order).toEqual(["presync:7", "presync-resolved", "handler"]);
+    expect(eventResultCell.get()).toBe(7);
+  });
+
+  it("dispatches the handler even when presyncInputs rejects (fail open)", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "presync fail open 1",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    const eventResultCell = runtime.getCell<number>(
+      space,
+      "presync fail open 2",
+      undefined,
+      tx,
+    );
+    eventResultCell.set(0);
+    tx.commit();
+
+    const eventHandler: EventHandler = (tx, event) => {
+      eventResultCell.withTx(tx).send(event);
+    };
+    eventHandler.presyncInputs = () =>
+      Promise.reject(new Error("presync boom"));
+
+    runtime.scheduler.addEventHandler(
+      eventHandler,
+      eventCell.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 3);
+
+    await eventResultCell.pull();
+    expect(eventResultCell.get()).toBe(3);
+  });
+
   it("should remove event handlers", async () => {
     const eventCell = runtime.getCell<number>(
       space,

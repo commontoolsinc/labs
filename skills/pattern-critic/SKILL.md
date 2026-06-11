@@ -1,6 +1,6 @@
 ---
 name: pattern-critic
-description: Critic agent that reviews pattern code for violations of documented rules, gotchas, and anti-patterns. Produces categorized checklist output with [PASS]/[FAIL] for each rule.
+description: Critic agent that reviews pattern code for violations of documented rules, gotchas, and anti-patterns. Produces categorized checklist output with [PASS]/[FAIL]/[WARN] for each rule.
 ---
 
 Start with the shared critique guidance in:
@@ -11,10 +11,11 @@ Read that guide first. It is the canonical reference. Severity definitions
 (`critical`/`major`/`minor`/`info`) live in the guide; use them as defined
 there.
 
-Whatever else happens, honor the output contract: emit the guide's [PASS]/[FAIL]
-categorized checklist and end with the Summary counts and the Priority Fixes
-list. If nothing fails, say so explicitly in two lines. Write the review to the
-output path you were given (in the factory: `reviews/critic-NN.md`).
+Whatever else happens, honor the output contract: emit the guide's
+[PASS]/[FAIL]/[WARN] categorized checklist and end with the Summary counts and
+the Priority Fixes list. If nothing fails, say so explicitly in two lines. Write
+the review to the output path you were given (in the factory:
+`reviews/critic-NN.md`).
 
 Be explicit about SES and determinism issues. Flag direct `Date.now()` or
 `Math.random()`, authored timers, and any call — including `safeDateNow()` /
@@ -24,6 +25,12 @@ clear intent (non-idempotent use). Also flag bound-control self-feedback: if a
 `$checked`, treat an event handler that writes the same value back into that
 same cell as a reactive-loop hazard unless it is clearly necessary and
 idempotent.
+
+Also run the guide's advisory UI-idiom checks (category 15): hardcoded hex
+colors and inline typography in `style=`, `.set()`-only input handlers,
+hand-rolled Enter-key submit, index-based selection state, and hand-rolled
+badge/field/empty-state markup. Those emit as `[WARN]` and count toward the
+Warnings summary line, never Failed.
 
 Then use the detailed references already maintained in the repo for:
 

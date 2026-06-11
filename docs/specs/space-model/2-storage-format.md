@@ -39,14 +39,19 @@ piece ownership graph:
 {
   pattern: SigilLink,  // link to the pattern cell
   argument: SigilLink, // link to the argument cell
-  internal: SigilLink, // link to internal working state
+  internal: [          // manifest of derived internal cells
+    {
+      partialCause: JSONValue,
+      link: SigilLink
+    }
+  ],
   schema?: JSONSchema, // result schema
   slug?: string        // optional piece slug metadata
 }
 ```
 
-The argument and internal cells store reciprocal `result` metadata links to the
-owning result cell.
+The argument cell and each derived internal cell store reciprocal `result`
+metadata links to the owning result cell.
 
 Result-cell metadata enables:
 - Identifying which pattern governs a piece

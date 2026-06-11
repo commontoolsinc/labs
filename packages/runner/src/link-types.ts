@@ -172,7 +172,10 @@ export function isWriteRedirectLink(
 
 /**
  * Check if value is a legacy alias.
- * @deprecated Switch to isWriteRedirectLink instead.
+ *
+ * While legacy aliases are no longer used as links, we do still use them in
+ * bindings in the intermediate form where we don't have enough detail to
+ * point to an actual cell.
  */
 export function isLegacyAlias(value: any): value is LegacyAlias {
   return isRecord(value) && "$alias" in value && isRecord(value.$alias) &&
@@ -231,9 +234,7 @@ export function parseLinkPrimitive(
 
     return {
       ...(id && { id }),
-      path: Array.isArray(alias.path)
-        ? alias.path.map((p) => p.toString())
-        : [],
+      path: alias.path,
       ...(base?.space && { space: base.space }),
       ...(alias.scope !== undefined
         ? { scope: alias.scope }

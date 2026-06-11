@@ -64,7 +64,8 @@ already does).
 **Reference:**
 
 - `packages/patterns/index.md` - Catalog of all pattern examples with summaries,
-  data types, and keywords
+  data types, and keywords. Check its "Status tiers" section before imitating
+  any pattern — only `exemplar` entries are style references.
 
 **Important:** Ignore the top level `deprecated-patterns` folder - it is
 defunct.

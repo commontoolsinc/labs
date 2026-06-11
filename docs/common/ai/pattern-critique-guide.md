@@ -199,6 +199,39 @@ state carry over? If not, it is probably `PerSession<>`.
 | handlers still work | existing functionality is not broken |
 | no unintended side effects | changes stay scoped to the intended area |
 
+### 15. Unidiomatic UI Authoring (advisory)
+
+Findings in this category are warnings, not failures: emit them as `[WARN]`
+lines in the checklist, count them under `Warnings` in the summary, and treat
+severity as `minor`. Skip files under `deprecated/`. The tells below are seed
+examples, not a boundary — the underlying principle is: if a shipped `cf-*`
+component or theme token already expresses the intent, hand-rolling it is a
+warning. Where a tell here overlaps category 6's "arbitrary one-off visual
+overrides" row, report it once, here, as `[WARN]` — not there as `[FAIL]`.
+
+| Look for | Why it's wrong | Use instead |
+|----------|----------------|-------------|
+| hex color literals inside `style=` strings or style objects (e.g. `#6b7280`) | bypasses theming; breaks dark mode and per-space themes | `--cf-theme-color-*` semantic tokens (preferred) or `--cf-colors-*` palette tokens — note the plural: no singular `--cf-color-*` family exists |
+| `font-size` / `font-weight` inside `style=` (e.g. `"font-size: 0.75rem; color: ..."`) | hand-rolled typography drifts off the type scale | `<cf-text variant="..." tone="...">` |
+| a handler whose entire body is `cell.set(event.detail?.value ?? ...)`, wired to `oncf-input`/`oncf-change` | re-implements two-way binding as boilerplate | `$value` / `$checked` on the control |
+| `if (event?.key === "Enter")` keydown handlers | re-implements submit by hand | `cf-input` emits `cf-submit` on Enter; multi-field forms use `cf-form` + a submit button |
+| `Writable<number>` selection index plus index-adjustment logic when the list mutates | indexes go stale on reorder/insert/remove and force compensation code (see `record.tsx` `trashSubPiece`) | hold the selected item itself in a `Writable<Item \| null>` — the stored link survives reorder and removal |
+| inline `padding` + `border-radius` + `background` pill/badge blobs; hand-rolled label-above-input stacks; hand-rolled centered "no items" divs | re-implements shipped components, each slightly differently | `cf-badge` / `cf-chip`; `cf-field` for labeled controls; `cf-empty-state` for empty lists |
+
+Do not warn on:
+
+- `var(--cf-...)` references inside `style=` — tokens in inline style are the
+  idiom for one-off layout. Exception: a reference to the undefined singular
+  family with a hex fallback (e.g. `var(--cf-color-gray-500, #6b7280)`) is
+  still a `[WARN]` — the token resolves to nothing, so the hex is what renders
+- genuinely dynamic inline styles computed from data (positions, sizes,
+  data-driven colors in charts or drag layers) where no static token applies
+- `$selectedIndex` on `cf-picker` — that is the component's own API, not
+  authored selection state
+- a handler doing dependent work beyond the single `.set()` (though if the
+  control is also cell-bound, the self-feedback rule in category 5 applies)
+- `Escape` or arrow-key handlers — no component affordance covers those
+
 ## Output Format
 
 The review should be emitted as a structured checklist with explicit pass/fail

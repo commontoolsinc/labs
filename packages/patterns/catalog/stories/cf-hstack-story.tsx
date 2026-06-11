@@ -76,7 +76,7 @@ export default pattern<HStackStoryInput, HStackStoryOutput>(() => {
               align="start"
               style="border: 1px dashed #cbd5e1; padding: 8px; border-radius: 4px; min-height: 60px;"
             >
-              <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+              <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                 align=start
               </span>
               <div style="background: #fde68a; padding: 4px 12px; border-radius: 4px; height: 40px;">
@@ -91,7 +91,7 @@ export default pattern<HStackStoryInput, HStackStoryOutput>(() => {
               align="center"
               style="border: 1px dashed #cbd5e1; padding: 8px; border-radius: 4px; min-height: 60px;"
             >
-              <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+              <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                 align=center
               </span>
               <div style="background: #bbf7d0; padding: 4px 12px; border-radius: 4px; height: 40px;">
@@ -106,7 +106,7 @@ export default pattern<HStackStoryInput, HStackStoryOutput>(() => {
               align="end"
               style="border: 1px dashed #cbd5e1; padding: 8px; border-radius: 4px; min-height: 60px;"
             >
-              <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+              <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                 align=end
               </span>
               <div style="background: #bfdbfe; padding: 4px 12px; border-radius: 4px; height: 40px;">

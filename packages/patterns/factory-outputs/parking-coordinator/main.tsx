@@ -1464,11 +1464,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
           {/* Header */}
           <div
             slot="header"
-            style="padding: 0.75rem 1rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--cf-color-gray-200);"
+            style="padding: 0.75rem 1rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--cf-colors-gray-200);"
           >
             <cf-heading level={4}>Parking</cf-heading>
             <div style="display: flex; align-items: center; gap: 0.75rem;">
-              <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
+              <span style="font-size: 0.875rem; color: var(--cf-colors-gray-500);">
                 {todayFormatted}
               </span>
               <cf-button
@@ -1497,7 +1497,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                 {noPeople
                   ? (
                     <cf-card>
-                      <span style="color: var(--cf-color-gray-500); font-size: 0.875rem;">
+                      <span style="color: var(--cf-colors-gray-500); font-size: 0.875rem;">
                         No team members yet — ask your admin to add people.
                       </span>
                     </cf-card>
@@ -1524,7 +1524,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           </span>
                           {stripSpotLabel
                             ? (
-                              <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                              <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                                 {stripSpotLabel}
                               </span>
                             )
@@ -1597,7 +1597,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                       </span>
                       {noPeople
                         ? (
-                          <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
+                          <span style="font-size: 0.875rem; color: var(--cf-colors-gray-500);">
                             No team members yet — ask your admin to add people.
                           </span>
                         )
@@ -1666,7 +1666,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                   <cf-hstack justify="between" align="center" wrap gap="2">
                     <cf-vstack gap="1">
                       <cf-heading level={6}>Admin Access</cf-heading>
-                      <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                      <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                         Demo manager access lets any user change who can manage
                         parking spots.
                       </span>
@@ -1688,7 +1688,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
                   {noPeople
                     ? (
-                      <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
+                      <span style="font-size: 0.875rem; color: var(--cf-colors-gray-500);">
                         Add people before assigning admins.
                       </span>
                     )
@@ -1706,7 +1706,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         align="center"
                         gap="2"
                         wrap
-                        style="padding: 0.5rem 0.75rem; border: 1px solid var(--cf-color-gray-200); border-radius: 0.75rem;"
+                        style="padding: 0.5rem 0.75rem; border: 1px solid var(--cf-colors-gray-200); border-radius: 0.75rem;"
                       >
                         <cf-vstack gap="0">
                           <cf-hstack gap="2" align="center" wrap>
@@ -1716,7 +1716,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                               variant={rowIsAdmin ? "accent" : "default"}
                             />
                           </cf-hstack>
-                          <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                          <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                             {rowEmail}
                           </span>
                         </cf-vstack>
@@ -1743,7 +1743,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
                 {weekMonthInfo
                   ? (
-                    <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                    <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                       {weekMonthInfo}
                     </span>
                   )
@@ -1773,7 +1773,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           borderRadius: "4px 4px 0 0",
                           color: isToday
                             ? "#92400e"
-                            : "var(--cf-color-gray-600)",
+                            : "var(--cf-colors-gray-600)",
                         }}
                       >
                         <span style="display: block;">{shortName}</span>
@@ -1790,7 +1790,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           padding: "0.25rem 0.5rem",
                           fontSize: "0.75rem",
                           fontWeight: "600",
-                          color: "var(--cf-color-gray-700)",
+                          color: "var(--cf-colors-gray-700)",
                           display: "flex",
                           alignItems: "center",
                         }}
@@ -1842,7 +1842,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   />
                                   {gridConflictName
                                     ? (
-                                      <span style="font-size: 0.625rem; color: var(--cf-color-red-600);">
+                                      <span style="font-size: 0.625rem; color: var(--cf-colors-red-600);">
                                         Already assigned to{" "}
                                         {gridConflictName}. Overwrite?
                                       </span>
@@ -1892,7 +1892,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       <cf-button
                                         variant="ghost"
                                         size="sm"
-                                        style="padding: 0; font-size: 0.625rem; line-height: 1; min-height: unset; color: var(--cf-color-red-500);"
+                                        style="padding: 0; font-size: 0.625rem; line-height: 1; min-height: unset; color: var(--cf-colors-red-500);"
                                         onClick={() =>
                                           cancelRequest.send({
                                             requestId: gridReq.id,
@@ -1904,7 +1904,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     : null}
                                   {gridIsManual
                                     ? (
-                                      <span style="position: absolute; top: 2px; right: 3px; font-size: 0.5rem; color: var(--cf-color-gray-400); font-weight: 700;">
+                                      <span style="position: absolute; top: 2px; right: 3px; font-size: 0.5rem; color: var(--cf-colors-gray-400); font-weight: 700;">
                                         M
                                       </span>
                                     )
@@ -1917,7 +1917,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     style={`color: ${
                                       gridIsToday
                                         ? "#92400e"
-                                        : "var(--cf-color-green-500)"
+                                        : "var(--cf-colors-green-500)"
                                     }; font-size: 0.625rem;`}
                                   >
                                     Free
@@ -1971,7 +1971,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           <cf-card style="text-align: center; padding: 1.5rem;">
                             <cf-vstack gap="2" align="center">
                               <span style="font-size: 2rem;">👥</span>
-                              <span style="color: var(--cf-color-gray-500); font-size: 0.875rem;">
+                              <span style="color: var(--cf-colors-gray-500); font-size: 0.875rem;">
                                 No team members yet. Add the first person below.
                               </span>
                             </cf-vstack>
@@ -2017,7 +2017,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           <cf-card
                             style={computed(() =>
                               isEditing
-                                ? "border: 2px solid var(--cf-color-blue-300);"
+                                ? "border: 2px solid var(--cf-colors-blue-500);"
                                 : ""
                             )}
                           >
@@ -2206,7 +2206,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       const err = editDraftVehicleError.get();
                                       if (!err) return null;
                                       return (
-                                        <span style="font-size: 0.75rem; color: var(--cf-color-red-600);">
+                                        <span style="font-size: 0.75rem; color: var(--cf-colors-red-600);">
                                           {err}
                                         </span>
                                       );
@@ -2247,7 +2247,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         <span style="font-weight: 600;">
                                           {personName}
                                         </span>
-                                        <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                                        <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                                           #{priorityRank}
                                         </span>
                                         {defaultSpot
@@ -2258,10 +2258,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                           )
                                           : null}
                                       </cf-hstack>
-                                      <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                                      <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                                         {email}
                                       </span>
-                                      <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                                      <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                                         {commuteIcon(commuteMode)} {commuteMode}
                                       </span>
                                     </cf-vstack>
@@ -2314,7 +2314,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
                                   {spotPreferences.length > 0
                                     ? (
-                                      <span style="font-size: 0.75rem; color: var(--cf-color-gray-400);">
+                                      <span style="font-size: 0.75rem; color: var(--cf-colors-gray-400);">
                                         Prefers: {spotPreferences.map((n) =>
                                           "#" + n
                                         )
@@ -2339,7 +2339,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     ? (
                                       <cf-card style="background: #fef2f2; border: 1px solid #fecaca;">
                                         <cf-vstack gap="1">
-                                          <span style="font-size: 0.75rem; color: var(--cf-color-red-700);">
+                                          <span style="font-size: 0.75rem; color: var(--cf-colors-red-700);">
                                             This person has upcoming requests.
                                             They will be preserved. Remove
                                             anyway?
@@ -2376,7 +2376,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
                       {addPersonFormOpen.get()
                         ? (
-                          <cf-card style="border: 2px dashed var(--cf-color-gray-200);">
+                          <cf-card style="border: 2px dashed var(--cf-colors-gray-200);">
                             <cf-vstack gap="2">
                               <cf-heading level={6}>Add Person</cf-heading>
                               <cf-hstack gap="2" wrap>
@@ -2553,7 +2553,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   const err = draftVehicleError.get();
                                   if (!err) return null;
                                   return (
-                                    <span style="font-size: 0.75rem; color: var(--cf-color-red-600);">
+                                    <span style="font-size: 0.75rem; color: var(--cf-colors-red-600);">
                                       {err}
                                     </span>
                                   );
@@ -2564,7 +2564,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 const err = addPersonError.get();
                                 if (!err) return null;
                                 return (
-                                  <span style="font-size: 0.75rem; color: var(--cf-color-red-600);">
+                                  <span style="font-size: 0.75rem; color: var(--cf-colors-red-600);">
                                     {err}
                                   </span>
                                 );
@@ -2666,7 +2666,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         </cf-checkbox>
                                         {spotDeactivateWarning
                                           ? (
-                                            <span style="font-size: 0.75rem; color: var(--cf-color-amber-600);">
+                                            <span style="font-size: 0.75rem; color: var(--cf-colors-warning);">
                                               Has upcoming allocations — they
                                               will remain.
                                             </span>
@@ -2706,8 +2706,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                           <span
                                             style={`font-weight: 700; font-size: 1rem; color: ${
                                               spotActive2
-                                                ? "var(--cf-color-gray-800)"
-                                                : "var(--cf-color-gray-400)"
+                                                ? "var(--cf-colors-gray-800)"
+                                                : "var(--cf-colors-gray-400)"
                                             };`}
                                           >
                                             #{spotNum2}
@@ -2716,8 +2716,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                             <span
                                               style={`font-size: 0.875rem; color: ${
                                                 spotActive2
-                                                  ? "var(--cf-color-gray-700)"
-                                                  : "var(--cf-color-gray-400)"
+                                                  ? "var(--cf-colors-gray-700)"
+                                                  : "var(--cf-colors-gray-400)"
                                               }; text-decoration: ${
                                                 spotActive2
                                                   ? "none"
@@ -2728,7 +2728,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                             </span>
                                             {spotNotes2
                                               ? (
-                                                <span style="font-size: 0.75rem; color: var(--cf-color-gray-400);">
+                                                <span style="font-size: 0.75rem; color: var(--cf-colors-gray-400);">
                                                   {spotNotes2}
                                                 </span>
                                               )
@@ -2769,7 +2769,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         ? (
                                           <cf-card style="background: #fef2f2; border: 1px solid #fecaca; margin-top: 0.5rem;">
                                             <cf-vstack gap="1">
-                                              <span style="font-size: 0.75rem; color: var(--cf-color-red-700);">
+                                              <span style="font-size: 0.75rem; color: var(--cf-colors-red-700);">
                                                 Spot #{spotNum2}{" "}
                                                 has upcoming allocations. They
                                                 will be preserved. Remove
@@ -2807,7 +2807,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
                           {addSpotFormOpen.get()
                             ? (
-                              <cf-card style="border: 2px dashed var(--cf-color-gray-200);">
+                              <cf-card style="border: 2px dashed var(--cf-colors-gray-200);">
                                 <cf-vstack gap="2">
                                   <cf-heading level={6}>Add Spot</cf-heading>
                                   <cf-hstack gap="2" wrap>
@@ -2846,7 +2846,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     const err = addSpotError.get();
                                     if (!err) return null;
                                     return (
-                                      <span style="font-size: 0.75rem; color: var(--cf-color-red-600);">
+                                      <span style="font-size: 0.75rem; color: var(--cf-colors-red-600);">
                                         {err}
                                       </span>
                                     );

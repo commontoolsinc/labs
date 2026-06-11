@@ -629,7 +629,9 @@ export class CFCodeEditor extends BaseElement {
         noteId: generateId(), // Ensure notes created via [[mention]] have unique IDs
       };
 
-      const page = await rt.createPage(pattern, inputs);
+      // The note is created in the same space as the pattern it backlinks
+      // from — creation, like every page op, names its space.
+      const page = await rt.createPage(pattern, this.pattern.space(), inputs);
       if (!page) {
         throw new Error("Could not create piece.");
       }

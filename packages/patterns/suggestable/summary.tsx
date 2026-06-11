@@ -59,7 +59,7 @@ const Summary = pattern<SummaryInput, SummaryOutput>(({ topic, context }) => {
         <cf-vstack gap="3" style="padding: 1.5rem;">
           {ifElse(
             response.pending,
-            <div style="color: var(--cf-color-text-secondary);">
+            <div style="color: var(--cf-theme-color-text-secondary);">
               <cf-loader show-elapsed /> Generating summary...
             </div>,
             <div style="line-height: 1.6; white-space: pre-wrap;">

@@ -27,6 +27,7 @@ export {
   mergeCfcLabelViews,
   rebaseCfcLabelView,
 } from "./label-view-state.ts";
+export { redactCaveatSourcesForDisplay } from "./label-view-core.ts";
 
 type LabelQueryableCell = {
   getAsNormalizedFullLink(): NormalizedFullLink;

@@ -277,7 +277,7 @@ export default pattern<Input, Output>(
             <cf-hstack justify="between" align="center">
               <cf-heading level={4}>Trip Planner</cf-heading>
               <cf-hstack gap="2">
-                <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                   {stopCount} stops | {areaCount} areas
                 </span>
               </cf-hstack>
@@ -290,10 +290,10 @@ export default pattern<Input, Output>(
               {/* Initialization prompt for empty state */}
               {ifElse(
                 computed(() => !initialized.get() && stops.get().length === 0),
-                <cf-card style="background: var(--cf-color-yellow-50); border: 1px solid var(--cf-color-yellow-300);">
+                <cf-card style="background: var(--cf-theme-color-status-warning-subtle); border: 1px solid var(--cf-theme-color-status-warning-soft);">
                   <cf-vstack gap="2" align="center">
                     <cf-heading level={5}>Welcome to Trip Planner!</cf-heading>
-                    <p style="text-align: center; color: var(--cf-color-gray-600); margin: 0;">
+                    <p style="text-align: center; color: var(--cf-colors-gray-600); margin: 0;">
                       Get started with demo data or click on the map to add your
                       first stop.
                     </p>
@@ -378,7 +378,7 @@ export default pattern<Input, Output>(
                 <cf-vstack gap="2">
                   <cf-hstack justify="between" align="center">
                     <cf-heading level={5}>Trip Stops</cf-heading>
-                    <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                    <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                       Click map to add
                     </span>
                   </cf-hstack>
@@ -392,8 +392,8 @@ export default pattern<Input, Output>(
                         borderRadius: "0.5rem",
                         backgroundColor: ifElse(
                           computed(() => selectedStopIndex.get() === index),
-                          "var(--cf-color-blue-100)",
-                          "var(--cf-color-gray-50)",
+                          "var(--cf-colors-blue-100)",
+                          "var(--cf-colors-gray-50)",
                         ),
                       }}
                     >
@@ -405,7 +405,7 @@ export default pattern<Input, Output>(
                           $value={stop.title}
                           style="font-weight: 500;"
                         />
-                        <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                        <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                           {computed(
                             () =>
                               `${formatCoord(stop.position.lat)}, ${
@@ -436,7 +436,7 @@ export default pattern<Input, Output>(
 
                   {ifElse(
                     computed(() => stops.get().length === 0),
-                    <div style="text-align: center; color: var(--cf-color-gray-500); padding: 1rem;">
+                    <div style="text-align: center; color: var(--cf-colors-gray-500); padding: 1rem;">
                       Click on the map to add your first stop!
                     </div>,
                     null,
@@ -478,7 +478,7 @@ export default pattern<Input, Output>(
                           $value={area.title}
                           style="font-weight: 500;"
                         />
-                        <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                        <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                           Radius: {area.radius}m
                         </span>
                       </cf-vstack>
@@ -512,7 +512,7 @@ export default pattern<Input, Output>(
 
                   {ifElse(
                     computed(() => areasOfInterest.get().length === 0),
-                    <div style="text-align: center; color: var(--cf-color-gray-500); padding: 1rem;">
+                    <div style="text-align: center; color: var(--cf-colors-gray-500); padding: 1rem;">
                       No areas defined. Click "Add Area" to highlight a region.
                     </div>,
                     null,
@@ -534,7 +534,7 @@ export default pattern<Input, Output>(
                             computed(() =>
                               index < stops.get().length - 1
                             ),
-                            <span style="color: var(--cf-color-gray-400);">
+                            <span style="color: var(--cf-colors-gray-400);">
                               {" "}
                               -&gt;{" "}
                             </span>,
@@ -543,7 +543,7 @@ export default pattern<Input, Output>(
                         </cf-hstack>
                       ))}
                     </cf-hstack>
-                    <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
+                    <span style="font-size: 0.875rem; color: var(--cf-colors-gray-500);">
                       {stopCount} stops connected by dashed route line
                     </span>
                   </cf-vstack>
@@ -552,10 +552,10 @@ export default pattern<Input, Output>(
               )}
 
               {/* Instructions */}
-              <cf-card style="background: var(--cf-color-blue-50);">
+              <cf-card style="background: var(--cf-colors-blue-50);">
                 <cf-vstack gap="1">
                   <cf-heading level={5}>How to Use</cf-heading>
-                  <ul style="margin: 0; padding-left: 1.25rem; font-size: 0.875rem; color: var(--cf-color-gray-600);">
+                  <ul style="margin: 0; padding-left: 1.25rem; font-size: 0.875rem; color: var(--cf-colors-gray-600);">
                     <li>Click anywhere on the map to add a new stop</li>
                     <li>Drag markers to reposition stops</li>
                     <li>Use "Fit to All Stops" to zoom to see all markers</li>

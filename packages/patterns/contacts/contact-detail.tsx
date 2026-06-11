@@ -29,7 +29,7 @@ export default pattern<ContactDetailInput, ContactDetailOutput>(
         <cf-card>
           <cf-vstack gap="2">
             <cf-vstack gap="1">
-              <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
+              <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-colors-gray-500);">
                 Name
               </label>
               <cf-input
@@ -39,7 +39,7 @@ export default pattern<ContactDetailInput, ContactDetailOutput>(
             </cf-vstack>
 
             <cf-vstack gap="1">
-              <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
+              <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-colors-gray-500);">
                 Email
               </label>
               <cf-input
@@ -50,7 +50,7 @@ export default pattern<ContactDetailInput, ContactDetailOutput>(
             </cf-vstack>
 
             <cf-vstack gap="1">
-              <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
+              <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-colors-gray-500);">
                 Phone
               </label>
               <cf-input
@@ -61,7 +61,7 @@ export default pattern<ContactDetailInput, ContactDetailOutput>(
             </cf-vstack>
 
             <cf-vstack gap="1">
-              <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
+              <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-colors-gray-500);">
                 Company
               </label>
               <cf-input

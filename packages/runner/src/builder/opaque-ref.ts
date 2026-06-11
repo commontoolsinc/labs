@@ -1,6 +1,7 @@
 import {
   type CellKind,
   type JSONSchema,
+  type JSONValue,
   type Opaque,
   type OpaqueRef,
   type SchemaWithoutCell,
@@ -8,11 +9,12 @@ import {
 } from "./types.ts";
 import { getTopFrame } from "./pattern.ts";
 import { createCell } from "../cell.ts";
+import { ContextualFlowControl } from "../cfc.ts";
 
 /**
  * Implementation of opaqueRef that creates actual Cells.
  * Uses getTopFrame() to access the runtime.
- * @param value - Optional initial value
+ * @param value - Optional schema default value
  * @param schema - Optional schema
  * @returns An OpaqueRef
  */
@@ -29,16 +31,12 @@ function opaqueRefWithCell<T>(
     );
   }
 
-  // Initial value is treated as default value
-
-  // TODO(seefeld): Use this once default schemas are properly propagated
-  /*
   if (value !== undefined) {
     schema = {
       ...ContextualFlowControl.toSchemaObj(schema),
-      default: value as JSONValue,
+      default: defaultForValue(value),
     };
-  }*/
+  }
 
   // Create a Cell without a link - it will be created on demand via .for()
   // Use tx from frame if available
@@ -53,11 +51,6 @@ function opaqueRefWithCell<T>(
     false,
     kind,
   );
-
-  // TODO(seefeld): Remove once default schemas are properly propagated
-  if (value !== undefined) {
-    cell.setInitialValue(value as T);
-  }
 
   frame.opaqueRefs.add(cell);
 
@@ -90,4 +83,17 @@ export function stream<T>(
   return opaqueRefWithCell<T>(undefined, schema, "stream") as unknown as Stream<
     T
   >;
+}
+
+function defaultForValue(value: unknown): JSONValue {
+  if (
+    value !== null &&
+    (typeof value === "object" || typeof value === "function")
+  ) {
+    const toJSON = (value as { toJSON?: unknown }).toJSON;
+    if (typeof toJSON === "function") {
+      return toJSON.call(value) as JSONValue;
+    }
+  }
+  return value as JSONValue;
 }

@@ -281,22 +281,25 @@ export interface IReadable<T> {
   sample(): Readonly<StripDefaultBrand<T>>;
 }
 
+export type MetaLinkField =
+  | "pattern"
+  | "argument"
+  | "result";
+
 /**
  * The `pattern` field links a result cell to its pattern
  * The `argument` field links a result cell to its argument cell
- * The `internal` field links a result cell to its internal cell for state
+ * The `internal` field contains a manifest with links to derived internal cells.
  * The `schema` field stores the schema for a result cell
  * The `result` field lets a result cell link to its parent result cell,
- * and also lets the argument and internal cells link back to the result cell.
+ * and also lets the argument and derived internal cells link back to the result cell.
  * The cfc code accesses the `cfc` field directly, but I include it here too.
  */
 export type MetaField =
-  | "pattern"
+  | MetaLinkField
   | "patternIdentity" // content-addressed {identity, symbol} pattern reference
-  | "argument"
   | "internal"
   | "schema"
-  | "result" // this lets us get from internal/argument back to result
   | "slug"
   | "cfc";
 
@@ -1322,7 +1325,6 @@ export type AnyCellWrapping<T> =
 export interface Pattern {
   argumentSchema: JSONSchema;
   resultSchema: JSONSchema;
-  internalSchema?: JSONSchema;
   defaultScope?: CellScope;
 }
 export interface Module {
