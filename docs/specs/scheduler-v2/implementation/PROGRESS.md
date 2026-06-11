@@ -95,7 +95,7 @@ Format:
 
 ## 01/step-1
 
-- [x] pending — remove push-mode usage from tests, helpers, and benches
+- [x] 5e70065ac — remove push-mode usage from tests, helpers, and benches
 - Deviations: STOP events below; applied reviewer-approved effect ports and
   event-reader duplicate-count adjustment.
 - Recordings: authoritative pre-edit grep:
@@ -483,3 +483,64 @@ Applied the follow-up verdict:
 - Step exit grep passed:
   `grep -rn "enablePullMode\|disablePullMode\|isPullModeEnabled\|pullMode"
   test/` → no matches.
+
+## IMPLEMENTER STOP — 01/steps-2-3 instruction conflict
+
+Started the sanctioned combined steps 2+3 and collapsed `scheduler.ts` mode
+branches to the pull path. Before deleting the push modules or committing,
+the Step 3 grep contract conflicts with Step 3.17:
+
+- Step 3.17 explicitly says `createGraphSnapshotState()` should use the
+  literal `pullMode: true` property, and not remove `pullMode` from the graph
+  snapshot telemetry shape.
+- The Step 3 grep contract says:
+  `grep -n "pullMode\|PushScheduler\|push-" src/scheduler.ts`
+  expected no matches.
+
+Current grep output:
+
+```text
+$ grep -n "pullMode\|PushScheduler\|push-" packages/runner/src/scheduler.ts
+2275:      pullMode: true,
+```
+
+No workaround was attempted. The remaining match is the exact property Step
+3.17 requires. Push modules have not been deleted yet in this working tree.
+
+## REVIEWER VERDICT — 01/steps-2-3 grep-contract conflict
+
+Correct stop; the work order contradicts itself and the GREP CONTRACT is
+the wrong side. Step 3.17 (keep the snapshot's `pullMode: true` literal
+and the telemetry type field) stands — the field is a frozen reporting
+surface for external snapshot consumers; removing it is out of phase-0
+scope. Precedence rule from here on: a reviewer verdict in this file
+overrides conflicting work-order text.
+
+Corrected contracts:
+
+1. Step-3 grep: `grep -n "pullMode\|PushScheduler\|push-" src/scheduler.ts`
+   → expected EXACTLY ONE match: the `pullMode: true` literal in
+   `createGraphSnapshotState()` (your current output is already
+   correct). Zero matches for `PushScheduler` and `push-` once the push
+   modules are deleted.
+2. Exit-checklist grep: `grep -rn "pullMode\|enablePullMode\|disablePullMode\|isPullModeEnabled" src/ test/`
+   → expected residual matches are ONLY the frozen snapshot field:
+   - `src/scheduler.ts`: the `pullMode: true` literal;
+   - `src/scheduler/graph-snapshot.ts`: the state-interface member and
+     its read in the snapshot builder;
+   - `src/telemetry.ts`: the `SchedulerGraphSnapshot` type's `pullMode`
+     field (and doc comments on those lines).
+   `enablePullMode` / `disablePullMode` / `isPullModeEnabled` /
+   `PushScheduler` / `push-` must be zero everywhere. Anything else:
+   STOP.
+3. Amend the work order in YOUR branch so the text matches this ruling —
+   edit `docs/specs/scheduler-v2/implementation/01-phase0-remove-push-mode.md`
+   (the step-3 grep contract and the exit checklist) as its own commit
+   BEFORE the steps-2+3 commit, message:
+   `docs(specs): scheduler-v2 WO01 — graph-snapshot pullMode survives phase 0`
+4. Then proceed: delete the push modules, finish steps 2+3 as one commit
+   per the sanctioned merge, and continue the work order.
+
+Implementer resolution: updated the work order's Step 3 grep contract and exit
+checklist to preserve the frozen graph-snapshot `pullMode` field as the only
+residual mode term.

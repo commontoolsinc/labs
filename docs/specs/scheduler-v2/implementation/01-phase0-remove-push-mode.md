@@ -169,8 +169,10 @@ Grep contract after the edit:
 grep -n "pullMode\|PushScheduler\|push-" src/scheduler.ts
 ```
 
-Expected: no matches (comments included — if a comment mentions push mode,
-delete the sentence, keeping the rest of the comment intact).
+Expected: exactly one match: the literal `pullMode: true` property in
+`createGraphSnapshotState()`. `PushScheduler` and `push-` must have no
+matches (comments included — if a comment mentions push mode, delete the
+sentence, keeping the rest of the comment intact).
 
 Verify: `deno check src/scheduler.ts`, then the full runner suite
 (`deno task test`).
@@ -239,7 +241,11 @@ Commit: `docs: pull-based-scheduler reflects push-mode removal`
 ## Exit checklist (reviewer)
 
 - [ ] `ls src/scheduler/ | grep push` → empty.
-- [ ] `grep -rn "pullMode\|enablePullMode\|disablePullMode\|isPullModeEnabled" src/ test/` → no matches.
+- [ ] `grep -rn "pullMode\|enablePullMode\|disablePullMode\|isPullModeEnabled" src/ test/` →
+      residual matches only for the frozen scheduler graph snapshot
+      `pullMode` field (`src/scheduler.ts`, `src/scheduler/graph-snapshot.ts`,
+      `src/telemetry.ts`). No `enablePullMode` / `disablePullMode` /
+      `isPullModeEnabled` matches.
 - [ ] `schedulerRuntimeFingerprint` still emits `runner:scheduler:pull`
       (grep shows the function unchanged).
 - [ ] Full runner suite green; `scheduler-pull.test.ts` runs with no mode
