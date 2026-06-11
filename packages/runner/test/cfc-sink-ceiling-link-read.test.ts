@@ -250,6 +250,14 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
 
     expect(released).toBe(false);
     expect(result.error).toBeDefined();
+    // Assert it is specifically the CFC enforcement rejection, not some other
+    // commit error — otherwise an unrelated failure would let this regression
+    // guard pass vacuously (cubic review). The invalidated relevant tx is
+    // rejected for being not-prepared; the underlying reason names the late
+    // sink-request input that flipped it.
+    const message = String((result.error as Error).message);
+    expect(message).toContain("CFC enforcement rejected commit");
+    expect(message).toContain("not prepared");
   });
 
   it("never fires a fetchData pattern request carrying a labeled header (end-to-end)", async () => {
