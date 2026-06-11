@@ -908,7 +908,12 @@ function buildShrunkTypeNodeFromType(
       ) ?? checker.getIndexTypeOfType(type, ts.IndexKind.String);
       if (!indexType) continue;
       propType = indexType;
-      isOptional = typeIncludesUndefined(indexType);
+      // An index signature types whatever keys happen to exist — it never
+      // guarantees this particular key is present. The shrunken property must
+      // be optional, or the injected schema marks it `required` and values
+      // lacking the key fail validation (the whole capture then reads
+      // undefined at runtime).
+      isOptional = true;
     }
 
     const hasDirectAccess = childPaths.some((path) => path.length === 0);
