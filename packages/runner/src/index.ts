@@ -173,6 +173,7 @@ export {
   type FabricChaseResult,
   resolveFabricRefToIdentity,
 } from "./fabric-ref-resolution.ts";
+export { type PinRewrite, rewriteFabricPins } from "./fabric-pin-rewrite.ts";
 export {
   resolveSlugTargetCell,
   SlugResolutionError,
