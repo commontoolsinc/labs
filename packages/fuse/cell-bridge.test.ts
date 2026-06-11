@@ -190,6 +190,7 @@ type SubscribePiece = (
   pieceIno: bigint,
   pieceName: string,
   spaceName: string,
+  state: unknown,
 ) => Promise<Array<() => void>>;
 
 type HydratePieceProp = (
@@ -1352,6 +1353,54 @@ Deno.test("CellBridge.addPieceToSpace assigns -2 suffix on name collision", asyn
   assertEquals(tree.lookup(state.piecesIno, "My-Note-2") !== undefined, true);
 });
 
+// Regression: on a cold runtime the piece list doesn't load the linked piece
+// docs, so a synchronous piece.name() read returns undefined until the NAME
+// doc is synced. addPieceToSpace must await that sync before choosing the
+// directory name — otherwise the piece mounts under the opaque id-derived
+// fallback name, permanently if no later change event fires (CI fuse-exec
+// "Timed out waiting for path: pieces/Fuse-Exec-Fixture").
+Deno.test("CellBridge.addPieceToSpace syncs a late-loading name before naming the directory", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+
+  // name() returns undefined until getCell().asSchema(...).sync() resolves —
+  // mirroring PieceController.name() reading a doc that loads asynchronously.
+  let nameLoaded = false;
+  const piece = {
+    id: "of:cold-start",
+    name: () => (nameLoaded ? "Fuse Exec Fixture" : undefined),
+    getCell: () => ({
+      asSchema: () => ({
+        sync: () => {
+          nameLoaded = true;
+          return Promise.resolve();
+        },
+      }),
+    }),
+    getPatternMeta: () => Promise.resolve({ patternName: "fixture" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+  };
+
+  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    .addPieceToSpace.bind(bridge);
+  const name = await addPiece(state, piece, "home");
+
+  assertEquals(name, "Fuse-Exec-Fixture");
+  assertEquals(
+    tree.lookup(state.piecesIno, "Fuse-Exec-Fixture") !== undefined,
+    true,
+    "piece dir should use the synced name, not the id fallback",
+  );
+});
+
 Deno.test("CellBridge.addPieceToSpace assigns -2 and -3 suffixes for three collisions", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/cf-exec");
@@ -1888,6 +1937,7 @@ Deno.test({
         tree.lookup(state.piecesIno, "Old-Name")!,
         "Old-Name",
         "home",
+        state,
       );
 
     // Store updated subs
@@ -2031,6 +2081,7 @@ Deno.test({
         tree.lookup(state.piecesIno, "Start-Here")!,
         "Start-Here",
         "home",
+        state,
       );
 
     state.pieceSubs.set("Start-Here", subs);
