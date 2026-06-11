@@ -2112,7 +2112,8 @@ describe("llmDialog", () => {
 
     let turn2Request: { messages: readonly BuiltInLLMMessage[] } | undefined;
     addMockResponse(
-      (req) => req.messages.length === 1 && req.tools?.["readInternal"] !== undefined,
+      (req) =>
+        req.messages.length === 1 && req.tools?.["readInternal"] !== undefined,
       {
         role: "assistant",
         content: [{
