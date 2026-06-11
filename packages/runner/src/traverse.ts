@@ -3307,7 +3307,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // unknown & T => T
       let match: TypeValidity.True | TypeValidity.Unknown | undefined;
       for (const option of schemaObj.allOf) {
-        const valid = this.isValidType(option, valueType);
+        const valid = this.isValidType(
+          schemaWithDefs(schemaObj, option),
+          valueType,
+        );
         // ignore undefined result (unknown type), but if any option returns
         // false, the whole thing is false
         if (valid === TypeValidity.False) {
@@ -3331,7 +3334,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
           match = TypeValidity.True;
           break;
         }
-        const valid = this.isValidType(option, valueType);
+        const valid = this.isValidType(
+          schemaWithDefs(schemaObj, option),
+          valueType,
+        );
         if (valid === TypeValidity.False) {
           continue;
         } else if (match !== TypeValidity.Unknown) {
@@ -3355,7 +3361,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
           match = TypeValidity.True;
           break;
         }
-        const valid = this.isValidType(option, valueType);
+        const valid = this.isValidType(
+          schemaWithDefs(schemaObj, option),
+          valueType,
+        );
         if (valid === TypeValidity.False) {
           continue;
         } else if (match !== TypeValidity.Unknown) {
@@ -4239,4 +4248,14 @@ function appendToPath(path: ValuePath, part: string): ValuePath {
 // helper function - since path starts with value, the new array will too
 function appendPartsToPath(path: ValuePath, parts: string[]): ValuePath {
   return [...path, ...parts] as ValuePath;
+}
+
+function schemaWithDefs(parent: JSONSchemaObj, option: JSONSchema): JSONSchema {
+  // We need to preserve any parent $defs in the branch
+  return typeof option === "object"
+    ? {
+      ...option,
+      ...(parent.$defs && { "$defs": parent.$defs }),
+    }
+    : option;
 }
