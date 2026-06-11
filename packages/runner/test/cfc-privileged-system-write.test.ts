@@ -166,6 +166,85 @@ describe("CFC privileged system write (S18)", () => {
     }
   });
 
+  it("records a ['cfc'] write made while disabled so a mid-tx escalation to enforce rejects", async () => {
+    // setCfcEnforcementMode permits raising the mode mid-transaction
+    // (disabled/observe impose no floor — audit S3), so a forged ["cfc"] write
+    // performed in a disabled window must not survive a later escalation to
+    // enforce. Like every other CFC signal, the write is recorded
+    // unconditionally and only evaluated against the mode at prepare/commit
+    // time.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "disabled",
+    });
+    try {
+      const tx = runtime.edit();
+      const target = runtime.getCell(
+        signer.did(),
+        "s18-forge-escalate",
+        undefined,
+        tx,
+      );
+      const id = target.getAsNormalizedFullLink().id as URI;
+      // Forge the label map while the transaction is still disabled.
+      tx.writeOrThrow({
+        space: signer.did(),
+        id,
+        type: "application/json",
+        path: ["cfc"],
+      }, forgedMetadata as unknown as Record<string, unknown>);
+      // The forgery is recorded even though enforcement is disabled.
+      expect(tx.getCfcState().unprivilegedSystemWrites.length).toBe(1);
+
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const result = await tx.commit();
+      expect(result.error).toBeDefined();
+      expect(String((result.error as Error).message).toLowerCase()).toContain(
+        "cfc",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("still commits a never-escalated transaction under disabled mode", async () => {
+    // `disabled` leaves CFC inert end-to-end: the forged write is recorded
+    // (see above) but prepareBoundaryCommit never runs for a transaction whose
+    // mode is still disabled at commit, so nothing turns the record into a
+    // rejection.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "disabled",
+    });
+    try {
+      const tx = runtime.edit();
+      const target = runtime.getCell(
+        signer.did(),
+        "s18-forge-disabled",
+        undefined,
+        tx,
+      );
+      const id = target.getAsNormalizedFullLink().id as URI;
+      tx.writeOrThrow({
+        space: signer.did(),
+        id,
+        type: "application/json",
+        path: ["cfc"],
+      }, forgedMetadata as unknown as Record<string, unknown>);
+
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("does not gate value-path writes or full-document seeds (path [])", async () => {
     // The Cell API writes value paths, never the document ["cfc"] field, so
     // ordinary pattern writes are unaffected. A path-[] full-document seed

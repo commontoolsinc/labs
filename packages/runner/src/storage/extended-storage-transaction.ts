@@ -257,11 +257,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // derivation for OTHER writes, bypassing the commit-boundary derivation +
   // mint-gating (audit S18). prepareBoundaryCommit turns each recorded address
   // into a fail-closed reason, so the violation surfaces uniformly with every
-  // other CFC reason (enforce rejects, observe diagnoses). `disabled` leaves
-  // CFC inert, so the guard does nothing there.
+  // other CFC reason (enforce rejects, observe diagnoses). Recording (and
+  // relevance marking) is deliberately unconditional on the enforcement mode,
+  // like every other CFC signal: setCfcEnforcementMode permits raising the
+  // mode mid-transaction (disabled/observe impose no floor), so a forgery in a
+  // disabled window must still be on record when a later escalation evaluates
+  // it. A transaction still `disabled` at commit never runs
+  // prepareBoundaryCommit, so the record stays inert there.
   private noteSystemWrite(address: IMemorySpaceAddress): void {
     if (this.#privilegedSystemWriteDepth > 0) return;
-    if (this.cfcState.enforcementMode === "disabled") return;
     // The ["cfc"] document field holds the persisted label map. A value-path
     // write (path[0] is a user key) or a path-[] full-document write is not it.
     if (address.path[0] !== "cfc") return;
