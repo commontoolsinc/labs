@@ -779,7 +779,109 @@ adjustments:
 - after shrinking, `validateShrinkCoverage` checks that all requested property
   paths were materialized (see §6.4); unresolvable paths produce hard errors
 
-## 11. Schema Generation
+## 11. Builder Call Hoisting And `__cfReg` Registration
+
+`BuilderCallHoistingTransformer` (stage 13, **after** SchemaInjection) hoists
+every reactive *builder call* to module scope and emits a single trailing
+content-addressing registration. It is the sole module-scope hoisting phase; it
+absorbed the former `LiftHoistingTransformer` (lift-only) and replaced the
+deleted `BuilderCallbackHoistingTransformer` (which hoisted builder callbacks
+and caused TDZ double-hoist bugs — #3864). Tickets: CT-1644 (lift), CT-1655
+(handler, pattern, patternTool), CT-1623 (`__cfReg` content addressing).
+
+### 11.1 What gets hoisted
+
+After SchemaInjection, each reactive builder computation appears in a schema-
+injected applied or argument-position shape. This stage relocates the inner
+builder call to a named module-scope `const` and rewrites the original site to
+reference that name. Three builder shapes are registered in
+`HOISTABLE_BUILDERS`:
+
+- **Applied builders** (`lift`, `handler`): the site is `builder(...)(captures)`
+  — the callee is itself the inner `builder(...)` call. Hoist the inner call,
+  leave `__cfLift_N(captures)` / `__cfHandler_N(captures)` at the site (any
+  trailing `.for(...)` member chain stays anchored on the outer call):
+
+  ```ts
+  // module scope:
+  const __cfLift_1 = __cfHelpers.lift(argSchema, resSchema, callback);
+  // original site:
+  __cfLift_1(captures).for("result", true)
+  ```
+
+- **Argument-position builder** (`pattern`): the bare `pattern(...)` call sits
+  in argument 0 of an enclosing `*WithPattern` call (`mapWithPattern`, etc.) or
+  `patternTool(...)`. Hoist argument 0 to `__cfPattern_N` and rewrite only that
+  argument, keeping the enclosing callee and remaining arguments intact. The
+  top-level `export default pattern(...)` is a direct call, not an argument, so
+  it is naturally excluded.
+
+Detection is provenance-driven via `detectCallKind` / `isHandlerAppliedCall` /
+`getWithPatternHoistablePatternCall` / `getPatternToolHoistablePatternCall`.
+
+### 11.2 Why this runs after SchemaInjection
+
+SchemaInjection derives a lift's argument schema from the adjacent applied
+captures object. Hoisting the call to a bare `const = lift(callback)` *before*
+injection would separate the captures object and silently drop capture
+properties in nested/multi-capture callbacks. Running after injection means the
+schema is already baked into the inner call before relocation, so the hoist is
+schema-transparent (C-002; verified regression).
+
+### 11.3 Hoist placement and TDZ ordering
+
+Hoisted consts are flushed immediately **before** their owning top-level
+statement, not pooled into a single after-imports block. This keeps each hoisted
+const after every module binding declared in an earlier statement. The ordering
+is behaviorally load-bearing for `pattern`: unlike `lift`/`handler` (callbacks
+stored and run lazily), `pattern(...)` invokes its callback **eagerly at
+construction**, so a hoisted `const __cfPattern_N = pattern(cb)` whose `cb`
+reads a later module-scoped binding would throw a module-load TDZ
+`ReferenceError` under after-imports placement.
+
+Hoisted identifiers use explicit per-prefix counters with literal numeric
+suffixes (`__cfLift_1`, `__cfPattern_1`, …), **not** `factory.createUniqueName`
+— whose `.text` carries only the bare prefix and defers suffixing to emit, which
+would make every hoisted identifier share the same `.text` and break the
+identity-by-text lookups later stages rely on.
+
+### 11.4 `__cfReg` content-addressed registration
+
+After visiting the whole file, the stage appends **one** trailing call:
+
+```ts
+__cfReg({ __cfLift_1, __cfPattern_1, __cfHandler_1, /* … */ });
+```
+
+using shorthand properties so each value is the module-level `const` binding
+itself. It is emitted only when there is something to register (hoist-free
+modules are unchanged). The registered set includes both:
+
+1. the synthetic hoists produced above, and
+2. **authored** non-exported top-level builder artifacts — `const foo =
+   lift(...)` / `pattern(...)` / `handler(...)` etc. — detected on the original
+   statement so an import/alias (`const x = imported`) is never mis-attributed
+   to this module's identity.
+
+`__cfReg` is a free identifier supplied by the module wrapper (the 4th factory
+parameter under the runtime's ESM loader; a no-op global on the legacy/AMD
+path). The runtime registrar pairs each `{ symbol -> live value }` entry with
+the module's content identity, populating the content-addressed reverse index
+that backs builder-artifact identity resolution. A single trailing call (rather
+than per-artifact export/registration) keeps the runtime verifier's obligation
+to "exactly one top-level `__cfReg` call," with a run-once trap rejecting
+injected duplicates. Runtime side:
+`packages/runner/src/sandbox/module-record-compiler.ts` and
+`packages/runner/src/pattern-manager.ts`.
+
+This registration is current, shipped behavior: `__cfReg({...})` appears in the
+expected output of the large majority of builder-bearing fixtures.
+
+Note: the design comments frame this stage as Phase 2 of a
+"derive→lift→selfcontained" arc. Phase 3 (`selfcontained(...)` wrapping of the
+hoisted consts) is **not** implemented on `main` — see the design-deltas doc.
+
+## 12. Schema Generation
 
 `SchemaGeneratorTransformer` replaces `toSchema<T>(options?)` calls with JSON
 schema literals.
@@ -817,7 +919,7 @@ Special path:
   behavior on `main`; those contracts are described separately in the draft CFC
   docs listed above
 
-## 12. Diagnostics Message Transformation (Optional Consumer Layer)
+## 13. Diagnostics Message Transformation (Optional Consumer Layer)
 
 Diagnostic message transformers are exported separately from AST transform
 pipeline. Current built-in behavior:
@@ -829,7 +931,7 @@ pipeline. Current built-in behavior:
 - `CompositeDiagnosticTransformer` returns the first matching transformer
   result.
 
-## 13. Current Known Limits (Observed)
+## 14. Current Known Limits (Observed)
 
 1. Generic helper functions with uninstantiated type-parameter lift-applied
    result types can degrade schema precision (type arguments may be
@@ -851,18 +953,34 @@ pipeline. Current built-in behavior:
    `docs/specs/ts-transformer/cfc_*.md` are draft contracts only; the current
    implemented pipeline on `main` does not yet lower those forms.
 
-## 14. Test Coverage Snapshot
+## 15. Test Coverage Snapshot
 
-Primary fixture suites executed by `fixture-based.test.ts`:
+The fixture suites driven by `fixture-based.test.ts` live under
+`test/fixtures/<suite>/` as `*.input.*` / `*.expected.*` pairs. The driver
+currently runs these suites:
 
-- `ast-transform`: 28 fixtures
-- `handler-schema`: 8 fixtures
-- `jsx-expressions`: 39 fixtures
-- `schema-transform`: 8 fixtures
-- `closures`: 141 fixtures
-- `schema-injection`: 19 fixtures
+- `ast-transform`
+- `handler-schema`
+- `jsx-expressions`
+- `schema-transform`
+- `closures` (the largest suite by a wide margin)
+- `kitchensink`
+- `schema-injection`
 
-Total active fixture inputs in these suites: **237**.
+(The `bug-repro` directory exists but is not an input/expected fixture suite.)
+
+Exact counts are intentionally not pinned here — they churn with every fixture
+addition. The fixture corpus is in the high hundreds of input files overall, of
+which `closures` is the largest single suite. To get current numbers:
+
+```bash
+# per suite
+for d in test/fixtures/*/; do
+  printf '%s: %s\n' "$(basename "$d")" "$(ls "$d"*.input.* 2>/dev/null | wc -l)"
+done
+# total input fixtures
+find test/fixtures -name '*.input.*' | wc -l
+```
 
 Additional non-fixture unit suites cover:
 
@@ -873,7 +991,7 @@ Additional non-fixture unit suites cover:
 - pipeline regression and policy/capability-analysis behavior
 - lift-applied call helper and identifier utilities
 
-## 15. Stability Statement
+## 16. Stability Statement
 
 This specification is a snapshot of current behavior. Any transformer code or
 fixture expectation changes should be treated as spec changes and reflected in
