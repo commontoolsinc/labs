@@ -37,6 +37,7 @@ import {
 import { getValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { atomPropagationClass } from "./atom-classes.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
 import { uniqueCfcAtoms } from "./observation.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
@@ -1244,10 +1245,19 @@ const forEachFlowObservation = (
   return false;
 };
 
-const deriveFlowConfidentiality = (
+const deriveFlowJoin = (
   tx: IExtendedStorageTransaction,
-): unknown[] => {
+): { confidentiality: unknown[]; integrity: unknown[] } => {
   const atoms: unknown[] = [];
+  // Class-aware integrity meet (§8.9.3 / §3.1.6.2): hereditary atoms
+  // survive only when EVERY contributing observation carries them. An
+  // observation with no resolved label has empty integrity and empties the
+  // meet — weakest link, which is what carries PolicyCertified-class
+  // certification honestly: a single uncertified input means the output is
+  // uncertified. (In practice most transactions read some unlabeled doc,
+  // so the meet is usually empty until inputs are universally certified —
+  // staged conformance per SC-9, never over-claiming.)
+  let hereditaryMeet: unknown[] | undefined;
   const metadataByDoc = new Map<string, CfcMetadata | undefined>();
   forEachFlowObservation(
     tx,
@@ -1265,10 +1275,30 @@ const deriveFlowConfidentiality = (
       if (label?.confidentiality?.length) {
         atoms.push(...label.confidentiality);
       }
+      const hereditary = (label?.integrity ?? []).filter((atom) =>
+        atomPropagationClass(atom) === "hereditary"
+      );
+      hereditaryMeet = hereditaryMeet === undefined
+        ? [...hereditary]
+        : hereditaryMeet.filter((kept) =>
+          hereditary.some((atom) => deepEqual(atom, kept))
+        );
       return false;
     },
   );
-  return uniqueCfcAtoms(atoms);
+  const confidentiality = uniqueCfcAtoms(atoms);
+  const integrity: unknown[] = [...(hereditaryMeet ?? [])];
+  // Derivation provenance (§8.9.3 TransformedBy, staged: identity binding
+  // only — no per-input refs/witnesses yet). Minted only alongside an
+  // entry that exists anyway; runtime-minted (schema-forgery gated).
+  const identity = tx.getCfcState().implementationIdentity;
+  if (
+    identity !== undefined &&
+    (confidentiality.length > 0 || integrity.length > 0)
+  ) {
+    integrity.push({ type: CFC_ATOM_TYPE.TransformedBy, identity });
+  }
+  return { confidentiality, integrity: uniqueCfcAtoms(integrity) };
 };
 
 /**
@@ -2453,8 +2483,13 @@ const RUNTIME_MINTED_INTEGRITY_ATOM_TYPES = new Set<string>([
   CFC_ATOM_TYPE.Builtin,
   CFC_ATOM_TYPE.LinkReference,
   CFC_ATOM_TYPE.Origin,
+  // Hereditary certification must come from the certification process, not
+  // a pattern-authored schema — forging it would survive every combination.
+  CFC_ATOM_TYPE.PolicyCertified,
   CFC_ATOM_TYPE.PromptSlotBound,
   CFC_ATOM_TYPE.PromptSlotInfluence,
+  // Derivation provenance is evidence minted by the flow stage (§8.9.3).
+  CFC_ATOM_TYPE.TransformedBy,
   CFC_ATOM_TYPE.UserSurfaceInput,
 ]);
 
@@ -2918,18 +2953,23 @@ export const prepareBoundaryCommit = (
   const flowMode = state.flowLabelsMode;
   const flowPersist = flowMode === "persist";
   const flowTargets = flowMode === "off" ? undefined : valueWriteTargets(tx);
-  const flowConfidentiality = flowMode === "off"
-    ? []
-    : deriveFlowConfidentiality(tx);
+  const flowJoin = flowMode === "off"
+    ? { confidentiality: [], integrity: [] }
+    : deriveFlowJoin(tx);
+  const flowConfidentiality = flowJoin.confidentiality;
+  const flowIntegrity = flowJoin.integrity;
+  const flowHasLabels = flowConfidentiality.length > 0 ||
+    flowIntegrity.length > 0;
   if (
     flowMode === "observe" &&
     flowTargets !== undefined &&
     flowTargets.size > 0 &&
-    flowConfidentiality.length > 0
+    flowHasLabels
   ) {
     state.diagnostics.push(
       `flow-labels(observe): would derive ${flowConfidentiality.length} ` +
-        `confidentiality atom(s) onto ${flowTargets.size} written doc(s)`,
+        `confidentiality / ${flowIntegrity.length} integrity atom(s) onto ` +
+        `${flowTargets.size} written doc(s)`,
     );
   }
   for (const [key, target] of valueWriteTargets(tx)) {
@@ -2973,7 +3013,7 @@ export const prepareBoundaryCommit = (
       if (targetKeys.has(key)) {
         continue;
       }
-      if (flowConfidentiality.length > 0) {
+      if (flowHasLabels) {
         targetKeys.add(key);
         continue;
       }
@@ -3233,7 +3273,7 @@ export const prepareBoundaryCommit = (
       }
     }
 
-    if (flowPersist && flowConfidentiality.length > 0) {
+    if (flowPersist && flowHasLabels) {
       // Attach the per-tx join at each written path. Within one tx every
       // write carries the same join, so deeper written paths are redundant
       // with a shallower written ancestor and are collapsed away (§4.6.4
@@ -3286,7 +3326,14 @@ export const prepareBoundaryCommit = (
         }
         persistedLabelEntries.push({
           path,
-          label: { confidentiality: [...flowConfidentiality] },
+          label: {
+            ...(flowConfidentiality.length > 0
+              ? { confidentiality: [...flowConfidentiality] }
+              : {}),
+            ...(flowIntegrity.length > 0
+              ? { integrity: [...flowIntegrity] }
+              : {}),
+          },
           origin: "derived",
         });
       }

@@ -32,9 +32,16 @@ export const CFC_ATOM_TYPE = {
   InjectionSafe: `${CFC_ATOM_BASE}InjectionSafe`,
   LinkReference: `${CFC_ATOM_BASE}LinkReference`,
   Origin: `${CFC_ATOM_BASE}Origin`,
+  // Hereditary certification (spec §15.1.1 / §3.1.6.1): survives combination
+  // via the class-aware meet — present on an output only when present on
+  // every input.
+  PolicyCertified: `${CFC_ATOM_BASE}PolicyCertified`,
   PromptSlotBound: `${CFC_ATOM_BASE}PromptSlotBound`,
   PromptSlotInfluence: `${CFC_ATOM_BASE}PromptSlotInfluence`,
   Resource: `${CFC_ATOM_BASE}Resource`,
+  // Runtime-minted derivation provenance (spec §8.9.3): which implementation
+  // produced this value. Evidence — not authorable in schemas.
+  TransformedBy: `${CFC_ATOM_BASE}TransformedBy`,
   UserSurfaceInput: `${CFC_ATOM_BASE}UserSurfaceInput`,
 } as const;
 
