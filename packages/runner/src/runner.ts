@@ -4133,7 +4133,7 @@ function getTxDebugActionId(
  * @param resultCell
  * @returns pattern id
  */
-function getPatternId(resultCell: Cell<unknown>): URI | undefined {
+export function getPatternId(resultCell: Cell<unknown>): URI | undefined {
   return getMetaLink(resultCell, "pattern")?.id;
 }
 
@@ -4143,7 +4143,7 @@ function getPatternId(resultCell: Cell<unknown>): URI | undefined {
  * load the pattern straight from the compiled cache by identity. Returns
  * undefined for legacy result cells that only carry the patternId link.
  */
-function getPatternIdentityRef(
+export function getPatternIdentityRef(
   resultCell: Cell<unknown>,
 ): { identity: string; symbol: string } | undefined {
   const raw = resultCell.getMetaRaw("patternIdentity", {

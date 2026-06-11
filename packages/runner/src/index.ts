@@ -170,6 +170,10 @@ export {
   validateSlug,
 } from "./slugs.ts";
 export {
+  type FabricChaseResult,
+  resolveFabricRefToIdentity,
+} from "./fabric-ref-resolution.ts";
+export {
   resolveSlugTargetCell,
   SlugResolutionError,
 } from "./slug-resolution.ts";
