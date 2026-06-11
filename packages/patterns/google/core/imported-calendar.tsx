@@ -60,7 +60,7 @@ interface Input {
   localEvents?: Writable<LocalEvent[] | Default<[]>>;
 }
 
-interface Output {
+export interface Output {
   title: string;
   eventCount: number;
   localEvents: LocalEvent[];

@@ -117,7 +117,7 @@ interface HotelMembershipInput {
 }
 
 /** Hotel loyalty membership extractor from Gmail. #hotelMemberships */
-interface HotelMembershipOutput {
+export interface HotelMembershipOutput {
   memberships: MembershipRecord[];
   lastScanAt: number;
   count: number;

@@ -439,7 +439,7 @@ interface PatternInput {
   overrideAuth?: Auth;
 }
 
-interface PatternOutput {
+export interface PatternOutput {
   taskEmails: TaskEmail[];
   taskCount: number;
   analyses: TaskAnalysis[];

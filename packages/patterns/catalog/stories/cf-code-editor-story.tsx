@@ -8,7 +8,7 @@ import {
 
 // deno-lint-ignore no-empty-interface
 interface CodeEditorStoryInput {}
-interface CodeEditorStoryOutput {
+export interface CodeEditorStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

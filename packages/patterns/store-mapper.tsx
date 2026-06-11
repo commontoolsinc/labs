@@ -71,7 +71,7 @@ interface Input {
   itemLocations: Writable<ItemLocation[] | Default<[]>>;
 }
 
-interface Output {
+export interface Output {
   storeName: string;
   aisles: Aisle[];
   departments: Department[];

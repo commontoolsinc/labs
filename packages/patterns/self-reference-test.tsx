@@ -5,7 +5,7 @@ interface Input {
   parent: Output | null | Default<null>;
   registry: Writable<Output[] | Default<[]>>;
 }
-interface Output {
+export interface Output {
   label: string;
   parent: Output | null;
   children: Output[];

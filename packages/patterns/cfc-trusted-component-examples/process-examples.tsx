@@ -13,7 +13,7 @@ import {
   TrustedSongIdRecordingSurface,
 } from "../cfc/trusted-surfaces/mod.ts";
 
-type ProcessExampleOutput = {
+export type ProcessExampleOutput = {
   [NAME]: string;
   [UI]: unknown;
   decoyStatus: string;

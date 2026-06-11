@@ -11,7 +11,7 @@ import { type RouteContext, Router } from "./router.tsx";
 // deno-lint-ignore no-empty-interface
 interface HomeInput {}
 
-interface HomeOutput {
+export interface HomeOutput {
   [NAME]: string;
   [UI]: VNode;
 }
@@ -19,7 +19,7 @@ interface HomeOutput {
 // deno-lint-ignore no-empty-interface
 interface BooksInput {}
 
-interface BooksOutput {
+export interface BooksOutput {
   [NAME]: string;
   [UI]: VNode;
 }
@@ -28,7 +28,7 @@ interface BookInput {
   route: RouteContext;
 }
 
-interface BookOutput {
+export interface BookOutput {
   [NAME]: string;
   [UI]: VNode;
 }
@@ -36,7 +36,7 @@ interface BookOutput {
 // deno-lint-ignore no-empty-interface
 interface MainInput {}
 
-interface MainOutput {
+export interface MainOutput {
   [NAME]: string;
   [UI]: VNode;
 }

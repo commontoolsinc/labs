@@ -30,7 +30,7 @@ interface InputSchema {
     ]>;
 }
 
-interface Input {
+export interface Input {
   repos: Repo[];
 }
 

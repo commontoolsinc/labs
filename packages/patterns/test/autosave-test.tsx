@@ -18,7 +18,7 @@ interface WritableState {
   counter: Writable<number | Default<0>>;
 }
 
-interface Output {
+export interface Output {
   data: string;
   counter: number;
   updateData: Stream<void>;

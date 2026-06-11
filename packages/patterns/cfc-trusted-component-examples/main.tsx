@@ -6,7 +6,7 @@ import SendPublishExamples from "./send-publish-examples.tsx";
 
 const TOTAL_EXAMPLES = 52;
 
-interface TrustedComponentExamplesOutput {
+export interface TrustedComponentExamplesOutput {
   [NAME]: string;
   [UI]: unknown;
   totalExamples: number;

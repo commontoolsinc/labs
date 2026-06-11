@@ -18,7 +18,7 @@ type QuestionInput = {
   context?: Record<string, any> | Default<Record<string, never>>;
 };
 
-type QuestionOutput = {
+export type QuestionOutput = {
   [NAME]: string;
   [UI]: VNode;
   topic: string;

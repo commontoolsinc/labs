@@ -2,7 +2,7 @@ import { NAME, pattern, UI, type VNode } from "commonfabric";
 
 // deno-lint-ignore no-empty-interface
 interface VignetteFinanceStoryInput {}
-interface VignetteFinanceStoryOutput {
+export interface VignetteFinanceStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

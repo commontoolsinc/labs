@@ -113,7 +113,7 @@ interface Input {
 }
 
 /** Google Calendar event manager for creating/editing/deleting events. #calendarManager */
-interface Output {
+export interface Output {
   draft: EventDraft;
   existingEvent: ExistingEvent;
   result: OperationResult;

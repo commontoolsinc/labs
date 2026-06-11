@@ -26,7 +26,7 @@ const sizeItems = [
 
 // deno-lint-ignore no-empty-interface
 interface AvatarStoryInput {}
-interface AvatarStoryOutput {
+export interface AvatarStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

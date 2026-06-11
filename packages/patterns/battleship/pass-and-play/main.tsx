@@ -50,7 +50,7 @@ interface BoardCell {
 
 type Input = Record<string, never>;
 
-interface Output {
+export interface Output {
   game: Writable<GameState>;
   fireShot: Stream<{ row: number; col: number }>;
   passDevice: Stream<void>;

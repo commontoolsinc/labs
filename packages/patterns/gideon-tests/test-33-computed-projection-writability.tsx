@@ -45,7 +45,7 @@ interface InputSchema {
 
 // Pattern output type - describes the inner value, not the cell wrapper
 // The pattern returns OpaqueCell<Source>, so output type is `Source`
-interface Output {
+export interface Output {
   source: Source;
 }
 

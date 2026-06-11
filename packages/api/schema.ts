@@ -28,7 +28,6 @@ import type {
   ReadonlyCell,
   SELF,
   Stream,
-  StripCell,
   WriteonlyCell,
 } from "commonfabric";
 
@@ -357,7 +356,12 @@ type DecrementDepth<D extends DepthLevel> = Decrement[D] & DepthLevel;
 
 /**
  * Like Schema<T> but without Cell/Stream wrapping.
- * Used for type parameters in factory return types.
+ *
+ * INPUT-POSITION ONLY: used for factory *argument* type parameters, where the
+ * stripped shape feeds `Opaque<...>` acceptance. Factory *result* type
+ * parameters use `Schema<T>` so that `asCell`/`asStream` entries surface as
+ * Cell<>/Stream<> brands — matching what consumers actually receive at runtime
+ * (see the boundary principle on PatternFunction in index.ts).
  */
 export type SchemaWithoutCell<
   T extends JSONSchema,
@@ -377,7 +381,7 @@ declare module "commonfabric" {
       ) => Opaque<Schema<OS>>,
       argumentSchema: IS,
       resultSchema: OS,
-    ): PatternFactory<SchemaWithoutCell<IS>, SchemaWithoutCell<OS>>;
+    ): PatternFactory<SchemaWithoutCell<IS>, Schema<OS>>;
 
     // Function + one schema: infer input type from JSONSchema literal
     <IS extends JSONSchema = JSONSchema>(
@@ -399,7 +403,7 @@ declare module "commonfabric" {
       implementation: (input: Schema<IS>) => Schema<OS>,
       argumentSchema: IS,
       resultSchema: OS,
-    ): ModuleFactory<SchemaWithoutCell<IS>, SchemaWithoutCell<OS>>;
+    ): ModuleFactory<SchemaWithoutCell<IS>, Schema<OS>>;
 
     // Callback + one schema: input type from argSchema; result type inferred from
     // the callback's return.
@@ -408,7 +412,7 @@ declare module "commonfabric" {
       argumentSchema: IS,
     ): ModuleFactory<
       SchemaWithoutCell<IS>,
-      StripCell<ReturnType<typeof implementation>>
+      ReturnType<typeof implementation>
     >;
   }
 

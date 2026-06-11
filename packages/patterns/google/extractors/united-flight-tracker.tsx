@@ -470,7 +470,7 @@ interface Input {
 }
 
 /** United Airlines flight tracker. #unitedFlights */
-interface Output {
+export interface Output {
   emailCount: number;
   flights: TrackedFlight[];
   upcomingFlights: TrackedFlight[];

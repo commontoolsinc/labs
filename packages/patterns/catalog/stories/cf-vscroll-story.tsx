@@ -4,7 +4,7 @@ import { Controls, SwitchControl } from "../ui/controls/index.ts";
 
 // deno-lint-ignore no-empty-interface
 interface VScrollStoryInput {}
-interface VScrollStoryOutput {
+export interface VScrollStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

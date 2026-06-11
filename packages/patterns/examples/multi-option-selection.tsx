@@ -7,7 +7,7 @@ type Input = {
   activeTab: Writable<string | Default<"tab1">>;
 };
 
-type Result = {
+export type Result = {
   selected: string;
   numericChoice: number;
   category: string;

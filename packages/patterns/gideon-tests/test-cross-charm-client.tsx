@@ -47,7 +47,7 @@ interface Input {
   invocationCount: number | Default<0>;
 }
 
-interface Output {
+export interface Output {
   useCfRender: boolean;
   lastInvocationStatus: string;
   invocationCount: number;

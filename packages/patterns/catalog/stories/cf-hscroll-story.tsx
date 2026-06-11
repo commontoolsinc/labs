@@ -4,7 +4,7 @@ import { Controls, SwitchControl } from "../ui/controls/index.ts";
 
 // deno-lint-ignore no-empty-interface
 interface HScrollStoryInput {}
-interface HScrollStoryOutput {
+export interface HScrollStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

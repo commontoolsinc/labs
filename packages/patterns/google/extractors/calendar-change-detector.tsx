@@ -219,7 +219,7 @@ interface PatternInput {
 }
 
 /** Calendar change detector for tracking schedule changes. #calendarChanges */
-interface PatternOutput {
+export interface PatternOutput {
   changes: ScheduleChange[];
   criticalChanges: ScheduleChange[];
   urgentChanges: ScheduleChange[];

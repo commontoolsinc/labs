@@ -35,7 +35,7 @@ interface ContactBookInput {
   relationships: Writable<Relationship[] | Default<[]>>;
 }
 
-interface ContactBookOutput {
+export interface ContactBookOutput {
   contacts: Contact[];
   relationships: Relationship[];
   mentionable: Contact[];

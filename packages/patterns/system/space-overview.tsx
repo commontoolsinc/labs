@@ -32,7 +32,7 @@ type SpaceOverviewResult = {
 
 type SpaceOverviewInput = Record<string, never>;
 
-interface SpaceOverviewOutput {
+export interface SpaceOverviewOutput {
   [NAME]: string;
   [UI]: VNode;
   summary: string;

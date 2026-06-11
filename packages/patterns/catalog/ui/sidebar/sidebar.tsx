@@ -16,7 +16,7 @@ interface SidebarInput {
   onCollapse?: Stream<void>;
 }
 
-interface SidebarOutput {
+export interface SidebarOutput {
   [NAME]: string;
   [UI]: VNode;
 }

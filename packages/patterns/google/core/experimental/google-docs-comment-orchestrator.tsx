@@ -159,7 +159,7 @@ interface Input {
 }
 
 /** Google Docs Comment Orchestrator. AI-powered comment responses. #googleDocsComments */
-interface Output {
+export interface Output {
   docUrl: string;
   comments: GoogleComment[];
   openCommentCount: number;

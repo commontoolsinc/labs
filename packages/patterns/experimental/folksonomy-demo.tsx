@@ -34,7 +34,7 @@ interface Input {
   customScope: string | Default<"demo-shared">;
 }
 
-interface Output {
+export interface Output {
   itemATags: string[];
   itemBTags: string[];
   itemCTags: string[];

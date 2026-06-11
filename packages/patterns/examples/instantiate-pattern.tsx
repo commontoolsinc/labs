@@ -65,7 +65,7 @@ interface FactoryInput {
 }
 
 // No additional outputs beyond name and UI
-type FactoryOutput = {
+export type FactoryOutput = {
   [NAME]: string;
   [UI]: any;
 };

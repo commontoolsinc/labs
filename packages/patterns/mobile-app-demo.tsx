@@ -2,7 +2,7 @@ import { action, computed, NAME, pattern, UI, Writable } from "commonfabric";
 
 // deno-lint-ignore no-empty-interface
 interface MobileAppDemoInput {}
-interface MobileAppDemoOutput {
+export interface MobileAppDemoOutput {
   [NAME]: string;
   [UI]: unknown;
 }

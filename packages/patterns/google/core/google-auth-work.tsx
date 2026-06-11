@@ -42,7 +42,7 @@ interface Input {
 }
 
 /** Work Google account. #googleAuth #googleAuthWork */
-interface Output {
+export interface Output {
   auth: Auth;
   accountType: "work";
   /** Minimal preview for picker display with WORK badge */

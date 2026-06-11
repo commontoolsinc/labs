@@ -54,7 +54,7 @@ export interface SimpleListInput {
   items?: Writable<SimpleListItem[] | Default<[]>>;
 }
 
-interface SimpleListOutput {
+export interface SimpleListOutput {
   [NAME]: string;
   [UI]: VNode;
   items: SimpleListItem[];

@@ -33,7 +33,7 @@ import ChartStory from "./cf-chart-story.tsx";
 
 // deno-lint-ignore no-empty-interface
 interface KitchenSinkStoryInput {}
-interface KitchenSinkStoryOutput {
+export interface KitchenSinkStoryOutput {
   [NAME]: string;
   [UI]: VNode;
 }

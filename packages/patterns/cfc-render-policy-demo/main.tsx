@@ -40,7 +40,7 @@ type LabelledContentArgument = {
   content: string;
 };
 
-type TrustedHealthDisclosureOutput = {
+export type TrustedHealthDisclosureOutput = {
   [NAME]: string;
   [UI]: unknown;
   revealSensitive: TrustedActionWrite<
@@ -53,7 +53,7 @@ type TrustedHealthDisclosureOutput = {
   conceal: Stream<unknown>;
 };
 
-type RenderPolicyDemoOutput = {
+export type RenderPolicyDemoOutput = {
   [NAME]: string;
   [UI]: unknown;
   revealSensitive: TrustedActionWrite<

@@ -166,7 +166,7 @@ interface DailyJournalInput {
   template?: Writable<string | Default<"">>;
 }
 
-interface DailyJournalOutput {
+export interface DailyJournalOutput {
   [NAME]: string;
   [UI]: VNode;
   title: string;

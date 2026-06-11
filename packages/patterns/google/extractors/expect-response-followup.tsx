@@ -526,7 +526,7 @@ interface PatternInput {
 }
 
 /** Gmail expect-response follow-up manager. #expectResponseFollowup */
-interface PatternOutput {
+export interface PatternOutput {
   threads: TrackedThread[];
   threadCount: number;
   dueCount: number;

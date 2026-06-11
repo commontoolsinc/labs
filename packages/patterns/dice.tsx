@@ -5,7 +5,7 @@ interface PatternState {
   value: number | Default<1>;
 }
 
-interface PatternOutput {
+export interface PatternOutput {
   value: number;
   something: {
     nested: string;

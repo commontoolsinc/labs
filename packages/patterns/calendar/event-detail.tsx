@@ -22,7 +22,7 @@ interface EventDetailInput {
  * Output shape of the event piece - this is what gets stored in calendars
  * #event
  */
-interface EventDetailOutput {
+export interface EventDetailOutput {
   [NAME]: string;
   [UI]: VNode;
   title: string;

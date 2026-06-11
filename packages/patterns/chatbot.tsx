@@ -90,7 +90,7 @@ const handlePinToChat = handler<
   pinCell.send({ path: event.path, name: event.name });
 });
 
-type ChatOutput = {
+export type ChatOutput = {
   messages: Array<BuiltInLLMMessage>;
   pending: boolean | undefined;
   addMessage: Stream<BuiltInLLMMessage>;

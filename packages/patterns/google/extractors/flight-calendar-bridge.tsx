@@ -452,7 +452,7 @@ interface PatternInput {
 }
 
 /** Flight calendar bridge - generates travel events from flights. #flightCalendar */
-interface PatternOutput {
+export interface PatternOutput {
   flightCount: number;
   events: CalendarEvent[];
   flightEvents: CalendarEvent[];

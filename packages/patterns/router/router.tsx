@@ -25,7 +25,7 @@ interface RouterInput {
   routeContext: Writable<RouteContext>;
 }
 
-interface RouterOutput {
+export interface RouterOutput {
   [NAME]: string;
   path: string;
   Pattern: VNode;

@@ -58,7 +58,7 @@ interface MailboxInput {
   draftBody: PerSession<Writable<string | Default<"">>>;
 }
 
-interface MailboxOutput {
+export interface MailboxOutput {
   [NAME]: string;
   [UI]: VNode;
   seed: Stream<void>;

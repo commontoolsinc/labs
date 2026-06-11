@@ -168,8 +168,9 @@ export declare const CELL_BRAND: unique symbol;
 
 /**
  * Symbol for phantom property that enables type inference from AnyBrandedCell.
- * This property doesn't exist at runtime - it's purely for TypeScript's benefit.
- * See packages/api/STRIPCELL_TYPE_INFERENCE_FIX.md for details.
+ * This property doesn't exist at runtime - it's purely for TypeScript's benefit:
+ * without a concrete property mentioning T, `AnyBrandedCell<infer U>` cannot
+ * infer U (T would be a phantom parameter and inference produces `unknown`).
  */
 export declare const CELL_INNER_TYPE: unique symbol;
 
@@ -1215,12 +1216,17 @@ export declare const CELL_LIKE: unique symbol;
  * Helper type to transform Cell<T> to Opaque<T> in pattern/lift/handler inputs.
  * Preserves Stream<T> since Streams are callable interfaces (.send()), not data containers.
  *
+ * INPUT-POSITION ONLY: stripping is an acceptance tool — used inside
+ * `Opaque<StripCell<T>>` so callers can pass the data shape with or without
+ * cell wrappers. It must NOT be applied to factory result types: result-type
+ * brands are exported capabilities, and transformer-inferred result schemas
+ * derive `asCell`/`asStream` from them (see the boundary principle on
+ * PatternFunction).
+ *
  * Implementation is non-distributive by default to preserve union types like RenderNode
  * that intentionally contain AnyBrandedCell as a data variant. However, for optional cell
  * properties like `title?: Writable<string>` (which expand to `Writable<string> | undefined`),
  * we extract the cell parts, strip them, and recombine with the non-cell parts.
- *
- * See packages/api/STRIPCELL_TYPE_INFERENCE_FIX.md for details.
  */
 export type StripCell<T> =
   // Handle optional cell properties: "SomeCell | undefined" pattern
@@ -1927,20 +1933,32 @@ export interface BuiltInCompileAndRunState<T> {
 }
 
 // Function type definitions
+//
+// Boundary principle for factory types: factories ACCEPT the stripped data
+// shape — `Opaque<StripCell<T>>` means "this data shape, wrapped however you
+// like" (liberal in what we accept). Factories RETURN exactly what the body
+// returned: `R` unstripped (faithful in what we produce). Cell/Stream brands in
+// a result type are exported capabilities, preserved end-to-end — the brand in
+// the type becomes `asCell`/`asStream` in the generated result schema, which
+// the runtime rematerializes as a live Cell/Stream for consumers. Stripping a
+// result type would not just misreport that; transformer-inferred schemas are
+// derived from these types, so it would silently downgrade live cells to dead
+// values. (`SELF` and the consumer-facing factory result deliberately use the
+// same unstripped `R`.)
 export interface PatternFunction {
   // Function-only overload: T and R inferred from function
   <T, R>(
     fn: (
       input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
     ) => Opaque<R>,
-  ): PatternFactory<StripCell<T>, StripCell<R>>;
+  ): PatternFactory<StripCell<T>, R>;
 
   // Function-only overload: T explicit, R inferred
   <T>(
     fn: (
       input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
     ) => any,
-  ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
+  ): PatternFactory<StripCell<T>, ReturnType<typeof fn>>;
 
   // Function + schema overload: T explicit, R inferred
   <T>(
@@ -1949,7 +1967,7 @@ export interface PatternFunction {
     ) => any,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
-  ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
+  ): PatternFactory<StripCell<T>, ReturnType<typeof fn>>;
 
   // Function + schema overload: T and R explicit
   <T, R>(
@@ -1958,7 +1976,7 @@ export interface PatternFunction {
     ) => Opaque<R>,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
-  ): PatternFactory<StripCell<T>, StripCell<R>>;
+  ): PatternFactory<StripCell<T>, R>;
 }
 
 /**
@@ -1995,15 +2013,15 @@ export type PatternToolFunction = <
 export interface LiftFunction {
   <T, R>(
     implementation: (input: T) => R,
-  ): ModuleFactory<StripCell<T>, StripCell<R>>;
+  ): ModuleFactory<StripCell<T>, R>;
 
   <T>(
     implementation: (input: T) => any,
-  ): ModuleFactory<StripCell<T>, StripCell<ReturnType<typeof implementation>>>;
+  ): ModuleFactory<StripCell<T>, ReturnType<typeof implementation>>;
 
   <T extends (...args: any[]) => any>(
     implementation: T,
-  ): ModuleFactory<StripCell<Parameters<T>[0]>, StripCell<ReturnType<T>>>;
+  ): ModuleFactory<StripCell<Parameters<T>[0]>, ReturnType<T>>;
 }
 
 // Helper type to make non-Cell and non-Stream properties readonly in handler state.

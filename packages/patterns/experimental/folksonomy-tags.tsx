@@ -79,7 +79,7 @@ interface FolksonomyTagsInput {
   aggregator?: AggregatorCharm;
 }
 
-interface FolksonomyTagsOutput {
+export interface FolksonomyTagsOutput {
   [NAME]: string;
   [UI]: VNode;
   tags: string[];

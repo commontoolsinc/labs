@@ -4,7 +4,7 @@ import { Controls, SwitchControl, TextControl } from "../ui/controls/index.ts";
 
 // deno-lint-ignore no-empty-interface
 interface InputStoryInput {}
-interface InputStoryOutput {
+export interface InputStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

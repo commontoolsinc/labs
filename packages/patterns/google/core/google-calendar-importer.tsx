@@ -514,7 +514,7 @@ interface GoogleCalendarImporterInput {
 }
 
 /** Google Calendar event importer. #calendarEvents */
-interface Output {
+export interface Output {
   events: CalendarEvent[];
   calendars: Calendar[];
   /** Number of events imported */

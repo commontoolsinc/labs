@@ -16,7 +16,7 @@ interface InboxListInput {
   inboxItems: InboxItem[] | Default<[]>;
 }
 
-interface InboxListOutput {
+export interface InboxListOutput {
   inboxItems: InboxItem[];
   deleteHandlers: Stream<void>[];
 }

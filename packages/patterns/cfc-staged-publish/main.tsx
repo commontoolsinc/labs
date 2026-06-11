@@ -31,7 +31,7 @@ interface StagedPublishInput {
   publishedBody: Writable<Default<TrustedPublishedBodyUiContract, "">>;
 }
 
-interface StagedPublishOutput {
+export interface StagedPublishOutput {
   [NAME]: string;
   [UI]: VNode;
   draftTitle: string;

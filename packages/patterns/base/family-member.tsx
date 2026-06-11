@@ -72,7 +72,7 @@ interface Input {
   sameAs?: Writable<ContactPiece[]>;
 }
 
-interface Output {
+export interface Output {
   [NAME]: string;
   [UI]: VNode;
   member: FamilyMember;

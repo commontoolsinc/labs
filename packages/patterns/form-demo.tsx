@@ -34,7 +34,7 @@ interface FormDemoInput {
   people: Writable<Person[] | Default<[]>>;
 }
 
-interface FormDemoOutput {
+export interface FormDemoOutput {
   [NAME]: string;
   [UI]: VNode;
   people: Person[];

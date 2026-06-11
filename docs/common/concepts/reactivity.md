@@ -80,3 +80,44 @@ export default pattern<WritableInput>(({ count, items, title }) => {
   };
 });
 ```
+
+## Results Mirror the Rule: Writable<> in a Result Type Grants Write Access
+
+The same principle applies to what a pattern (or `lift`/`computed`) **returns**.
+Cell brands in a result type are exported capabilities, and they are preserved
+end-to-end: the brand in the type becomes `asCell` in the generated result
+schema, and consumers receive a live `Cell` — same identity, write access
+included — not a dereferenced copy.
+
+- **Include `Writable<T>`/`Cell<T>` in a result field** when you intend
+  consumers to write to it (or bind it bidirectionally, e.g. `$value`).
+- **Omit it** when consumers should only read — return the plain value
+  (it's still reactive, as always).
+
+```tsx
+interface CounterOutput {
+  count: Writable<number>;   // consumers may .set() / bind $value
+  label: string;             // read-only view (still reactive)
+}
+```
+
+**Export your result type.** Because the factory's result type references your
+declared interface by name (`pattern<Input, Output>` produces a
+`PatternFactory<…, Output>`), a non-exported `Output` interface fails
+compilation with "Default export of the module has or is using private name
+'Output'". The result type is your public contract — export it:
+
+```tsx
+export interface CounterOutput { /* ... */ }
+export default pattern<CounterInput, CounterOutput>(/* ... */);
+```
+
+Consumers see exactly what the author returned — the factory's result type is
+not stripped. A consumer that receives `Writable<GameState>` reads current
+values with `.get()` inside `computed()`/`lift()`/handler bodies, just like a
+`Writable<>` input:
+
+```tsx
+const game = Battleship({});
+const phase = computed(() => game.game.get().phase); // game.game: Writable<GameState>
+```

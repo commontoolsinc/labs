@@ -26,7 +26,7 @@ const handleBacklinkClick = handler<
 
 // ===== Output Type =====
 
-interface NoteMdOutput {
+export interface NoteMdOutput {
   [NAME]: string;
   [UI]: VNode;
   /** Passthrough note reference */

@@ -27,7 +27,7 @@ interface QuickCaptureInput {
   allPieces: Writable<MentionablePiece[]>;
 }
 
-interface QuickCaptureOutput {
+export interface QuickCaptureOutput {
   [NAME]: string;
   [UI]: VNode;
   summary: string;

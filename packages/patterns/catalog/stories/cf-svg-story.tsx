@@ -3,7 +3,7 @@ import { Controls, TextControl } from "../ui/controls/index.ts";
 
 // deno-lint-ignore no-empty-interface
 interface SvgStoryInput {}
-interface SvgStoryOutput {
+export interface SvgStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

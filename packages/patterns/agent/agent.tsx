@@ -31,7 +31,7 @@ interface AgentInput {
 }
 
 /** An #agent piece — autonomous worker with directive, learned state, and status. */
-interface AgentOutput extends AgentPiece {
+export interface AgentOutput extends AgentPiece {
   [NAME]: string;
   [UI]: VNode;
   agentName: string;

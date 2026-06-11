@@ -12,7 +12,7 @@ type ImageInput = {
   caption: string | Default<"">;
 };
 
-type ImageOutput = {
+export type ImageOutput = {
   [NAME]: unknown;
   [UI]: unknown;
   url: string;
