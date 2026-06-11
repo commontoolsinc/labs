@@ -369,6 +369,73 @@ export function computeModuleIdentities(
   return identityByPath;
 }
 
+export const FABRIC_MOUNT_ROOT = "/~cf/";
+
+export interface FabricMount {
+  /** Terminal identity the subtree was fetched by and must hash back to. */
+  entryIdentity: string;
+  /** Mounted path of the subtree's entry file. */
+  entryPath: string;
+  /** The fabric specifiers that resolve to this mount. */
+  specifiers: string[];
+}
+
+/**
+ * Compute module identities for a program that may include mounted fabric
+ * subtrees. Authored files keep the existing idPrefix behavior; each mount is
+ * hashed as its own standalone source set by stripping `/~cf/<identity>`.
+ */
+export function computeFabricModuleIdentities(
+  sources: Source[],
+  mounts: readonly FabricMount[],
+  options: { idPrefix?: string; runtimeFingerprint?: string } = {},
+): Map<string, string> {
+  const authored: Source[] = [];
+  const mountFiles = new Map<FabricMount, Source[]>();
+  for (const mount of mounts) mountFiles.set(mount, []);
+
+  for (const source of sources) {
+    if (!source.name.startsWith(FABRIC_MOUNT_ROOT)) {
+      authored.push(source);
+      continue;
+    }
+
+    const mount = mounts.find((candidate) =>
+      source.name.startsWith(mountPrefix(candidate))
+    );
+    if (mount === undefined) {
+      throw new Error(
+        `corrupt fabric mount assembly: '${source.name}' is under ${FABRIC_MOUNT_ROOT} but matches no mount`,
+      );
+    }
+    mountFiles.get(mount)!.push(source);
+  }
+
+  const result = computeModuleIdentities(authored, options);
+  for (const mount of mounts) {
+    const identities = computeModuleIdentities(mountFiles.get(mount) ?? [], {
+      idPrefix: `${FABRIC_MOUNT_ROOT}${mount.entryIdentity}`,
+      ...(options.runtimeFingerprint !== undefined
+        ? { runtimeFingerprint: options.runtimeFingerprint }
+        : {}),
+    });
+    const actual = identities.get(mount.entryPath);
+    if (actual !== mount.entryIdentity) {
+      throw new Error(
+        `integrity failure for fabric mount ${mount.entryIdentity}: mounted entry '${mount.entryPath}' hashed to '${actual}'`,
+      );
+    }
+    for (const [path, identity] of identities) {
+      result.set(path, identity);
+    }
+  }
+  return result;
+}
+
+function mountPrefix(mount: FabricMount): string {
+  return `${FABRIC_MOUNT_ROOT}${mount.entryIdentity}/`;
+}
+
 export function compileSourcesToRecords(
   sources: Source[],
   options: CompileSourcesOptions = {},
