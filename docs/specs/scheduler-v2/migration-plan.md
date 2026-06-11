@@ -124,11 +124,14 @@ memory-engine component — coordinate with the memory owners from the start.
 
 1. Stream `Cell.set` keeps queueing at send time (`cell.ts:1167` —
    unchanged latency); the queued event records its origin tx id.
-2. Handling transactions for origin-bearing events carry an
-   *origin-committed* precondition; the memory engine verifies it
-   (same-session commits are processed in order, so the origin's fate is
-   known; cross-space origins are best-effort client-side until spec open
-   question 2 is resolved).
+2. Same-space origins: handling transactions carry an *origin-committed*
+   precondition verified by the memory engine (same-session commits are
+   processed in order, so the origin's fate is known — the check is free).
+   Cross-space origins: the event **parks until the origin commit is
+   confirmed** (spec resolved decision 11; same head-parking mechanism as
+   time-gated dependencies, latency mirrors the accepted cross-space write
+   protocol), then dispatches normally; dropped on origin failure. No
+   cross-space server verification.
 3. Client lineage registry: origin tx → {queued events, started pieces}.
    On locally-known origin failure: cancel undispatched descendant events,
    cancel+stop descendant pieces (`handleJavaScriptHandlerResult` pull
@@ -148,7 +151,7 @@ memory-engine component — coordinate with the memory owners from the start.
    receipt; on receipt-exists rejection the client drops the event (lost
    race — no retry) and emits telemetry.
 3. Class surface: declare the opt-in (stream/ingress annotation — spec open
-   question 3); default on for webhook ingress and background delivery,
+   question 2); default on for webhook ingress and background delivery,
    off for renderer-local UI events.
 4. Multi-handler audit: today `queueSchedulerEvent` queues one event per
    matching handler; determine whether anything relies on that, then make
@@ -166,7 +169,9 @@ memory-engine component — coordinate with the memory owners from the start.
   harness): exactly one runtime's handler commits; the loser does not
   retry;
 - receipt + retryable conflict on another doc: handler retries and commits;
-  its own receipt never blocks it.
+  its own receipt never blocks it;
+- cross-space follow-up: parks until origin confirmation, dispatches after;
+  dropped (never dispatched) when the origin fails.
 
 Exit: I10 holds for handler-sent events and handler-started pieces; I11
 holds for receipt-enabled classes.
@@ -287,7 +292,7 @@ Coordinate with memory-layer owners (observation rows live in memory v2):
 | A storage configuration delivers commit notifications asynchronously, so same-pass convergence regresses (still correct, more ticks) | 2 | Test-only synchronicity assertion across providers; accept extra ticks as degraded-but-correct; document the provider requirement in storage interface docs |
 | Hidden dependence on prefetch as replica warmer (cold-start empty reads) | 4 | Fixture in 4.4; awaitSync piece gate; arrival-as-change invariant test |
 | A side-writer the transformer's capability analysis missed (write outside the registered surface) | 1 | Dev-mode actual-writes-within-surface assertion (phase 1.4) surfaces declaration gaps; idempotency validator covers the contract side |
-| Cross-space lineage cannot be server-verified (origin's commit log lives in another space) | E | Best-effort client cancellation cross-space; receipts bound duplicates; revisit with spec open question 2 (origin attestation / multi-space commit) |
+| Parked cross-space follow-up head-blocks the single global lane for a confirmation round trip | E | Accepted (same slowness class as the cross-space write protocol); the agreed per-space lane split confines it when it bites (spec open question 1) |
 | Permanent-vs-retryable rejection taxonomy leaks wrong behavior (a permanent rejection retried, or a conflict dropped) | E | Taxonomy lands first (E0) with focused tests on both retry paths (`events.ts` unshift, `action-run.ts` watch) before lineage/receipts build on it |
 | Receipt write traffic on high-frequency event classes | E | Per-class opt-in with UI-local classes off by default; measure commit volume on enabled classes before widening defaults |
 | Multi-handler streams silently rely on today's one-event-per-matching-handler fanout | E | Audit before receipts land; make multi-handler explicit opt-in (receipt id incorporates handler id) |

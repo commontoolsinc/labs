@@ -619,22 +619,44 @@ speculatively, exactly as today — no added latency for resend chains — and
 correctness comes from cancellation, not staging:
 
 1. An event sent during a transaction carries that transaction's id as its
-   *origin*. The handler transaction for such an event carries a
-   commit-time precondition: *origin committed*. The server (memory engine)
-   verifies it and rejects with a permanent rejection if the origin failed.
-   Same-session commits are processed in order, so by the time a follow-up's
-   commit arrives, its origin's fate is decided in the common case;
-   cross-session/cross-space origins may need a retryable "origin pending"
-   hold (open question for cross-space, where the verifying server cannot
-   see the origin's commit log — there, client-side cancellation plus
-   receipts bound the damage).
+   *origin*. Dispatch policy depends on where the event's handling commit
+   will land relative to the origin:
+   - **Same-space origin** (the common resend chain): dispatch immediately
+     and speculatively, exactly as today. The handler transaction carries a
+     commit-time precondition — *origin committed* — verified by the
+     memory engine; violation is a permanent rejection. Same-session
+     commits are processed in order, so the origin's fate is already
+     decided when the follow-up's commit arrives: the check is free.
+   - **Cross-space origin**: the event **parks until the origin commit is
+     confirmed**, then dispatches with ordinary semantics in the target
+     space; if the origin fails, the parked event is dropped via the
+     lineage registry. No cross-space server verification is needed: the
+     local runtime is the sole holder of the event (queues are in-memory
+     and events do not travel between runtimes), so withholding release
+     until confirmation closes the gap completely — cross-space descendants
+     of a failed origin never dispatch at all. This mirrors the existing
+     cross-space write protocol (child-space commit first, then the
+     handler transaction — `enableCrossSpaceChildCommit`) and shares its
+     accepted latency: one confirmation round trip on the cross-space hop.
+     Both are instances of one rule: *the depended-upon commit becomes
+     durable before the depending action proceeds.* Parking uses the same
+     head-parking mechanism as time-gated dependencies; under the single
+     global lane this head-blocks for the round trip — accepted, and the
+     concrete trigger for the agreed per-space lane split when it bites.
+     (Future server-routed/cross-runtime event delivery would reopen this
+     with an origin-attestation design; deferred until such a path
+     exists.)
 2. Client-side, the runtime keeps a lineage registry: origin tx →
    {queued events, started pieces}. When an origin's failure becomes known
-   locally, undispatched descendant events are cancelled in place and
-   descendant pieces are stopped (the compensating cancel+stop that the
-   pull path is missing today, now keyed off the same registry).
-   `navigateTo` results keep the fully commit-gated start (durability
-   before navigation).
+   locally, undispatched descendant events (parked or queued) are cancelled
+   in place and descendant pieces are stopped (the compensating cancel+stop
+   that the pull path is missing today, now keyed off the same registry).
+   This also improves the existing cross-space write protocol's accepted
+   zombie: when the handler transaction fails *after* a successful
+   child-space commit, the durable orphan data in the child space remains
+   accepted, but the registry stops the locally registered piece so no
+   running zombie sits on top of it. `navigateTo` results keep the fully
+   commit-gated start (durability before navigation).
 3. Descendants of a *failed attempt* are never retried (permanent
    rejection); when the parent itself retries and succeeds, the re-run
    emits fresh follow-ups under the new attempt's tx id. This is what
@@ -1011,26 +1033,34 @@ Summary table; the full per-mechanism walkthrough with file references is in
    the retry-exhaustion sites.
 10. **Effect-launched work.** No audit needed: effects re-run freely and
     deterministic ids converge the same way computation children do.
+11. **Cross-space lineage: park until origin confirmed.** A follow-up whose
+    handling commit lands in a different space than its origin parks until
+    the origin commit is confirmed, then dispatches normally; on origin
+    failure it is dropped. Sound (the local runtime is the event's sole
+    holder — no speculation gap to verify server-side) and symmetric with
+    the existing cross-space write protocol (child-space commit first,
+    confirmed, then the handler transaction; first failure aborts, second
+    failure's durable orphan is accepted — now with the lineage registry
+    at least stopping the local zombie piece). Latency = one confirmation
+    round trip on the cross-space hop, same accepted class of slowness as
+    cross-space writes. Origin attestation is deferred until a
+    cross-runtime event-delivery path exists.
 
 ### Open
 
 1. **Lane relaxation beyond per-space.** Per-space is the agreed first step
-   when contention warrants lanes at all. Finer schemes (per-stream,
+   when contention warrants lanes at all (a parked cross-space follow-up
+   head-blocking the global lane — resolved decision 11 — is the most
+   likely concrete trigger). Finer schemes (per-stream,
    handler-closure-overlap) make ordering data-dependent and are deferred
    until real contention data exists. Pairing question when lanes split:
    the consistency gate also becomes per-lane.
-2. **Cross-space lineage verification.** A follow-up handled in space B
-   cannot have its origin (committed in space A) verified by B's server.
-   Options: client-side cancellation only (receipts bound duplicates), a
-   cross-space origin-attestation carried with the event, or piggybacking
-   on a future multi-space commit protocol. Until decided, lineage is
-   server-verified same-space and best-effort cross-space.
-3. **Receipt class surface.** Where is the receipt opt-in declared — stream
+2. **Receipt class surface.** Where is the receipt opt-in declared — stream
    schema annotation, ingress configuration, or handler registration? And
    which classes default on (webhook ingress and background delivery
    clearly; cross-runtime UI streams less clear). Needs alignment with the
    CFC spec's exactly-once requirement scope.
-4. **Multi-handler events.** Today `queueSchedulerEvent` silently queues
+3. **Multi-handler events.** Today `queueSchedulerEvent` silently queues
    one event per matching handler. Receipts default to single-handler
    semantics, which would make the second handler lose the race. Audit
    whether anything relies on multi-match today, then make multi-handler
