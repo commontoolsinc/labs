@@ -1,4 +1,5 @@
 import { encodePointer } from "../../../memory/v2/path.ts";
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { uniqueCfcAtoms } from "./observation.ts";
 
 export type IFCLabel = {
@@ -57,6 +58,51 @@ export const cloneCfcLabel = (label: IFCLabel): IFCLabel => {
 
 export const hasCfcLabelValues = (label: IFCLabel): boolean =>
   LABEL_KEYS.some((key) => Array.isArray(label[key]) && label[key]!.length > 0);
+
+// Strip `Caveat.source` — the principal identity that introduced a caveat —
+// from a single atom. Other atom types and the caveat's `kind`/`by` are left
+// intact; only the identity is removed.
+const redactCaveatSourceAtom = (atom: unknown): unknown => {
+  if (
+    atom !== null && typeof atom === "object" && !Array.isArray(atom) &&
+    (atom as { type?: unknown }).type === CFC_ATOM_TYPE.Caveat &&
+    "source" in (atom as Record<string, unknown>)
+  ) {
+    const { source: _source, ...rest } = atom as Record<string, unknown>;
+    return rest;
+  }
+  return atom;
+};
+
+/**
+ * Redact `Caveat.source` identities from a label view for the pattern-facing
+ * INTROSPECTION surface (`getCfcLabel()` → `handleCellGetCfcLabel`). Surfacing
+ * the source lets a pattern learn which principal a caveat came from — an
+ * information-flow leak (audit item 28b, inv-12; full inv-12 labeling stays
+ * phased).
+ *
+ * Apply ONLY at the `handleCellGetCfcLabel` display response. It is deliberately
+ * NOT used by `cloneCfcLabel`, `cfcLabelViewFromMetadata`, or `cfcLabelViewForCell`
+ * — those feed observation labeling (`cfcConfidentialityForObservationNode`), the
+ * dereference-trace path `prepare.ts` consumes, and the carried-label view that
+ * round-trips back into cells via `getCellFromLink`, all of which must keep
+ * `source` intact.
+ */
+export const redactCaveatSourcesForDisplay = (
+  view: CfcLabelView,
+): CfcLabelView => ({
+  version: 1,
+  entries: view.entries.map((entry) => {
+    const label: IFCLabel = {};
+    for (const key of LABEL_KEYS) {
+      const value = entry.label[key];
+      if (Array.isArray(value) && value.length > 0) {
+        label[key] = value.map(redactCaveatSourceAtom);
+      }
+    }
+    return { path: entry.path, label };
+  }),
+});
 
 const sortEntries = (entries: CfcLabelViewEntry[]): CfcLabelViewEntry[] =>
   entries.sort((left, right) => {
