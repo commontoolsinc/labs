@@ -66,7 +66,10 @@ import {
   ignoreReadForScheduling,
   markReadAsAttemptedWrite,
 } from "./scheduler.ts";
-import { internalVerifierRead } from "./storage/reactivity-log.ts";
+import {
+  internalVerifierRead,
+  schedulerDependencyRead,
+} from "./storage/reactivity-log.ts";
 import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
@@ -2149,6 +2152,15 @@ export class Runner {
   }
 
   private populateDeclaredSchedulerReads(
+    reads: readonly NormalizedFullLink[],
+    depTx: IExtendedStorageTransaction,
+  ): void {
+    depTx.runWithAmbientReadMeta(schedulerDependencyRead, () => {
+      this.#populateDeclaredSchedulerReadsInner(reads, depTx);
+    });
+  }
+
+  #populateDeclaredSchedulerReadsInner(
     reads: readonly NormalizedFullLink[],
     depTx: IExtendedStorageTransaction,
   ): void {

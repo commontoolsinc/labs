@@ -75,6 +75,26 @@ export function isLinkResolutionProbe(meta?: Metadata): boolean {
   return meta?.[linkResolutionProbeMarker] === true;
 }
 
+const schedulerDependencyReadMarker: unique symbol = Symbol(
+  "schedulerDependencyReadMarker",
+);
+
+/**
+ * Marks reads performed by the scheduler's dependency seeding
+ * (populateDeclaredSchedulerReads and friends): they materialize declared
+ * dependencies so the reactivity log covers them for subscriptions, but
+ * they are scheduling machinery, not handler consumption (§8.10.1:
+ * dependency-discovery reads must not count as consumed inputs). Flow-label
+ * derivation excludes them; the action body's own reads carry the taint.
+ */
+export const schedulerDependencyRead: Metadata = {
+  [schedulerDependencyReadMarker]: true,
+};
+
+export function isSchedulerDependencyRead(meta?: Metadata): boolean {
+  return meta?.[schedulerDependencyReadMarker] === true;
+}
+
 export function reactivityLogFromActivities(
   activities: Iterable<Activity>,
 ): TransactionReactivityLog {

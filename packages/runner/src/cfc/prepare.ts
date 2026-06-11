@@ -27,6 +27,7 @@ import {
   internalVerifierRead,
   isInternalVerifierRead,
   isLinkResolutionProbe,
+  isSchedulerDependencyRead,
 } from "../storage/reactivity-log.ts";
 import {
   isPrimitiveCellLink,
@@ -1155,6 +1156,12 @@ const forEachFlowObservation = (
     // target's content label unless something actually reads its value
     // (which appears as an ordinary, unmarked read).
     if (isLinkResolutionProbe(read.meta)) {
+      continue;
+    }
+    // Scheduler dependency seeding materializes declared deps so the
+    // reactivity log covers them; it is scheduling machinery, not handler
+    // consumption (§8.10.1) — the action body's own reads carry the taint.
+    if (isSchedulerDependencyRead(read.meta)) {
       continue;
     }
     if (flowReadExcluded(read.id, read.path)) {

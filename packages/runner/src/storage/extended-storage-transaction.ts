@@ -19,6 +19,7 @@ import type {
   IStorageTransaction,
   ITransactionJournal,
   MemorySpace,
+  Metadata,
   ReadError,
   Result,
   StorageTransactionFailed,
@@ -295,6 +296,34 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  // Ambient metadata merged into every read issued inside a
+  // runWithAmbientReadMeta scope. Used by scheduler dependency seeding to
+  // tag its materialization reads without threading meta through every
+  // cell/traverse API in between.
+  #ambientReadMeta?: Metadata;
+
+  runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T {
+    const previous = this.#ambientReadMeta;
+    this.#ambientReadMeta = previous === undefined
+      ? meta
+      : { ...previous, ...meta };
+    try {
+      return fn();
+    } finally {
+      this.#ambientReadMeta = previous;
+    }
+  }
+
+  #withAmbientReadMeta(options?: IReadOptions): IReadOptions | undefined {
+    if (this.#ambientReadMeta === undefined) {
+      return options;
+    }
+    return {
+      ...options,
+      meta: { ...this.#ambientReadMeta, ...options?.meta },
+    };
+  }
+
   getNarrowestReadScope(): CellScope {
     return this.narrowestReadScope;
   }
@@ -562,6 +591,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     address: IMemorySpaceAddress,
     options?: IReadOptions,
   ): Result<IAttestation, ReadError> {
+    options = this.#withAmbientReadMeta(options);
     if (this.cfcState.prepare.status === "prepared") {
       this.invalidateCfc("read-after-prepare");
     }
@@ -573,6 +603,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     address: IMemorySpaceAddress,
     options?: IReadOptions,
   ): Immutable<FabricValue> {
+    options = this.#withAmbientReadMeta(options);
     if (this.cfcState.prepare.status === "prepared") {
       this.invalidateCfc("read-after-prepare");
     }
@@ -966,6 +997,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {
     this.wrapped.addCfcTriggerReads(reads);
+  }
+
+  runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T {
+    return this.wrapped.runWithAmbientReadMeta(meta, fn);
   }
 
   markCfcRelevant(reason?: string): void {
