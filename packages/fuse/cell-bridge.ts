@@ -1998,7 +1998,13 @@ export class CellBridge {
     piece: PieceController,
     spaceName: string,
   ): Promise<string> {
-    let name = resolveProjectedPieceName(piece.name(), piece.id);
+    const rawName = piece.name();
+    let name = resolveProjectedPieceName(rawName, piece.id);
+    this.debugLog(
+      `[${spaceName}] addPieceToSpace: id=${piece.id} rawName=${
+        JSON.stringify(rawName)
+      } resolved=${name}`,
+    );
     if (state.usedNames.has(name)) {
       let suffix = 2;
       while (state.usedNames.has(`${name}-${suffix}`)) suffix++;
@@ -2151,6 +2157,9 @@ export class CellBridge {
     spaceName: string,
   ): Promise<void> {
     const allPieces = await state.pieces.getAllPieces();
+    this.debugLog(
+      `[${spaceName}] syncPieceListOnce: live=${allPieces.length} tracked=${state.pieceMap.size}`,
+    );
 
     // Build set of current entity IDs
     const liveIds = new Set(allPieces.map((p) => p.id));

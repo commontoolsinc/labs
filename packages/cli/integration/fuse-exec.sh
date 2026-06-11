@@ -2,12 +2,36 @@
 set -euo pipefail
 
 export LOG_TO_STDERR=1
+# Surface piece-list build/sync diagnostics in the daemon log; without this a
+# "piece dir never appeared" timeout gives no signal about what the daemon saw.
+export CF_FUSE_DEBUG=1
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 
 error() {
   >&2 echo "ERROR: $1"
+  dump_mount_state
   exit 1
+}
+
+# On failure, show what the mounted tree actually contains so "path never
+# appeared" failures distinguish an empty piece list from a misnamed entry.
+dump_mount_state() {
+  if [ -z "${MOUNTPOINT:-}" ] || [ -z "${SPACE:-}" ]; then
+    return 0
+  fi
+  local pieces_dir="$MOUNTPOINT/$SPACE/pieces"
+  >&2 echo "--- mount state dump ---"
+  if path_exists "$pieces_dir" 2; then
+    >&2 ls -la "$pieces_dir" 2>&1 || true
+    if path_exists "$pieces_dir/pieces.json" 2; then
+      >&2 echo "--- pieces.json ---"
+      >&2 cat "$pieces_dir/pieces.json" 2>&1 || true
+    fi
+  else
+    >&2 echo "(pieces dir not reachable: $pieces_dir)"
+  fi
+  >&2 echo "--- end mount state dump ---"
 }
 
 success() {
