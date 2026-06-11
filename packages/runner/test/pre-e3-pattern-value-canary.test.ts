@@ -103,4 +103,30 @@ describe("pre-E3 stored pattern-value canary", () => {
     const resolved = resolveOpPattern(runtime!, graph, "map");
     expect(resolved).toBe(graph);
   });
+
+  it("dual-write vintage ($patternRef + graph) still executes via runtime.run", async () => {
+    setup();
+    const graph = fixture.serialized.dualWrite as unknown as Pattern;
+    expect("$patternRef" in graph).toBe(true);
+    expect(Array.isArray(graph.nodes)).toBe(true);
+
+    // Again no compile first: the module is NOT in this session's identity
+    // index, so execution must come from the carried graph.
+    const vs = await runGraph(
+      structuredClone(graph),
+      "canary-dual-write-run",
+    );
+    expect(vs).toEqual([7, 8, 9]);
+  });
+
+  it("dual-write vintage resolves from its carried graph on an identity-cache miss", () => {
+    setup();
+    const value = structuredClone(
+      fixture.serialized.dualWrite,
+    ) as unknown as Pattern;
+    // Fresh runtime: nothing is in the bounded identity cache, so the
+    // sentinel-shaped value must resolve from the graph it carries.
+    const resolved = resolveOpPattern(runtime!, value, "map");
+    expect(resolved).toBe(value);
+  });
 });

@@ -1,5 +1,10 @@
 // One-off capture script for the pre-E3 serialized-pattern fixture.
 // Run: deno run -A test/fixtures/capture-pre-e3.ts (from packages/runner)
+//
+// The `preE3` vintage was captured BEFORE the $patternRef dual-write and is
+// preserved verbatim when re-running (committed stored data does not change
+// because the writer did). Re-running against the current checkout refreshes
+// only the `dualWrite` vintage.
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../../src/runtime.ts";
@@ -35,18 +40,30 @@ await runtime.idle();
 // value undergoes when written to a cell (native-conversion HasToJSON).
 const serialized = JSON.parse(JSON.stringify(compiled));
 
+const fixtureUrl = new URL(
+  "./pre-e3-serialized-pattern.json",
+  import.meta.url,
+);
+let preE3 = serialized;
+try {
+  const existing = JSON.parse(await Deno.readTextFile(fixtureUrl));
+  if (existing?.serialized?.preE3) preE3 = existing.serialized.preE3;
+} catch {
+  // First capture: the current writer IS the pre-E3 writer.
+}
+
 const fixture = {
   comment:
-    "Captured by PR E3 from the PRE-E3 writer (patternToJSON before $patternRef dual-write). A stored pattern VALUE of this vintage is a bare node-graph with no $patternRef; it must keep executing through the graph read paths (runtime.run on a deserialized graph; resolveOpPattern legacy branch) for as long as stored data can carry it. Regenerate by re-running test/fixtures/capture-pre-e3.ts against a pre-E3 checkout.",
+    "Stored pattern-VALUE vintages (PR E3). preE3: captured from the writer BEFORE the $patternRef dual-write — a bare node-graph; preserved verbatim on re-capture. dualWrite: the current writer's boundary output — $patternRef alongside the graph. Both must keep executing through the graph read paths (runtime.run on a deserialized graph; resolveOpPattern) for as long as stored data can carry them. Refresh dualWrite by re-running test/fixtures/capture-pre-e3.ts.",
   program: PROGRAM,
-  serialized: { preE3: serialized },
+  serialized: { preE3, dualWrite: serialized },
 };
 
 await Deno.writeTextFile(
-  new URL("./pre-e3-serialized-pattern.json", import.meta.url),
+  fixtureUrl,
   JSON.stringify(fixture, null, 2) + "\n",
 );
-console.log("captured", Object.keys(serialized));
+console.log("captured dualWrite keys:", Object.keys(serialized));
 
 await runtime.dispose();
 await storageManager.close();
