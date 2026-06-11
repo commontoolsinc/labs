@@ -8,6 +8,7 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 import {
   COMPILE_CACHE_RUNTIME_VERSION,
   loadCompiledClosure,
+  loadVerifiedSourceClosure,
   writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
 
@@ -15,6 +16,7 @@ const signer = await Identity.fromPassphrase(
   "fabric imports pattern manager test",
 );
 const space = signer.did();
+const otherSpace = "did:key:z6MkFabricImportsPatternManagerOther";
 
 describe("PatternManager fabric imports", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -206,6 +208,56 @@ describe("PatternManager fabric imports", () => {
       readTx.abort?.();
       expect(compiled.has(importer.entryIdentity)).toBe(true);
       expect(compiled.has(dependency.entryIdentity)).toBe(true);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("copies cross-space fabric imports into the compiling space cache", async () => {
+    const runtime = newRuntime();
+    try {
+      const engine = runtime.harness as Engine;
+      const dependency = await engine.compileToRecordGraph(
+        dependencyProgram(30),
+      );
+      const depTx = runtime.edit();
+      writeSourceDocs(
+        runtime,
+        otherSpace,
+        dependency.modules,
+        dependency.entryIdentity,
+        depTx,
+      );
+      await depTx.commit();
+
+      const importer = await runtime.patternManager.compilePattern(
+        importerProgram(
+          `cf:/${otherSpace}/pattern:${dependency.entryIdentity}`,
+        ),
+        { space },
+      );
+      const importerIdentity = runtime.patternManager.getArtifactEntryRef(
+        importer,
+      )!.identity;
+      await runtime.patternManager.flushCompileCacheWrites();
+
+      const readTx = runtime.edit();
+      const copiedDependency = await loadVerifiedSourceClosure(
+        runtime,
+        space,
+        dependency.entryIdentity,
+        readTx,
+      );
+      const copiedImporter = await loadVerifiedSourceClosure(
+        runtime,
+        space,
+        importerIdentity,
+        readTx,
+      );
+      readTx.abort?.();
+
+      expect(copiedDependency?.has(dependency.entryIdentity)).toBe(true);
+      expect(copiedImporter?.has(importerIdentity)).toBe(true);
     } finally {
       await runtime.dispose();
     }

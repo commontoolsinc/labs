@@ -4,6 +4,7 @@ import {
   type ProgramResolver,
   type Source,
 } from "@commonfabric/js-compiler";
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   loadVerifiedSourceClosure,
   type SourceDoc,
@@ -17,13 +18,16 @@ import {
   FABRIC_MOUNT_ROOT,
   type FabricMount,
 } from "../sandbox/module-record-compiler.ts";
+import { resolveFabricRefToIdentity } from "../fabric-ref-resolution.ts";
+import type { FabricImportOptions, ResolvedFabricPin } from "./types.ts";
 
 const TARGET = ts.ScriptTarget.ES2023;
 const MAX_FABRIC_MOUNTS = 32;
+const DID_RE = /^did:[a-z0-9]+:.+$/;
+const logger = getLogger("fabric-resolver");
 
-export interface FabricResolutionContext {
+export interface FabricResolutionContext extends FabricImportOptions {
   runtime: Runtime;
-  space: MemorySpace;
 }
 
 export class FabricAwareResolver implements ProgramResolver {
@@ -31,6 +35,7 @@ export class FabricAwareResolver implements ProgramResolver {
   #mountByIdentity = new Map<string, FabricMount>();
   #entrySourceByIdentity = new Map<string, Source>();
   #specifierAliases = new Map<string, string>();
+  #resolvedPins: ResolvedFabricPin[] = [];
 
   constructor(
     private readonly inner: ProgramResolver,
@@ -58,14 +63,25 @@ export class FabricAwareResolver implements ProgramResolver {
       throw new Error("subpaths not yet supported (M4)");
     }
 
-    const identity = pinnedIdentity(ref);
+    let identity = pinnedIdentity(ref);
+    const sourceSpace = this.#sourceSpaceFor(ref.space);
     if (identity === undefined) {
-      throw new Error(
-        "fabric ref requires resolution of a mutable pointer — not yet supported (M2)",
+      if (this.ctx.allowUnpinned !== true) {
+        throw new Error(
+          `unpinned fabric import '${identifier}'; pin it (cf deps update) or deploy to pin`,
+        );
+      }
+      const resolved = await resolveFabricRefToIdentity(
+        this.ctx.runtime,
+        this.ctx.space,
+        ref,
       );
-    }
-    if (ref.space !== undefined && ref.space !== this.ctx.space) {
-      throw new Error("cross-space fabric refs not yet supported (M2)");
+      identity = resolved.entryIdentity;
+      this.#resolvedPins.push({
+        specifier: identifier,
+        resolvedIdentity: identity,
+        chain: resolved.chain,
+      });
     }
 
     const existing = this.#mountByIdentity.get(identity);
@@ -81,15 +97,23 @@ export class FabricAwareResolver implements ProgramResolver {
       throw new Error("fabric import graph too deep/large");
     }
 
-    const docs = await this.#loadSourceClosure(identity);
+    if (sourceSpace !== this.ctx.space) {
+      logger.info("fabric-import-cross-space", () => [
+        `source=${sourceSpace}`,
+        `dest=${this.ctx.space}`,
+        `entry=${identity}`,
+      ]);
+    }
+
+    const docs = await this.#loadSourceClosure(identity, sourceSpace);
     if (docs === undefined) {
-      throw new Error(this.#notFoundMessage(identity));
+      throw new Error(this.#notFoundMessage(identity, sourceSpace));
     }
     this.#assertNoRootAbsoluteImports(identity, docs);
 
     const entryDoc = docs.get(identity);
     if (entryDoc === undefined) {
-      throw new Error(this.#notFoundMessage(identity));
+      throw new Error(this.#notFoundMessage(identity, sourceSpace));
     }
     const entryPath = this.#mountPath(identity, entryDoc.filename);
     const mount: FabricMount = {
@@ -125,14 +149,22 @@ export class FabricAwareResolver implements ProgramResolver {
     return new Map(this.#specifierAliases);
   }
 
+  resolvedPins(): ResolvedFabricPin[] {
+    return this.#resolvedPins.map((pin) => ({
+      ...pin,
+      chain: [...pin.chain],
+    }));
+  }
+
   async #loadSourceClosure(
     identity: string,
+    space: MemorySpace,
   ): Promise<Map<string, SourceDoc> | undefined> {
     const tx = this.ctx.runtime.edit();
     try {
       return await loadVerifiedSourceClosure(
         this.ctx.runtime,
-        this.ctx.space,
+        space,
         identity,
         tx,
       );
@@ -161,7 +193,15 @@ export class FabricAwareResolver implements ProgramResolver {
     return `${FABRIC_MOUNT_ROOT}${identity}${filename}`;
   }
 
-  #notFoundMessage(identity: string): string {
-    return `source for pattern:${identity} not found in space ${this.ctx.space} (or failed integrity verification)`;
+  #notFoundMessage(identity: string, space: MemorySpace): string {
+    return `source for pattern:${identity} not found in space ${space} (or failed integrity verification)`;
+  }
+
+  #sourceSpaceFor(refSpace: string | undefined): MemorySpace {
+    if (refSpace === undefined) return this.ctx.space;
+    if (DID_RE.test(refSpace)) return refSpace as MemorySpace;
+    throw new Error(
+      "space names require name→DID resolution (open question 2); use a DID",
+    );
   }
 }

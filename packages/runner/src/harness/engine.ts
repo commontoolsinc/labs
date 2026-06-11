@@ -5,6 +5,7 @@ import {
   type Exports,
   type Harness,
   type HarnessedFunction,
+  type ResolvedFabricPin,
   type RuntimeProgram,
   type TypeScriptHarnessProcessOptions,
 } from "./types.ts";
@@ -229,6 +230,7 @@ export class Engine extends EventTarget implements Harness {
       mainSpecifier: string;
       entryIdentity: string;
       modules: CacheableModule[];
+      resolvedPins: ResolvedFabricPin[];
     }
   > {
     logger.timeStart("compileToRecordGraph");
@@ -245,12 +247,14 @@ export class Engine extends EventTarget implements Harness {
         ? new FabricAwareResolver(engineResolver, {
           runtime: this.ctRuntime,
           space: options.fabricImports.space,
+          allowUnpinned: options.fabricImports.allowUnpinned,
         })
         : undefined;
       const resolver = fabricResolver ?? engineResolver;
       const resolvedProgram = await this.resolve(resolver);
       const mounts = fabricResolver?.mounts() ?? [];
       const specifierAliases = fabricResolver?.specifierAliases() ?? new Map();
+      const resolvedPins = fabricResolver?.resolvedPins() ?? [];
       const resolvedFiles = uniqueSourcesByName(resolvedProgram.files);
       const resolvedForCompile = { ...resolvedProgram, files: resolvedFiles };
 
@@ -456,7 +460,14 @@ export class Engine extends EventTarget implements Harness {
         };
       });
 
-      return { id, graph, mainSpecifier, entryIdentity, modules };
+      return {
+        id,
+        graph,
+        mainSpecifier,
+        entryIdentity,
+        modules,
+        resolvedPins,
+      };
     } finally {
       logger.timeEnd("compileToRecordGraph");
     }
@@ -483,7 +494,9 @@ export class Engine extends EventTarget implements Harness {
   async compileResolvedToRecordGraph(
     resolvedFiles: Source[],
     entryFilename: string,
-    options: { fabricImports?: { space: MemorySpace } } = {},
+    options: {
+      fabricImports?: TypeScriptHarnessProcessOptions["fabricImports"];
+    } = {},
   ): Promise<{ modules: CacheableModule[]; entryIdentity: string }> {
     const { compiler } = await this.getCompilerInternals();
     assertNoReservedFabricPaths(resolvedFiles);
@@ -498,6 +511,7 @@ export class Engine extends EventTarget implements Harness {
       ? new FabricAwareResolver(engineResolver, {
         runtime: this.ctRuntime,
         space: options.fabricImports.space,
+        allowUnpinned: options.fabricImports.allowUnpinned,
       })
       : undefined;
     const resolver = fabricResolver ?? engineResolver;

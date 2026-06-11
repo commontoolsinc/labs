@@ -8,6 +8,12 @@ import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { writeSourceDocs } from "../src/compilation-cache/cell-cache.ts";
 import { FABRIC_MOUNT_ROOT } from "../src/sandbox/module-record-compiler.ts";
+import { createRef } from "../src/create-ref.ts";
+import { fromURI, toURI } from "../src/uri-utils.ts";
+import { type PatternMeta, patternMetaSchema } from "../src/pattern-manager.ts";
+import { slugIdForSpace } from "../src/slugs.ts";
+import type { Cell } from "../src/cell.ts";
+import type { URI } from "../src/sigil-types.ts";
 
 const signer = await Identity.fromPassphrase("fabric imports engine test");
 const space = signer.did();
@@ -69,6 +75,54 @@ describe("Engine fabric imports", () => {
     );
     await tx.commit();
     return compiled;
+  }
+
+  function newPatternId(label: string): URI {
+    return toURI(createRef({ pattern: label }, "fabric imports engine test"));
+  }
+
+  function patternMetaCell(patternId: URI): Cell<PatternMeta> {
+    return runtime.getCellFromEntityId(
+      space,
+      { "/": fromURI(patternId) },
+      [],
+      patternMetaSchema,
+    );
+  }
+
+  async function writePatternMeta(
+    entryIdentity: string,
+  ): Promise<{ patternId: URI; cell: Cell<PatternMeta> }> {
+    const patternId = newPatternId(entryIdentity);
+    const cell = patternMetaCell(patternId);
+    await runtime.editWithRetry((tx) => {
+      cell.withTx(tx).set({
+        spec: "pattern",
+        entryIdentity,
+      } as PatternMeta);
+    });
+    return { patternId, cell };
+  }
+
+  async function writeSlug(slug: string, target: Cell<unknown>): Promise<void> {
+    const slugCell = runtime.getCellFromEntityId(space, {
+      "/": slugIdForSpace(space, slug),
+    });
+    await runtime.editWithRetry((tx) => {
+      const slugWithTx = slugCell.withTx(tx);
+      slugWithTx.setRawUntyped(
+        target.withTx(tx).getAsWriteRedirectLink({ base: slugWithTx }),
+      );
+    });
+  }
+
+  async function poisonSlug(slug: string): Promise<void> {
+    const slugCell = runtime.getCellFromEntityId(space, {
+      "/": slugIdForSpace(space, slug),
+    });
+    await runtime.editWithRetry((tx) => {
+      slugCell.withTx(tx).setRawUntyped("not a redirect");
+    });
   }
 
   async function runPattern(pattern: unknown, value: number): Promise<unknown> {
@@ -161,6 +215,71 @@ describe("Engine fabric imports", () => {
     ).rejects.toThrow(
       "fabric imports require a space context (options.fabricImports)",
     );
+  });
+
+  it("rejects unpinned fabric imports unless explicitly allowed", async () => {
+    await expect(
+      engine.compileToRecordGraph(importerProgram("cf:dep"), {
+        fabricImports: { space },
+      }),
+    ).rejects.toThrow(
+      "unpinned fabric import 'cf:dep'; pin it (cf deps update) or deploy to pin",
+    );
+  });
+
+  it("resolves unpinned fabric imports in dev mode and surfaces resolved pins", async () => {
+    const dependency = await publish(dependencyProgram(9));
+    const { patternId, cell } = await writePatternMeta(
+      dependency.entryIdentity,
+    );
+    await writeSlug("dep", cell);
+
+    const compiled = await engine.compileToRecordGraph(
+      importerProgram("cf:dep"),
+      {
+        fabricImports: { space, allowUnpinned: true },
+      },
+    );
+
+    expect(compiled.resolvedPins).toEqual([
+      {
+        specifier: "cf:dep",
+        resolvedIdentity: dependency.entryIdentity,
+        chain: [
+          "slug:dep",
+          `patternMeta:${patternId}`,
+          `entryIdentity:${dependency.entryIdentity}`,
+        ],
+      },
+    ]);
+    const evaluated = engine.evaluateRecordGraph(
+      compiled.id,
+      compiled.graph,
+      compiled.mainSpecifier,
+      importerProgram("cf:dep").files,
+    );
+    expect(evaluated.main?.y()).toBe(10);
+  });
+
+  it("does not chase the slug for already-pinned mutable refs", async () => {
+    const dependency = await publish(dependencyProgram(11));
+    const { cell } = await writePatternMeta(dependency.entryIdentity);
+    await writeSlug("dep", cell);
+    await poisonSlug("dep");
+
+    const compiled = await engine.compileToRecordGraph(
+      importerProgram(`cf:dep@${dependency.entryIdentity}`),
+      { fabricImports: { space } },
+    );
+
+    expect(compiled.resolvedPins).toEqual([]);
+    const evaluated = engine.evaluateRecordGraph(
+      compiled.id,
+      compiled.graph,
+      compiled.mainSpecifier,
+      importerProgram(`cf:dep@${dependency.entryIdentity}`).files,
+    );
+    expect(evaluated.main?.y()).toBe(12);
   });
 
   it("dedupes mounted files when different specifier texts pin the same identity", async () => {

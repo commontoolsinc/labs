@@ -63,7 +63,18 @@ export interface TypeScriptHarnessProcessOptions {
    * source docs fabric refs are fetched from and verified against. Absent means
    * any fabric specifier in the authored program is a compile error.
    */
-  fabricImports?: { space: MemorySpace };
+  fabricImports?: FabricImportOptions;
+}
+
+export interface FabricImportOptions {
+  space: MemorySpace;
+  allowUnpinned?: boolean;
+}
+
+export interface ResolvedFabricPin {
+  specifier: string;
+  resolvedIdentity: string;
+  chain: string[];
 }
 
 /** A cached/compiled per-module artifact: emitted JS plus optional source map. */
@@ -137,6 +148,7 @@ export interface Harness extends EventTarget {
     mainSpecifier: string;
     entryIdentity: string;
     modules: CacheableModule[];
+    resolvedPins: ResolvedFabricPin[];
   }>;
 
   // Evaluate a verified ESM record graph produced by `compileToRecordGraph`.
@@ -160,7 +172,7 @@ export interface Harness extends EventTarget {
   compileResolvedToRecordGraph(
     resolvedFiles: Source[],
     entryFilename: string,
-    options?: { fabricImports?: { space: MemorySpace } },
+    options?: { fabricImports?: FabricImportOptions },
   ): Promise<{ modules: CacheableModule[]; entryIdentity: string }>;
 
   // Resolves a `ProgramResolver` into a `Program` using the engine's

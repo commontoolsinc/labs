@@ -19,6 +19,12 @@ import {
 } from "../src/compilation-cache/cell-cache.ts";
 import { FabricAwareResolver } from "../src/harness/fabric-resolver.ts";
 import { FABRIC_MOUNT_ROOT } from "../src/sandbox/module-record-compiler.ts";
+import { createRef } from "../src/create-ref.ts";
+import { fromURI, toURI } from "../src/uri-utils.ts";
+import { type PatternMeta, patternMetaSchema } from "../src/pattern-manager.ts";
+import { slugIdForSpace } from "../src/slugs.ts";
+import type { URI } from "../src/sigil-types.ts";
+import type { Cell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("fabric resolver test");
 const space = signer.did();
@@ -78,12 +84,62 @@ describe("FabricAwareResolver", () => {
     await storageManager?.close();
   });
 
-  async function publish(program: Program = PROGRAM): Promise<string> {
+  async function publish(
+    program: Program = PROGRAM,
+    targetSpace = space,
+  ): Promise<string> {
     const { modules, entryIdentity } = toModules(program);
     const tx = runtime.edit();
-    writeSourceDocs(runtime, space, modules, entryIdentity, tx);
+    writeSourceDocs(runtime, targetSpace, modules, entryIdentity, tx);
     await tx.commit();
     return entryIdentity;
+  }
+
+  function newPatternId(label: string): URI {
+    return toURI(createRef({ pattern: label }, "fabric resolver test"));
+  }
+
+  function patternMetaCell(
+    patternId: URI,
+    targetSpace = space,
+  ): Cell<PatternMeta> {
+    return runtime.getCellFromEntityId(
+      targetSpace,
+      { "/": fromURI(patternId) },
+      [],
+      patternMetaSchema,
+    );
+  }
+
+  async function writePatternMeta(
+    entryIdentity: string,
+    targetSpace = space,
+  ): Promise<{ patternId: URI; cell: Cell<PatternMeta> }> {
+    const patternId = newPatternId(entryIdentity);
+    const cell = patternMetaCell(patternId, targetSpace);
+    await runtime.editWithRetry((tx) => {
+      cell.withTx(tx).set({
+        spec: "pattern",
+        entryIdentity,
+      } as PatternMeta);
+    });
+    return { patternId, cell };
+  }
+
+  async function writeSlug(
+    slug: string,
+    target: Cell<unknown>,
+    targetSpace = space,
+  ): Promise<void> {
+    const slugCell = runtime.getCellFromEntityId(targetSpace, {
+      "/": slugIdForSpace(targetSpace, slug),
+    });
+    await runtime.editWithRetry((tx) => {
+      const slugWithTx = slugCell.withTx(tx);
+      slugWithTx.setRawUntyped(
+        target.withTx(tx).getAsWriteRedirectLink({ base: slugWithTx }),
+      );
+    });
   }
 
   it("fetches a pinned same-space pattern and mounts its verified source closure", async () => {
@@ -200,7 +256,52 @@ describe("FabricAwareResolver", () => {
     );
   });
 
-  it("throws M1 scope errors for mutable, cross-space, cross-host, and subpath refs", async () => {
+  it("resolves unpinned refs when allowed and records resolved pins", async () => {
+    const entryIdentity = await publish();
+    const { patternId, cell } = await writePatternMeta(entryIdentity);
+    await writeSlug("dep", cell);
+    const resolver = new FabricAwareResolver(innerProgram(), {
+      runtime,
+      space,
+      allowUnpinned: true,
+    });
+
+    const entry = await resolver.resolveSource("cf:dep");
+
+    expect(entry?.name).toBe(`${FABRIC_MOUNT_ROOT}${entryIdentity}/main.tsx`);
+    expect(resolver.resolvedPins()).toEqual([
+      {
+        specifier: "cf:dep",
+        resolvedIdentity: entryIdentity,
+        chain: [
+          "slug:dep",
+          `patternMeta:${patternId}`,
+          `entryIdentity:${entryIdentity}`,
+        ],
+      },
+    ]);
+  });
+
+  it("loads pinned cross-space refs from the referenced DID space", async () => {
+    const entryIdentity = await publish(PROGRAM, otherSpace);
+    const specifier = `cf:/${otherSpace}/pattern:${entryIdentity}`;
+    const resolver = new FabricAwareResolver(innerProgram(), {
+      runtime,
+      space,
+    });
+
+    const entry = await resolver.resolveSource(specifier);
+
+    expect(entry).toEqual({
+      name: `${FABRIC_MOUNT_ROOT}${entryIdentity}/main.tsx`,
+      contents: PROGRAM.files[0].contents,
+    });
+    expect(resolver.specifierAliases().get(specifier)).toBe(
+      `${FABRIC_MOUNT_ROOT}${entryIdentity}/main.tsx`,
+    );
+  });
+
+  it("throws scope errors for unpinned, cross-host, subpath, and named-space refs", async () => {
     const entryIdentity = await publish();
     const resolver = new FabricAwareResolver(innerProgram(), {
       runtime,
@@ -209,11 +310,7 @@ describe("FabricAwareResolver", () => {
     const cases: Array<[string, string]> = [
       [
         "cf:dep",
-        "fabric ref requires resolution of a mutable pointer — not yet supported (M2)",
-      ],
-      [
-        `cf:/${otherSpace}/pattern:${entryIdentity}`,
-        "cross-space fabric refs not yet supported (M2)",
+        "unpinned fabric import 'cf:dep'; pin it (cf deps update) or deploy to pin",
       ],
       [
         `cf://example.com/${space}/pattern:${entryIdentity}`,
@@ -222,6 +319,10 @@ describe("FabricAwareResolver", () => {
       [
         `cf:pattern:${entryIdentity}/schema`,
         "subpaths not yet supported (M4)",
+      ],
+      [
+        `cf:/kitchen/pattern:${entryIdentity}`,
+        "space names require name→DID resolution (open question 2); use a DID",
       ],
     ];
 
