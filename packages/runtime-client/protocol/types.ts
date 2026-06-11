@@ -49,6 +49,7 @@ export enum RequestType {
   GetHomeSpaceCell = "runtime:getHomeSpaceCell",
   EnsureHomePatternRunning = "runtime:ensureHomePatternRunning",
   Idle = "runtime:idle",
+  RuntimeSynced = "runtime:synced",
   FlushCompileCacheWrites = "runtime:flushCompileCacheWrites",
   GetGraphSnapshot = "runtime:getGraphSnapshot",
   SetPullMode = "runtime:setPullMode",
@@ -226,6 +227,15 @@ export interface EnsureHomePatternRunningRequest extends BaseRequest {
 
 export interface IdleRequest extends BaseRequest {
   type: RequestType.Idle;
+}
+
+/**
+ * Await storage/piece-manager convergence for EVERY space this worker
+ * has opened. Genuinely spaceless — like Idle — unlike PageSynced,
+ * which awaits one named space's piece context.
+ */
+export interface RuntimeSyncedRequest extends BaseRequest {
+  type: RequestType.RuntimeSynced;
 }
 
 /**
@@ -439,6 +449,8 @@ export type LoggerFlagsData = Record<
 
 export interface PageCreateRequest extends BaseRequest {
   type: RequestType.PageCreate;
+  /** The space the piece is created in — part of its address. */
+  space: DID;
   source: {
     url: string;
   } | {
@@ -450,61 +462,60 @@ export interface PageCreateRequest extends BaseRequest {
 }
 
 /**
- * Page operations resolve against one space's piece context. `space`
- * is optional on every request: absent ⇒ the space the worker was
- * initialized with (the home space), byte-identical to the
- * single-space behavior. Present ⇒ the worker lazily builds a piece
- * context for that space, sharing the one runtime/storage connection.
+ * Page operations resolve against one space's piece context, and every
+ * request names its space explicitly — there is no implicit/default
+ * space at this layer. The worker lazily builds a piece context per
+ * space, sharing the one runtime/storage connection.
  */
 export interface PageGetSpaceDefault extends BaseRequest {
   type: RequestType.GetSpaceRootPattern;
-  space?: DID;
+  space: DID;
 }
 
 export interface RecreateSpaceRootPatternRequest extends BaseRequest {
   type: RequestType.RecreateSpaceRootPattern;
-  space?: DID;
+  space: DID;
 }
 
 export interface PageGetRequest extends BaseRequest {
   type: RequestType.PageGet;
   pageId: string;
   runIt?: boolean;
-  space?: DID;
+  space: DID;
 }
 
 export interface PageGetSlugRequest extends BaseRequest {
   type: RequestType.PageGetSlug;
   pageId: string;
-  space?: DID;
+  space: DID;
 }
 
 export interface PageRemoveRequest extends BaseRequest {
   type: RequestType.PageRemove;
   pageId: string;
-  space?: DID;
+  space: DID;
 }
 
 export interface PageStartRequest extends BaseRequest {
   type: RequestType.PageStart;
   pageId: string;
-  space?: DID;
+  space: DID;
 }
 
 export interface PageStopRequest extends BaseRequest {
   type: RequestType.PageStop;
   pageId: string;
-  space?: DID;
+  space: DID;
 }
 
 export interface PageGetAllRequest extends BaseRequest {
   type: RequestType.PageGetAll;
-  space?: DID;
+  space: DID;
 }
 
 export interface PageSyncedRequest extends BaseRequest {
   type: RequestType.PageSynced;
-  space?: DID;
+  space: DID;
 }
 
 /**
@@ -634,6 +645,7 @@ export type IPCClientRequest =
   | PageStopRequest
   | PageGetAllRequest
   | PageSyncedRequest
+  | RuntimeSyncedRequest
   | VDomEventRequest
   | VDomMountRequest
   | VDomUnmountRequest
@@ -914,6 +926,10 @@ export type Commands = {
   };
   [RequestType.PageSynced]: {
     request: PageSyncedRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.RuntimeSynced]: {
+    request: RuntimeSyncedRequest;
     response: EmptyResponse;
   };
   [RequestType.PageGet]: {

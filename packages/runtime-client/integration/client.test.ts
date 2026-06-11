@@ -108,7 +108,7 @@ describe("RuntimeClient", () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEMP_PATTERN, {
+      const page = await rt.createPage(TEMP_PATTERN, session.space, {
         run: true,
       });
       const cell = page.cell();
@@ -334,7 +334,7 @@ describe("RuntimeClient", () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, {
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
         run: true,
       });
       assertExists(page.id());
@@ -344,10 +344,10 @@ describe("RuntimeClient", () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, {
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
         run: true,
       });
-      const retrieved = await rt.getPage(page.id(), true);
+      const retrieved = await rt.getPage(page.id(), session.space, true);
       assertExists(retrieved);
 
       const cell = retrieved.cell();
@@ -363,7 +363,7 @@ describe("RuntimeClient", () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, {
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
         run: false,
       });
       await page.start();
@@ -375,11 +375,11 @@ describe("RuntimeClient", () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, {
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
         run: false,
       });
-      await rt.removePage(page.id());
-      await rt.synced();
+      await rt.removePage(page.id(), session.space);
+      await rt.synced(session.space);
 
       // Note: getPage may still return a reference to a removed page
       // because the ID still maps to a cell that existed. The removal
@@ -390,7 +390,7 @@ describe("RuntimeClient", () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const piecesListCell = await rt.getPiecesListCell();
+      const piecesListCell = await rt.getPiecesListCell(session.space);
       assertExists(piecesListCell);
 
       await piecesListCell.sync();
@@ -430,7 +430,7 @@ export default pattern((_) => {
         },
       );
 
-      await rt.createPage(consoleProgram, { run: true });
+      await rt.createPage(consoleProgram, session.space, { run: true });
       await rt.idle();
 
       await waitFor(
@@ -498,7 +498,7 @@ export default pattern((_) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, {
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
         run: true,
       });
       const cell = page.cell();
@@ -515,7 +515,7 @@ export default pattern((_) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, {
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
         run: true,
       });
       const cell = page.cell();
@@ -588,7 +588,7 @@ export default pattern<unknown, ParentOutput>(() => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(unknownUiProgram, {
+      const page = await rt.createPage(unknownUiProgram, session.space, {
         run: true,
       });
       const mock = new MockDoc(
@@ -647,7 +647,7 @@ export default pattern<State>(({ value }) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(valueProgram, {
+      const page = await rt.createPage(valueProgram, session.space, {
         run: true,
       });
       const mock = new MockDoc(
@@ -701,7 +701,7 @@ export default pattern<State>(({ value }) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(derivedProgram, {
+      const page = await rt.createPage(derivedProgram, session.space, {
         run: true,
       });
       const cell = page.cell() as CellHandle<VNode>;
@@ -775,7 +775,7 @@ export default pattern<Input, Output>(({ question, myName }) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(scopedHeaderProgram, {
+      const page = await rt.createPage(scopedHeaderProgram, session.space, {
         run: true,
       });
       const cell = page.cell() as CellHandle<VNode>;
@@ -853,7 +853,7 @@ export default pattern<State>(({ value }) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(clickProgram, {
+      const page = await rt.createPage(clickProgram, session.space, {
         run: true,
       });
       const valueCell = (page.cell() as any).key("value").asSchema({
@@ -927,7 +927,7 @@ export default pattern<State>(({ value }) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(clickProgram, {
+      const page = await rt.createPage(clickProgram, session.space, {
         run: true,
       });
       const valueCell = (page.cell() as any).key("value").asSchema({
@@ -1001,7 +1001,7 @@ export default pattern<Record<string, never>>(() => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(navigateProgram, {
+      const page = await rt.createPage(navigateProgram, session.space, {
         run: true,
       });
       const mock = new MockDoc(
@@ -1095,7 +1095,7 @@ export default pattern<Record<string, never>>(() => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(navigateProgram, {
+      const page = await rt.createPage(navigateProgram, session.space, {
         run: true,
       });
       const mock = new MockDoc(
@@ -1158,6 +1158,6 @@ async function createRuntimeClient(session: Session): Promise<RuntimeClient> {
     spaceName: session.spaceName,
   });
 
-  await worker.synced();
+  await worker.synced(session.space);
   return worker;
 }

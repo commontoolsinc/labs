@@ -476,15 +476,22 @@ export class RuntimeProcessor {
   }
 
   /**
-   * Resolve the piece context for a space. No space (or the home
-   * space) ⇒ the context built at initialize; any other space lazily
-   * gets its own PieceManager/PiecesController, sharing this worker's
-   * runtime/scheduler/storage (the storage layer is already
-   * multi-space). The per-space session authenticates as the user —
-   * no per-space signer, matching the storage connections.
+   * Resolve the piece context for a space. The space the worker was
+   * initialized with gets the context built at initialize; any other
+   * space lazily gets its own PieceManager/PiecesController, sharing
+   * this worker's runtime/scheduler/storage (the storage layer is
+   * already multi-space). The per-space session authenticates as the
+   * user — no per-space signer, matching the storage connections.
+   *
+   * `space` is required: page operations carry their space explicitly,
+   * with no implicit default at this layer. (The runtime guard catches
+   * out-of-date callers that still omit it.)
    */
-  private getSpaceCtx(space?: DID): SpaceContext {
-    const target = space ?? this.space;
+  private getSpaceCtx(space: DID): SpaceContext {
+    const target: DID | undefined = space;
+    if (!target) {
+      throw new Error("Page operations must name a space explicitly.");
+    }
     let ctx = this.spaces.get(target);
     if (!ctx) {
       const pieceManager = new PieceManager(
@@ -730,9 +737,10 @@ export class RuntimeProcessor {
   async handlePieceCreate(
     request: PageCreateRequest,
   ): Promise<PageResponse> {
+    const { cc } = this.getSpaceCtx(request.space);
     let program: Program | undefined;
     if ("url" in request.source && request.source.url) {
-      program = await this.cc.manager().runtime.harness.resolve(
+      program = await cc.manager().runtime.harness.resolve(
         new HttpProgramResolver(request.source.url),
       );
     } else if ("program" in request.source) {
@@ -741,7 +749,7 @@ export class RuntimeProcessor {
       throw new Error("Invalid source.");
     }
 
-    const piece = await this.cc.create<NameSchema>(program, {
+    const piece = await cc.create<NameSchema>(program, {
       input: request.argument as object | undefined,
       start: request.run ?? true,
     }, request.cause);
@@ -750,27 +758,9 @@ export class RuntimeProcessor {
     };
   }
 
-  /**
-   * Root-pattern ensure/recreate stays home-space only. Both can WRITE
-   * (create + start the default pattern), and they seed the pattern URL
-   * from the requesting user's home `defaultAppUrl` — the right
-   * semantics for your own space, wrong for a foreign one. Mounting an
-   * existing foreign pattern (`PageGet`) doesn't need either. Lift this
-   * when federation defines who provisions a space's root pattern.
-   */
-  private checkRootPatternSpace(space?: DID): void {
-    if (space !== undefined && space !== this.space) {
-      throw new Error(
-        "Root-pattern operations are home-space only; " +
-          `got space ${space}`,
-      );
-    }
-  }
-
   async handleGetSpaceRootPattern(
     request: PatternGetSpaceRoot,
   ): Promise<PageResponse> {
-    this.checkRootPatternSpace(request.space);
     const { cc } = this.getSpaceCtx(request.space);
     const piece = await cc.ensureDefaultPattern();
     return {
@@ -781,7 +771,6 @@ export class RuntimeProcessor {
   async handleRecreateSpaceRootPattern(
     request: RecreateSpaceRootPatternRequest,
   ): Promise<PageResponse> {
-    this.checkRootPatternSpace(request.space);
     const { cc } = this.getSpaceCtx(request.space);
     const piece = await cc.recreateDefaultPattern();
     return {
@@ -893,6 +882,15 @@ export class RuntimeProcessor {
   async handlePageSynced(request: PageSyncedRequest): Promise<void> {
     const { pieceManager } = this.getSpaceCtx(request.space);
     await pieceManager.synced();
+  }
+
+  /** Convergence across every opened space — no space named, none implied. */
+  async handleRuntimeSynced(): Promise<void> {
+    await Promise.all(
+      [...this.spaces.values()].map(({ pieceManager }) =>
+        pieceManager.synced()
+      ),
+    );
   }
 
   getGraphSnapshot(_: GetGraphSnapshotRequest): GraphSnapshotResponse {
@@ -1183,6 +1181,8 @@ export class RuntimeProcessor {
         return await this.handlePageGetAll(request);
       case RequestType.PageSynced:
         return await this.handlePageSynced(request);
+      case RequestType.RuntimeSynced:
+        return await this.handleRuntimeSynced();
       case RequestType.GetGraphSnapshot:
         return this.getGraphSnapshot(request);
       case RequestType.SetPullMode:

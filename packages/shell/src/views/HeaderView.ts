@@ -492,6 +492,10 @@ export class XHeaderView extends BaseView {
   @property({ attribute: false })
   accessor spaceDid: DID | undefined = undefined;
 
+  /** The resolved space DID of the current view (view state). */
+  @property({ attribute: false })
+  accessor space: DID | undefined = undefined;
+
   @property({ attribute: false })
   accessor isLoggedIn = false;
 
@@ -610,6 +614,12 @@ export class XHeaderView extends BaseView {
       this._piecesCache = undefined;
       this._setupFavoritesSubscription();
     }
+    // One runtime serves every space, so a space switch no longer
+    // replaces rt — the per-space pieces cache must invalidate on the
+    // space itself.
+    if (changedProperties.has("space")) {
+      this._piecesCache = undefined;
+    }
     if (changedProperties.has("pieceId")) {
       this._localIsFavorite = undefined;
     }
@@ -617,24 +627,24 @@ export class XHeaderView extends BaseView {
 
   /**
    * Eagerly fetch all pieces in the current space as soon as the
-   * runtime is available. Results are cached until the runtime changes
-   * (e.g. navigating to a different space). This ensures the piece list
-   * is ready by the time the user opens a dropdown.
+   * runtime is available. Results are cached until the runtime or the
+   * viewed space changes. This ensures the piece list is ready by the
+   * time the user opens a dropdown.
    * Fetches are parallelized with Promise.allSettled; pieces that fail
    * to resolve are silently skipped.
    */
   private _piecesCache: PieceItem[] | undefined;
 
   private _pieces = new Task(this, {
-    task: async ([rt]): Promise<PieceItem[]> => {
-      if (!rt) {
+    task: async ([rt, space]): Promise<PieceItem[]> => {
+      if (!rt || !space) {
         this._piecesCache = undefined;
         return [];
       }
       if (this._piecesCache) return this._piecesCache;
 
-      await rt.synced();
-      const piecesListCell = await rt.getPiecesListCell();
+      await rt.synced(space);
+      const piecesListCell = await rt.getPiecesListCell(space);
       await piecesListCell.sync();
       const piecesList = piecesListCell.get() as any[];
       if (!piecesList) return [];
@@ -650,7 +660,7 @@ export class XHeaderView extends BaseView {
           // Names come from the persisted result cells — do NOT start every
           // piece in the space just to label a menu (CT-1623: that cost ~10s
           // of dependency collection per reload or on first interaction).
-          const page = await rt.getPattern(id, { start: false });
+          const page = await rt.getPattern(space, id, { start: false });
           await page.cell().sync();
           return {
             id: page.id(),
@@ -667,7 +677,7 @@ export class XHeaderView extends BaseView {
         .map((r) => r.value);
       return this._piecesCache;
     },
-    args: () => [this.rt] as const,
+    args: () => [this.rt, this.space] as const,
   });
 
   /** Clear the keystore and identity, logging the user out. */
@@ -853,7 +863,10 @@ export class XHeaderView extends BaseView {
   private async handleToggleFavorite(e: Event) {
     e.preventDefault();
     e.stopPropagation();
-    if (!this.rt || !this.pieceId || this._isFavoriteLoading) return;
+    const space = this.space;
+    if (!this.rt || !space || !this.pieceId || this._isFavoriteLoading) {
+      return;
+    }
 
     const currentlyFavorite = this._isFavorite();
     this._localIsFavorite = !currentlyFavorite;
@@ -861,11 +874,11 @@ export class XHeaderView extends BaseView {
 
     try {
       if (currentlyFavorite) {
-        await this.rt.favorites().removeFavorite(this.pieceId);
+        await this.rt.favorites().removeFavorite(space, this.pieceId);
       } else {
         await this.rt
           .favorites()
-          .addFavorite(this.pieceId, undefined, this.rt.spaceName());
+          .addFavorite(space, this.pieceId, undefined, this.spaceName);
       }
     } catch (err) {
       console.error("[HeaderView] Error toggling favorite:", err);

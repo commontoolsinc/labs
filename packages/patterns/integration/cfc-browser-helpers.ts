@@ -456,10 +456,12 @@ export async function waitForRuntimeSynced(
   await waitFor(async () => {
     return await page.evaluate(async () => {
       const rt = (globalThis as typeof globalThis & {
-        commonfabric?: { rt?: { synced?: () => Promise<void> } };
+        commonfabric?: { rt?: { allSynced?: () => Promise<void> } };
       }).commonfabric?.rt;
-      if (!rt?.synced) return false;
-      await rt.synced();
+      // Quiescence isn't a per-space question: allSynced awaits every
+      // space the worker has opened.
+      if (!rt?.allSynced) return false;
+      await rt.allSynced();
       return true;
     });
   }, { timeout, delay: 250 });

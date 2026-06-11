@@ -3,7 +3,6 @@ import {
   applyCommand,
   AppState,
   AppUpdateEvent,
-  AppView,
   clone,
   Command,
   isAppViewEqual,
@@ -16,7 +15,8 @@ import { property, state } from "lit/decorators.js";
 import { Task } from "@lit/task";
 import { type RuntimeClient } from "@commonfabric/runtime-client";
 import { type DID } from "@commonfabric/identity";
-import { RuntimeInternals } from "@commonfabric/lib-shell";
+import { resolveSpaceDid, RuntimeInternals } from "@commonfabric/lib-shell";
+import { shouldRecreateRuntime } from "../lib/runtime-lifecycle.ts";
 import { createVDomDebugHelpers } from "@commonfabric/html/debug";
 import { createDebugUtils } from "../lib/debug-utils.ts";
 import { runtimeContext, spaceContext } from "@commonfabric/ui";
@@ -31,7 +31,6 @@ type CommonfabricDebugState = Partial<ReturnType<typeof createDebugUtils>> & {
   rt?: RuntimeClient;
   vdom?: ReturnType<typeof createVDomDebugHelpers>;
   detectNonIdempotent?: (durationMs?: number) => Promise<unknown>;
-  space?: DID;
 };
 
 function getCommonfabricGlobal(): typeof globalThis & {
@@ -79,12 +78,12 @@ export class XRootView extends BaseView {
   @state()
   private accessor space: DID | undefined = undefined;
 
-  // The runtime task runs when AppState changes, and determines
-  // if a new RuntimeInternals must be created, like when
-  // identity or space change. This is manually run in `updated()`
-  // because we want to compare to previous values, leaving this
-  // function responsible for cleaning up previous runtimes, and
-  // creating a new one.
+  // The runtime task runs when AppState changes, and determines if a
+  // new RuntimeInternals must be created — only when identity or host
+  // (apiUrl) change; one runtime serves every space. This is manually
+  // run in `updated()` because we want to compare to previous values,
+  // leaving this function responsible for cleaning up previous
+  // runtimes, and creating a new one.
   private _rt = new Task<[AppState | undefined], RuntimeInternals | undefined>(
     this,
     {
@@ -112,9 +111,11 @@ export class XRootView extends BaseView {
 
         const rt = await RuntimeInternals.create({
           identity: app.identity,
-          view: app.view,
           apiUrl: app.apiUrl,
           experimental: EXPERIMENTAL,
+          // lib-shell emits address-shaped targets ({spaceDid, pieceId});
+          // mapNavigationView (shared/navigate.ts) maps a DID back to the
+          // human-readable spaceName URL at the Navigation layer.
           navigate,
         });
 
@@ -129,9 +130,9 @@ export class XRootView extends BaseView {
           return;
         }
 
-        // Update the provided runtime and space values
+        // Update the provided runtime; `space` is view state, resolved
+        // from app.view in updated() independent of the runtime's life.
         this.runtime = rt.runtime();
-        this.space = rt.space() as DID;
 
         // Expose RuntimeClient for console debugging
         // (e.g. commonfabric.rt.setLoggerLevel("debug"))
@@ -154,7 +155,6 @@ export class XRootView extends BaseView {
         };
 
         // Debug utilities for inspecting cell values from the console
-        global.commonfabric.space = this.space;
         const debugUtils = createDebugUtils(
           () => this.space as DID,
           () => this.runtime,
@@ -201,20 +201,44 @@ export class XRootView extends BaseView {
     const flipState = (!previous && current) ||
       !current;
 
-    let spaceChanged = false;
-    if (previous && !isAppViewEqual(previous.view, current.view)) {
-      spaceChanged = didViewSpaceChange(previous.view, current.view);
-    }
-
-    // If host, view's space, or identity changes, we'll
-    // need to recreate the runtime.
     const stateChanged = !!previous &&
-      (previous.apiUrl !== current.apiUrl ||
-        previous.identity !== current.identity || spaceChanged);
+      shouldRecreateRuntime(previous, current);
 
     if (flipState || stateChanged) {
       this._rt.run([current]);
     }
+    if (
+      flipState || stateChanged ||
+      (previous && !isAppViewEqual(previous.view, current.view))
+    ) {
+      void this.#resolveViewSpace(current);
+    }
+  }
+
+  // Resolve the current view to a space DID — view state, independent of
+  // the runtime's lifecycle.
+  #resolveSpaceToken = 0;
+  async #resolveViewSpace(app: AppState | undefined): Promise<void> {
+    const token = ++this.#resolveSpaceToken;
+    let space: DID | undefined;
+    const identity = app?.identity;
+    const view = app?.view;
+    if (identity && view) {
+      if ("builtin" in view) {
+        space = view.builtin === "home" ? identity.did() : undefined;
+      } else if ("spaceDid" in view) {
+        space = view.spaceDid;
+      } else if ("spaceName" in view) {
+        try {
+          space = await resolveSpaceDid(identity, view.spaceName);
+        } catch (error) {
+          console.error("[RootView] Failed to resolve space name:", error);
+          space = undefined;
+        }
+      }
+    }
+    if (token !== this.#resolveSpaceToken) return;
+    this.space = space;
   }
 
   private _onThemeChanged = (e: Event) => {
@@ -255,7 +279,7 @@ export class XRootView extends BaseView {
   }
 
   getRuntimeSpaceDID(): DID | undefined {
-    return this._rt.value?.space();
+    return this.space;
   }
 
   override render() {
@@ -265,23 +289,11 @@ export class XRootView extends BaseView {
           .app="${this.app}"
           .keyStore="${this.keyStore}"
           .rt="${this._rt.value}"
+          .space="${this.space}"
         ></x-app-view>
       </cf-theme>
     `;
   }
 }
-
-const didViewSpaceChange = (previous: AppView, current: AppView): boolean => {
-  if ("builtin" in previous || "builtin" in current) {
-    return JSON.stringify(previous) !== JSON.stringify(current);
-  }
-  if ("spaceName" in previous && "spaceName" in current) {
-    return previous.spaceName !== current.spaceName;
-  }
-  if ("spaceDid" in previous && "spaceDid" in current) {
-    return previous.spaceDid !== current.spaceDid;
-  }
-  return true;
-};
 
 globalThis.customElements.define("x-root-view", XRootView);
