@@ -143,18 +143,32 @@ Current mode-sensitive behavior:
 
 ## 5. Call Kind Detection Contract
 
-`detectCallKind()` drives multiple transformers. It recognizes:
+`detectCallKind()` drives multiple transformers. The set of recognized Common
+Fabric runtime exports — and, for each, its call category and whether it is a
+**reactive origin** — is defined in one place:
+`COMMONFABRIC_RUNTIME_EXPORT_REGISTRY`
+(`src/core/commonfabric-runtime-registry.ts`). A guard test
+(`test/core/commonfabric-runtime-registry.test.ts`) asserts the registry covers
+every callable the runner's builder factory injects, so the registry — not this
+list — is the authoritative source. As of this writing it recognizes:
 
-- builders: `pattern`, `handler`, `action`, `lift`, `computed`, `render`
-- `ifElse`, `when`, `unless`
+- builders (all reactive-origin): `pattern`, `handler`, `action`, `lift`,
+  `computed`, `render`. (`byRef` is a registered-but-`ignored` export.)
+- conditional-helper calls: `ifElse`, `when`, `unless`
 - reactive array calls (`map`, `mapWithPattern`, `filter`, `filterWithPattern`,
   `flatMap`, `flatMapWithPattern`)
 - cell factories (`cell`, `new Cell`, `new OpaqueCell`, `new Stream`, etc.),
   with legacy `.of(...)` still accepted
 - `Cell.for`-style calls
 - `wish`
-- `generateObject`
-- `patternTool`
+- `generateObject` and `generateText`
+- the `runtime-call` family — tagged-call / function runtime origins: `str`,
+  `llm`, `llmDialog`, `fetchData`, `fetchProgram`, `streamData`,
+  `compileAndRun`, `navigateTo`, and the SQLite builtins `sqliteDatabase` /
+  `sqliteQuery` (`sqliteQuery<Row>` additionally gets dedicated type-argument
+  schema injection)
+- `patternTool` — recognized, but explicitly **not** a reactive origin
+  (`reactiveOrigin: false`)
 
 Detection is provenance-first:
 
@@ -214,19 +228,29 @@ No error when:
 On call `receiver.get()` (no args):
 
 - if receiver cell kind resolves to `"cell"` or `"stream"`:
-  - no diagnostic
+  - no diagnostic (these types legitimately have `.get()`)
 - otherwise if receiver either:
-  - resolves to opaque cell kind via `getCellKind()`, or
-  - structurally traces back to a reactive-origin call result/alias/binding
-    initialized from one of:
-    - builders (`pattern`, `computed`, `lift`, `handler`, `action`, `render`)
-    - `ifElse`, `when`, `unless`
-    - cell factories / `Cell.for`
-    - `wish`
-    - `generateObject`
+  - resolves to opaque cell kind (`"opaque"`) via `getCellKind()`, or
+  - is structurally reactive — `isReactiveExpression` walks the receiver and
+    treats it as reactive when it is (or its property/element-access root is):
+    - a **`pattern` / `render` callback parameter** (including via destructured
+      binding elements), or
+    - a local variable whose initializer is a **reactive-origin call** (after
+      stripping non-null/parenthesized/cast wrappers and property/element-access
+      tails), as defined by `isReactiveOriginCall` / the runtime registry (§5):
+      reactive-origin builders (`pattern`, `computed`, `lift`, `handler`,
+      `action`, `render`), the lift-applied shape, `ifElse` / `when` / `unless`,
+      cell factories / `Cell.for`, `wish`, `generateObject`, `generateText`, and
+      the `runtime-call` family (`str`, `llm`, …)
   - **Error** `opaque-get:invalid-call`
   - message instructs direct access, clarifies only `Writable<T>`/`Cell<T>`
     reads require `.get()`.
+
+Deliberate non-coverage of the structural fallback: `lift` / `handler` /
+`action` callback **parameters** are not inferred as opaque from structure
+alone — they keep their declared cell semantics. The structural inference exists
+only for the `OpaqueRef<T> = T` identity-alias case where the cell brand is
+gone.
 
 Same-named local helpers are not treated as reactive origins unless the call
 itself resolves through the Common Fabric provenance rules in §5.
