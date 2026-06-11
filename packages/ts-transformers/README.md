@@ -116,9 +116,8 @@ CastValidation
 → HelperOwnedExpressionSiteLowering
 → WriteAuthorizedByValidation
 → PatternCallbackLowering
-→ BuilderCallbackHoisting
 → SchemaInjection
-→ LiftHoisting
+→ BuilderCallHoisting
 → SchemaGenerator
 → ReactiveVariableFor
 → ModuleScopeShadowing

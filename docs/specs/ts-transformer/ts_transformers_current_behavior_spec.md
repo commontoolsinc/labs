@@ -35,30 +35,64 @@ Before AST transforms, `transformCfDirective()`:
 
 1. Scans the first non-empty source line for transform directives.
 2. Unless that line is `/// <cf-disable-transform />`, injects:
-   - `import * as __cfHelpers from "commonfabric";`
-   - helper `h(...)` forwarding to `__cfHelpers.h`.
+   - `import { __cfHelpers } from "commonfabric";` (a named import of the
+     internal helper binding, not a namespace import)
+   - a forwarding `h(...)` helper delegating to `__cfHelpers.h` (so authors
+     need not import the JSX factory manually, and so the helper module is not
+     tree-shaken before binding).
 3. Rejects sources that contain identifier `__cfHelpers` anywhere in the AST.
 4. Strips opt-out `/// <cf-disable-transform />` from the source before later
    stages.
+
+These string-level steps run in `transformCfDirective()`
+(`src/core/cf-helpers.ts`) before any AST transformer, because symbol binding
+happens before the transformer pipeline runs.
 
 Opt-out note:
 
 - `/// <cf-disable-transform />` is the explicit opt-out.
 
-### 2.2 Pipeline object
+### 2.2 Pipeline object and cross-stage state
 
-`CommonFabricTransformerPipeline` constructs one ordered pipeline with shared
-mutable registries:
+`CommonFabricTransformerPipeline` (`src/cf-pipeline.ts`) constructs one ordered
+pipeline from `CFC_TRANSFORMER_STAGE_SPECS`. Every stage shares:
 
-- `typeRegistry: WeakMap<ts.Node, ts.Type>`
-- `mapCallbackRegistry: WeakSet<ts.Node>`
-- `schemaHints: WeakMap<ts.Node, SchemaHint>`
-- `capabilitySummaryRegistry: WeakMap<ts.Node, FunctionCapabilitySummary>`
-- `diagnosticsCollector: TransformationDiagnostic[]`
+- a single `diagnosticsCollector: TransformationDiagnostic[]`
+- a single `CrossStageState` instance (`src/core/cross-stage-state.ts`), which
+  is the sole owner of cross-transformer communication. It replaced the
+  formerly-separate registry fields on `TransformationOptions`.
+
+`CrossStageState` organizes its registries into three deliberate families
+(mirroring the TypeScript compiler's `NodeLinks` pattern):
+
+1. **Bare cross-package maps** — the published boundary contract, read directly
+   as plain `WeakMap`s by the separate schema-generator package, which must not
+   depend on `CrossStageState`:
+   - `typeRegistry: WeakMap<ts.Node, ts.Type>`
+   - `schemaHints: WeakMap<ts.Node, SchemaHint>`
+2. **`nodeLinks` side table** — a `WeakMap<ts.Node, NodeTypeLinks>` for
+   transformer-internal, non-cache-invalidating per-node channels, reached only
+   through record/lookup/mark/is accessors:
+   - `capabilitySummary` (formerly the separate `capabilitySummaryRegistry`)
+   - `schemaInjected` — a presence flag marking builder call/`new` nodes that
+     SchemaInjection has finalized, replacing the scattered arg-count
+     idempotency guards. It uses a plain presence check with **no**
+     `getOriginalNode` fallback (it tags synthetic nodes whose original is the
+     pre-injection user call).
+3. **Marker family** — node/symbol-keyed `WeakSet`s whose membership checks fall
+   back through `getOriginalNode`, and whose mutators are coupled to the
+   context's reactive-analysis cache invalidation (invalidation is a
+   `TransformationContext` concern; `CrossStageState` stays a pure data holder):
+   - `mapCallbackRegistry` (transformed array-method callbacks)
+   - `syntheticComputeCallbackRegistry`
+   - `syntheticComputeOwnedNodeRegistry`
+   - `syntheticReactiveCollectionRegistry` (keyed by `ts.Symbol`)
 
 ## 3. Pipeline Order (Normative)
 
-Transformers always run in this order:
+The authoritative ordering lives in `CFC_TRANSFORMER_STAGE_SPECS` /
+`CFC_TRANSFORMER_STAGE_NAMES` in `src/cf-pipeline.ts`. Transformers always run
+in this order (18 stages):
 
 1. `CastValidationTransformer`
 2. `EmptyArrayOfValidationTransformer`
@@ -71,19 +105,27 @@ Transformers always run in this order:
 9. `HelperOwnedExpressionSiteLoweringTransformer`
 10. `WriteAuthorizedByValidationTransformer`
 11. `PatternCallbackLoweringTransformer`
-12. `BuilderCallbackHoistingTransformer`
-13. `SchemaInjectionTransformer`
-14. `LiftHoistingTransformer`
-15. `SchemaGeneratorTransformer`
-16. `ReactiveVariableForTransformer`
-17. `ModuleScopeShadowingTransformer`
-18. `ModuleScopeCfDataTransformer`
-19. `ModuleScopeFunctionHardeningTransformer`
+12. `SchemaInjectionTransformer`
+13. `BuilderCallHoistingTransformer`
+14. `SchemaGeneratorTransformer`
+15. `ReactiveVariableForTransformer`
+16. `ModuleScopeShadowingTransformer`
+17. `ModuleScopeCfDataTransformer`
+18. `ModuleScopeFunctionHardeningTransformer`
 
-The order is behaviorally significant. (`LiftHoistingTransformer`, stage 14,
-runs **after** `SchemaInjectionTransformer` so the lift call it relocates to
-module scope already carries its injected schemas — see CT-1644 and
-`packages/ts-transformers/docs/derive-to-lift-design.md`.)
+The order is behaviorally significant (invariant C-002). Two ordering facts
+worth calling out:
+
+- `BuilderCallHoistingTransformer` (stage 13) runs **after**
+  `SchemaInjectionTransformer` (stage 12) so each builder call it relocates to
+  module scope already carries its injected schemas — see CT-1644 and
+  `packages/ts-transformers/docs/derive-to-lift-design.md`. This stage hoists
+  `lift`, `handler`, and `pattern` builder calls. It absorbed and replaced the
+  former separate `LiftHoistingTransformer` (which hoisted only `lift`); the
+  even-older `BuilderCallbackHoistingTransformer` was deleted (#3864). Earlier
+  spec revisions listing those two as distinct stages are obsolete.
+- The four module-scope stages (15–18) run last so they operate on fully lowered
+  and schema-injected output.
 
 ## 4. Global Modes
 
