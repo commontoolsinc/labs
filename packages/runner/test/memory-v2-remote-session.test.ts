@@ -178,3 +178,66 @@ describe("StorageManager per-space host wiring", () => {
     }
   });
 });
+
+// Site-table v0: runtime-learned host hints. The registry's refusal
+// semantics ARE the contract — seed wins, opened spaces never re-point.
+describe("StorageManager.registerSpaceHost", () => {
+  const spaceSeeded = "did:key:z6Mk-register-seeded" as MemorySpace;
+  const spaceLearned = "did:key:z6Mk-register-learned" as MemorySpace;
+  const spaceOpened = "did:key:z6Mk-register-opened" as MemorySpace;
+
+  async function makeManager() {
+    const signer = await Identity.fromPassphrase("register-space-host");
+    return StorageManager.open({
+      as: signer,
+      memoryHost: new URL("http://host-a.test"),
+      spaceHostMap: { [spaceSeeded]: "http://host-seed.test" },
+    });
+  }
+
+  it("accepts a hint for an untouched space and refuses re-pointing a seeded one", async () => {
+    const manager = await makeManager();
+    expect(manager.registerSpaceHost(spaceLearned, "http://host-b.test"))
+      .toBe(true);
+    // Seed wins: same host confirms, different host refuses.
+    expect(manager.registerSpaceHost(spaceSeeded, "http://host-seed.test"))
+      .toBe(true);
+    expect(manager.registerSpaceHost(spaceSeeded, "http://host-evil.test"))
+      .toBe(false);
+  });
+
+  it("never re-points an opened space, and the hint routes a fresh open", async () => {
+    const realWebSocket = globalThis.WebSocket;
+    (globalThis as { WebSocket: unknown }).WebSocket = RecordingWebSocket;
+    RecordingWebSocket.dialed.length = 0;
+    try {
+      const manager = await makeManager();
+      expect(manager.registerSpaceHost(spaceLearned, "http://host-b.test"))
+        .toBe(true);
+      manager.open(spaceLearned).sync("of:register-probe" as URI)
+        .catch(() => {});
+      await RecordingWebSocket.whenDialed(1);
+      expect(new URL(RecordingWebSocket.dialed[0]).host).toBe("host-b.test");
+      // Now that the space is open: same-host hint confirms; a
+      // different host refuses rather than silently re-pointing.
+      expect(manager.registerSpaceHost(spaceLearned, "http://host-b.test"))
+        .toBe(true);
+      expect(manager.registerSpaceHost(spaceLearned, "http://host-c.test"))
+        .toBe(false);
+      // The opened space refusal also applies with no prior hint.
+      manager.open(spaceOpened).sync("of:register-probe" as URI)
+        .catch(() => {});
+      await RecordingWebSocket.whenDialed(2);
+      expect(manager.registerSpaceHost(spaceOpened, "http://host-d.test"))
+        .toBe(false);
+    } finally {
+      (globalThis as { WebSocket: unknown }).WebSocket = realWebSocket;
+    }
+  });
+
+  it("throws on a malformed host, naming the space", async () => {
+    const manager = await makeManager();
+    expect(() => manager.registerSpaceHost(spaceLearned, "not a url"))
+      .toThrow(`Invalid host for space ${spaceLearned}`);
+  });
+});

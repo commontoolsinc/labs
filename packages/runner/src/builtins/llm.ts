@@ -233,7 +233,7 @@ async function executeWithToolsLoop(params: {
     // module-level default endpoint — like fetch-data, hostForSpace's
     // apiUrl fallback is NOT used, because deployments may split the
     // pattern-facing api host from the runtime's memory host.
-    const mappedLlmHost = runtime.spaceHostMap?.[space];
+    const mappedLlmHost = runtime.mappedHostFor(space);
     const llmResult = await client.sendRequest(
       requestParams,
       updatePartial,
@@ -1349,8 +1349,9 @@ export function generateObject<T extends Record<string, unknown>>(
                   messages: currentMessages,
                 };
 
-                const mappedLlmHost = runtime
-                  .spaceHostMap?.[parentCell.space];
+                const mappedLlmHost = runtime.mappedHostFor(
+                  parentCell.space,
+                );
                 const llmResult = await client.sendRequest(
                   requestParams,
                   updatePartial,
@@ -1655,8 +1656,9 @@ export function generateObject<T extends Record<string, unknown>>(
                 ...liveContextDocs.observedConfidentiality,
               ]).length,
             });
-            const mappedLlmHost = runtime
-              .spaceHostMap?.[parentCell.space];
+            const mappedLlmHost = runtime.mappedHostFor(
+              parentCell.space,
+            );
             const response = await client.generateObject(
               {
                 ...generateObjectParams,

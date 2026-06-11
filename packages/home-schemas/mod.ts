@@ -45,8 +45,13 @@ export {
 } from "./learned.ts";
 
 export {
+  type SiteTable,
+  siteTableCause,
+  siteTableSchema,
   type SpaceEntry,
   spaceEntrySchema,
+  type SpaceHostEntry,
+  spaceHostEntrySchema,
   type SpacesList,
   spacesListSchema,
 } from "./spaces.ts";
