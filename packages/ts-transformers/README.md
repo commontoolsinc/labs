@@ -14,31 +14,43 @@ The transformers analyze TypeScript at compile time and:
    runtime-inspectable schema
 2. **Make closure captures explicit** - Hidden variable captures become explicit
    parameters with schemas
-3. **Annotate data flow boundaries** - Every `derive`, `handler`, and
+3. **Annotate data flow boundaries** - Every `lift` / `computed`, `handler`, and
    `mapWithPattern` gets input/output schemas
 
-Example transformation:
+Example transformation (illustrative; trimmed for readability — use
+`--show-transformed` below for the full output):
 
-```typescript
-// Input: Natural TypeScript
-state.items.map((item) => item.price * state.discount);
+```tsx
+// Input: Natural TypeScript inside a pattern
+items.map((item) => item.price * discount);
 
-// Output: Schema-annotated form
-state.items.mapWithPattern(
-  pattern(
-    inputSchema,
-    outputSchema,
-    ({ element: item, params: { state } }) =>
-      derive(
-        deriveInputSchema,
-        deriveOutputSchema,
-        { item, state },
-        ({ item, state }) => item.price * state.discount,
-      ),
-  ),
-  { state: { discount: state.discount } },
+// Output: the reactive collection call becomes a hoisted, schema-annotated
+// mapWithPattern over a module-scope pattern, with closure captures threaded as
+// params and reactive reads lowered to `.key(...)`:
+const __cfPattern_1 = __cfHelpers.pattern(
+  (__cf_pattern_input) => {
+    const item = __cf_pattern_input.key("element");
+    const discount = __cf_pattern_input.key("params", "discount");
+    return item.key("price") * discount;
+  },
+  /* element + params input schema */ {
+    /* … */
+  } as const satisfies __cfHelpers.JSONSchema,
+  /* result schema */ {
+    type: "number",
+  } as const satisfies __cfHelpers.JSONSchema,
 );
+// …used at the original site as:
+items.mapWithPattern(__cfPattern_1, { params: { discount } });
+// …and registered for content-addressed identity at module end:
+__cfReg({ __cfPattern_1 });
 ```
+
+Note the shape that current `main` actually emits: builder calls (`pattern` /
+`lift` / `handler`) are hoisted to module-scope consts and registered with a
+single trailing `__cfReg({ … })` (see the current-behavior spec §11);
+`computed`/`derive`-style computations lower to the lift-applied form rather
+than the retired `derive(...)` helper.
 
 ## Review First
 
@@ -71,7 +83,7 @@ test/fixtures/closures/
 ├── map-single-capture.expected.tsx   # What the transformer produces
 ├── handler-event-param.input.tsx
 ├── handler-event-param.expected.tsx
-└── ... (96 closure fixtures)
+└── ... (many more closure fixtures)
 ```
 
 To run a specific fixture:
@@ -133,7 +145,7 @@ The exact current order and behavior are documented normatively in
 | Input Pattern         | Output                                    | Purpose                   |
 | --------------------- | ----------------------------------------- | ------------------------- |
 | `array.map(fn)`       | `array.mapWithPattern(pattern, captures)` | Explicit closure captures |
-| `expr1 * expr2`       | `derive(schema, schema, inputs, fn)`      | Data flow boundary        |
+| `expr1 * expr2`       | `lift(schema, schema, fn)(inputs)`        | Data flow boundary        |
 | `onClick={() => ...}` | `handler(eventSchema, stateSchema, fn)`   | Handler with dual schemas |
 | `Cell<T>`             | `{ type: "...", asCell: ["cell"] }`       | Writable reactive ref     |
 | `OpaqueRef<T>`        | structural schema without `asOpaque`      | Read-only reactive ref    |
@@ -154,7 +166,8 @@ The exact current order and behavior are documented normatively in
 The schemas enable:
 
 - **Reactivity** - Runtime knows which values to track for re-computation
-- **Taint tracking** - If secret data enters a derive, the output is tainted
+- **Taint tracking** - If secret data enters a computation, the output is
+  tainted
 - **Access control** - Can this computation see this data?
 - **Audit trails** - How did this value get computed?
 
