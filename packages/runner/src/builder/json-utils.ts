@@ -322,8 +322,13 @@ export function moduleToJSON(module: Module) {
   // attach for the in-builder ergonomics (`mod.with(...)`/`mod.bind(...)`).
   // They are not part of the serialized contract; left in, they would surface
   // as `Cannot store function per se`, so they are destructured out here.
+  // `implementationRef` is likewise runtime-only since the flip (PR E1 of
+  // docs/specs/content-addressed-action-identity.md): rehydration resolves
+  // through `$implRef`, and the in-memory ref only still feeds the legacy
+  // read path for graphs persisted before the flip.
   const {
     implementation: _implementation,
+    implementationRef: _implementationRef,
     toJSON: _toJSON,
     with: _with,
     bind: _bind,
@@ -363,21 +368,14 @@ export function moduleToJSON(module: Module) {
   }
 
   if (typeof implementation === "function") {
-    if (
-      module.type === "javascript" &&
-      typeof module.implementationRef !== "string"
-    ) {
-      throw new Error(
-        "JavaScript function modules must carry implementationRef before serialization",
-      );
-    }
-    // Content-addressed reference (dual-write with implementationRef until
-    // the flip — see docs/specs/content-addressed-action-identity.md): when
-    // the implementation function has module-scope provenance, serialize its
+    // Content-addressed reference (the only ref written since the flip — see
+    // docs/specs/content-addressed-action-identity.md): when the
+    // implementation function has module-scope provenance, serialize its
     // `{ identity, symbol }` so a rehydrated module resolves by identity.
     // `toJSON` runs at cell-write time — post-evaluation, after provenance was
     // recorded by the module indexing. Dynamic (in-action-created) artifacts
-    // have no symbol and serialize without a ref (in-session only, as before).
+    // have no symbol and serialize without a ref; they keep their stringified
+    // body below (in-session re-resolution through the SES fallback).
     const provenance = module.type === "javascript"
       ? getVerifiedProvenance(implementation)
       : undefined;
@@ -388,7 +386,34 @@ export function moduleToJSON(module: Module) {
     const preview = (implementation as { preview?: string }).preview ??
       implementation.toString().slice(0, 200);
     const location = (implementation as { src?: string }).src;
-    const admittedImplementation = module.type === "javascript" &&
+    // Omit the stringified body only when the implementation is resolvable on
+    // load BY THE RUNTIME THAT WILL READ IT: its engine's content-addressed
+    // implementation index admits the `$implRef`. Provenance is
+    // process-global, so a `$implRef` being PRESENT does not by itself prove
+    // the reading runtime can resolve it: a pattern compiled by a standalone
+    // Engine and registered on another runtime carries `$implRef`, but that
+    // runtime's engine never verified-evaluated the module, so it must keep
+    // the stringified body as the fallback or reload throws. The engine index
+    // — unlike the bounded artifact index — never evicts within a session,
+    // which is what lets the writer omit the body without the legacy
+    // `implementationRef` fallback it used to lean on.
+    const implRefResolvable = implRefValue !== undefined &&
+      typeof frame?.runtime?.harness?.getVerifiedImplementation?.(
+          implRefValue.identity,
+          implRefValue.symbol,
+        ) === "function";
+    // Where the `$implRef` does NOT suffice, the legacy admitted-probe
+    // behavior is kept VERBATIM: a module whose function the registry admits —
+    // host-trusted artifacts (`trustedHostFunctionIndex`, e.g. trusted-builder
+    // values whose closures cannot survive a stringified round-trip) and
+    // dynamic in-action-created artifacts (per-load registry, no provenance
+    // symbol) — still serializes `implementationRef` with the body omitted,
+    // because `getExecutableFunction(implementationRef)` is their ONLY
+    // rehydration channel. Their story moves to the synthetic-identity host
+    // registrar in PR E2 (design §5); until then the legacy field is
+    // load-bearing for exactly this category.
+    const admittedImplementation = !implRefResolvable &&
+        module.type === "javascript" &&
         typeof module.implementationRef === "string"
       ? frame?.verifiedLoadId
         ? frame.runtime?.harness?.getVerifiedFunctionInLoad(
@@ -401,23 +426,12 @@ export function moduleToJSON(module: Module) {
           module.implementationRef,
         )
       : undefined;
-    // Omit the stringified body only when the implementation is resolvable on
-    // load BY THE RUNTIME THAT WILL READ IT — either THIS runtime's identity
-    // index already resolves the `$implRef` (content-addressed), or the legacy
-    // verified-function registry admits it. Provenance is process-global, so
-    // a `$implRef` being PRESENT does not by itself prove the reading runtime
-    // can resolve it: a pattern compiled by a standalone Engine and registered
-    // on another runtime carries `$implRef`, but that runtime's index never saw
-    // the artifact (no `compilePattern`/`registerEvaluatedModules`), so it must
-    // keep the stringified body as the fallback or reload throws. Stringify
-    // whenever NEITHER resolution path applies.
-    const implRefResolvable = implRefValue !== undefined &&
-      frame?.runtime?.patternManager?.artifactFromIdentitySync?.(
-          implRefValue.identity,
-          implRefValue.symbol,
-        ) !== undefined;
+    const keepLegacyRef = !implRefResolvable &&
+      admittedImplementation === implementation &&
+      typeof module.implementationRef === "string";
     return {
       ...rest,
+      ...(keepLegacyRef ? { implementationRef: module.implementationRef } : {}),
       ...implRef,
       ...(module.type === "javascript" && !implRefResolvable &&
           admittedImplementation !== implementation

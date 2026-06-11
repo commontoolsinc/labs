@@ -6,18 +6,37 @@ symbol }` references and object-keyed (WeakMap/WeakSet) trust.
 
 ## Status
 
-Design. Depends on (and assumes) the shipped state after the AMD-loader
-removal: the ESM module-record loader is the only loader, every module has a
-content-addressed identity (`cf:module/<hash>`), and every module-scope builder
-artifact (pattern / lift / handler) is addressable as `{ identity, symbol }` —
-authored exports by export name, hoisted/non-exported artifacts by their
-`__cfReg` key (see `docs/specs/module-loading.md` and the op-by-identity
-migration that introduced the `$patternRef` sentinel,
-`builtins/op-pattern-ref.ts`).
+Phases 0–2 shipped: #3997 (ordinal-free `implementationRef` + legacy-alias
+shim), #4006 (A: `unsafe_parentPattern` deleted), #4008 (B: derived-copy side
+tables, `unsafe_originalPattern` deleted), #4009 (C: `$implRef` dual-write +
+CFC provenance), #4013 (D: pattern-scoped registries deleted, provenance
+recording in `Engine.recordModuleProvenance`).
+
+Phase 3 in progress — **E1 (writer flip)**: writers emit `$implRef` only;
+`implementationRef` and the stringified body are no longer written where the
+reading runtime's engine proves the `$implRef` resolvable through its strong
+content-addressed implementation index
+(`ExecutableRegistry.registerVerifiedImplementation`, the resolution of open
+question 1 — see § Open questions). The legacy `implementationRef` is still
+written for exactly one category: registry-admitted artifacts the `$implRef`
+cannot cover — host-trusted values (`trustedHostFunctionIndex`, whose closures
+cannot survive a stringified round-trip) and dynamic in-action-created
+artifacts (no provenance symbol). Their replacement is the §5 synthetic-identity
+registrar (PR E2). All read paths are retained; `VerifiedProvenance` carries
+the evaluating load's `bundleId` so stored bundleId-only `writeAuthorizedBy`
+claims keep verifying for modules resolved without a `verifiedLoadId`.
+
+The design assumes the shipped state after the AMD-loader removal: the ESM
+module-record loader is the only loader, every module has a content-addressed
+identity (`cf:module/<hash>`), and every module-scope builder artifact
+(pattern / lift / handler) is addressable as `{ identity, symbol }` — authored
+exports by export name, hoisted/non-exported artifacts by their `__cfReg` key
+(see `docs/specs/module-loading.md` and the op-by-identity migration that
+introduced the `$patternRef` sentinel, `builtins/op-pattern-ref.ts`).
 
 ## Last Updated
 
-2026-06-10
+2026-06-11
 
 ## Motivation
 
@@ -463,11 +482,20 @@ canary test compiling+resolving with `$implRef` stripped.
 
 ## Open questions
 
-1. **Eviction pinning.** `addressableByIdentity` is FIFO-bounded; the op path
-   tolerates eviction via `$opFallback`. If Phase 4 drops fallbacks, running
-   patterns must pin their modules' index entries (refcount on running pieces)
-   or the resolver needs a sync-safe re-evaluation path from
-   `modulesByIdentity`. Decide before Phase 4; until then fallbacks cover it.
+1. **Eviction pinning — DECIDED (E1).** `addressableByIdentity` is
+   FIFO-bounded; the op path tolerates eviction via `$opFallback`. Dropping
+   the `implementationRef` writer removed the unbounded legacy registry's
+   eviction insurance for new data, so E1 ships the replacement: a strong,
+   session-lifetime, per-engine content-addressed implementation index
+   (`ExecutableRegistry.verifiedImplementationsByEntryRef`, populated by
+   `Engine.recordModuleProvenance`, surfaced as
+   `Harness.getVerifiedImplementation`, consulted by `resolveByImplRef` after
+   the bounded artifact index misses). Chosen over refcount pinning (piece
+   lifecycle is fuzzy; high complexity) and a WeakRef shadow (fails exactly in
+   the post-eviction-GC scenario it must cover). Memory is bounded by the set
+   of distinct verified implementations per session — strictly less than the
+   legacy per-load registries retained. `$opFallback` (full-graph embed) stays
+   until E3 revisits it.
 2. **`cfc/canonical.ts` digests.** Confirm no *persisted* artifact compares
    `bundleId`s across sessions (believed session-only; verify before Phase 3).
 3. **`location`/`preview` retention.** Keep both on serialized modules for

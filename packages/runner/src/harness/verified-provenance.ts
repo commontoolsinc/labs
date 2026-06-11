@@ -32,6 +32,16 @@ export type VerifiedProvenance = {
   dynamic?: true;
   /** CT-1665 verified binding identity, when the factory carried one. */
   bindingIdentity?: { sourceFile: string; bindingPath: string[] };
+  /**
+   * The evaluating load's bundle id (hash of the program's concatenated
+   * compiled bodies). Transitional: stored legacy `writeAuthorizedBy` claims
+   * are keyed by bundleId only, and post-flip graphs resolve without a
+   * `verifiedLoadId` (no `implementationRef` to look one up by), so the live
+   * identity sources the bundle id from here instead. Retires together with
+   * the bundleId verification arm (see
+   * docs/specs/content-addressed-action-identity-implementation-plan.md, PR E).
+   */
+  bundleId?: string;
 };
 
 const provenanceByFn = new WeakMap<object, VerifiedProvenance>();

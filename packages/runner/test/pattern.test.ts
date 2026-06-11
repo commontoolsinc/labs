@@ -298,9 +298,12 @@ describe("pattern", () => {
     const json = JSON.stringify(doublePattern);
     const parsed = JSON.parse(json);
     expect(json.length).toBeGreaterThan(200);
+    // A test-built (never verified-evaluated) module has no provenance, so
+    // the writer keeps the stringified body as the executable fallback. The
+    // legacy `implementationRef` is runtime-only since the flip (PR E1) —
+    // never serialized.
     expect(typeof parsed.nodes[0].module.implementation).toBe("string");
-    expect("implementationRef" in parsed.nodes[0].module).toBe(true);
-    expect(typeof parsed.nodes[0].module.implementationRef).toBe("string");
+    expect("implementationRef" in parsed.nodes[0].module).toBe(false);
   });
 
   it("pattern with map node serializes correctly", () => {
