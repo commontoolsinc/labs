@@ -8,8 +8,6 @@ import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { patternMetaSchema } from "../src/pattern-manager.ts";
-import { popFrame, pushFrame } from "../src/builder/pattern.ts";
-import { getVerifiedLoadId } from "../src/builder/pattern-metadata.ts";
 import { getPatternProgram } from "../src/builder/pattern-metadata.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -295,72 +293,6 @@ describe("PatternManager.compileOrGetPattern", () => {
 
     // Should be the exact same object instance (cache hit)
     expect(second).toBe(first);
-  });
-
-  it("does not overwrite a cached pattern's verified load id on re-registration", async () => {
-    const compiled = await runtime.patternManager.compilePattern(simpleProgram);
-    const patternId = runtime.patternManager.registerPattern(
-      compiled,
-      simpleProgram,
-    );
-
-    // The established verified-load id is first-write-wins in the
-    // PatternManager's patternToVerifiedLoadId map (the channel that survived
-    // the pattern-scoped-registry deletion); a later registration under a
-    // different frame load id must not overwrite it.
-    // deno-lint-ignore no-explicit-any
-    const readEstablished = () =>
-      (runtime.patternManager as any).patternToVerifiedLoadId.get(compiled) ??
-        getVerifiedLoadId(compiled);
-    const initialLoadId = readEstablished();
-    expect(initialLoadId).toBeDefined();
-
-    const frame = pushFrame({ verifiedLoadId: "wrong-load-id" });
-    try {
-      expect(runtime.patternManager.registerPattern(compiled)).toEqual(
-        patternId,
-      );
-    } finally {
-      popFrame(frame);
-    }
-
-    expect(readEstablished()).toEqual(initialLoadId);
-  });
-
-  it("propagates verified load ids to nested compiled subpatterns", async () => {
-    const nestedProgram: RuntimeProgram = {
-      main: "/main.tsx",
-      files: [
-        {
-          name: "/main.tsx",
-          contents: [
-            "import { Default, pattern } from 'commonfabric';",
-            "export default pattern<{ values: Default<number[], []> }>(({ values }) => ({",
-            "  doubled: values.map((value) => ({ next: value })),",
-            "}));",
-          ].join("\n"),
-        },
-      ],
-    };
-
-    const externalEngine = new Engine(runtime);
-    const { main } = await externalEngine.compileAndEvaluateModules(
-      nestedProgram,
-    );
-    const compiled = main?.default as any;
-    runtime.patternManager.registerPattern(compiled, nestedProgram);
-    const initialLoadId = getVerifiedLoadId(compiled);
-    expect(initialLoadId).toBeDefined();
-
-    const nestedPattern = (compiled.nodes.find((node: any) => node.inputs?.op)
-      ?.inputs as { op?: unknown }).op;
-    expect(nestedPattern).toBeDefined();
-
-    runtime.patternManager.registerPattern(nestedPattern as any);
-
-    // The nested subpattern inherits the parent's verified-load id through the
-    // seed walk (same per-value side table).
-    expect(getVerifiedLoadId(nestedPattern as object)).toEqual(initialLoadId);
   });
 
   it("compiles different patterns for different programs", async () => {

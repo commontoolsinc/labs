@@ -90,7 +90,6 @@ export type Exports = Record<string, any>;
 export interface EvaluateResult {
   main?: Exports;
   exportMap?: Record<string, Exports>;
-  loadId?: string;
   /**
    * Per-module namespaces keyed by content identity (the prefix-free
    * `cf:module/<identity>` hash). Lets the runner register every module in a
@@ -166,34 +165,6 @@ export interface Harness extends EventTarget {
 
   getInvocation(source: string): HarnessedFunction;
 
-  getVerifiedLoadId?(
-    implementationRef: string,
-  ): string | undefined;
-
-  getVerifiedFunctionInLoad?(
-    loadId: string,
-    implementationRef: string,
-  ): HarnessedFunction | undefined;
-
-  isVerifiedSourceInLoad?(
-    loadId: string,
-    source: string,
-  ): boolean;
-
-  getVerifiedBundleId?(
-    loadId: string,
-  ): string | undefined;
-
-  getVerifiedBindingMetadata?(
-    implementationRef: string,
-  ): { sourceFile?: string; bindingPath?: string[] } | undefined;
-
-  registerVerifiedFunction?(
-    loadId: string,
-    implementationRef: string,
-    implementation: HarnessedFunction,
-  ): void;
-
   getExecutableFunction?(
     implementationRef: string,
   ): HarnessedFunction | undefined;
@@ -209,13 +180,12 @@ export interface Harness extends EventTarget {
   ): HarnessedFunction | undefined;
 
   // Admit a DYNAMIC (in-action-created) artifact into the global executable
-  // index under its minted content-derived `implementationRef`, WITHOUT a
-  // load id. Used by the runner's in-action registrar when the invoking
-  // function resolved through a post-flip `$implRef`-only module (no
-  // `verifiedLoadId` to register under) — the global index is what lets the
+  // index under its minted content-derived `implementationRef`. Used by the
+  // runner's in-action registrar — the global index is what lets the
   // artifact's serialized module keep the legacy
   // `{ implementationRef, body omitted }` live-closure rehydration channel.
-  // Replaced by the synthetic-identity registrar in PR E2 (design §5).
+  // Replaced by the synthetic-identity registrar (design §5) when the legacy
+  // read path retires.
   registerDynamicVerifiedFunction?(
     implementationRef: string,
     implementation: HarnessedFunction,

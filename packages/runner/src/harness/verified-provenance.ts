@@ -19,9 +19,9 @@ import { VERIFIED_BINDING_METADATA_FIELD } from "@commonfabric/utils/sandbox-con
  * The WeakMap itself is the anti-spoof proof for CFC: an attacker-supplied
  * function — even with byte-identical source text — was never registered
  * during a verified evaluation, so it has no entry. There is no string key to
- * collide and no load scoping required. This replaces (and during the
- * transition runs alongside) the `implementationRef` × `verifiedLoadId`
- * registry checks; see docs/specs/content-addressed-action-identity.md.
+ * collide and no load scoping required. This replaced the former
+ * `implementationRef` × `verifiedLoadId` registry checks (deleted in PR E2);
+ * see docs/specs/content-addressed-action-identity.md.
  */
 export type VerifiedProvenance = {
   /** Module content identity (prefix-free `cf:module/<hash>` hash). */

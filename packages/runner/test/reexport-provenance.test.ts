@@ -95,7 +95,6 @@ describe("re-export provenance", () => {
     // CFC resolves it as verified — NOT unsupported (the bug would have made a
     // re-exporter's identity stamp it, failing the fn.src consistency check).
     const identity = resolvePolicyFacingImplementationIdentity(module, {
-      harness: runtime.harness,
       implementation: fn,
     });
     expect(identity?.kind).toBe("verified");

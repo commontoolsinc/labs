@@ -5071,7 +5071,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       });
       tx.setCfcImplementationIdentity({
         kind: "verified",
-        bundleId: "bundle-hash-1",
+        moduleIdentity: "module-hash-1",
         sourceFile: "/main.tsx",
         bindingPath: ["localFunction"],
       });
@@ -5120,7 +5120,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       });
       tx.setCfcImplementationIdentity({
         kind: "verified",
-        bundleId: "bundle-hash-1",
+        moduleIdentity: "module-hash-1",
         sourceFile: "/trusted.tsx",
         bindingPath: ["commitTrustedProfileSave"],
       });
@@ -5220,7 +5220,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       });
       tx.setCfcImplementationIdentity({
         kind: "verified",
-        bundleId: "bundle-hash-1",
+        moduleIdentity: "module-hash-1",
         sourceFile: "/trusted.tsx",
         bindingPath: ["commitTrustedMessageSend"],
       });
@@ -5473,7 +5473,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       });
       tx.setCfcImplementationIdentity({
         kind: "verified",
-        bundleId: "bundle-hash-1",
+        moduleIdentity: "module-hash-1",
         sourceFile: "/trusted.tsx",
         bindingPath: ["commitTrustedMessageSend"],
       });
@@ -5528,7 +5528,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       });
       tx.setCfcImplementationIdentity({
         kind: "verified",
-        bundleId: "bundle-hash-1",
+        moduleIdentity: "module-hash-1",
         sourceFile: "/trusted.tsx",
         bindingPath: ["commitTrustedMessageSend"],
       });

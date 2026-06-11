@@ -5,27 +5,26 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
 
 // CT-1665: An owner-protected field bound by `WriteAuthorizedBy<T, typeof fn>`
 // compiles to a verified-binding `writeAuthorizedBy` claim. At commit the CFC
-// verifier resolves the authoring handler's identity via
-// `harness.getVerifiedBindingMetadata(implementationRef)`. That metadata is
-// attached by the transformer's `__cfBindVerifiedBinding` to the FACTORY object
-// the builder returns — but a handler declared as a NON-exported module-scope
-// const (the shape used throughout system/profile-home.tsx) is reachable to the
-// post-evaluation capture walk only via the export namespace, so its metadata
-// was never registered and the write was rejected with
+// verifier resolves the authoring handler's identity — sourceFile/bindingPath
+// — from the function's content-addressed provenance (`bindingIdentity`,
+// recorded by Engine.recordModuleProvenance from the transformer's
+// `__cfBindVerifiedBinding` annotation on the FACTORY object). A handler
+// declared as a NON-exported module-scope const (the shape used throughout
+// system/profile-home.tsx) surfaces through the `__cfReg` registration sink —
+// the gap this test guards is that sink registration carrying the binding
+// identity, without which the write is rejected with
 // "writeAuthorizedBy requires a trusted verified binding identity".
 //
-// Scope: these tests assert the writer identity is REGISTERED and RESOLVES through
-// the harness's `getVerifiedBindingMetadata` — the exact lookup the CFC verifier
-// performs at commit (`cfc/prepare.ts` writeAuthorizedByReason) — and run under
-// `observe`. That isolates the CT-1665 gap (metadata never registered for
-// non-exported bindings) precisely, white-box. A full enforce-mode, end-to-end
-// "the write is accepted" assertion additionally needs trust-snapshot +
-// owner-principal + trusted-event provenance setup, which profile-owner-cfc.test.ts
-// drives via a mocked authoring identity (a path that, pre-fix, never reached the
-// binding-identity resolution that broke here).
+// Scope: these tests assert the writer identity is REGISTERED (provenance
+// carries the bindingIdentity) and RESOLVES onto transactions while handlers
+// run — the value the CFC verifier consumes at commit — under `observe`. A
+// full enforce-mode, end-to-end "the write is accepted" assertion additionally
+// needs trust-snapshot + owner-principal + trusted-event provenance setup,
+// which profile-owner-cfc.test.ts drives via a mocked authoring identity.
 
 const signer = await Identity.fromPassphrase("ct1665-repro");
 const space = signer.did();
@@ -60,14 +59,22 @@ function programFor(src: string): RuntimeProgram {
 }
 
 function recordedBindingPaths(rt: Runtime): string[][] {
+  // The binding identity lives on each registered function's content-addressed
+  // provenance (the former `verifiedBindingMetadata` map is gone — PR E2);
+  // enumerate the engine's implementation index to reach the registered fns.
   const reg = (rt.harness as any).executableRegistry;
-  const meta = reg.verifiedBindingMetadata as Map<
+  const byRef = reg.verifiedImplementationsByEntryRef as Map<
     string,
-    { bindingPath?: string[] }
+    Map<string, unknown>
   >;
-  return [...meta.values()]
-    .map((m) => m.bindingPath)
-    .filter((p): p is string[] => Array.isArray(p));
+  const out: string[][] = [];
+  for (const bucket of byRef.values()) {
+    for (const fn of bucket.values()) {
+      const path = getVerifiedProvenance(fn)?.bindingIdentity?.bindingPath;
+      if (Array.isArray(path)) out.push(path);
+    }
+  }
+  return out;
 }
 
 // Capture the bindingPaths of the writer identities STAMPED on transactions

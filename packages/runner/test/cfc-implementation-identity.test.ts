@@ -6,7 +6,10 @@ import { raw } from "../src/module.ts";
 import { Runtime } from "../src/runtime.ts";
 import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
 import { getTopFrame } from "../src/builder/pattern.ts";
-import type { Harness } from "../src/harness/types.ts";
+import {
+  getVerifiedProvenance,
+  recordVerifiedProvenance,
+} from "../src/harness/verified-provenance.ts";
 
 const signer = await Identity.fromPassphrase(
   "runner-cfc-implementation-identity",
@@ -170,37 +173,30 @@ describe("CFC builtin implementation identity", () => {
     tx.abort("test-complete");
   });
 
-  it("resolves verified compiled modules through the current load and source location", () => {
+  it("resolves verified compiled modules through provenance, with binding identity and bundle id", () => {
+    // PR E2: the implementationRef × verifiedLoadId registry arm is gone; the
+    // function object's provenance (recorded during verified evaluation) is
+    // the only source of `kind: "verified"`. This drives the resolver through
+    // the same registration channel the engine uses.
     const implementation = Object.assign(() => undefined, {
-      src: "/main.tsx:4:12",
+      src: "cf:module/module-hash-1/main.tsx:4:12",
     });
-    const harness = {
-      getVerifiedFunctionInLoad: () => implementation,
-      isVerifiedSourceInLoad: () => true,
-      getVerifiedBundleId: () => "bundle-hash-1",
-      getVerifiedBindingMetadata: () => ({
+    recordVerifiedProvenance(implementation, {
+      identity: "module-hash-1",
+      symbol: "localFunction",
+      bundleId: "bundle-hash-1",
+      bindingIdentity: {
         sourceFile: "/main.tsx",
         bindingPath: ["localFunction"],
-      }),
-    } satisfies Pick<
-      Harness,
-      | "getVerifiedBindingMetadata"
-      | "getVerifiedBundleId"
-      | "getVerifiedFunctionInLoad"
-      | "isVerifiedSourceInLoad"
-    >;
-    const module = {
-      type: "javascript" as const,
-      implementationRef: "verified-implementation-ref",
-    };
+      },
+    });
+    const module = { type: "javascript" as const };
     expect(
-      resolvePolicyFacingImplementationIdentity(module, {
-        verifiedLoadId: "verified-load-1",
-        harness,
-        implementation,
-      }),
+      resolvePolicyFacingImplementationIdentity(module, { implementation }),
     ).toEqual({
       kind: "verified",
+      moduleIdentity: "module-hash-1",
+      symbol: "localFunction",
       bundleId: "bundle-hash-1",
       sourceFile: "/main.tsx",
       bindingPath: ["localFunction"],
@@ -239,11 +235,15 @@ describe("CFC builtin implementation identity", () => {
 
     const { main } = await runtime.harness.compileAndEvaluateModules(program);
 
+    // The binding identity rides on the function's content-addressed
+    // provenance (recorded by Engine.recordModuleProvenance from the
+    // transformer's annotation on the exported factory).
     expect(
-      runtime.harness.getVerifiedBindingMetadata(
-        (main as { saveTitle: { implementationRef: string } }).saveTitle
-          .implementationRef,
-      ),
+      getVerifiedProvenance(
+        (main as {
+          saveTitle: { implementation: (...args: unknown[]) => unknown };
+        }).saveTitle.implementation,
+      )?.bindingIdentity,
     ).toEqual({
       sourceFile: "/main.tsx",
       bindingPath: ["saveTitle"],
@@ -255,63 +255,45 @@ describe("CFC builtin implementation identity", () => {
     expect(resolvePolicyFacingImplementationIdentity(module)).toBeUndefined();
   });
 
-  it("fails closed when a verified implementation cannot be rebound through the claimed load", () => {
+  it("an implementationRef alone grants nothing — a provenance-less function stays untrusted", () => {
+    // The legacy-arm-deletion pin (PR E2): under the dual-read window a
+    // module's `implementationRef` could still resolve a verified identity
+    // through the per-load registry. Post-flip the ref is inert for CFC — a
+    // function that was never registered during a verified evaluation has no
+    // provenance and gets NO identity, no matter what the module claims.
     const implementation = Object.assign(() => undefined, {
       src: "/main.tsx:4:12",
     });
-    const harness = {
-      getVerifiedFunctionInLoad: () => undefined,
-      isVerifiedSourceInLoad: () => true,
-    } satisfies Pick<
-      Harness,
-      "getVerifiedFunctionInLoad" | "isVerifiedSourceInLoad"
-    >;
     const module = {
       type: "javascript" as const,
       implementationRef: "verified-implementation-ref",
     };
 
     expect(
-      resolvePolicyFacingImplementationIdentity(module, {
-        verifiedLoadId: "verified-load-1",
-        harness,
-        implementation,
-      }),
-    ).toEqual({
-      kind: "unsupported",
-      className: "verified",
-      reason:
-        "verified compiled policy identity must resolve through the current verified load",
-    });
+      resolvePolicyFacingImplementationIdentity(module, { implementation }),
+    ).toBeUndefined();
   });
 
-  it("fails closed when a verified source location resolves outside the current bundle", () => {
+  it("fails closed when the canonical source disagrees with the provenance identity", () => {
+    // The provenance analogue of the former out-of-bundle check: a recorded
+    // identity must match the module the function's canonical src points
+    // into; a mismatch is rejected as unsupported rather than guessed at.
     const implementation = Object.assign(() => undefined, {
-      src: "/other-bundle.tsx:4:12",
+      src: "cf:module/other-module-hash/other.tsx:4:12",
     });
-    const harness = {
-      getVerifiedFunctionInLoad: () => implementation,
-      isVerifiedSourceInLoad: () => false,
-    } satisfies Pick<
-      Harness,
-      "getVerifiedFunctionInLoad" | "isVerifiedSourceInLoad"
-    >;
-    const module = {
-      type: "javascript" as const,
-      implementationRef: "verified-implementation-ref",
-    };
+    recordVerifiedProvenance(implementation, {
+      identity: "module-hash-1",
+      symbol: "localFunction",
+    });
+    const module = { type: "javascript" as const };
 
     expect(
-      resolvePolicyFacingImplementationIdentity(module, {
-        verifiedLoadId: "verified-load-1",
-        harness,
-        implementation,
-      }),
+      resolvePolicyFacingImplementationIdentity(module, { implementation }),
     ).toEqual({
       kind: "unsupported",
       className: "verified",
       reason:
-        "verified compiled policy identity must map back into the current verified bundle",
+        "provenance identity must match the implementation's canonical source",
     });
   });
 });

@@ -123,11 +123,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
 
       const identity = resolvePolicyFacingImplementationIdentity(
         handlerModules(pattern)[0],
-        {
-          harness: runtime!.harness,
-          verifiedLoadId: "load:forged",
-          implementation: forged,
-        },
+        { implementation: forged },
       );
       // Never "verified": no provenance, no legacy registry entry.
       expect(identity?.kind).not.toBe("verified");
@@ -151,7 +147,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
 
       const identity = resolvePolicyFacingImplementationIdentity(
         handlerModules(pattern)[0],
-        { harness: runtime!.harness, implementation: forged },
+        { implementation: forged },
       );
       expect(identity?.kind).not.toBe("verified");
     });
@@ -218,7 +214,6 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       const identity = resolvePolicyFacingImplementationIdentity(
         forgedModuleA,
         {
-          harness: runtime!.harness,
           implementation: fnA,
         },
       );
@@ -689,7 +684,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
 
       const identity = resolvePolicyFacingImplementationIdentity(
         { type: "javascript" } as Module,
-        { harness: runtime?.harness, implementation: fn },
+        { implementation: fn },
       );
       expect(identity?.kind).toBe("unsupported");
     });
@@ -704,7 +699,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       });
       const identity = resolvePolicyFacingImplementationIdentity(
         { type: "javascript" } as Module,
-        { harness: runtime?.harness, implementation: fn },
+        { implementation: fn },
       );
       // identityFromCanonicalSource("/main.tsx...") is undefined ≠ provenance id.
       expect(identity?.kind).toBe("unsupported");
@@ -720,7 +715,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       });
       const identity = resolvePolicyFacingImplementationIdentity(
         { type: "javascript" } as Module,
-        { harness: runtime?.harness, implementation: fn },
+        { implementation: fn },
       );
       expect(identity?.kind).toBe("verified");
       const v = identity as { kind: "verified"; moduleIdentity?: string };
@@ -742,7 +737,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
 
       const identity = resolvePolicyFacingImplementationIdentity(
         { type: "javascript" } as Module,
-        { harness: runtime?.harness, implementation: fn },
+        { implementation: fn },
       );
       // It is verified IN SESSION (the provenance exists and src matches)...
       expect(identity?.kind).toBe("verified");
@@ -760,7 +755,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       recordVerifiedProvenance(fn, { identity: "DYN_MODULE", dynamic: true });
       const identity = resolvePolicyFacingImplementationIdentity(
         { type: "javascript" } as Module,
-        { harness: runtime?.harness, implementation: fn },
+        { implementation: fn },
       );
       expect(identity?.kind).toBe("unsupported");
     });

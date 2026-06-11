@@ -54,8 +54,7 @@ describe("Engine.compileToRecordGraph", () => {
           "export const answer = 42;\nexport const make = () => answer;\nexport default make;",
       }],
     };
-    const { main, loadId } = await engine.compileAndEvaluateModules(program);
-    expect(loadId).toBeTruthy();
+    const { main } = await engine.compileAndEvaluateModules(program);
     expect(main).toBeDefined();
     expect((main as { answer: number }).answer).toBe(42);
     expect((main as { make(): number }).make()).toBe(42);

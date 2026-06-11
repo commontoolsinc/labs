@@ -493,7 +493,6 @@ type BoundNodeIO = {
 type ResolvedJavaScriptModule = {
   fn: (...args: any[]) => any;
   name: string | undefined;
-  verifiedLoadId: string | undefined;
 };
 
 type JavaScriptNodeContext = BoundNodeIO & {
@@ -505,7 +504,6 @@ type JavaScriptNodeContext = BoundNodeIO & {
   pattern: Pattern;
   fn: (...args: any[]) => any;
   name: string | undefined;
-  verifiedLoadId: string | undefined;
   schedulerRehydration: SchedulerRehydrationSubscriptionOptions;
 };
 
@@ -2371,9 +2369,6 @@ export class Runner {
     module: Module,
   ): ResolvedJavaScriptModule {
     let fn: (...args: any[]) => any;
-    const verifiedLoadId = module.implementationRef
-      ? this.runtime.harness.getVerifiedLoadId?.(module.implementationRef)
-      : undefined;
 
     const cached = this.functionCache.get(module);
     if (cached) {
@@ -2384,8 +2379,9 @@ export class Runner {
       //    artifact by `{ identity, symbol }` from the in-memory index (only
       //    trust-gated artifacts are indexed, so whatever resolves is
       //    builder-made) and run its implementation;
-      // 2. legacy `implementationRef` registry lookup (dual-read until the
-      //    flip);
+      // 2. legacy `implementationRef` registry lookup (the retained read path
+      //    for graphs persisted before the writer flip, plus host-trusted and
+      //    dynamic artifacts — gate-2 decision in the implementation plan);
       // 3. the stringified-source fallback (SES-sandboxed, CFC-unverified).
       fn = this.resolveByImplRef(module) ??
         (module.implementationRef
@@ -2410,7 +2406,7 @@ export class Runner {
       });
     }
 
-    return { fn, name, verifiedLoadId };
+    return { fn, name };
   }
 
   /**
@@ -2507,7 +2503,6 @@ export class Runner {
     resultCell: Cell<any>,
     tx: IExtendedStorageTransaction,
     inHandler: boolean,
-    verifiedLoadId?: string,
     implementationIdentity?: ImplementationIdentity,
   ): Frame {
     return pushFrameFromCause(cause, {
@@ -2522,7 +2517,6 @@ export class Runner {
       runtime: this.runtime,
       space: resultCell.space,
       tx,
-      ...(verifiedLoadId ? { verifiedLoadId } : {}),
       ...(implementationIdentity ? { implementationIdentity } : {}),
     });
   }
@@ -3004,7 +2998,6 @@ export class Runner {
       inputs,
       reads,
       writes,
-      verifiedLoadId,
       schedulerRehydration,
       streamLink,
     }: JavaScriptNodeContext & { streamLink: NormalizedFullLink },
@@ -3022,11 +3015,7 @@ export class Runner {
       };
       const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
         module,
-        {
-          verifiedLoadId,
-          harness: this.runtime.harness,
-          implementation: fn,
-        },
+        { implementation: fn },
       );
       const frame = this.createPatternFrame(
         cause,
@@ -3034,7 +3023,6 @@ export class Runner {
         resultCell,
         tx,
         true,
-        verifiedLoadId,
         policyFacingIdentity,
       );
       if (policyFacingIdentity) {
@@ -3101,7 +3089,6 @@ export class Runner {
               module,
               fn,
               argument,
-              verifiedLoadId,
             );
             if (result instanceof Promise) {
               result = result.finally(() =>
@@ -3287,7 +3274,6 @@ export class Runner {
       outputs,
       reads,
       writes,
-      verifiedLoadId,
       schedulerRehydration,
     }: JavaScriptNodeContext,
   ): void {
@@ -3316,11 +3302,7 @@ export class Runner {
       const resultFor = { inputs, outputs, fn: fnSource };
       const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
         module,
-        {
-          verifiedLoadId,
-          harness: this.runtime.harness,
-          implementation: fn,
-        },
+        { implementation: fn },
       );
       const frame = this.createPatternFrame(
         resultFor,
@@ -3328,7 +3310,6 @@ export class Runner {
         patternResultCell,
         tx,
         false,
-        verifiedLoadId,
         policyFacingIdentity,
       );
       (action as Action & { lastFrame?: Frame }).lastFrame = frame;
@@ -3422,7 +3403,6 @@ export class Runner {
               module,
               fn,
               argument,
-              verifiedLoadId,
             );
             if (result instanceof Promise) {
               result = result.finally(() =>
@@ -3583,9 +3563,7 @@ export class Runner {
       processCell,
       pattern,
     );
-    const { fn, name, verifiedLoadId } = this.resolveJavaScriptFunction(
-      module,
-    );
+    const { fn, name } = this.resolveJavaScriptFunction(module);
     const context: JavaScriptNodeContext = {
       tx,
       module,
@@ -3595,7 +3573,6 @@ export class Runner {
       pattern,
       fn,
       name,
-      verifiedLoadId,
       schedulerRehydration,
       ...io,
     };
@@ -3649,7 +3626,6 @@ export class Runner {
     module: Module,
     fn: (...args: any[]) => any,
     argument: unknown,
-    verifiedLoadId?: string,
   ): unknown {
     const invoke = () => {
       if (module.wrapper === "handler") {
@@ -3665,52 +3641,41 @@ export class Runner {
       return fn(argument);
     };
 
-    // A verified execution context is proven either by the legacy load id
-    // (resolved through `implementationRef`) or — for post-flip graphs, which
-    // carry no legacy ref — by the resolved function's content-addressed
-    // provenance. An unverified function (fallback-resolved or forged) has
-    // neither, so it can never register dynamic artifacts as verified.
+    // A verified execution context is proven by the resolved function's
+    // content-addressed provenance — the registration recorded during a
+    // verified evaluation. An unverified function (fallback-resolved or
+    // forged) has none, so it can never register dynamic artifacts as
+    // verified. (The former verifiedLoadId arm is gone with the loadId
+    // machinery: every function the legacy registry could hand out is an
+    // evaluation product and so carries provenance.)
     const invokerProvenance = getVerifiedProvenance(fn);
-    const verifiedContext = verifiedLoadId !== undefined ||
-      invokerProvenance !== undefined;
-    if (!verifiedContext) {
+    if (invokerProvenance === undefined) {
       return invoke();
     }
 
     const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
       (implementationRef, implementation) => {
-        if (verifiedLoadId && this.runtime.harness.registerVerifiedFunction) {
-          this.runtime.harness.registerVerifiedFunction(
-            verifiedLoadId,
-            implementationRef,
-            implementation as (input: any) => void,
-          );
-        } else {
-          // loadId-less verified context (the invoker resolved through a
-          // post-flip `$implRef`-only module): admit the dynamic artifact
-          // into the GLOBAL executable index under its minted content-derived
-          // ref, so its serialized module keeps the legacy
-          // `{ implementationRef, body omitted }` form — the live-closure
-          // rehydration channel the per-load registration provides on the
-          // loadId-ful path (PR #4053 review finding). A `$implRef` is not an
-          // option here: a dynamic function frequently has NO canonical
-          // `fn.src` (action-time stacks don't resolve under tamed SES, only
-          // module-eval ones do), so the minted ref — which the builder hands
-          // this registrar directly — is the one deterministic, re-mintable
-          // key. Replaced wholesale by the synthetic-identity registrar in
-          // PR E2 (design §5).
-          this.runtime.harness.registerDynamicVerifiedFunction?.(
-            implementationRef,
-            implementation as (input: any) => void,
-          );
-        }
+        // Admit the dynamic artifact into the GLOBAL executable index under
+        // its minted content-derived ref, so its serialized module keeps the
+        // legacy `{ implementationRef, body omitted }` form — the
+        // live-closure rehydration channel (PR #4053 review finding). A
+        // `$implRef` is not an option here: a dynamic function frequently has
+        // NO canonical `fn.src` (action-time stacks don't resolve under tamed
+        // SES, only module-eval ones do), so the minted ref — which the
+        // builder hands this registrar directly — is the one deterministic,
+        // re-mintable key. Replaced wholesale by the synthetic-identity
+        // registrar when the legacy read path retires (design §5).
+        this.runtime.harness.registerDynamicVerifiedFunction?.(
+          implementationRef,
+          implementation as (input: any) => void,
+        );
         // Content-addressed provenance for artifacts created DURING a
         // verified action's execution: the identity derives from the new
         // function's canonical source location (it was compiled as part of a
         // verified module) when one resolves. The inherited bundle id keeps
         // stored bundleId-only `writeAuthorizedBy` claims verifying for the
         // dynamic artifact's own writes when CFC identity resolves through
-        // provenance (mirrors the loadId-ful path's getVerifiedBundleId).
+        // provenance.
         const identity = identityFromCanonicalSource(
           (implementation as { src?: string }).src,
         );
@@ -3718,7 +3683,7 @@ export class Runner {
           recordVerifiedProvenance(implementation, {
             identity,
             dynamic: true,
-            ...(invokerProvenance?.bundleId
+            ...(invokerProvenance.bundleId
               ? { bundleId: invokerProvenance.bundleId }
               : {}),
           });

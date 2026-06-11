@@ -378,10 +378,13 @@ const writeAuthorizedByReason = (
   }
   // Identity arm (fail closed): a claim stamped with the content-addressed
   // moduleIdentity must match it; a legacy claim (bundleId only, written
-  // before the moduleIdentity switch) must match the live bundleId. A claim
-  // carrying neither is rejected. New claims are stamped with BOTH (see
-  // rebindWriteAuthorizedByClaims), so the bundleId arm only serves stored
-  // legacy data and retires with it.
+  // before the moduleIdentity switch in #4009) must match the live bundleId —
+  // which now rides on the function's provenance (stamped at evaluation
+  // time), since post-flip resolution yields no verifiedLoadId to derive it
+  // from. A claim carrying neither id is rejected. New claims are stamped
+  // with moduleIdentity ONLY (see rebindWriteAuthorizedByClaims); the
+  // bundleId arm serves stored pre-#4009 data and retires with it (gate-2
+  // decision in the implementation plan).
   const identityArmMatches = typeof bindingIdentity.moduleIdentity === "string"
     ? (typeof identity.moduleIdentity === "string" &&
       identity.moduleIdentity.length > 0 &&
@@ -858,26 +861,22 @@ const rebindWriteAuthorizedByClaims = (
   if (!identity || identity.kind !== "verified") {
     return schema;
   }
-  const bundleId = typeof identity.bundleId === "string" &&
-      identity.bundleId.length > 0
-    ? identity.bundleId
-    : undefined;
   const moduleIdentity = typeof identity.moduleIdentity === "string" &&
       identity.moduleIdentity.length > 0
     ? identity.moduleIdentity
     : undefined;
-  if (!bundleId && !moduleIdentity) {
+  if (!moduleIdentity) {
     return schema;
   }
   return rebindWriteAuthorizedByClaimsInner(
     schema,
-    { bundleId, moduleIdentity },
+    { moduleIdentity },
   ) as JSONSchema;
 };
 
 const rebindWriteAuthorizedByClaimsInner = (
   value: unknown,
-  ids: { bundleId?: string; moduleIdentity?: string },
+  ids: { moduleIdentity?: string },
 ): unknown => {
   if (Array.isArray(value)) {
     let changed = false;
@@ -902,9 +901,13 @@ const rebindWriteAuthorizedByClaimsInner = (
 
   if (isRecord(value.ifc) && isRecord(value.ifc.writeAuthorizedBy)) {
     const claim = value.ifc.writeAuthorizedBy;
-    // Stamp an unstamped claim with BOTH identity arms: the content-addressed
-    // moduleIdentity (the durable one) and the legacy bundleId (kept so a
-    // rollback or an older reader can still verify; retired with the flip).
+    // Stamp an unstamped claim with the content-addressed moduleIdentity —
+    // the durable arm. New claims no longer carry the legacy `bundleId` stamp
+    // (PR E2): it was load-derived and invalidated by ANY module change in
+    // the program, and the verification arms in `writeAuthorizedByReason`
+    // prefer `moduleIdentity` whenever a claim has one. The bundleId-ONLY arm
+    // stays for claims persisted before #4009 (gate-2 decision). Rollback
+    // floor: a pre-#4009 binary cannot verify a moduleIdentity-only claim.
     if (
       isRecord(claim.__ctWriterIdentityOf) &&
       claim.__ctWriterIdentityOf.bundleId === undefined &&
@@ -915,7 +918,6 @@ const rebindWriteAuthorizedByClaimsInner = (
         ...claim,
         __ctWriterIdentityOf: {
           ...claim.__ctWriterIdentityOf,
-          ...(ids.bundleId ? { bundleId: ids.bundleId } : {}),
           ...(ids.moduleIdentity ? { moduleIdentity: ids.moduleIdentity } : {}),
         },
       };

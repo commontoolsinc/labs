@@ -1257,7 +1257,7 @@ describe("CFC trusted UI event enforcement", () => {
       ((tx: IExtendedStorageTransaction) => {
         tx.setCfcImplementationIdentity({
           kind: "verified",
-          bundleId: "trusted-bundle",
+          moduleIdentity: "trusted-module",
           sourceFile: "/trusted.tsx",
           bindingPath: ["commitTrustedMessageSend"],
         });
@@ -1479,7 +1479,7 @@ describe("CFC trusted UI event enforcement", () => {
       ((tx: IExtendedStorageTransaction) => {
         tx.setCfcImplementationIdentity({
           kind: "verified",
-          bundleId: "trusted-bundle",
+          moduleIdentity: "trusted-module",
           sourceFile: "/trusted.tsx",
           bindingPath: ["commitTrustedMessageSend"],
         });
