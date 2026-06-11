@@ -403,8 +403,16 @@ Diagnostics emitted in all modes:
 - **Error** `pattern-context:computation`
   - binary/unary/conditional computations using opaque dependencies outside
     wrappers
+  - also the catch-all for other non-lowerable reactive reads at a top-level
+    pattern site — notably **bare dynamic key (element) access** like
+    `scopes[key]` directly in a pattern-body value position (the target-language
+    spec's "bare dynamic key access in top-level pattern-facing code" =
+    Unsupported). The same access is fine inside JSX, a computation callback, a
+    collection callback, or a structural binding form.
   - validation first checks the shared lowerable-expression-site policy; only
-    non-lowerable computation sites still report this error
+    non-lowerable computation sites still report this error (so `items[0].name`,
+    `name.toUpperCase()` at lowerable top-level sites, and dynamic keys inside
+    supported contexts validate clean)
 - **Error** `pattern-context:callback-container`
   - a callback passed to an **unsupported container** in pattern-facing JSX
     (the callback-boundary decision is `unsupported` with
