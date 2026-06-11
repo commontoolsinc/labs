@@ -67,10 +67,8 @@ import {
   markReadAsAttemptedWrite,
 } from "./scheduler.ts";
 import { internalVerifierRead } from "./storage/reactivity-log.ts";
-import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
-import { isCellResult } from "./query-result-proxy.ts";
 import { isCellScope, narrowestScope } from "./scope.ts";
 import {
   describePatternOrModule,
@@ -493,7 +491,6 @@ type BoundNodeIO = {
 type ResolvedJavaScriptModule = {
   fn: (...args: any[]) => any;
   name: string | undefined;
-  verifiedLoadId: string | undefined;
 };
 
 type JavaScriptNodeContext = BoundNodeIO & {
@@ -505,7 +502,6 @@ type JavaScriptNodeContext = BoundNodeIO & {
   pattern: Pattern;
   fn: (...args: any[]) => any;
   name: string | undefined;
-  verifiedLoadId: string | undefined;
   schedulerRehydration: SchedulerRehydrationSubscriptionOptions;
 };
 
@@ -546,7 +542,6 @@ function dedupeNormalizedLinks(
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${CellScope}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
-  private functionCache = new FunctionCache();
   private locallyPreparedResults = new Set<
     `${MemorySpace}/${CellScope}/${URI}`
   >();
@@ -1056,8 +1051,6 @@ export class Runner {
       resultCell,
     );
 
-    this.discoverAndCacheFunctions(pattern, new Set());
-
     const key = this.getDocKey(resultCell);
     this.locallyPreparedResults.add(key);
     tx.addCommitCallback((_tx, result) => {
@@ -1161,7 +1154,6 @@ export class Runner {
       addCancel(nodeCancel);
 
       // Instantiate nodes
-      this.discoverAndCacheFunctions(pattern, new Set());
       const actualTx = useTx ?? this.runtime.edit();
       const shouldCommit = !useTx;
       const schedulerRehydration = options.rehydrateSchedulerFromStorage ===
@@ -1868,126 +1860,6 @@ export class Runner {
     this.locallyStoppedResults.clear();
   }
 
-  /**
-   * Discover and cache JavaScript functions from a pattern.
-   * This recursively traverses the pattern structure to find all JavaScript modules
-   * with string implementations and evaluates them for caching.
-   *
-   * @param pattern The pattern to discover functions from
-   */
-  private discoverAndCacheFunctions(
-    pattern: Pattern,
-    seen: Set<object>,
-  ): void {
-    if (seen.has(pattern)) return;
-    seen.add(pattern);
-
-    for (const node of pattern.nodes) {
-      this.discoverAndCacheFunctionsFromModule(node.module, seen);
-
-      // Also check inputs for nested patterns (e.g., in map operations)
-      this.discoverAndCacheFunctionsFromValue(node.inputs, seen);
-    }
-  }
-
-  /**
-   * Discover and cache functions from a module.
-   *
-   * @param module The module to process
-   */
-  private discoverAndCacheFunctionsFromModule(
-    module: Module,
-    seen: Set<object>,
-  ): void {
-    if (seen.has(module)) return;
-    seen.add(module);
-
-    if (!isModule(module)) return;
-
-    switch (module.type) {
-      case "javascript":
-        // Only prewarm the cache from functions that were already registered
-        // by the SES verification/evaluation pipeline. Host callbacks must not
-        // enter the execution cache directly.
-        if (module.implementationRef && !this.functionCache.has(module)) {
-          const executable = this.runtime.harness.getExecutableFunction(
-            module.implementationRef,
-          );
-          if (executable) {
-            this.functionCache.set(module, executable);
-          }
-        }
-        break;
-
-      case "pattern":
-        // Recursively discover functions in nested patterns
-        if (isPattern(module.implementation)) {
-          this.discoverAndCacheFunctions(module.implementation, seen);
-        }
-        break;
-
-      case "ref":
-        // Resolve reference and process the referenced module
-        try {
-          const referencedModule = this.runtime.moduleRegistry.getModule(
-            module.implementation as string,
-          );
-          this.discoverAndCacheFunctionsFromModule(referencedModule, seen);
-        } catch (error) {
-          console.warn(
-            `Failed to resolve module reference for implementation "${module.implementation}":`,
-            error,
-          );
-        }
-        break;
-    }
-  }
-
-  /**
-   * Discover and cache functions from a value that might contain patterns.
-   * This handles cases where patterns are passed as inputs (e.g., to map operations).
-   *
-   * @param value The value to search for patterns
-   */
-  private discoverAndCacheFunctionsFromValue(
-    value: FabricValue,
-    seen: Set<object>,
-  ): void {
-    if (isPattern(value)) {
-      this.discoverAndCacheFunctions(value, seen);
-      return;
-    }
-
-    if (isModule(value)) {
-      this.discoverAndCacheFunctionsFromModule(value, seen);
-      return;
-    }
-
-    if (
-      !isRecord(value) || isCell(value) || isCellResult(value)
-    ) {
-      return;
-    }
-
-    if (seen.has(value)) return;
-    seen.add(value);
-
-    // Recursively search in objects and arrays
-    if (Array.isArray(value)) {
-      for (const item of value as FabricValue[]) {
-        this.discoverAndCacheFunctionsFromValue(item, seen);
-      }
-      return;
-    }
-
-    for (const key in value as Record<string, any>) {
-      this.discoverAndCacheFunctionsFromValue(
-        value[key] as FabricValue,
-        seen,
-      );
-    }
-  }
-
   private instantiateNode(
     tx: IExtendedStorageTransaction,
     module: Module,
@@ -2370,32 +2242,25 @@ export class Runner {
   private resolveJavaScriptFunction(
     module: Module,
   ): ResolvedJavaScriptModule {
-    let fn: (...args: any[]) => any;
-    const verifiedLoadId = module.implementationRef
-      ? this.runtime.harness.getVerifiedLoadId?.(module.implementationRef)
-      : undefined;
-
-    const cached = this.functionCache.get(module);
-    if (cached) {
-      fn = cached;
-    } else {
-      // Resolution order (docs/specs/content-addressed-action-identity.md):
-      // 1. content-addressed `$implRef` — resolve the registered builder
-      //    artifact by `{ identity, symbol }` from the in-memory index (only
-      //    trust-gated artifacts are indexed, so whatever resolves is
-      //    builder-made) and run its implementation;
-      // 2. legacy `implementationRef` registry lookup (dual-read until the
-      //    flip);
-      // 3. the stringified-source fallback (SES-sandboxed, CFC-unverified).
-      fn = this.resolveByImplRef(module) ??
-        (module.implementationRef
-          ? this.runtime.harness.getExecutableFunction(
-            module.implementationRef,
-          ) as ((...args: any[]) => any) | undefined
-          : undefined) ??
-        this.getFallbackJavaScriptImplementation(module);
-      this.functionCache.set(module, fn);
-    }
+    // Resolution order (docs/specs/content-addressed-action-identity.md):
+    // 1. content-addressed `$implRef` — resolve the registered builder
+    //    artifact by `{ identity, symbol }` from the in-memory index (only
+    //    trust-gated artifacts are indexed, so whatever resolves is
+    //    builder-made) and run its implementation;
+    // 2. legacy `implementationRef` registry lookup (the retained read path
+    //    for graphs persisted before the writer flip, plus host-trusted and
+    //    dynamic artifacts — gate-2 decision in the implementation plan);
+    // 3. the stringified-source fallback (SES-sandboxed, CFC-unverified).
+    // (The former per-runner FunctionCache is gone — steps 1–2 are two Map
+    // probes against session-lifetime indexes, so the ref-keyed cache only
+    // added a third map in front of them.)
+    const fn: (...args: any[]) => any = this.resolveByImplRef(module) ??
+      (module.implementationRef
+        ? this.runtime.harness.getExecutableFunction(
+          module.implementationRef,
+        ) as ((...args: any[]) => any) | undefined
+        : undefined) ??
+      this.getFallbackJavaScriptImplementation(module);
 
     const namedFn = fn as {
       src?: string;
@@ -2410,7 +2275,7 @@ export class Runner {
       });
     }
 
-    return { fn, name, verifiedLoadId };
+    return { fn, name };
   }
 
   /**
@@ -2507,7 +2372,6 @@ export class Runner {
     resultCell: Cell<any>,
     tx: IExtendedStorageTransaction,
     inHandler: boolean,
-    verifiedLoadId?: string,
     implementationIdentity?: ImplementationIdentity,
   ): Frame {
     return pushFrameFromCause(cause, {
@@ -2522,7 +2386,6 @@ export class Runner {
       runtime: this.runtime,
       space: resultCell.space,
       tx,
-      ...(verifiedLoadId ? { verifiedLoadId } : {}),
       ...(implementationIdentity ? { implementationIdentity } : {}),
     });
   }
@@ -3004,7 +2867,6 @@ export class Runner {
       inputs,
       reads,
       writes,
-      verifiedLoadId,
       schedulerRehydration,
       streamLink,
     }: JavaScriptNodeContext & { streamLink: NormalizedFullLink },
@@ -3022,11 +2884,7 @@ export class Runner {
       };
       const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
         module,
-        {
-          verifiedLoadId,
-          harness: this.runtime.harness,
-          implementation: fn,
-        },
+        { implementation: fn },
       );
       const frame = this.createPatternFrame(
         cause,
@@ -3034,7 +2892,6 @@ export class Runner {
         resultCell,
         tx,
         true,
-        verifiedLoadId,
         policyFacingIdentity,
       );
       if (policyFacingIdentity) {
@@ -3101,7 +2958,6 @@ export class Runner {
               module,
               fn,
               argument,
-              verifiedLoadId,
             );
             if (result instanceof Promise) {
               result = result.finally(() =>
@@ -3287,7 +3143,6 @@ export class Runner {
       outputs,
       reads,
       writes,
-      verifiedLoadId,
       schedulerRehydration,
     }: JavaScriptNodeContext,
   ): void {
@@ -3316,11 +3171,7 @@ export class Runner {
       const resultFor = { inputs, outputs, fn: fnSource };
       const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
         module,
-        {
-          verifiedLoadId,
-          harness: this.runtime.harness,
-          implementation: fn,
-        },
+        { implementation: fn },
       );
       const frame = this.createPatternFrame(
         resultFor,
@@ -3328,7 +3179,6 @@ export class Runner {
         patternResultCell,
         tx,
         false,
-        verifiedLoadId,
         policyFacingIdentity,
       );
       (action as Action & { lastFrame?: Frame }).lastFrame = frame;
@@ -3422,7 +3272,6 @@ export class Runner {
               module,
               fn,
               argument,
-              verifiedLoadId,
             );
             if (result instanceof Promise) {
               result = result.finally(() =>
@@ -3583,9 +3432,7 @@ export class Runner {
       processCell,
       pattern,
     );
-    const { fn, name, verifiedLoadId } = this.resolveJavaScriptFunction(
-      module,
-    );
+    const { fn, name } = this.resolveJavaScriptFunction(module);
     const context: JavaScriptNodeContext = {
       tx,
       module,
@@ -3595,7 +3442,6 @@ export class Runner {
       pattern,
       fn,
       name,
-      verifiedLoadId,
       schedulerRehydration,
       ...io,
     };
@@ -3649,7 +3495,6 @@ export class Runner {
     module: Module,
     fn: (...args: any[]) => any,
     argument: unknown,
-    verifiedLoadId?: string,
   ): unknown {
     const invoke = () => {
       if (module.wrapper === "handler") {
@@ -3665,52 +3510,41 @@ export class Runner {
       return fn(argument);
     };
 
-    // A verified execution context is proven either by the legacy load id
-    // (resolved through `implementationRef`) or — for post-flip graphs, which
-    // carry no legacy ref — by the resolved function's content-addressed
-    // provenance. An unverified function (fallback-resolved or forged) has
-    // neither, so it can never register dynamic artifacts as verified.
+    // A verified execution context is proven by the resolved function's
+    // content-addressed provenance — the registration recorded during a
+    // verified evaluation. An unverified function (fallback-resolved or
+    // forged) has none, so it can never register dynamic artifacts as
+    // verified. (The former verifiedLoadId arm is gone with the loadId
+    // machinery: every function the legacy registry could hand out is an
+    // evaluation product and so carries provenance.)
     const invokerProvenance = getVerifiedProvenance(fn);
-    const verifiedContext = verifiedLoadId !== undefined ||
-      invokerProvenance !== undefined;
-    if (!verifiedContext) {
+    if (invokerProvenance === undefined) {
       return invoke();
     }
 
     const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
       (implementationRef, implementation) => {
-        if (verifiedLoadId && this.runtime.harness.registerVerifiedFunction) {
-          this.runtime.harness.registerVerifiedFunction(
-            verifiedLoadId,
-            implementationRef,
-            implementation as (input: any) => void,
-          );
-        } else {
-          // loadId-less verified context (the invoker resolved through a
-          // post-flip `$implRef`-only module): admit the dynamic artifact
-          // into the GLOBAL executable index under its minted content-derived
-          // ref, so its serialized module keeps the legacy
-          // `{ implementationRef, body omitted }` form — the live-closure
-          // rehydration channel the per-load registration provides on the
-          // loadId-ful path (PR #4053 review finding). A `$implRef` is not an
-          // option here: a dynamic function frequently has NO canonical
-          // `fn.src` (action-time stacks don't resolve under tamed SES, only
-          // module-eval ones do), so the minted ref — which the builder hands
-          // this registrar directly — is the one deterministic, re-mintable
-          // key. Replaced wholesale by the synthetic-identity registrar in
-          // PR E2 (design §5).
-          this.runtime.harness.registerDynamicVerifiedFunction?.(
-            implementationRef,
-            implementation as (input: any) => void,
-          );
-        }
+        // Admit the dynamic artifact into the GLOBAL executable index under
+        // its minted content-derived ref, so its serialized module keeps the
+        // legacy `{ implementationRef, body omitted }` form — the
+        // live-closure rehydration channel (PR #4053 review finding). A
+        // `$implRef` is not an option here: a dynamic function frequently has
+        // NO canonical `fn.src` (action-time stacks don't resolve under tamed
+        // SES, only module-eval ones do), so the minted ref — which the
+        // builder hands this registrar directly — is the one deterministic,
+        // re-mintable key. Replaced wholesale by the synthetic-identity
+        // registrar when the legacy read path retires (design §5).
+        this.runtime.harness.registerDynamicVerifiedFunction?.(
+          implementationRef,
+          implementation as (input: any) => void,
+        );
         // Content-addressed provenance for artifacts created DURING a
         // verified action's execution: the identity derives from the new
         // function's canonical source location (it was compiled as part of a
         // verified module) when one resolves. The inherited bundle id keeps
         // stored bundleId-only `writeAuthorizedBy` claims verifying for the
         // dynamic artifact's own writes when CFC identity resolves through
-        // provenance (mirrors the loadId-ful path's getVerifiedBundleId).
+        // provenance.
         const identity = identityFromCanonicalSource(
           (implementation as { src?: string }).src,
         );
@@ -3718,7 +3552,7 @@ export class Runner {
           recordVerifiedProvenance(implementation, {
             identity,
             dynamic: true,
-            ...(invokerProvenance?.bundleId
+            ...(invokerProvenance.bundleId
               ? { bundleId: invokerProvenance.bundleId }
               : {}),
           });

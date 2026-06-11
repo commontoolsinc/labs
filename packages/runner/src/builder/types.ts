@@ -243,11 +243,10 @@ declare module "@commonfabric/api" {
     derivedInternalCells?: DerivedInternalCellDescriptor[];
     result: JSONValue;
     nodes: Node[];
-    // NOTE: `program` (rehydration source), the verified-load id, and the
-    // derivation link to a copy's original all live in WeakMaps/WeakSets in
-    // ./pattern-metadata.ts (so exported patterns can be frozen, and so no
-    // own property can carry trust). Use get/setPatternProgram,
-    // get/setVerifiedLoadId, noteDerivedCopy/resolveOriginal.
+    // NOTE: `program` (rehydration source) and the derivation link to a
+    // copy's original live in WeakMaps/WeakSets in ./pattern-metadata.ts (so
+    // exported patterns can be frozen, and so no own property can carry
+    // trust). Use get/setPatternProgram, noteDerivedCopy/resolveOriginal.
   }
 }
 
@@ -279,7 +278,6 @@ export type Frame = {
   parent?: Frame;
   cause?: unknown;
   generatedIdCounter: number;
-  verifiedLoadId?: string;
   implementationIdentity?: ImplementationIdentity;
   runtime?: Runtime;
   tx?: IExtendedStorageTransaction;

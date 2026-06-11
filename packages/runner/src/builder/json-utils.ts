@@ -403,28 +403,21 @@ export function moduleToJSON(module: Module) {
           implRefValue.symbol,
         ) === "function";
     // Where the `$implRef` does NOT suffice, the legacy admitted-probe
-    // behavior is kept VERBATIM: a module whose function the registry admits —
-    // host-trusted artifacts (`trustedHostFunctionIndex`, e.g. trusted-builder
-    // values whose closures cannot survive a stringified round-trip) and
-    // dynamic in-action-created artifacts (per-load registry, no provenance
+    // behavior is kept: a module whose function the global executable index
+    // admits — host-trusted artifacts (`trustedHostFunctionIndex`, e.g.
+    // trusted-builder values whose closures cannot survive a stringified
+    // round-trip) and dynamic in-action-created artifacts (no provenance
     // symbol) — still serializes `implementationRef` with the body omitted,
     // because `getExecutableFunction(implementationRef)` is their ONLY
     // rehydration channel. Their story moves to the synthetic-identity host
-    // registrar in PR E2 (design §5); until then the legacy field is
-    // load-bearing for exactly this category.
+    // registrar (design §5) when the legacy read path retires; until then the
+    // legacy field is load-bearing for exactly this category.
     const admittedImplementation = !implRefResolvable &&
         module.type === "javascript" &&
         typeof module.implementationRef === "string"
-      ? frame?.verifiedLoadId
-        ? frame.runtime?.harness?.getVerifiedFunctionInLoad(
-          frame.verifiedLoadId,
-          module.implementationRef,
-        ) ?? frame.runtime?.harness?.getExecutableFunction(
-          module.implementationRef,
-        )
-        : frame?.runtime?.harness?.getExecutableFunction(
-          module.implementationRef,
-        )
+      ? frame?.runtime?.harness?.getExecutableFunction(
+        module.implementationRef,
+      )
       : undefined;
     const keepLegacyRef = !implRefResolvable &&
       admittedImplementation === implementation &&

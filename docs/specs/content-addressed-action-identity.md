@@ -12,19 +12,36 @@ tables, `unsafe_originalPattern` deleted), #4009 (C: `$implRef` dual-write +
 CFC provenance), #4013 (D: pattern-scoped registries deleted, provenance
 recording in `Engine.recordModuleProvenance`).
 
-Phase 3 in progress — **E1 (writer flip)**: writers emit `$implRef` only;
-`implementationRef` and the stringified body are no longer written where the
-reading runtime's engine proves the `$implRef` resolvable through its strong
-content-addressed implementation index
-(`ExecutableRegistry.registerVerifiedImplementation`, the resolution of open
-question 1 — see § Open questions). The legacy `implementationRef` is still
-written for exactly one category: registry-admitted artifacts the `$implRef`
-cannot cover — host-trusted values (`trustedHostFunctionIndex`, whose closures
-cannot survive a stringified round-trip) and dynamic in-action-created
-artifacts (no provenance symbol). Their replacement is the §5 synthetic-identity
-registrar (PR E2). All read paths are retained; `VerifiedProvenance` carries
-the evaluating load's `bundleId` so stored bundleId-only `writeAuthorizedBy`
-claims keep verifying for modules resolved without a `verifiedLoadId`.
+Phase 3 shipped in two PRs:
+
+- **E1 (#4053, writer flip)**: writers emit `$implRef` only;
+  `implementationRef` and the stringified body are no longer written where
+  the reading runtime's engine proves the `$implRef` resolvable through its
+  strong content-addressed implementation index
+  (`ExecutableRegistry.registerVerifiedImplementation`, the resolution of
+  open question 1 — see § Open questions). The legacy `implementationRef` is
+  still written for exactly one category: registry-admitted artifacts the
+  `$implRef` cannot cover — host-trusted values (`trustedHostFunctionIndex`,
+  whose closures cannot survive a stringified round-trip) and dynamic
+  in-action-created artifacts (no provenance symbol). `VerifiedProvenance`
+  carries the evaluating load's `bundleId` so stored bundleId-only
+  `writeAuthorizedBy` claims keep verifying without a `verifiedLoadId`.
+- **E2 (legacy machinery deletion)**: every loadId surface is gone — frame
+  threading, side tables, `seedVerifiedLoadIds`, per-load registry
+  partitions and capture walks, the loadId-scoped `Harness` methods, the
+  CFC `implementationRef`×`verifiedLoadId` arm (provenance is the only
+  source of `kind: "verified"`), `FunctionCache`, and the prewarm walk. New
+  `writeAuthorizedBy` claims are stamped with `moduleIdentity` only. What
+  remains of the legacy machinery is exactly the gate-2 retained read path —
+  `ensureImplementationRef` (+ ordinal shim) feeding ONE string-keyed global
+  executable index behind `getExecutableFunction`, the bundleId-only
+  verification arm for stored pre-#4009 claims, and the `unsafe-host:`
+  minting that rides the same channel (the §5 synthetic-identity registrar is
+  deferred to the cycle that retires this read path; decisions recorded in
+  the implementation plan).
+
+Phase 4 (drop the retained read path + the §7 refs-only pattern JSON / E3)
+remains open, gated on stored-data evidence or a runtime-version cutoff.
 
 The design assumes the shipped state after the AMD-loader removal: the ESM
 module-record loader is the only loader, every module has a content-addressed
