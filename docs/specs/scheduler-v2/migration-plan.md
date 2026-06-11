@@ -141,21 +141,32 @@ memory-engine component — coordinate with the memory owners from the start.
    (`watchReactiveActionCommit`, `rescheduleActionForImmediateRetry`) for
    the accepted zombie-piece case (spec resolved decision 9).
 
-**E2 — receipts (I11).**
+**E2 — receipts = result cells (I11).**
 
-1. Memory engine: create-only receipt precondition with a distinct
-   permanent rejection (receipt-exists), keyed by receipt doc id derived
-   causally from the event id (+ handler id when multi-handler is opted
-   in).
-2. Runner: for receipt-enabled event classes, the handling tx writes the
-   receipt; on receipt-exists rejection the client drops the event (lost
-   race — no retry) and emits telemetry.
-3. Class surface: declare the opt-in (stream/ingress annotation — spec open
+1. Make the handler-result cause event-causal: replace the random
+   per-invocation `$event: crypto.randomUUID()` (`runner.ts:2995-2998`)
+   with the E0 event id, threaded from `QueuedEvent` into the handler
+   frame. All handler-frame-minted ids become deterministic per event:
+   retries reuse ids (aborted attempts never committed), per-gesture
+   uniqueness is preserved (event ids are unique per send). Verify no
+   fixture relies on per-attempt-unique ids.
+2. Memory engine: create-only precondition on the handling's result cell
+   for receipt-gated classes, with a distinct permanent rejection
+   (receipt-exists).
+3. Runner: receipt-gated classes materialize the result cell
+   unconditionally (it is the `{ resultFor: cause }` cell a
+   pattern-launching handler already creates — no new document kind); on
+   receipt-exists rejection the client drops the event (lost race — no
+   retry) and emits telemetry. Non-gated classes keep
+   materialize-only-when-launching.
+4. Single-handler enforcement: replace `queueSchedulerEvent`'s silent
+   one-event-per-matching-handler fanout with one handler per stream link
+   at registration (dev-mode error on concurrent duplicates; audit
+   existing registrations first). Multi-handler dispatch = future opt-in
+   feature (handler id would join the result-cell derivation).
+5. Class surface: declare the opt-in (stream/ingress annotation — spec open
    question 2); default on for webhook ingress and background delivery,
    off for renderer-local UI events.
-4. Multi-handler audit: today `queueSchedulerEvent` queues one event per
-   matching handler; determine whether anything relies on that, then make
-   multi-handler explicit opt-in.
 
 **Fixtures (red first, per repo practice):**
 
@@ -171,7 +182,9 @@ memory-engine component — coordinate with the memory owners from the start.
 - receipt + retryable conflict on another doc: handler retries and commits;
   its own receipt never blocks it;
 - cross-space follow-up: parks until origin confirmation, dispatches after;
-  dropped (never dispatched) when the origin fails.
+  dropped (never dispatched) when the origin fails;
+- pattern-launching event redelivered to a second runtime: the result-cell
+  create collides; exactly one piece exists; the loser does not retry.
 
 Exit: I10 holds for handler-sent events and handler-started pieces; I11
 holds for receipt-enabled classes.
@@ -295,7 +308,8 @@ Coordinate with memory-layer owners (observation rows live in memory v2):
 | Parked cross-space follow-up head-blocks the single global lane for a confirmation round trip | E | Accepted (same slowness class as the cross-space write protocol); the agreed per-space lane split confines it when it bites (spec open question 1) |
 | Permanent-vs-retryable rejection taxonomy leaks wrong behavior (a permanent rejection retried, or a conflict dropped) | E | Taxonomy lands first (E0) with focused tests on both retry paths (`events.ts` unshift, `action-run.ts` watch) before lineage/receipts build on it |
 | Receipt write traffic on high-frequency event classes | E | Per-class opt-in with UI-local classes off by default; measure commit volume on enabled classes before widening defaults |
-| Multi-handler streams silently rely on today's one-event-per-matching-handler fanout | E | Audit before receipts land; make multi-handler explicit opt-in (receipt id incorporates handler id) |
+| Single-handler enforcement breaks a stream silently relying on multi-match fanout | E | Registration audit before enforcement; dev-mode error first, prod telemetry; multi-handler returns later as an explicit opt-in feature |
+| Event-causal handler-frame ids change id derivation for documents created in handlers | E | Uniqueness per gesture is preserved (event ids unique per send); fixture sweep over handler-heavy patterns before the cause swap |
 | Conditional-effect parity (effects running more often than v1's watermark filter allowed) | 2–3 | Run-count parity fixtures on the v1 conditional-effect tests; the §7.2 closure-ordering must land with the watermark deletion, not after |
 | Persisted observation misses after fingerprint change | 0, 7 | Versioned fingerprints; a miss only costs one re-run per node |
 | changeGroup external consumers (runtime client, toolshed diagnostics) | 2 | Grep + keep as inert diagnostic label until consumers migrate |

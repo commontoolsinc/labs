@@ -679,27 +679,49 @@ server confirmation.
 
 **Receipts (exactly-once handling).** Needed for CFC: certain events must
 be handled at most once system-wide, not once per runtime that sees them.
-Per opt-in event class (declared on the stream/ingress; renderer-local UI
-events default off — they cannot race; cross-runtime, webhook-ingress, and
-background-delivery classes default on):
 
-1. The handling transaction also creates a **receipt document** whose id is
-   causally derived from the event id (and the handler id iff the stream
-   opts into multiple handlers; default is single-handler — note today's
-   `queueSchedulerEvent` silently queues one event per matching handler,
-   which an audit must make explicit before receipts land).
-2. Receipt creation is a create-only commit precondition. If the receipt
-   already exists, the commit fails with a *permanent* rejection: the
-   client lost the race and must **not** retry — the event was handled
-   elsewhere.
+The receipt is not a new document kind: **the receipt is the handling's
+result cell.** Every event handling conceptually owns one result document —
+the same `{ resultFor: cause }` cell that hosts a launched pattern when the
+handler returns one; when the handler launches nothing, the cell is simply
+the receipt. This gives handlers the same shape as computations: one
+canonical output document per unit of work, whose creation doubles as the
+exactly-once witness.
+
+Each event is handled by **exactly one handler** (decided; multi-handler
+dispatch is a future opt-in feature — if it lands, the handler id joins the
+result-cell derivation). Today's `queueSchedulerEvent` silently queues one
+event per matching handler; registration is tightened to enforce one
+handler per stream link instead.
+
+1. The result cell's id is causally derived from the **event id**. Today's
+   handler-result cause is per-invocation but *random*
+   (`{ ...inputs, $event: crypto.randomUUID() }`, `runner.ts:2995-2998`);
+   substituting the durable event id (§7.5) for the random UUID is the
+   whole bridge. It also makes every id minted inside the handler frame
+   event-causal (the frame cause feeds id derivation for objects the
+   handler creates): per-gesture uniqueness is preserved because event ids
+   are unique per send, retries of the same event reuse the same ids
+   instead of minting fresh ones per attempt, and duplicate handlings
+   elsewhere derive the same ids — colliding exactly where intended.
+2. For receipt-gated event classes (declared on the stream/ingress;
+   webhook-ingress, background-delivery, and cross-runtime classes default
+   on; renderer-local UI events default off — they cannot race and keep
+   today's materialize-only-when-launching behavior), the handling
+   transaction creates the result cell **unconditionally**, under a
+   create-only commit precondition. If it already exists, the commit fails
+   with a *permanent* rejection: the client lost the race and must **not**
+   retry — the event was handled elsewhere.
 3. Retryable conflicts on other documents re-run the handler as usual; the
-   re-run derives the same receipt id from the same event id, so a
+   re-run derives the same result-cell id from the same event id, so a
    handler's own retries never collide with themselves (the losing attempt
-   never committed its receipt).
+   never committed).
 4. Receipts compose with non-durable event queues: delivery may be
    at-least-once (redelivery after restart, multi-runtime fanout); receipts
    make *handling* exactly-once, including across process restarts, without
-   making queues durable.
+   making queues durable. And because the receipt is the result cell, a
+   redelivered pattern-launching event cannot create a second piece — the
+   collision is on the very document the piece would live at.
 
 Lineage and receipts are deliberately the same shape — commit-time
 precondition, permanent rejection, no-retry client behavior, ids derived
@@ -890,9 +912,10 @@ retried. A retried parent emits fresh launches under its new attempt. See
 
 **I11 — Receipt-gated events are handled at most once.** For event classes
 with receipts enabled, at most one handling transaction system-wide ever
-commits for a given event id (per handler, where multi-handler is opted
-in). A receipt-exists rejection is permanent: the losing client does not
-retry. See §7.6.
+commits for a given event id: the create of the handling's result cell
+(whose id is causal to the event id) is the witness. A receipt-exists
+rejection is permanent: the losing client does not retry. Each event has
+exactly one handler. See §7.6.
 
 ---
 
@@ -1045,6 +1068,20 @@ Summary table; the full per-mechanism walkthrough with file references is in
     round trip on the cross-space hop, same accepted class of slowness as
     cross-space writes. Origin attestation is deferred until a
     cross-runtime event-delivery path exists.
+12. **Exactly one handler per event.** Single-handler dispatch is the
+    model; registration enforces one handler per stream link (replacing
+    today's silent one-event-per-matching-handler fanout in
+    `queueSchedulerEvent`). Multi-handler dispatch is a future opt-in
+    feature; if it lands, the handler id joins the receipt derivation.
+13. **The receipt is the handler's result cell.** Every handling owns one
+    result document — the `{ resultFor: cause }` cell that hosts a
+    launched pattern when there is one, and is just the receipt when there
+    was nothing to launch. Implementation bridge: replace the random
+    per-invocation `$event: crypto.randomUUID()` in the handler-result
+    cause (`runner.ts:2995-2998`) with the durable event id, making the
+    result cell and all handler-frame-minted ids event-causal (retries
+    reuse ids; duplicates collide; per-gesture uniqueness preserved since
+    event ids are unique per send).
 
 ### Open
 
@@ -1055,13 +1092,10 @@ Summary table; the full per-mechanism walkthrough with file references is in
    handler-closure-overlap) make ordering data-dependent and are deferred
    until real contention data exists. Pairing question when lanes split:
    the consistency gate also becomes per-lane.
-2. **Receipt class surface.** Where is the receipt opt-in declared — stream
-   schema annotation, ingress configuration, or handler registration? And
-   which classes default on (webhook ingress and background delivery
-   clearly; cross-runtime UI streams less clear). Needs alignment with the
-   CFC spec's exactly-once requirement scope.
-3. **Multi-handler events.** Today `queueSchedulerEvent` silently queues
-   one event per matching handler. Receipts default to single-handler
-   semantics, which would make the second handler lose the race. Audit
-   whether anything relies on multi-match today, then make multi-handler
-   an explicit opt-in (receipt id incorporates handler id).
+2. **Receipt class declaration surface.** With receipts unified into the
+   result cell (resolved decision 13), the cost concern is mostly gone —
+   what remains is purely where the create-precondition opt-in is declared
+   (stream schema annotation, ingress configuration, or handler
+   registration) and which classes default on (webhook ingress and
+   background delivery clearly; cross-runtime UI streams less clear).
+   Needs alignment with the CFC spec's exactly-once requirement scope.
