@@ -11,6 +11,7 @@ import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessRunState } from "../src/run-state.ts";
 import { RESERVED_ARTIFACT_PATH_DETAIL } from "../src/tools/reserved-artifacts.ts";
+import { resolveDockerRunscSandboxConfig } from "../src/sandbox/docker-runsc.ts";
 import type {
   ProcessRunner,
   ProcessRunRequest,
@@ -171,6 +172,26 @@ Deno.test("CfHarnessEngine runs a tool in enforce mode when CFC transports are w
   // The guard does not fire; execution reaches the (faked) docker lifecycle
   // (the exact mediated output is covered elsewhere — here we only assert the
   // transport floor lets the run proceed and an outputId is produced).
+  const result = await engine.invokeBuiltinTool("bash", { command: "echo hi" });
+  assertEquals(typeof result.output.outputId, "string");
+});
+
+Deno.test("CfHarnessEngine does not apply the CFC transport floor to an injected sandbox runtime", async () => {
+  // An injected sandboxRuntime is the thing that actually executes and carries
+  // its own enforcement guarantees. The engine must not validate the *resolved
+  // config's* transports against it: that config is unused here and may describe
+  // a different sandbox, so doing so would falsely reject an otherwise valid
+  // enforce-mode run. (Regression for the run-start transport floor.)
+  const engine = new CfHarnessEngine({
+    runId: "run-1",
+    workspaceHostPath: "/host/project",
+    cfcEnforcementMode: "enforce-strict",
+    // A docker-runsc-cfc config with no CFC sidecar transports wired.
+    sandbox: resolveDockerRunscSandboxConfig({
+      workspaceHostPath: "/host/project",
+    }),
+    sandboxRuntime: new FakeSandboxRuntime(),
+  });
   const result = await engine.invokeBuiltinTool("bash", { command: "echo hi" });
   assertEquals(typeof result.output.outputId, "string");
 });

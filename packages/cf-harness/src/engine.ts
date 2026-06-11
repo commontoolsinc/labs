@@ -322,8 +322,12 @@ export class CfHarnessEngine {
     // Capture the engine-owned docker-runsc config so we can refuse to *run* an
     // enforce-mode tool whose sandbox lacks the CFC sidecar transports (the
     // check fires at run start, not construction — see #assertCfcTransportReady).
-    // Injected sandbox runtimes carry their own enforcement guarantees.
-    this.#ownedRunscConfig = sandboxConfig?.kind === "docker-runsc-cfc"
+    // Only when the engine constructs the runtime itself: an injected
+    // sandboxRuntime is the thing that actually executes and carries its own
+    // enforcement guarantees, while `sandboxConfig` in that branch is the
+    // unused resolved config and may describe a different sandbox entirely.
+    this.#ownedRunscConfig = options.sandboxRuntime === undefined &&
+        sandboxConfig?.kind === "docker-runsc-cfc"
       ? sandboxConfig
       : undefined;
     this.hostProcessRunner = options.processRunner ?? new DenoProcessRunner();
