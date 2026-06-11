@@ -295,14 +295,13 @@ describe("Pattern Runner - Regressions", () => {
     const rawValuePattern = {
       argumentSchema: {},
       resultSchema: {},
-      initial: {
-        internal: {
-          recipe: initialRecipe as unknown,
-        },
-      },
+      derivedInternalCells: [{
+        partialCause: "recipe",
+        schema: { default: initialRecipe.toJSON() },
+      }],
       result: {
         internalRecipe: {
-          $alias: { cell: "internal", path: ["recipe"] },
+          $alias: { partialCause: "recipe", path: [] },
         },
         resultRecipe: resultRecipe as unknown,
       },

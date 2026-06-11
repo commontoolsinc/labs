@@ -1641,8 +1641,30 @@ async function collectNotebookSourceState(page: Page): Promise<{
       return { notebookEntityId };
     }
 
+    const resolveInternalManifest = async (
+      manifest: unknown,
+    ): Promise<Record<string, unknown>> => {
+      const resolved: Record<string, unknown> = {};
+      if (!Array.isArray(manifest)) return resolved;
+
+      for (const entry of manifest) {
+        if (entry === null || typeof entry !== "object") continue;
+        const { partialCause, link } = entry as {
+          partialCause?: unknown;
+          link?: { sync?: () => Promise<unknown> };
+        };
+        const key = typeof partialCause === "string"
+          ? partialCause
+          : JSON.stringify(partialCause) ?? String(partialCause);
+        if (link && typeof link.sync === "function") {
+          resolved[key] = await link.sync();
+        }
+      }
+      return resolved;
+    };
+
     let notebookArgument: unknown;
-    let notebookInternal: unknown;
+    let notebookInternalManifest: unknown;
     const originalLog = console.log;
     try {
       console.log = () => {};
@@ -1650,13 +1672,16 @@ async function collectNotebookSourceState(page: Page): Promise<{
         id: notebookEntityId,
         meta: "argument",
       });
-      notebookInternal = await api.readCell({
+      notebookInternalManifest = await api.readCell({
         id: notebookEntityId,
         meta: "internal",
       });
     } finally {
       console.log = originalLog;
     }
+    const notebookInternal = await resolveInternalManifest(
+      notebookInternalManifest,
+    );
 
     return {
       notebookEntityId,
@@ -1853,6 +1878,7 @@ async function collectNotebookCreateTraceSummary(page: Page): Promise<unknown> {
       readCell?: (options: {
         id: string;
         path?: string[];
+        meta?: "argument" | "internal";
       }) => Promise<unknown>;
       __eventInvocationTrace?: unknown[];
     } | undefined;
@@ -1911,18 +1937,43 @@ async function collectNotebookCreateTraceSummary(page: Page): Promise<unknown> {
     const notebookEntityId = notebookNotesWrite?.match(
       /\/(of:[^/]+)\/value\/argument\/notes/,
     )?.[1];
+    const resolveInternalManifest = async (
+      manifest: unknown,
+    ): Promise<Record<string, unknown>> => {
+      const resolved: Record<string, unknown> = {};
+      if (!Array.isArray(manifest)) return resolved;
+
+      for (const entry of manifest) {
+        if (entry === null || typeof entry !== "object") continue;
+        const { partialCause, link } = entry as {
+          partialCause?: unknown;
+          link?: { sync?: () => Promise<unknown> };
+        };
+        const key = typeof partialCause === "string"
+          ? partialCause
+          : JSON.stringify(partialCause) ?? String(partialCause);
+        if (link && typeof link.sync === "function") {
+          resolved[key] = await link.sync();
+        }
+      }
+      return resolved;
+    };
+
     let notebookArgument: unknown;
-    let notebookInternal: unknown;
+    let notebookInternalManifest: unknown;
     if (notebookEntityId && api?.readCell) {
       notebookArgument = await api.readCell({
         id: notebookEntityId,
-        path: ["argument"],
+        meta: "argument",
       });
-      notebookInternal = await api.readCell({
+      notebookInternalManifest = await api.readCell({
         id: notebookEntityId,
-        path: ["internal"],
+        meta: "internal",
       });
     }
+    const notebookInternal = await resolveInternalManifest(
+      notebookInternalManifest,
+    );
     const triggerTrace = await rt?.getTriggerTrace?.() ?? [];
     const notebookNotesTriggers = triggerTrace
       .filter((entry) =>

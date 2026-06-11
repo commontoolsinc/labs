@@ -12,6 +12,7 @@ import type {
   AsWriteonlyCell,
   ByRefFunction,
   Cell,
+  CellScope,
   CellTypeConstructor,
   CfDataFunction,
   CfSqliteHelpers,
@@ -229,12 +230,17 @@ export type Node = {
   outputs: JSONValue;
 };
 
+export type DerivedInternalCellDescriptor = {
+  partialCause: JSONValue;
+  schema?: JSONSchema;
+  scope?: CellScope;
+};
+
 declare module "@commonfabric/api" {
   interface Pattern {
     argumentSchema: JSONSchema;
     resultSchema: JSONSchema;
-    internalSchema?: JSONSchema;
-    initial?: JSONValue;
+    derivedInternalCells?: DerivedInternalCellDescriptor[];
     result: JSONValue;
     nodes: Node[];
     // NOTE: `program` (rehydration source), the verified-load id, and the

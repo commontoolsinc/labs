@@ -22,6 +22,7 @@ const LIBFUSE_PATHS = [
   "/usr/lib/libfuse3.so", // Arch, Fedora
   "/usr/lib64/libfuse3.so", // RHEL/CentOS
   "/usr/lib64/libfuse3.so.3", // Fedora
+  "/usr/lib64/libfuse3.so.4", // Fedora
 ];
 
 // --- Linux-specific FFI symbols (FUSE v3) ---

@@ -15,6 +15,7 @@ import {
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
 import {
+  getDerivedInternalCellLink,
   getMetaLink,
   parseLink,
   toMemorySpaceAddress,
@@ -249,13 +250,12 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const pattern = {
         argumentSchema: { type: "object", properties: {} } as const,
         resultSchema,
-        initial: {
-          internal: {
-            savedTitle: "",
-          },
-        },
+        derivedInternalCells: [{
+          partialCause: "savedTitle",
+          schema: { type: "string", default: "" },
+        }],
         result: {
-          savedTitle: { $alias: { cell: "internal", path: ["savedTitle"] } },
+          savedTitle: { $alias: { partialCause: "savedTitle", path: [] } },
         },
         nodes: [],
       } satisfies Pattern;
@@ -272,10 +272,11 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(parseLink(resultCell.getMetaRaw("argument"), resultCell))
         .toBeDefined();
       const savedTitleLink = parseLink(resultCell.key("savedTitle").getRaw());
-      const internalCellLink = parseLink(resultCell.getMetaRaw("internal"));
-      expect(internalCellLink).toBeDefined();
-      expect(savedTitleLink?.id).toBe(internalCellLink?.id);
-      expect(savedTitleLink?.path).toEqual(["savedTitle"]);
+      const savedTitleDerivedLink = getDerivedInternalCellLink(resultCell, {
+        partialCause: "savedTitle",
+      });
+      expect(savedTitleLink?.id).toBe(savedTitleDerivedLink?.id);
+      expect(savedTitleLink?.path).toEqual([]);
 
       const replica = storageManager.open(signer.did()).replica as unknown as {
         getDocument(id: string): {
@@ -337,13 +338,12 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const pattern = {
         argumentSchema: { type: "object", properties: {} } as const,
         resultSchema,
-        initial: {
-          internal: {
-            savedTitle: "",
-          },
-        },
+        derivedInternalCells: [{
+          partialCause: "savedTitle",
+          schema: { type: "string", default: "" },
+        }],
         result: {
-          savedTitle: { $alias: { cell: "internal", path: ["savedTitle"] } },
+          savedTitle: { $alias: { partialCause: "savedTitle", path: [] } },
         },
         nodes: [],
       } satisfies Pattern;
@@ -361,10 +361,9 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(parseLink(resultCell.getMetaRaw("argument"), resultCell))
         .toBeDefined();
       const savedTitleLink = parseLink(resultCell.key("savedTitle").getRaw());
-      const internalCellLink = parseLink(resultCell.getMetaRaw("internal"));
-      expect(internalCellLink).toBeDefined();
-      expect(savedTitleLink?.id).toBe(internalCellLink?.id);
-      expect(savedTitleLink?.path).toEqual(["savedTitle"]);
+      const internalManifest = resultCell.getMetaRaw("internal");
+      expect(internalManifest).toBeDefined();
+      expect(savedTitleLink?.path).toEqual([]);
 
       const replica = storageManager.open(signer.did()).replica as unknown as {
         getDocument(id: string): {

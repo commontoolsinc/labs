@@ -1,6 +1,7 @@
 import {
   fabricFromNativeValue,
   type FabricValue,
+  nativeFromFabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
 import { hashOf } from "@commonfabric/data-model/value-hash";
@@ -18,6 +19,7 @@ import {
   isPattern,
   isStreamValue,
   type JSONSchema,
+  JSONValue,
   type Module,
   NAME,
   type NodeFactory,
@@ -40,6 +42,7 @@ import { resolveLink } from "./link-resolution.ts";
 import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
+  getDerivedInternalCell,
   getMetaCell,
   getMetaLink,
   isCellLink,
@@ -93,6 +96,7 @@ import {
 } from "./harness/verified-provenance.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
+import { SigilLink } from "./sigil-types.ts";
 export {
   extractDefaultValues,
   mergeObjects,
@@ -121,6 +125,11 @@ const EAGER_RESULT_BUILTIN_REFS = new Set([
   "navigateTo",
   "streamData",
 ]);
+
+type InternalCellDescriptor = {
+  partialCause: JSONValue;
+  link: SigilLink;
+};
 
 function schedulerRawActionName(
   rawTargetName: string,
@@ -770,14 +779,12 @@ export class Runner {
       ? resultCell.withTx(tx)
       : resultCell.withTx(tx).asSchema(pattern.resultSchema);
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
-    const internalCellLink = getMetaLink(resultCell, "internal")!;
-    const resultCellLink = resultCell.getAsNormalizedFullLink();
     let result = unwrapOneLevelAndBindtoDoc<R, any>(
       this.runtime.cfc,
       pattern.result as R,
       argumentCellLink,
-      internalCellLink,
-      resultCellLink,
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
     const previousResult = writableResultCell.getRaw({
       meta: ignoreReadForScheduling,
@@ -807,6 +814,72 @@ export class Runner {
   }
 
   /**
+   * Creates and initializes any internal cells needed for the pattern.
+   *
+   * @param tx
+   * @param pattern
+   * @param resultCell
+   * @param internal a FabricValue with the existing array of InternalCellDescriptors
+   * @returns a FabricValue with the array of InternalCellDescriptors
+   */
+  private materializeDerivedInternalCells<R>(
+    tx: IExtendedStorageTransaction,
+    pattern: Pattern,
+    resultCell: Cell<R>,
+    internal: FabricValue,
+  ): FabricValue {
+    const descriptors = pattern.derivedInternalCells;
+    if (!descriptors?.length) return [];
+
+    // Our internal meta field contains a manifest with information about all
+    // the individual internal cells.
+    const nativeInternal = nativeFromFabricValue(internal);
+    const existingManifest: InternalCellDescriptor[] =
+      Array.isArray(nativeInternal)
+        ? [...nativeInternal] as InternalCellDescriptor[]
+        : [];
+    // We'll build the updated manifest from the existing
+    const manifest: InternalCellDescriptor[] = [];
+
+    for (const descriptor of descriptors) {
+      const derivedCell = getDerivedInternalCell(
+        resultCell,
+        descriptor,
+        tx,
+      );
+      const manifestMatch = existingManifest.findIndex((existingDescriptor) =>
+        deepEqual(existingDescriptor.partialCause, descriptor.partialCause)
+      );
+      if (manifestMatch === -1) {
+        // this cell isn't in our manifest yet. Create it, and add it to the manifest
+        const derivedSigilLink = derivedCell.getAsWriteRedirectLink({
+          base: resultCell,
+          includeSchema: true,
+        });
+        manifest.push({
+          partialCause: descriptor.partialCause,
+          link: derivedSigilLink,
+        });
+        setResultCell(derivedCell, resultCell.asSchema(pattern.resultSchema));
+      } else {
+        manifest.push(existingManifest[manifestMatch]);
+      }
+
+      const currentValue = derivedCell.getRawUntyped({
+        meta: ignoreReadForScheduling,
+      });
+      const schemaDefault = isRecord(descriptor.schema)
+        ? descriptor.schema.default as JSONValue | undefined
+        : undefined;
+      if (currentValue === undefined && schemaDefault !== undefined) {
+        derivedCell.setRawUntyped(fabricFromNativeValue(schemaDefault));
+      }
+    }
+
+    return fabricFromNativeValue(manifest);
+  }
+
+  /**
    * When this function is first called, the resultCell may not have its
    * internal, argument, and pattern cells set up, so do that here.
    */
@@ -819,48 +892,17 @@ export class Runner {
     resultCell: Cell<R>,
   ): void {
     const defaults = extractDefaultValues(pattern.argumentSchema) as Partial<T>;
-    const internalLink = getMetaLink(resultCell, "internal");
     let argumentLink = getMetaLink(resultCell, "argument");
-    const internalCell = getMetaCell(
-      resultCell,
-      "internal",
-      tx,
-      pattern.internalSchema,
-    );
-    const previousInternal = internalCell.getRawUntyped({
+    const previousInternal = resultCell.getMetaRaw("internal", {
       meta: ignoreReadForScheduling,
     });
-    // `fabricFromNativeValue()` below rebuilds a fresh tree from `internal`
-    // without mutating its inputs, and `internal` isn't used after that. So the
-    // operands can be merged by reference: no defensive deep copy of `defaults`
-    // / `pattern.initial`, and no mutable (`frozen: false`) read of
-    // `previousInternal`, is needed -- `Object.assign` only reads their
-    // top-level keys.
-    const internal = Object.assign(
-      {},
-      (defaults as unknown as { internal?: FabricValue })?.internal,
-      isRecord(pattern.initial) && isRecord(pattern.initial.internal)
-        ? pattern.initial.internal
-        : {},
-      isRecord(previousInternal) ? previousInternal : {},
-    ) as FabricValue;
-    // Convert-and-freeze (default): the convert step is load-bearing -- it
-    // normalizes nested `toJSON`-bearing values (so this can't be a plain
-    // clone) -- and producing a deep-frozen result lets the storage write
-    // boundary's `cloneIfNecessary` identity-pass instead of
-    // deep-cloning-to-freeze.
-    internalCell.setRawUntyped(fabricFromNativeValue(internal));
-    if (internalLink === undefined) {
-      setResultCell(internalCell, resultCell.asSchema(pattern.resultSchema));
-      const newInternalCellLink = internalCell.getAsWriteRedirectLink({
-        base: resultCell,
-        includeSchema: true,
-      });
-      resultCell.withTx(tx).setMetaRaw(
-        "internal",
-        newInternalCellLink,
-      );
-    }
+    const internalManifest = this.materializeDerivedInternalCells(
+      tx,
+      pattern,
+      resultCell,
+      previousInternal,
+    );
+    resultCell.withTx(tx).setMetaRaw("internal", internalManifest);
 
     let nextArgument = argument;
     // The argument meta field of the result cell should be a link to the
@@ -1026,15 +1068,20 @@ export class Runner {
 
   /** Convert a module to pattern format */
   private moduleToPattern(module: Module): Pattern {
+    const resultSchema = module.resultSchema ?? {};
     return {
       argumentSchema: module.argumentSchema ?? {},
-      resultSchema: module.resultSchema ?? {},
-      result: { $alias: { cell: "internal", path: [] } },
+      resultSchema,
+      derivedInternalCells: [{
+        partialCause: "$result",
+        schema: resultSchema,
+      }],
+      result: { $alias: { partialCause: "$result", path: [] } },
       nodes: [
         {
           module,
           inputs: { $alias: { cell: "argument", path: [] } },
-          outputs: { $alias: { cell: "internal", path: [] } },
+          outputs: { $alias: { partialCause: "$result", path: [] } },
         },
       ],
     } satisfies Pattern;
@@ -1705,28 +1752,6 @@ export class Runner {
     };
   }
 
-  /**
-   * Sync the result cell's `internal` and `argument` meta-linked docs.
-   *
-   * They are separate content-addressed docs reached only via the result
-   * cell's meta links, so they are not loaded by syncing the result cell or the
-   * pattern's node inputs/outputs. `applySetupState` reads the persisted
-   * `internal` synchronously; awaiting these here keeps a build-time default
-   * from transiently clobbering a persisted value on a cold read (CT-1666).
-   *
-   * The result cell must already be synced so its meta links are readable.
-   */
-  private async syncMetaCells(resultCell: Cell<any>): Promise<void> {
-    const promises: Promise<unknown>[] = [];
-    for (const field of ["argument", "internal"] as const) {
-      const link = getMetaLink(resultCell, field);
-      if (link === undefined) continue;
-      const maybePromise = this.runtime.getCellFromLink(link).sync();
-      if (maybePromise instanceof Promise) promises.push(maybePromise);
-    }
-    await Promise.all(promises);
-  }
-
   private async syncCellsForRunningPattern(
     resultCell: Cell<any>,
     pattern: Module | Pattern,
@@ -1753,16 +1778,6 @@ export class Runner {
     await Promise.all(promises);
 
     await resultCell.sync();
-
-    // Also load the `internal` and `argument` meta-linked docs. These live in
-    // separate content-addressed docs reached only via the result cell's meta
-    // links -- not through the schema/value graph synced above -- so they are
-    // not covered by `resultCell.sync()` or the node input/output sync below.
-    // `applySetupState` reads the persisted `internal` synchronously and merges
-    // the pattern's build-time defaults UNDER it (persisted wins). Without this
-    // awaited load that read races storage and can see `undefined`, letting a
-    // build-time default transiently clobber the persisted value (CT-1666).
-    await this.syncMetaCells(resultCell);
 
     // We could support this by replicating what happens in runner, but since
     // we're calling this again when returning false, this is good enough for now.
@@ -2059,23 +2074,22 @@ export class Runner {
     outputBindings: FabricValue,
     resultCell: Cell<any>,
     baseCell: Cell<any>,
+    pattern: Pattern,
   ): BoundNodeIO {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
-    const internalCellLink = getMetaLink(resultCell, "internal")!;
-    const resultCellLink = resultCell.getAsNormalizedFullLink();
     const inputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       inputBindings,
       argumentCellLink,
-      internalCellLink,
-      resultCellLink,
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
     const outputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       outputBindings,
       argumentCellLink,
-      internalCellLink,
-      resultCellLink,
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
     return {
       inputs,
@@ -2864,7 +2878,6 @@ export class Runner {
         tx,
         resultCell,
         getMetaLink(resultCell, "argument")!,
-        getMetaLink(resultCell, "internal")!,
         outputs,
         result,
         {
@@ -2948,7 +2961,6 @@ export class Runner {
       tx,
       resultCell,
       getMetaLink(resultCell, "argument")!,
-      getMetaLink(resultCell, "internal")!,
       outputs,
       resultCell.getAsLink(),
       { narrowestReadScope: effectiveOutputScope },
@@ -3318,7 +3330,6 @@ export class Runner {
             tx,
             resultCell,
             getMetaLink(resultCell, "argument")!,
-            getMetaLink(resultCell, "internal")!,
             outputs,
             undefined,
           );
@@ -3546,6 +3557,7 @@ export class Runner {
       outputBindings,
       resultCell,
       processCell,
+      pattern,
     );
     const { fn, name, verifiedLoadId } = this.resolveJavaScriptFunction(
       module,
@@ -3713,26 +3725,19 @@ export class Runner {
       tx.setCfcImplementationIdentity(builtinIdentity);
     }
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
-    const internalCellLink = getMetaLink(resultCell, "internal")!;
-    const resultCellLink = resultCell.getAsNormalizedFullLink();
-    // CT-1230: Pass bindPatterns: false to prevent premature alias binding in pattern
-    // arguments. When a subpattern is passed to map(), its aliases should not be
-    // bound to the current doc yet - they need to remain unbound until the pattern
-    // is actually instantiated for each mapped item.
     const mappedInputBindings = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       inputBindings,
       argumentCellLink,
-      internalCellLink,
-      resultCellLink,
-      { bindPatterns: false },
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
     const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       outputBindings,
       argumentCellLink,
-      internalCellLink,
-      resultCellLink,
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
 
     // CT-1623: for the list builtins, replace a pattern-valued input (the `op`)
@@ -3822,13 +3827,13 @@ export class Runner {
             tx,
             resultCell,
             argumentCellLink!,
-            internalCellLink!,
             mappedOutputBindings,
             resultForRawBuiltinOutputBinding(
               result,
               outputBindingSchema,
               builtinIdentity,
             ),
+            { preserveLinkOutput: true },
           );
         },
         addCancel,
@@ -3998,26 +4003,31 @@ export class Runner {
     outputBindings: FabricValue,
     resultCell: Cell<any>,
     _addCancel: AddCancel,
-    _pattern: Pattern,
+    pattern: Pattern,
   ) {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
-    const internalCellLink = getMetaLink(resultCell, "internal")!;
-    const resultCellLink = resultCell.getAsNormalizedFullLink();
     const inputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       inputBindings,
       argumentCellLink,
-      internalCellLink,
-      resultCellLink,
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
+    );
+    const outputs = unwrapOneLevelAndBindtoDoc(
+      this.runtime.cfc,
+      outputBindings,
+      argumentCellLink,
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
 
     sendValueToBinding(
       tx,
       resultCell,
       argumentCellLink,
-      internalCellLink,
-      outputBindings,
+      outputs,
       inputs,
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
   }
 
@@ -4028,35 +4038,44 @@ export class Runner {
     outputBindings: FabricValue,
     resultCell: Cell<any>,
     addCancel: AddCancel,
-    _pattern: Pattern,
+    pattern: Pattern,
     schedulerRehydration: SchedulerRehydrationSubscriptionOptions = {},
   ) {
+    const parentResultCell = resultCell;
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
-    const internalCellLink = getMetaLink(resultCell, "internal")!;
-    const resultCellLink = resultCell.getAsNormalizedFullLink();
     if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
     const patternImpl = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       module.implementation,
       argumentCellLink,
-      internalCellLink,
-      resultCellLink,
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
     const inputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       inputBindings,
       argumentCellLink,
-      internalCellLink,
-      resultCellLink,
-      { targetSchema: patternImpl.argumentSchema },
+      resultCell,
+      {
+        targetSchema: patternImpl.argumentSchema,
+        derivedInternalCells: pattern.derivedInternalCells,
+      },
+    );
+    const outputs = unwrapOneLevelAndBindtoDoc(
+      this.runtime.cfc,
+      outputBindings,
+      argumentCellLink,
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
 
     // If output bindings is a link to a non-redirect cell,
     // use that instead of creating a new cell.
     let sendToBindings: boolean;
-    if (isSigilLink(outputBindings) && !isWriteRedirectLink(outputBindings)) {
-      resultCell = this.runtime.getCellFromLink(
-        parseLink(outputBindings, resultCell),
+    let childResultCell: Cell<any>;
+    if (isSigilLink(outputs) && !isWriteRedirectLink(outputs)) {
+      childResultCell = this.runtime.getCellFromLink(
+        parseLink(outputs, resultCell),
         patternImpl.resultSchema,
         tx,
       );
@@ -4086,9 +4105,7 @@ export class Runner {
         this.runtime.cfc,
         outputBindings,
         argumentCellLink,
-        internalCellLink,
-        resultCellLink,
-        { bindPatterns: false },
+        resultCell,
       );
       const outputRedirect = firstResolvedOutputRedirect(
         this.runtime,
@@ -4114,13 +4131,14 @@ export class Runner {
         patternImpl.resultSchema,
         tx,
       );
-      resultCell = baseResultCell;
+
+      childResultCell = baseResultCell;
       if (resultScope !== undefined && resultScope !== "space") {
         let resultCellLink = baseResultCell.getAsNormalizedFullLink();
         resultCellLink = { ...resultCellLink, scope: resultScope };
         // The result cell's scope isn't "space", so we may have just created
         // this cell. If so, create the corresponding argument/internal cells.
-        resultCell = createCell(this.runtime, resultCellLink, tx);
+        childResultCell = createCell(this.runtime, resultCellLink, tx);
       }
       sendToBindings = true;
     }
@@ -4128,20 +4146,20 @@ export class Runner {
     const sourceKey = getTxDebugActionId(tx) ?? "none";
     triggerFlowLogger.debug(`instantiate-pattern-node/${sourceKey}`, () => [
       `[PATTERN-NODE] source=${sourceKey}`,
-      `result=${resultCell.getAsNormalizedFullLink().id}`,
+      `result=${childResultCell.getAsNormalizedFullLink().id}`,
       `pattern=${describePatternOrModule(patternImpl)}`,
       `sendToBindings=${sendToBindings}`,
     ]);
 
-    if (resultCell.space !== resultCellLink.space) {
+    if (childResultCell.space !== parentResultCell.space) {
       // Cross-space child pattern: run it inline in a multi-space transaction
       // (child space committed first) rather than re-instantiating it in a
       // deferred second transaction, which would lose its verified-function
       // identity. The journal allows the cross-space write once opted in.
       this.enableCrossSpaceChildCommit(
         tx,
-        resultCell.space,
-        resultCellLink.space,
+        childResultCell.space,
+        parentResultCell.space,
       );
       // CT-1687: a fresh runtime navigating to the child piece loads its
       // pattern artifacts from `resultCell.space` (the child's own space),
@@ -4149,11 +4167,11 @@ export class Runner {
       // them there (fire-and-forget) so the child is independently loadable.
       this.runtime.patternManager.replicatePatternToSpace(
         patternImpl,
-        resultCell.space,
-        resultCellLink.space,
+        childResultCell.space,
+        parentResultCell.space,
       );
     }
-    this.run(tx, patternImpl, inputs, resultCell, {
+    this.run(tx, patternImpl, inputs, childResultCell, {
       awaitSyncBeforeInitialRun: schedulerRehydration.rehydrateFromStorage
         ?.awaitSync,
     });
@@ -4161,18 +4179,18 @@ export class Runner {
     if (sendToBindings) {
       sendValueToBinding(
         tx,
-        resultCell,
+        parentResultCell,
         argumentCellLink,
-        internalCellLink,
-        outputBindings,
-        resultCell.getAsLink(),
+        outputs,
+        childResultCell.getAsLink(),
+        { derivedInternalCells: pattern.derivedInternalCells },
       );
     }
 
     // TODO(seefeld): Make sure to not cancel after a pattern is elevated to a
     // piece, e.g. via navigateTo. Nothing is cancelling right now, so leaving
     // this as TODO.
-    addCancel(() => this.stop(resultCell));
+    addCancel(() => this.stop(childResultCell));
   }
 }
 

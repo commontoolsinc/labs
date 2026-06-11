@@ -39,7 +39,7 @@ There are a few more specific terms for cells within the piece:
 flowchart TD
     A["Result Cell"]
     A --argument--> B["Argument Cell"]
-    A --internal--> C["Internal Cell"]
+    A --internal manifest--> C@{ shape: procs, label: "Internal Cells}"
     A --pattern--> D["Pattern Cell"]
     B --result--> A
     C --result--> A

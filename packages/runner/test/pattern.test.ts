@@ -72,7 +72,43 @@ describe("pattern", () => {
     expect(isPattern(doublePattern)).toBe(true);
     expect(doublePattern.nodes.length).toBe(1);
     expect(doublePattern.nodes[0].inputs).toMatchObject({
-      x: { $alias: { cell: "internal", path: ["x"] } },
+      x: {
+        $alias: {
+          partialCause: "x",
+          path: [],
+          scope: "space",
+        },
+      },
+    });
+    expect(doublePattern.derivedInternalCells).toEqual([
+      {
+        partialCause: "double",
+      },
+      {
+        partialCause: "x",
+        schema: { default: 1 },
+      },
+    ]);
+  });
+
+  it("derives numeric partial causes for anonymous internal roots", () => {
+    const increment = lift((x: number) => x + 1);
+    const double = lift((x: number) => x * 2);
+    const testPattern = pattern<{ x: number }>(({ x }) => {
+      const intermediate = increment(x);
+      return { doubled: double(intermediate) };
+    });
+
+    expect(testPattern.derivedInternalCells).toEqual([
+      {
+        partialCause: { $generated: 0 },
+      },
+      {
+        partialCause: "doubled",
+      },
+    ]);
+    expect(testPattern.nodes[0].outputs).toMatchObject({
+      $alias: { partialCause: { $generated: 0 }, path: [] },
     });
   });
 
@@ -91,13 +127,28 @@ describe("pattern", () => {
 
     const firstPath = (testPattern.result as any).first.$alias.path;
     const secondPath = (testPattern.result as any).second.$alias.path;
-    expect((testPattern.result as any).first.$alias.cell).toBe("internal");
-    expect(firstPath).toEqual(["isSelected"]);
-    expect(secondPath).toEqual(["isSelected__#0"]);
-    expect((testPattern.internalSchema as any).properties).toEqual({
-      isSelected: { type: "boolean" },
-      "isSelected__#0": { type: "boolean" },
+    expect((testPattern.result as any).first.$alias.partialCause).toBe(
+      "isSelected",
+    );
+    expect((testPattern.result as any).second.$alias.partialCause).toEqual({
+      name: "isSelected",
+      $generated: 0,
     });
+    expect(firstPath).toEqual([]);
+    expect(secondPath).toEqual([]);
+    expect(testPattern.derivedInternalCells).toEqual([
+      {
+        partialCause: "isSelected",
+        schema: { type: "boolean" },
+      },
+      {
+        partialCause: {
+          name: "isSelected",
+          $generated: 0,
+        },
+        schema: { type: "boolean" },
+      },
+    ]);
   });
 
   it("complex pattern has correct schema and nodes", () => {
@@ -111,7 +162,11 @@ describe("pattern", () => {
     expect(argumentSchema).toBe(true);
     expect(result).toEqual({
       double: {
-        $alias: { cell: "internal", path: ["double"], scope: "space" },
+        $alias: {
+          partialCause: "double",
+          path: [],
+          scope: "space",
+        },
       },
     });
 
@@ -123,13 +178,17 @@ describe("pattern", () => {
       $alias: { cell: "argument", path: ["x"], scope: "space" },
     });
     expect(nodes[0].outputs).toEqual({
-      $alias: { cell: "internal", path: ["__#0"], scope: "space" },
+      $alias: { partialCause: { $generated: 0 }, path: [], scope: "space" },
     });
     expect(nodes[1].inputs).toEqual({
-      $alias: { cell: "internal", path: ["__#0"], scope: "space" },
+      $alias: { partialCause: { $generated: 0 }, path: [], scope: "space" },
     });
     expect(nodes[1].outputs).toEqual({
-      $alias: { cell: "internal", path: ["double"], scope: "space" },
+      $alias: {
+        partialCause: "double",
+        path: [],
+        scope: "space",
+      },
     });
   });
 
@@ -205,7 +264,11 @@ describe("pattern", () => {
     expect(argumentSchema).toBe(true);
     expect(result).toEqual({
       double: {
-        $alias: { cell: "internal", path: ["__#1", "doubled"], scope: "space" },
+        $alias: {
+          partialCause: { $generated: 1 },
+          path: ["doubled"],
+          scope: "space",
+        },
       },
     });
 
@@ -217,15 +280,19 @@ describe("pattern", () => {
       x: { $alias: { cell: "argument", path: ["x"], scope: "space" } },
     });
     expect(nodes[0].outputs).toEqual({
-      $alias: { cell: "internal", path: ["__#0"], scope: "space" },
+      $alias: { partialCause: { $generated: 0 }, path: [], scope: "space" },
     });
     expect(nodes[1].inputs).toEqual({
       x: {
-        $alias: { cell: "internal", path: ["__#0", "doubled"], scope: "space" },
+        $alias: {
+          partialCause: { $generated: 0 },
+          path: ["doubled"],
+          scope: "space",
+        },
       },
     });
     expect(nodes[1].outputs).toEqual({
-      $alias: { cell: "internal", path: ["__#1"], scope: "space" },
+      $alias: { partialCause: { $generated: 1 }, path: [], scope: "space" },
     });
 
     const json = JSON.stringify(doublePattern);
@@ -322,8 +389,8 @@ describe("pattern", () => {
     expect(result).toMatchObject({
       double: {
         $alias: {
-          cell: "internal",
-          path: ["__#1", "double"],
+          partialCause: { $generated: 1 },
+          path: ["double"],
           schema: {
             ifc: ArgumentSchema.properties.x.ifc,
           },
@@ -347,16 +414,16 @@ describe("pattern", () => {
     // I don't like that we don't know the other properties of our output here
     expect(nodes[0].outputs).toMatchObject({
       $alias: {
-        cell: "internal",
-        path: ["__#0"],
+        partialCause: { $generated: 0 },
+        path: [],
         schema: { ifc: ArgumentSchema.properties.x.ifc },
       },
     });
     expect(nodes[1].inputs).toMatchObject({
       x: {
         $alias: {
-          cell: "internal",
-          path: ["__#0", "double"],
+          partialCause: { $generated: 0 },
+          path: ["double"],
           schema: {
             ifc: ArgumentSchema.properties.x.ifc,
           },
@@ -365,8 +432,8 @@ describe("pattern", () => {
     });
     expect(nodes[1].outputs).toMatchObject({
       $alias: {
-        cell: "internal",
-        path: ["__#1"],
+        partialCause: { $generated: 1 },
+        path: [],
         schema: {
           ifc: ArgumentSchema.properties.x.ifc,
         },
@@ -445,15 +512,15 @@ describe("pattern", () => {
     expect(nodes[0].outputs).toHaveProperty("$alias");
     const nodeOutputAlias = (nodes[0].outputs as any)["$alias"];
     expect(nodeOutputAlias).toMatchObject({
-      cell: "internal",
-      path: ["__#0"],
+      partialCause: { $generated: 0 },
+      path: [],
       schema: { ifc: { confidentiality: ["confidential"] } },
     });
     expect(result).toMatchObject({
       capitalized: {
         $alias: {
-          cell: "internal",
-          path: ["__#0", "capitalized"],
+          partialCause: { $generated: 0 },
+          path: ["capitalized"],
           schema: { ifc: { confidentiality: ["confidential"] } },
         },
       },
