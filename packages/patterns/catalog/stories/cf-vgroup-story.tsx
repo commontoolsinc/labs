@@ -61,7 +61,7 @@ export default pattern<VGroupStoryInput, VGroupStoryOutput>(() => {
           </div>
           <cf-hstack gap="4">
             <cf-vstack gap="1" style="flex: 1;">
-              <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+              <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                 gap=sm
               </span>
               <cf-vgroup gap="sm">
@@ -77,7 +77,7 @@ export default pattern<VGroupStoryInput, VGroupStoryOutput>(() => {
               </cf-vgroup>
             </cf-vstack>
             <cf-vstack gap="1" style="flex: 1;">
-              <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+              <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                 gap=md
               </span>
               <cf-vgroup gap="md">
@@ -93,7 +93,7 @@ export default pattern<VGroupStoryInput, VGroupStoryOutput>(() => {
               </cf-vgroup>
             </cf-vstack>
             <cf-vstack gap="1" style="flex: 1;">
-              <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+              <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                 gap=lg
               </span>
               <cf-vgroup gap="lg">

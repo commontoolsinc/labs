@@ -73,7 +73,7 @@ export default pattern<VStackStoryInput, VStackStoryOutput>(() => {
               gap="0"
               style="border: 1px dashed #cbd5e1; padding: 8px; border-radius: 4px; flex: 1;"
             >
-              <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+              <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                 gap=0
               </span>
               <div style="background: #fde68a; padding: 4px 8px; border-radius: 4px;">
@@ -90,7 +90,7 @@ export default pattern<VStackStoryInput, VStackStoryOutput>(() => {
               gap="2"
               style="border: 1px dashed #cbd5e1; padding: 8px; border-radius: 4px; flex: 1;"
             >
-              <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+              <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                 gap=2
               </span>
               <div style="background: #bbf7d0; padding: 4px 8px; border-radius: 4px;">
@@ -107,7 +107,7 @@ export default pattern<VStackStoryInput, VStackStoryOutput>(() => {
               gap="4"
               style="border: 1px dashed #cbd5e1; padding: 8px; border-radius: 4px; flex: 1;"
             >
-              <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+              <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                 gap=4
               </span>
               <div style="background: #bfdbfe; padding: 4px 8px; border-radius: 4px;">

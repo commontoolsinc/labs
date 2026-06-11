@@ -111,7 +111,9 @@ const UrlPatternReference = pattern<
     [UI]: (
       <cf-vstack gap="2" style={{ padding: "12px" }}>
         <strong>{title}</strong>
-        <span style={{ color: "var(--cf-color-text-secondary)" }}>{url}</span>
+        <span style={{ color: "var(--cf-theme-color-text-secondary)" }}>
+          {url}
+        </span>
       </cf-vstack>
     ),
   }),
@@ -354,7 +356,9 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
                   <cf-cell-link $cell={element.cell}>
                     {element.title ?? element.tag}
                   </cf-cell-link>
-                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
+                  <span
+                    style={{ color: "var(--cf-theme-color-text-secondary)" }}
+                  >
                     {element.userTags.map((tag) => `#${tag}`).join(" ")}
                   </span>
                   <cf-button

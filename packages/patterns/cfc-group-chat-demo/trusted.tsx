@@ -994,7 +994,7 @@ export const TrustedAdminPanel = pattern<
                   wrap
                   style={{
                     padding: "0.5rem 0.75rem",
-                    border: "1px solid var(--cf-color-border, #e5e7eb)",
+                    border: "1px solid var(--cf-theme-color-border, #e5e7eb)",
                     borderRadius: "0.75rem",
                   }}
                 >

@@ -32,11 +32,11 @@ export interface AuthManagerDescriptor {
 
 /** Status colors shared across all auth managers */
 export const STATUS_COLORS: Record<AuthState, string> = {
-  loading: "var(--cf-color-yellow-500, #eab308)",
-  "needs-login": "var(--cf-color-red-500, #ef4444)",
-  "missing-scopes": "var(--cf-color-orange-500, #f97316)",
-  "token-expired": "var(--cf-color-red-500, #ef4444)",
-  ready: "var(--cf-color-green-500, #22c55e)",
+  loading: "var(--cf-colors-warning, #eab308)",
+  "needs-login": "var(--cf-colors-red-500, #ef4444)",
+  "missing-scopes": "var(--cf-colors-coral, #f97316)",
+  "token-expired": "var(--cf-colors-red-500, #ef4444)",
+  ready: "var(--cf-colors-green-500, #22c55e)",
 };
 
 /** Status messages shared across all auth managers */
