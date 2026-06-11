@@ -704,13 +704,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.assertWritable("writeValuesOrThrow()");
     this.invalidateReadResultCache();
     if (this.tx.writeBatch) {
+      // Keep the batch path on the same noteSystemWrite chokepoint as single
+      // writes (S18). Structurally inert today — the NormalizedFullLink
+      // signature means toMemorySpaceAddress always yields path ["value", ...]
+      // — but the guard must not silently fall away if the signature is ever
+      // widened to document-root addresses.
+      const noteSystemWrite = (address: IMemorySpaceAddress) =>
+        this.noteSystemWrite(address);
       const result = this.tx.writeBatch(
         (function* () {
           for (const write of writes) {
-            yield {
-              address: toMemorySpaceAddress(write.address),
-              value: write.value,
-            };
+            const address = toMemorySpaceAddress(write.address);
+            noteSystemWrite(address);
+            yield { address, value: write.value };
           }
         })(),
       );
