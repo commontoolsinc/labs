@@ -1,12 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  CFC_LABEL_READ_FAILED_ATOM,
   cfcLabelViewForCell,
   cfcLabelViewForCellFailClosed,
   cfcLabelViewForCellWithStatus,
 } from "../src/cfc/label-view.ts";
 import {
+  CFC_LABEL_READ_FAILED_ATOM,
   cfcConfidentialityForObservationNode,
   cfcObservationFitsCeiling,
 } from "../src/cfc/observation.ts";
@@ -90,8 +90,23 @@ describe("LLM observation fail-closed on metadata read error (audit 22)", () => 
       logicalPath: ["0"],
     });
     expect(observed).toContain(CFC_LABEL_READ_FAILED_ATOM);
-    // The sentinel is absent from any real ceiling → node does not fit → redact.
+    // The marker is absent from any real ceiling → node does not fit → redact.
     expect(cfcObservationFitsCeiling(observed, REAL_CEILING)).toBe(false);
+  });
+
+  it("treats the read-failed marker as UNGRANTABLE (can't be allow-listed)", () => {
+    // A caller could otherwise name the marker atom in their own ceiling to
+    // re-open the fail-open. The marker must never fit a ceiling, even one that
+    // lists it (or lists everything).
+    const observed = [CFC_LABEL_READ_FAILED_ATOM];
+    expect(cfcObservationFitsCeiling(observed, [CFC_LABEL_READ_FAILED_ATOM]))
+      .toBe(false);
+    expect(
+      cfcObservationFitsCeiling(observed, [
+        CFC_LABEL_READ_FAILED_ATOM,
+        ...REAL_CEILING,
+      ]),
+    ).toBe(false);
   });
 
   it("does NOT over-redact cleanly-unlabelled data (no error → no sentinel)", () => {

@@ -8,6 +8,7 @@ import {
 import type { Runtime } from "../runtime.ts";
 import { readStoredCfcMetadata } from "./metadata.ts";
 import type { CfcMetadata } from "./types.ts";
+import { CFC_LABEL_READ_FAILED_ATOM } from "./observation.ts";
 import {
   type CfcLabelView,
   type CfcLabelViewEntry,
@@ -37,17 +38,6 @@ type LinkedValueMetadata = {
   metadata: CfcMetadata;
   path: readonly string[];
 };
-
-// Sentinel confidentiality atom injected when a cell's label could not be read
-// because a metadata read ERRORED (as opposed to being cleanly absent). It is
-// not a real principal/tag, so it is absent from every declared observation
-// ceiling — any observation node it taints fails `cfcObservationFitsCeiling`
-// and is redacted. This lets the LLM-observation path fail CLOSED on read errors
-// (audit item 22): a swallowed read error must not let confidential data
-// serialize to the model as if it were public. The shared `cfcLabelViewForCell`
-// seam (renderer / fuse / runtime-client) is intentionally left untouched — it
-// already treats a missing label as blocked, so only LLM egress needs this.
-export const CFC_LABEL_READ_FAILED_ATOM = "cfc:label-read-failed";
 
 // `readFailed` distinguishes a genuine metadata read error (fail closed) from a
 // cleanly-absent label (`readOrThrow` already maps NotFound/TypeMismatch to
