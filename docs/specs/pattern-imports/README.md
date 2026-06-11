@@ -411,7 +411,10 @@ import costs nothing the deployed pattern hasn't already paid.
 A runtime is no longer bound to one memory host: `spaceHostMap`
 (`storage/v2-remote-session.ts:createStorageAddressResolver`, PR #3947)
 routes each space to its host, and a foreign-host session is an ordinary
-authenticated memory session. So a `cf://host/space/ref` reference resolves
+authenticated memory session. (`spaceHostMap` itself is an **interim
+mechanism** — per-space host resolution will evolve; this design depends only
+on the property "a space's cells are readable wherever the space lives", not
+on the map's current shape.) So a `cf://host/space/ref` reference resolves
 exactly like a local one — slug chase, piece/meta hops, and `pattern:<identity>`
 source-doc reads are all cell reads in a space that happens to live on
 another host, under that host's normal authz. No resolve endpoint, no
@@ -484,6 +487,16 @@ unchanged.
   reads under existing space authz — including cross-host (`spaceHostMap`
   sessions authenticate like any other). Nothing exposes data a space-read
   doesn't already grant.
+- **Pattern source is data with provenance.** Patterns can contain private
+  information (literals, prompts, embedded knowledge), so source docs are not
+  exempt from CFC: fetching an imported pattern's source is a labeled read,
+  and the compile-cache write-back that copies fetched source docs into the
+  importing space is a labeled **flow** that must respect the source's
+  provenance (fail closed when a label forbids it). Wiring CFC labels through
+  fetch and write-back is deliberate **follow-up work** — flagged here so the
+  initial implementation doesn't silently launder source across spaces; until
+  it lands, cross-space imports should be treated as moving data with the
+  same care as any cross-space link.
 
 ## Failure modes (all compile-time errors with actionable messages)
 
@@ -550,12 +563,14 @@ unchanged.
    with identical pins (status quo for runtime modules, now also for fabric
    refs). Acceptable, but worth stating in the compile-cache invalidation
    docs.
-7. **What "publicly readable" means.** Memory sessions are authenticated;
-   importing requires *some* identity the publishing space grants read to.
-   Does publication mean "readable by any authenticated identity" (a broad
-   grant), and is an anonymous, CDN-cacheable HTTP mirror for published
-   patterns ever wanted on top (trust-free via hash verification, but a
-   second distribution path to maintain)?
+7. **What "publicly readable" means — and a possible public endpoint.**
+   Memory sessions are authenticated; importing requires *some* identity the
+   publishing space grants read to. Does publication mean "readable by any
+   authenticated identity" (a broad grant)? An anonymous, CDN-cacheable HTTP
+   endpoint serving **public** patterns by identity may still be useful on
+   top (trust-free via hash verification) — deliberately left open rather
+   than rejected; it only makes sense for content whose labels permit
+   unrestricted disclosure (see the provenance note in § Security).
 8. **Dynamic space→host routes.** `spaceHostMap` is fixed at storage
    construction; host-qualified refs discovered mid-compile need dynamic
    route registration (or a short-lived secondary session). Small, but it
