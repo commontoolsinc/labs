@@ -161,7 +161,7 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
                       style={{
                         margin: 0,
                         fontSize: "14px",
-                        color: "var(--cf-color-gray-500)",
+                        color: "var(--cf-colors-gray-500)",
                         textTransform: "uppercase",
                         letterSpacing: "0.05em",
                       }}
@@ -174,7 +174,7 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
                         style={{
                           padding: "0.75rem",
                           borderRadius: "8px",
-                          background: "var(--cf-color-gray-50)",
+                          background: "var(--cf-colors-gray-50)",
                         }}
                       >
                         <strong style={{ fontSize: "14px" }}>
@@ -184,7 +184,7 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
                           style={{
                             margin: 0,
                             fontSize: "13px",
-                            color: "var(--cf-color-gray-600)",
+                            color: "var(--cf-colors-gray-600)",
                           }}
                         >
                           {theme.description}
@@ -198,7 +198,7 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
                       style={{
                         margin: 0,
                         fontSize: "14px",
-                        color: "var(--cf-color-gray-500)",
+                        color: "var(--cf-colors-gray-500)",
                         textTransform: "uppercase",
                         letterSpacing: "0.05em",
                       }}
@@ -219,7 +219,7 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
                           style={{
                             margin: 0,
                             fontSize: "14px",
-                            color: "var(--cf-color-gray-500)",
+                            color: "var(--cf-colors-gray-500)",
                             textTransform: "uppercase",
                             letterSpacing: "0.05em",
                           }}
@@ -246,7 +246,7 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
                       style={{
                         margin: 0,
                         fontSize: "14px",
-                        color: "var(--cf-color-gray-500)",
+                        color: "var(--cf-colors-gray-500)",
                         textTransform: "uppercase",
                         letterSpacing: "0.05em",
                       }}
@@ -267,7 +267,7 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
                 </cf-vstack>
               )
               : (
-                <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
+                <div style="text-align: center; color: var(--cf-colors-gray-500); padding: 2rem;">
                   {pending ? <span>Exploring the space...</span> : <span />}
                 </div>
               )}
