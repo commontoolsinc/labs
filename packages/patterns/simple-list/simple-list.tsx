@@ -3,25 +3,44 @@
  *
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Provides rapid keyboard entry, checkboxes, and indent toggle.
+ *
+ * ## Migrated onto the EditableList primitive (CT-1712)
+ *
+ * The add / remove / toggle / model now live in the `EditableList` primitive
+ * (`../primitives/editable-list.tsx`). simple-list embeds it **headless**: it
+ * does NOT render EditableList's default `[UI]` because simple-list has its own
+ * row chrome (indent gutter, Cmd+[ / Cmd+] keyboard indent, indent-toggle
+ * button) that the default row does not provide. Instead it consumes
+ * EditableList's id-keyed streams + counts and `.map()`s its own rows.
+ *
+ * Identity, not index: rows are now addressed by a stable `id` minted by the
+ * primitive (was array index — fragile under reorder/concurrent edits). The
+ * indent fields (`text`, `indented`) ride along as plain-data extras on the
+ * item; they round-trip through the primitive's index-signature passthrough
+ * untouched. simple-list's own indent + text-add streams are thin id-keyed
+ * handlers bound to the SAME shared `items` cell the primitive mutates.
  */
 import {
-  action,
   computed,
   Default,
+  handler,
   NAME,
+  nonPrivateRandom,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   type VNode,
   Writable,
 } from "commonfabric";
 import type { ModuleMetadata } from "../container-protocol.ts";
+import EditableList from "../primitives/editable-list.tsx";
 
 // ===== Self-Describing Metadata =====
 export const MODULE_METADATA: ModuleMetadata = {
   type: "simple-list",
   label: "Simple List",
-  icon: "\u2611", // ballot box with check
+  icon: "☑", // ballot box with check
   allowMultiple: true,
   schema: {
     items: {
@@ -45,9 +64,13 @@ export const MODULE_METADATA: ModuleMetadata = {
 
 // ===== Types =====
 export interface SimpleListItem {
+  /** Stable identity (minted by the EditableList primitive). */
+  id: string;
   text: string;
   indented: boolean | Default<false>;
   done: boolean | Default<false>;
+  /** Carried for the primitive's default-UI shape; simple-list keys off text. */
+  label: Default<string, "">;
 }
 
 export interface SimpleListInput {
@@ -59,62 +82,85 @@ interface SimpleListOutput {
   [UI]: VNode;
   items: SimpleListItem[];
   summary: string;
-  toggleIndent: Stream<{ index: number }>;
-  setIndent: Stream<{ index: number; indented: boolean }>;
-  deleteItem: Stream<{ index: number }>;
+  toggleIndent: Stream<{ id: string }>;
+  setIndent: Stream<{ id: string; indented: boolean }>;
+  deleteItem: Stream<{ id: string }>;
   addItem: Stream<{ text: string }>;
 }
+
+// ===== simple-list-specific handlers (id-keyed, share the primitive's cell) =====
+// These operate on the SAME `items` cell the embedded EditableList mutates.
+// They exist because indent + the `text` field are simple-list concepts the
+// generic primitive does not model. All address items by stable id, never index.
+
+const toggleIndentHandler = handler<
+  { id: string },
+  { items: Writable<SimpleListItem[]> }
+>(({ id }, { items }) => {
+  const current = items.get() ?? [];
+  let touched = false;
+  const next = current.map((i) => {
+    if (i.id !== id) return i;
+    touched = true;
+    return { ...i, indented: !i.indented };
+  });
+  if (touched) items.set(next);
+});
+
+const setIndentHandler = handler<
+  { id: string; indented: boolean },
+  { items: Writable<SimpleListItem[]> }
+>(({ id, indented }, { items }) => {
+  const current = items.get() ?? [];
+  let touched = false;
+  const next = current.map((i) => {
+    if (i.id !== id) return i;
+    touched = true;
+    return { ...i, indented };
+  });
+  if (touched) items.set(next);
+});
+
+// simple-list's external `addItem({ text })` mints a stable id (same scheme as
+// the primitive) and carries simple-list's `text`/`indented` fields. It pushes
+// onto the SAME shared cell the primitive mutates, so the model stays unified.
+const addItemHandler = handler<
+  { text: string },
+  { items: Writable<SimpleListItem[]> }
+>(({ text }, { items }) => {
+  const trimmed = (text ?? "").trim();
+  if (!trimmed) return;
+  const id = `${safeDateNow().toString(36)}-${
+    nonPrivateRandom().toString(36).slice(2, 10)
+  }`;
+  items.push({
+    id,
+    text: trimmed,
+    label: trimmed,
+    indented: false,
+    done: false,
+  });
+});
 
 // ===== The Pattern =====
 export const SimpleListModule = pattern<
   SimpleListInput,
   SimpleListOutput
 >(({ items }) => {
-  // Pattern-body actions - preferred for single-use handlers
-  const toggleIndent = action(({ index }: { index: number }) => {
-    const current = items.get() || [];
-    if (index < 0 || index >= current.length) return;
+  // Embed the primitive for the id-keyed model (remove / toggle / counts).
+  // Headless: simple-list renders its own rows below, not list[UI].
+  const list = EditableList({ items });
 
-    const updated = [...current];
-    updated[index] = {
-      ...updated[index],
-      indented: !updated[index].indented,
-    };
-    items.set(updated);
-  });
-
-  const setIndent = action(
-    ({ index, indented }: { index: number; indented: boolean }) => {
-      const current = items.get() || [];
-      if (index < 0 || index >= current.length) return;
-
-      const updated = [...current];
-      updated[index] = { ...updated[index], indented };
-      items.set(updated);
-    },
-  );
-
-  const deleteItem = action(({ index }: { index: number }) => {
-    const current = items.get() || [];
-    if (index < 0 || index >= current.length) return;
-
-    items.set(current.toSpliced(index, 1));
-  });
-
-  const addItem = action(({ text }: { text: string }) => {
-    const trimmed = text.trim();
-    if (trimmed) {
-      items.push({ text: trimmed, indented: false, done: false });
-    }
-  });
+  // simple-list-specific streams, bound to the same shared cell.
+  const toggleIndent = toggleIndentHandler({ items });
+  const setIndent = setIndentHandler({ items });
+  const addItem = addItemHandler({ items });
 
   // Computed summary for NAME
   const displayText = computed(() => {
-    const list = items.get() || [];
-    const total = list.length;
+    const total = list.total;
     if (total === 0) return "Empty";
-    const done = list.filter((item) => item.done).length;
-    return `${done}/${total}`;
+    return `${list.done}/${total}`;
   });
 
   const summary = computed(() => {
@@ -129,7 +175,7 @@ export const SimpleListModule = pattern<
       <cf-vstack gap="2">
         {/* List items */}
         <cf-vstack gap="0">
-          {items.map((item, index: number) => (
+          {items.map((item: SimpleListItem) => (
             <cf-hstack
               gap="2"
               style={{
@@ -167,11 +213,11 @@ export const SimpleListModule = pattern<
                   if (!d) return;
                   // Cmd+] or Ctrl+] = indent
                   if (d.key === "]" && (d.metaKey || d.ctrlKey)) {
-                    setIndent.send({ index, indented: true });
+                    setIndent.send({ id: item.id, indented: true });
                   }
                   // Cmd+[ or Ctrl+[ = outdent
                   if (d.key === "[" && (d.metaKey || d.ctrlKey)) {
-                    setIndent.send({ index, indented: false });
+                    setIndent.send({ id: item.id, indented: false });
                   }
                 }}
               />
@@ -179,7 +225,7 @@ export const SimpleListModule = pattern<
               {/* Indent toggle */}
               <button
                 type="button"
-                onClick={() => toggleIndent.send({ index })}
+                onClick={() => toggleIndent.send({ id: item.id })}
                 style={{
                   background: "none",
                   border: "none",
@@ -192,13 +238,16 @@ export const SimpleListModule = pattern<
                 }}
                 title={item.indented ? "Outdent" : "Indent"}
               >
-                {item.indented ? "\u2190" : "\u2192"}
+                {item.indented ? "←" : "→"}
               </button>
 
-              {/* Delete - subtle until hover */}
+              {
+                /* Delete - subtle until hover. Reuses the primitive's id-keyed
+                  removeItem (one remove path). */
+              }
               <button
                 type="button"
-                onClick={() => deleteItem.send({ index })}
+                onClick={() => list.removeItem.send({ id: item.id })}
                 style={{
                   background: "none",
                   border: "none",
@@ -225,7 +274,7 @@ export const SimpleListModule = pattern<
             fontSize: "14px",
           }}
           oncf-send={(e: { detail?: { message?: string } }) => {
-            const text = e.detail?.message;
+            const text = e.detail?.message?.trim();
             if (text) {
               addItem.send({ text });
             }
@@ -237,7 +286,7 @@ export const SimpleListModule = pattern<
     summary,
     toggleIndent,
     setIndent,
-    deleteItem,
+    deleteItem: list.removeItem,
     addItem,
   };
 });

@@ -44,42 +44,52 @@ export default pattern(() => {
     list.addItem.send({ text: "   " });
   });
 
+  // Identity-addressed (CT-1712): read the live id from the list inside the
+  // action, then send by id. Items now carry a stable id minted by the
+  // EditableList primitive; mutations are never by array index.
+
   // Toggle indent on first item
   const action_toggle_indent_0 = action(() => {
-    list.toggleIndent.send({ index: 0 });
+    const id = list.items[0]?.id;
+    if (id) list.toggleIndent.send({ id });
   });
 
   // Set indent directly on second item
   const action_set_indent_1_true = action(() => {
-    list.setIndent.send({ index: 1, indented: true });
+    const id = list.items[1]?.id;
+    if (id) list.setIndent.send({ id, indented: true });
   });
 
   const action_set_indent_1_false = action(() => {
-    list.setIndent.send({ index: 1, indented: false });
+    const id = list.items[1]?.id;
+    if (id) list.setIndent.send({ id, indented: false });
   });
 
-  // Delete middle item (index 1)
+  // Delete middle item (the second-added item)
   const action_delete_1 = action(() => {
-    list.deleteItem.send({ index: 1 });
+    const id = list.items[1]?.id;
+    if (id) list.deleteItem.send({ id });
   });
 
-  // Delete first item (index 0)
+  // Delete first item
   const action_delete_0 = action(() => {
-    list.deleteItem.send({ index: 0 });
+    const id = list.items[0]?.id;
+    if (id) list.deleteItem.send({ id });
   });
 
   // Delete last remaining item
   const action_delete_last = action(() => {
-    list.deleteItem.send({ index: 0 });
+    const id = list.items[0]?.id;
+    if (id) list.deleteItem.send({ id });
   });
 
-  // Invalid index operations (should be no-ops)
+  // Invalid operations (absent id) should be no-ops
   const action_toggle_invalid = action(() => {
-    list.toggleIndent.send({ index: 999 });
+    list.toggleIndent.send({ id: "does-not-exist" });
   });
 
   const action_delete_invalid = action(() => {
-    list.deleteItem.send({ index: -1 });
+    list.deleteItem.send({ id: "does-not-exist" });
   });
 
   // ==========================================================================

@@ -1,3 +1,43 @@
+/**
+ * Do List — a #do checklist whose tasks may eventually do themselves.
+ *
+ * ## Migrated onto the EditableList primitive (CT-1712)
+ *
+ * do-list embeds `EditableList` (`../primitives/editable-list.tsx`)
+ * **headless**: the primitive owns the id-keyed MODEL (stable-id minting on
+ * add, id-addressed `updateItem` / `toggleItem`, and the `total`/`active`/`done`
+ * counts), while do-list keeps its rich rows — the `Suggestion` sub-pattern,
+ * cell-link attachments, drop-zones, indent gutters, and a completed-items
+ * drawer — and `.map()`s them itself.
+ *
+ * ### Identity, not whole-object equality
+ *
+ * Items now carry a stable `id` minted by the primitive. Every mutation
+ * addresses an item by `{ id }` (was `equals(whole-object)` / array index —
+ * fragile under edits/reorders). The title-addressed
+ * `removeItemByTitle` / `updateItemByTitle` handlers are kept as do-list's
+ * AGENT-FACING CONVENIENCE layer over the id model (the `*ByText` analogue);
+ * title is NOT the identity.
+ *
+ * ### attachments stay a DECLARED field on do-list's own item type
+ *
+ * `attachments: Writable<any>[]` is a LIVE-CELL field. The primitive's
+ * index-signature passthrough carries extras as PLAIN DATA only — a live cell
+ * read back through it is NOT re-hydrated (the "any → true schema" gotcha; see
+ * primitives.md). So attachments are declared directly on `DoItem` and do-list
+ * renders + mutates them itself (`addAttachment` / `removeAttachment` via
+ * `items.key(idx).key("attachments")`). This is exactly why do-list is a
+ * headless embed and not a default-UI caller.
+ *
+ * ### do-list keeps its own add / remove handlers
+ *
+ * `removeItem` is a CASCADE delete (an item plus its indent-children) — richer
+ * than the primitive's single-item `removeItem` — so do-list keeps its own,
+ * keyed by id. `addItem` / `addItems` carry `indent` / `aiEnabled` /
+ * `attachments`, so they go through the primitive's `addItem` (which mints the
+ * id) with those fields as the `item` payload. `updateItem` / `toggleItem`
+ * (title / done patches) delegate straight to the primitive.
+ */
 import {
   computed,
   Default,
@@ -5,24 +45,31 @@ import {
   handler,
   ifElse,
   NAME,
+  nonPrivateRandom,
   OpaqueRef,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   type VNode,
   Writable,
 } from "commonfabric";
 import Suggestion from "../system/suggestion.tsx";
+import EditableList from "../primitives/editable-list.tsx";
 
 // ===== Types =====
 
 /** A #do item — a task that may do itself */
 export interface DoItem {
+  /** Stable identity, minted by the EditableList primitive on add. */
+  id: string;
   title: string;
   done: boolean | Default<false>;
   indent: number | Default<0>; // 0 = root, 1 = child, 2 = grandchild...
   aiEnabled: boolean | Default<false>; // future: flag for AI auto-completion
   attachments: Writable<any>[] | Default<[]>;
+  /** Carried for the primitive's default-UI shape; do-list keys off title. */
+  label: Default<string, "">;
 }
 
 interface DoListInput {
@@ -38,13 +85,13 @@ interface DoListOutput {
   itemCount: number;
   summary: string;
   mentionable: { [NAME]: string; summary: string; [UI]: VNode }[];
-  // UI handlers (use cell references via equals())
+  // UI handlers — now id-addressed (identity, not whole-object equality)
   addItem: OpaqueRef<
     Stream<{ title: string; indent?: number; attachments?: Writable<any>[] }>
   >;
-  removeItem: OpaqueRef<Stream<{ item: DoItem }>>;
+  removeItem: OpaqueRef<Stream<{ id: string }>>;
   updateItem: OpaqueRef<
-    Stream<{ item: DoItem; title?: string; done?: boolean }>
+    Stream<{ id: string; title?: string; done?: boolean }>
   >;
   addItems: OpaqueRef<
     Stream<{
@@ -55,7 +102,7 @@ interface DoListOutput {
       }>;
     }>
   >;
-  // LLM-friendly handlers (use title matching)
+  // LLM-friendly handlers (use title matching) — convenience over the id model
   /** Remove a task and its subtasks by title */
   removeItemByTitle: OpaqueRef<Stream<{ title: string }>>;
   /** Update a task by title. Set done to mark complete, newTitle to rename, attachments to add references. */
@@ -70,7 +117,10 @@ interface DoListOutput {
   archiveCompleted: OpaqueRef<Stream<unknown>>;
 }
 
-// ===== Module-scope Handlers =====
+// ===== do-list-specific handlers (operate on the shared `items` cell) =====
+// These cover do-list concepts the generic primitive does not model: rich
+// extras on add (indent / aiEnabled / attachments), cascade delete (item +
+// indent-children), and title-addressed agent convenience.
 
 const addItemHandler = handler<
   { title: string; indent?: number; attachments?: Writable<any>[] },
@@ -80,59 +130,14 @@ const addItemHandler = handler<
   if (!trimmed) return;
 
   items.push({
+    id: mintId(),
     title: trimmed,
+    label: trimmed,
     done: false,
     indent: indent ?? 0,
     aiEnabled: false,
     attachments: attachments ?? [],
   });
-});
-
-const removeItemHandler = handler<
-  { item: DoItem },
-  { items: Writable<DoItem[]> }
->(({ item }, { items }) => {
-  const currentItems = items.get();
-  const index = currentItems.findIndex((i) => equals(i, item));
-
-  if (index === -1) return;
-
-  // Count consecutive children (items with higher indent)
-  const itemIndent = item.indent ?? 0;
-  let childCount = 0;
-  for (let i = index + 1; i < currentItems.length; i++) {
-    const nextIndent = currentItems[i].indent ?? 0;
-    if (nextIndent > itemIndent) {
-      childCount++;
-    } else {
-      break;
-    }
-  }
-
-  // Remove item and all its children
-  const newItems = [
-    ...currentItems.slice(0, index),
-    ...currentItems.slice(index + 1 + childCount),
-  ];
-  items.set(newItems);
-});
-
-const updateItemHandler = handler<
-  { item: DoItem; title?: string; done?: boolean },
-  { items: Writable<DoItem[]> }
->(({ item, title, done }, { items }) => {
-  const currentItems = items.get();
-  const newItems = currentItems.map((i) => {
-    if (!equals(i, item)) return i;
-
-    return {
-      ...i,
-      ...(title !== undefined ? { title } : {}),
-      ...(done !== undefined ? { done } : {}),
-    };
-  });
-
-  items.set(newItems);
 });
 
 const addItemsHandler = handler<
@@ -149,7 +154,9 @@ const addItemsHandler = handler<
     const trimmed = title.trim();
     if (trimmed) {
       items.push({
+        id: mintId(),
         title: trimmed,
+        label: trimmed,
         done: false,
         indent: indent ?? 0,
         aiEnabled: false,
@@ -159,7 +166,52 @@ const addItemsHandler = handler<
   });
 });
 
-// ===== LLM-friendly Handlers (title-based matching) =====
+// Cascade delete: an item plus its consecutive higher-indent children.
+const removeItemHandler = handler<
+  { id: string },
+  { items: Writable<DoItem[]> }
+>(({ id }, { items }) => {
+  const currentItems = items.get();
+  const index = currentItems.findIndex((i) => i.id === id);
+  if (index === -1) return;
+
+  const itemIndent = currentItems[index].indent ?? 0;
+  let childCount = 0;
+  for (let i = index + 1; i < currentItems.length; i++) {
+    const nextIndent = currentItems[i].indent ?? 0;
+    if (nextIndent > itemIndent) {
+      childCount++;
+    } else {
+      break;
+    }
+  }
+
+  const newItems = [
+    ...currentItems.slice(0, index),
+    ...currentItems.slice(index + 1 + childCount),
+  ];
+  items.set(newItems);
+});
+
+const updateItemHandler = handler<
+  { id: string; title?: string; done?: boolean },
+  { items: Writable<DoItem[]> }
+>(({ id, title, done }, { items }) => {
+  const currentItems = items.get();
+  const newItems = currentItems.map((i) => {
+    if (i.id !== id) return i;
+
+    return {
+      ...i,
+      ...(title !== undefined ? { title } : {}),
+      ...(done !== undefined ? { done } : {}),
+    };
+  });
+
+  items.set(newItems);
+});
+
+// ===== LLM-friendly Handlers (title-based matching) — convenience layer =====
 
 /** Remove a task and its subtasks by title */
 const removeItemByTitleHandler = handler<
@@ -225,7 +277,7 @@ const addAttachment = handler<
   const cell = e.detail?.sourceCell;
   if (!cell) return;
   const currentItems = items.get();
-  const idx = currentItems.findIndex((i) => equals(i, item));
+  const idx = currentItems.findIndex((i) => i.id === item.id);
   if (idx >= 0) {
     items.key(idx).key("attachments").push(cell);
   }
@@ -236,7 +288,7 @@ const removeAttachment = handler<
   { item: DoItem; attachment: Writable<any>; items: Writable<DoItem[]> }
 >((_, { item, attachment, items }) => {
   const currentItems = items.get();
-  const idx = currentItems.findIndex((i) => equals(i, item));
+  const idx = currentItems.findIndex((i) => i.id === item.id);
   if (idx >= 0) {
     const attachments = items.key(idx).key("attachments");
     const currentAttachments = attachments.get();
@@ -249,19 +301,21 @@ const removeAttachment = handler<
   }
 });
 
-const archiveCompletedHandler = handler<
-  unknown,
-  { items: Writable<DoItem[]> }
->((_, { items }) => {
-  items.set(items.get().filter((i) => !i.done));
-});
+// id minting — same scheme as the EditableList primitive. (Add still goes
+// through do-list's own handler because it carries indent/aiEnabled/attachments
+// extras; the primitive's addItem would not set those.)
+function mintId(): string {
+  const now = safeDateNow().toString(36);
+  const rand = nonPrivateRandom().toString(36).slice(2, 10);
+  return `${now}-${rand}`;
+}
 
 // ===== Sub-pattern for item rendering =====
 
 const DoItemCard = pattern<
   {
     item: DoItem;
-    removeItem: Stream<{ item: DoItem }>;
+    removeItem: Stream<{ id: string }>;
     items: Writable<DoItem[]>;
   },
   { [UI]: VNode; [NAME]: string; summary: string }
@@ -287,7 +341,7 @@ const DoItemCard = pattern<
             />
             <cf-button
               variant="ghost"
-              onClick={() => removeItem.send({ item })}
+              onClick={() => removeItem.send({ id: item.id })}
             >
               x
             </cf-button>
@@ -361,8 +415,12 @@ const CompletedItemCard = pattern<
 // ===== Pattern =====
 
 export default pattern<DoListInput, DoListOutput>(({ items }) => {
-  // Computed values
-  const itemCount = computed(() => items.get().length);
+  // Embed the primitive for the id-keyed model (id minting, id-addressed
+  // update/toggle, counts). Headless: do-list renders its own rich rows below.
+  const list = EditableList({ items });
+
+  // Computed values (counts from the primitive; filtered views local).
+  const itemCount = list.total;
   const activeItems = computed(() => items.get().filter((i) => i && !i.done));
   const completedItems = computed(() => items.get().filter((i) => i && i.done));
   const hasCompleted = computed(() => completedItems.length > 0);
@@ -375,14 +433,15 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
       .join(", ");
   });
 
-  // Bind handlers
+  // Bind do-list's own handlers (extras + cascade + title convenience).
   const addItem = addItemHandler({ items });
+  const addItems = addItemsHandler({ items });
   const removeItem = removeItemHandler({ items });
   const updateItem = updateItemHandler({ items });
-  const addItems = addItemsHandler({ items });
   const removeItemByTitle = removeItemByTitleHandler({ items });
   const updateItemByTitle = updateItemByTitleHandler({ items });
-  const archiveCompleted = archiveCompletedHandler({ items });
+  // archiveCompleted maps onto the primitive's clearDone (drop every done item).
+  const archiveCompleted = list.clearDone;
 
   // Map items to sub-pattern instances once — reused for UI and mentionable
   const itemCards = activeItems.map((item: DoItem) => (
@@ -436,7 +495,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
   );
 
   return {
-    [NAME]: computed(() => `Do List (${items.get().length})`),
+    [NAME]: computed(() => `Do List (${list.total})`),
     [UI]: (
       <cf-screen>
         <cf-vstack slot="header" gap="1">
