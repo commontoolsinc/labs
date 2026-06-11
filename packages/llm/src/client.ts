@@ -442,6 +442,15 @@ export class LLMClient {
   async generateObject(
     request: LLMGenerateObjectRequest,
     abortSignal?: AbortSignal,
+    opts?: {
+      /**
+       * Full LLM endpoint URL for THIS call (e.g.
+       * `new URL("/api/ai/llm", host)`); the module-level default
+       * (setLLMUrl) is the fallback. Lets one runtime route per-space
+       * work to that space's host.
+       */
+      endpoint?: string | URL;
+    },
   ): Promise<LLMGenerateObjectResponse> {
     // Check for mock mode
     if (mockCatalog.isEnabled()) {
@@ -461,7 +470,8 @@ export class LLMClient {
       throw new Error(TEST_GUARD_MESSAGE);
     }
 
-    const response = await fetch(llmApiUrl + "/generateObject", {
+    const endpoint = opts?.endpoint?.toString() ?? llmApiUrl;
+    const response = await fetch(endpoint + "/generateObject", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
@@ -500,6 +510,10 @@ export class LLMClient {
     request: LLMRequest,
     callback?: PartialCallback,
     abortSignal?: AbortSignal,
+    opts?: {
+      /** Per-call LLM endpoint; module-level default is the fallback. */
+      endpoint?: string | URL;
+    },
   ): Promise<LLMResponse> {
     if (request.stream && !callback) {
       throw new Error(
@@ -549,7 +563,7 @@ export class LLMClient {
       throw new Error(TEST_GUARD_MESSAGE);
     }
 
-    const response = await fetch(llmApiUrl, {
+    const response = await fetch(opts?.endpoint?.toString() ?? llmApiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),

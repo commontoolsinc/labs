@@ -43,10 +43,12 @@ describe("file-cell-storage", () => {
     const stored = await uploadFile({
       file,
       runtime,
+      space: "did:key:z6Mk-file-cell-storage-test" as never,
       includeDataUrl: true,
     });
 
     expect(request).toMatchObject({
+      space: "did:key:z6Mk-file-cell-storage-test",
       contentType: "text/plain",
       suffix: "txt",
     });

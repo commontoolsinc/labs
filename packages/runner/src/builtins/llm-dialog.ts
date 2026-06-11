@@ -2989,7 +2989,16 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
     };
 
   // TODO(bf): sendRequest must be given a callback, even if it does nothing
-  const doWork = () => client.sendRequest(llmParams, () => {}, abortSignal);
+  const mappedLlmHost = runtime.spaceHostMap?.[space];
+  const doWork = () =>
+    client.sendRequest(
+      llmParams,
+      () => {},
+      abortSignal,
+      mappedLlmHost
+        ? { endpoint: new URL("/api/ai/llm", mappedLlmHost) }
+        : undefined,
+    );
 
   const resultPromise = queueName
     ? runtime.getOrCreateQueue(queueName).enqueue(doWork)

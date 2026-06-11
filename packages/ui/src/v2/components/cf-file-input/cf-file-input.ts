@@ -11,7 +11,8 @@ import {
   defaultTheme,
 } from "../theme-context.ts";
 import { formatFileSize } from "../../utils/image-compression.ts";
-import { runtimeContext } from "../../runtime-context.ts";
+import { runtimeContext, spaceContext } from "../../runtime-context.ts";
+import type { DID } from "@commonfabric/identity";
 import {
   type StoredFile,
   type StoreFileOptions,
@@ -241,6 +242,10 @@ export class CFFileInput extends BaseElement {
   @property({ attribute: false })
   accessor runtime: RuntimeClient | undefined = undefined;
 
+  @consume({ context: spaceContext, subscribe: true })
+  @property({ attribute: false })
+  accessor space: DID | undefined = undefined;
+
   protected getFiles(): StoredFile[] {
     return [...this.storedFiles];
   }
@@ -264,9 +269,13 @@ export class CFFileInput extends BaseElement {
     if (!this.runtime) {
       throw new Error("Runtime is not available for file storage");
     }
+    if (!this.space) {
+      throw new Error("Space is not available for file storage");
+    }
     return await uploadFile({
       file,
       runtime: this.runtime,
+      space: this.space,
       includeDataUrl: this.includeData,
       ...metadata,
     });

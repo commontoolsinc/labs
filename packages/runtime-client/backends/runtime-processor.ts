@@ -137,6 +137,7 @@ export function runtimeOptionsFromInitializationData(
   const apiUrlObj = new URL(data.apiUrl);
   return {
     apiUrl: apiUrlObj,
+    spaceHostMap: data.spaceHostMap,
     storageManager,
     patternEnvironment: { apiUrl: apiUrlObj },
     telemetry,
@@ -282,8 +283,6 @@ export class RuntimeProcessor {
   private pieceManager: PieceManager;
   private cc: PiecesController;
   private spaces = new Map<DID, SpaceContext>();
-  private apiUrl: URL;
-  private space: DID;
   private identity: Identity;
   private _isDisposed = false;
   private disposingPromise: Promise<void> | undefined;
@@ -305,17 +304,14 @@ export class RuntimeProcessor {
     runtime: Runtime,
     pieceManager: PieceManager,
     cc: PiecesController,
-    apiUrl: URL,
-    space: DID,
+    initSpace: DID,
     identity: Identity,
     telemetry: RuntimeTelemetry,
   ) {
     this.runtime = runtime;
     this.pieceManager = pieceManager;
     this.cc = cc;
-    this.spaces.set(space, { pieceManager, cc });
-    this.apiUrl = apiUrl;
-    this.space = space;
+    this.spaces.set(initSpace, { pieceManager, cc });
     this.identity = identity;
     this.telemetry = telemetry;
     this.telemetry.addEventListener("telemetry", this.#onTelemetry);
@@ -428,7 +424,6 @@ export class RuntimeProcessor {
       runtime,
       pieceManager,
       cc,
-      apiUrlObj,
       space,
       identity,
       telemetry,
@@ -1036,11 +1031,20 @@ export class RuntimeProcessor {
   async handleUploadBlob(
     request: UploadBlobRequest,
   ): Promise<UploadBlobResponse> {
+    // Guard for untyped callers: the request must name the blob's space
+    // (required since the federation work) — fail with a named error
+    // rather than a confusing server 404 on /undefined/blobs/….
+    if (!request.space || !String(request.space).startsWith("did:")) {
+      throw new Error("uploadBlob requires a space DID");
+    }
     const suffix = (request.suffix ?? "bin").replace(/^\./, "") || "bin";
     const bytes = Uint8Array.from(request.body);
+    // The blob belongs to the named space, so it uploads to — and its
+    // returned URL resolves against — THAT space's host.
+    const host = this.runtime.hostForSpace(request.space);
     const target = new URL(
-      `/${this.space}/blobs/upload.${encodeURIComponent(suffix)}`,
-      this.apiUrl,
+      `/${request.space}/blobs/upload.${encodeURIComponent(suffix)}`,
+      host,
     );
     // Blob upload payloads must preserve FabricBytes even when the wider
     // process is running with legacy memory JSON flags.
@@ -1064,7 +1068,7 @@ export class RuntimeProcessor {
     }
     return {
       id: result.id,
-      url: resolveBlobUrl(result.url, this.apiUrl, this.space),
+      url: resolveBlobUrl(result.url, host, request.space),
     };
   }
 

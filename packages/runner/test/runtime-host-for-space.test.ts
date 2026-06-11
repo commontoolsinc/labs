@@ -1,0 +1,75 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+
+const signer = await Identity.fromPassphrase("runtime-host-for-space");
+const spaceA = signer.did();
+const spaceB = "did:key:z6Mk-host-for-space-b" as MemorySpace;
+
+function makeRuntime(spaceHostMap?: Record<string, string>) {
+  const storageManager = StorageManager.emulate({ as: signer });
+  return new Runtime({
+    apiUrl: new URL("http://host-a.test/"),
+    spaceHostMap,
+    storageManager,
+  });
+}
+
+describe("Runtime.hostForSpace", () => {
+  it("resolves mapped spaces to their host and others to apiUrl", async () => {
+    const runtime = makeRuntime({ [spaceB]: "http://host-b.test" });
+    try {
+      expect(runtime.hostForSpace(spaceA).toString()).toBe(
+        "http://host-a.test/",
+      );
+      expect(runtime.hostForSpace(spaceB).toString()).toBe(
+        "http://host-b.test/",
+      );
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("healthCheck fans out over the default and every mapped host", async () => {
+    const dialed: string[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      dialed.push(String(input));
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    }) as typeof fetch;
+    const runtime = makeRuntime({
+      [spaceB]: "http://host-b.test",
+      "did:key:z6Mk-host-for-space-c": "http://host-b.test", // dupe host
+    });
+    try {
+      expect(await runtime.healthCheck()).toBe(true);
+      expect(dialed.sort()).toEqual([
+        "http://host-a.test/_health",
+        "http://host-b.test/_health",
+      ]);
+    } finally {
+      globalThis.fetch = realFetch;
+      await runtime.dispose();
+    }
+  });
+
+  it("healthCheck is false when any host is unreachable", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((input: RequestInfo | URL) =>
+      Promise.resolve(
+        new Response("", {
+          status: String(input).includes("host-b") ? 500 : 200,
+        }),
+      )) as typeof fetch;
+    const runtime = makeRuntime({ [spaceB]: "http://host-b.test" });
+    try {
+      expect(await runtime.healthCheck()).toBe(false);
+    } finally {
+      globalThis.fetch = realFetch;
+      await runtime.dispose();
+    }
+  });
+});

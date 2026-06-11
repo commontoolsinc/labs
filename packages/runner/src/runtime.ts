@@ -188,6 +188,14 @@ export interface ExperimentalOptions {
 
 export interface RuntimeOptions {
   apiUrl: URL;
+  /**
+   * Optional space DID → host base URL map (federation). Space-bound
+   * work (LLM calls, fetches, blob uploads) for a mapped space targets
+   * that host; absent map or entry ⇒ `apiUrl`. Mirrors the storage
+   * layer's map (StorageManager Options.spaceHostMap) — pass the same
+   * one. Fixed for the runtime's lifetime.
+   */
+  spaceHostMap?: Record<string, string>;
   storageManager: IStorageManager;
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
@@ -326,6 +334,7 @@ export class Runtime {
   /** Resolved experimental flags (all properties present, defaulting to `false`). */
   readonly experimental: ExperimentalOptions;
   readonly apiUrl: URL;
+  readonly spaceHostMap?: Record<string, string>;
   readonly userIdentityDID: DID;
   /** Cache of resolved PatternFactory.inSpace("name") space DIDs. */
   private readonly spaceNameToDid = new Map<string, MemorySpace>();
@@ -367,6 +376,26 @@ export class Runtime {
 
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
+    // Validate eagerly, mirroring the storage layer's resolver: a
+    // malformed host should fail at configuration time naming the
+    // space, not mid-builtin as a bare Invalid URL.
+    for (const [space, host] of Object.entries(options.spaceHostMap ?? {})) {
+      try {
+        new URL(host);
+      } catch (cause) {
+        throw new Error(
+          `Invalid spaceHostMap entry for ${space}: "${host}"`,
+          { cause },
+        );
+      }
+    }
+    // Snapshot + freeze: the map is fixed for the runtime's lifetime
+    // (the per-space provider cache and routing decisions assume
+    // space → host never changes), so a caller mutating their object
+    // after construction must not change routing.
+    this.spaceHostMap = options.spaceHostMap
+      ? Object.freeze({ ...options.spaceHostMap })
+      : undefined;
     this.staticCache = isDeno()
       ? new StaticCacheFS()
       : new StaticCacheHTTP(new URL("/static", this.apiUrl));
@@ -1105,13 +1134,38 @@ export class Runtime {
     return this.runner.start(resultCell);
   }
 
+  /**
+   * The host that serves a space's space-bound work (LLM, fetch, blob).
+   * A space in `spaceHostMap` resolves to its mapped host; everything
+   * else to the default `apiUrl`. The single compute-side analogue of
+   * the storage layer's per-space address resolver.
+   */
+  hostForSpace(space: MemorySpace): URL {
+    return new URL(this.spaceHostMap?.[space] ?? this.apiUrl);
+  }
+
+  /**
+   * True iff the default host AND every distinct mapped host are
+   * reachable — one runtime can span hosts, so health is the
+   * conjunction over all of them.
+   */
   async healthCheck(): Promise<boolean> {
-    try {
-      const url = new URL("/_health", this.apiUrl);
-      const res = await fetch(url);
-      return res.ok;
-    } catch (_) {
-      return false;
+    const hosts = new Set([this.apiUrl.toString()]);
+    for (const host of Object.values(this.spaceHostMap ?? {})) {
+      try {
+        hosts.add(new URL(host).toString());
+      } catch {
+        return false; // a malformed mapped host is unhealthy by definition
+      }
     }
+    const checks = [...hosts].map(async (host) => {
+      try {
+        const res = await fetch(new URL("/_health", host));
+        return res.ok;
+      } catch (_) {
+        return false;
+      }
+    });
+    return (await Promise.all(checks)).every(Boolean);
   }
 }

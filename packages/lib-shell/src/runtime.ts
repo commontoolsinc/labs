@@ -312,6 +312,7 @@ export class RuntimeInternals extends EventTarget {
   }
 
   async uploadBlob(options: {
+    space: DID;
     contentType: string;
     body: Uint8Array;
     suffix?: string;
