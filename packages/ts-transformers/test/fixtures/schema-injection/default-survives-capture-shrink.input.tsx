@@ -1,4 +1,9 @@
-import { computed, type Default, pattern } from "commonfabric";
+import {
+  computed,
+  type Default,
+  type Default as RenamedDefault,
+  pattern,
+} from "commonfabric";
 
 // FIXTURE: default-survives-capture-shrink
 // Verifies: Default<…> annotations on properties survive capture shrinking
@@ -11,6 +16,8 @@ import { computed, type Default, pattern } from "commonfabric";
 interface Item {
   done: boolean | Default<false>;
   label: Default<string, "">;
+  // Renamed import: detection is symbol-verified, not name-gated.
+  rank: RenamedDefault<number, 7>;
 }
 
 interface Input {
@@ -20,5 +27,6 @@ interface Input {
 export default pattern<Input>(({ items }) => {
   const firstDone = computed(() => items[0]?.done === true);
   const firstLabelEmpty = computed(() => items[0]?.label === "");
-  return { firstDone, firstLabelEmpty };
+  const firstRank = computed(() => items[0]?.rank === 7);
+  return { firstDone, firstLabelEmpty, firstRank };
 });

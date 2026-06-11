@@ -689,12 +689,14 @@ function findAuthoredDefaultReference(
   }
   if (
     ts.isTypeReferenceNode(node) &&
-    getTypeReferenceNodeName(node) === "Default" &&
     node.typeArguments && node.typeArguments.length > 0 &&
     node.pos >= 0
   ) {
-    // Resolve through import aliases: at a use site the symbol is the
-    // ImportSpecifier in the using file, not the api declaration.
+    // Symbol-verified, NOT name-gated: a renamed import (`Default as D`)
+    // must still graft, matching isDefaultTypeRef's symbol-resolution
+    // behavior in regular input schemas. Resolve through import aliases —
+    // at a use site the symbol is the ImportSpecifier in the using file,
+    // not the api declaration.
     let symbol = checker.getSymbolAtLocation(node.typeName);
     if (symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
       symbol = checker.getAliasedSymbol(symbol);

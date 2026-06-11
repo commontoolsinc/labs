@@ -7,7 +7,7 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { computed, type Default, pattern } from "commonfabric";
+import { computed, type Default, type Default as RenamedDefault, pattern, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -22,6 +22,8 @@ const __cfAmdHooks = undefined;
 interface Item {
     done: boolean | Default<false>;
     label: Default<string, "">;
+    // Renamed import: detection is symbol-verified, not name-gated.
+    rank: RenamedDefault<number, 7>;
 }
 interface Input {
     items: Item[];
@@ -76,11 +78,37 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_3 = __cfHelpers.lift<{
+    items: {
+        rank: __cfHelpers.Default<number | (number & { readonly [DEFAULT_MARKER]: number; }), 7>;
+    }[];
+}, boolean>(({ items }) => items[0]?.rank === 7, {
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    rank: {
+                        type: "number",
+                        "default": 7
+                    }
+                },
+                required: ["rank"]
+            }
+        }
+    },
+    required: ["items"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     const firstDone = __cfLift_1({ items: items }).for("firstDone", true);
     const firstLabelEmpty = __cfLift_2({ items: items }).for("firstLabelEmpty", true);
-    return { firstDone, firstLabelEmpty };
+    const firstRank = __cfLift_3({ items: items }).for("firstRank", true);
+    return { firstDone, firstLabelEmpty, firstRank };
 }, {
     type: "object",
     properties: {
@@ -103,9 +131,12 @@ export default pattern((__cf_pattern_input) => {
                 label: {
                     type: "string",
                     "default": ""
+                },
+                rank: {
+                    type: "number"
                 }
             },
-            required: ["done", "label"]
+            required: ["done", "label", "rank"]
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, {
@@ -116,14 +147,18 @@ export default pattern((__cf_pattern_input) => {
         },
         firstLabelEmpty: {
             type: "boolean"
+        },
+        firstRank: {
+            type: "boolean"
         }
     },
-    required: ["firstDone", "firstLabelEmpty"]
+    required: ["firstDone", "firstLabelEmpty", "firstRank"]
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
 __cfReg({
     __cfLift_1,
-    __cfLift_2
+    __cfLift_2,
+    __cfLift_3
 });
