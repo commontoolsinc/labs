@@ -9,14 +9,17 @@ import type { Module, Pattern } from "../src/builder/types.ts";
 import type { HarnessedFunction } from "../src/harness/types.ts";
 
 /**
- * PR C of docs/specs/content-addressed-action-identity-implementation-plan.md:
- * content-addressed `$implRef` dual-write + CFC provenance.
+ * PRs C and E1 of
+ * docs/specs/content-addressed-action-identity-implementation-plan.md:
+ * content-addressed `$implRef` + CFC provenance, and the writer flip.
  *
  * - Functions become "verified" by being registered through the trust-gated
  *   module indexing during evaluation; their provenance carries the defining
  *   module's content identity and the artifact's export/`__cfReg` symbol.
- * - Serialized javascript modules carry `$implRef: { identity, symbol }`
- *   (alongside the legacy `implementationRef` until the flip).
+ * - Serialized javascript modules carry `$implRef: { identity, symbol }`;
+ *   since the flip (E1) the legacy `implementationRef` is runtime-only and
+ *   the body is omitted when the engine's strong implementation index proves
+ *   the ref resolvable — including after the bounded artifact index evicts.
  * - CFC policy identity resolves from the provenance (`moduleIdentity`,
  *   reload-stable) with the legacy registry as fallback; a forged function —
  *   even with byte-identical source — has no provenance and fails closed.
@@ -94,7 +97,7 @@ describe("content-addressed action identity", () => {
     );
   });
 
-  it("serializes javascript modules with $implRef (dual-write)", async () => {
+  it("serializes javascript modules with $implRef only (no legacy fields)", async () => {
     const pattern = await setup();
     const module = handlerModuleOf(pattern);
     const json = (module as Module & { toJSON?: () => unknown }).toJSON
@@ -111,8 +114,70 @@ describe("content-addressed action identity", () => {
     )!;
     expect(ref.identity).toBe(provenance.identity);
     expect(ref.symbol).toBe(provenance.symbol);
-    // Legacy field still written during the dual-write window.
-    expect(typeof json.implementationRef).toBe("string");
+    // PR E1 (the flip): the legacy `implementationRef` is no longer written,
+    // and the body stays omitted because this runtime's engine resolves the
+    // `$implRef` through its content-addressed implementation index.
+    expect("implementationRef" in json).toBe(false);
+    expect("implementation" in json).toBe(false);
+  });
+
+  it("a $implRef-only module survives artifact-index eviction (engine implementation index)", async () => {
+    const pattern = await setup();
+    const module = handlerModuleOf(pattern);
+    const json = (module as Module & { toJSON: () => unknown })
+      .toJSON() as Record<string, unknown>;
+    const ref = json.$implRef as { identity: string; symbol: string };
+    expect(ref).toBeDefined();
+    expect("implementation" in json).toBe(false);
+
+    // The engine's implementation index admits the ref directly (this is the
+    // strong, session-lifetime index that replaces the legacy registry's
+    // eviction insurance for post-flip data).
+    expect(
+      typeof runtime!.harness.getVerifiedImplementation?.(
+        ref.identity,
+        ref.symbol,
+      ),
+    ).toBe("function");
+
+    // Simulate the bounded artifact index rolling the module out mid-session
+    // (FIFO eviction after ~1000 other identities) — the worst case for a
+    // `$implRef`-only stored graph, which has no legacy ref and no body.
+    const manager = runtime!.patternManager as unknown as {
+      addressableByIdentity: Map<string, unknown>;
+      modulesByIdentity: Map<string, unknown>;
+    };
+    manager.addressableByIdentity.clear();
+    manager.modulesByIdentity.clear();
+    expect(
+      runtime!.patternManager.artifactFromIdentitySync(
+        ref.identity,
+        ref.symbol,
+      ),
+    ).toBeUndefined();
+
+    // A graph carrying only the $implRef must still instantiate and execute.
+    const nodes = pattern.nodes.map((node) =>
+      (node.module as Module).type === "javascript" &&
+        (node.module as Module).wrapper === "handler"
+        ? { ...node, module: json as unknown as Module }
+        : node
+    );
+    const rehydrated = { ...pattern, nodes } as unknown as Pattern;
+    const tx = runtime!.edit();
+    const resultCell = runtime!.getCell<{ name: string }>(
+      signer.did(),
+      "evicted-implref-resolution",
+      undefined,
+      tx,
+    );
+    // deno-lint-ignore no-explicit-any
+    const r = runtime!.run(tx, rehydrated, {}, resultCell) as any;
+    await tx.commit();
+    await r.pull();
+    r.key("setName").send({ name: "resolved-after-eviction" });
+    await runtime!.idle();
+    expect(r.key("name").get()).toBe("resolved-after-eviction");
   });
 
   it("CFC identity resolves from provenance with a stable moduleIdentity", async () => {
@@ -211,6 +276,38 @@ describe("provenance bundleId fallback (legacy claim compat)", () => {
     expect(identity?.kind).toBe("verified");
     expect((identity as { bundleId?: string }).bundleId).toBe(
       "load:legacy-bundle",
+    );
+  });
+
+  it("carries the evaluation's bundleId via provenance when no verifiedLoadId is available", async () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "observe",
+    });
+    const pattern = await runtime.patternManager.compilePattern(PROGRAM);
+    await runtime.idle();
+    const node = pattern.nodes.find((n) =>
+      (n.module as Module).type === "javascript" &&
+      (n.module as Module).wrapper === "handler"
+    );
+    const module = node!.module as Module;
+    const fn = module.implementation as HarnessedFunction;
+
+    // Post-flip stored graphs carry no `implementationRef`, so resolution of a
+    // rehydrated module yields NO verifiedLoadId — but a stored legacy
+    // bundleId-only `writeAuthorizedBy` claim still needs the live identity to
+    // carry the bundle id or it fails closed. The id therefore rides on the
+    // provenance recorded at evaluation time.
+    expect(getVerifiedProvenance(fn)?.bundleId).toBeDefined();
+    const identity = resolvePolicyFacingImplementationIdentity(module, {
+      harness: runtime.harness,
+      implementation: fn,
+    });
+    expect(identity?.kind).toBe("verified");
+    expect((identity as { bundleId?: string }).bundleId).toBe(
+      getVerifiedProvenance(fn)!.bundleId,
     );
   });
 });

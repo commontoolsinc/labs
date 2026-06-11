@@ -813,11 +813,12 @@ describe("moduleToJSON", () => {
 
     expect(serialized).toMatchObject({
       type: "javascript",
-      implementationRef: "main.tsx#000:doubled",
       implementation: Function.prototype.toString.call(implementation),
       preview: "(value) => value * 2",
       location: "main.tsx:1:1",
     });
+    // Since the flip the legacy ref is runtime-only — never serialized.
+    expect("implementationRef" in serialized).toBe(false);
   });
 
   it("serializes non-javascript function-backed modules without leaking implementations", () => {
@@ -836,11 +837,11 @@ describe("moduleToJSON", () => {
 
     expect(serialized).toMatchObject({
       type: "raw",
-      implementationRef: "main.tsx#001:raw",
       preview: "() => 'ok'",
       location: "main.tsx:2:1",
     });
     expect("implementation" in serialized).toBe(false);
+    expect("implementationRef" in serialized).toBe(false);
   });
 
   it("keeps the fallback body when the registering runtime can't resolve the $implRef (standalone-engine registration)", async () => {
@@ -913,17 +914,23 @@ describe("moduleToJSON", () => {
 
     // The implementation became verified during the STANDALONE Engine's
     // evaluation, so it carries process-global content-addressed provenance
-    // (Engine.recordModuleProvenance) and `moduleToJSON` dual-writes a
-    // `$implRef`. But this pattern was registered WITHOUT going through
-    // `compilePattern`/`registerEvaluatedModules`, so the runtime's own
-    // identity index never saw the artifact and cannot resolve that `$implRef`
-    // on reload (the cross-engine path the deleted `associatePattern` bridge
-    // used to serve). The serializer must therefore KEEP the stringified body
-    // as the fallback — otherwise reload would miss the index, miss the
-    // registry, and throw.
+    // (Engine.recordModuleProvenance) and `moduleToJSON` writes a `$implRef`.
+    // But this pattern was registered WITHOUT going through
+    // `compilePattern`/`registerEvaluatedModules` on THIS runtime, so its
+    // engine's implementation index never saw the artifact and cannot resolve
+    // that `$implRef` on reload (the cross-engine path the deleted
+    // `associatePattern` bridge used to serve). The serializer must therefore
+    // KEEP the stringified body as the fallback — otherwise reload would miss
+    // the index, miss the registry, and throw.
     expect(getVerifiedProvenance(targetModule.implementation)).toBeDefined();
     expect(
       runtime.patternManager.artifactFromIdentitySync(
+        getVerifiedProvenance(targetModule.implementation)!.identity,
+        getVerifiedProvenance(targetModule.implementation)!.symbol!,
+      ),
+    ).toBeUndefined();
+    expect(
+      runtime.harness.getVerifiedImplementation?.(
         getVerifiedProvenance(targetModule.implementation)!.identity,
         getVerifiedProvenance(targetModule.implementation)!.symbol!,
       ),
@@ -936,10 +943,8 @@ describe("moduleToJSON", () => {
     } finally {
       popFrame(frame);
     }
-    expect(serialized).toMatchObject({
-      type: "javascript",
-      implementationRef: targetModule.implementationRef,
-    });
+    expect(serialized).toMatchObject({ type: "javascript" });
+    expect("implementationRef" in serialized).toBe(false);
     expect(serialized).toHaveProperty("$implRef");
     // Body KEPT: this runtime cannot resolve the $implRef, so the fallback is
     // required for a successful reload.

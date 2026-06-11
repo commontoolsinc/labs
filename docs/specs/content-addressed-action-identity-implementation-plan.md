@@ -3,11 +3,12 @@
 Companion to [`content-addressed-action-identity.md`](./content-addressed-action-identity.md)
 (the design). One PR per letter; each lands green and is independently
 revertible. Phase 0 (ordinal-free `implementationRef` + legacy-alias shim)
-shipped in #3997.
+shipped in #3997; A–D shipped in #4006/#4008/#4009/#4013; E is in flight (see
+"PR E — the flip" for the recorded gating decisions and the E1 status).
 
 ## Last Updated
 
-2026-06-10
+2026-06-11
 
 ## Guiding constraints
 
@@ -285,11 +286,59 @@ BEFORE C2 and assert it still loads (legacy-read canary, kept until PR E).
 Verify: full runner suite; multi-runtime/multi-user cf tests (worker-isolated
 runtimes exercise repeated loads of identical programs).
 
-## PR E — the flip (gated; not scheduled yet)
+## PR E — the flip (gated)
 
 Gate: B–D soaked on main; stored-data aging assessed (graphs rewrite on piece
 re-instantiation, so legacy refs age out; sample production spaces if
 available).
+
+### Gating decisions (recorded 2026-06-11)
+
+- **Gate 1 (soak): pass.** A–D merged (#4006/#4008/#4009/#4013) with no
+  reverts and no identity-machinery incidents; the only post-C commits
+  touching the identity-critical files were #4014 (cross-space loading) and
+  #4015 (CFC read gating), both unrelated mechanisms. Caveat: D merged
+  2026-06-10, so soak time is short — mitigated by E1 keeping every read path.
+- **Gate 2 (stored-data aging): could not measure** — no production-space
+  sample was available at decision time, and C/D are days old, so pre-C
+  graphs (`implementationRef` + omitted body, no `$implRef`) certainly
+  persist. Decision: KEEP the legacy read path one more cycle —
+  `ensureImplementationRef` + ordinal-alias shim (+ its test), the
+  `registerVerifiedFunctionImplementation` builder channel, one string-keyed
+  unbounded verified-function index, `getExecutableFunction`, the runner's
+  legacy resolution arm, and the bundleId-only claim-verification arm. E2 is
+  scoped down accordingly (loadId threading and per-load maps still go; the
+  ref-keyed global index stays). Retirement of the kept pair needs either a
+  stored-data sample showing `$implRef`-less graphs aged out or a
+  `COMPILE_CACHE_RUNTIME_VERSION`-style cutoff (design Phase 4).
+- **Gate 3 (eviction pinning): decided in E1** — a strong, session-lifetime,
+  per-engine content-addressed implementation index
+  (`ExecutableRegistry.verifiedImplementationsByEntryRef`, populated by
+  `Engine.recordModuleProvenance`, exposed as
+  `Harness.getVerifiedImplementation`). The bounded artifact index stays the
+  fast path; the engine index is the eviction-proof backing that lets writers
+  omit both `implementationRef` and the body. See design § Open questions 1.
+- **bundleId-arm retention:** the verification arm in `cfc/prepare.ts` stays
+  (stored claims need it); `VerifiedProvenance` now carries the evaluating
+  load's `bundleId` so identities resolved WITHOUT a `verifiedLoadId`
+  (post-flip graphs have no `implementationRef` to look one up by) still
+  satisfy stored bundleId-only claims. The provenance field and the arm retire
+  together, next cycle, gated on stored-data evidence.
+
+### E1 — writer flip (landed as this series' first PR)
+
+Writers stop emitting `implementationRef`/stringified `implementation` exactly
+where the resolvability gate proves the `$implRef` suffices (the gate now
+probes the engine implementation index, which never evicts in-session); the
+"must carry implementationRef" throw is deleted. The admitted-probe is NOT
+deleted (the plan text below predates the finding): it is narrowed to the one
+category `$implRef` cannot cover — registry-admitted host-trusted values
+(`trustedHostFunctionIndex`; closure-bearing, body round-trip impossible) and
+dynamic in-action artifacts (no provenance symbol) — which keep serializing
+`implementationRef` + omitted body until E2's §5 host registrar replaces them.
+Canary: `test/pre-flip-graph-canary.test.ts` + the committed pre-flip fixture
+pin both persisted vintages (pre-#4009 ref-only, #4009..E1 dual-write)
+loading AND executing; it must stay green until the legacy read path retires.
 
 1. Writers stop emitting `implementationRef` and the stringified
    `implementation`; `moduleToJSON`'s `admittedImplementation` probe and the
