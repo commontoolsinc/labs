@@ -47,7 +47,10 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import { type CfcLabelView, cfcLabelViewForCell } from "../cfc/label-view.ts";
+import {
+  type CfcLabelView,
+  cfcLabelViewForCellFailClosed,
+} from "../cfc/label-view.ts";
 import {
   cfcConfidentialityForObservationNode,
   cfcObservationFitsCeiling,
@@ -1436,7 +1439,7 @@ function buildAvailableCellsDocumentationWithObservation(
         contextSpace: space,
         rootLink: link,
         labelView: observationMaxConfidentiality
-          ? cfcLabelViewForCell(concreteCell)
+          ? cfcLabelViewForCellFailClosed(concreteCell)
           : undefined,
         observationMaxConfidentiality,
       });
@@ -1546,7 +1549,7 @@ function getObservedDialogMessages(
   messages: readonly BuiltInLLMMessage[];
   observedConfidentiality: readonly unknown[];
 } {
-  const labelView = cfcLabelViewForCell(messagesCell);
+  const labelView = cfcLabelViewForCellFailClosed(messagesCell);
   const observedConfidentiality = joinCfcObservedConfidentiality(
     messages.map((_message, index) => {
       const stored = messageObservations[index.toString()];
@@ -2149,7 +2152,7 @@ async function handleRead(
     seen: new Set(),
     contextSpace: space,
     rootLink: cell.getAsNormalizedFullLink(),
-    labelView: cfcLabelViewForCell(cell),
+    labelView: cfcLabelViewForCellFailClosed(cell),
     observationMaxConfidentiality,
   });
 
@@ -2321,7 +2324,7 @@ async function handleInvoke(
       rootLink: concreteResult.getAsNormalizedFullLink(),
       labelView: useResultSchemaForObservation
         ? undefined
-        : cfcLabelViewForCell(concreteResult),
+        : cfcLabelViewForCellFailClosed(concreteResult),
       observationMaxConfidentiality,
     });
     return {
@@ -2349,7 +2352,7 @@ async function handleInvoke(
         seen: new Set(),
         contextSpace: space,
         rootLink: result.getAsNormalizedFullLink(),
-        labelView: cfcLabelViewForCell(result),
+        labelView: cfcLabelViewForCellFailClosed(result),
         observationMaxConfidentiality,
       });
       return {

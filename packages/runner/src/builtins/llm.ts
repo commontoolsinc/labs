@@ -20,7 +20,7 @@ import {
 import type { Schema } from "@commonfabric/api/schema";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
-import { cfcLabelViewForCell } from "../cfc/label-view.ts";
+import { cfcLabelViewForCellFailClosed } from "../cfc/label-view.ts";
 import {
   schemaWithInjectionSafeAnnotations,
   validateAgainstSchema,
@@ -89,7 +89,7 @@ function summarizeGenerateObjectRequest(details: {
 }
 
 function collectCellConfidentiality(cell: Cell<any>): readonly unknown[] {
-  const labelView = cfcLabelViewForCell(cell.resolveAsCell());
+  const labelView = cfcLabelViewForCellFailClosed(cell.resolveAsCell());
   if (labelView === undefined) {
     return [];
   }
