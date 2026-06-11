@@ -88,6 +88,7 @@ import {
 } from "./cfc/types.ts";
 import { setVerifiedFunctionRegistrar } from "./sandbox/function-hardening.ts";
 import {
+  getVerifiedProvenance,
   identityFromCanonicalSource,
   recordVerifiedProvenance,
 } from "./harness/verified-provenance.ts";
@@ -2407,12 +2408,22 @@ export class Runner {
       ref.identity,
       ref.symbol,
     );
-    if (!artifact) return undefined;
-    const implementation =
-      (artifact as { implementation?: unknown }).implementation ?? artifact;
-    return typeof implementation === "function"
-      ? implementation as (...args: any[]) => any
-      : undefined;
+    if (artifact) {
+      const implementation =
+        (artifact as { implementation?: unknown }).implementation ?? artifact;
+      if (typeof implementation === "function") {
+        return implementation as (...args: any[]) => any;
+      }
+    }
+    // Eviction insurance: the artifact index is FIFO-bounded and can roll a
+    // running pattern's module out mid-session, and a post-flip graph has no
+    // legacy ref (and no body when the writer proved resolvability). The
+    // engine's content-addressed implementation index is strong for the
+    // session, so the `$implRef` keeps resolving.
+    return this.runtime.harness.getVerifiedImplementation?.(
+      ref.identity,
+      ref.symbol,
+    ) as ((...args: any[]) => any) | undefined;
   }
 
   /**
@@ -3561,17 +3572,26 @@ export class Runner {
       return fn(argument);
     };
 
-    if (!verifiedLoadId || !this.runtime.harness.registerVerifiedFunction) {
+    // A verified execution context is proven either by the legacy load id
+    // (resolved through `implementationRef`) or — for post-flip graphs, which
+    // carry no legacy ref — by the resolved function's content-addressed
+    // provenance. An unverified function (fallback-resolved or forged) has
+    // neither, so it can never register dynamic artifacts as verified.
+    const verifiedContext = verifiedLoadId !== undefined ||
+      getVerifiedProvenance(fn) !== undefined;
+    if (!verifiedContext) {
       return invoke();
     }
 
     const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
       (implementationRef, implementation) => {
-        this.runtime.harness.registerVerifiedFunction!(
-          verifiedLoadId,
-          implementationRef,
-          implementation as (input: any) => void,
-        );
+        if (verifiedLoadId && this.runtime.harness.registerVerifiedFunction) {
+          this.runtime.harness.registerVerifiedFunction(
+            verifiedLoadId,
+            implementationRef,
+            implementation as (input: any) => void,
+          );
+        }
         // Content-addressed provenance for artifacts created DURING a
         // verified action's execution: the identity derives from the new
         // function's canonical source location (it was compiled as part of a

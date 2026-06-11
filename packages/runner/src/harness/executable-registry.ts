@@ -36,6 +36,21 @@ export class ExecutableRegistry {
   >();
   private trustedHostFunctionRefs = new WeakMap<HarnessedFunction, string>();
   private nextTrustedHostFunctionId = 0;
+  // Content-addressed implementation index: module identity → symbol → the
+  // implementation function recorded by `Engine.recordModuleProvenance` during
+  // a verified evaluation. Deliberately STRONG and session-unbounded, like the
+  // legacy `verifiedFunctionIndex` whose eviction insurance it replaces: the
+  // bounded artifact index (`PatternManager.addressableByIdentity`, FIFO 1000)
+  // can roll a running pattern's module out mid-session, and a post-flip
+  // serialized graph carries ONLY `$implRef` — no legacy ref, and no body when
+  // the writer proved this index admits the ref. Retention is bounded by the
+  // set of DISTINCT verified implementations evaluated this session, strictly
+  // less than the legacy per-load registries held (one entry per content
+  // identity instead of one per load).
+  private readonly verifiedImplementationsByEntryRef = new Map<
+    string,
+    Map<string, HarnessedFunction>
+  >();
 
   clear(): void {
     this.verifiedFunctions.clear();
@@ -47,6 +62,34 @@ export class ExecutableRegistry {
     this.trustedHostFunctionIndex.clear();
     this.trustedHostFunctionRefs = new WeakMap();
     this.nextTrustedHostFunctionId = 0;
+    this.verifiedImplementationsByEntryRef.clear();
+  }
+
+  /**
+   * Record a verified implementation under its content-addressed
+   * `{ identity, symbol }` entry ref. Overwrites: a re-evaluation of the same
+   * identity resolves to the fresh function (mirroring the artifact index;
+   * any two instances of one module identity are interchangeable — the SES
+   * verifier forbids module-scope mutable state).
+   */
+  registerVerifiedImplementation(
+    identity: string,
+    symbol: string,
+    implementation: HarnessedFunction,
+  ): void {
+    let bucket = this.verifiedImplementationsByEntryRef.get(identity);
+    if (!bucket) {
+      bucket = new Map();
+      this.verifiedImplementationsByEntryRef.set(identity, bucket);
+    }
+    bucket.set(symbol, implementation);
+  }
+
+  getVerifiedImplementation(
+    identity: string,
+    symbol: string,
+  ): HarnessedFunction | undefined {
+    return this.verifiedImplementationsByEntryRef.get(identity)?.get(symbol);
   }
 
   beginVerifiedLoad(loadId: string): void {

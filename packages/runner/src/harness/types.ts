@@ -198,6 +198,16 @@ export interface Harness extends EventTarget {
     implementationRef: string,
   ): HarnessedFunction | undefined;
 
+  // Resolve a verified implementation function by its content-addressed
+  // `{ identity, symbol }` entry ref — the strong (session-lifetime) index
+  // behind serialized `$implRef`s. Unlike the bounded artifact index this
+  // never evicts, so a `$implRef`-only graph stays resolvable for as long as
+  // its module was verified-evaluated in this session.
+  getVerifiedImplementation?(
+    identity: string,
+    symbol: string,
+  ): HarnessedFunction | undefined;
+
   unsafeTrustHostValue(
     value: unknown,
     options: UnsafeHostTrustOptions,
