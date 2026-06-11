@@ -3,7 +3,7 @@
 Letting authored patterns import other patterns published in the fabric:
 
 ```tsx
-import { TodoItem, todoSchema } from "cf:kitchen/todo-list";   // a slug — names a piece OR a published pattern
+import { TodoItem, todoSchema } from "cf:/kitchen/todo-list";  // a slug — names a piece OR a published pattern
 import { TodoItem } from "cf:pattern:9f2ab…e41";               // a content-addressed source, directly
 ```
 
@@ -99,14 +99,19 @@ Because both come up, and only one is the pin:
 
 ### One grammar, no type tag
 
+The prefix encodes the qualification level, like relative path / absolute
+path / protocol-relative URL:
+
 ```
-cf:[//host/][<space>/]<ref>[/<subpath>][@<pin>]
+cf:<ref>[/<subpath>][@<pin>]                       ; current space
+cf:/<space>/<ref>[/<subpath>][@<pin>]              ; explicit space
+cf://<host>/<space>/<ref>[/<subpath>][@<pin>]      ; explicit toolshed
 
 ref     = slug                ; no ":" — isSlugAddress convention
         | "of:" hash          ; cell URI (pattern meta cell, or a piece's entity id)
         | "pattern:" hash     ; entry-module identity (content-addressed source)
-space   = space-name | space-did | "~"     ; "~" = the compiling space
-host    = domain[":"port]                  ; a toolshed
+space   = space-name | space-did
+host    = domain[":"port]     ; a toolshed
 pin     = entry-module identity hex
 ```
 
@@ -114,33 +119,32 @@ Examples:
 
 ```tsx
 import { TodoItem } from "cf:todo-list";                            // slug, current space
-import { TodoItem } from "cf:kitchen/todo-list";                    // space by name
-import { TodoItem } from "cf:did:key:z6Mk…/todo-list";              // space by DID
+import { todoSchema } from "cf:todo-list/schemas";                  // subpath (phase 2)
+import { TodoItem } from "cf:/kitchen/todo-list";                   // space by name
+import { TodoItem } from "cf:/did:key:z6Mk…/todo-list";             // space by DID
 import { TodoItem } from "cf://toolshed.common.tools/kitchen/todo-list";  // explicit toolshed
-import { todoSchema } from "cf:~/todo-list/schemas";                // subpath (phase 2; "~" required)
 import { TodoItem } from "cf:pattern:9f2ab…e41";                    // content-addressed, space-free
-import { TodoItem } from "cf:kitchen/of:bafy…";                     // pattern meta cell by URI
+import { TodoItem } from "cf:/kitchen/of:bafy…";                    // pattern meta cell by URI
 
 // What a deployed importer actually stores (§ Snapshot semantics):
-import { TodoItem } from "cf:kitchen/todo-list@9f2ab…e41";
+import { TodoItem } from "cf:/kitchen/todo-list@9f2ab…e41";
 ```
 
-Parsing rules (each segment class is syntactically disjoint):
+Parsing rules (each form is disjoint by prefix; no segment counting needed):
 
-- After `cf:`, a leading `//` introduces a **host** (URL-authority style); a
-  single leading `/` is permitted and ignored. Hosts only appear in the
-  authority position, so no dot-sniffing of path segments is needed.
 - The **pin** is always a trailing `@<hash>`; strip it first. Slugs, space
   names, DIDs, and hosts cannot contain `@`.
-- Segments split on `/`. **One segment** ⇒ it is the `ref`, current space.
-  **Two or more** ⇒ the first is the `space` (name, DID — colons inside a
-  segment are fine — or `~`), the second is the `ref`, the rest is `subpath`.
-  Consequence: a subpath on a current-space ref requires the `~` placeholder
-  (`cf:~/todo-list/schemas`); a misparse fails loudly at space resolution.
+- After `cf:`: `//` ⇒ the next segment is a **host**, then space, then ref.
+  A single `/` ⇒ the next segment is a **space** (name or DID — colons inside
+  a segment are fine), then ref. No slash ⇒ the first segment is the `ref` in
+  the current space. All remaining segments are the `subpath`. Because
+  space-qualification *requires* the leading slash, `cf:todo-list/schemas` is
+  unambiguously ref + subpath — no placeholder needed.
 - A `ref` containing `:` is a cell URI (`of:`, `pattern:`); otherwise it must
   validate as a slug. `pattern:` refs are space-free-capable (content
-  addressed; the space, if given, is only a resolution hint). Slug refs always
-  need a space (slug ids are space-scoped: `slugIdForSpace`).
+  addressed; the space, if given, is only a resolution hint). Slug refs are
+  always space-scoped (slug ids are `slugIdForSpace(space, slug)`), with the
+  current space as default.
 - The emitted-namespace specifiers `cf:module/<hash>` and `cf:cache-root/`
   remain compiler-internal and are **rejected in authored source**.
 
@@ -214,7 +218,7 @@ Mechanics:
    the specifier in the stored source** to the pinned form:
 
    ```tsx
-   import { TodoItem } from "cf:kitchen/todo-list@9f2ab…e41";
+   import { TodoItem } from "cf:/kitchen/todo-list@9f2ab…e41";
    ```
 
    The stored program is then fully deterministic: compilation, identity, and
@@ -352,15 +356,19 @@ with storage and network access, and `ProgramResolver.resolveSource` is async)
 Engine wraps the authored resolver; on a `cf:` specifier:
 
 1. **Reference → identity**: pinned (or `pattern:` ref) → use the hash, never
-   touch the mutable pointer. Unpinned (dev only) → run the uniform chase:
-   resolve space (`~`/name/DID), slug cell redirect, piece `meta(…)` hop,
-   meta-cell `entryIdentity`.
+   touch the mutable pointer. Unpinned (authoring/dev only) → run the uniform
+   chase **as ordinary cell reads through the compiling runtime's storage**
+   (slug cell redirect, piece `meta(…)` hop, meta-cell `entryIdentity`) —
+   `cf check`/`cf dev` already construct a runtime (`packages/cli/lib/dev.ts`),
+   and every production compile happens inside one, so no resolution endpoint
+   is involved and space authz is exactly memory-read authz. The one
+   exception is host-qualified refs (§ Toolshed surface).
 2. **Identity → source set**, first hit wins, every hop hash-verified:
    1. local/space compile-cache source docs (`pattern:<identity>`, walking
       import links);
    2. the space named in the reference (if any);
-   3. the toolshed registry endpoint (below);
-   4. for host-qualified refs, that host's registry endpoint.
+   3. the toolshed pattern endpoint (below);
+   4. for host-qualified refs, that host's pattern endpoint.
 3. **Verify**: recompute `computeModuleHashes` over the fetched program (its
    own namespace, its own authored paths) and require the entry hash to equal
    the requested identity. Mismatch = compile error. This is what makes every
@@ -399,23 +407,36 @@ import costs nothing the deployed pattern hasn't already paid.
 
 ### 4. Toolshed surface
 
-Two new endpoints (names indicative), both per-toolshed — this is the host in
-a host-qualified reference, defaulting to the toolshed the compiling runtime's
-session is connected to:
+Mutable-pointer resolution does **not** get an endpoint for the common case:
+every compile context has a runtime (CLI commands construct one; production
+compiles run inside one), and the chase is ordinary cell reads over the
+existing memory session — which also means space authz is inherited rather
+than re-implemented in an HTTP route.
 
-- `GET /api/registry/resolve/:space/:ref` → `{ spaceDid, chain: [...],
-  entryIdentity, patternId }` — runs the uniform resolution chase for a slug
-  or cell-URI ref and reports the terminal identity (plus the chain, for
-  tooling/error messages). Auth: requires read access to the space (same
-  authz as a memory read; this is a convenience projection, not a bypass).
-  Used by CLI/CI pin steps and cross-toolshed resolution without a full
-  memory session.
+One new endpoint, needed for cross-host content:
+
 - `GET /api/registry/pattern/:identity` → the source set
   (`{ main, files: [{name, contents}] }`, plus per-module identities) for a
   **published** pattern. Backed by publication-as-naming: assigning a slug to
   a pattern meta cell in a toolshed-readable space (sugar: `cf publish`).
   Responses are immutable and cacheable (`Cache-Control: immutable`, like
   blobs); clients verify by re-hashing, so mirroring is safe.
+
+And one *possible* endpoint, deferred until host-qualified refs land:
+
+- `GET /api/registry/resolve/:space/:ref` → `{ spaceDid, chain, entryIdentity }`
+  — runs the chase server-side. Its only justified scenario is **pin time for
+  a cross-toolshed mutable ref** (`cf://other-host/...`): the author's runtime
+  has a memory session to *its* toolshed only, and usually no identity on the
+  foreign host, so reading the remote slug/piece chain needs either a one-shot
+  foreign memory session or this GET. That is a rare, authoring-time,
+  human-in-the-loop operation — and if cross-host refs are simply required to
+  be born pinned (resolve once via the publisher's host at authoring time),
+  the compile path never needs it at all. Decide when phase 3 starts; the
+  conservative default is to ship publication (slug → pattern in a public
+  space) such that the chase for *published* names is readable
+  unauthenticated, making this endpoint a thin projection rather than new
+  authority.
 
 The existing `/api/patterns/:filename` (repo-file serving) is unrelated and
 unchanged.
@@ -438,10 +459,11 @@ unchanged.
 1. **`cf:pattern:<hash>`, same-space.** No new endpoints, no pinning step —
    resolution entirely via existing cell-cache source docs +
    `computeModuleHashes` verification. Proves the resolver/mounting/emit seams.
-2. **Slug/piece refs + pinning**, current toolshed; registry resolve endpoint;
-   deploy-time pin rewrite; `cf deps update`.
+2. **Slug/piece refs + pinning**, current toolshed — still no endpoints
+   (resolution = the compiling runtime's storage reads); deploy-time pin
+   rewrite; `cf deps update`.
 3. **`cf publish` + registry pattern endpoint + host-qualified refs**
-   (cross-toolshed).
+   (cross-toolshed); decide the resolve-endpoint question here.
 4. **Subpaths; `npm:`/esm.sh vendoring** on the same rails.
 
 ## Security considerations
@@ -479,9 +501,10 @@ unchanged.
 
 ## Test plan
 
-- **Grammar**: parse/format round-trips; host/space/ref/subpath/pin
-  disambiguation table (incl. `~`, DIDs-as-space, `of:`/`pattern:` refs);
-  rejection of `cf:module/` and `cf:cache-root/` in authored source.
+- **Grammar**: parse/format round-trips; prefix-form table (`cf:ref`,
+  `cf:/space/ref`, `cf://host/space/ref`, subpaths, pins, DIDs-as-space,
+  `of:`/`pattern:` refs); rejection of `cf:module/` and `cf:cache-root/` in
+  authored source.
 - **Resolution chase**: slug→piece→pattern, slug→pattern (direct
   publication), `of:<patternId>` start, `pattern:<hash>` terminal; "not a
   pattern" failures per chain shape.
