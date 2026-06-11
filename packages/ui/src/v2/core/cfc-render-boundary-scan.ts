@@ -27,7 +27,9 @@ const MAX_SCAN_DEPTH = 64;
  * The scan walks everything synchronously reachable: arrays, vnode children,
  * props (reactive props can carry vdom), `$UI` chains, and the cached values
  * of nested `CellHandle`s. It errs toward `true`: an uninspectable cell
- * (`get()` throws) or an over-deep tree counts as "may contain".
+ * (`get()` throws), an over-deep tree, or an array with a non-default
+ * `Symbol.iterator` (index reads and iteration could disagree) counts as
+ * "may contain".
  *
  * Known limit, in line with this being a conservative presence check: a
  * nested cell with no cached value scans as boundary-free, so a boundary that
@@ -73,7 +75,21 @@ function scan(value: unknown, visited: Set<object>, depth: number): boolean {
   let entries: unknown[];
   try {
     if (Array.isArray(value)) {
-      entries = Array.from(value);
+      // A non-default iterator lets index reads and iteration disagree about
+      // the array's contents, and consumers differ in which they use; refuse
+      // to certify either view as boundary-free.
+      if (
+        Object.hasOwn(value, Symbol.iterator) ||
+        value[Symbol.iterator] !== Array.prototype[Symbol.iterator]
+      ) {
+        return true;
+      }
+      // Walk by index, matching how the legacy renderer enumerates children
+      // (`newChildren[i]` up to `.length` in `bindChildren`). `Array.from`
+      // would consume the iterator protocol instead, which can hide elements
+      // that index reads still expose.
+      entries = [];
+      for (let i = 0; i < value.length; i++) entries.push(value[i]);
     } else {
       const record = value as Record<string, unknown>;
       // Flag on the node name alone (no `type === "vnode"` requirement): the

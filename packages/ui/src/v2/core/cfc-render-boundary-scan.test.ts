@@ -222,6 +222,50 @@ describe("mayContainCfcRenderBoundary", () => {
     expect(mayContainCfcRenderBoundary(proxy)).toBe(true);
   });
 
+  it("does not trust an array's own iterator to enumerate children", () => {
+    // A genuine array whose own `Symbol.iterator` yields nothing: iteration
+    // (e.g. `Array.from`) sees an empty array, while index reads — which is
+    // how the legacy renderer walks children — still see the boundary.
+    const hidden: unknown[] = [vnode("cf-cfc-render-boundary")];
+    Object.defineProperty(hidden, Symbol.iterator, {
+      value: function* (): Generator<unknown> {},
+    });
+    expect(Array.from(hidden)).toEqual([]); // iteration hides the element
+    expect(hidden[0]).toBeTruthy(); // index reads expose it
+    expect(mayContainCfcRenderBoundary(hidden)).toBe(true);
+    expect(mayContainCfcRenderBoundary(vnode("div", {}, hidden))).toBe(true);
+  });
+
+  it("treats an array subclass with an overridden iterator as may-contain", () => {
+    class SmugglingArray extends Array<unknown> {}
+    // Overridden on the subclass prototype (not an own property): iteration
+    // yields a boundary that index reads never show, so an iterating consumer
+    // would render it while an index-only scan would certify boundary-free.
+    Object.defineProperty(SmugglingArray.prototype, Symbol.iterator, {
+      value: function* (): Generator<unknown> {
+        yield vnode("cf-cfc-render-boundary");
+      },
+    });
+    const smuggling = new SmugglingArray();
+    smuggling.push(vnode("span", {}, ["looks benign by index"]));
+    expect(mayContainCfcRenderBoundary(smuggling)).toBe(true);
+    expect(mayContainCfcRenderBoundary(vnode("div", {}, smuggling))).toBe(
+      true,
+    );
+  });
+
+  it("still scans plain arrays correctly in both directions", () => {
+    expect(
+      mayContainCfcRenderBoundary([
+        vnode("span", {}, ["fine"]),
+        vnode("cf-cfc-render-boundary"),
+      ]),
+    ).toBe(true);
+    expect(
+      mayContainCfcRenderBoundary([vnode("span", {}, ["fine"]), "text"]),
+    ).toBe(false);
+  });
+
   it("still scans normally around hostile siblings", () => {
     const hostile = {
       get boom(): unknown {
