@@ -8,6 +8,7 @@ export {
   getCarriedCfcLabelView,
   mergeCfcLabelViews,
   rebaseCfcLabelView,
+  redactCaveatSourcesForDisplay,
 } from "./label-view.ts";
 export type {
   AttemptedWrite,

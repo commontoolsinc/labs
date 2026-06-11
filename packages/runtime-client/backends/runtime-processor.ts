@@ -25,7 +25,10 @@ import {
   setPatternEnvironment,
   type SigilLink,
 } from "@commonfabric/runner";
-import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
+import {
+  cfcLabelViewForCell,
+  redactCaveatSourcesForDisplay,
+} from "@commonfabric/runner/cfc";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
@@ -656,8 +659,17 @@ export class RuntimeProcessor {
     });
     await syncMetaLinkedDocs(rootCell);
     await cell.sync();
+    // `getCfcLabel()` is the pattern-facing INTROSPECTION surface: the response
+    // is returned to the caller, not round-tripped back into a cell. Redact
+    // `Caveat.source` identities here so a pattern can't learn which principal
+    // introduced a caveat (audit item 28b, inv-12). Observation labeling, the
+    // dereference-trace enforcement path, and the carried-label view all read
+    // the label through other seams and keep `source`.
+    const cfcLabel = cfcLabelViewForCell(cell);
     return {
-      cfcLabel: cfcLabelViewForCell(cell),
+      cfcLabel: cfcLabel === undefined
+        ? undefined
+        : redactCaveatSourcesForDisplay(cfcLabel),
     };
   }
 

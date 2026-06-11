@@ -18,6 +18,7 @@ import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { cellRefToSigilLink } from "./utils.ts";
 import { Runtime } from "@commonfabric/runner";
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import * as V2Storage from "../../runner/src/storage/v2.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
 
@@ -892,6 +893,60 @@ describe("RuntimeProcessor CFC label IPC", () => {
         }],
       },
     });
+  });
+
+  it("redacts Caveat.source from the introspection response (audit 28b)", async () => {
+    const ref: CellRef = {
+      id: "of:cfc-caveat-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink: () => ({
+          runtime: {
+            readTx: () => ({
+              readOrThrow: () => ({
+                value: "labelled data",
+                cfc: {
+                  version: 1,
+                  schemaHash: "test-schema",
+                  labelMap: {
+                    version: 1,
+                    entries: [{
+                      path: [],
+                      label: {
+                        confidentiality: [{
+                          type: CFC_ATOM_TYPE.Caveat,
+                          kind: "derived-from",
+                          source: "did:key:alice",
+                        }],
+                      },
+                    }],
+                  },
+                },
+              }),
+            }),
+          },
+          getAsNormalizedFullLink: () => ref,
+          getMetaRaw: () => undefined,
+          sync: () => Promise.resolve(),
+        }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    const response = await RuntimeProcessor.prototype.handleCellGetCfcLabel
+      .call(
+        processor,
+        { type: RequestType.CellGetCfcLabel, cell: ref },
+      );
+    const atom = response.cfcLabel?.entries[0].label.confidentiality
+      ?.[0] as Record<string, unknown>;
+    // The caveat survives with its kind/type, but the source identity is gone.
+    expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
+    expect(atom.kind).toBe("derived-from");
+    expect("source" in atom).toBe(false);
   });
 
   it("returns label views on resolved cell refs", () => {
