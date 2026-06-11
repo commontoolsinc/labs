@@ -24,3 +24,48 @@ export const spacesListSchema = {
 } as const satisfies JSONSchema;
 
 export type SpacesList = Schema<typeof spacesListSchema>;
+
+/**
+ * Site table: where each space lives. The home space carries a per-user
+ * table of `did → host` facts — the v0 of hint-driven space resolution
+ * (2026-06-09 federation session: "the smallest possible slice"). The
+ * runtime reads it as its live host lookup; writers include the local
+ * daemon (syncing its served sources) and link-receipt flows.
+ *
+ * Entries are HINTS: unverified in v0 (the space's own log is the
+ * integrity boundary, not the host), and a hint must never silently
+ * re-point a space the runtime already opened.
+ */
+export const spaceHostEntrySchema = {
+  type: "object",
+  properties: {
+    /** The space DID this fact is about — the table key. */
+    did: { type: "string" },
+    /** Base URL of the host currently serving the space. */
+    host: { type: "string" },
+    /** ISO timestamp of when this fact was recorded. */
+    updatedAt: { type: "string" },
+    /** Who recorded it (e.g. "local-source-sync", "share-link"). */
+    source: { type: "string" },
+  },
+  required: ["did", "host"],
+} as const satisfies JSONSchema;
+
+export type SpaceHostEntry = Schema<typeof spaceHostEntrySchema>;
+
+export const siteTableSchema = {
+  type: "array",
+  items: spaceHostEntrySchema,
+  default: [],
+} as const satisfies JSONSchema;
+
+export type SiteTable = Schema<typeof siteTableSchema>;
+
+/**
+ * Canonical cause for the home-space site-table cell, shared by the
+ * runtime (reader) and embedder daemons (writers) so both address the
+ * same document: `getCell(userDid, siteTableCause(userDid), siteTableSchema)`.
+ */
+export function siteTableCause(userDid: string): { siteTable: string } {
+  return { siteTable: userDid };
+}
