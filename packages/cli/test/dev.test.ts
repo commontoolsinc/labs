@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { bytesToLines, cf, checkStderr } from "./utils.ts";
+import { bytesToLines, cf, checkStderr, stripAnsi } from "./utils.ts";
 
 describe("cli dev", () => {
   it("Executes a package", async () => {
@@ -73,5 +73,19 @@ describe("cli dev", () => {
     checkStderr(stderr);
     expect(stdout[stdout.length - 1]).toBe("25");
     expect(code).toBe(0);
+  });
+
+  it("surfaces fabric imports without a space as a CLI compile error", async () => {
+    const { code, stdout, stderr } = await cf(
+      "check fixtures/fabric-import.tsx --no-run",
+    );
+    const renderedStderr = stripAnsi(stderr.join("\n"));
+
+    expect(code).not.toBe(0);
+    expect(stdout.length).toBe(0);
+    expect(renderedStderr).toContain(
+      "fabric imports require a space context (options.fabricImports)",
+    );
+    expect(renderedStderr).not.toContain("Could not resolve");
   });
 });

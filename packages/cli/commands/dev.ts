@@ -150,6 +150,9 @@ function createDevCommand(cmdName: string): Command<any> {
       "--root <path:string>",
       "Root directory for resolving imports. Allows imports from parent directories within this root.",
     )
+    // TODO(M2): add explicit space selection for fabric imports when CLI
+    // dependency pinning/update support lands. M1 intentionally does not add
+    // a new --space flag.
     .arguments("<files...:string>")
     .action(devAction);
 }

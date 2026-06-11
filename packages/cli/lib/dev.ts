@@ -1,8 +1,18 @@
-import { Program } from "@commonfabric/js-compiler";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import {
+  collectImportSpecifiers,
+  FileSystemProgramResolver,
+  type Program,
+  type ProgramResolver,
+  resolveImportSpecifier,
+  type Source,
+} from "@commonfabric/js-compiler";
+import { TARGET } from "@commonfabric/js-compiler/typescript";
 import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
 import { experimentalOptionsFromEnv } from "./utils.ts";
+
+const FABRIC_IMPORTS_REQUIRE_SPACE_MESSAGE =
+  "fabric imports require a space context (options.fabricImports)";
 
 async function createRuntime() {
   const { StorageManager } = await import(
@@ -40,9 +50,12 @@ export async function process(
   // that state, so `fn.src` stays a raw bundle coordinate and CFC verified-
   // binding identities (writeAuthorizedBy) fail under enforcement.
   const engine = runtime.harness;
-  const program = await engine.resolve(
-    new FileSystemProgramResolver(options.main, options.rootPath),
+  const resolver = new FileSystemProgramResolver(
+    options.main,
+    options.rootPath,
   );
+  await assertNoFabricImportsWithoutSpace(resolver);
+  const program = await engine.resolve(resolver);
   if (options.mainExport) {
     program.mainExport = options.mainExport;
   }
@@ -85,4 +98,41 @@ function renderTransformed(program: Program) {
     console.log(`// transformed: ${name}`);
     console.log(contents);
   }
+}
+
+async function assertNoFabricImportsWithoutSpace(
+  resolver: ProgramResolver,
+): Promise<void> {
+  const main = await resolver.main();
+  const pending = [main];
+  const seen = new Set<string>();
+
+  while (pending.length > 0) {
+    const source = pending.shift()!;
+    if (seen.has(source.name)) continue;
+    seen.add(source.name);
+
+    for (const specifier of collectImportSpecifiers(source, TARGET)) {
+      if (isFabricImportSpecifier(specifier)) {
+        throw new Error(FABRIC_IMPORTS_REQUIRE_SPACE_MESSAGE);
+      }
+
+      const identifier = resolveImportSpecifier(specifier, source);
+      if (!isFileSystemSourceIdentifier(identifier) || seen.has(identifier)) {
+        continue;
+      }
+      const resolved = await resolver.resolveSource(identifier);
+      if (resolved !== undefined) pending.push(resolved);
+    }
+  }
+}
+
+function isFabricImportSpecifier(specifier: string): boolean {
+  return specifier.startsWith("cf:");
+}
+
+function isFileSystemSourceIdentifier(
+  identifier: string,
+): identifier is Source["name"] {
+  return identifier.startsWith("/");
 }
