@@ -12,13 +12,6 @@ const MAP_INPUT_SCHEMA = internSchema({
   required: ["op"],
 });
 
-const MAP_LIST_SCHEMA = internSchema({
-  type: "array",
-  // `processDefaultValue()` treats `asCell` as an opaque cell boundary, so
-  // `type: "unknown"` only documents the inner value shape here.
-  items: { asCell: ["cell"], type: "unknown" },
-});
-
 // Presence probe for the result container: slots resolve as cells, so the
 // coordinator can ask "is the container initialized?" without materializing
 // element contents. A content-schema get() here would journal real value
