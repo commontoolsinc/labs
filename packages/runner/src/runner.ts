@@ -2363,7 +2363,7 @@ export class Runner {
         (module.implementationRef
           ? this.runtime.harness.getExecutableFunction(
             module.implementationRef,
-          ) as (...args: any[]) => any | undefined
+          ) as ((...args: any[]) => any) | undefined
           : undefined) ??
         this.getFallbackJavaScriptImplementation(module);
       this.functionCache.set(module, fn);
