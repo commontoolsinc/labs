@@ -169,3 +169,7 @@ export {
   slugIdForSpace,
   validateSlug,
 } from "./slugs.ts";
+export {
+  resolveSlugTargetCell,
+  SlugResolutionError,
+} from "./slug-resolution.ts";

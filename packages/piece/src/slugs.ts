@@ -1,27 +1,15 @@
-import type { Cell, URI } from "@commonfabric/runner";
+import type { Cell } from "@commonfabric/runner";
 import {
   getMetaLink,
   isSlugAddress,
-  parseLink,
+  resolveSlugTargetCell as resolveRuntimeSlugTargetCell,
   slugIdForSpace,
+  SlugResolutionError,
   validateSlug,
 } from "@commonfabric/runner";
 import { pieceId, PieceManager } from "./manager.ts";
 
-export class SlugResolutionError extends Error {
-  constructor(
-    message: string,
-    readonly code?:
-      | "invalid"
-      | "missing"
-      | "malformed"
-      | "not-piece"
-      | "missing-piece-id",
-  ) {
-    super(message);
-    this.name = "SlugResolutionError";
-  }
-}
+export { SlugResolutionError };
 
 export async function assignSlug(
   manager: PieceManager,
@@ -109,32 +97,9 @@ export async function resolveSlugTargetCell(
   manager: PieceManager,
   token: string,
 ): Promise<Cell<unknown>> {
-  const slug = validateSlug(token);
-  const slugId = slugIdForSpace(manager.getSpace(), slug);
-  const slugCell = manager.runtime.getCellFromEntityId(
+  return await resolveRuntimeSlugTargetCell(
+    manager.runtime,
     manager.getSpace(),
-    { "/": slugId },
+    token,
   );
-  await slugCell.sync();
-  const raw = slugCell.getRaw();
-  if (raw === undefined) {
-    throw new SlugResolutionError(`Slug "${slug}" not found.`, "missing");
-  }
-
-  const targetLink = parseLink(raw, slugCell);
-  if (!targetLink || targetLink.overwrite !== "redirect") {
-    throw new SlugResolutionError(
-      `Slug "${slug}" does not contain a valid redirect.`,
-      "malformed",
-    );
-  }
-
-  const target = manager.runtime.getCellFromLink({
-    ...targetLink,
-    id: targetLink.id as URI,
-    space: targetLink.space ?? manager.getSpace(),
-    scope: targetLink.scope ?? "space",
-  });
-  await target.sync();
-  return target;
 }
