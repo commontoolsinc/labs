@@ -155,6 +155,15 @@ export interface InitializationData {
   // `declassifyConfidentiality` so a pattern can't release a secret upward
   // through a render boundary (audit S15).
   renderDeclassificationPolicy?: "allow" | "deny";
+  // Host-supplied default render ceiling (spec §8.10.6, S16 phase D):
+  // confidentiality a display surface admits by default — exact `atoms`
+  // (the place for acting-user identity atoms) plus Caveat `caveatKinds`
+  // (display-dischargeable classes). Undefined = no ceiling (current
+  // behavior).
+  renderConfidentialityCeiling?: {
+    atoms?: unknown[];
+    caveatKinds?: string[];
+  };
   // Static trust snapshot applied to worker-owned transactions.
   trustSnapshot?: {
     id: string;

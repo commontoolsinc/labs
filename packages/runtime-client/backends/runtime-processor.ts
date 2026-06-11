@@ -121,6 +121,7 @@ import { cellRefToKey } from "../shared/utils.ts";
 import { RemoteResponse } from "@commonfabric/runtime-client";
 import {
   normalizeRenderDeclassificationPolicy,
+  type RenderConfidentialityCeiling,
   type RenderDeclassificationPolicy,
   WorkerReconciler,
 } from "@commonfabric/html/worker";
@@ -305,6 +306,9 @@ export class RuntimeProcessor {
   // Render-boundary declassification policy applied to every mount's
   // reconciler. Set from InitializationData; "allow" preserves prior behavior.
   private renderDeclassificationPolicy: RenderDeclassificationPolicy = "allow";
+  // Host-supplied default render ceiling applied to every mount's
+  // reconciler. Undefined preserves prior behavior (no ceiling).
+  private renderConfidentialityCeiling?: RenderConfidentialityCeiling;
 
   private constructor(
     runtime: Runtime,

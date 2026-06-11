@@ -100,6 +100,15 @@ export interface RenderPolicy {
   maxConfidentiality?: readonly unknown[];
 
   /**
+   * Caveat kinds admitted by the host's default render ceiling (spec
+   * §8.10.6): a Caveat-type confidentiality atom renders when its `kind` is
+   * listed here even if the atom is not in `maxConfidentiality`. Inherited
+   * unchanged through authored boundaries — narrowing narrows
+   * `maxConfidentiality`, never widens kinds.
+   */
+  caveatKindAllow?: readonly string[];
+
+  /**
    * Confidentiality atoms this subtree may declassify before applying the max bound.
    * This is a temporary low-level capability hook for trusted UI experiments.
    */
@@ -246,6 +255,7 @@ export function normalizeRenderDeclassificationPolicy(
   return value === "allow" ? "allow" : "deny";
 }
 
+
 /**
  * Options for the worker reconciler.
  */
@@ -264,6 +274,13 @@ export interface WorkerReconcilerOptions {
    * {@link RenderDeclassificationPolicy}.
    */
   renderDeclassificationPolicy?: RenderDeclassificationPolicy;
+
+  /**
+   * Default render ceiling applied at the tree root. Defaults to undefined
+   * (no ceiling — today's behavior). See
+   * {@link RenderConfidentialityCeiling}.
+   */
+  renderConfidentialityCeiling?: RenderConfidentialityCeiling;
 }
 
 /**

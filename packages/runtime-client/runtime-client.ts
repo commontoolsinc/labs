@@ -110,6 +110,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       experimental: options.experimental,
       cfcEnforcementMode: options.cfcEnforcementMode,
       renderDeclassificationPolicy: options.renderDeclassificationPolicy,
+      renderConfidentialityCeiling: options.renderConfidentialityCeiling,
       trustSnapshot: options.trustSnapshot,
     });
     return new RuntimeClient(initialized, options);
