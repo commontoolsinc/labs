@@ -1,4 +1,8 @@
-import { type CellHandle, isCellHandle, UI } from "@commonfabric/runtime-client";
+import {
+  type CellHandle,
+  isCellHandle,
+  UI,
+} from "@commonfabric/runtime-client";
 import { render } from "@commonfabric/html/client";
 import { mayContainCfcRenderBoundary } from "./cfc-render-boundary-scan.ts";
 import "../components/cf-cell-link/cf-cell-link.ts";
