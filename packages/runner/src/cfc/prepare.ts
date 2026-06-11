@@ -2677,7 +2677,7 @@ const coalesceLabelEntries = (
   const byKey = new Map<string, LabelMapEntry>();
   for (const entry of entries) {
     const path = [...entry.path];
-    const key = `${entry.origin ?? ""} ${pathKey(path)}`;
+    const key = `${entry.origin ?? ""}\u0000${pathKey(path)}`;
     const existing = byKey.get(key);
     byKey.set(key, {
       path,

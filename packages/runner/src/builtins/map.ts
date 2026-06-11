@@ -46,6 +46,8 @@ import {
   scopedCell,
 } from "./scope-policy.ts";
 import { resolveLink } from "../link-resolution.ts";
+import { isPrimitiveCellLink, parseLink } from "../link-utils.ts";
+import { linkResolutionProbe } from "../storage/reactivity-log.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
 
 /**
@@ -122,7 +124,32 @@ export function map(
     // `array` callback arguments should observe the actual list entity, not the
     // alias/boxed reference used to pass that list into the builtin.
     const listCell = sourceListCell.withTx(tx).resolveAsCell();
-    const list = listCell.asSchema(MAP_LIST_SCHEMA).withTx(tx).get();
+    // Identity-only list materialization: read the raw slots (journals the
+    // list-doc read for reactivity and label flow — membership/order ARE
+    // the list's content) and build element cells from the slot links
+    // directly. The asCell traversal here used to dereference each slot's
+    // target ("arrays dereference one more link"), journaling a content
+    // read of every element doc the coordinator never consumes — under
+    // flow labels (S16) that joined every element's label into the
+    // coordinator's J and smeared it across sibling scaffolding.
+    // resolveLink's probe reads are flow-excluded (linkResolutionProbe);
+    // no element value is loaded at all.
+    const rawList = listCell.withTx(tx).getRaw() as unknown;
+    const listBase = listCell.getAsNormalizedFullLink();
+    const list: Cell<any>[] | undefined = rawList === undefined
+      ? undefined
+      : !Array.isArray(rawList)
+      ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
+      : rawList.map((slot, i) => {
+        const slotLink: NormalizedFullLink = isPrimitiveCellLink(slot)
+          ? parseLink(slot, listBase)
+          : {
+            ...listBase,
+            path: [...listBase.path, String(i)],
+          };
+        const resolved = resolveLink(runtime, tx, slotLink, "value");
+        return runtime.getCellFromLink(resolved, undefined, tx);
+      });
     // .getRaw() because we want the pattern itself and avoid following the
     // aliases in the pattern. The raw value is either a compact
     // `{ $patternRef }` sentinel (resolved to the live canonical pattern by
@@ -175,14 +202,24 @@ export function map(
     });
 
     // If the result's value is undefined, set it to the empty array.
-    if (resultWithLog.get() === undefined) {
-      resultWithLog.set([]);
+    // Container reads run under the link-resolution-probe scope: the
+    // presence probe and set() diffing materialize prior slot targets for
+    // identity comparison only — the coordinator never consumes element
+    // content, and the written links carry their per-slot labels via the
+    // link-write machinery. Without the scope, the asCell slot dereference
+    // journals a content read of every prior element result, feeding the
+    // coordinator's own output taint back into its next reconcile's J and
+    // smearing it onto fresh elements' scaffolding (S16 pointwise).
+    const probeScoped = <T>(fn: () => T): T =>
+      tx.runWithAmbientReadMeta(linkResolutionProbe, fn);
+    if (probeScoped(() => resultWithLog.get()) === undefined) {
+      probeScoped(() => resultWithLog.set([]));
     }
     // If the list is undefined it means the input isn't available yet.
     // Correspondingly, the result should be []. TODO: Maybe it's important to
     // distinguish empty inputs from undefined inputs?
     if (list === undefined) {
-      resultWithLog.set([]);
+      probeScoped(() => resultWithLog.set([]));
       for (const entry of elementRuns.values()) {
         runtime.runner.stop(entry.resultCell);
       }
@@ -250,7 +287,7 @@ export function map(
         newArrayValue[i] = exposedResultCell(runtime, tx, resultCell);
       }
     }
-    resultWithLog.set(newArrayValue);
+    probeScoped(() => resultWithLog.set(newArrayValue));
 
     // NOTE: We leave prior results in elementRuns for now, so they reuse
     // prior runs when items reappear. This means elementRuns grows
