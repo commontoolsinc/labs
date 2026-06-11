@@ -70,15 +70,20 @@ Commit: `feat(runner): stamp the source action on run transactions (scheduler-v2
    grep -rn "inFlightSources\|InFlightSourceState\|addInFlightSource\|removeInFlightSource" src/
    ```
 
-   Expected sites: `action-run.ts` (state interface, add/remove helpers,
-   the add at ~338, the remove in `watchReactiveActionCommit`'s finally
-   and in `rescheduleActionForImmediateRetry`), `scheduler.ts` (field
-   ~366-368, `createStorageNotificationState` member,
-   `createActionRunState` member), `notifications.ts`
-   (`StorageNotificationState.inFlightSources` member). Delete every one;
-   the `watchReactiveActionCommit` `.finally()` that only removed the
-   source collapses (keep the catch for the commit promise).
-   Any other site: STOP.
+   Expected sites (verified, untruncated): `action-run.ts` (state
+   interface, add/remove helpers, the add at ~338, the remove in
+   `watchReactiveActionCommit`'s finally and in
+   `rescheduleActionForImmediateRetry`), `scheduler.ts` (field ~366-368,
+   `createStorageNotificationState` member, `createActionRunState`
+   member), `notifications.ts` (`StorageNotificationState.inFlightSources`
+   member), and `test/scheduler-cfc-trigger-reads.test.ts` (builds a
+   `StorageNotificationState` stub with an `inFlightSources` member and a
+   self-suppression case at ~160-165 — rewrite that case to stamp
+   `sourceTx.sourceAction = action` instead, and drop the stub member).
+   `push-notifications.ts` matched before phase 0 and is already gone.
+   Delete every one; the `watchReactiveActionCommit` `.finally()` that
+   only removed the source collapses (keep the catch for the commit
+   promise). Any other site: STOP.
 
 3. **Do NOT touch** the change-group skip
    (`planSkippedTriggeredAction`'s `skip-same-change-group` branch,

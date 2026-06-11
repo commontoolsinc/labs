@@ -7,32 +7,78 @@
 All paths relative to `packages/runner/` unless noted. Spec references:
 inventory §12 (site list), spec decision: one engine.
 
-## Step 1 — Delete the push test, de-noise mode calls in tests
+## Step 1 — Remove mode usage from tests, helpers, and benches
 
-Files: `test/scheduler-pull.test.ts` only.
+Mode APIs are exercised across **~25 test/bench files** in several
+patterns (full inventory regenerated 2026-06-11 after a review caught an
+earlier truncated list). First record YOUR authoritative inventory —
+never pipe a contract grep through `head` (G6):
 
-1. Open the file. Locate the test around line 90 that calls
-   `runtime.scheduler.disablePullMode()` — it is a push-mode baseline
-   comparison. Delete that entire `it(...)`/`test(...)` block (from its
-   opening call to its closing `);`). Read the block before deleting and
-   record its name in PROGRESS.md.
-2. Delete every `runtime.scheduler.enablePullMode();` line in the file
-   (pull is the default; the calls are no-ops). Expected count: ~14 lines
-   (verified sites at lines 48, 140, 206, 250, 330, 430, 522, 605, 691,
-   749, 850, 912, 960, 1022 — line numbers will shift as you edit; match on
-   the exact call text).
-3. Grep contract:
-   ```bash
-   grep -rn "enablePullMode\|disablePullMode" test/
-   ```
-   Expected after this step: no matches. If other test files match, STOP
-   and report (the verified state had matches only in
-   `scheduler-pull.test.ts`).
+```bash
+cd packages/runner
+grep -rn "enablePullMode\|disablePullMode\|isPullModeEnabled\|pullMode" test/
+```
 
-Verify: run `test/scheduler-pull.test.ts` (single-file command from
-00-README G3). All remaining tests pass.
+Paste the full output into PROGRESS.md, then apply these rules file by
+file until the grep returns zero:
 
-Commit: `test(runner): drop push-mode baseline and redundant enablePullMode calls`
+**A. Shared helpers — remove the option.**
+`test/scheduler-test-utils.ts` (~lines 75-79): delete the `pullMode`
+option from the options type and the enable/disable if/else.
+`test/scheduler-bench-helpers.ts` (~line 103): same treatment.
+
+**B. Option passers.**
+- `pullMode: "enabled"` → delete the property (no-op). Verified sites:
+  `scheduler-observations.test.ts` (×24), `scheduler-pull-handlers.test.ts`
+  (×2), `scheduler-pull-references.test.ts:30`,
+  `scheduler-pull-array.test.ts:43`.
+- `pullMode: "disabled"` marks a PUSH-MODE variant — classify per rule D.
+  Verified sites: `scheduler-convergence.test.ts:31`,
+  `scheduler-events.test.ts:56`, `scheduler-retries.test.ts:29`,
+  `scheduler-core.test.ts:61`, `scheduler-ordering.test.ts:561`.
+
+**C. Boolean parameterizations** (a local helper takes
+`pullMode: boolean` and branches): `navigate-handler.test.ts` (~13, 30),
+`default-app-note-create.bench.ts` (~107),
+`push-pull-patterns.bench.ts` (~342, 352, 805, 841, 883),
+`scheduler.bench.ts:31`, `storage.bench.ts:36`,
+`scheduler-pull-seeds.bench.ts`, `wish-mentionable-schema.bench.ts`.
+Drop the parameter and the entire push arm. For
+`push-pull-patterns.bench.ts`: keep the FILE NAME (renames are deferred
+to phase 3f) and add a header comment that it is pull-only since
+phase 0.
+
+**D. Classification rule for push-pinned tests — do not delete coverage
+blindly:**
+
+1. If the block exists to compare against or assert push mode itself
+   (asserts `isPullModeEnabled()` is `false`, name/describe mentions
+   push, or it duplicates an adjacent pull-mode test): DELETE the block.
+   Record its name in PROGRESS.md. Known cases:
+   `scheduler-pull.test.ts:90` and `:2242` (push baselines).
+2. Otherwise the test covers real behavior that was merely pinned to
+   push (expected for: the rule-B "disabled" passers,
+   `oncommit-race.test.ts:29`, `cell-callbacks.test.ts:1374` and `:1486`,
+   `scheduler-effects.test.ts:1055`): REMOVE the pin so it runs under
+   pull, then run that file. Green → keep it. Red → **STOP and report
+   the test name + failure** — it documents a push-only semantic, and
+   the reviewer decides delete-vs-port; do not decide yourself.
+
+**E. No-ops and tautologies.** Bare `runtime.scheduler.enablePullMode();`
+lines and `expect(...isPullModeEnabled()).toBe(true)` assertions →
+delete. Largest file: `scheduler-pull.test.ts` (38 combined sites
+including the rule-D baselines).
+
+Verify: the FULL runner suite (`deno task test`) — the sweep touches too
+many files for single-file verification. Then the step's exit grep:
+
+```bash
+grep -rn "enablePullMode\|disablePullMode\|isPullModeEnabled\|pullMode" test/
+```
+
+Expected: zero matches.
+
+Commit: `test(runner): remove push-mode usage from tests, helpers, and benches`
 
 ## Step 2 — Delete the push modules
 
@@ -138,9 +184,12 @@ Commit (covers steps 2+3):
    ```bash
    grep -rn "isPullModeEnabled" ../../packages --include="*.ts"
    ```
-   Expected sites (verified): `runner.ts:2702`, `runner.ts:2813`
-   (`patternNeedsOneShotPull`), `runner.ts:2828`
-   (`pullCellOnceAfterSuccessfulCommit`). Anything else: STOP and report.
+   Expected sites (verified, untruncated): four in `src/runner.ts` —
+   `2702` (`handleJavaScriptHandlerResult`), `2813`
+   (`patternNeedsOneShotPull`), `2828`
+   (`pullCellOnceAfterSuccessfulCommit`), `2841`
+   (`pullCellOnceInPullMode`) — plus test sites already removed in
+   step 1. Anything else: STOP and report.
 2. `src/runner.ts` `handleJavaScriptHandlerResult` (~2702-2736): the block
    `if (!this.runtime.scheduler.isPullModeEnabled()) { ... } else { addCancel(() => this.stop(resultCell)); }`
    — delete the entire push branch (the `readResultAction` subscription,
@@ -152,8 +201,11 @@ Commit (covers steps 2+3):
 3. `patternNeedsOneShotPull` (~2813): change
    `if (!this.runtime.scheduler.isPullModeEnabled() || !pattern)` to
    `if (!pattern)`.
-4. `pullCellOnceAfterSuccessfulCommit` (~2828): delete the
-   `if (!this.runtime.scheduler.isPullModeEnabled()) { return; }` guard.
+4. `pullCellOnceAfterSuccessfulCommit` (~2828) and
+   `pullCellOnceInPullMode` (~2841): delete the
+   `if (!this.runtime.scheduler.isPullModeEnabled()) { return; }` guard in
+   each, keeping the bodies. (The `InPullMode` name is cleaned up in
+   phase 3f, not here.)
 5. Telemetry: in `src/telemetry.ts`, locate the `scheduler.mode.change`
    event type member and delete it (grep `mode.change` — expected: the
    type definition only, since the emit sites died with

@@ -107,9 +107,14 @@ Deletion-only steps don't need new tests but must keep existing ones green.
 Steps that delete a mechanism include a grep whose expected result is listed
 (usually "no matches" or an exact site list). If the grep returns anything
 unexpected, STOP and report the diff between expected and actual. The
-expected lists were verified against commit `4cf4ec86f` of branch
-`claude/beautiful-knuth-7f8c80`; drift is possible and must be surfaced, not
-absorbed.
+expected lists were verified against branch `claude/beautiful-knuth-7f8c80`
+(regenerated untruncated on 2026-06-11 after review); drift is possible and
+must be surfaced, not absorbed.
+
+When YOU run a contract grep — to verify, or to build an inventory a step
+asks for — **never pipe it through `head` or otherwise truncate it**, and
+record the full output in PROGRESS.md. A truncated grep is how the one
+known-bad expected list in these orders was originally produced.
 
 ### G7 — Progress tracking
 
