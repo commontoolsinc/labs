@@ -1209,6 +1209,29 @@ const forEachFlowObservation = (
       return true;
     }
   }
+  // Trigger reads (§8.9.2): the addresses whose invalidating writes
+  // scheduled this run. The decision to run now was influenced by their
+  // values even when this run's branch never re-reads them — without this,
+  // "dep changed" leaks one bit per change through the timing/existence of
+  // writes the rerun makes. Runtime-surface addresses were already dropped
+  // by `addCfcTriggerReads` (which sees the raw notification path before
+  // canonicalization), so no `flowReadExcluded` check here — the stored
+  // path is canonical, where a user `value.source` is indistinguishable
+  // from the raw `["source"]` surface.
+  for (const trigger of tx.getCfcState().triggerReads) {
+    if (
+      consume(
+        trigger.space,
+        trigger.id as URI,
+        normalizeCellScope(trigger.scope),
+        "application/json",
+        trigger.path,
+        false,
+      )
+    ) {
+      return true;
+    }
+  }
   return false;
 };
 

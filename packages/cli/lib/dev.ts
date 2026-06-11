@@ -1,7 +1,7 @@
 import { Program } from "@commonfabric/js-compiler";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { Identity } from "@commonfabric/identity";
-import { Engine, Runtime } from "@commonfabric/runner";
+import { Runtime } from "@commonfabric/runner";
 import { experimentalOptionsFromEnv } from "./utils.ts";
 
 async function createRuntime() {
@@ -33,7 +33,13 @@ export async function process(
   options: ProcessOptions,
 ): Promise<{ output: string; main?: Record<string, unknown> }> {
   const runtime = await createRuntime();
-  const engine = new Engine(runtime);
+  // Compile/evaluate through the runtime's OWN harness, not a second Engine.
+  // Verified-load registration, source maps, and module hashes all live on the
+  // engine that evaluates the bundle; the runner and the builder's source-
+  // location annotation consult `runtime.harness`. A separate Engine splits
+  // that state, so `fn.src` stays a raw bundle coordinate and CFC verified-
+  // binding identities (writeAuthorizedBy) fail under enforcement.
+  const engine = runtime.harness;
   const program = await engine.resolve(
     new FileSystemProgramResolver(options.main, options.rootPath),
   );

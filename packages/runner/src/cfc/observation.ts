@@ -11,6 +11,15 @@ export type CfcObservationMaxConfidentiality =
   | readonly unknown[]
   | undefined;
 
+// Marker confidentiality atom injected when a cell's label could not be read
+// because a metadata read ERRORED (as opposed to being cleanly absent), so the
+// LLM-observation path can fail CLOSED on read errors (audit item 22): a
+// swallowed read error must not let confidential data serialize to the model as
+// if it were public. `cfcObservationFitsCeiling` treats this marker as
+// UNGRANTABLE — an observation carrying it never fits a ceiling, even one that
+// names the marker, so it cannot be allow-listed by an author-supplied ceiling.
+export const CFC_LABEL_READ_FAILED_ATOM = "cfc:label-read-failed";
+
 export interface CfcOpaqueLink {
   "@link": string;
 }
@@ -78,6 +87,19 @@ export const cfcObservationFitsCeiling = (
   // atoms) fits any ceiling, including the empty one.
   if (observationMaxConfidentiality === undefined) {
     return true;
+  }
+
+  // The read-failed marker is UNGRANTABLE: an observation that carries it never
+  // fits a declared ceiling, even one that names the marker. The atom is an
+  // exported string, so an author-supplied ceiling could otherwise allow-list it
+  // and defeat the fail-closed redaction (audit item 22). Reject it explicitly
+  // before the per-atom membership check rather than relying on its absence.
+  if (
+    confidentiality.some((value) =>
+      deepEqual(value, CFC_LABEL_READ_FAILED_ATOM)
+    )
+  ) {
+    return false;
   }
 
   return confidentiality.every((value) =>
