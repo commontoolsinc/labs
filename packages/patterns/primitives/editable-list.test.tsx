@@ -3,12 +3,13 @@
  *
  * Exercises the composition contract via runSynced:
  * - empty → nonempty (counts, empty branch)
- * - add by text (convenience) + add by id-core stream
- * - toggle done by id (identity), counts react
- * - update by id (identity patch); id is never overwritten
- * - remove by id (identity)
+ * - add by text (convenience) + add by core stream
+ * - toggle done by live item reference (equals() identity), counts react
+ * - update by live item reference (identity patch)
+ * - remove by live item reference (items.remove(item))
  * - text-addressed convenience: updateItemByText / removeItemByText
  * - clearDone
+ * - no-op safety: a detached object literal matches nothing
  *
  * Run: deno task cf test packages/patterns/primitives/editable-list.test.tsx --verbose
  */
@@ -34,23 +35,20 @@ export default pattern(() => {
     list.addItem.send({ item: { label: "Gamma", priority: 9 } });
   });
 
-  // Identity-addressed: read the live id from the list, then act on it.
+  // Reference-addressed: read the live item from the list, then send it.
+  // The item arrives in the handler as a link; equals() resolves it back to
+  // the same entity — no user-land id involved.
   const toggle_first_done = action(() => {
-    const id = list.items[0]?.id;
-    if (id) list.toggleItem.send({ id });
+    const item = list.items[0];
+    if (item) list.toggleItem.send({ item });
   });
   const update_first_label = action(() => {
-    const id = list.items[0]?.id;
-    if (id) list.updateItem.send({ id, changes: { label: "Alpha!" } });
-  });
-  const attempt_id_overwrite = action(() => {
-    const id = list.items[0]?.id;
-    // changes.id must be ignored — identity is immutable.
-    if (id) list.updateItem.send({ id, changes: { id: "HACKED" } });
+    const item = list.items[0];
+    if (item) list.updateItem.send({ item, changes: { label: "Alpha!" } });
   });
   const remove_first = action(() => {
-    const id = list.items[0]?.id;
-    if (id) list.removeItem.send({ id });
+    const item = list.items[0];
+    if (item) list.removeItem.send({ item });
   });
 
   // Text-addressed convenience (fuzzy).
@@ -86,15 +84,20 @@ export default pattern(() => {
     list.updateItemByText.send({ text: "Dup", newText: "DupChanged" });
   });
 
-  // No-op safety: mutating an absent id changes nothing.
-  const remove_absent_id = action(() => {
-    list.removeItem.send({ id: "does-not-exist" });
+  // No-op safety: a detached object literal has no entity identity in the
+  // list, so equals()/remove() match nothing and the list is untouched —
+  // even when its fields structurally mirror a real item.
+  const remove_absent_item = action(() => {
+    list.removeItem.send({ item: { label: "DupChanged", done: false } });
   });
-  const update_absent_id = action(() => {
+  const update_absent_item = action(() => {
     list.updateItem.send({
-      id: "does-not-exist",
+      item: { label: "Dup", done: true },
       changes: { label: "ghost" },
     });
+  });
+  const toggle_absent_item = action(() => {
+    list.toggleItem.send({ item: { label: "DupChanged", done: false } });
   });
 
   // ==========================================================================
@@ -107,9 +110,6 @@ export default pattern(() => {
   const assert_one = computed(() => list.total === 1);
   const assert_first_label_alpha = computed(() =>
     list.items[0]?.label === "Alpha"
-  );
-  const assert_first_has_id = computed(() =>
-    typeof list.items[0]?.id === "string" && list.items[0].id.length > 0
   );
   const assert_first_not_done = computed(() => list.items[0]?.done === false);
 
@@ -129,8 +129,9 @@ export default pattern(() => {
   const assert_first_renamed = computed(() =>
     list.items[0]?.label === "Alpha!"
   );
-  const assert_id_not_overwritten = computed(() =>
-    list.items[0]?.id !== "HACKED"
+  const assert_others_untouched = computed(() =>
+    // The reference-addressed update patched ONLY the first item.
+    list.items[1]?.label === "Beta" && list.items[2]?.label === "Gamma"
   );
 
   const assert_after_remove_two = computed(() => list.total === 2);
@@ -172,12 +173,15 @@ export default pattern(() => {
     return still.length === 1 && still[0]?.done === true;
   });
 
-  // No-op: removing/updating an absent id leaves the list untouched.
+  // No-op: detached-literal remove/update/toggle leaves the list untouched.
   const assert_noop_count = computed(() => list.total === 2);
   const assert_noop_labels = computed(() =>
     list.items.find((i: EditableListItem) => i.label === "DupChanged") !==
       undefined &&
     list.items.find((i: EditableListItem) => i.label === "Dup") !== undefined
+  );
+  const assert_noop_done_flags = computed(() =>
+    list.items[0]?.done === false && list.items[1]?.done === true
   );
 
   // ==========================================================================
@@ -193,7 +197,6 @@ export default pattern(() => {
       { action: add_alpha },
       { assertion: assert_one },
       { assertion: assert_first_label_alpha },
-      { assertion: assert_first_has_id },
       { assertion: assert_first_not_done },
 
       // Add by core stream
@@ -206,19 +209,18 @@ export default pattern(() => {
       { assertion: assert_gamma_present },
       { assertion: assert_extra_passthrough },
 
-      // Toggle done by id (identity)
+      // Toggle done by live item reference (equals() identity)
       { action: toggle_first_done },
       { assertion: assert_first_done },
       { assertion: assert_active_after_toggle },
       { assertion: assert_done_count },
 
-      // Update by id (identity patch) + id immutability
+      // Update by live item reference (identity patch)
       { action: update_first_label },
       { assertion: assert_first_renamed },
-      { action: attempt_id_overwrite },
-      { assertion: assert_id_not_overwritten },
+      { assertion: assert_others_untouched },
 
-      // Remove by id (identity)
+      // Remove by live item reference (items.remove(item))
       { action: remove_first },
       { assertion: assert_after_remove_two },
       { assertion: assert_alpha_gone },
@@ -248,11 +250,13 @@ export default pattern(() => {
       { assertion: assert_first_dup_changed },
       { assertion: assert_second_dup_unchanged },
 
-      // No-op safety: absent-id remove/update changes nothing.
-      { action: remove_absent_id },
-      { action: update_absent_id },
+      // No-op safety: detached literals match nothing.
+      { action: remove_absent_item },
+      { action: update_absent_item },
+      { action: toggle_absent_item },
       { assertion: assert_noop_count },
       { assertion: assert_noop_labels },
+      { assertion: assert_noop_done_flags },
     ],
     list,
   };

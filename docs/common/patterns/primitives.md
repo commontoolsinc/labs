@@ -57,19 +57,33 @@ does not need this; same-space `Writable<T[]>` mutation works.)
 ## Identity, not index, not title (collection primitives)
 
 For **collection** primitives — ones that own a list/set of items
-(`EditableList`, `MasterDetail`) — core mutations address an item by a **stable
-id** carried on the item, never by its array position. Index-based
-selection/mutation breaks under reordering and concurrent edits — it is the
-central fragility this composition overhaul removes. `addItem` mints an id when
-the caller omits one; `removeItem` / `updateItem` / `toggleItem` all take
-`{ id }`. Primitives with no collection (e.g. `ConfirmAction`, a single-gate
-primitive) have nothing to address by id and this section does not apply to
-them.
+(`EditableList`, `MasterDetail`) — core mutations address an item by **live
+reference**, using the data model's own identity: `removeItem` takes `{ item }`
+and calls `cell.remove(item)`; `updateItem` / `toggleItem` locate the item with
+`findIndex((x) => equals(x, item))`. The runtime gives array items implicit
+entity identity that survives reorder and field mutation, and `equals()` /
+`remove()` compare by that identity — a row rendered from `items.map(...)`
+already holds the reference it needs to send.
+
+Two things are explicitly **not** the identity model:
+
+- **Array indices.** Index-based selection/mutation breaks under reordering and
+  concurrent edits — the central fragility this composition overhaul removes.
+- **User-land id fields.** NEVER mint `id` properties (UUIDs, counters,
+  timestamps) on items. The reactive fabric is an object graph, not a keyed
+  database; synthetic ids fight the reactivity system (in `.map()` callbacks an
+  `id` property is a Cell, not a string, so lookups fail silently). See
+  [`identity.md`](../concepts/identity.md) ("No ID generation") and
+  [Custom `id` Property Pitfall](../../development/debugging/gotchas/custom-id-property-pitfall.md).
+
+Primitives with no collection (e.g. `ConfirmAction`, a single-gate primitive)
+have nothing to address and this section does not apply to them.
 
 Title/text addressing, where offered, is a **separate, explicit convenience
-layer** (e.g. `removeItemByText`) for agent-driveability — fuzzy
-(case-insensitive, first-match) and documented as such. It sits *on top of* the
-identity core; it is not the identity model.
+layer** (e.g. `removeItemByText`) — the agent-facing string-addressing story for
+LLMs that only have words. It is fuzzy (case-insensitive, first-match) and
+documented as such. It sits *on top of* the reference-addressed core; it is not
+the identity model.
 
 ## Headless vs default rendering
 
@@ -91,7 +105,7 @@ identity core; it is not the identity model.
   {list.items.map((it) => (
     <my-row>
       <span>{it.label}</span>
-      <cf-button onClick={() => list.toggleItem.send({ id: it.id })}>
+      <cf-button onClick={() => list.toggleItem.send({ item: it })}>
         toggle
       </cf-button>
     </my-row>
@@ -121,9 +135,10 @@ rendering without that machinery.
 
 ## Authoring checklist
 
-- Item type carries a stable `id` plus whatever the model needs; an index
+- Item type carries whatever the model needs — **no `id` field**; an index
   signature lets callers extend it.
-- Core handlers operate by `id`, bound to the caller's `Writable<T[]>`.
+- Core handlers address items by live reference (`equals()` /
+  `cell.remove(item)`), bound to the caller's `Writable<T[]>`.
 - Counts / derived values are **named `computed` cells** (so they resolve
   through `runSynced` + `.get()` in tests).
 - `[UI]` is a static `VNode`; gate empty/non-empty with `ifElse` as a *child* of

@@ -25,22 +25,29 @@
  *   NO VNode / render-prop input — render props fight the CTS transformer.
  *   Headless looks like:
  *       const list = EditableList({ items: myItems });
- *       // ...render list.items yourself, call list.toggleItem.send({ id }) etc.
+ *       // ...render list.items yourself, call list.toggleItem.send({ item }).
  *
- * ### Identity, NOT index, NOT title
+ * ### Identity comes from the DATA MODEL, not from an id field
  *
- * Every mutation in the CORE layer addresses an item by its stable `id`.
- * removeItem/updateItem/toggleItem never take an array index — index-based
- * mutation is exactly the fragility (reorder/concurrent-edit races) this
- * overhaul kills. addItem mints an `id` if the caller doesn't supply one.
+ * Every mutation in the CORE layer addresses an item by the live item
+ * reference itself: `removeItem` calls `items.remove(item)` and
+ * `toggleItem`/`updateItem` locate the item with `equals()` — both compare by
+ * the runtime's own entity identity, which survives reorder and concurrent
+ * edits. removeItem/updateItem/toggleItem never take an array index (the
+ * reorder/race fragility this overhaul kills) and there is deliberately NO
+ * user-land `id` field. NEVER mint ids (UUIDs, counters, timestamps) on items
+ * — the reactive fabric is an object graph, not a keyed database, and the
+ * runtime already gives array items stable identity. See
+ * docs/common/concepts/identity.md and
+ * docs/development/debugging/gotchas/custom-id-property-pitfall.md.
  *
  * ### Title/text addressing is a SEPARATE convenience layer
  *
  * `addItemByText` / `updateItemByText` / `removeItemByText` are fuzzy
  * (case-insensitive `label` match), provided so an LLM can drive the list with
  * the words it already has. They are explicitly NOT the identity model: on
- * duplicate labels they touch the first match. Prefer the id-based streams in
- * code; reach for the text streams only from agent tool-calls.
+ * duplicate labels they touch the first match. Prefer the reference-addressed
+ * streams in code; reach for the text streams only from agent tool-calls.
  *
  * ### What the DEFAULT UI assumes about item shape (headless does not)
  *
@@ -66,19 +73,18 @@
  *     — the sub-pattern's handlers `.set()` the parent's `state.value`.
  *   - docs/common/patterns/composition.md: "Both patterns receive the same
  *     `items` cell - changes sync automatically."
- * So the contract exposes id-based Streams the parent wires by simply passing
- * its cell; no parent-side handler plumbing is required.
+ * So the contract exposes reference-addressed Streams the parent wires by
+ * simply passing its cell; no parent-side handler plumbing is required.
  */
 import {
   computed,
   Default,
+  equals,
   handler,
   ifElse,
   NAME,
-  nonPrivateRandom,
   type OpaqueRef,
   pattern,
-  safeDateNow,
   type Stream,
   UI,
   type VNode,
@@ -90,8 +96,10 @@ import {
 /**
  * The minimal, extensible item contract.
  *
- * Required by the model: a stable `id` and a `done` flag.
- * Read by the DEFAULT UI only: `label`.
+ * Required by the model: a `done` flag. Read by the DEFAULT UI only: `label`.
+ * There is NO `id` field: identity is the runtime's own entity identity
+ * (compare with `equals()`, remove with `items.remove(item)`) — see
+ * docs/common/concepts/identity.md.
  * The index signature lets callers carry arbitrary extra fields (priority,
  * dueDate, plain refs, ...) that the model passes through untouched and that
  * headless rows can render.
@@ -105,8 +113,6 @@ import {
  * with `asCell` rather than relying on the passthrough.
  */
 export interface EditableListItem {
-  /** Stable identity. Minted by addItem if not provided. Never an index. */
-  id: string;
   /** Completion flag — drives the default row's checkbox. */
   done: boolean | Default<false>;
   /** Text label — the only text key the default row reads. */
@@ -136,19 +142,19 @@ export interface EditableListOutput {
   active: number;
   done: number;
 
-  // ----- CORE: identity-addressed streams -----
-  /** Append an item. Mints an id if omitted; you may pass extra fields. */
+  // ----- CORE: reference-addressed streams -----
+  /** Append an item. You may pass extra fields via `item`. */
   addItem: OpaqueRef<
     Stream<{ label?: string; item?: Partial<EditableListItem> }>
   >;
-  /** Remove the item with this id. No-op if absent. */
-  removeItem: OpaqueRef<Stream<{ id: string }>>;
-  /** Patch the item with this id. Only provided fields change. */
+  /** Remove this item (matched by `equals()` identity). No-op if absent. */
+  removeItem: OpaqueRef<Stream<{ item: EditableListItem }>>;
+  /** Patch this item (matched by `equals()`). Only provided fields change. */
   updateItem: OpaqueRef<
-    Stream<{ id: string; changes: Partial<EditableListItem> }>
+    Stream<{ item: EditableListItem; changes: Partial<EditableListItem> }>
   >;
-  /** Flip (or set) `done` on the item with this id. */
-  toggleItem: OpaqueRef<Stream<{ id: string; done?: boolean }>>;
+  /** Flip (or set) `done` on this item (matched by `equals()`). */
+  toggleItem: OpaqueRef<Stream<{ item: EditableListItem; done?: boolean }>>;
   /** Drop every item whose `done` is true. */
   clearDone: OpaqueRef<Stream<unknown>>;
 
@@ -163,15 +169,7 @@ export interface EditableListOutput {
   removeItemByText: OpaqueRef<Stream<{ text: string }>>;
 }
 
-// ===== id minting =====
-
-function mintId(): string {
-  const now = safeDateNow().toString(36);
-  const rand = nonPrivateRandom().toString(36).slice(2, 10);
-  return `${now}-${rand}`;
-}
-
-// ===== CORE handlers (identity-addressed) =====
+// ===== CORE handlers (reference-addressed) =====
 
 const addItemHandler = handler<
   { label?: string; item?: Partial<EditableListItem> },
@@ -184,49 +182,42 @@ const addItemHandler = handler<
   if (!text && item === undefined) return;
   items.push({
     ...provided,
-    id: provided.id ?? mintId(),
     label: text,
     done: provided.done ?? false,
   });
 });
 
 const removeItemHandler = handler<
-  { id: string },
+  { item: EditableListItem },
   { items: Writable<EditableListItem[]> }
->(({ id }, { items }) => {
-  const current = items.get() ?? [];
-  const next = current.filter((i) => i.id !== id);
-  if (next.length !== current.length) items.set(next);
+>(({ item }, { items }) => {
+  // `remove` locates the item with the same `equals()` identity machinery.
+  items.remove(item);
 });
 
 const updateItemHandler = handler<
-  { id: string; changes: Partial<EditableListItem> },
+  { item: EditableListItem; changes: Partial<EditableListItem> },
   { items: Writable<EditableListItem[]> }
->(({ id, changes }, { items }) => {
+>(({ item, changes }, { items }) => {
   const current = items.get() ?? [];
-  let touched = false;
-  const next = current.map((i) => {
-    if (i.id !== id) return i;
-    touched = true;
-    // Never let a caller overwrite identity.
-    const { id: _ignore, ...safe } = changes;
-    return { ...i, ...safe };
-  });
-  if (touched) items.set(next);
+  const i = current.findIndex((x) => equals(x, item));
+  if (i >= 0) items.set(current.toSpliced(i, 1, { ...current[i], ...changes }));
 });
 
 const toggleItemHandler = handler<
-  { id: string; done?: boolean },
+  { item: EditableListItem; done?: boolean },
   { items: Writable<EditableListItem[]> }
->(({ id, done }, { items }) => {
+>(({ item, done }, { items }) => {
   const current = items.get() ?? [];
-  let touched = false;
-  const next = current.map((i) => {
-    if (i.id !== id) return i;
-    touched = true;
-    return { ...i, done: done ?? !i.done };
-  });
-  if (touched) items.set(next);
+  const i = current.findIndex((x) => equals(x, item));
+  if (i >= 0) {
+    items.set(
+      current.toSpliced(i, 1, {
+        ...current[i],
+        done: done ?? !current[i].done,
+      }),
+    );
+  }
 });
 
 const clearDoneHandler = handler<
@@ -246,7 +237,7 @@ const addItemByTextHandler = handler<
 >(({ text }, { items }) => {
   const trimmed = (text ?? "").trim();
   if (!trimmed) return;
-  items.push({ id: mintId(), label: trimmed, done: false });
+  items.push({ label: trimmed, done: false });
 });
 
 const updateItemByTextHandler = handler<
@@ -310,8 +301,9 @@ export const EditableList = pattern<EditableListInput, EditableListOutput>(
 
     // Default rows. Checkbox + text use $checked/$value two-way binding
     // (no setter handler — that would just write the same value back). Delete
-    // reuses the already-exposed `removeItem` stream (remove-by-id lives in ONE
-    // place), keyed by the item's stable id, NOT its array index.
+    // reuses the already-exposed `removeItem` stream (removal lives in ONE
+    // place), sending the live item reference the row already holds from
+    // `items.map(...)` — NOT an array index, NOT a minted id.
     const rows = items.map((item: EditableListItem) => (
       <cf-hstack gap="2" align="center" style="padding: 4px 0;">
         <cf-checkbox $checked={item.done} />
@@ -320,7 +312,7 @@ export const EditableList = pattern<EditableListInput, EditableListOutput>(
           variant="ghost"
           size="sm"
           onClick={() =>
-            removeItem.send({ id: item.id })}
+            removeItem.send({ item })}
         >
           x
         </cf-button>
