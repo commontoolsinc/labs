@@ -141,8 +141,9 @@ memory-engine component — coordinate with the memory owners from the start.
    uniqueness is preserved (event ids are unique per send). Verify no
    fixture relies on per-attempt-unique ids.
 2. Memory engine: create-only precondition on the handling's result cell
-   for receipt-gated classes, with a distinct permanent rejection
-   (receipt-exists).
+   (default-on for all events, decision 14; gated only by the
+   transitional `commitPreconditions` protocol flag), with a distinct
+   permanent rejection (receipt-exists).
 3. Runner: every handling materializes the result cell unconditionally
    (default-on for all events — it is the `{ resultFor: cause }` cell a
    pattern-launching handler already creates; no new document kind and no

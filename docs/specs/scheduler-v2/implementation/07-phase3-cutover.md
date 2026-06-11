@@ -136,12 +136,18 @@ each):
    easy to invert).
 2. Provisional demand: in `subscribePullSchedulerAction`, the current
    block `parent && state.activePullDemandActions.has(parent)` becomes
-   `parentRecord && isLive(parentRecord)` → `record.provisionalDemand = true`
-   plus enrollment in a `provisionalThisPass: Set<SchedulerNode>` cleared
-   at pass end (continuation: expiry = end of creating pass OR first run,
-   whichever later — pass-end sweep clears only nodes with
-   `passRuns > 0 || createdBeforeThisPass`; encode decision 4 exactly and
-   point fixture 6 at it).
+   `parentRecord && isLive(parentRecord)` → `record.provisionalDemand = true`.
+   Expiry encodes decision 4 — the LATER of first completed run and
+   creating-pass end — as two clear points: (a) the pass-end sweep over a
+   `provisionalThisPass: Set<SchedulerNode>` clears provisional demand
+   only for nodes that have completed at least one run
+   (`record.status !== "never-ran"`); (b) run-finalize clears it for a
+   node whose creating pass has already ended (track the creating pass id
+   on the record; a node still gated past its creating pass keeps
+   provisional demand until that first run completes). Fixture 6 pins (a);
+   add a small fixture for (b): a provisionally-created node behind a
+   debounce gate longer than its creating pass still runs once when the
+   gate opens.
 3. Replace `demand.ts` consumers:
    - `isDemandedPullComputation(a)` → `record.kind === "computation" && isLive(record)`;
    - `isLiveEffect` → `record?.kind === "effect"`;

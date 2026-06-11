@@ -365,10 +365,14 @@ pass) with O(Δedges) bookkeeping.
 
 A computation registered while a live node is running inherits demand
 provisionally: the creating run is itself evidence that something live is
-constructing this subgraph (D4). Provisional demand expires at the end of the
-node's first completed run — by then its output edges exist and real liveness
-takes over — or when its creating pass reaches quiescence without anyone
-reading its output.
+constructing this subgraph (D4). Provisional demand expires at the **later**
+of the node's first completed run and the end of its creating pass (resolved
+decision 4). A provisionally-demanded node is runnable, so it normally runs
+within its creating pass and expiry coincides with the pass end — keeping it
+through the whole pass lets nodes created later in the same pass become its
+readers before dormancy is decided. If a time gate defers the node past its
+creating pass, provisional demand persists until that first completed run,
+so the materializing run is never lost.
 
 This is the principled form of v1's `pullDemandedFirstRunComputations` +
 `hasDemandedParentContext`. v1's *continuation* set
@@ -588,7 +592,8 @@ semantics explicit.
 
 Requirements: invariant I10 (launched work survives only if the launching
 commit succeeds, and descendants of a failed attempt are never retried) and
-invariant I11 (receipt-gated events are handled at most once system-wide).
+invariant I11 (events are handled at most once system-wide; the
+result-cell receipt is the witness — default-on, decision 14).
 
 Current state, for the record (verified in code, June 2026):
 

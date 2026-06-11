@@ -215,6 +215,7 @@ export class SpeculationLineage {
               this.hooks.onError(error);
             }
           }
+          settled.events.clear();
           for (const stop of settled.pieceStops) {
             try {
               stop();
@@ -222,13 +223,16 @@ export class SpeculationLineage {
               this.hooks.onError(error);
             }
           }
+          settled.pieceStops.length = 0;
+          this.byOrigin.delete(origin);
+        } else {
+          // Success: compensation is moot, but the EVENTS must stay
+          // registered — still-queued descendants (e.g. cross-space parked
+          // ones) keep asking originStatus() until they dispatch and
+          // release(). Clearing them here would let the first release()
+          // delete the record and strand the rest.
+          settled.pieceStops.length = 0;
         }
-        settled.events.clear();
-        settled.pieceStops.length = 0;
-        // Status is still queryable until dispatch consumes it; the entry
-        // is dropped when no events reference it (dispatched ones call
-        // release()).
-        if (result.error) this.byOrigin.delete(origin);
         this.hooks.queueExecution();
       });
     }
@@ -258,9 +262,13 @@ export class SpeculationLineage {
 
   originStatus(origin: IExtendedStorageTransaction): OriginStatus {
     return this.byOrigin.get(origin)?.status ??
-      // Unknown origin: either never recorded (no launches) or already
-      // settled-and-flushed. Callers only ask for origins they recorded.
-      "pending";
+      // Unknown origin ⇒ the record was settled and fully released. A
+      // still-queued event always finds its record (failure removes the
+      // event synchronously; success keeps the record until release()),
+      // so this fallback is only reachable after settlement — and it must
+      // be "confirmed": "pending" would park a cross-space event forever,
+      // since the commit callback that wakes it has already fired.
+      "confirmed";
   }
 }
 ```
@@ -271,9 +279,13 @@ Read `extended-storage-transaction.ts` `addCommitCallback` + commit (~line
 841-857) and confirm callbacks run on every commit() resolution path; if
 any early-return path skips callbacks, STOP and report it.
 
-Unit tests: `test/scheduler-lineage.test.ts` — record/confirm flush keeps
-events; record/fail cancels events (removeQueuedEvent called) and runs
-pieceStops; release() cleanup; double-settle safe.
+Unit tests: `test/scheduler-lineage.test.ts` — record/fail cancels events
+(removeQueuedEvent called) and runs pieceStops; record/confirm does NOT
+remove events and drops pieceStops; **two recorded events, origin
+confirms, first release()s → second still reads `"confirmed"`** (the
+stranded-sibling regression); release() of the last event after
+settlement deletes the record; originStatus of an unknown origin returns
+`"confirmed"`; double-settle safe.
 
 Commit: `feat(runner): speculation lineage registry (scheduler-v2 E1)`
 
