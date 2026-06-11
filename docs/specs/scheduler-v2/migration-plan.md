@@ -5,11 +5,12 @@
 
 Sequencing principle: each phase lands independently, keeps the full test
 suite green, and shrinks the v1 surface the next phase has to reason about.
-Phases 0–2 are mechanical/verifiable and worth doing even if v2 stalled
-afterwards. Phase 3 is the structural cutover; it is built as the new
-component set and flipped in one short-lived branch series — **no long-lived
-runtime flag** for old-vs-new scheduler (we just removed one mode flag; we
-should not mint another).
+Phases 0–2 and phase E are mechanical/verifiable correctness or deletion
+work, worth doing even if v2 stalled afterwards (phase E in particular fixes
+live bugs against the current scheduler). Phase 3 is the structural cutover;
+it is built as the new component set and flipped in one short-lived branch
+series — **no long-lived runtime flag** for old-vs-new scheduler (we just
+removed one mode flag; we should not mint another).
 
 ---
 
@@ -36,31 +37,35 @@ and only production mode).
 Exit: no `push` identifier under `packages/runner/src/scheduler/`; suite
 green.
 
-## Phase 1 — Enforce single output (P4 prerequisite)
+## Phase 1 — Static write surface (P4 prerequisite)
 
-The direction is already set (#3911 gave each internal its own cell; output
-bindings in practice carry a single write redirect). Make it a guarantee:
+Confirmed (2026-06-11): the pattern builder already produces exactly one
+output redirect per node — the transformer cannot bind to multiple outputs.
+**No corpus audit and no new builder/transformer enforcement is needed.**
+What this phase does is stop *discovering* write sets from runs and freeze
+the surface at registration:
 
-1. Corpus audit: scan `packages/patterns` + integration fixtures for any
-   node whose output binding resolves to >1 write-redirect target
-   (`findAllWriteRedirectCells(outputs, …).length > 1`). Expect zero; fix or
-   consciously migrate any stragglers.
-2. Runner: assert single resolved redirect target at node instantiation
-   (dev-mode hard error, prod-mode telemetry + first-target behavior during
-   bake-in).
-3. Transformer: reject pattern constructs that would produce multi-target
-   output bindings, so the invariant is compile-time.
-4. Collapse `SchedulerWriteIndex` to: static `outputByNode` /
-   `nodeByOutputEntity` (1:1) + the materializer envelope index. Delete
+1. Compute the write surface at node instantiation, as today's inputs
+   already allow: primary result cell + `collectStaticRedirectWriteTargets`
+   (fixed writable inputs; skipped when envelopes exist, per the existing
+   tiering at `runner.ts:3495-3501`) + declared materializer envelopes.
+   Pass it in the registration; nothing about it updates from run logs.
+2. Collapse `SchedulerWriteIndex` to: static `outputsByNode` /
+   `nodesByOutputEntity` + the materializer envelope index. Delete
    current-known/historical write tracking, declared-write seeding,
    dependents backfill on write growth, structural-ancestor pruning.
-5. Remove the `schedulerHistoricalMightWrite` experimental option and the
-   legacy mode of `getMightWrite` (verify no external diagnostic consumer
-   first; keep `getMightWrite` as a thin "return [output]" shim if anything
-   still calls it).
+3. Remove the `schedulerHistoricalMightWrite` experimental option, the
+   legacy `getMightWrite` mode, and historical write storage (deletion
+   confirmed; keep `getMightWrite` as a thin "return outputs" shim only if
+   a caller remains).
+4. Belt-and-braces: a dev-mode assertion that a run's actual writes fall
+   inside the registered surface (primary + static targets + envelopes),
+   surfacing any side-writer the transformer's capability analysis missed —
+   this is diagnostics for declaration gaps, not enforcement of a new rule.
 
-Exit: writer lookup is a map access; observation payload no longer needs
-write sets (coordinate the payload change with phase 7 or ship dual-write).
+Exit: writer lookup is a static map access; observation payload no longer
+needs write sets (coordinate the payload change with phase 7 or ship
+dual-write).
 
 ## Phase 2 — One change channel + tx-carried identity
 
@@ -99,6 +104,34 @@ write sets (coordinate the payload change with phase 7 or ship dual-write).
 Exit: exactly one path marks nodes dirty; self-suppression is one id
 comparison.
 
+## Phase E (independent) — commit-gate event-launched work
+
+Correctness fixes for spec §7.6 / invariant I10. Independent of the v2
+cutover: both land against the current scheduler and should not wait for it.
+
+1. **Sent events → post-commit outbox.** Stream `Cell.set` stages the event
+   send in the transaction's idempotency-keyed post-commit outbox
+   (`extended-storage-transaction.ts`) instead of calling
+   `scheduler.queueEvent` at send time (`cell.ts:1167`); the flush on
+   commit success enqueues it. Internal callers that need send-time
+   semantics (if any — audit UI bridge / framework senders) keep an
+   explicit immediate path.
+2. **Handler-result pieces: compensating stop.** In
+   `handleJavaScriptHandlerResult`'s pull path, register a commit callback
+   that on final rejection cancels the child registrations and stops the
+   result piece — restoring for pull mode the cleanup the push branch had
+   (`runner.ts:2724-2729` vs `2735`). `navigateTo` results keep the
+   commit-gated `startAfterSuccessfulCommit` path.
+3. Fixtures (red first, per repo practice):
+   - handler whose commit conflicts then succeeds on retry: follow-up event
+     dispatches exactly once, with payload from the committed run;
+   - handler whose commit exhausts retries: follow-up event never
+     dispatches; result piece is stopped and unregistered;
+   - interleaving snapshot tests for the send-time → commit-time enqueue
+     shift (spec open question 2) before flipping.
+
+Exit: I10 holds for handler-sent events and handler-started pieces.
+
 ## Phase 3 — Node records + liveness refcounts + new pass (the cutover)
 
 Build the v2 components (`registry`, `graph`, `invalidation`, `settle`,
@@ -116,7 +149,7 @@ where separable, or as one reviewed series where not:
    downstream closure for ordering, run-gate re-check at turn. Delete
    `dirty-dependencies.ts` upstream collector, traversal-root asymmetry,
    `collectStack`, the late-materializer per-effect recheck (folded into
-   work-set construction), and the cycle breaker (replaced by §7.6 budgets +
+   work-set construction), and the cycle breaker (replaced by §7.7 budgets +
    backoff).
 4. Read-delta application replaces resubscribe/unsubscribe-around-runs
    (`pull-subscriptions.ts` resubscribe path, trigger replace memo).
@@ -170,19 +203,23 @@ Depends on phases 1–3.
 1. Fold `delays.ts` + `delay-control.ts` + the event wake timer into
    `gates`: per-node `debounceReadyAt` / `throttleReadyAt` / `backoffUntil`,
    one wake timer, `eligibleAt()`.
-2. Re-express auto-debounce and the §7.6 backoff as policies writing gate
+2. Re-express auto-debounce and the §7.7 backoff as policies writing gate
    fields; delete computation trailing-flush seeds (`scheduler-throttle` /
    `scheduler-timing` tests define the observable contract and must pass).
 3. Event parking uses the same wake (head event `notBefore` = min
    `eligibleAt` of blocking deps).
 
-## Phase 6 — Event preflight closure cache
+## Phase 6 — Event preflight closure cache (optional, measured)
 
-1. Cache the handler read closure from the last dispatch log; invalidate on
-   handler re-registration; opt-in strict mode (populate-every-time) flag in
-   the handler registration for spec open question 3.
-2. Bench `scheduler-event-preflight.bench.ts` before/after; the deep walk
-   should disappear from steady-state event latency.
+Decision (2026-06-11): default stays populate-per-dispatch; caching is an
+off-by-default optimization adopted only if measurement justifies it.
+
+1. Bench first: quantify steady-state preflight cost on realistic handlers
+   (`scheduler-event-preflight.bench.ts` + a UI-flow trace). If it is not a
+   material share of event latency, skip this phase entirely.
+2. If adopted: cache the handler read closure from the last dispatch log,
+   invalidate on handler re-registration, keep populate-per-dispatch as the
+   correctness fallback and as the default until the cache has soak time.
 
 ## Phase 7 — Persistence alignment
 
@@ -210,7 +247,9 @@ Coordinate with memory-layer owners (observation rows live in memory v2):
 | --- | --- | --- |
 | A storage configuration delivers commit notifications asynchronously, so same-pass convergence regresses (still correct, more ticks) | 2 | Test-only synchronicity assertion across providers; accept extra ticks as degraded-but-correct; document the provider requirement in storage interface docs |
 | Hidden dependence on prefetch as replica warmer (cold-start empty reads) | 4 | Fixture in 4.4; awaitSync piece gate; arrival-as-change invariant test |
-| Multi-target output bindings exist in the wild | 1 | Corpus audit before enforcement; staged assert (telemetry → error) |
+| A side-writer the transformer's capability analysis missed (write outside the registered surface) | 1 | Dev-mode actual-writes-within-surface assertion (phase 1.4) surfaces declaration gaps; idempotency validator covers the contract side |
+| Send-time → commit-time enqueue shift reorders handler-sent events relative to independent arrivals | E | Interleaving snapshot fixtures before the flip; commit-time order is the causally honest one (spec §15 open question 2) |
+| Audit gap: internal senders relying on send-time queueing (UI bridge, framework code) | E | Call-site audit of `queueEvent`; explicit immediate path for non-handler senders |
 | Conditional-effect parity (effects running more often than v1's watermark filter allowed) | 2–3 | Run-count parity fixtures on the v1 conditional-effect tests; the §7.2 closure-ordering must land with the watermark deletion, not after |
 | Persisted observation misses after fingerprint change | 0, 7 | Versioned fingerprints; a miss only costs one re-run per node |
 | changeGroup external consumers (runtime client, toolshed diagnostics) | 2 | Grep + keep as inert diagnostic label until consumers migrate |

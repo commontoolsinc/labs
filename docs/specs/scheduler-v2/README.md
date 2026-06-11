@@ -106,12 +106,18 @@ watermark history was needed to filter them back out at run time.
 is invalid *and* live (§5). Effects are live by construction. Everything else
 derives liveness from being read. Registration does not imply a run.
 
-**P4 — One node, one output.** A computation owns exactly one output document
-(its internal/result cell, per the per-internal-cell model of #3911). The
-writer index degenerates to a 1:1 map, write-set tracking disappears, and
-"what does this node produce" is static for the node's lifetime.
-Side-writing through caller-provided cells is a separate, declared capability
-(§4.3, materializers) — not a generalization of output.
+**P4 — One node, one static write surface.** A computation's writes fall into
+three tiers, all fixed for the node's lifetime: its single primary output
+document (its internal/result cell, per the per-internal-cell model of #3911 —
+the pattern builder structurally allows only one output redirect, so this
+needs no enforcement); statically-resolvable side-write targets (a passed-in
+cell bound to a fixed link — just additional output documents); and declared
+materializer envelopes for dynamic side-writes (§4.3). What disappears is not
+side-writing — it is *write-set discovery*: nothing about what a node can
+write is learned from runs, so current-known/historical write tracking
+disappears and the writer index is a static map. The price of side-writing is
+the idempotency contract (§4.2), which the idempotency validator enforces in
+tests.
 
 **P5 — Self-identification through the transaction.** Every run's transaction
 carries its node id. Change records derived from that transaction do not
@@ -182,7 +188,8 @@ interface SchedulerNode {
   fn: (tx: IExtendedStorageTransaction) => unknown;
 
   // Static for the node's lifetime:
-  output?: DocumentRef;          // exactly one; absent for effects
+  outputs: DocumentRef[];        // primary output + static side-write targets;
+                                 // empty for effects (§4.3)
   sideWriteEnvelope?: Address[]; // materializers only (§4.3)
   declaredReads: LinkRef[];      // from node bindings; ordering hints only (§6.2)
   parent?: NodeId;               // creation context (§5.3, §7.4)
@@ -206,16 +213,26 @@ rehydration.
 
 ### 4.2 Node kinds
 
-**Computations** are pure-ish transformations: read through schemas, return a
-result that the runner writes to the node's single output document. Required
-contract (already the documented contract in v1): *idempotent* — re-running
-against unchanged inputs produces the same output. The scheduler may run a
-computation any number of times. lift/computed/derive, the list builtins
+**Computations** are transformations: read through schemas, return a result
+that the runner writes to the node's primary output document, optionally
+side-writing through cells passed to them. Required contract (already the
+documented contract in v1): *idempotent* — re-running against unchanged
+inputs produces the same writes, including side-writes. The scheduler may run
+a computation any number of times. lift/computed/derive, the list builtins
 (`map`/`filter`/`flatMap`), and raw builtins (fetch, llm, …) register as
-computations. A computation whose run produces an *unchanged* output value
-generates no change records (the storage layer already elides no-op
-writes), so downstream stays clean — equality cutoff falls out of P1+P2
-rather than being a separate mechanism.
+computations. A computation whose run produces *unchanged* values generates
+no change records (the storage layer already elides no-op writes), so
+downstream stays clean — equality cutoff falls out of P1+P2 rather than
+being a separate mechanism.
+
+The idempotency contract is enforced by the **idempotency validator**, which
+v2 keeps: the inline recheck mode re-runs every computation a second time
+against post-commit state and diffs the writes (today
+`enableIdempotencyCheck` / `runIdempotencyCheck`, wired into `cf test`
+including the multi-user runners and the `expect-non-idempotent` assertion).
+This is a test strategy rather than a production gate, but it is the thing
+that makes "computations may run any number of times" a checked property
+rather than a hope.
 
 **Effects** are demand sources with externally visible behavior: `sink()`
 callbacks (UI render), `cell.pull()` (ephemeral effect), framework
@@ -229,15 +246,35 @@ event handlers or post-commit outboxes.
 (§7.5) with their own transactional/retry contract. They share the node
 machinery only for preflight (computing a read closure to pull against).
 
-### 4.3 Materializers (declared side-writers)
+### 4.3 The write surface: three tiers
 
-A materializer is a computation that writes *through cells passed to it*
-(dynamic targets) instead of — or in addition to — its own output. Membership
-and the write envelope are **declared** (transformer metadata / module
-annotations, as in v1), never inferred from observed writes.
+A computation's write surface is fixed at registration and has up to three
+parts:
 
-Materializers are the one place where "who writes X" is not answerable by the
-1:1 output map. They get three special rules, and only these:
+1. **Primary output** — the node's internal/result cell. The pattern builder
+   structurally produces exactly one output redirect per node (the
+   transformer cannot bind to multiple outputs), so this is a given, not an
+   enforced invariant.
+2. **Static side-write targets** — writable cells passed in whose links
+   resolve at instantiation time (v1's `collectStaticRedirectWriteTargets`).
+   These are simply *additional output documents*: they enter the writer map
+   and the reader-edge graph exactly like the primary output, so demand
+   flowing from readers of a side-written document reaches the writer the
+   normal way. A node with static side-writes needs no standing demand.
+3. **Materializer envelopes** — declared write envelopes for computations
+   whose side-write targets are dynamic or broad (the function navigates a
+   large structure behind a passed-in cell and may modify a small part
+   anywhere within it). Membership and envelopes are **declared**
+   (transformer capability analysis / module annotations, as in v1), never
+   inferred from observed writes. v1's tiering rule carries over: a node
+   with declared envelopes treats the envelope as its side-write surface
+   (static target resolution is skipped); otherwise statically-resolvable
+   writable inputs become tier-2 targets.
+
+All three tiers require the §4.2 idempotency contract. Tiers 1–2 are ordinary
+graph participants. Materializers (tier 3) are the one place where "who
+writes X" is not answerable by the static output map, and they get three
+special rules, and only these:
 
 1. **Standing demand, idle priority.** A materializer is always live
    (`liveRefs` includes a permanent self-reference): its consumers are
@@ -299,7 +336,7 @@ register-time deep prefetch (`populateDependencies` with
 ```
 live(N) ⇔ N is an effect (registered, not cancelled)
         ∨ N is a materializer (standing self-demand)
-        ∨ ∃ registered node R: R.reads overlaps N.output ∧ live(R)
+        ∨ ∃ registered node R: R.reads overlaps one of N.outputs ∧ live(R)
         ∨ N.provisionalDemand
         ∨ N is in the head event's preflight closure (transient, §7.5)
 ```
@@ -395,8 +432,8 @@ For (a), v2 uses what is statically known:
 
 The deep prefetch survives in exactly one place: event-handler preflight
 (§7.5), where consistency-before-dispatch (D7) genuinely requires knowing the
-read closure ahead of an un-re-runnable action — and there it is cached
-(§7.5).
+read closure ahead of an un-re-runnable action (§7.5; caching it is a
+permitted later optimization).
 
 ---
 
@@ -440,8 +477,8 @@ run iff their actual inputs changed value* — without the watermark history,
 because the run-gate is the node's own value-accurate `invalid` bit.
 
 Node edges for the closure and the sort: writer→reader edges derived from the
-1:1 output map plus reader index (maintained incrementally as read deltas are
-applied), plus materializer envelope edges (ordering only), plus
+static output map plus reader index (maintained incrementally as read deltas
+are applied), plus materializer envelope edges (ordering only), plus
 `declaredReads` edges for never-ran nodes.
 
 ### 7.3 Run gate and run
@@ -491,38 +528,99 @@ Topological sort over the work set with:
 
 ### 7.5 Events
 
-The event queue is global FIFO with per-event retry budget, unchanged in
-contract from v1. Per pass, only the head event is considered (strict
-ordering):
+Events are dispatched per **ordering lane**. A lane is a FIFO queue with a
+per-event retry budget; events carry a global enqueue sequence number. There
+is exactly **one lane today** (lane = everything), so observable behavior is
+v1's global FIFO unchanged — but the spec states ordering, consistency
+gating, parking, and (future) confirmed-commit dispatch *per lane*, so that
+relaxing ordering later (per-stream, per-piece, or read/write-overlap lanes;
+or an opt-in server-confirmed mode that occupies only its own lane while
+others proceed) is a policy change, not a contract change. Lane granularity
+is an open question (§15); nothing in v2 may assume "the head event" is
+globally unique — components address "the head of a lane".
 
-1. **Preflight.** Compute the handler's read closure: the last dispatch's
-   logged read set when available (cached per handler; invalidated when the
-   handler is re-registered), else populate via declared input links and the
-   `$event` schema closure (the one surviving deep-read, scoped to the event
-   payload). Run in a read-only, commit-as-no-op transaction (CFC-inert,
-   as today).
+Per pass, for each lane's head event:
+
+1. **Preflight.** Compute the handler's read closure in a read-only,
+   commit-as-no-op transaction (CFC-inert, as today): declared writable-input
+   links when present, else the `$event`-scoped schema closure — the one
+   place a deep schema read survives in v2. **Default is
+   populate-per-dispatch** (v1 behavior). Reusing the previous dispatch's
+   logged closure is a permitted *implementation optimization*, adopted only
+   behind the preflight benchmark and off by default: the consistency gate
+   is the one place where an under-approximated closure weakens a
+   user-visible guarantee (I4), so correctness-by-default wins until the
+   cache is proven.
 2. **Consistency gate.** Treat the closure as a transient demand root: any
-   invalid live-or-not upstream nodes of the closure join the pass's work set
-   (they are demanded *by the event*). If any are ineligible (time-gated),
-   park the head event with `notBefore = min eligibleAt` and set the wake
-   gate; the queue stays FIFO.
+   invalid upstream nodes of the closure join the pass's work set (they are
+   demanded *by the event*, live or not). If any are ineligible (time-gated),
+   park the lane's head with `notBefore = min eligibleAt` and set the wake
+   gate; the lane stays FIFO.
 3. **Dispatch** once the closure is clean: presync handler inputs
    (`presyncInputs`, unchanged), run the handler in an immediate transaction
    stamped with the handler's id, commit optimistically (changes propagate
-   through the one channel), retry by re-queueing at head on rejection,
-   then run the internal `onCommit` callback (success or exhausted failure;
-   no external side effects — unchanged contract).
+   through the one channel), retry by re-queueing at the lane head on
+   rejection, then run the internal `onCommit` callback (success or
+   exhausted failure; no external side effects — unchanged contract).
 
-The preflight read-closure cache is the v2 answer to "preflight is a deep
-fetch on every event": steady-state events hit the cache; the deep walk runs
-only on first dispatch or topology change. Cache correctness is the same
-argument as §6.2 — an under-approximated closure can only come from the
-closure changing, in which case the previous dispatch's log is stale by
-exactly the data that changed, which is invalid in the graph and pulled
-anyway, or it is corrected on the next dispatch. (If a stronger guarantee is
-wanted for specific handlers, they can opt into populate-every-time.)
+### 7.6 Event-initiated work and commit failure
 
-### 7.6 Convergence bounds
+A handler run can *launch* work that escapes its transaction: events sent to
+streams, and pieces instantiated from its result (the runner's `postRun`
+path). The handler's **data** writes are atomic with its commit and roll
+back for free; the launched work is control flow, and v2 makes its failure
+semantics explicit.
+
+Requirement (invariant I10): work launched by an event handler takes effect
+**at most once, and only if the launching commit succeeds**.
+
+Current state, for the record (verified in code, June 2026):
+
+- *Sent events* are queued at send time (`Cell.set` on a stream calls
+  `scheduler.queueEvent` immediately, `cell.ts:1167`), ungated on the
+  sender's commit. A handler whose commit is rejected and retried queues its
+  follow-up event once per attempt (duplication), and a follow-up queued by
+  a permanently failed attempt still dispatches — possibly with a payload
+  computed from rolled-back state. This violates I10 today.
+- *Handler-result pieces* are instantiated inline in the handler's
+  transaction (data atomic — good), but their scheduler registrations are
+  eager. The on-commit-error cleanup (cancel + stop) exists only in the dead
+  push-mode branch (`runner.ts:2724-2729`); the pull path ties teardown only
+  to the handler node's lifetime (`runner.ts:2735`). Convergence after a
+  failed commit relies on retry + cause-derived deterministic ids
+  (`{ resultFor: cause }` + `startCore`'s already-running check); exhausted
+  retries leave a registered piece running against rolled-back data. The
+  commit-gated mechanism already exists (`startAfterSuccessfulCommit`) but
+  is used only for `navigateTo` results.
+
+v2 rules:
+
+1. **Sent events ride the post-commit outbox.** The transaction layer
+   already has an idempotency-keyed outbox flushed only on successful commit
+   (`extended-storage-transaction.ts:385,859`). Handler-emitted events are
+   staged there and enqueued into their lane at commit-success time. Retries
+   cannot duplicate (only the committed attempt flushes); failed handlers
+   emit nothing. Ordering note: events emitted by one handler enqueue
+   together at commit time, preserving their relative order; their
+   interleaving with independently arriving events shifts from send-time to
+   commit-time, which is the causally honest ordering.
+2. **Handler-result pieces: eager start + compensating stop.** Inline
+   instantiation stays (commit-gating every child start on server ack would
+   add a round trip to interactive flows); v2 restores the missing failure
+   path: a commit callback that, on final rejection, cancels the child
+   registrations and stops the piece — the pull-mode equivalent of the
+   cleanup the push path had. `navigateTo` results keep the fully
+   commit-gated start (durability before navigation).
+3. **Computation-launched children are outside I10.** Computations are
+   idempotent and re-runnable; their children converge through deterministic
+   ids and normal re-runs, and orphaned registrations are bounded by the
+   same retry budget. (The exhausted-retry zombie is accepted as
+   pre-existing; tracked as an open question.)
+
+Both fixes are independent of the v2 cutover and can land against v1 (see
+migration plan, phase E).
+
+### 7.7 Convergence bounds
 
 - `MAX_ITERS` iterations per pass (default 10).
 - `PASS_RUN_BUDGET` runs per node per pass (small, default 5 — v1's 100 was a
@@ -547,7 +645,7 @@ responsive; an eventually-consistent graph eventually wins.
 eligibleAt(N) = max(
   N.gate.debounceReadyAt ?? 0,    // reset on each invalidation while gated
   N.gate.throttleReadyAt ?? 0,    // lastRunAt + throttleMs
-  N.gate.backoffUntil ?? 0,       // §7.6
+  N.gate.backoffUntil ?? 0,       // §7.7
 )
 eligible(N) = now ≥ eligibleAt(N)
 ```
@@ -560,7 +658,7 @@ eligible(N) = now ≥ eligibleAt(N)
   averaging above a threshold after K runs get a default debounce unless
   opted out. Pure policy: adjusts `gate.debounce`.
 - **Cycle backoff** — replaces v1's cycle-aware debounce *and* cycle breaker
-  with the §7.6 escalating gate.
+  with the §7.7 escalating gate.
 
 ### 8.3 Semantics
 
@@ -660,10 +758,10 @@ re-runs if a value in its registered read set changed (per §6.1 comparison
 semantics) or its commit was rejected. Corollary: a computation producing
 unchanged output triggers no downstream runs.
 
-**I4 — Event ordering & consistency.** Handlers dispatch in global queue
-order. Before dispatch, every invalid node upstream of the handler's read
-closure has been run (or the event is parked; it is never skipped or
-reordered).
+**I4 — Event ordering & consistency.** Handlers dispatch in enqueue order
+within their ordering lane (today: one global lane). Before dispatch, every
+invalid node upstream of the handler's read closure has been run (or the
+event is parked; it is never skipped or reordered within its lane).
 
 **I5 — Self-stability.** A run's own committed changes never invalidate the
 node that produced them. A run that writes only its output with unchanged
@@ -687,6 +785,12 @@ originating node id and the trigger-read addresses that caused the run.
 data edge M→N, M runs (or is skipped as clean/ineligible) before N in that
 iteration.
 
+**I10 — Event-launched work is commit-gated.** Events sent and pieces
+started by an event handler take effect at most once, and only if the
+handler's transaction commits successfully (sent events: staged in the
+post-commit outbox; started pieces: compensated by cancel+stop on final
+rejection). See §7.6.
+
 ---
 
 ## 12. Component structure
@@ -698,7 +802,7 @@ field bag.)
 | Component | Owns | Key operations |
 | --- | --- | --- |
 | `registry` | Node records, identity, lifecycle | `register`, `remove`, `get` |
-| `graph` | Reader index (trigger semantics), 1:1 writer map, envelope index, node edges, liveness refcounts | `applyReadDelta`, `match(change)`, `edgesFor`, `liveRefDelta` |
+| `graph` | Reader index (trigger semantics), static writer map, envelope index, node edges, liveness refcounts | `applyReadDelta`, `match(change)`, `edgesFor`, `liveRefDelta` |
 | `invalidation` | Storage subscription → `markInvalid` + tick | `onNotification` |
 | `settle` | The pass: work set, toposort, run-gating, iteration/budget bounds | `pass()` |
 | `runner` | One-tx run, commit watch, retries, read-delta handoff, observation attach | `runNode` |
@@ -768,40 +872,68 @@ Summary table; the full per-mechanism walkthrough with file references is in
 | `populateDependencies` deep prefetch for reactive nodes | `declaredReads` ordering hints | Convergence loop corrects under-approximation (§6.2); outputs no longer need discovery (P4). |
 | `inFlightSources` + change-group self-skip | `tx.nodeId` (P5) | One tx per run already holds; the id is already stamped (`debugActionId`) — promote, don't parallel-track. |
 | unsubscribe/resubscribe around runs + memoized trigger diff | Read-delta application (P6) | The diff already exists (trigger-index memo); make it the primitive. |
-| `SchedulerWriteIndex` current-known/historical/backfill/ancestor-pruning | 1:1 output map + declared envelopes | P4 (user-confirmed direction; enforced in migration phase 1). |
-| Cycle breaker + cycle-aware debounce + effect pre-clear cycle detection | Budgets + escalating backoff gate (§7.6, §8) | Bounded-rate convergence preserves liveness without bespoke surgery. |
+| `SchedulerWriteIndex` current-known/historical/backfill/ancestor-pruning | Static write surface (outputs + envelopes) | P4: the builder already guarantees one primary redirect; static side-write targets and envelopes are fixed at registration (confirmed 2026-06-11). |
+| Cycle breaker + cycle-aware debounce + effect pre-clear cycle detection | Budgets + escalating backoff gate (§7.7, §8) | Bounded-rate convergence preserves liveness without bespoke surgery. |
 | 3 timer systems (debounce timers, computation trailing flush, event wake) | One gate + one wake timer (§8) | All were expressions of `eligibleAt`. |
 | Per-action rehydration tokens/timeouts/awaitSync race guards | Piece-level resume phase (§9.2) | Sync-before-register makes per-node racing impossible by construction. |
 
 ---
 
-## 15. Open questions
+## 15. Decisions log and open questions
 
-1. **Single-output enforcement.** P4 is assumed per current direction (one
-   write redirect = the action's internal cell; #3911 landed per-internal
-   cells). Migration phase 1 must verify no pattern in the corpus binds one
-   node's result into multiple target documents, and make multi-target
-   bindings a compile-time error in the transformer rather than a runtime
-   surprise.
-2. **Effect speculation contract.** v1/v2 both run effects against
-   locally-committed-but-unconfirmed state. Should the spec promise a
-   server-confirmed mode for designated effects (e.g. payment-ish UI), or is
-   the post-commit outbox the only sanctioned path? v2 keeps v1's stance
-   (outbox only) but the contract should be stated in pattern-facing docs.
-3. **Preflight cache strictness.** §7.5 allows last-log closures for handler
-   preflight. Are there handlers whose consistency requirement is strict
-   enough to mandate populate-every-time (opt-in flag), and should the
-   transformer emit that flag for handlers reading through dynamic links?
-4. **Provisional-demand expiry edge.** A parent may create a child whose
-   output is read only by a node created even later in the same pass. Expiry
-   "at end of creating pass" vs "at first run" changes whether the child can
-   go dormant prematurely. Default proposal: expire at end of the creating
-   pass *or* first run, whichever is later; needs a fixture during phase 3.
-5. **Global run serialization.** v2 keeps one-run-at-a-time. Per-space
-   parallelism is structurally possible (transactions are per-commit, the
-   channel is ordered per space) but interacts with cross-space reads;
-   explicitly out of scope until the single-engine design is proven.
-6. **`schedulerHistoricalMightWrite`.** The experimental flag and historical
-   write tracking die with the write index. Confirm no diagnostic consumer
-   (toolshed dashboards?) reads `getMightWrite` in historical mode before
-   removing rather than stubbing.
+### Resolved (2026-06-11)
+
+1. **Write surface (was: single-output enforcement).** Confirmed: the
+   pattern builder already produces exactly one output redirect per node —
+   the transformer cannot bind to multiple outputs, so no corpus audit and
+   no new enforcement is needed. Equally confirmed: computations *also*
+   legally write into passed-in cells under the idempotency contract, and
+   the full v1 taxonomy stays — statically-fixed passed-in cells are just
+   additional outputs; dynamic/broad targets are materializer envelopes with
+   eager-at-idle execution. P4 is therefore "static write surface", not
+   "single write" (§4.3). The idempotency validator (inline re-run + write
+   diff, `cf test` integration) is confirmed kept as the enforcement
+   strategy.
+2. **Server-confirmed dispatch.** Future feature, strictly opt-in — never
+   the only mode. Decided now so it stays cheap later: events are specified
+   per ordering *lane* with enqueue sequence numbers (§7.5); a confirmed
+   event would occupy only its lane. FIFO relaxation (and per-lane
+   consistency gating) is the real design question and stays open below.
+3. **Preflight closure caching.** Default is populate-per-dispatch (v1
+   behavior); caching the last dispatch's closure is an optional, off-by-
+   default optimization to be adopted only behind the preflight benchmark
+   (§7.5). No API decision needed now.
+4. **Provisional-demand expiry.** Agreed: expire at end of the creating pass
+   *or* first run, whichever is later; fixture due in migration phase 3.
+5. **Run serialization.** Stays globally serialized. Actions are effectively
+   synchronous today; parallelism only becomes relevant with multiple
+   workers and is deliberately out of scope.
+6. **`schedulerHistoricalMightWrite`.** Confirmed deletable — flag, legacy
+   `getMightWrite` mode, and historical write tracking go in migration
+   phase 1.
+
+### Open
+
+1. **Lane granularity.** When ordering is relaxed, what is a lane —
+   per-stream link, per-piece, per-space, or dynamic (events whose handler
+   closures don't overlap commute)? Closure-overlap is the most permissive
+   but makes ordering data-dependent; per-piece is predictable but still
+   blocks within a busy piece. Likely staged: keep one lane; introduce
+   per-piece lanes behind an experiment flag; evaluate closure-overlap only
+   with real contention data. The same question applies to the consistency
+   gate: today the gate blocks the lane head globally; per-lane gates are
+   the natural pairing.
+2. **Outbox enqueue-time ordering.** §7.6 moves handler-sent events from
+   send-time to commit-time enqueueing. Within one handler this preserves
+   order; across handlers it can reorder relative to today when commits
+   resolve out of order. Position: commit-time is the causally honest order;
+   needs a fixture catalog of today's interleavings before landing to
+   confirm nothing user-visible depends on send-time order.
+3. **Zombie pieces on exhausted retries.** Computation-launched children
+   whose creating run never durably commits stay registered against
+   rolled-back data (pre-existing, bounded, rare). Worth a cheap reaper
+   (e.g. piece-level "result cell never became durable" check) or accept?
+4. **Speculation rollback beyond events.** §7.6 covers handler-launched
+   work. Is there an analogous gap for *effect*-launched work (sinks
+   starting pieces)? Effects re-run freely, so deterministic ids should
+   converge the same way computations do, but this has not been audited.
