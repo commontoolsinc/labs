@@ -1069,7 +1069,10 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       ).toBeUndefined();
       // Genuine identity, symbol that was never registered under it → miss.
       expect(
-        harness.getVerifiedImplementation?.(prov.identity, "unregistered-symbol"),
+        harness.getVerifiedImplementation?.(
+          prov.identity,
+          "unregistered-symbol",
+        ),
       ).toBeUndefined();
       // The genuine pair returns the EXACT recorded function (a trust-gated
       // artifact's implementation), never attacker-controlled data.
