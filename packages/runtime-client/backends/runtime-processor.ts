@@ -114,6 +114,7 @@ import {
 import { cellRefToKey } from "../shared/utils.ts";
 import { RemoteResponse } from "@commonfabric/runtime-client";
 import {
+  normalizeRenderDeclassificationPolicy,
   type RenderDeclassificationPolicy,
   WorkerReconciler,
 } from "@commonfabric/html/worker";
@@ -432,8 +433,11 @@ export class RuntimeProcessor {
       identity,
       telemetry,
     );
+    // InitializationData crosses postMessage with no runtime validation, so a
+    // typo'd host config or version-skewed peer must fail CLOSED, not open:
+    // any present-but-unknown value becomes "deny"; absent stays "allow".
     processor.renderDeclassificationPolicy =
-      data.renderDeclassificationPolicy ?? "allow";
+      normalizeRenderDeclassificationPolicy(data.renderDeclassificationPolicy);
     return processor;
   }
 

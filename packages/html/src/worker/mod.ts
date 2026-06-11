@@ -20,4 +20,7 @@ export type {
   WorkerRenderNode,
   WorkerVNode,
 } from "./types.ts";
-export { isWorkerVNode } from "./types.ts";
+export {
+  isWorkerVNode,
+  normalizeRenderDeclassificationPolicy,
+} from "./types.ts";
