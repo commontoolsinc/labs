@@ -448,10 +448,20 @@ export class RuntimeProcessor {
     return processor;
   }
 
+  #siteTableCancel: Cancel | undefined;
+  #siteTableWarned = new Set<string>();
+
   /**
    * Subscribe to the home-space site table and register each entry as
    * a host hint. Fire-and-forget: resolution hints are an enhancement,
    * never a boot dependency.
+   *
+   * ORDERING CONTRACT for embedders: this subscription races the first
+   * mount. An embedder about to mount a space it just learned the host
+   * for must push the hint via the RegisterSpaceHost IPC BEFORE that
+   * mount — once a space opens against the default host, the
+   * opened-space rule pins it for the session. The table is the
+   * durable record; the IPC is the ordering guarantee.
    */
   watchSiteTable(): void {
     try {
@@ -462,23 +472,45 @@ export class RuntimeProcessor {
         siteTableSchema,
       );
       Promise.resolve(table.sync()).then(() => {
-        table.sink((entries: Readonly<SiteTable> | undefined) => {
-          for (const entry of entries ?? []) {
-            if (!entry?.did || !entry.host) continue;
-            if (!String(entry.did).startsWith("did:")) continue;
-            try {
-              this.runtime.registerSpaceHost(
-                entry.did as DID,
-                entry.host,
-              );
-            } catch (error) {
-              console.warn(
-                `[RuntimeProcessor] Ignoring invalid site-table entry for ${entry.did}:`,
-                error instanceof Error ? error.message : error,
-              );
+        this.#siteTableCancel = table.sink(
+          (entries: Readonly<SiteTable> | undefined) => {
+            for (const entry of entries ?? []) {
+              if (!entry?.did || !entry.host) continue;
+              if (!String(entry.did).startsWith("did:")) continue;
+              try {
+                const accepted = this.runtime.registerSpaceHost(
+                  entry.did as DID,
+                  entry.host,
+                );
+                // The dual of "never silently re-point": never silently
+                // fail to take effect. Warn (once per fact) when the
+                // hint lost — usually the boot race: the space opened
+                // against the default host first.
+                if (!accepted) {
+                  const key = `${entry.did}|${entry.host}`;
+                  const effective = this.runtime.hostForSpace(
+                    entry.did as DID,
+                  ).toString();
+                  if (
+                    effective !== new URL(entry.host).toString() &&
+                    !this.#siteTableWarned.has(key)
+                  ) {
+                    this.#siteTableWarned.add(key);
+                    console.warn(
+                      `[RuntimeProcessor] Site-table hint for ${entry.did} not in effect ` +
+                        `(space already open or seeded elsewhere); using ${effective}`,
+                    );
+                  }
+                }
+              } catch (error) {
+                console.warn(
+                  `[RuntimeProcessor] Ignoring invalid site-table entry for ${entry.did}:`,
+                  error instanceof Error ? error.message : error,
+                );
+              }
             }
-          }
-        });
+          },
+        );
       }).catch((error: unknown) => {
         console.warn(
           "[RuntimeProcessor] Site table unavailable (continuing without hints):",
@@ -509,6 +541,8 @@ export class RuntimeProcessor {
     this.disposingPromise = (async () => {
       this.telemetry.removeEventListener("telemetry", this.#onTelemetry);
       try {
+        this.#siteTableCancel?.();
+        this.#siteTableCancel = undefined;
         for (const cancel of this.subscriptions.values()) {
           cancel();
         }

@@ -246,6 +246,12 @@ export interface RuntimeSyncedRequest extends BaseRequest {
  * on the live runtime without waiting for a sync round-trip. The
  * worker's refusal semantics apply: seed wins, opened spaces are never
  * re-pointed.
+ *
+ * ORDERING CONTRACT: an embedder that will mount a space it just
+ * learned the host for must send this BEFORE the first mount of that
+ * space — once a space opens against the default host, the
+ * opened-space rule pins it for the session. The table is the durable
+ * record; this IPC is the ordering guarantee.
  */
 export interface RegisterSpaceHostRequest extends BaseRequest {
   type: RequestType.RegisterSpaceHost;

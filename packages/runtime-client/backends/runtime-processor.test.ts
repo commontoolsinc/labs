@@ -1780,6 +1780,56 @@ describe("RuntimeProcessor per-space piece contexts", () => {
     }
   });
 
+  it("watchSiteTable registers table entries, isolating bad ones", async () => {
+    const { runtime } = createRuntime();
+    const { siteTableCause, siteTableSchema } = await import(
+      "@commonfabric/home-schemas"
+    );
+    const registered: Array<[string, string]> = [];
+    Object.assign(runtime, {
+      registerSpaceHost: (space: string, host: string) => {
+        registered.push([space, host]);
+        // Malformed hosts throw in the real registry — simulate to
+        // assert per-entry isolation.
+        if (host === "not a url") throw new Error("Invalid host");
+        return host !== "http://refused.test/";
+      },
+    });
+    const userDid = runtime.userIdentityDID;
+    const table = runtime.getCell(
+      userDid,
+      siteTableCause(userDid),
+      siteTableSchema,
+    );
+    const tx = runtime.edit();
+    table.withTx(tx).set([
+      { did: "did:key:z6Mk-table-a", host: "http://host-a.test/" },
+      { did: "not-a-did", host: "http://ignored.test/" },
+      { did: "did:key:z6Mk-table-bad", host: "not a url" },
+      { did: "did:key:z6Mk-table-b", host: "http://refused.test/" },
+      { did: "did:key:z6Mk-table-c", host: "http://host-c.test/" },
+    ]);
+    await tx.commit();
+
+    const processor = { runtime } as unknown as RuntimeProcessor;
+    try {
+      (RuntimeProcessor.prototype as unknown as {
+        watchSiteTable(): void;
+      }).watchSiteTable.call(processor);
+      await runtime.idle();
+      // Microtask drain: sync() resolution + first sink fire.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(registered).toEqual([
+        ["did:key:z6Mk-table-a", "http://host-a.test/"],
+        ["did:key:z6Mk-table-bad", "not a url"],
+        ["did:key:z6Mk-table-b", "http://refused.test/"],
+        ["did:key:z6Mk-table-c", "http://host-c.test/"],
+      ]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("handleRegisterSpaceHost forwards to the runtime and reports the verdict", () => {
     const calls: Array<[string, string]> = [];
     const processor = {
@@ -1790,9 +1840,11 @@ describe("RuntimeProcessor per-space piece contexts", () => {
         },
       },
     } as unknown as RuntimeProcessor;
-    const handle =
-      (RuntimeProcessor.prototype as unknown as Record<string, Function>)
-        .handleRegisterSpaceHost;
+    const handle = (RuntimeProcessor.prototype as unknown as {
+      handleRegisterSpaceHost(
+        r: { type: RequestType; space: string; host: string },
+      ): { value: boolean };
+    }).handleRegisterSpaceHost;
     expect(handle.call(processor, {
       type: RequestType.RegisterSpaceHost,
       space: "did:key:z6Mk-ipc-a",
