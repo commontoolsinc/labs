@@ -2100,6 +2100,150 @@ describe("llmDialog", () => {
       },
     });
   });
+
+  it("bounds tool-loop follow-up turns by the deployment sink ceiling (#3993 review)", async () => {
+    // A tool-bearing dialog reads a labeled cell during a follow-up turn. The
+    // pattern declares a generous observation bound (["internal"]), so without a
+    // deployment ceiling the internal note would ship to the LLM in turn 2 — the
+    // initial-request ceiling never gates these post-commit tool reads. With a
+    // deployment ceiling of llmDialog: [] (public-only) the effective bound must
+    // collapse to [] (pattern ∧ deployment) and the note must be redacted.
+    const secret = "internal-only-secret-payload";
+
+    let turn2Request: { messages: readonly BuiltInLLMMessage[] } | undefined;
+    addMockResponse(
+      (req) => req.messages.length === 1 && req.tools?.["readInternal"] !== undefined,
+      {
+        role: "assistant",
+        content: [{
+          type: "tool-call",
+          toolCallId: "call_read_internal_ceiling",
+          toolName: "readInternal",
+          input: {},
+        }],
+        id: "ceiling-turn-1",
+      },
+    );
+    addMockResponse(
+      (req) => {
+        const matches = req.messages.some((m) =>
+          m.role === "tool" && Array.isArray(m.content) &&
+          m.content.some((c: any) =>
+            c.type === "tool-result" && c.toolName === "readInternal"
+          )
+        );
+        if (matches) {
+          turn2Request = { messages: req.messages };
+        }
+        return matches;
+      },
+      {
+        role: "assistant",
+        content: "Done.",
+        id: "ceiling-turn-2",
+      },
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
+        pending: { type: "boolean" },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    const readInternal = pattern(
+      () => {
+        return { note: secret };
+      },
+      { type: "object" },
+      {
+        type: "object",
+        properties: { note: { type: "string" } },
+        required: ["note"],
+        ifc: { confidentiality: ["internal"] },
+      } as const satisfies JSONSchema,
+    );
+
+    const ceilingStorageManager = StorageManager.emulate({ as: signer });
+    const ceilingRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: ceilingStorageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      // Deployment ceiling: the llmDialog sink may carry no confidentiality.
+      cfcSinkMaxConfidentiality: { llmDialog: [] },
+    });
+    const ceilingTx = ceilingRuntime.edit();
+    const { commonfabric } = createTrustedBuilder(ceilingRuntime);
+
+    try {
+      const testPattern = commonfabric.pattern(
+        () => {
+          const messages = commonfabric.Cell.of<BuiltInLLMMessage[]>([]);
+          const dialog = commonfabric.llmDialog({
+            messages,
+            // Generous pattern-supplied bound — would let "internal" ship.
+            observationMaxConfidentiality: ["internal"],
+            tools: {
+              readInternal: commonfabric.patternTool(
+                readInternal,
+              ) as unknown as BuiltInLLMTool,
+            },
+          });
+          return {
+            addMessage: dialog.addMessage,
+            pending: dialog.pending,
+            messages,
+          };
+        },
+        false,
+        resultSchema,
+      );
+
+      const resultCell = ceilingRuntime.getCell(
+        space,
+        "llmDialog-sink-ceiling-tool-loop-test",
+        resultSchema,
+        ceilingTx,
+      );
+
+      const result = ceilingRuntime.run(ceilingTx, testPattern, {}, resultCell);
+      ceilingTx.commit();
+
+      const addMessage = await result.key("addMessage").pull();
+      addMessage.send({ role: "user", content: "Read the briefing." });
+
+      // user, assistant(tool-call), tool(result), assistant(final).
+      await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
+
+      const messages = (await result.key("messages").pull())!;
+      const toolMessage = messages[2];
+      expect(toolMessage.role).toBe("tool");
+      // The tool EXECUTED (it was not denied and did not error) — the leak is
+      // prevented by redacting its labeled result to an opaque link, so a
+      // failed invocation must not masquerade as a successful redaction.
+      const output = (toolMessage.content as any)[0].output;
+      expect(output.type).toBe("json");
+      expect(JSON.stringify(output.value)).toContain("@link");
+      const toolText = JSON.stringify(toolMessage.content);
+      // The secret must not appear in the tool-result that feeds turn 2.
+      expect(toolText).not.toContain(secret);
+
+      // And the actual follow-up request the LLM saw must not carry it either.
+      expect(turn2Request).toBeDefined();
+      expect(JSON.stringify(turn2Request!.messages)).not.toContain(secret);
+    } finally {
+      await ceilingTx.commit();
+      await ceilingRuntime.idle();
+      await ceilingRuntime.dispose();
+      await ceilingStorageManager.close();
+    }
+  });
 });
 
 function waitForMessages(result: any, expectedCount: number) {
