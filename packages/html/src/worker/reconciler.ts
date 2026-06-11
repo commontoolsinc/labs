@@ -143,6 +143,15 @@ export class WorkerReconciler {
    * @param vnode - The root VNode, Cell<VNode>, or Cell<unknown> to mount
    * @returns A cancel function to unmount the tree
    */
+  /** Best-effort space of a cell; undefined when it can't name one. */
+  private spaceOfCell(cell: Cell<unknown>): string | undefined {
+    try {
+      return cell.space;
+    } catch {
+      return undefined;
+    }
+  }
+
   mount(vnode: WorkerVNode | Cell<WorkerVNode> | Cell<unknown>): Cancel {
     logger.debug(
       "mount",
@@ -154,7 +163,11 @@ export class WorkerReconciler {
       this.rootCancel();
     }
 
-    const ctx = this.createContext();
+    let ctx = this.createContext();
+    if (isCell(vnode)) {
+      const rootSpace = this.spaceOfCell(vnode);
+      if (rootSpace) ctx = { ...ctx, space: rootSpace };
+    }
     const [cancel, addCancel] = useCancelGroup();
 
     // Handle Cell<VNode> at the root
@@ -2177,9 +2190,23 @@ export class WorkerReconciler {
       return null;
     }
 
-    // Create element
+    // Create element. Stamp the producing cell's space when it differs
+    // from the nearest ancestor element that carried one — descendants
+    // inherit, so transcluded subtrees re-stamp at their boundary.
+    const stampSpace = ctx.space !== undefined &&
+        ctx.space !== ctx.emittedSpace
+      ? ctx.space
+      : undefined;
     const nodeId = ctx.nextNodeId();
-    this.queueOps([{ op: "create-element", nodeId, tagName: sanitized.name }]);
+    this.queueOps([{
+      op: "create-element",
+      nodeId,
+      tagName: sanitized.name,
+      ...(stampSpace !== undefined ? { space: stampSpace } : {}),
+    }]);
+    if (stampSpace !== undefined) {
+      ctx = { ...ctx, emittedSpace: stampSpace };
+    }
     const childPolicy = this.childRenderPolicyForNode(
       sanitized,
       policy,
@@ -2888,6 +2915,12 @@ export class WorkerReconciler {
     childKey: string,
     policy: RenderPolicy,
   ): ChildNodeState {
+    // A followed cell is a (potential) transclusion boundary: its
+    // subtree renders in the CELL's space, not the surrounding one.
+    const cellSpace = this.spaceOfCell(cell);
+    if (cellSpace !== undefined && cellSpace !== ctx.space) {
+      ctx = { ...ctx, space: cellSpace };
+    }
     const [cancel, addCancel] = useCancelGroup();
 
     // Create child state that will track the current node
