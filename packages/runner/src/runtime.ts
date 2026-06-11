@@ -62,6 +62,7 @@ import {
   type CfcLabelView,
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
   flowLabelWorkExists,
+  gatedSinkRequestExists,
   type SinkMaxConfidentiality,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
@@ -762,6 +763,14 @@ export class Runtime {
       flowLabelWorkExists(tx)
     ) {
       tx.markCfcRelevant("flow-labels");
+    }
+    // Sink-request ceiling relevance is also computed, not caller-marked
+    // (audit item 21): a request assembled from a value pulled through a
+    // schema-less link marks nothing, so without this the egress commits
+    // without `prepareCfc` and the ceiling is never checked. Independent of
+    // the flow dial — the ceiling enforces even when flow labels are off.
+    if (!state.relevant && gatedSinkRequestExists(tx)) {
+      tx.markCfcRelevant("sink-request-ceiling");
     }
     if (!state.relevant) {
       return;

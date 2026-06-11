@@ -62,6 +62,7 @@ import {
   DEFAULT_CFC_FLOW_LABELS_MODE,
   flowLabelWorkExists,
   flowReadExcluded,
+  gatedSinkRequestExists,
   type ImplementationIdentity,
   type PostCommitSideEffect,
   prepareBoundaryCommit,
@@ -801,6 +802,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         flowLabelWorkExists(this)
       ) {
         this.markCfcRelevant("flow-labels");
+      }
+      // Sink-request ceiling relevance (audit item 21): a request built from a
+      // value pulled through a schema-less link marks nothing, so the egress
+      // would otherwise commit without prepareCfc and skip the ceiling check.
+      // Independent of the flow dial; probe only while unprepared so a
+      // post-prepare relevance flip can't invalidate an already-done digest.
+      if (
+        !this.cfcState.relevant &&
+        this.cfcState.prepare.status === "unprepared" &&
+        this.cfcState.enforcementMode !== "disabled" &&
+        gatedSinkRequestExists(this)
+      ) {
+        this.markCfcRelevant("sink-request-ceiling");
       }
       if (
         this.cfcState.relevant &&

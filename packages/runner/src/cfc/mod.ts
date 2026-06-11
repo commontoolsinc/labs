@@ -56,6 +56,7 @@ export {
 export {
   flowLabelWorkExists,
   flowReadExcluded,
+  gatedSinkRequestExists,
   prepareBoundaryCommit,
 } from "./prepare.ts";
 export {
