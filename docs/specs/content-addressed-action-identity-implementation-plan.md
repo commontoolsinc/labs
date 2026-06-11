@@ -471,6 +471,20 @@ One-time effect: stored pattern-bearing values gain a `$patternRef` key, so
 the first re-serialization after upgrade diffs once per value (same class as
 E1's serialized-module change).
 
+Known dual-write gap (deliberate, flagged by Codex review): STRUCTURAL
+pattern copies — the plain bound copies `unwrapOneLevelAndBindtoDoc` builds
+from `pattern.nodes`-derived bindings — persist without `$patternRef`, since
+they carry no `toJSON` and `getImmutableCell` stringifies them directly. The
+load-bearing instance (the list-builtin `op`) is already covered by the
+`substituteOpPatternRefs` sentinel, which stamps the ref from the copy's
+derivation chain at instantiation. Stamping refs into the remaining bound
+copies would change the content of immutable inputs cells (the CT-1623
+id-churn class) for a vintage that rewrites on every re-instantiation anyway
+— so they stay bare until the Phase 4 flip changes the internal serializer
+itself. The aging signal dual-write exists for is the LIVE-factory boundary
+writes (llm toolDef patterns, patterns passed directly in piece arguments),
+which are the values that persist across sessions.
+
 ## Sequencing & parallelism
 
 A → B → C → D strictly (B's `entryRefByValue` promotion is C's lookup
