@@ -154,7 +154,7 @@ describe("resolveOpPattern dual-read", () => {
         { $patternRef: { identity: "cf:module/miss", symbol: "s" } } as never,
         "map",
       )
-    ).toThrow(/not in the/);
+    ).toThrow(/did not evaluate in this session/);
   });
 });
 
