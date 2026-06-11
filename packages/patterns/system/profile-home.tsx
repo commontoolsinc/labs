@@ -57,6 +57,22 @@ export type RemoveProfileElementEvent = {
   cell: any;
 };
 
+/**
+ * The single event shape for every element mutation (see `mutateElements`):
+ * a `cell` (from the event or the instance's bound state) removes that
+ * element; a `patternUrl` (or a bound link form) adds a link reference card;
+ * otherwise a catalog card is added. `AddProfileElementEvent` /
+ * `RemoveProfileElementEvent` are subsets kept for the exported stream types.
+ */
+export type MutateProfileElementsEvent = {
+  catalogId?: string;
+  patternUrl?: string;
+  title?: string;
+  tag?: string;
+  userTags?: readonly string[];
+  cell?: any;
+};
+
 export type SetProfileNameEvent = {
   name?: string;
   detail?: { message?: string };
@@ -76,11 +92,14 @@ export type ProfileHomeOutput = {
   [UI]: unknown;
   name: OwnerProtectedProfileWrite<string, typeof setName>;
   avatar: OwnerProtectedProfileWrite<string, typeof setAvatar>;
-  elements: OwnerProtectedProfileWrite<ProfileElement[], typeof addElement>;
+  elements: OwnerProtectedProfileWrite<ProfileElement[], typeof mutateElements>;
   setName: Stream<SetProfileNameEvent>;
   setAvatar: Stream<SetProfileAvatarEvent>;
-  addElement: Stream<AddProfileElementEvent>;
-  removeElement: Stream<RemoveProfileElementEvent>;
+  // Both element streams accept the full mutation event (the union shape of
+  // the one authorized writer); `AddProfileElementEvent` /
+  // `RemoveProfileElementEvent` remain the documented per-stream subsets.
+  addElement: Stream<MutateProfileElementsEvent>;
+  removeElement: Stream<MutateProfileElementsEvent>;
   initialNameApplied: string;
 };
 
@@ -130,35 +149,99 @@ const appendElement = (
   elements.push(element);
 };
 
-const addElement = handler<
-  AddProfileElementEvent,
-  { elements: Writable<ProfileElement[]> }
->((event, { elements }) => {
-  const source = event.patternUrl ? "url" : "catalog";
-  const title = event.title ??
-    (source === "url" ? event.patternUrl ?? "Profile pattern" : "Profile card");
-  const tag = event.tag ?? event.catalogId ?? event.patternUrl ?? "profile";
-  const cell = source === "url"
-    ? (UrlPatternReference({ title, url: event.patternUrl ?? "" }) as any).for(
-      tag,
-    )
-    : (ProfileCatalogCard({ title }) as any).for(tag);
-  appendElement({
-    cell,
-    tag,
-    userTags: event.userTags ?? [],
-    title,
-    source,
-  }, elements);
-});
-
-const removeElement = handler<
-  RemoveProfileElementEvent,
-  { elements: Writable<ProfileElement[]> }
->(({ cell }, { elements }) => {
-  elements.set(
-    elements.get().filter((element) => !equals(element.cell, cell)),
-  );
+// THE single authorized writer for the owner-protected `elements` list. A
+// `writeAuthorizedBy` claim carries exactly one handler binding, verified
+// against the writing handler's implementation identity — so every element
+// mutation (the exported add/remove streams, the catalog/link-form buttons,
+// the per-row remove) must be an INSTANCE of this one implementation.
+// Instances differ only in bound state — including the explicit `mode`
+// below — which doesn't change the implementation identity.
+const mutateElements = handler<
+  MutateProfileElementsEvent,
+  {
+    elements: Writable<ProfileElement[]>;
+    // Instance intent. Each binding site declares what its events may do, so
+    // a malformed/empty event can never cross purposes (an empty remove must
+    // not add; an empty link form must not add a catalog card):
+    //   "add"     — the exported add stream: event-driven, url or catalog.
+    //   "addCard" — the catalog button: one fixed "Profile card".
+    //   "addLink" — the link form: reads (and clears) the bound form; no-op
+    //               without a URL.
+    //   "remove"  — the exported remove stream / per-row button: removes
+    //               `event.cell ?? state.cell`; no-op without one.
+    mode: "add" | "addCard" | "addLink" | "remove";
+    // Per-row remove binding ("remove" mode).
+    cell?: any;
+    // Link form binding ("addLink" mode).
+    patternUrl?: Writable<string>;
+    title?: Writable<string>;
+    tag?: Writable<string>;
+    userTags?: string[];
+  }
+>((event, state) => {
+  const userTags = event.userTags ?? state.userTags ?? [];
+  switch (state.mode) {
+    case "remove": {
+      const removeCell = event.cell ?? state.cell;
+      if (removeCell === undefined) return;
+      state.elements.set(
+        state.elements.get().filter((element) =>
+          !equals(element.cell, removeCell)
+        ),
+      );
+      return;
+    }
+    case "addLink": {
+      const url = (state.patternUrl?.get() ?? "").trim();
+      if (url.length === 0) return;
+      const title = (state.title?.get() ?? "").trim() || url;
+      const tag = (state.tag?.get() ?? "").trim() || url;
+      appendElement({
+        cell: (UrlPatternReference({ title, url }) as any).for(tag),
+        source: "url",
+        title,
+        tag,
+        userTags,
+      }, state.elements);
+      state.patternUrl?.set("");
+      state.title?.set("");
+      state.tag?.set("");
+      return;
+    }
+    case "addCard": {
+      appendElement({
+        cell: (ProfileCatalogCard({ title: "Profile card" }) as any).for(
+          "profile-card",
+        ),
+        source: "catalog",
+        title: "Profile card",
+        tag: "profile-card",
+        userTags,
+      }, state.elements);
+      return;
+    }
+    case "add": {
+      const source = event.patternUrl ? "url" : "catalog";
+      const title = event.title ??
+        (source === "url"
+          ? event.patternUrl ?? "Profile pattern"
+          : "Profile card");
+      const tag = event.tag ?? event.catalogId ?? event.patternUrl ??
+        "profile";
+      const cell = source === "url"
+        ? (UrlPatternReference({ title, url: event.patternUrl ?? "" }) as any)
+          .for(tag)
+        : (ProfileCatalogCard({ title }) as any).for(tag);
+      appendElement({
+        cell,
+        tag,
+        userTags,
+        title,
+        source,
+      }, state.elements);
+      return;
+    }
+  }
 });
 
 const setName = handler<SetProfileNameEvent, { name: Writable<string> }>(
@@ -190,55 +273,6 @@ const applyInitialName = lift<
   return name.get() ?? trimInitialName(initialName);
 });
 
-const addCatalogElement = handler<void, {
-  elements: Writable<ProfileElement[]>;
-  userTags: string[];
-}>((_, state) => {
-  appendElement({
-    cell: (ProfileCatalogCard({ title: "Profile card" }) as any).for(
-      "profile-card",
-    ),
-    source: "catalog",
-    title: "Profile card",
-    tag: "profile-card",
-    userTags: state.userTags,
-  }, state.elements);
-});
-
-const addUrlElement = handler<void, {
-  elements: Writable<ProfileElement[]>;
-  patternUrl: Writable<string>;
-  title: Writable<string>;
-  tag: Writable<string>;
-  userTags: string[];
-}>((_, state) => {
-  const url = state.patternUrl.get().trim();
-  if (!url) {
-    return;
-  }
-  const title = state.title.get().trim() || url;
-  const tag = state.tag.get().trim() || url;
-  appendElement({
-    cell: (UrlPatternReference({ title, url }) as any).for(tag),
-    source: "url",
-    title,
-    tag,
-    userTags: state.userTags,
-  }, state.elements);
-  state.patternUrl.set("");
-  state.title.set("");
-  state.tag.set("");
-});
-
-const removeElementCell = handler<void, {
-  elements: Writable<ProfileElement[]>;
-  cell: any;
-}>((_, state) => {
-  state.elements.set(
-    state.elements.get().filter((element) => !equals(element.cell, state.cell)),
-  );
-});
-
 export default pattern<ProfileHomeInput, ProfileHomeOutput>(
   ({ initialName }) => {
     const initialProfileName = trimInitialName(initialName);
@@ -249,7 +283,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       OwnerProtectedProfileWrite<string, typeof setAvatar>
     >("").for("avatar");
     const elements = new Writable<
-      OwnerProtectedProfileWrite<ProfileElement[], typeof addElement>
+      OwnerProtectedProfileWrite<ProfileElement[], typeof mutateElements>
     >([]).for("elements");
     const patternUrl = new Writable("").for("patternUrl");
     const elementTitle = new Writable("").for("elementTitle");
@@ -279,8 +313,10 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       elements,
       setName: setName({ name }),
       setAvatar: setAvatar({ avatar }),
-      addElement: addElement({ elements }),
-      removeElement: removeElement({ elements }),
+      // Both exported streams are instances of the one authorized writer,
+      // pinned to their declared purpose via the bound mode.
+      addElement: mutateElements({ elements, mode: "add" }),
+      removeElement: mutateElements({ elements, mode: "remove" }),
       initialNameApplied,
       [UI]: (
         <cf-screen
@@ -323,8 +359,9 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
 
             <cf-hstack gap="2">
               <cf-button
-                onClick={addCatalogElement({
+                onClick={mutateElements({
                   elements,
+                  mode: "addCard",
                   userTags: parsedUserTags,
                 })}
               >
@@ -333,21 +370,26 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
             </cf-hstack>
 
             <cf-vstack gap="2">
-              <label>Pattern URL</label>
+              <label>Link URL</label>
               <cf-input $value={patternUrl} placeholder="/api/patterns/..." />
               <cf-input $value={elementTitle} placeholder="Title" />
               <cf-input $value={elementTag} placeholder="Tag" />
               <cf-button
-                onClick={addUrlElement({
+                onClick={mutateElements({
                   elements,
+                  mode: "addLink",
                   patternUrl,
                   title: elementTitle,
                   tag: elementTag,
                   userTags: parsedUserTags,
                 })}
               >
-                Add URL element
+                Add link
               </cf-button>
+              <span style={{ color: "var(--cf-color-text-secondary)" }}>
+                Links are saved as reference cards. They are not deployed or
+                run.
+              </span>
             </cf-vstack>
 
             <cf-vstack gap="2">
@@ -364,8 +406,9 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
                   <cf-button
                     size="sm"
                     variant="ghost"
-                    onClick={removeElementCell({
+                    onClick={mutateElements({
                       elements,
+                      mode: "remove",
                       cell: element.cell,
                     })}
                   >
