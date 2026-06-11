@@ -799,7 +799,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     needs: ["attest-binaries"]
     runs-on: ubuntu-latest
-    environment: rapids
+    environment: toolshed
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
