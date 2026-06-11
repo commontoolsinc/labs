@@ -1,0 +1,106 @@
+import { afterEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Runtime } from "../src/runtime.ts";
+import type { Pattern } from "../src/builder/types.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
+import { resolveOpPattern } from "../src/builtins/op-pattern-ref.ts";
+
+/**
+ * PR E3 stored-pattern-value canary (docs/specs/content-addressed-action-
+ * identity.md §7): pattern VALUES persisted to cells before the `$patternRef`
+ * dual-write are bare node-graphs — no ref, no `$opFallback`. Two production
+ * read paths consume them as graphs:
+ *
+ *  - `runtime.run` on a deserialized graph (llm-dialog tool invocation reads
+ *    `toolDef.pattern` raw from a cell and runs it), and
+ *  - the list builtins' legacy branch (`resolveOpPattern` passes a
+ *    non-sentinel graph through unchanged).
+ *
+ * The fixture was captured from the pre-E3 writer and committed verbatim
+ * (test/fixtures/pre-e3-serialized-pattern.json). It must keep loading and
+ * EXECUTING for as long as stored data can carry that vintage — this test is
+ * the tripwire against a refs-only `Pattern.toJSON()` (or a reader change)
+ * silently dropping the graph read path stored data still needs.
+ */
+
+const signer = await Identity.fromPassphrase("pre-e3-pattern-value-canary");
+const space = signer.did();
+
+const fixture = JSON.parse(
+  Deno.readTextFileSync(
+    new URL("./fixtures/pre-e3-serialized-pattern.json", import.meta.url),
+  ),
+) as {
+  program: RuntimeProgram;
+  serialized: Record<string, Record<string, unknown>>;
+};
+
+describe("pre-E3 stored pattern-value canary", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
+  let runtime: Runtime | undefined;
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+    runtime = undefined;
+    storageManager = undefined;
+  });
+
+  const setup = () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+  };
+
+  const runGraph = async (graph: Pattern, cause: string) => {
+    let tx = runtime!.edit();
+    const resultCell = runtime!.getCell<{ vs: number[] }>(
+      space,
+      cause,
+      graph.resultSchema,
+      tx,
+    );
+    const result = runtime!.run(
+      tx,
+      graph,
+      { items: [{ v: 7 }, { v: 8 }, { v: 9 }] },
+      resultCell,
+    );
+    runtime!.prepareTxForCommit(tx);
+    await tx.commit();
+    tx = runtime!.edit();
+    const cancelSink = result.sink(() => {});
+    await runtime!.idle();
+    const vs = await result.key("vs").pull();
+    cancelSink();
+    await tx.commit();
+    return vs;
+  };
+
+  it("pre-E3 vintage (bare graph, no $patternRef) still executes via runtime.run", async () => {
+    setup();
+    const graph = fixture.serialized.preE3 as unknown as Pattern;
+    expect("$patternRef" in graph).toBe(false);
+    expect(Array.isArray(graph.nodes)).toBe(true);
+
+    // What llm-dialog's invoke does with a stored toolDef pattern: parse the
+    // cell value as a graph and run it. NOTE: deliberately no compile of the
+    // fixture program first — a stored graph must run without its module ever
+    // having been evaluated in this session.
+    const vs = await runGraph(structuredClone(graph), "canary-pre-e3-run");
+    expect(vs).toEqual([7, 8, 9]);
+  });
+
+  it("pre-E3 vintage passes through resolveOpPattern's legacy graph branch", () => {
+    setup();
+    const graph = structuredClone(
+      fixture.serialized.preE3,
+    ) as unknown as Pattern;
+    const resolved = resolveOpPattern(runtime!, graph, "map");
+    expect(resolved).toBe(graph);
+  });
+});

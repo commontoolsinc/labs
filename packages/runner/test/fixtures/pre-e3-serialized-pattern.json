@@ -1,0 +1,176 @@
+{
+  "comment": "Captured by PR E3 from the PRE-E3 writer (patternToJSON before $patternRef dual-write). A stored pattern VALUE of this vintage is a bare node-graph with no $patternRef; it must keep executing through the graph read paths (runtime.run on a deserialized graph; resolveOpPattern legacy branch) for as long as stored data can carry it. Regenerate by re-running test/fixtures/capture-pre-e3.ts against a pre-E3 checkout.",
+  "program": {
+    "main": "/main.tsx",
+    "files": [
+      {
+        "name": "/main.tsx",
+        "contents": "import { pattern } from 'commonfabric';\nexport default pattern<{ items: { v: number }[] }>(({ items }) => {\n  return { vs: items.map((item) => item.v) };\n});"
+      }
+    ]
+  },
+  "serialized": {
+    "preE3": {
+      "argumentSchema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "v": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "v"
+              ]
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "resultSchema": {
+        "type": "object",
+        "properties": {
+          "vs": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "vs"
+        ]
+      },
+      "derivedInternalCells": [
+        {
+          "partialCause": [
+            "__patternResult",
+            "vs"
+          ],
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        }
+      ],
+      "result": {
+        "vs": {
+          "$alias": {
+            "partialCause": [
+              "__patternResult",
+              "vs"
+            ],
+            "path": [],
+            "scope": "space",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      },
+      "nodes": [
+        {
+          "module": {
+            "type": "ref",
+            "implementation": "map"
+          },
+          "inputs": {
+            "list": {
+              "$alias": {
+                "cell": "argument",
+                "path": [
+                  "items"
+                ],
+                "scope": "space",
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "v": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "v"
+                    ]
+                  }
+                }
+              }
+            },
+            "op": {
+              "argumentSchema": {
+                "type": "object",
+                "properties": {
+                  "element": {
+                    "type": "object",
+                    "properties": {
+                      "v": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "v"
+                    ]
+                  }
+                },
+                "required": [
+                  "element"
+                ]
+              },
+              "resultSchema": {
+                "type": "number"
+              },
+              "result": {
+                "$alias": {
+                  "defer": 1,
+                  "path": [
+                    "element",
+                    "v"
+                  ],
+                  "scope": "space",
+                  "schema": {
+                    "type": "number"
+                  },
+                  "cell": "argument"
+                }
+              },
+              "nodes": []
+            },
+            "params": {}
+          },
+          "outputs": {
+            "$alias": {
+              "partialCause": [
+                "__patternResult",
+                "vs"
+              ],
+              "path": [],
+              "scope": "space",
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "program": {
+        "main": "/main.tsx"
+      }
+    }
+  }
+}
