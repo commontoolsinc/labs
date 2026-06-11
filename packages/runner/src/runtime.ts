@@ -376,6 +376,19 @@ export class Runtime {
 
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
+    // Validate eagerly, mirroring the storage layer's resolver: a
+    // malformed host should fail at configuration time naming the
+    // space, not mid-builtin as a bare Invalid URL.
+    for (const [space, host] of Object.entries(options.spaceHostMap ?? {})) {
+      try {
+        new URL(host);
+      } catch (cause) {
+        throw new Error(
+          `Invalid spaceHostMap entry for ${space}: "${host}"`,
+          { cause },
+        );
+      }
+    }
     this.spaceHostMap = options.spaceHostMap;
     this.staticCache = isDeno()
       ? new StaticCacheFS()

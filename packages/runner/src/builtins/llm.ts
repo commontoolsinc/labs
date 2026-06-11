@@ -227,13 +227,20 @@ async function executeWithToolsLoop(params: {
       requestParams.tools = toolCatalog.llmTools;
     }
 
-    // Route the call to the executing space's host — one runtime spans
-    // hosts, and an LLM call belongs to the space whose pattern made it.
+    // Route the call to the executing space's host when the space is
+    // host-mapped (one runtime spans hosts; an LLM call belongs to the
+    // space whose pattern made it). An UNMAPPED space keeps the
+    // module-level default endpoint — like fetch-data, hostForSpace's
+    // apiUrl fallback is NOT used, because deployments may split the
+    // pattern-facing api host from the runtime's memory host.
+    const mappedLlmHost = runtime.spaceHostMap?.[space];
     const llmResult = await client.sendRequest(
       requestParams,
       updatePartial,
       undefined,
-      { endpoint: new URL("/api/ai/llm", runtime.hostForSpace(space)) },
+      mappedLlmHost
+        ? { endpoint: new URL("/api/ai/llm", mappedLlmHost) }
+        : undefined,
     );
 
     if (thisRun !== getCurrentRun()) return;
@@ -1342,16 +1349,15 @@ export function generateObject<T extends Record<string, unknown>>(
                   messages: currentMessages,
                 };
 
+                const mappedLlmHost = runtime
+                  .spaceHostMap?.[parentCell.space];
                 const llmResult = await client.sendRequest(
                   requestParams,
                   updatePartial,
                   undefined,
-                  {
-                    endpoint: new URL(
-                      "/api/ai/llm",
-                      runtime.hostForSpace(parentCell.space),
-                    ),
-                  },
+                  mappedLlmHost
+                    ? { endpoint: new URL("/api/ai/llm", mappedLlmHost) }
+                    : undefined,
                 );
 
                 if (isRunCancelled()) return;
@@ -1649,6 +1655,8 @@ export function generateObject<T extends Record<string, unknown>>(
                 ...liveContextDocs.observedConfidentiality,
               ]).length,
             });
+            const mappedLlmHost = runtime
+              .spaceHostMap?.[parentCell.space];
             const response = await client.generateObject(
               {
                 ...generateObjectParams,
@@ -1656,12 +1664,9 @@ export function generateObject<T extends Record<string, unknown>>(
                   "You are a helpful assistant.",
               },
               undefined,
-              {
-                endpoint: new URL(
-                  "/api/ai/llm",
-                  runtime.hostForSpace(parentCell.space),
-                ),
-              },
+              mappedLlmHost
+                ? { endpoint: new URL("/api/ai/llm", mappedLlmHost) }
+                : undefined,
             ) as {
               object: T;
             };

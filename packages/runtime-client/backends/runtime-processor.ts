@@ -279,8 +279,6 @@ export class RuntimeProcessor {
   private pieceManager: PieceManager;
   private cc: PiecesController;
   private spaces = new Map<DID, SpaceContext>();
-  private apiUrl: URL;
-  private space: DID;
   private identity: Identity;
   private _isDisposed = false;
   private disposingPromise: Promise<void> | undefined;
@@ -302,17 +300,14 @@ export class RuntimeProcessor {
     runtime: Runtime,
     pieceManager: PieceManager,
     cc: PiecesController,
-    apiUrl: URL,
-    space: DID,
+    initSpace: DID,
     identity: Identity,
     telemetry: RuntimeTelemetry,
   ) {
     this.runtime = runtime;
     this.pieceManager = pieceManager;
     this.cc = cc;
-    this.spaces.set(space, { pieceManager, cc });
-    this.apiUrl = apiUrl;
-    this.space = space;
+    this.spaces.set(initSpace, { pieceManager, cc });
     this.identity = identity;
     this.telemetry = telemetry;
     this.telemetry.addEventListener("telemetry", this.#onTelemetry);
@@ -425,7 +420,6 @@ export class RuntimeProcessor {
       runtime,
       pieceManager,
       cc,
-      apiUrlObj,
       space,
       identity,
       telemetry,
@@ -1021,6 +1015,12 @@ export class RuntimeProcessor {
   async handleUploadBlob(
     request: UploadBlobRequest,
   ): Promise<UploadBlobResponse> {
+    // Guard for untyped callers: the request must name the blob's space
+    // (required since the federation work) — fail with a named error
+    // rather than a confusing server 404 on /undefined/blobs/….
+    if (!request.space || !String(request.space).startsWith("did:")) {
+      throw new Error("uploadBlob requires a space DID");
+    }
     const suffix = (request.suffix ?? "bin").replace(/^\./, "") || "bin";
     const bytes = Uint8Array.from(request.body);
     // The blob belongs to the named space, so it uploads to — and its

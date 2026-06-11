@@ -745,9 +745,13 @@ describe("RuntimeProcessor blob upload IPC", () => {
     };
     // The constructor performs full runtime initialization; this focused unit
     // test calls the handler with the fields it reads directly.
+    const hostForSpaceCalls: string[] = [];
     const processor = {
       runtime: {
-        hostForSpace: () => new URL("http://toolshed.test/base"),
+        hostForSpace: (space: string) => {
+          hostForSpaceCalls.push(space);
+          return new URL("http://toolshed.test/base");
+        },
       },
     } as unknown as RuntimeProcessor;
 
@@ -771,6 +775,8 @@ describe("RuntimeProcessor blob upload IPC", () => {
     expect(requestedUrl).toBe(
       "http://toolshed.test/did:key:test-space/blobs/upload.png",
     );
+    // The host is resolved for the REQUEST's space, not any init space.
+    expect(hostForSpaceCalls).toEqual(["did:key:test-space"]);
     expect(requestedPayload).toEqual({
       type: "image/png",
       body: new FabricBytes(new Uint8Array([1, 2, 3])),
