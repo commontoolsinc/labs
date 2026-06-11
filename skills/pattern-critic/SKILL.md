@@ -25,6 +25,12 @@ clear intent (non-idempotent use). Also flag bound-control self-feedback: if a
 same cell as a reactive-loop hazard unless it is clearly necessary and
 idempotent.
 
+Also run the guide's advisory UI-idiom checks (category 15): hardcoded hex
+colors and inline typography in `style=`, `.set()`-only input handlers,
+hand-rolled Enter-key submit, index-based selection state, and hand-rolled
+badge/field/empty-state markup. Those emit as `[WARN]` and count toward the
+Warnings summary line, never Failed.
+
 Then use the detailed references already maintained in the repo for:
 
 - `docs/development/debugging/README.md`
