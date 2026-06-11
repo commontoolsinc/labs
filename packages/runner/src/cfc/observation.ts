@@ -92,8 +92,9 @@ export const cfcObservationFitsCeiling = (
   // The read-failed marker is UNGRANTABLE: an observation that carries it never
   // fits a declared ceiling, even one that names the marker. The atom is an
   // exported string, so an author-supplied ceiling could otherwise allow-list it
-  // and defeat the fail-closed redaction (audit item 22). Reject it explicitly
-  // before the per-atom membership check rather than relying on its absence.
+  // and defeat the fail-closed redaction (audit item 22). atomsOutsideCeiling
+  // already forces the marker outside every declared ceiling; keep this explicit
+  // rejection too as defense in depth for the redaction path.
   if (
     confidentiality.some((value) =>
       deepEqual(value, CFC_LABEL_READ_FAILED_ATOM)
@@ -102,9 +103,8 @@ export const cfcObservationFitsCeiling = (
     return false;
   }
 
-  return confidentiality.every((value) =>
-    observationMaxConfidentiality.some((allowed) => deepEqual(allowed, value))
-  );
+  return atomsOutsideCeiling(confidentiality, observationMaxConfidentiality)
+    .length === 0;
 };
 
 /**
@@ -113,8 +113,16 @@ export const cfcObservationFitsCeiling = (
  * `undefined` ceiling means "no ceiling" — nothing is outside it. A declared but
  * empty ceiling is "public only", so every confidential atom is outside it.
  *
+ * `CFC_LABEL_READ_FAILED_ATOM` is UNGRANTABLE (audit item 22): it is always
+ * outside a DECLARED ceiling, even one that explicitly lists it, so a config
+ * naming the exported marker string cannot allow-list a swallowed label-read
+ * error. An `undefined` ceiling still admits it — no bound declared means no
+ * check at all, matching `cfcObservationFitsCeiling`'s early return (the
+ * sink-request gate never consults this helper for an undeclared ceiling).
+ *
  * Shared by the prepare-time sink-request ceiling check so the gate and the
- * fits-test agree on membership semantics (deep-equal over structured atoms).
+ * fits-test agree on membership semantics — including the ungrantable marker —
+ * by construction (deep-equal over structured atoms).
  */
 export const atomsOutsideCeiling = (
   confidentiality: readonly unknown[],
@@ -124,6 +132,7 @@ export const atomsOutsideCeiling = (
     return [];
   }
   return confidentiality.filter((value) =>
+    deepEqual(value, CFC_LABEL_READ_FAILED_ATOM) ||
     !ceiling.some((allowed) => deepEqual(allowed, value))
   ) as ImmutableJSONValue[];
 };
