@@ -59,19 +59,28 @@ export const cloneCfcLabel = (label: IFCLabel): IFCLabel => {
 export const hasCfcLabelValues = (label: IFCLabel): boolean =>
   LABEL_KEYS.some((key) => Array.isArray(label[key]) && label[key]!.length > 0);
 
-// Strip `Caveat.source` — the principal identity that introduced a caveat —
-// from a single atom. Other atom types and the caveat's `kind`/`by` are left
-// intact; only the identity is removed.
+// Recursively strip `Caveat.source` — the principal identity that introduced a
+// caveat — from an atom and every atom nested inside it. CFC atoms nest (e.g.
+// `PromptSlotBound.source` / `Caveat.by` are themselves `CfcAtom`s), so a Caveat
+// can appear at any depth; walk the whole structure and drop `source` from each
+// Caveat found, leaving its `kind`/`by`/`type` and all other atoms intact.
 const redactCaveatSourceAtom = (atom: unknown): unknown => {
-  if (
-    atom !== null && typeof atom === "object" && !Array.isArray(atom) &&
-    (atom as { type?: unknown }).type === CFC_ATOM_TYPE.Caveat &&
-    "source" in (atom as Record<string, unknown>)
-  ) {
-    const { source: _source, ...rest } = atom as Record<string, unknown>;
-    return rest;
+  if (Array.isArray(atom)) {
+    return atom.map(redactCaveatSourceAtom);
   }
-  return atom;
+  if (atom === null || typeof atom !== "object") {
+    return atom;
+  }
+  const obj = atom as Record<string, unknown>;
+  const dropSource = obj.type === CFC_ATOM_TYPE.Caveat;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (dropSource && key === "source") {
+      continue;
+    }
+    out[key] = redactCaveatSourceAtom(value);
+  }
+  return out;
 };
 
 /**
