@@ -804,7 +804,7 @@ comment line in the Step 4 code-commit scope.
 
 ## IMPLEMENTER RESOLUTION — 01/step-4 final
 
-- [x] pending — drop push-mode branches from runner and telemetry
+- [x] 2d9053c46 — drop push-mode branches from runner and telemetry
 - Deviations: per reviewer verdict, the Step 4 code commit also deletes the
   single stale `scheduler.mode.change` commented line in
   `packages/shell/src/lib/debugger-controller.ts`.
@@ -823,3 +823,18 @@ comment line in the Step 4 code-commit scope.
     uses matched.
   - `cd packages/runner && deno task test`: passed,
     `586 passed (3067 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m3s`.
+
+## IMPLEMENTER RESOLUTION — 01/step-5 final
+
+- [x] pending — pull-based scheduler docs reflect push-mode removal
+- Deviations: none.
+- Recordings:
+  - Updated the header sentence to state push mode has been removed and point
+    forward-looking design readers at `docs/specs/scheduler-v2/`.
+  - Deleted the "Mode Control" subsection under "Current Behavior Reference".
+  - Deleted the mode-control API entries and the diagnostic
+    `scheduler.isPullModeEnabled()` listing.
+  - `grep -n "enablePullMode\|disablePullMode\|isPullModeEnabled"
+    docs/specs/pull-based-scheduler/README.md`: no matches.
+  - `grep -n "### Mode Control"
+    docs/specs/pull-based-scheduler/README.md`: no matches.
