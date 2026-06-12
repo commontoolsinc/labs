@@ -1938,16 +1938,18 @@ describe("RuntimeProcessor vdom mount render policy", () => {
         type: RequestType.VDomUnmount,
         mountId: 1,
       });
-      // Let queued reconciler flushes drain while the stub is in place.
-      await new Promise((resolve) => setTimeout(resolve, 10));
       return policy;
     } finally {
+      // Reconciler flushes are queueMicrotask batches, so everything queued
+      // by mount/unmount fires before this await's continuation — restoring
+      // postMessage after it means the stub is in place through the last
+      // flush, with no timer heuristics.
+      await runtime.dispose();
       if (hadPostMessage) {
         (globalThis as any).postMessage = originalPostMessage;
       } else {
         delete (globalThis as any).postMessage;
       }
-      await runtime.dispose();
     }
   }
 
