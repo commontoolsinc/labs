@@ -1,5 +1,7 @@
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import { entityKey } from "./keys.ts";
+import type { MaterializerIndexState } from "./materializers.ts";
+import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
 import { readsOverlapWrites } from "./scheduling-writes.ts";
 import type { SchedulerStaleness } from "./staleness.ts";
 import type { TriggerIndexState } from "./trigger-index.ts";
@@ -17,12 +19,49 @@ export interface DependencyGraphState {
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly reverseDependencies: WeakMap<Action, Set<Action>>;
   readonly staleness: SchedulerStaleness;
+  readonly nodes: NodeRegistry;
+  readonly materializerIndex: Pick<MaterializerIndexState, "isMaterializer">;
   readonly getSchedulingWrites: (
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;
   readonly isStale: (action: Action) => boolean;
   readonly isDemandedPullComputation: (action: Action) => boolean;
   readonly queueExecution: () => void;
+}
+
+export type SchedulerLivenessState = Pick<
+  DependencyGraphState,
+  "nodes" | "reverseDependencies" | "materializerIndex"
+>;
+
+export function isLive(
+  state: SchedulerLivenessState,
+  node: SchedulerNode,
+): boolean {
+  if (!isRegisteredNode(state, node)) return false;
+
+  return state.nodes.isEffect(node.action) ||
+    node.liveRefs > 0 ||
+    node.provisionalDemand ||
+    state.materializerIndex.isMaterializer(node.action);
+}
+
+export function notifyNodeLivenessChange(
+  state: SchedulerLivenessState,
+  action: Action,
+  wasLive: boolean,
+): void {
+  const node = state.nodes.get(action);
+  if (!node) return;
+
+  const nowLive = isLive(state, node);
+  if (wasLive === nowLive) return;
+
+  if (nowLive) {
+    addLiveRefsFromWriters(state, node, new Set<Action>());
+  } else {
+    dropLiveRefsFromWriters(state, node, new Set<Action>());
+  }
 }
 
 export function groupReadsByEntity(
@@ -190,6 +229,13 @@ export function registerDependentEdge(
   }
   reverse.add(writer);
 
+  if (!alreadyDependent) {
+    const dependentRecord = state.nodes.get(dependent);
+    if (dependentRecord && isLive(state, dependentRecord)) {
+      addLiveRef(state, writer, new Set<Action>());
+    }
+  }
+
   if (!alreadyDependent && state.isStale(writer)) {
     state.staleness.addStaleUpstream(writer, dependent);
     if (state.isDemandedPullComputation(writer)) {
@@ -221,6 +267,10 @@ export function unregisterDependentEdge(
   writer: Action,
   dependent: Action,
 ): void {
+  const dependentRecord = state.nodes.get(dependent);
+  const dependentWasLive = dependentRecord
+    ? isLive(state, dependentRecord)
+    : false;
   const dependents = state.dependents.get(writer);
   const hadDependent = dependents?.delete(dependent) ?? false;
   if (dependents && dependents.size === 0) {
@@ -234,8 +284,91 @@ export function unregisterDependentEdge(
   }
 
   if (hadDependent) {
+    if (dependentWasLive) {
+      dropLiveRef(state, writer, new Set<Action>());
+    }
     state.staleness.removeStaleUpstream(writer, dependent);
   }
+}
+
+function addLiveRef(
+  state: SchedulerLivenessState,
+  action: Action,
+  visited: Set<Action>,
+): void {
+  const node = state.nodes.get(action);
+  if (!node || !isRegisteredNode(state, node)) return;
+
+  const wasLive = isLive(state, node);
+  node.liveRefs++;
+  if (!wasLive && isLive(state, node)) {
+    addLiveRefsFromWriters(state, node, visited);
+  }
+}
+
+function dropLiveRef(
+  state: SchedulerLivenessState,
+  action: Action,
+  visited: Set<Action>,
+): void {
+  const node = state.nodes.get(action);
+  if (!node || !isRegisteredNode(state, node) || node.liveRefs === 0) {
+    return;
+  }
+
+  const wasLive = isLive(state, node);
+  node.liveRefs--;
+  if (wasLive && !isLive(state, node)) {
+    dropLiveRefsFromWriters(state, node, visited);
+  }
+}
+
+function addLiveRefsFromWriters(
+  state: SchedulerLivenessState,
+  node: SchedulerNode,
+  visited: Set<Action>,
+): void {
+  updateLiveRefsFromWriters(state, node, visited, addLiveRef);
+}
+
+function dropLiveRefsFromWriters(
+  state: SchedulerLivenessState,
+  node: SchedulerNode,
+  visited: Set<Action>,
+): void {
+  updateLiveRefsFromWriters(state, node, visited, dropLiveRef);
+}
+
+function updateLiveRefsFromWriters(
+  state: SchedulerLivenessState,
+  node: SchedulerNode,
+  visited: Set<Action>,
+  update: (
+    state: SchedulerLivenessState,
+    action: Action,
+    visited: Set<Action>,
+  ) => void,
+): void {
+  // Direction convention: `dependents` is writer -> readers, and
+  // `reverseDependencies` is reader -> writers. Liveness therefore propagates
+  // from a live reader upstream through `reverseDependencies`.
+  if (visited.has(node.action)) return;
+  visited.add(node.action);
+
+  const writers = state.reverseDependencies.get(node.action);
+  if (!writers) return;
+
+  for (const writer of writers) {
+    update(state, writer, visited);
+  }
+}
+
+function isRegisteredNode(
+  state: SchedulerLivenessState,
+  node: SchedulerNode,
+): boolean {
+  return state.nodes.isEffect(node.action) ||
+    state.nodes.isComputation(node.action);
 }
 
 export function pendingDependencyCollectionMightAffect(

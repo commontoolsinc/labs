@@ -51,6 +51,8 @@ import {
 } from "./scheduler/diagnosis.ts";
 import {
   type DependencyGraphState,
+  isLive,
+  notifyNodeLivenessChange,
   registerDependentsForWriterSurface,
   updateDependentEdgesForLog,
 } from "./scheduler/dependency-graph.ts";
@@ -896,8 +898,8 @@ export class Scheduler {
     action: Action,
     options: { preserveChangeGroup?: boolean } = {},
   ): void {
-    this.materializers.clearAction(action);
     unsubscribeSchedulerAction(this.unsubscribeState, action, options);
+    this.materializers.clearAction(action);
   }
 
   async run(action: Action): Promise<any> {
@@ -1722,6 +1724,8 @@ export class Scheduler {
       dependents: this.dependents,
       reverseDependencies: this.reverseDependencies,
       staleness: this.staleness,
+      nodes: this.nodes,
+      materializerIndex: this.materializers,
       getSchedulingWrites: (action) =>
         this.writeIndex.getSchedulingWrites(action),
       isStale: (action) => this.staleness.isStale(action),
@@ -1889,6 +1893,7 @@ export class Scheduler {
       actionChangeGroups: this.actionChangeGroups,
       changeGroupToActionId: this.changeGroupToActionId,
       nodes: this.nodes,
+      dependencyGraphState: this.dependencyGraphState,
       getIdempotencyCheckMode: () => this.idempotencyCheckMode,
       queueExecution: () => this.queueExecution(),
       getActionId: (target) => this.getActionId(target),
@@ -1964,6 +1969,7 @@ export class Scheduler {
       conditionallyScheduledEffects: this.conditionallyScheduledEffects,
       reverseDependencies: this.reverseDependencies,
       dependents: this.dependents,
+      dependencyGraphState: this.dependencyGraphState,
       nodes: this.nodes,
       pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
       pullDemandedContinuationComputations: this
@@ -2436,10 +2442,13 @@ export class Scheduler {
   }
 
   private updateMaterializerRegistration(action: Action): void {
+    const record = this.nodes.get(action);
+    const wasLive = record ? isLive(this.dependencyGraphState, record) : false;
     this.materializers.register(
       action,
       (action as Partial<TelemetryAnnotations>).materializerWriteEnvelopes,
     );
+    notifyNodeLivenessChange(this.dependencyGraphState, action, wasLive);
   }
 
   private getNextDebounceRunTime(action: Action): number | undefined {
