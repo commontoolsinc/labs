@@ -71,8 +71,13 @@ deno task cf piece link <srcID>/items <dstID>/items    # wire two pieces
 deno task cf piece set-slug myslug <ID>                # pretty URL
 ```
 
-One subtlety: `piece set` writes the cell but doesn't trigger recompute —
-follow it with `piece step`. (`piece call` does both.)
+One subtlety: neither `piece set` nor `piece call` refreshes *computed*
+outputs. `set` writes the cell without running anything; `call` runs the
+handler (so the handler's own writes land and sync), but the scheduler is
+lazy — derived values recompute only when something observes them
+(Chapter 8), and nothing in the ephemeral CLI session does. Run
+`cf piece step --piece <ID>` — which pulls the piece, forcing
+recomputation — before inspecting computed fields with `get`/`inspect`.
 
 This CLI surface is also exactly how *agents* drive the system — same
 streams, same cells. The browser shell is just one more client.
