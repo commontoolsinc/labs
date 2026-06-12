@@ -34,6 +34,15 @@ export const toSpaceWebSocketAddress = (
 export const MEMORY_STORAGE_PATH = "/api/storage/memory";
 
 /**
+ * Validity window stamped onto each signed `session.open` (federation PR5).
+ * `session.open` is a live handshake sent the instant a connection opens, so a
+ * few minutes is ample for clock skew and round-trip while bounding how long a
+ * captured open stays replayable (the server adds its own skew grace). Was
+ * effectively infinite before this — the open carried no `exp` at all.
+ */
+export const SESSION_OPEN_TTL_SECONDS = 300;
+
+/**
  * Build the per-space storage-endpoint resolver: a space present in
  * `spaceHostMap` resolves against that host's base URL, everything else
  * against `defaultHost`. Host selection lives here, next to the
@@ -181,6 +190,11 @@ export class RemoteSessionFactory implements SessionFactory {
     space: MemorySpace,
     session: MemoryClient.MountOptions,
   ): Promise<MemoryClient.SessionOpenAuth> {
+    // Stamp a short validity window so a captured session.open can't be
+    // replayed forever (federation PR5). `exp` rides inside the signed
+    // invocation hash and is enforced server-side in session-open-auth.ts;
+    // servers that don't yet check it simply ignore the extra fields.
+    const iat = Math.floor(Date.now() / 1000);
     const invocation = {
       iss: signer.did(),
       cmd: "session.open",
@@ -189,6 +203,8 @@ export class RemoteSessionFactory implements SessionFactory {
         protocol: MEMORY_PROTOCOL,
         session,
       },
+      iat,
+      exp: iat + SESSION_OPEN_TTL_SECONDS,
     };
     const signature = await signer.sign(hashOf(invocation).bytes);
     if (signature.error) {

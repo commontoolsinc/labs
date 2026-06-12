@@ -12,77 +12,16 @@
  * bundles.
  */
 
-import { encodeMemoryBoundary, MEMORY_PROTOCOL } from "../v2.ts";
+import { encodeMemoryBoundary } from "../v2.ts";
 import * as MemoryServer from "./server.ts";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { fromDID } from "../util.ts";
+import { verifySessionOpenAuthorization } from "./session-open-auth.ts";
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
-
-const authorizationError = (message: string): Error =>
-  Object.assign(new Error(message), { name: "AuthorizationError" });
-
-const sameSessionDescriptor = (
-  left: Record<string, unknown>,
-  right: { sessionId?: string; seenSeq?: number },
-): boolean =>
-  (typeof left.sessionId === "string" ? left.sessionId : undefined) ===
-    right.sessionId &&
-  (typeof left.seenSeq === "number" ? left.seenSeq : undefined) ===
-    right.seenSeq;
-
-// Same verification as toolshed's memory route: the session principal is the
-// verified issuer of the signed session.open invocation. User/session scoped
-// storage partitioning keys off this principal, so clients exercise real
-// authentication, not a trusted-client shortcut.
-const authorizeSessionOpen = async (
-  message: {
-    space: string;
-    session: { sessionId?: string; seenSeq?: number };
-    invocation?: Record<string, unknown>;
-    authorization?: unknown;
-  },
-): Promise<string> => {
-  const rawSignature = isRecord(message.authorization)
-    ? message.authorization.signature
-    : undefined;
-  const signature = rawSignature instanceof FabricBytes
-    ? rawSignature.slice()
-    : null;
-  if (!isRecord(message.invocation) || signature === null) {
-    throw authorizationError("memory session.open requires authorization");
-  }
-
-  const invocation = message.invocation;
-  if (
-    typeof invocation.iss !== "string" ||
-    invocation.cmd !== "session.open" ||
-    invocation.sub !== message.space ||
-    !isRecord(invocation.args) ||
-    invocation.args.protocol !== MEMORY_PROTOCOL ||
-    !isRecord(invocation.args.session) ||
-    !sameSessionDescriptor(invocation.args.session, message.session)
-  ) {
-    throw authorizationError("memory session.open authorization mismatch");
-  }
-
-  const issuer = await fromDID(invocation.iss);
-  if (issuer.error) {
-    throw issuer.error;
-  }
-
-  const verified = await issuer.ok.verify({
-    payload: hashOf(invocation).bytes,
-    signature,
-  });
-  if (verified.error) {
-    throw verified.error;
-  }
-
-  return invocation.iss;
-};
+// Session.open verification is shared with toolshed's memory route — see
+// session-open-auth.ts. The standalone test server does not configure an
+// audience (audience binding is opt-in), so this enforces signature + expiry.
+const authorizeSessionOpen = (
+  message: Parameters<typeof verifySessionOpenAuthorization>[0],
+): Promise<string> => verifySessionOpenAuthorization(message);
 
 let nextConnectionTag = 0;
 
