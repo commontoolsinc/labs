@@ -16,6 +16,7 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
 
 const secondSigner = await Identity.fromPassphrase(
   "scheduler event lineage second space",
@@ -335,6 +336,96 @@ describe("scheduler event lineage", () => {
 
     expect(originAttempts).toBe(2);
     expect(payloads.get()).toEqual([]);
+  });
+
+  it("keeps retried same-space follow-ups lineage-gated", async () => {
+    const streamA = runtime.getCell<unknown>(
+      space,
+      "lineage retry stream a",
+      undefined,
+      tx,
+    );
+    const streamB = runtime.getCell<unknown>(
+      space,
+      "lineage retry stream b",
+      undefined,
+      tx,
+    );
+    const originWrites = runtime.getCell<number>(
+      space,
+      "lineage retry origin writes",
+      undefined,
+      tx,
+    );
+    const payloads = runtime.getCell<unknown[]>(
+      space,
+      "lineage retry payloads",
+      undefined,
+      tx,
+    );
+    streamA.set({ $stream: true });
+    streamB.set({ $stream: true });
+    originWrites.set(0);
+    payloads.set([]);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const handlerA: EventHandler = (handlerTx) => {
+      originWrites.withTx(handlerTx).set(1);
+      runtime.scheduler.queueEvent(
+        streamB.getAsNormalizedFullLink(),
+        1,
+        undefined,
+        undefined,
+        false,
+        { originTx: handlerTx },
+      );
+    };
+    let descendantAttempts = 0;
+    const handlerB: EventHandler = (handlerTx, event: unknown) => {
+      descendantAttempts++;
+      if (descendantAttempts === 1) {
+        // Simulate the inSpace("name") resolution path: the run aborts and
+        // the scheduler requeues the same event locally.
+        throw new RetryImmediately();
+      }
+      const current = payloads.withTx(handlerTx).get();
+      payloads.withTx(handlerTx).set([...current, event]);
+    };
+
+    runtime.scheduler.addEventHandler(
+      handlerA,
+      streamA.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.addEventHandler(
+      handlerB,
+      streamB.getAsNormalizedFullLink(),
+    );
+
+    // Interleaving: the origin commit is held in flight while the descendant
+    // dispatches speculatively and requeues itself locally (RetryImmediately).
+    // The requeued retry must stay lineage-gated: when the origin then fails,
+    // the retry must not run and commit.
+    const gate = delayNextServerTransact(storageManager);
+
+    try {
+      runtime.scheduler.queueEvent(streamA.getAsNormalizedFullLink(), {}, 0);
+      await waitForSignal(gate.started, "origin commit did not start");
+      await waitForSchedulerCondition(
+        runtime,
+        () => descendantAttempts >= 1,
+        "descendant did not dispatch while the origin was pending",
+      );
+      gate.fail();
+      await runtime.idle();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await runtime.idle();
+
+      expect(payloads.get()).toEqual([]);
+    } finally {
+      gate.fail();
+      gate.restore();
+    }
   });
 
   it("parks cross-space follow-ups until the origin confirms", async () => {

@@ -243,6 +243,10 @@ export interface SchedulerEventExecutionState {
     originTx: IExtendedStorageTransaction,
     event: QueuedEvent,
   ) => void;
+  readonly recordLineageEvent: (
+    originTx: IExtendedStorageTransaction,
+    event: QueuedEvent,
+  ) => void;
   readonly getOriginLocalSeq: (
     originTx: IExtendedStorageTransaction,
     space: MemorySpace,
@@ -450,6 +454,10 @@ export async function dispatchQueuedEvent(state: {
     originTx: IExtendedStorageTransaction,
     event: QueuedEvent,
   ) => void;
+  readonly recordLineageEvent: (
+    originTx: IExtendedStorageTransaction,
+    event: QueuedEvent,
+  ) => void;
   readonly getOriginLocalSeq: (
     originTx: IExtendedStorageTransaction,
     space: MemorySpace,
@@ -506,6 +514,30 @@ export async function dispatchQueuedEvent(state: {
     state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
   }
   const actionId = state.getActionId(action);
+
+  // Requeue a retry of this event. Dispatch released the lineage
+  // registration above, so the fresh QueuedEvent object must be re-recorded:
+  // otherwise an origin that fails while the retry is queued cannot remove
+  // it, and the post-settlement originStatus() fallback ("confirmed") would
+  // let a descendant of a failed origin run.
+  const requeueForRetry = () => {
+    const retry: QueuedEvent = {
+      id: queuedEvent.id,
+      originTx: queuedEvent.originTx,
+      action,
+      eventLink: queuedEvent.eventLink,
+      handler,
+      event: eventValue,
+      retriesLeft: retriesLeft - 1,
+      onCommit,
+    };
+    state.eventQueue.unshift(retry);
+    if (retry.originTx !== undefined) {
+      state.recordLineageEvent(retry.originTx, retry);
+    }
+    state.queueExecution();
+  };
+
   const runFinalCommitCallback = () => {
     if (!onCommit) {
       return;
@@ -531,17 +563,7 @@ export async function dispatchQueuedEvent(state: {
         tx.abort(error);
       }
       if (retriesLeft > 0) {
-        state.eventQueue.unshift({
-          id: queuedEvent.id,
-          originTx: queuedEvent.originTx,
-          action,
-          eventLink: queuedEvent.eventLink,
-          handler,
-          event: eventValue,
-          retriesLeft: retriesLeft - 1,
-          onCommit,
-        });
-        state.queueExecution();
+        requeueForRetry();
       } else {
         logger.error(
           "scheduler",
@@ -603,17 +625,7 @@ export async function dispatchQueuedEvent(state: {
           `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
           { error: result.error, handlerId },
         );
-        state.eventQueue.unshift({
-          id: queuedEvent.id,
-          originTx: queuedEvent.originTx,
-          action,
-          eventLink: queuedEvent.eventLink,
-          handler,
-          event: eventValue,
-          retriesLeft: retriesLeft - 1,
-          onCommit,
-        });
-        state.queueExecution();
+        requeueForRetry();
         return;
       }
       runFinalCommitCallback();

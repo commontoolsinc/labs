@@ -120,6 +120,8 @@ export async function processPullQueuedEventDuringExecute(
     lineageStatus: (originTx) => state.lineageStatus(originTx),
     releaseLineageEvent: (originTx, event) =>
       state.releaseLineageEvent(originTx, event),
+    recordLineageEvent: (originTx, event) =>
+      state.recordLineageEvent(originTx, event),
     getOriginLocalSeq: (originTx, space) =>
       state.getOriginLocalSeq(originTx, space),
     onEventCommitWrites: (sourceAction, writes) =>

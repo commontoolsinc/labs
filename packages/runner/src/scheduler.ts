@@ -2179,6 +2179,9 @@ export class Scheduler {
       releaseLineageEvent: (originTx, queuedEvent) => {
         this.lineage.release(originTx, queuedEvent);
       },
+      recordLineageEvent: (originTx, queuedEvent) => {
+        this.lineage.recordEvent(originTx, queuedEvent);
+      },
       getOriginLocalSeq: (originTx, targetSpace) =>
         getCommitLocalSeq(originTx.tx, targetSpace),
       snapshotDirtyDependencyTraceContext: (trace) =>
