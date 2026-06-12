@@ -1609,7 +1609,7 @@ is green on top of the fix.
 
 ## 03/step-6
 
-- [x] pending — handler-launched piece registrations are stopped when the
+- [x] 7a50fba4b — handler-launched piece registrations are stopped when the
   launching handler transaction fails permanently.
 - Deviations: restored the reviewer-approved Step 6 work after the
   settled-origin fixup; stash conflict resolution in
@@ -1631,3 +1631,34 @@ is green on top of the fix.
     `0 failed`.
   - `cd packages/runner && deno task test`: passed,
     `590 passed (3090 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m4s`.
+
+## 03/phase-end
+
+- [x] pending — WO03 exit checklist self-check complete.
+- Benchmarks: none listed in WO03.
+- Recordings:
+  - `cd packages/runner && deno task test`: passed,
+    `590 passed (3090 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m4s`.
+  - `cd packages/memory && deno task test`: passed, `211 passed
+    (95 steps)`, `0 failed`.
+- Exit checklist:
+  - All event-lineage fixtures green:
+    `test/scheduler-event-lineage.test.ts` passed, `1 passed (7 steps)`,
+    `0 failed`; duplication fixture red-first output is recorded under
+    03/step-5.
+  - Preconditions inspection passed: `dispatchQueuedEvent` attaches
+    `origin-committed` only when `originLocalSeq !== undefined`, lineage
+    status is `"pending"`, and
+    `runtime.experimental.commitPreconditions === true`.
+  - Cross-space park inspection passed: `pull-events.ts` only examines the
+    head event, parks by returning before preflight, `idle()` waits on
+    `hasPendingLineageHeadEvent()`, and `continuation.ts` documents that the
+    wake source is the lineage commit callback rather than a timer.
+  - Renderer/ingress events inspection passed: `queueSchedulerEvent` takes no
+    lineage branch unless `args.originTx !== undefined`.
+  - Engine tests green; flag PR for memory-owner review because WO03 touches
+    `packages/memory`.
+  - FIFO inspection passed: surviving events are appended with
+    `eventQueue.push`, processing remains head-only, retry uses the existing
+    `unshift` path for the same event id, and lineage failure only removes
+    failed descendants or shifts a failed head without reordering survivors.
