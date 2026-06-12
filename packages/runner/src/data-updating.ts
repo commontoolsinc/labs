@@ -91,6 +91,11 @@ const seededDocs = (runtime: Runtime): Set<string> => {
   }
   return docs;
 };
+// Scope is part of the key: per-user/per-session instances share an id with
+// the space-scoped doc, and one scope's presence must not suppress another's
+// seed.
+const seedMemoKey = (link: NormalizedFullLink): string =>
+  `${link.space}/${link.scope ?? "space"}/${link.id}`;
 
 const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   space: link.space,
@@ -567,7 +572,7 @@ export function normalizeAndDiff(
       // cell skip it — the check would otherwise run on EVERY defaulted-cell
       // serialization, a measurable hot-path cost (the CI perf check caught
       // +22–36% on the CLI integration suites for the unmemoized version).
-      !seededDocs(runtime).has(`${seedTarget.space}/${seedTarget.id}`)
+      !seededDocs(runtime).has(seedMemoKey(seedTarget))
     ) {
       // Don't subscribe the serializing action to the seed doc — mirror
       // materializeDerivedInternalCells' read for the same check.
@@ -575,14 +580,22 @@ export function normalizeAndDiff(
         meta: ignoreReadForScheduling,
       }) === undefined;
       if (!absent) {
-        seededDocs(runtime).add(`${seedTarget.space}/${seedTarget.id}`);
+        seededDocs(runtime).add(seedMemoKey(seedTarget));
       }
       if (absent) {
         try {
-          // The marker is what authorizes this write past an owner-protected
-          // schema's `writeAuthorizedBy` (cfc/prepare.ts requires marker AND
-          // doc-creation); it is recorded only here, by the runtime, never
-          // from arbitrary cell.set calls.
+          tx.writeValueOrThrow(
+            seedTarget,
+            fabricFromNativeValue(seedDefault) as FabricValue,
+          );
+          // The marker is what authorizes the write above past an
+          // owner-protected schema's `writeAuthorizedBy` (cfc/prepare.ts
+          // requires marker AND doc-creation; both are checked at commit,
+          // so in-tx ordering is immaterial there). Record it only AFTER
+          // the write succeeds: a thrown write must not leave a stray
+          // marker that could authorize an unrelated same-doc write later
+          // in this transaction. It is recorded only here, by the runtime,
+          // never from arbitrary cell.set calls.
           tx.recordCfcWritePolicyInput({
             kind: "structural-provenance",
             target: {
@@ -599,10 +612,6 @@ export function normalizeAndDiff(
               path: [],
             }],
           });
-          tx.writeValueOrThrow(
-            seedTarget,
-            fabricFromNativeValue(seedDefault) as FabricValue,
-          );
           // Deliberately NOT memoized here: if this tx aborts, the doc stays
           // absent and the next serialization must seed again. Once the
           // write commits, the next check finds the doc present and settles.

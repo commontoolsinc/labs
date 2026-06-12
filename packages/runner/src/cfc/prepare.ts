@@ -612,6 +612,7 @@ const writeIsSeedMaterialization = (
   }
   return [...(tx.getWriteDetails?.(target.space) ?? [])].some((detail) =>
     detail.address.id === target.id &&
+    normalizeCellScope(detail.address.scope) === target.scope &&
     detail.address.path.length <= 1 &&
     detail.previousValue === undefined
   );
