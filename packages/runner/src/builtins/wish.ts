@@ -32,18 +32,6 @@ import { setRunnableName } from "../runner-utils.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import { scopedCell } from "./scope-policy.ts";
 
-// Resolved lazily (not at module load): in the browser worker this module is
-// imported before the runtime calls `setPatternEnvironment` with the real API
-// URL, so a module-level const would capture the default — the worker's own
-// origin, i.e. the frontend server. That is only correct when the shell is
-// served by the API host (as in CI); against a separate frontend the fetch
-// gets the SPA index.html fallback and pattern compilation fails.
-const suggestionTsxPath = () =>
-  getPatternEnvironment().apiUrl + "api/patterns/system/suggestion.tsx";
-const profileCreateTsxPath = () =>
-  getPatternEnvironment().apiUrl + "api/patterns/system/profile-create.tsx";
-const profilePickerTsxPath = () =>
-  getPatternEnvironment().apiUrl + "api/patterns/system/profile-picker.tsx";
 const wishFlowLogger = getLogger("runner.wish-flow", {
   enabled: true,
   level: "warn",
@@ -1134,87 +1122,117 @@ function releaseSharedHashtagResolver(runtime: Runtime, key: string): void {
   resolvers?.delete(key);
 }
 
-// fetchSuggestionPattern runs at runtime scope, shared across all wish invocations
-let suggestionPatternFetchPromise: Promise<Pattern | undefined> | undefined;
-let suggestionPattern: Pattern | undefined;
-let profileCreatePatternFetchPromise: Promise<Pattern | undefined> | undefined;
-let profileCreatePattern: Pattern | undefined;
-let profilePickerPatternFetchPromise: Promise<Pattern | undefined> | undefined;
-let profilePickerPattern: Pattern | undefined;
+// Fetch-and-compile cache for one sidecar pattern (suggestion /
+// profile-create / profile-picker), shared across all wish invocations. The
+// cache tracks the URL each fetch was started for: `setPatternEnvironment`
+// can change the apiUrl while a fetch is in flight, so a launch for a
+// different URL starts a fresh fetch, and a superseded fetch leaves the cache
+// untouched and resolves to undefined when it settles.
+export function createSidecarPatternCache(options: {
+  // File name under `api/patterns/system/`. Also labels errors.
+  name: string;
+  // Compile with the user's home space as cache context, so the
+  // (space-independent) system pattern is reused across reloads for this
+  // user (CT-1623, per-space cache).
+  compileInUserSpace?: boolean;
+  // Drop a failed fetch from the cache so a later launch retries it.
+  retryOnFailure?: boolean;
+}) {
+  let fetchPromise: Promise<Pattern | undefined> | undefined;
+  let fetchUrl: string | undefined;
+  let pattern: Pattern | undefined;
 
-async function fetchSuggestionPattern(
-  runtime: Runtime,
-): Promise<Pattern | undefined> {
-  try {
-    const program = await runtime.harness.resolve(
-      new HttpProgramResolver(suggestionTsxPath()),
-    );
+  // Resolved lazily (not at module load): in the browser worker this module
+  // is imported before the runtime calls `setPatternEnvironment` with the
+  // real API URL, so a module-load-time const would capture the default — the
+  // worker's own origin, i.e. the frontend server. That is only correct when
+  // the shell is served by the API host (as in CI); against a separate
+  // frontend the fetch gets the SPA index.html fallback and pattern
+  // compilation fails.
+  const patternUrl = () =>
+    getPatternEnvironment().apiUrl + `api/patterns/system/${options.name}`;
 
-    if (!program) {
-      throw new WishError("Can't load suggestion.tsx");
+  async function fetchPattern(
+    runtime: Runtime,
+    url: string,
+  ): Promise<Pattern | undefined> {
+    try {
+      const program = await runtime.harness.resolve(
+        new HttpProgramResolver(url),
+      );
+
+      if (!program) {
+        throw new WishError(`Can't load ${options.name}`);
+      }
+      const compiled = await runtime.patternManager.compilePattern(
+        program,
+        options.compileInUserSpace
+          ? { space: runtime.userIdentityDID }
+          : undefined,
+      );
+
+      if (!compiled) throw new WishError(`Can't compile ${options.name}`);
+
+      return compiled;
+    } catch (e) {
+      console.error(`Can't load ${options.name}`, e);
+      return undefined;
     }
-    // Cache the (space-independent) system pattern in the user's home space so
-    // it's reused across reloads for this user (CT-1623, per-space cache).
-    const pattern = await runtime.patternManager.compilePattern(program, {
-      space: runtime.userIdentityDID,
-    });
-
-    if (!pattern) throw new WishError("Can't compile suggestion.tsx");
-
-    return pattern;
-  } catch (e) {
-    console.error("Can't load suggestion.tsx", e);
-    return undefined;
   }
+
+  return {
+    // Pattern from a completed fetch for the current environment's URL.
+    cached(): Pattern | undefined {
+      return fetchUrl === patternUrl() ? pattern : undefined;
+    },
+    // Memoized fetch for the current environment's URL, started by this call
+    // when none is in flight for that URL. When this call starts the fetch,
+    // `onSuccess` runs once it resolves with a pattern, unless a later fetch
+    // superseded it. A superseded fetch resolves to undefined.
+    fetch(
+      runtime: Runtime,
+      onSuccess?: (pattern: Pattern) => void,
+    ): Promise<Pattern | undefined> {
+      const url = patternUrl();
+      if (!fetchPromise || fetchUrl !== url) {
+        fetchUrl = url;
+        pattern = undefined;
+        const started: Promise<Pattern | undefined> = fetchPattern(
+          runtime,
+          url,
+        ).then((fetched) => {
+          // Only the fetch the cache currently points to records and reports
+          // its result; launches chained on a superseded fetch get undefined
+          // so a stale pattern is never run.
+          if (fetchPromise !== started) return undefined;
+          pattern = fetched;
+          if (fetched) {
+            onSuccess?.(fetched);
+          } else if (options.retryOnFailure) {
+            fetchPromise = undefined;
+          }
+          return fetched;
+        });
+        fetchPromise = started;
+      }
+      return fetchPromise;
+    },
+  };
 }
 
-async function fetchProfileCreatePattern(
-  runtime: Runtime,
-): Promise<Pattern | undefined> {
-  try {
-    const program = await runtime.harness.resolve(
-      new HttpProgramResolver(profileCreateTsxPath()),
-    );
-
-    if (!program) {
-      throw new WishError("Can't load profile-create.tsx");
-    }
-    // Cache the (space-independent) system pattern in the user's home space so
-    // it's reused across reloads for this user (CT-1623, per-space cache).
-    const pattern = await runtime.patternManager.compilePattern(program, {
-      space: runtime.userIdentityDID,
-    });
-
-    if (!pattern) throw new WishError("Can't compile profile-create.tsx");
-
-    return pattern;
-  } catch (e) {
-    console.error("Can't load profile-create.tsx", e);
-    return undefined;
-  }
-}
-
-async function fetchProfilePickerPattern(
-  runtime: Runtime,
-): Promise<Pattern | undefined> {
-  try {
-    const program = await runtime.harness.resolve(
-      new HttpProgramResolver(profilePickerTsxPath()),
-    );
-
-    if (!program) {
-      throw new WishError("Can't load profile-picker.tsx");
-    }
-    const pattern = await runtime.patternManager.compilePattern(program);
-
-    if (!pattern) throw new WishError("Can't compile profile-picker.tsx");
-
-    return pattern;
-  } catch (e) {
-    console.error("Can't load profile-picker.tsx", e);
-    return undefined;
-  }
-}
+const suggestionPatternCache = createSidecarPatternCache({
+  name: "suggestion.tsx",
+  compileInUserSpace: true,
+});
+const profileCreatePatternCache = createSidecarPatternCache({
+  name: "profile-create.tsx",
+  compileInUserSpace: true,
+  retryOnFailure: true,
+});
+const profilePickerPatternCache = createSidecarPatternCache({
+  name: "profile-picker.tsx",
+  retryOnFailure: true,
+});
 
 function errorUI(message: string): VNode {
   return h("span", { style: "color: red" }, `⚠️ ${message}`);
@@ -1509,31 +1527,26 @@ export function wish(
       );
     }
 
-    if (!suggestionPattern) {
-      if (!suggestionPatternFetchPromise) {
-        suggestionPatternFetchPromise = fetchSuggestionPattern(runtime).then(
-          (pattern) => {
-            suggestionPattern = pattern;
-            return pattern;
-          },
-        );
-      }
+    const cachedSuggestionPattern = suggestionPatternCache.cached();
+    if (!cachedSuggestionPattern) {
       // Once fetch completes, run the pattern without a tx (it creates its own)
-      void suggestionPatternFetchPromise.then((pattern) => {
-        if (!cancelled && pattern && suggestionPatternResultCell) {
-          runtime.run(
-            undefined,
-            pattern,
-            suggestionPatternInput,
-            suggestionPatternResultCell!,
-          );
-        }
-      });
+      void suggestionPatternCache.fetch(runtime).then(
+        (pattern) => {
+          if (!cancelled && pattern && suggestionPatternResultCell) {
+            runtime.run(
+              undefined,
+              pattern,
+              suggestionPatternInput,
+              suggestionPatternResultCell!,
+            );
+          }
+        },
+      );
     } else {
       if (!cancelled && suggestionPatternResultCell) {
         runtime.run(
           tx,
-          suggestionPattern,
+          cachedSuggestionPattern,
           suggestionPatternInput,
           suggestionPatternResultCell,
         );
@@ -1640,24 +1653,16 @@ export function wish(
       };
     };
 
-    if (!profileCreatePattern) {
-      if (!profileCreatePatternFetchPromise) {
-        profileCreatePatternFetchPromise = fetchProfileCreatePattern(runtime)
-          .then((pattern) => {
-            profileCreatePattern = pattern;
-            if (pattern && profileCreatePatternReadyCell) {
-              const readyTx = runtime.edit();
-              profileCreatePatternReadyCell.withTx(readyTx).set(true);
-              runtime.prepareTxForCommit(readyTx);
-              readyTx.commit();
-            }
-            if (!pattern) {
-              profileCreatePatternFetchPromise = undefined;
-            }
-            return pattern;
-          });
-      }
-      void profileCreatePatternFetchPromise.then((pattern) => {
+    const cachedProfileCreatePattern = profileCreatePatternCache.cached();
+    if (!cachedProfileCreatePattern) {
+      void profileCreatePatternCache.fetch(runtime, () => {
+        if (profileCreatePatternReadyCell) {
+          const readyTx = runtime.edit();
+          profileCreatePatternReadyCell.withTx(readyTx).set(true);
+          runtime.prepareTxForCommit(readyTx);
+          readyTx.commit();
+        }
+      }).then((pattern) => {
         if (!cancelled && pattern && profileCreatePatternResultCell) {
           runSidecarInOwnTx(
             profileCreatePatternResultCell,
@@ -1669,7 +1674,7 @@ export function wish(
     } else if (!cancelled && profileCreatePatternResultCell) {
       runtime.run(
         tx,
-        profileCreatePattern,
+        cachedProfileCreatePattern,
         profileCreateInputForTx(tx),
         profileCreatePatternResultCell.withTx(tx),
       );
@@ -1740,30 +1745,23 @@ export function wish(
       };
     };
 
-    if (!profilePickerPattern) {
-      if (!profilePickerPatternFetchPromise) {
-        profilePickerPatternFetchPromise = fetchProfilePickerPattern(runtime)
-          .then((pattern) => {
-            profilePickerPattern = pattern;
-            if (!pattern) {
-              profilePickerPatternFetchPromise = undefined;
-            }
-            return pattern;
-          });
-      }
-      void profilePickerPatternFetchPromise.then((pattern) => {
-        if (!cancelled && pattern && profilePickerPatternResultCell) {
-          runSidecarInOwnTx(
-            profilePickerPatternResultCell,
-            pattern,
-            pickerInputForTx,
-          );
-        }
-      });
+    const cachedProfilePickerPattern = profilePickerPatternCache.cached();
+    if (!cachedProfilePickerPattern) {
+      void profilePickerPatternCache.fetch(runtime).then(
+        (pattern) => {
+          if (!cancelled && pattern && profilePickerPatternResultCell) {
+            runSidecarInOwnTx(
+              profilePickerPatternResultCell,
+              pattern,
+              pickerInputForTx,
+            );
+          }
+        },
+      );
     } else if (!cancelled && profilePickerPatternResultCell) {
       runtime.run(
         tx,
-        profilePickerPattern,
+        cachedProfilePickerPattern,
         pickerInputForTx(tx),
         profilePickerPatternResultCell.withTx(tx),
       );
@@ -2006,7 +2004,7 @@ export function wish(
               // launch it and send its result cell so the picker's output
               // flows through. Otherwise fall back to first result and kick
               // off the fetch for next time.
-              if (suggestionPattern) {
+              if (suggestionPatternCache.cached()) {
                 measureWishPhase(
                   "send-suggestion",
                   queryKey,
