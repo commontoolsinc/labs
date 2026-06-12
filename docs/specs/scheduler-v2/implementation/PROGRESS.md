@@ -1987,7 +1987,7 @@ semantics.
 
 ## 04/step-5
 
-- [x] pending — receipt exactly-once fixtures cover redelivery, launches,
+- [x] 5fdd5375a — receipt exactly-once fixtures cover redelivery, launches,
   transient retry, precondition-only idempotent redelivery, receipt-only
   handling, and flag-off transitional behavior.
 - Deviations: includes the reviewer-requested idempotent handler fixture where
@@ -2004,3 +2004,83 @@ semantics.
     --allow-read --allow-write=/tmp,/var/folders --allow-run=git
     test/scheduler-event-receipts.test.ts`: passed, `1 passed (6 steps)`,
     `0 failed`.
+
+## 04/phase-end self-check
+
+- [x] pending — work order 04 phase-end verification recorded.
+- Deviations: work order 04 lists no phase-specific benchmarks beyond the
+  full suites and exit-checklist greps. The flag-on runner pass used a
+  temporary local edit to `packages/runner/test/scheduler-test-utils.ts` to
+  default `commitPreconditions: true`; that edit was reverted before this
+  record was written, and `git status --short` was clean.
+- Recordings:
+  - `cd packages/memory && deno task test`: passed, `211 passed
+    (95 steps)`, `0 failed`.
+  - `cd packages/runner && deno task test` with default
+    `commitPreconditions` off: passed, `591 passed (3097 steps)`,
+    `0 failed`, `0 ignored (10 steps)`, `2m5s`.
+  - `cd packages/runner && deno task test` with a temporary
+    `scheduler-test-utils.ts` default of `commitPreconditions: true`: passed,
+    `591 passed (3097 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m5s`.
+    The helper toggle was reverted before recording.
+  - `grep -n "handleJavaScriptHandlerResult" packages/runner/src/runner.ts`:
+
+```text
+2502:  private handleJavaScriptHandlerResult(
+2981:            return this.handleJavaScriptHandlerResult(
+```
+
+  - `rg -n "crypto\.randomUUID\(\)" packages/runner/src/runner.ts`:
+
+```text
+2884:        $event: tx.dispatchedEventId ?? crypto.randomUUID(),
+```
+
+  - `rg -n "markCreateOnly" packages/runner/src`:
+
+```text
+packages/runner/src/runner.ts:1460:    markCreateOnlyResult: boolean = false,
+packages/runner/src/runner.ts:1476:        if (markCreateOnlyResult) {
+packages/runner/src/runner.ts:1477:          startTx.markCreateOnly?.(
+packages/runner/src/runner.ts:1517:    markCreateOnlyResult = false,
+packages/runner/src/runner.ts:1531:        if (markCreateOnlyResult) {
+packages/runner/src/runner.ts:1532:          startTx.markCreateOnly?.(
+packages/runner/src/runner.ts:2528:        tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
+packages/runner/src/runner.ts:2611:      tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
+packages/runner/src/runner.ts:2675:    markCreateOnlyResult = false,
+packages/runner/src/runner.ts:2696:        markCreateOnlyResult,
+packages/runner/src/storage/v2-transaction.ts:865:  markCreateOnly(
+packages/runner/src/storage/v2-transaction.ts:868:    this.assertWritable("markCreateOnly()");
+packages/runner/src/storage/extended-storage-transaction.ts:563:  markCreateOnly(
+packages/runner/src/storage/extended-storage-transaction.ts:566:    this.assertWritable("markCreateOnly");
+packages/runner/src/storage/extended-storage-transaction.ts:573:    this.tx.markCreateOnly?.(link);
+packages/runner/src/storage/extended-storage-transaction.ts:1109:  markCreateOnly(
+packages/runner/src/storage/extended-storage-transaction.ts:1112:    this.wrapped.markCreateOnly?.(link);
+packages/runner/src/storage/interface.ts:587:  markCreateOnly?(
+packages/runner/src/storage/interface.ts:764:  markCreateOnly?(
+```
+
+  - `rg -n "event-handler-replaced|Exactly one handler per event|event-lost-race|permanentRejection|isPermanentRejection|receipt-exists" packages/runner/src/scheduler/events.ts packages/runner/src/telemetry.ts packages/runner/src/storage/rejection.ts`:
+
+```text
+packages/runner/src/storage/rejection.ts:4: * for `receipt-exists` a retry would double-handle an event.
+packages/runner/src/storage/rejection.ts:6:export function isPermanentRejection(
+packages/runner/src/telemetry.ts:170:  permanentRejection?: "origin-committed" | "receipt-exists";
+packages/runner/src/scheduler/events.ts:16:import { isPermanentRejection } from "../storage/rejection.ts";
+packages/runner/src/scheduler/events.ts:162:      // Exactly one handler per event (spec scheduler-v2 decision 12).
+packages/runner/src/scheduler/events.ts:210:    logger.warn("event-handler-replaced", () => [
+packages/runner/src/scheduler/events.ts:594:      const permanentRejection =
+packages/runner/src/scheduler/events.ts:595:        result.error && isPermanentRejection(result.error)
+packages/runner/src/scheduler/events.ts:613:        ...(permanentRejection !== undefined ? { permanentRejection } : {}),
+packages/runner/src/scheduler/events.ts:617:        !isPermanentRejection(result.error)
+packages/runner/src/scheduler/events.ts:639:        if (permanentRejection === "receipt-exists") {
+packages/runner/src/scheduler/events.ts:641:            "event-lost-race",
+packages/runner/src/scheduler/events.ts:654:            permanent: isPermanentRejection(result.error),
+```
+
+  - `rg -n "entity-absent|PreconditionFailedError|receipt-exists" packages/memory/v2.ts packages/memory/v2/engine.ts packages/memory/v2/server.ts packages/runner/src/storage/interface.ts packages/runner/src/storage/v2-transaction.ts packages/runner/src/storage/v2.ts`: entity-absent precondition type, engine validation,
+    memory server typed-error mapping, runner native precondition emission, and
+    runner permanent rejection mapping all present.
+  - `rg -n "createOnly" packages/memory packages/runner/src packages/runner/test/scheduler-event-receipts.test.ts`: no op-level
+    `createOnly` operation surface remains; remaining matches are
+    `markCreateOnly` API/helper names and local mark maps.
