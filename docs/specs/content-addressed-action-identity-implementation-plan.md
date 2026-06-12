@@ -3,11 +3,11 @@
 Companion to [`content-addressed-action-identity.md`](./content-addressed-action-identity.md)
 (the design). One PR per letter; each lands green and is independently
 revertible. Phase 0 (ordinal-free `implementationRef` + legacy-alias shim)
-shipped in #3997; A–D shipped in #4006/#4008/#4009/#4013; E shipped in three
-PRs — E1 #4053, E2 #4064, E3 (pattern JSON boundary, scoped to dual-write) —
-see "PR E — the flip" for the recorded gating decisions per part. Phase 4
-(retire the legacy read path + the refs-only pattern-JSON flip) is the open
-remainder.
+shipped in #3997; A–D shipped in #4006/#4008/#4009/#4013; E shipped in four
+PRs — E1 #4053, E2 #4064, E3 #4073 (pattern JSON dual-write), E4 (refs-only
+pattern JSON + session-lifetime artifact index) — see "PR E — the flip" for
+the recorded gating decisions per part. Phase 4's open remainder is retiring
+the legacy javascript-function read path (gate-2 pair + bundleId arm).
 
 ## Last Updated
 
@@ -484,6 +484,58 @@ id-churn class) for a vintage that rewrites on every re-instantiation anyway
 itself. The aging signal dual-write exists for is the LIVE-factory boundary
 writes (llm toolDef patterns, patterns passed directly in piece arguments),
 which are the values that persist across sessions.
+
+### E4 — refs-only pattern JSON (the §7 completion)
+
+E3's gating blocker dissolved on inspection (recorded 2026-06-11): a pattern
+artifact derives synchronously from its module's evaluation, and the obvious
+fix is not to re-derive on miss but to never lose it — extend E1's gate-3
+move (session-lifetime strong index) to builder artifacts. The FIFO bound on
+`addressableByIdentity` was protecting against memory the strong function
+index already commits to (every verified implementation retained per
+session; module-scope functions referencing module-level patterns
+transitively retain the factories anyway).
+
+What landed:
+
+1. **Artifact index pinned** — `addressableByIdentity` eviction deleted;
+   `artifactFromIdentitySync` is a plain probe (no LRU touch). The
+   module-NAMESPACE cache (`modulesByIdentity`) stays bounded, its bound now
+   an instance field tests can shrink
+   (`test/artifact-index-pinning.test.ts`).
+2. **`$opFallback` dropped** — the sentinel is stamped from the op's live
+   artifact in the same session that reads it back, so sync resolution
+   cannot miss short of a bug, and the bug is loud
+   (`map-op-by-identity.test.ts`: "fails loudly"). Stored pre-E4 sentinel
+   vintages are read tolerantly (`resolveStoredPattern`).
+3. **Refs-only boundary** — `patternToJSON` emits
+   `{ $patternRef, argumentSchema, resultSchema }`; no-entry-ref patterns
+   (manually constructed / dynamic / bare-Engine eval — including the CLI
+   `--pattern-json` debug dump, which evaluates without a PatternManager and
+   therefore keeps printing graphs) fall back to the full graph
+   (`test/pattern-ref-boundary.test.ts`).
+4. **llm-dialog async net** — `resolveStoredPatternAsync` follows the sync
+   probe with the storage-backed `loadPatternByIdentity`. INVARIANT (per
+   decision), now ENFORCED rather than assumed (both review bots flagged the
+   fire-and-forget race): `compileViaCellCache` AWAITS the cold closure
+   write-back, so a cell can only carry a `$patternRef` after its artifact
+   write completed — the factory does not exist until `compilePattern`
+   returns. Warm hits just read the closure from storage (already durable);
+   a failed write logs without failing the compile (in-session unaffected;
+   the next cold compile of the same content retries). Space-less compiles
+   (no `cacheCtx`) persist nothing — dev/test paths whose values resolve
+   in-session via the pinned index.
+5. **Canary** — the fixture grows a `refsOnly` vintage; pins both resolution
+   paths (sync live-canonical after in-session eval; source-free async load
+   in a runtime that never evaluated the module) plus the older graph
+   vintages unchanged.
+
+The map case is covered by construction: anything instantiating a map
+mentioned its op (hoisted closure or imported factory), so the op's module
+is part of that piece's bundle and evaluates in the reading session. The one
+corner outside the construction — an op passed as a runtime VALUE from a
+program not running in this session — throws the descriptive sentinel error
+(tripwire; sync Actions cannot await the loader).
 
 ## Sequencing & parallelism
 

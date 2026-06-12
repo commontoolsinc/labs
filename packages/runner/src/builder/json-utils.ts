@@ -522,21 +522,22 @@ export function patternToJSON(pattern: Pattern) {
     ...(programIdentity ? { program: programIdentity } : {}),
   };
   if (internalGraphSerialization) return graph;
-  // JSON boundary (cell writes, JSON.stringify): dual-write the pattern's
-  // content-addressed entry ref alongside the graph (design §7, scoped — see
-  // the implementation plan's E3 section). The ref is content-derived, so
-  // identical bytes re-emit the identical ref across sessions; readers
-  // (resolveOpPattern, llm-dialog tool invocation) prefer it to resolve the
-  // live canonical pattern and fall back to the carried graph. Refs-ONLY
-  // emission is deferred: stored refs today resolve only through the
-  // FIFO-bounded artifact index (sync) or by-identity load (async) — neither
-  // covers the sync list builtins cross-session, so the graph must travel
-  // until a session-lifetime pattern index (eviction pinning) exists.
+  // JSON boundary (cell writes, JSON.stringify): REFS-ONLY (design §7,
+  // identity E4). The ref is content-derived, so identical bytes re-emit the
+  // identical ref across sessions. Schemas ride along so consumers can read
+  // them without resolving (llm-dialog tool schemas). Rehydration goes by
+  // identity: the session-lifetime artifact index covers every module
+  // evaluated in the reading session (any authored op, by construction), and
+  // async readers fall back to the storage-backed `loadPatternByIdentity` —
+  // compiled artifacts persist in-space as an expected part of compilation.
+  // A pattern with NO entry ref (manually constructed / dynamic) still
+  // serializes its full graph: nothing could ever resolve its ref.
   const entryRef = getArtifactEntryRef(pattern);
   return entryRef
     ? {
       $patternRef: { identity: entryRef.identity, symbol: entryRef.symbol },
-      ...graph,
+      argumentSchema: pattern.argumentSchema,
+      resultSchema: pattern.resultSchema,
     }
     : graph;
 }

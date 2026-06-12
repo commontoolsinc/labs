@@ -57,11 +57,21 @@ Phase 3 shipped in two PRs:
   covers the sync list builtins or cross-session llm-dialog reads.
   Canary: `test/pre-e3-pattern-value-canary.test.ts` pins both stored
   vintages (bare graph; ref+graph) loading and executing.
+- **E4 (refs-only pattern JSON)**: the E3 blocker resolved —
+  `addressableByIdentity` is session-lifetime (open question 1 extended to
+  pattern artifacts; the FIFO eviction deleted), so sync resolution covers
+  every module evaluated in the reading session. `Pattern.toJSON()` emits
+  `{ $patternRef, argumentSchema, resultSchema }` with NO graph (patterns
+  without an entry ref still serialize their graph); the op sentinel drops
+  `$opFallback` (a sync miss is now a loud bug, not a recoverable state);
+  llm-dialog adds the async storage-backed net (`resolveStoredPatternAsync`
+  → `loadPatternByIdentity`; compiled artifacts persist in-space as an
+  expected part of compilation). Stored graph vintages keep loading
+  tolerantly; see §7's status block for the full record.
 
-Phase 4 (drop the retained read path + the §7 refs-only pattern JSON flip)
-remains open, gated on stored-data evidence or a runtime-version cutoff —
-and, for the pattern-JSON flip, on a session-lifetime pattern artifact index
-(eviction pinning, open question 2).
+Phase 4's remainder is the legacy javascript-function read path (the gate-2
+retained pair + the bundleId verification arm), still gated on stored-data
+evidence or a runtime-version cutoff. The §7 pattern-JSON flip shipped as E4.
 
 The design assumes the shipped state after the AMD-loader removal: the ESM
 module-record loader is the only loader, every module has a content-addressed
@@ -373,48 +383,42 @@ but `toJSON` runs when a value is *written to a cell* — after
 - `Pattern.nodes` / `result` / `initial` stay as the in-memory instantiation
   representation only; nothing outside the runner consumes them as JSON.
 
-Status (E3, 2026-06-11): shipped as DUAL-WRITE, not refs-only. The boundary
-now emits `$patternRef` alongside the graph; the escape hatch below landed;
-the refs-only flip is deferred to Phase 4. The gating finding: unlike
-javascript functions (E1's session-lifetime
-`verifiedImplementationsByEntryRef`), pattern artifacts have NO strong index —
-a stored `$patternRef` resolves only through the FIFO-bounded
-`addressableByIdentity` (sync) or `loadPatternByIdentity` (async). The
-write-path audit found pattern graphs persist at exactly three cell-write
-sites (pattern values in piece arguments, the list-builtin inputs sentinel,
-nested sub-pattern arguments; no wire/IPC surface carries graphs), and the
-read-path audit found two production consumers of stored graphs: the list
-builtins' `resolveOpPattern` (a sync Action — cannot await a by-identity
-load) and llm-dialog's tool invocation (cross-session: the toolDef pattern's
-module may never re-evaluate in the reading session, and its compiled
-artifact being loadable from the space is not guaranteed for arbitrary
-pattern values). Refs-only emission therefore needs eviction pinning (open
-question 2) plus stored-data evidence first — the same shape as gate 2.
+Status: COMPLETE in two steps. E3 (2026-06-11) shipped dual-write —
+`$patternRef` alongside the graph — because pattern artifacts then had no
+session-lifetime index: a stored ref resolved only through the FIFO-bounded
+`addressableByIdentity` (sync) or `loadPatternByIdentity` (async), and the
+two production consumers of stored graphs (the list builtins' sync
+`resolveOpPattern`; llm-dialog's cross-session tool invocation) could not
+tolerate a miss. E4 (same day) removed that blocker and completed the flip:
 
-Known things this trips (each was a work item; states recorded inline):
-
-- **`$opFallback`** embeds a full serialized graph *on purpose* (eviction
-  resilience). Refs-only `toJSON` would silently turn the fallback into a ref
-  too, defeating it. RESOLVED via the explicit `serializePatternGraph()`
-  escape hatch (json-utils): `toJSONWithLegacyAliases` — the builder-time
-  node serializer the `$opFallback` graphs descend from — routes pattern
-  values through it under an internal-serialization context that suppresses
-  `$patternRef`, making the internal/boundary split structural. Without it,
-  builder calls inside a running action that reference an already-indexed
-  imported pattern would embed refs into `Pattern.nodes`.
-- Anything that JSON-round-trips patterns and expects a graph: json-utils
-  round-trip tests, pattern-as-value deserialization in `pattern-binding`,
-  debug tooling. Deserialization of a ref requires the module to be loadable
-  by identity (in-memory, or storage-backed via the compile cache) — which is
-  the whole point, but makes by-identity load the only rehydration path.
-  UNDER DUAL-WRITE: readers prefer the ref (`resolveStoredPattern`) and keep
-  the graph as fallback, so nothing requires by-identity load yet; the
-  remaining graph consumers are pinned by
-  `test/pre-e3-pattern-value-canary.test.ts`.
-- Wire/IPC surfaces that today receive pattern JSON (runtime-client
-  `getPatternSources` is source-based and unaffected; the E3 audit found no
-  other protocol field carrying serialized pattern graphs — IPC carries
-  pattern ids/sources only).
+- `addressableByIdentity` is session-lifetime (open question 1, E4
+  extension): sync resolution covers every module evaluated in the reading
+  session — every authored op by construction, since whatever instantiates
+  the map mentioned the op and loaded it as part of its bundle.
+- `Pattern.toJSON()` emits `{ $patternRef, argumentSchema, resultSchema }` —
+  no graph. Schemas ride along for consumers that read them without
+  resolving (llm-dialog tool schemas). A pattern with NO entry ref
+  (manually constructed / dynamic / bare-Engine evaluation, e.g. the CLI's
+  `--pattern-json` debug dump) still serializes its full graph.
+- `$opFallback` dropped from the op sentinel: it was eviction insurance, and
+  eviction no longer exists; a sync miss is a loud bug. Stored pre-E4
+  sentinel vintages are still read tolerantly.
+- llm-dialog follows the sync resolution with the async storage-backed
+  `loadPatternByIdentity` (`resolveStoredPatternAsync`) — compiled artifacts
+  persist in-space as part of the compilation step (the cold write-back is
+  AWAITED inside `compilePattern`, so a persisted ref always has a durable
+  closure behind it), and a tool invoked cold after a reload rehydrates
+  source-free.
+- The write-path audit (E3) found graphs persisted at exactly three
+  cell-write sites and on no wire/IPC surface; stored graph vintages
+  (pre-E3 bare graph, E3 ref+graph) keep loading and executing — pinned by
+  `test/pre-e3-pattern-value-canary.test.ts` alongside the refs-only
+  vintage's two resolution paths.
+- The internal/boundary split is structural: `serializePatternGraph()`
+  (json-utils) serializes the full graph under an internal-serialization
+  context that suppresses `$patternRef`; `toJSONWithLegacyAliases` (the
+  builder-time node serializer) routes pattern values through it, so
+  `Pattern.nodes` stays a bare-graph in-memory representation.
 
 ## Persisted-data compatibility
 
@@ -557,8 +561,18 @@ canary test compiling+resolving with `$implRef` stripped.
    lifecycle is fuzzy; high complexity) and a WeakRef shadow (fails exactly in
    the post-eviction-GC scenario it must cover). Memory is bounded by the set
    of distinct verified implementations per session — strictly less than the
-   legacy per-load registries retained. `$opFallback` (full-graph embed) stays
-   until E3 revisits it.
+   legacy per-load registries retained.
+   **E4 extends the same resolution to pattern artifacts:**
+   `addressableByIdentity` itself is now session-lifetime (its FIFO eviction
+   deleted) — the same retention order, since the strong function index
+   already keeps every verified implementation alive, and module-scope
+   functions referencing module-level patterns transitively retain those
+   factories anyway. With sync resolution eviction-proof for every module
+   evaluated in the session, `$opFallback` was dropped: the op sentinel is
+   stamped from its live artifact in the same session that reads it, so a
+   miss is a loud bug, not a recoverable state. The module-NAMESPACE cache
+   (`modulesByIdentity`) stays bounded; its misses recover via the async
+   storage-backed load.
 2. **`cfc/canonical.ts` digests.** Confirm no *persisted* artifact compares
    `bundleId`s across sessions (believed session-only; verify before Phase 3).
 3. **`location`/`preview` retention.** Keep both on serialized modules for

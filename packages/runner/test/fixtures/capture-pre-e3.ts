@@ -45,25 +45,29 @@ const fixtureUrl = new URL(
   import.meta.url,
 );
 let preE3 = serialized;
+let dualWrite = serialized;
 try {
   const existing = JSON.parse(await Deno.readTextFile(fixtureUrl));
   if (existing?.serialized?.preE3) preE3 = existing.serialized.preE3;
+  if (existing?.serialized?.dualWrite) {
+    dualWrite = existing.serialized.dualWrite;
+  }
 } catch {
   // First capture: the current writer IS the pre-E3 writer.
 }
 
 const fixture = {
   comment:
-    "Stored pattern-VALUE vintages (PR E3). preE3: captured from the writer BEFORE the $patternRef dual-write — a bare node-graph; preserved verbatim on re-capture. dualWrite: the current writer's boundary output — $patternRef alongside the graph. Both must keep executing through the graph read paths (runtime.run on a deserialized graph; resolveOpPattern) for as long as stored data can carry them. Refresh dualWrite by re-running test/fixtures/capture-pre-e3.ts.",
+    "Stored pattern-VALUE vintages. preE3 (writer before the E3 $patternRef dual-write): a bare node-graph. dualWrite (E3 writer): $patternRef alongside the graph. refsOnly (E4 writer, current): $patternRef + schemas, no graph — rehydrates by identity only. The graph-bearing vintages must keep executing through the graph read paths (runtime.run on a deserialized graph; resolveOpPattern) for as long as stored data can carry them; earlier vintages are preserved verbatim on re-capture. Refresh refsOnly by re-running test/fixtures/capture-pre-e3.ts.",
   program: PROGRAM,
-  serialized: { preE3, dualWrite: serialized },
+  serialized: { preE3, dualWrite, refsOnly: serialized },
 };
 
 await Deno.writeTextFile(
   fixtureUrl,
   JSON.stringify(fixture, null, 2) + "\n",
 );
-console.log("captured dualWrite keys:", Object.keys(serialized));
+console.log("captured refsOnly keys:", Object.keys(serialized));
 
 await runtime.dispose();
 await storageManager.close();
