@@ -5,7 +5,7 @@ export interface SchedulerDelayControlState {
   readonly delays: SchedulerDelays;
   readonly computations: ReadonlySet<Action>;
   readonly effects: ReadonlySet<Action>;
-  readonly dirty: ReadonlySet<Action>;
+  readonly isInvalid: (action: Action) => boolean;
   readonly pending: Set<Action>;
   readonly queueExecution: () => void;
   readonly logDebounce: (message: string) => void;
@@ -30,7 +30,7 @@ export function getNextDebounceRunTime(
     {
       computations: state.computations,
       effects: state.effects,
-      dirty: state.dirty,
+      isInvalid: state.isInvalid,
     },
   );
 }
@@ -90,7 +90,7 @@ function debouncedComputationContext(state: SchedulerDelayControlState) {
   return {
     computations: state.computations,
     effects: state.effects,
-    dirty: state.dirty,
+    isInvalid: state.isInvalid,
     pending: state.pending,
     queueExecution: state.queueExecution,
     logDebounce: state.logDebounce,

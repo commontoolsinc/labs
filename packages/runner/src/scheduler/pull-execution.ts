@@ -1,15 +1,18 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { topologicalSort } from "./topology.ts";
 import type { Action, SettleIterationStats } from "./types.ts";
+import { collectMaterializerWritersForLog } from "./materializers.ts";
 import {
   collectPendingDependencyActions,
-  recordEarlyIterationComputations,
+  planBudgetBackoff,
   recordSettleActionRun,
   type SchedulerSettleLoopState,
   type SchedulerSettleResult,
   summarizeSettleIteration,
   summarizeSettleRun,
 } from "./execution.ts";
+import { MAX_ITERS, PASS_RUN_BUDGET } from "./constants.ts";
+import { isInvalidOrNeverRan } from "./pull-scheduling.ts";
 
 const logger = getLogger("scheduler", {
   enabled: true,
@@ -24,35 +27,22 @@ type PullSettleIteration = { settled: true } | {
 
 function buildPullIterationWorkSet(state: {
   readonly initialSeeds: ReadonlySet<Action>;
-  readonly settleIter: number;
+  readonly nodes: SchedulerSettleLoopState["nodes"];
+  readonly dependencies: SchedulerSettleLoopState["dependencies"];
+  readonly materializerIndex: SchedulerSettleLoopState["materializerIndex"];
+  readonly dependents: WeakMap<Action, Set<Action>>;
+  readonly isLiveAction: (action: Action) => boolean;
   readonly collectPullIterationSeeds: (iterationSeeds: Set<Action>) => void;
-  readonly collectDirtyDependencies: (
-    seed: Action,
-    workSet: Set<Action>,
-    memo: Map<Action, boolean>,
-  ) => boolean;
-  readonly collectDirtyDependenciesFromTraversalRoot: (
-    seed: Action,
-    workSet: Set<Action>,
-    memo: Map<Action, boolean>,
-  ) => boolean;
 }): {
   workSet: Set<Action>;
   iterationSeeds: Set<Action>;
-  dirtyDependencyCount: number;
+  materializerPromotionCount: number;
 } {
   const workSet = new Set<Action>();
   const iterationSeeds = new Set<Action>();
-  const traversalSeeds = new Set<Action>();
 
   for (const seed of state.initialSeeds) {
-    traversalSeeds.add(seed);
-    // On the first iteration, initial seeds are runnable work. On later
-    // iterations they remain demand roots for newly dirtied dependencies, but
-    // should not be rerun unless normal scheduling also marks them pending.
-    if (state.settleIter === 0) {
-      iterationSeeds.add(seed);
-    }
+    iterationSeeds.add(seed);
   }
 
   // Every iteration needs to consider newly created pending effects.
@@ -62,28 +52,76 @@ function buildPullIterationWorkSet(state: {
 
   for (const seed of iterationSeeds) {
     workSet.add(seed);
-    traversalSeeds.add(seed);
   }
 
-  // Pull in dirty computations that feed the currently runnable seeds.
-  const dirtyDependencyMemo = new Map<Action, boolean>();
-  for (const seed of traversalSeeds) {
-    if (state.settleIter > 0 && state.initialSeeds.has(seed)) {
-      state.collectDirtyDependenciesFromTraversalRoot(
-        seed,
-        workSet,
-        dirtyDependencyMemo,
-      );
-      continue;
-    }
-    state.collectDirtyDependencies(seed, workSet, dirtyDependencyMemo);
-  }
+  const beforePromotions = workSet.size;
+  addInvalidMaterializerPromotions(state, iterationSeeds, workSet);
+  const materializerPromotionCount = workSet.size - beforePromotions;
+  addLiveDownstreamClosure(state, workSet);
 
   return {
     workSet,
     iterationSeeds,
-    dirtyDependencyCount: workSet.size - iterationSeeds.size,
+    materializerPromotionCount,
   };
+}
+
+function addInvalidMaterializerPromotions(
+  state: {
+    readonly nodes: SchedulerSettleLoopState["nodes"];
+    readonly dependencies: SchedulerSettleLoopState["dependencies"];
+    readonly materializerIndex: SchedulerSettleLoopState["materializerIndex"];
+  },
+  seeds: ReadonlySet<Action>,
+  workSet: Set<Action>,
+): void {
+  for (const seed of seeds) {
+    const log = state.dependencies.get(seed);
+    if (!log) continue;
+
+    for (
+      const materializer of collectMaterializerWritersForLog(
+        state.materializerIndex,
+        log,
+        { exclude: seed },
+      )
+    ) {
+      const record = state.nodes.get(materializer);
+      if (record && isInvalidOrNeverRan(record)) {
+        workSet.add(materializer);
+      }
+    }
+  }
+}
+
+function addLiveDownstreamClosure(state: {
+  readonly nodes: SchedulerSettleLoopState["nodes"];
+  readonly dependents: WeakMap<Action, Set<Action>>;
+  readonly isLiveAction: (action: Action) => boolean;
+}, workSet: Set<Action>): void {
+  const visited = new Set<Action>();
+  const dirtyRoots = [...workSet].filter((action) => {
+    const record = state.nodes.get(action);
+    return record !== undefined && isInvalidOrNeverRan(record);
+  });
+
+  const visit = (action: Action): void => {
+    if (visited.has(action)) return;
+    visited.add(action);
+
+    const dependents = state.dependents.get(action);
+    if (!dependents) return;
+
+    for (const dependent of dependents) {
+      if (!state.isLiveAction(dependent)) continue;
+      workSet.add(dependent);
+      visit(dependent);
+    }
+  };
+
+  for (const action of dirtyRoots) {
+    visit(action);
+  }
 }
 
 export async function runPullSchedulerSettleLoop(
@@ -94,11 +132,12 @@ export async function runPullSchedulerSettleLoop(
   // First iteration processes initial seeds + their dirty deps.
   // Subsequent iterations process new subscriptions and re-collect dirty deps.
   logger.timeStart("scheduler", "execute", "settle");
-  const maxSettleIterations = 10;
-  const EARLY_ITERATION_THRESHOLD = 5;
-  const earlyIterationComputations = new Set<Action>(); // Track computations in first N iterations
+  const maxSettleIterations = MAX_ITERS;
   let lastWorkSet: Set<Action> = new Set();
   let settledEarly = false;
+  let backoffApplied = false;
+  let backoffActionCount = 0;
+  let backoffUntil: number | undefined;
   const collectSettleStats = state.getCollectSettleStats();
   const settleIterStats: SettleIterationStats[] | undefined = collectSettleStats
     ? []
@@ -113,8 +152,6 @@ export async function runPullSchedulerSettleLoop(
       state,
       initialSeeds,
       settleIter,
-      EARLY_ITERATION_THRESHOLD,
-      earlyIterationComputations,
     );
 
     if (iteration.settled) {
@@ -125,6 +162,20 @@ export async function runPullSchedulerSettleLoop(
     lastWorkSet = iteration.workSet;
     const iterationWorkSetSize = iteration.workSet.size;
     const iterActionsRun = await runPullSettleOrder(state, iteration.order);
+    if (didAnyActionHitPassRunBudget(state, iteration.order)) {
+      const budgetBackoff = maybeApplyBudgetBackoff(
+        state,
+        collectCurrentBackoffCandidates(state),
+        "pass-budget",
+        { requirePassRunBudget: false },
+      );
+      if (budgetBackoff.applied) {
+        backoffApplied = true;
+        backoffActionCount += budgetBackoff.actionCount;
+        backoffUntil = minDefined(backoffUntil, budgetBackoff.backoffUntil);
+        break;
+      }
+    }
 
     if (settleIterStats) {
       settleIterStats.push(summarizeSettleIteration({
@@ -136,6 +187,17 @@ export async function runPullSchedulerSettleLoop(
         getActionId: (action) => state.getActionId(action),
       }));
     }
+  }
+
+  if (!settledEarly && !backoffApplied && lastWorkSet.size > 0) {
+    const iterationBackoff = maybeApplyBudgetBackoff(
+      state,
+      lastWorkSet,
+      "iteration-cap",
+    );
+    backoffApplied = iterationBackoff.applied;
+    backoffActionCount += iterationBackoff.actionCount;
+    backoffUntil = minDefined(backoffUntil, iterationBackoff.backoffUntil);
   }
 
   const settleStats = settleIterStats
@@ -151,9 +213,10 @@ export async function runPullSchedulerSettleLoop(
 
   return {
     settledEarly,
-    lastWorkSet,
-    earlyIterationComputations,
     maxSettleIterations,
+    backoffApplied,
+    backoffActionCount,
+    ...(backoffUntil !== undefined ? { backoffUntil } : {}),
     ...(settleStats ? { settleStats } : {}),
   };
 }
@@ -162,7 +225,7 @@ function collectPullSettlePreRunDependencies(
   state: SchedulerSettleLoopState,
 ): void {
   // Process any newly subscribed actions from previous iteration.
-  // This sets up their dependencies so collectDirtyDependencies can find them.
+  // This sets up their dependencies before work-set construction.
   if (state.pendingDependencyCollection.size === 0) {
     return;
   }
@@ -186,8 +249,6 @@ function preparePullSettleIteration(
   state: SchedulerSettleLoopState,
   initialSeeds: ReadonlySet<Action>,
   settleIter: number,
-  earlyIterationThreshold: number,
-  earlyIterationComputations: Set<Action>,
 ): PullSettleIteration {
   const { workSet } = buildAndLogPullIterationWorkSet(
     state,
@@ -199,16 +260,7 @@ function preparePullSettleIteration(
     return { settled: true };
   }
 
-  recordEarlyIterationComputations({
-    settleIter,
-    threshold: earlyIterationThreshold,
-    workSet,
-    effects: state.effects,
-    earlyIterationComputations,
-  });
-
   const order = orderPullWorkSet(state, workSet, settleIter);
-  clearPullEffectsBeforeRun(state, order);
 
   return { settled: false, workSet, order };
 }
@@ -220,21 +272,22 @@ function buildAndLogPullIterationWorkSet(
 ): {
   workSet: Set<Action>;
   iterationSeeds: Set<Action>;
-  dirtyDependencyCount: number;
+  materializerPromotionCount: number;
 } {
   const buildPullWorkSetStart = performance.now();
   const result = buildPullIterationWorkSet({
     initialSeeds,
-    settleIter,
+    nodes: state.nodes,
+    dependencies: state.dependencies,
+    materializerIndex: state.materializerIndex,
+    dependents: state.dependents,
+    isLiveAction: state.isLiveAction,
     collectPullIterationSeeds: state.collectPullIterationSeeds,
-    collectDirtyDependencies: state.collectDirtyDependencies,
-    collectDirtyDependenciesFromTraversalRoot:
-      state.collectDirtyDependenciesFromTraversalRoot,
   });
 
   if (settleIter === 0) {
     logger.debug("schedule-execute-pull", () => [
-      `Pull mode: Seeds: ${result.iterationSeeds.size}, Dirty deps added: ${result.dirtyDependencyCount}`,
+      `Pull mode: Seeds: ${result.iterationSeeds.size}, Materializers promoted: ${result.materializerPromotionCount}`,
     ]);
   }
   logger.time(
@@ -275,20 +328,6 @@ function orderPullWorkSet(
   return order;
 }
 
-function clearPullEffectsBeforeRun(
-  state: SchedulerSettleLoopState,
-  order: readonly Action[],
-): void {
-  // Implicit cycle detection for effects:
-  // Clear dirty flags for all effects upfront. If an effect becomes dirty again
-  // by the time we run it, something in the execution re-dirtied it -> cycle.
-  for (const fn of order) {
-    if (state.effects.has(fn)) {
-      state.clearDirty(fn);
-    }
-  }
-}
-
 async function runPullSettleOrder(
   state: SchedulerSettleLoopState,
   order: readonly Action[],
@@ -310,72 +349,94 @@ async function runPullSettleAction(
   if (!isStillScheduled) return 0;
 
   if (!isPullSettleActionStillRunnable(state, fn)) return 0;
-  if (deferEffectForLateMaterializerDependency(state, fn)) return 0;
   if (skipPullDelayedSettleAction(state, fn)) return 0;
-  if (skipUnchangedConditionalEffect(state, fn)) return 0;
 
-  // Clean up from pending/dirty before running
+  // Clean up explicit scheduling state before running. The node status is
+  // set clean inside runSchedulerAction before invoking the action body.
   state.pending.delete(fn);
-  state.conditionallyScheduledEffects.delete(fn);
   if (state.computations.has(fn)) {
     state.clearComputationDebounceState(fn);
   }
-  if (state.effects.has(fn)) {
-    state.clearDirty(fn);
-  }
 
   state.filterStats.executed++;
-  if (!recordSettleActionRun(state, fn)) return 1;
+  recordSettleActionRun(state, fn);
 
   await state.runAction(fn);
   return 1;
+}
+
+function maybeApplyBudgetBackoff(
+  state: SchedulerSettleLoopState,
+  workSet: ReadonlySet<Action>,
+  reason: "iteration-cap" | "pass-budget",
+  options: { requirePassRunBudget?: boolean } = {},
+): {
+  applied: boolean;
+  actionCount: number;
+  backoffUntil?: number;
+} {
+  const plan = planBudgetBackoff({
+    workSet,
+    nodes: state.nodes,
+    pending: state.pending,
+    isLiveAction: state.isLiveAction,
+    getNextEligibleRunTime: state.getNextEligibleRunTime,
+    isDebouncedComputationWaiting: state.isDebouncedComputationWaiting,
+    reason,
+    requirePassRunBudget: options.requirePassRunBudget,
+  });
+  if (plan.actions.length === 0) {
+    return { applied: false, actionCount: 0 };
+  }
+
+  logger.debug("schedule-backoff", () => [
+    `[BACKOFF] ${reason}: deferred ${plan.actions.length} action(s)`,
+    ...(plan.backoffUntil !== undefined
+      ? [
+        `wake in ${
+          Math.max(0, Math.round(plan.backoffUntil - performance.now()))
+        }ms`,
+      ]
+      : []),
+  ]);
+
+  return {
+    applied: true,
+    actionCount: plan.actions.length,
+    ...(plan.backoffUntil !== undefined
+      ? { backoffUntil: plan.backoffUntil }
+      : {}),
+  };
+}
+
+function didAnyActionHitPassRunBudget(
+  state: SchedulerSettleLoopState,
+  actions: readonly Action[],
+): boolean {
+  return actions.some((action) =>
+    (state.nodes.get(action)?.passRuns ?? 0) >= PASS_RUN_BUDGET
+  );
+}
+
+function collectCurrentBackoffCandidates(
+  state: SchedulerSettleLoopState,
+): Set<Action> {
+  const candidates = new Set<Action>();
+  for (const record of state.nodes.nodes()) {
+    candidates.add(record.action);
+  }
+  return candidates;
 }
 
 function isPullSettleActionStillRunnable(
   state: SchedulerSettleLoopState,
   fn: Action,
 ): boolean {
-  const isInPending = state.pending.has(fn);
-  const isInDirty = state.dirty.has(fn);
-
-  // For effects: we cleared dirty upfront, so check if re-dirtied (cycle)
-  if (state.effects.has(fn)) {
-    if (state.dirty.has(fn)) {
-      // Effect was re-dirtied during this tick -> cycle detected
-      logger.debug("schedule-cycle", () => [
-        `[CYCLE] Effect ${
-          state.getActionId(fn)
-        } re-dirtied, skipping (cycle detected)`,
-      ]);
-      // Skip this effect - it will run on a future tick after cycle settles
-      state.pending.delete(fn);
-      return false;
-    }
-    return isInPending;
-  }
-
-  // For computations: must be pending or dirty
-  return isInPending || isInDirty;
-}
-
-function deferEffectForLateMaterializerDependency(
-  state: SchedulerSettleLoopState,
-  fn: Action,
-): boolean {
-  if (!state.effects.has(fn)) return false;
-
-  const dirtyDeps = new Set<Action>();
-  state.collectDirtyDependencies(fn, dirtyDeps, new Map());
-  const materializers = [...dirtyDeps].filter((dep) =>
-    state.materializerIndex.isMaterializer(dep) && state.dirty.has(dep)
-  );
-  if (materializers.length === 0) return false;
-
-  for (const materializer of materializers) {
-    state.pending.add(materializer);
-  }
-  state.pending.add(fn);
-  return true;
+  const record = state.nodes.get(fn);
+  return record !== undefined &&
+    isInvalidOrNeverRan(record) &&
+    (state.isLiveAction(fn) || state.pending.has(fn)) &&
+    record.passRuns < PASS_RUN_BUDGET;
 }
 
 function skipPullDelayedSettleAction(
@@ -401,31 +462,26 @@ function skipPullDelayedSettleAction(
     // Don't clear from pending or dirty - action stays in its current state
     // but we remove from pending so it doesn't run this cycle
     state.pending.delete(fn);
-    // Keep pull-mode effects dirty so they wake when the throttle expires.
-    if (state.effects.has(fn)) {
-      state.markDirectDirty(fn);
-    }
+    return true;
+  }
+
+  const nextEligibleAt = state.getNextEligibleRunTime(fn);
+  if (nextEligibleAt !== undefined && nextEligibleAt > performance.now()) {
+    logger.debug("schedule-backoff", () => [
+      `[GATE] Skipping time-gated action: ${state.getActionId(fn)}`,
+    ]);
+    state.filterStats.filtered++;
+    state.pending.delete(fn);
     return true;
   }
 
   return false;
 }
 
-function skipUnchangedConditionalEffect(
-  state: SchedulerSettleLoopState,
-  fn: Action,
-): boolean {
-  if (
-    !state.effects.has(fn) ||
-    !state.conditionallyScheduledEffects.has(fn) ||
-    state.conditionalEffectHasChangedInputs(fn)
-  ) {
-    return false;
-  }
-
-  state.conditionallyScheduledEffects.delete(fn);
-  state.pending.delete(fn);
-  state.clearDirty(fn);
-  state.filterStats.filtered++;
-  return true;
+function minDefined(
+  current: number | undefined,
+  next: number | undefined,
+): number | undefined {
+  if (next === undefined) return current;
+  return current === undefined ? next : Math.min(current, next);
 }

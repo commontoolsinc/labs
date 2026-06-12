@@ -3933,3 +3933,337 @@ CT-1316, and the differing value is exact (registry `none` vs WeakMap
     - No case exceeded the >10% regression STOP threshold.
   - `cd packages/runner && deno task test`: passed,
     `594 passed (3109 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m7s`.
+
+## IMPLEMENTER STOP — 07/3c.i closure ordering retry regression
+
+3c.i asks for a parity commit: after seed + upstream collection, add the live
+downstream closure of every dirty node to the work set, keep runtime gates
+unchanged, and expect zero behavior change. I implemented the closure in
+`pull-execution.ts` by walking `dependents` from dirty work-set roots, adding
+only nodes whose `SchedulerNode` is live according to the 3b liveness helper.
+This required a narrow `isLiveAction` settle-state predicate.
+
+Validation before the stop:
+
+- `deno fmt packages/runner/src/scheduler.ts
+  packages/runner/src/scheduler/execution.ts
+  packages/runner/src/scheduler/pull-execution.ts`: passed
+  (`Checked 3 files`).
+- `deno lint` on the same 3 files: passed (`Checked 3 files`).
+- `deno check` on the same 3 files: passed.
+- Cutover fixture pack:
+  `ENV=test deno test --allow-ffi --allow-env --allow-read
+  --allow-write=/tmp,/var/folders --allow-run=git
+  packages/runner/test/scheduler-v2-cutover.test.ts`: passed,
+  `1 passed (10 steps)`, `0 failed`; fixtures 3 and 4 stayed green.
+
+Full runner suite then failed one test:
+
+```text
+$ cd packages/runner && deno task test
+FAILED | 593 passed (3108 steps) | 1 failed (1 step) | 0 ignored (10 steps) (2m6s)
+
+reactive retries ... should preserve dependencies when retrying failed commits
+error: AssertionError: Values are not strictly equal.
+
+[Diff] Actual / Expected
+
+-   3
++   2
+
+at packages/runner/test/scheduler-retries.test.ts:187:31
+```
+
+The focused retry file reproduces the same failure:
+
+```text
+$ ENV=test deno test --allow-ffi --allow-env --allow-read \
+  --allow-write=/tmp,/var/folders --allow-run=git \
+  packages/runner/test/scheduler-retries.test.ts
+FAILED | 0 passed (1 step) | 1 failed (1 step) (61ms)
+```
+
+Initial read: the new closure can place a clean live downstream computation in
+the same order after an upstream dirty computation. In the retry fixture,
+`action1` writes `intermediate` and aborts for its first two attempts; with the
+closure, downstream `action2` can be present later in the same order and becomes
+dirty before its turn, so the unchanged v1 computation gate (`pending || dirty`)
+runs it once more before `action1` eventually succeeds. That contradicts the
+3c.i "zero behavioral change" expectation, even though the cutover
+effect-parity fixtures stay green.
+
+STOP question for reviewer: should 3c.i narrow the parity closure until 3c.ii
+(for example only clean effects / nodes whose current v1 gate would skip until
+synchronous invalidation), should the retry fixture expectation change for the
+new closure semantics, or should this wait for the 3c.ii single-channel run gate
+before including downstream computations?
+
+## REVIEWER VERDICT — 07/3c.i closure narrows to effects
+
+Correct stop, and your first option is the ruling. My "zero behavioral
+change" framing for 3c.i was over-broad: with v1's computation gate
+(`pending || dirty`) still active, ANY downstream computation placed in
+the order can be admitted one iteration early when an upstream member's
+optimistic commit dirties it mid-iteration. That is a real semantic
+shift, and `scheduler-retries` is a contract test — its expectation
+does not move (option 2 rejected), and deferring the whole closure
+(option 3) would orphan the parity instrument fixture 3 needs.
+
+1. **3c.i closure = live downstream EFFECTS only.** Effects keep their
+   v1 gates (conditional filter, changed-inputs check, pre-clear), so
+   their same-iteration placement is behavior-preserving — fixtures 3/4
+   are exactly their parity witnesses. Drop computations from the
+   closure walk; keep the `isLiveAction` predicate and the
+   `dependents`-walk scaffolding (3c.ii reuses them verbatim).
+2. **Computations join the closure in 3c.ii, in the same commit as the
+   invalid-at-turn run-gate** — the gate that makes their placement
+   sound (clean-at-turn ⇒ skipped, regardless of what dirtied whom
+   mid-iteration). Amend the work order's 3c.i/3c.ii text in-branch to
+   say this — own docs commit:
+   `docs(specs): scheduler-v2 WO07 — 3c.i closure is effects-only; computations join with the ii gate`.
+3. Add `test/scheduler-retries.test.ts` to 3c.ii's named gates (it
+   already runs in the suite; naming it makes the count assertion an
+   explicit parity witness for the computation-closure flip).
+4. Optional, scratch-only, do not block: one log line identifying what
+   dirties `action2` during a failed attempt (optimistic-apply
+   notification vs something else) — useful context for the 3c.ii
+   review, recorded here if cheap.
+5. Then: rerun the fixture pack + retries + full suite; commit 3c.i
+   with its planned message.
+
+## 07/3c.i-docs-amendment
+
+- [x] pending — amended 07/3c.i and 07/3c.ii work-order text per reviewer
+  ruling.
+- Fix shape:
+  - 3c.i downstream closure is now specified as live downstream effects only,
+    preserving v1 computation-gate behavior.
+  - 3c.ii now explicitly expands the closure to all live nodes in the same
+    commit as the invalid-at-turn run gate.
+  - `test/scheduler-retries.test.ts` is now an explicit 3c.ii gate.
+
+## 07/3c.i-closure-ordering
+
+- [x] pending — added live downstream effect closure ordering for scheduler
+  settle work sets.
+- Fix shape:
+  - `buildPullIterationWorkSet` now walks `dependents` from dirty work-set
+    roots after seed + upstream collection.
+  - The 3c.i closure adds only live effect nodes, per reviewer ruling, so
+    unchanged v1 computation gates cannot admit downstream computations early.
+  - The settle-loop state now exposes `isLiveAction` for the closure helper;
+    3c.ii will reuse this path when computations join the closure with the new
+    invalid-at-turn run gate.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/execution.ts
+    packages/runner/src/scheduler/pull-execution.ts`: passed
+    (`Checked 3 files`).
+  - `deno lint` on the same 3 files: passed (`Checked 3 files`).
+  - `deno check` on the same 3 files: passed.
+  - Cutover fixture pack:
+    `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    packages/runner/test/scheduler-v2-cutover.test.ts`: passed,
+    `1 passed (10 steps)`, `0 failed`.
+  - Retry parity witness:
+    `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    packages/runner/test/scheduler-retries.test.ts`: passed,
+    `1 passed (2 steps)`, `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3109 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m6s`.
+
+## 07/3c.ii-value-gated-effects-channel-deletion
+
+- [x] pending — migrated scheduler invalidation to node status and deleted the
+  duplicate write-propagation/scheduled-effect channels.
+- Fix shape:
+  - `record.status`/`record.invalidCauses` now own invalidation state; storage
+    notifications call the `markInvalid` entry point and action runs consume
+    or restore causes from the node record.
+  - The settle work-set closure now includes all live downstream nodes, while
+    the turn gate runs only invalid/never-ran live eligible nodes under
+    `PASS_RUN_BUDGET`; clean computations included for ordering are skipped.
+  - Deleted the write-propagation module and the `changedWritesHistory`,
+    `conditionallyScheduledEffects`, `scheduledFirstTime`,
+    `scheduleAffectedEffects`, and `scheduledEffects` trace channels.
+  - First-run no-output computations discovered during dependency collection
+    receive provisional demand so startup/restart semantics stay live.
+  - Initial clean rehydration refuses to overwrite a node once the dirty mirror
+    or invalid status shows it has been invalidated during the async load.
+  - Stale-input resubscribe skips debounced computation writers so the debounce
+    wake path, not same-turn effect revalidation, controls the trailing flush.
+  - Scheduler tests use `StorageManager.emulate({ as: signer })` through
+    `createSchedulerTestRuntime`; `rg` found no other scheduler storage
+    configuration in runner scheduler helpers. The representative synchronous
+    notification assertion runs in `scheduler-pull.test.ts`.
+- Recordings:
+  - Deletion grep returned no matches:
+
+```text
+$ rg -n "cfcTriggerReads|changedWritesHistory|conditionallyScheduledEffects|scheduledFirstTime|scheduleAffectedEffects|markEffectConditionallyScheduled|conditionalEffectHasChangedInputs|markPullDemandContinuation|recordChangedComputationWrites|markReadersDirtyForChangedWrites|writePropagation|TriggerTraceScheduledEffect|scheduledEffects|mark-dirty|already-dirty|schedule-effect" packages/runner/src packages/runner/test
+```
+
+  - `git diff --check`: passed.
+  - `deno fmt` on the 29 touched source/test files: passed (`Checked 29 files`).
+  - `deno lint` on the same 29 files: passed.
+  - `deno check` on the same 29 files: passed.
+  - Persistent rehydration trio:
+    `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    packages/runner/test/scheduler-observations.test.ts
+    packages/runner/test/reload-rehydration.test.ts
+    packages/runner/test/reload-sibling-overdirty.test.ts`: passed,
+    `3 passed (22 steps)`, `0 failed`.
+  - Regression set:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/ensure-piece-running.test.ts test/runner.test.ts
+    test/scheduler-timing.test.ts`: passed, `7 passed (72 steps)`,
+    `0 failed`.
+  - 3c.ii gate pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts test/scheduler-cfc-trigger-reads.test.ts
+    test/scheduler-retries.test.ts test/scheduler-pull.test.ts
+    test/scheduler-convergence.test.ts test/scheduler-ordering.test.ts
+    test/scheduler-events.test.ts`: passed, `11 passed (92 steps)`,
+    `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3108 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m6s`.
+  - Expected noisy passing logs remain: legacy cycle-cap telemetry in
+    convergence cases and the reload-rehydration fixture's expected
+    `TypeError`.
+
+## 07/3c.iii-upstream-machinery-deletion
+
+- [x] pending — deleted the upstream dirty/stale machinery and rebuilt the
+  remaining event-preflight and settle seeding paths around node invalid status.
+- Fix shape:
+  - Deleted `src/scheduler/dirty-dependencies.ts` and
+    `src/scheduler/staleness.ts`; scheduler state no longer owns a
+    dirty/stale mirror, `collectStack`, or dirty-dependency trace context.
+  - Added `event-preflight-dependencies.ts` with
+    `collectInvalidUpstreamForLog`, preserving the public preflight stats shape
+    while collecting only invalid/never-ran upstream nodes.
+  - Event preflight now walks through clean intermediates to find invalid
+    ancestors of handler reads, so transient event demand still blocks on
+    stale inputs without restoring pull mode's old dirty collector.
+  - Pull settle work-set construction now uses initial seeds plus invalid/live
+    seeds, invalid materializer promotions, and live downstream closure; the
+    old initial-seed/traversal-root asymmetry and late materializer per-effect
+    recheck are gone.
+  - Continuations, delays, cycle-break shims, graph snapshots, subscription
+    revalidation, and persisted rehydration now derive "dirty" compatibility
+    from node invalid/never-ran status.
+  - The first full-suite attempt exposed an async initial-rehydration race:
+    `never-ran` is both the normal pre-rehydrate state and the state after an
+    explicit invalidation. `markActionInvalid` now cancels any pending initial
+    rehydrate token so a late clean snapshot cannot overwrite that
+    invalidation.
+- Recordings:
+  - Focused scheduler trio:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-events.test.ts test/scheduler-pull.test.ts
+    test/scheduler-convergence.test.ts`: passed, `3 passed (53 steps)`,
+    `0 failed`.
+  - 3c.iii gate pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts
+    test/scheduler-cfc-trigger-reads.test.ts test/scheduler-retries.test.ts
+    test/scheduler-ordering.test.ts test/scheduler-timing.test.ts
+    test/scheduler-throttle.test.ts`: passed, `10 passed (68 steps)`,
+    `0 failed`.
+  - Rehydration regression check:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-observations.test.ts`: passed, `1 passed (22 steps)`,
+    `0 failed`.
+  - Event/stale bench pair:
+    `cd packages/runner && deno bench --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-event-preflight.bench.ts
+    test/scheduler-stale-propagation.bench.ts`: passed. Results:
+    event clean broad graph `328.7ms`, event waits on transitive invalid writer
+    `25.7ms`, note-shaped clean events `1.1s`, deep read-populated handler
+    `545.2ms`; stale-propagation bench, now an end-to-end graph update bench:
+    chain `98.9ms`, diamond `88.6ms`, wide fanout `239.8ms`, dynamic deps
+    `81.5ms`, unchanged recompute `45.9ms`.
+  - `deno fmt` on the 29 touched source/test files: passed
+    (`Checked 29 files`).
+  - `deno lint` on the same 29 files: passed (`Checked 29 files`).
+  - `deno check` on the same 29 files: passed.
+  - `git diff --check`: passed.
+  - Upstream deletion grep returned no matches:
+
+```text
+$ rg -n "staleness|dirty-dependencies|SchedulerStaleness|collectStack|dirtyDependencyTraceContext|DirtyDependencyTraceContext|collectDirtyDependencies|collectDirtyDependenciesForLog|collectDirtyDependenciesFromTraversalRoot|deferEffectForLateMaterializerDependency|isStale\(|getUpstreamStaleCount|stale\.size|upstreamStale|markDirectDirty|clearSchedulerDirectDirty|clearSchedulerDirty|forceClearStale" packages/runner/src packages/runner/test
+```
+
+  - Scheduler-source stale grep returned no matches:
+
+```text
+$ rg -n "stale\b" packages/runner/src/scheduler packages/runner/src/scheduler.ts
+```
+
+  - First `cd packages/runner && deno task test` attempt failed one test:
+    `scheduler-observations.test.ts` /
+    `does not apply async initial rehydration after an action becomes dirty`.
+    The final rerun passed: `594 passed (3106 steps)`, `0 failed`,
+    `0 ignored (10 steps)`, `2m6s`.
+
+## 07/3c.iv-budgets-backoff
+
+- [x] pending — replaced cycle breaking/adaptive cycle debounce with v2 pass
+  budgets and exponential backoff.
+- Fix shape:
+  - `constants.ts` now owns `MAX_ITERS = 10`, `PASS_RUN_BUDGET = 5`, and
+    the 250ms/2000ms backoff bounds; the old `MAX_ITERATIONS_PER_RUN`,
+    `loopCounter`, and cycle-debounce constants are gone.
+  - Node records now carry `backoffUntil` and consecutive
+    `backoffFailures`; settle execution applies exponential backoff when an
+    iteration cap or pass-budget exhaustion leaves runnable invalid work.
+  - Pass-budget backoff keys off any action reaching the run budget, then
+    defers the currently runnable invalid nodes. This fixes alternating cycles
+    where the action that trips the budget is clean by the time planning runs.
+  - Continuation and run gating now use combined throttle/backoff eligibility,
+    so delayed work schedules through the existing event-wake path rather than
+    immediate requeueing.
+  - `scheduler.non-settling` telemetry is emitted once per backoff episode via
+    the existing settling tracker.
+  - Deleted `pull-cycle-break.ts`, `planPullCycleBreak`,
+    `planPullAdaptiveCycleDebounce`, adaptive cycle-debounce application, and
+    the remaining effect re-dirty cycle-skip paths.
+  - Updated scheduler convergence/timing/cutover/core tests to assert bounded
+    backoff semantics instead of the removed hard loop cap and cycle debounce.
+- Recordings:
+  - Deletion grep returned no matches:
+
+```text
+$ rg -n "runsThisExecute|loopCounter|executeStartTime|CYCLE_DEBOUNCE|MAX_ITERATIONS_PER_RUN|PullCycleBreakState|breakPullCyclesIfNeeded|planPullCycleBreak|planPullAdaptiveCycleDebounce|schedule-cycle-debounce|schedule-cycle|dirtyEffectsToRun|earlyIterationComputations|getLoopCounter|pull-cycle-break|cycle-break|cycle-aware debounce|cycle debounce" packages/runner/src packages/runner/test
+```
+
+  - `deno fmt` on the touched source/test files: passed.
+  - `deno lint` on the touched source/test files: passed (`Checked 11 files`).
+  - `deno check` on the touched source/test files: passed.
+  - `git diff --check`: passed.
+  - Core regression check:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-core.test.ts`: passed, `1 passed (25 steps)`, `0 failed`.
+  - 3c.iv gate pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts test/scheduler-convergence.test.ts
+    test/scheduler-timing.test.ts test/scheduler-throttle.test.ts`: passed,
+    `4 passed (49 steps)`, `0 failed`.
+  - First `cd packages/runner && deno task test` attempt failed the legacy
+    `scheduler-core.test.ts` loop-cap assertion after the hard loop cap was
+    removed. The final rerun passed: `594 passed (3099 steps)`, `0 failed`,
+    `0 ignored (10 steps)`, `2m8s`.
+  - Expected noisy passing logs remain: deliberate scheduler errors in
+    convergence/core/stack-trace tests, reload-rehydration's expected
+    `TypeError`, and existing write-surface/wish warnings.

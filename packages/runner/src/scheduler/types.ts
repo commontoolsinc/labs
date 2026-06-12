@@ -81,7 +81,7 @@ export type ReactivityLog = {
 
 export type PopulateDependenciesEntry = PopulateDependencies | ReactivityLog;
 
-export type DirtyDependencyTraceContext = SchedulerEventPreflightStats & {
+export type EventPreflightTraceContext = SchedulerEventPreflightStats & {
   depth: number;
   actionSummaries: Map<Action, SchedulerEventPreflightActionSummary>;
   rootDirectWriterActions: Set<Action>;
@@ -147,29 +147,20 @@ export interface TriggerTraceValueSummary {
   preview?: string | number | boolean | null;
 }
 
-export interface TriggerTraceScheduledEffect {
-  actionId: string;
-  pendingBefore: boolean;
-  dirtyBefore: boolean;
-  debounceMs?: number;
-}
-
 export interface TriggerTraceActionRecord {
   actionId: string;
   actionType: "effect" | "computation";
   mode: "pull" | "push";
   decision:
     | "schedule-push"
-    | "schedule-effect"
-    | "mark-dirty"
-    | "already-dirty"
+    | "mark-invalid"
+    | "already-invalid"
     | "skip-own-commit-source"
     | "skip-same-change-group";
   pendingBefore: boolean;
   pendingAfter: boolean;
   dirtyBefore: boolean;
   dirtyAfter: boolean;
-  scheduledEffects: TriggerTraceScheduledEffect[];
 }
 
 export interface TriggerTraceEntry {

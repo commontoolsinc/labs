@@ -153,19 +153,7 @@ export function subscribePullSchedulerAction(
   }
 
   if (!deferInitialExecution) {
-    // First-time pull subscription makes the action dirty and pending, but
-    // computations still need a live effect or demand context to run.
-    state.markDirectDirty(action);
-    state.pending.add(action);
-    state.scheduledFirstTime.add(action);
-  }
-
-  if (
-    !deferInitialExecution &&
-    !actionIsEffect &&
-    state.getSchedulingWrites(action)?.length
-  ) {
-    state.scheduleAffectedEffects(action);
+    state.markInvalid(action);
   }
 
   // Emit telemetry for new subscription
@@ -200,6 +188,7 @@ export function resubscribePullSchedulerAction(
   options: SchedulerResubscribeOptions = {},
 ): void {
   const { isEffect } = options;
+  const existingRecord = state.subscriptionState.nodes.get(action);
 
   updateSchedulerActionChangeGroup(
     state.subscriptionState,
@@ -220,10 +209,14 @@ export function resubscribePullSchedulerAction(
     action,
     isEffect,
   );
+  const record = state.subscriptionState.nodes.get(action);
+  if (!existingRecord && record?.status === "never-ran") {
+    record.status = "clean";
+  }
   const actionId = state.getActionId(action);
 
-  // Registering a new edge to a live effect can be the moment a stale upstream
-  // computation becomes demanded.
+  // Registering a new edge to a live effect can be the moment an invalid
+  // upstream computation becomes demanded.
   state.updateDependents(action, schedulingLog);
 
   // Track parent-child relationship if action is created during another action's execution

@@ -3661,9 +3661,8 @@ export class Runner {
       mappedInputBindings,
       processCell,
     );
-    // outputCells tracks what cells this action writes to. This is needed for
-    // pull-based scheduling so collectDirtyDependencies() can find computations
-    // that write to cells being read by effects.
+    // outputCells tracks the static write surface for dependency ordering and
+    // event preflight.
     const outputCells = findAllWriteRedirectCells(
       mappedOutputBindings,
       processCell,
@@ -3854,8 +3853,8 @@ export class Runner {
 
     // Create populateDependencies callback.
     // If builtin provides custom reads, use that; otherwise read all inputs.
-    // Always register output writes so collectDirtyDependencies() can find this
-    // computation when an effect needs its outputs.
+    // Always register output writes so dependency ordering can find this
+    // computation when an effect or event reads its outputs.
     const populateDependencies = (depTx: IExtendedStorageTransaction) => {
       logger.timeStart("raw", "populateDependencies");
       try {

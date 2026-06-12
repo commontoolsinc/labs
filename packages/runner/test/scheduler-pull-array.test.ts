@@ -240,7 +240,7 @@ describe("pull mode array reactivity", () => {
     // Expected behavior:
     // 1. Source array changes (push)
     // 2. Computation that reads source is marked dirty
-    // 3. scheduleAffectedEffects finds sink as a dependent and schedules it
+    // 3. The invalidated computation and dependent sink settle together
     // 4. Computation runs, then sink is notified with new value
 
     const sourceArray = runtime.getCell<string[]>(

@@ -39,7 +39,6 @@ export type {
   SettleStatsHistoryEntry,
   TriggerTraceActionRecord,
   TriggerTraceEntry,
-  TriggerTraceScheduledEffect,
   TriggerTraceValueKind,
   TriggerTraceValueSummary,
 } from "./scheduler.ts";
