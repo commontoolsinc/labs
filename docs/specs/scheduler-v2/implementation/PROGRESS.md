@@ -5427,3 +5427,63 @@ $ rg -n "queueInitialActionRehydration|initialRehydrationTokens|canApplyInitialA
     write-surface warnings in wish/raw map fixtures, and the reload fixture's
     transient `TypeError: Cannot read properties of undefined (reading
     'length')` log while passing.
+
+## 08/final-cleanup
+
+- [x] pending — completed the post-phase-7 cleanup checklist.
+- Shape:
+  - Replaced `docs/specs/pull-based-scheduler/README.md` with a pointer to
+    `docs/specs/scheduler-v2/README.md`.
+  - Marked the inventory dispositions as DONE with the scheduler-v2 commits
+    that realized each row. Added a mode-plumbing status note that the frozen
+    scheduler graph-snapshot `pullMode: true` diagnostic remains by phase-0
+    reviewer verdict, while mode-control APIs are gone.
+  - Verified and updated the migration-plan flag end-state table.
+  - Updated `docs/specs/persistent-scheduler-state.md` status for piece-level
+    resume, payload v2, v1/v2 row compatibility, and the separate default-on
+    rollout decision.
+  - Final flag verification found stale shell/pattern integration
+    `setPullMode` callers after the runtime-client API had already been
+    deleted; removed those callers and the debugger graph mode toggle.
+  - Touched-file `deno check` then exposed obsolete trigger-trace
+    `scheduledEffects` diagnostics. Removed that stale diagnostic field usage
+    from the default-app integration diagnostics, shell debug utilities, and
+    runtime-client/shell fixtures. The current trigger trace records direct
+    action decisions only.
+- Recordings:
+  - `deno fmt` on the touched TypeScript files: passed (`Checked 6 files`).
+  - `deno lint` on the touched TypeScript files: passed (`Checked 6 files`).
+  - Initial `deno check` on the touched TypeScript files failed on stale
+    `TriggerTraceActionRecord.scheduledEffects` references in
+    `packages/patterns/integration/default-app.test.ts`. After removing the
+    obsolete diagnostics, `deno check` on the touched TypeScript files passed.
+  - `cd packages/shell && deno test --allow-read --allow-write --allow-run
+    --allow-env test/debug-utils.test.ts`: passed, `1 passed (2 steps)`,
+    `0 failed`, `7ms`.
+  - `cd packages/runtime-client && deno test --allow-env --allow-read
+    --allow-ffi backends/runtime-processor.test.ts`: passed, `11 passed (50
+    steps)`, `0 failed`, `112ms`.
+  - Mode-control / historical-write flag grep:
+    `rg -n "setPullMode|enablePullMode|disablePullMode|isPullModeEnabled|schedulerHistoricalMightWrite|historicalMightWrite" --glob '!docs/**' .`:
+    no matches.
+  - Old-vs-new scheduler flag grep:
+    `rg -n "old-vs-new|schedulerV2|useSchedulerV2|newScheduler|legacyScheduler|v2Scheduler" --glob '!docs/**' packages`:
+    no matches.
+  - `pullMode` residue grep:
+    `rg -n "pullMode" packages/shell packages/runner/src packages/runner/test packages/runtime-client packages/patterns -g '*.ts' -g '*.tsx'`
+    returned only the frozen graph-snapshot diagnostic plumbing and
+    `packages/runner/test/scheduler-bench-helpers.ts`'s ignored compatibility
+    parameter.
+  - Inventory unmarked-row grep:
+    `rg -n "\*\*(Keep|Subsume|Delete)\*\*:" docs/specs/scheduler-v2/current-system-inventory.md`:
+    no matches.
+  - Persistent scheduler flag grep:
+    `rg -n "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE|persistentSchedulerState" packages/runner/src packages/runner/test packages/shell packages/toolshed packages/memory -g '*.ts' -g '*.tsx'`:
+    matches only the expected runtime option, shell/toolshed env plumbing,
+    memory-v2 config/handshake, and tests.
+  - `git diff --check`: passed.
+  - Final full runner suite refresh:
+    `cd packages/runner && deno task test`: passed,
+    `595 passed (3099 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m8s`.
+  - Expected noisy passing logs remain: scheduler preflight/retry/error logs
+    and write-surface warnings in wish/raw map fixtures.
