@@ -216,6 +216,9 @@ overrides" row, report it once, here, as `[WARN]` — not there as `[FAIL]`.
 | a handler whose entire body is `cell.set(event.detail?.value ?? ...)`, wired to `oncf-input`/`oncf-change` | re-implements two-way binding as boilerplate | `$value` / `$checked` on the control |
 | `if (event?.key === "Enter")` keydown handlers | re-implements submit by hand | `cf-input` emits `cf-submit` on Enter; multi-field forms use `cf-form` + a submit button |
 | `Writable<number>` selection index plus index-adjustment logic when the list mutates | indexes go stale on reorder/insert/remove and force compensation code (see `record.tsx` `trashSubPiece`) | hold the selected item itself in a `Writable<Item \| null>` — the stored link survives reorder and removal |
+| minted identity fields on items: `id: crypto.randomUUID()` / counters / timestamps used to find rows (`findIndex((x) => x.id === id)`) | the data model already assigns array items stable entity identity; user-land ids fight it (in `.map()` callbacks an `id` property is a Cell, not a string, so lookups fail silently) — see `docs/common/concepts/identity.md` and `docs/development/debugging/gotchas/custom-id-property-pitfall.md` | address items by live reference: `items.remove(item)`, `findIndex((x) => equals(x, item))` |
+| string-addressed mutation streams added "for agents" (`removeByText`, `updateByTitle`, id-token APIs) on a NEW pattern/primitive | LLM tool-calls round-trip item references through the serialization layer (`@link`s re-cellify on receipt) — agents send the item like any caller; a parallel string API duplicates identity | expose reference-addressed streams only; an agent grounds words against the data it read, then sends the reference |
+| update handlers that replace an array slot with a fresh object literal (`items.set(current.toSpliced(i, 1, { ...current[i], ...changes }))`, or a `.map()` returning `{ ...i, field }` for the matched item) | a fresh literal re-mints the element's entity identity, orphaning every held reference — selection cells and earlier-read items stop `equals()`-matching, so later mutations with them silently no-op | patch fields through element cells: `items.key(i).key(field).set(value)`; structural remove/clear may still rebuild the array |
 | inline `padding` + `border-radius` + `background` pill/badge blobs; hand-rolled label-above-input stacks; hand-rolled centered "no items" divs | re-implements shipped components, each slightly differently | `cf-badge` / `cf-chip`; `cf-field` for labeled controls; `cf-empty-state` for empty lists |
 
 Do not warn on:
@@ -231,6 +234,12 @@ Do not warn on:
 - a handler doing dependent work beyond the single `.set()` (though if the
   control is also cell-bound, the self-feedback rule in category 5 applies)
 - `Escape` or arrow-key handlers — no component affordance covers those
+- a domain field that happens to be called `id` because the DATA is identified
+  externally (an API record id, a Google event id) and is never used to find
+  rows in cells — the rule targets identity *minting* for row tracking
+- existing, consumed natural-language agent APIs (e.g. do-list's
+  `updateItemByTitle`, driven by the omnibox tools) — legacy surface with real
+  callers; the rule targets NEW patterns adding parallel string identity
 
 ## Output Format
 

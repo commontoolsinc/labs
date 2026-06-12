@@ -126,8 +126,10 @@ list designed to be embedded as a JSX tag inside other patterns. Headless-able:
 render its `[UI]` for a default row experience (checkbox + editable text +
 delete, a cf-message-input adder, cf-empty-state when empty), or ignore the
 `[UI]` and `.map()` your own rows while driving the exposed streams/cells.
-Mutations are addressed by stable `id` (never array index); a separate fuzzy
-text-addressed layer (`*ByText`) exists for agent-driveability. See
+Mutations are addressed by live item reference via `equals()` /
+`items.remove(item)` — never array index, never a user-land `id` field, and no
+text-addressed layer: agents pass item references through tool-calls like any
+other caller (the serialization layer round-trips them as `@link`s). See
 `docs/common/patterns/primitives.md` for the full composition contract.
 
 **Keywords:** primitive, composable, list, editable, headless, identity, stream,
@@ -137,7 +139,7 @@ embed, sub-pattern
 
 ```ts
 interface EditableListItem {
-  id: string; // stable identity (minted by addItem if omitted)
+  // no `id` field — identity is the runtime's entity identity (equals())
   done: boolean | Default<false>;
   label: Default<string, "">; // default row reads this key
   [extra: string]: any; // pass-through extra fields for headless rows
@@ -160,16 +162,14 @@ interface EditableListOutput {
   total: number;
   active: number;
   done: number;
-  // CORE: identity-addressed
+  // CORE: reference-addressed (equals() identity)
   addItem: Stream<{ label?: string; item?: Partial<EditableListItem> }>;
-  removeItem: Stream<{ id: string }>;
-  updateItem: Stream<{ id: string; changes: Partial<EditableListItem> }>;
-  toggleItem: Stream<{ id: string; done?: boolean }>;
+  removeItem: Stream<{ item: EditableListItem }>;
+  updateItem: Stream<
+    { item: EditableListItem; changes: Partial<EditableListItem> }
+  >;
+  toggleItem: Stream<{ item: EditableListItem; done?: boolean }>;
   clearDone: Stream<unknown>;
-  // CONVENIENCE: fuzzy text-addressed (agent layer)
-  addItemByText: Stream<{ text: string }>;
-  updateItemByText: Stream<{ text: string; newText?: string; done?: boolean }>;
-  removeItemByText: Stream<{ text: string }>;
 }
 ```
 

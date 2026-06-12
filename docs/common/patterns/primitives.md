@@ -19,12 +19,17 @@ In priority order:
    product. The caller passes a `Writable<T>` it owns; the primitive binds its
    handlers to that cell and returns the bound `Stream<>`s. The caller wires
    nothing by hand — passing the cell *is* the wiring.
-2. **A convenience layer** of fuzzy / agent-friendly Streams (e.g.
-   text-addressed `*ByText`). Optional, additive, clearly labelled as
-   convenience — never the core model.
-3. **An optional default `[UI]`.** A static `VNode` giving a caller who just
+2. **An optional default `[UI]`.** A static `VNode` giving a caller who just
    wants the thing a working experience for free. A caller who wants custom
    rendering simply does not render it.
+
+That's the whole surface. In particular, do **not** add string-addressed
+("ByText"/"ByTitle") mutation layers "for agents": LLM tool-calls round-trip
+item references through the serialization layer (cells/items serialize to
+`@link` references and re-cellify on the way back), so an agent that has read
+the data sends the item itself — the same call a JSX handler makes. Grounding
+a natural-language phrase against the data is the agent's job, not extra API
+surface on the primitive.
 
 ## The crux: a sub-pattern CAN mutate a parent-owned cell
 
@@ -57,19 +62,47 @@ does not need this; same-space `Writable<T[]>` mutation works.)
 ## Identity, not index, not title (collection primitives)
 
 For **collection** primitives — ones that own a list/set of items
-(`EditableList`, `MasterDetail`) — core mutations address an item by a **stable
-id** carried on the item, never by its array position. Index-based
-selection/mutation breaks under reordering and concurrent edits — it is the
-central fragility this composition overhaul removes. `addItem` mints an id when
-the caller omits one; `removeItem` / `updateItem` / `toggleItem` all take
-`{ id }`. Primitives with no collection (e.g. `ConfirmAction`, a single-gate
-primitive) have nothing to address by id and this section does not apply to
-them.
+(`EditableList`, `MasterDetail`) — core mutations address an item by **live
+reference**, using the data model's own identity: `removeItem` takes `{ item }`
+and calls `cell.remove(item)`; `updateItem` / `toggleItem` locate the item with
+`findIndex((x) => equals(x, item))`. The runtime gives array items implicit
+entity identity that survives reorder and field mutation, and `equals()` /
+`remove()` compare by that identity — a row rendered from `items.map(...)`
+already holds the reference it needs to send.
 
-Title/text addressing, where offered, is a **separate, explicit convenience
-layer** (e.g. `removeItemByText`) for agent-driveability — fuzzy
-(case-insensitive, first-match) and documented as such. It sits *on top of* the
-identity core; it is not the identity model.
+Updates must also **preserve** that identity: patch fields through the
+element's cells (`items.key(i).key(field).set(value)` — the same route the
+default row's `$checked` / `$value` two-way binding writes through), never by
+replacing the array slot with a fresh object literal
+(`items.set(current.toSpliced(i, 1, { ...old, ...changes }))`). A fresh
+literal re-mints the entity identity, so every previously-held reference to
+that item — a selection cell, a MasterDetail holder, any caller that read it
+before the update — stops `equals()`-matching and later mutations sent with it
+silently no-op. Structural mutations (remove, clear-completed) genuinely drop
+entries, so rebuilding the array there is correct.
+
+Two things are explicitly **not** the identity model:
+
+- **Array indices.** Index-based selection/mutation breaks under reordering and
+  concurrent edits — the central fragility this composition overhaul removes.
+- **User-land id fields.** NEVER mint `id` properties (UUIDs, counters,
+  timestamps) on items. The reactive fabric is an object graph, not a keyed
+  database; synthetic ids fight the reactivity system (in `.map()` callbacks an
+  `id` property is a Cell, not a string, so lookups fail silently). See
+  [`identity.md`](../concepts/identity.md) ("No ID generation") and
+  [Custom `id` Property Pitfall](../../development/debugging/gotchas/custom-id-property-pitfall.md).
+
+Primitives with no collection (e.g. `ConfirmAction`, a single-gate primitive)
+have nothing to address and this section does not apply to them.
+
+**Agents are not an exception.** It is tempting to add a third addressing mode
+— title/text matching or a serializable token — "because an LLM can't hold a
+live reference." It can: tool-call arguments pass through the serialization
+layer, which carries item references as `@link`s and re-cellifies them on
+receipt. Reference addressing is the one identity story for code *and* agents.
+(Per-caller natural-language conveniences like do-list's title-addressed
+handlers are a caller's own agent API, justified by that caller's usage — they
+are not part of the primitive contract.)
 
 ## Headless vs default rendering
 
@@ -91,7 +124,7 @@ identity core; it is not the identity model.
   {list.items.map((it) => (
     <my-row>
       <span>{it.label}</span>
-      <cf-button onClick={() => list.toggleItem.send({ id: it.id })}>
+      <cf-button onClick={() => list.toggleItem.send({ item: it })}>
         toggle
       </cf-button>
     </my-row>
@@ -121,16 +154,20 @@ rendering without that machinery.
 
 ## Authoring checklist
 
-- Item type carries a stable `id` plus whatever the model needs; an index
+- Item type carries whatever the model needs — **no `id` field**; an index
   signature lets callers extend it.
-- Core handlers operate by `id`, bound to the caller's `Writable<T[]>`.
+- Core handlers address items by live reference (`equals()` /
+  `cell.remove(item)`), bound to the caller's `Writable<T[]>`; updates patch
+  fields through element cells (`items.key(i).key(field).set(...)`), never by
+  replacing the slot with a fresh literal.
 - Counts / derived values are **named `computed` cells** (so they resolve
   through `runSynced` + `.get()` in tests).
 - `[UI]` is a static `VNode`; gate empty/non-empty with `ifElse` as a *child* of
   a static wrapper, never by wrapping `[UI]` in `computed()`.
 - Default rows use `$checked` / `$value` two-way binding — do not add setter
   handlers that just write the same value back.
-- Optional convenience (`*ByText`) streams are additive and documented as fuzzy.
+- No string-addressed mutation layers: agents pass item references through
+  tool-calls like any other caller.
 
 ## See also
 

@@ -3,30 +3,41 @@
  *
  * Exercises the composition contract via runSynced:
  * - empty → nonempty (counts, empty branch)
- * - add by text (convenience) + add by id-core stream
- * - toggle done by id (identity), counts react
- * - update by id (identity patch); id is never overwritten
- * - remove by id (identity)
- * - text-addressed convenience: updateItemByText / removeItemByText
+ * - add by core stream (label-only and item forms)
+ * - toggle done by live item reference (equals() identity), counts react
+ * - update by live item reference (identity patch)
+ * - remove by live item reference (items.remove(item))
+ * - duplicate labels distinguished by reference — equals() compares entity
+ *   identity, not content, so two items with the SAME label stay addressable
  * - clearDone
+ * - no-op safety: a detached object literal matches nothing
+ * - held-reference survival: a reference stashed in a cell BEFORE an
+ *   update/toggle (a selection cell, a MasterDetail holder, ...) must still
+ *   `equals()`-match and still drive toggle/remove AFTER the item is patched.
+ *   This guards the update-in-place contract: update/toggle write through the
+ *   element's cells; replacing the array slot with a fresh object literal
+ *   would re-mint entity identity and orphan every held reference.
  *
  * Run: deno task cf test packages/patterns/primitives/editable-list.test.tsx --verbose
  */
-import { action, computed, pattern } from "commonfabric";
+import { action, computed, equals, pattern, Writable } from "commonfabric";
 import EditableList, { type EditableListItem } from "./editable-list.tsx";
 
 export default pattern(() => {
   const list = EditableList({});
+
+  // Simulates an external holder (selection cell / MasterDetail) that read an
+  // item once and keeps the reference across later mutations.
+  const held = new Writable<EditableListItem | null>(null);
 
   // ==========================================================================
   // Actions
   // ==========================================================================
 
   const add_alpha = action(() => {
-    list.addItemByText.send({ text: "Alpha" });
+    list.addItem.send({ label: "Alpha" });
   });
   const add_beta = action(() => {
-    // core stream, label-only convenience form
     list.addItem.send({ label: "Beta" });
   });
   const add_gamma_with_extra = action(() => {
@@ -34,67 +45,98 @@ export default pattern(() => {
     list.addItem.send({ item: { label: "Gamma", priority: 9 } });
   });
 
-  // Identity-addressed: read the live id from the list, then act on it.
+  // Reference-addressed: read the live item from the list, then send it.
+  // The item arrives in the handler as a link; equals() resolves it back to
+  // the same entity — no user-land id, no text matching.
   const toggle_first_done = action(() => {
-    const id = list.items[0]?.id;
-    if (id) list.toggleItem.send({ id });
+    const item = list.items[0];
+    if (item) list.toggleItem.send({ item });
   });
   const update_first_label = action(() => {
-    const id = list.items[0]?.id;
-    if (id) list.updateItem.send({ id, changes: { label: "Alpha!" } });
-  });
-  const attempt_id_overwrite = action(() => {
-    const id = list.items[0]?.id;
-    // changes.id must be ignored — identity is immutable.
-    if (id) list.updateItem.send({ id, changes: { id: "HACKED" } });
+    const item = list.items[0];
+    if (item) list.updateItem.send({ item, changes: { label: "Alpha!" } });
   });
   const remove_first = action(() => {
-    const id = list.items[0]?.id;
-    if (id) list.removeItem.send({ id });
+    const item = list.items[0];
+    if (item) list.removeItem.send({ item });
   });
 
-  // Text-addressed convenience (fuzzy).
-  const rename_beta_by_text = action(() => {
-    list.updateItemByText.send({ text: "Beta", newText: "Beta2" });
+  // After remove_first the list is [Beta, Gamma]; keep driving by reference.
+  const rename_beta_by_ref = action(() => {
+    const item = list.items[0];
+    if (item) list.updateItem.send({ item, changes: { label: "Beta2" } });
   });
-  const done_beta_by_text = action(() => {
-    list.updateItemByText.send({ text: "Beta2", done: true });
+  const done_beta_by_ref = action(() => {
+    const item = list.items[0];
+    if (item) list.toggleItem.send({ item, done: true });
   });
-  const remove_gamma_by_text = action(() => {
-    list.removeItemByText.send({ text: "Gamma" });
+  const remove_gamma_by_ref = action(() => {
+    const item = list.items[1];
+    if (item) list.removeItem.send({ item });
   });
 
   const clear_done = action(() => {
     list.clearDone.send({});
   });
 
-  // Whitespace add should be ignored.
+  // Whitespace-only label with no item payload should be ignored.
   const add_blank = action(() => {
-    list.addItemByText.send({ text: "   " });
+    list.addItem.send({ label: "   " });
   });
 
-  // Duplicate-label fuzzy semantics: updateItemByText touches the FIRST match.
-  // The two dups are distinguished by the declared `done` field (NOT an extra —
-  // extras don't survive a full-array set, see the EditableListItem doc).
+  // Identical labels, distinguished ONLY by entity identity: update the SECOND
+  // "Dup" by reference and prove the first is untouched. (A text-matching
+  // layer could never express this — equals() is the point.)
   const add_dup_a = action(() => {
     list.addItem.send({ item: { label: "Dup", done: false } });
   });
   const add_dup_b = action(() => {
     list.addItem.send({ item: { label: "Dup", done: true } });
   });
-  const update_dup_by_text = action(() => {
-    list.updateItemByText.send({ text: "Dup", newText: "DupChanged" });
+  const update_second_dup_by_ref = action(() => {
+    const item = list.items[1];
+    if (item) list.updateItem.send({ item, changes: { label: "DupChanged" } });
   });
 
-  // No-op safety: mutating an absent id changes nothing.
-  const remove_absent_id = action(() => {
-    list.removeItem.send({ id: "does-not-exist" });
+  // No-op safety: a detached object literal has no entity identity in the
+  // list, so equals()/remove() match nothing and the list is untouched —
+  // even when its fields structurally mirror a real item.
+  const remove_absent_item = action(() => {
+    list.removeItem.send({ item: { label: "DupChanged", done: true } });
   });
-  const update_absent_id = action(() => {
+  const update_absent_item = action(() => {
     list.updateItem.send({
-      id: "does-not-exist",
+      item: { label: "Dup", done: false },
       changes: { label: "ghost" },
     });
+  });
+  const toggle_absent_item = action(() => {
+    list.toggleItem.send({ item: { label: "DupChanged", done: true } });
+  });
+
+  // Held-reference survival. Add a fresh target, STASH a reference to it in
+  // the `held` cell, then patch the item via updateItem. If update replaced
+  // the array slot with a fresh literal, the entity would be re-minted and
+  // the held reference orphaned: equals() would stop matching and the
+  // toggle/remove sent with the stale-but-once-valid reference would no-op.
+  const add_held_target = action(() => {
+    list.addItem.send({ label: "Held" });
+  });
+  const stash_held = action(() => {
+    const item = list.items[2];
+    if (item) held.set(item);
+  });
+  const update_held_target = action(() => {
+    const item = list.items[2];
+    if (item) list.updateItem.send({ item, changes: { label: "HeldRenamed" } });
+  });
+  const toggle_via_held = action(() => {
+    const h = held.get();
+    if (h) list.toggleItem.send({ item: h, done: true });
+  });
+  const remove_via_held = action(() => {
+    const h = held.get();
+    if (h) list.removeItem.send({ item: h });
   });
 
   // ==========================================================================
@@ -107,9 +149,6 @@ export default pattern(() => {
   const assert_one = computed(() => list.total === 1);
   const assert_first_label_alpha = computed(() =>
     list.items[0]?.label === "Alpha"
-  );
-  const assert_first_has_id = computed(() =>
-    typeof list.items[0]?.id === "string" && list.items[0].id.length > 0
   );
   const assert_first_not_done = computed(() => list.items[0]?.done === false);
 
@@ -129,8 +168,9 @@ export default pattern(() => {
   const assert_first_renamed = computed(() =>
     list.items[0]?.label === "Alpha!"
   );
-  const assert_id_not_overwritten = computed(() =>
-    list.items[0]?.id !== "HACKED"
+  const assert_others_untouched = computed(() =>
+    // The reference-addressed update patched ONLY the first item.
+    list.items[1]?.label === "Beta" && list.items[2]?.label === "Gamma"
   );
 
   const assert_after_remove_two = computed(() => list.total === 2);
@@ -138,46 +178,67 @@ export default pattern(() => {
     list.items.find((i: EditableListItem) => i.label === "Alpha!") === undefined
   );
 
-  const assert_beta_renamed = computed(() =>
-    list.items.find((i: EditableListItem) => i.label === "Beta2") !== undefined
-  );
+  const assert_beta_renamed = computed(() => list.items[0]?.label === "Beta2");
   const assert_beta_done = computed(() =>
-    // After removing Alpha, the list is [Beta2, Gamma]; Beta2 is index 0.
     list.items[0]?.label === "Beta2" && list.items[0]?.done === true
   );
 
   const assert_gamma_removed = computed(() =>
     list.items.find((i: EditableListItem) => i.label === "Gamma") === undefined
   );
-  const assert_one_after_text_remove = computed(() => list.total === 1);
+  const assert_one_after_ref_remove = computed(() => list.total === 1);
 
   const assert_blank_ignored = computed(() => list.total === 1);
 
   const assert_empty_after_clear = computed(() => list.total === 0);
 
-  // Duplicate-label first-match assertions. After clearDone the list is empty;
-  // we add two items both labelled "Dup" (the first not-done, the second done).
+  // Duplicate-label identity assertions. After clearDone the list is empty;
+  // we add two items both labelled "Dup" (first not-done, second done), then
+  // update the SECOND by reference.
   const assert_two_dups = computed(() => list.total === 2);
-  // updateItemByText("Dup") must change ONLY the first match (the not-done one):
-  // exactly one item now reads "DupChanged" and it is the not-done one; the
-  // done one still reads "Dup".
-  const assert_first_dup_changed = computed(() => {
+  const assert_second_dup_changed = computed(() => {
     const changed = list.items.filter((i: EditableListItem) =>
       i.label === "DupChanged"
     );
-    return changed.length === 1 && changed[0]?.done === false;
+    return changed.length === 1 && changed[0]?.done === true;
   });
-  const assert_second_dup_unchanged = computed(() => {
+  const assert_first_dup_unchanged = computed(() => {
     const still = list.items.filter((i: EditableListItem) => i.label === "Dup");
-    return still.length === 1 && still[0]?.done === true;
+    return still.length === 1 && still[0]?.done === false;
   });
 
-  // No-op: removing/updating an absent id leaves the list untouched.
+  // No-op: detached-literal remove/update/toggle leaves the list untouched.
   const assert_noop_count = computed(() => list.total === 2);
   const assert_noop_labels = computed(() =>
     list.items.find((i: EditableListItem) => i.label === "DupChanged") !==
       undefined &&
     list.items.find((i: EditableListItem) => i.label === "Dup") !== undefined
+  );
+  const assert_noop_done_flags = computed(() =>
+    list.items[0]?.done === false && list.items[1]?.done === true
+  );
+
+  // Held-reference survival assertions.
+  const assert_three_after_held_add = computed(() => list.total === 3);
+  const assert_held_stashed = computed(() => {
+    const h = held.get();
+    return h !== null && equals(list.items[2], h);
+  });
+  const assert_held_renamed = computed(() =>
+    list.items[2]?.label === "HeldRenamed"
+  );
+  // KEY: the stale-but-once-valid reference still equals()-matches the item
+  // AFTER updateItem patched it.
+  const assert_held_survives_update = computed(() => {
+    const h = held.get();
+    return h !== null && equals(list.items[2], h);
+  });
+  // KEY: the held reference still DRIVES mutations after the update.
+  const assert_toggled_via_held = computed(() => list.items[2]?.done === true);
+  const assert_removed_via_held = computed(() =>
+    list.total === 2 &&
+    list.items.find((i: EditableListItem) => i.label === "HeldRenamed") ===
+      undefined
   );
 
   // ==========================================================================
@@ -189,14 +250,12 @@ export default pattern(() => {
       { assertion: assert_initial_empty },
       { assertion: assert_initial_active },
 
-      // Add by text (convenience)
+      // Add via core stream (label-only form)
       { action: add_alpha },
       { assertion: assert_one },
       { assertion: assert_first_label_alpha },
-      { assertion: assert_first_has_id },
       { assertion: assert_first_not_done },
 
-      // Add by core stream
       { action: add_beta },
       { assertion: assert_two },
 
@@ -206,31 +265,30 @@ export default pattern(() => {
       { assertion: assert_gamma_present },
       { assertion: assert_extra_passthrough },
 
-      // Toggle done by id (identity)
+      // Toggle done by live item reference (equals() identity)
       { action: toggle_first_done },
       { assertion: assert_first_done },
       { assertion: assert_active_after_toggle },
       { assertion: assert_done_count },
 
-      // Update by id (identity patch) + id immutability
+      // Update by live item reference (identity patch)
       { action: update_first_label },
       { assertion: assert_first_renamed },
-      { action: attempt_id_overwrite },
-      { assertion: assert_id_not_overwritten },
+      { assertion: assert_others_untouched },
 
-      // Remove by id (identity)
+      // Remove by live item reference (items.remove(item))
       { action: remove_first },
       { assertion: assert_after_remove_two },
       { assertion: assert_alpha_gone },
 
-      // Text-addressed convenience
-      { action: rename_beta_by_text },
+      // Continue driving by reference after the list has shifted
+      { action: rename_beta_by_ref },
       { assertion: assert_beta_renamed },
-      { action: done_beta_by_text },
+      { action: done_beta_by_ref },
       { assertion: assert_beta_done },
-      { action: remove_gamma_by_text },
+      { action: remove_gamma_by_ref },
       { assertion: assert_gamma_removed },
-      { assertion: assert_one_after_text_remove },
+      { assertion: assert_one_after_ref_remove },
 
       // Whitespace ignored
       { action: add_blank },
@@ -240,19 +298,35 @@ export default pattern(() => {
       { action: clear_done },
       { assertion: assert_empty_after_clear },
 
-      // Duplicate-label fuzzy semantics: updateItemByText hits the first match.
+      // Identical labels distinguished by entity identity, not content
       { action: add_dup_a },
       { action: add_dup_b },
       { assertion: assert_two_dups },
-      { action: update_dup_by_text },
-      { assertion: assert_first_dup_changed },
-      { assertion: assert_second_dup_unchanged },
+      { action: update_second_dup_by_ref },
+      { assertion: assert_second_dup_changed },
+      { assertion: assert_first_dup_unchanged },
 
-      // No-op safety: absent-id remove/update changes nothing.
-      { action: remove_absent_id },
-      { action: update_absent_id },
+      // No-op safety: detached literals match nothing.
+      { action: remove_absent_item },
+      { action: update_absent_item },
+      { action: toggle_absent_item },
       { assertion: assert_noop_count },
       { assertion: assert_noop_labels },
+      { assertion: assert_noop_done_flags },
+
+      // Held-reference survival: stash → update → the old reference still
+      // matches and still drives toggle/remove.
+      { action: add_held_target },
+      { assertion: assert_three_after_held_add },
+      { action: stash_held },
+      { assertion: assert_held_stashed },
+      { action: update_held_target },
+      { assertion: assert_held_renamed },
+      { assertion: assert_held_survives_update },
+      { action: toggle_via_held },
+      { assertion: assert_toggled_via_held },
+      { action: remove_via_held },
+      { assertion: assert_removed_via_held },
     ],
     list,
   };
