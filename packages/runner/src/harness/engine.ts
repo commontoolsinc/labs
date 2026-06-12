@@ -60,7 +60,6 @@ import {
   createModuleCompartmentGlobals,
   createSafeConsoleGlobal,
 } from "../sandbox/compartment-globals.ts";
-import { setVerifiedFunctionRegistrar } from "../sandbox/function-hardening.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 import { ExecutableRegistry } from "./executable-registry.ts";
 import { isTrustedBuilderArtifact } from "../builder/pattern-metadata.ts";
@@ -613,7 +612,6 @@ export class Engine extends EventTarget implements Harness {
       // a from-zero scan, and any mis-attribution degrades fail-closed at the
       // CFC identity layer — see the fn.src note in the design doc.)
       const script = [...graph.compiledBodies.values()].join("\n");
-      const bundleId = hashOf(script).toString();
       // Register a composed bundle source map for `${evalId}.js` so that
       // `fn.src` coordinates (resolved against `script`) map back to the
       // original authored sources — without this the ESM loader yields raw
@@ -654,17 +652,6 @@ export class Engine extends EventTarget implements Harness {
         if (moduleMap) this.getSESRuntime().loadSourceMap(sourceUrl, moduleMap);
       }
 
-      // Register functions minted during this evaluation into the global
-      // executable index — the retained legacy read path: a pre-flip stored
-      // graph (`implementationRef`, body omitted) resolves once its module
-      // re-evaluates and the builder re-mints the same content-derived refs.
-      const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
-        (implementationRef, implementation) =>
-          this.executableRegistry.registerVerifiedFunction(
-            implementationRef,
-            implementation as HarnessedFunction,
-          ),
-      );
       const frame = pushFrame({
         runtime: this.ctRuntime,
         sourceLocationContext: {
@@ -689,7 +676,6 @@ export class Engine extends EventTarget implements Harness {
         throw this.getSESRuntime().mapThrownError(error);
       } finally {
         popFrame(frame);
-        restoreVerifiedFunctionRegistrar();
       }
 
       const main = loaded.namespace as Exports;
@@ -745,7 +731,6 @@ export class Engine extends EventTarget implements Harness {
       this.recordModuleProvenance(
         exportsByIdentity,
         graph.registrationSink,
-        bundleId,
       );
 
       // `graph.registrationSink` was populated by each module's `__cfReg` during
@@ -774,7 +759,6 @@ export class Engine extends EventTarget implements Harness {
   private recordModuleProvenance(
     exportsByIdentity: Map<string, Exports>,
     registrationSink: Map<string, Map<string, unknown>>,
-    bundleId: string,
   ): void {
     const record = (identity: string, symbol: string, value: unknown) => {
       if (!isTrustedBuilderArtifact(value)) return;
@@ -801,7 +785,6 @@ export class Engine extends EventTarget implements Harness {
       recordVerifiedProvenance(implementation, {
         identity,
         symbol,
-        bundleId,
         ...(bindingIdentity ? { bindingIdentity } : {}),
       });
       // The strong content-addressed implementation index — the resolution
@@ -940,33 +923,11 @@ export class Engine extends EventTarget implements Harness {
     return this.getSESRuntime().evaluateCallback(source) as HarnessedFunction;
   }
 
-  getVerifiedFunction(
-    implementationRef: string,
-  ): HarnessedFunction | undefined {
-    return this.executableRegistry.getVerifiedFunction(implementationRef);
-  }
-
-  getExecutableFunction(
-    implementationRef: string,
-  ): HarnessedFunction | undefined {
-    return this.executableRegistry.getExecutableFunction(implementationRef);
-  }
-
   getVerifiedImplementation(
     identity: string,
     symbol: string,
   ): HarnessedFunction | undefined {
     return this.executableRegistry.getVerifiedImplementation(identity, symbol);
-  }
-
-  registerDynamicVerifiedFunction(
-    implementationRef: string,
-    implementation: HarnessedFunction,
-  ): void {
-    this.executableRegistry.registerVerifiedFunction(
-      implementationRef,
-      implementation,
-    );
   }
 
   unsafeTrustHostValue(

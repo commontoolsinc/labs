@@ -165,10 +165,6 @@ export interface Harness extends EventTarget {
 
   getInvocation(source: string): HarnessedFunction;
 
-  getExecutableFunction?(
-    implementationRef: string,
-  ): HarnessedFunction | undefined;
-
   // Resolve a verified implementation function by its content-addressed
   // `{ identity, symbol }` entry ref — the strong (session-lifetime) index
   // behind serialized `$implRef`s. Unlike the bounded artifact index this
@@ -178,18 +174,6 @@ export interface Harness extends EventTarget {
     identity: string,
     symbol: string,
   ): HarnessedFunction | undefined;
-
-  // Admit a DYNAMIC (in-action-created) artifact into the global executable
-  // index under its minted content-derived `implementationRef`. Used by the
-  // runner's in-action registrar — the global index is what lets the
-  // artifact's serialized module keep the legacy
-  // `{ implementationRef, body omitted }` live-closure rehydration channel.
-  // Replaced by the synthetic-identity registrar (design §5) when the legacy
-  // read path retires.
-  registerDynamicVerifiedFunction?(
-    implementationRef: string,
-    implementation: HarnessedFunction,
-  ): void;
 
   unsafeTrustHostValue(
     value: unknown,

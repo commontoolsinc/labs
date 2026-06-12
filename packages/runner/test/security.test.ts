@@ -327,9 +327,10 @@ describe("SES security regressions", () => {
     const countVerifiedFunctions = () =>
       (engine as unknown as {
         executableRegistry: {
-          verifiedFunctionIndex: Map<string, unknown>;
+          verifiedImplementationsByEntryRef: Map<string, Map<string, unknown>>;
         };
-      }).executableRegistry.verifiedFunctionIndex.size;
+      }).executableRegistry.verifiedImplementationsByEntryRef.values()
+        .reduce((n, bucket) => n + bucket.size, 0);
 
     // The nested computation (now the module-scope `__cfLift_N`) and the
     // handler are blessed at load: the global executable index is already

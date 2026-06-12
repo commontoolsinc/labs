@@ -21,16 +21,13 @@ import {
   applyArgumentIfcToResult,
   connectInputAndOutputs,
 } from "./node-utils.ts";
+import { assertNotInActionExecution } from "./action-context.ts";
 import { moduleToJSON } from "./json-utils.ts";
 import { brandTrustedBuilderArtifact } from "./pattern-metadata.ts";
 import { getTopFrame } from "./pattern.ts";
 import { generateHandlerSchema } from "../schema.ts";
 import { getLogger } from "@commonfabric/utils/logger";
-import { createRef } from "../create-ref.ts";
-import {
-  hardenVerifiedFunction,
-  registerVerifiedFunctionImplementation,
-} from "../sandbox/function-hardening.ts";
+import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 
 const sourceLocationLogger = getLogger("builder.source-location", {
   enabled: false,
@@ -116,14 +113,11 @@ export function createNodeFactory<T = any, R = any>(
 ): ModuleFactory<T, R> {
   // Attach source location and preview to function implementations for debugging
   if (typeof moduleSpec.implementation === "function") {
+    assertNotInActionExecution("lift");
     const implementation = prepareInspectableImplementation(
       moduleSpec.implementation,
     );
     annotateFunctionDebugMetadata(implementation);
-    moduleSpec.implementationRef = ensureImplementationRef(
-      implementation,
-      "fn",
-    );
     hardenVerifiedFunction(implementation);
     moduleSpec.implementation = implementation;
   }
@@ -410,11 +404,10 @@ function handlerInternal<E, T>(
   }
 
   // Attach source location and preview to handler function for debugging
-  let implementationRef: string | undefined;
   if (typeof handler === "function") {
+    assertNotInActionExecution("handler");
     handler = prepareInspectableImplementation(handler);
     annotateFunctionDebugMetadata(handler);
-    implementationRef = ensureImplementationRef(handler, "handler");
     hardenVerifiedFunction(handler);
   }
 
@@ -428,7 +421,6 @@ function handlerInternal<E, T>(
   } = {
     type: "javascript",
     implementation: handler,
-    ...(implementationRef ? { implementationRef } : {}),
     wrapper: "handler",
     with: (inputs: Opaque<StripCell<T>>) => factory(inputs),
     // Overriding the default `bind` method on functions. The wrapper will bind
@@ -684,60 +676,4 @@ function findMappedLocationInSourceRange(
   }
 
   return null;
-}
-
-function ensureImplementationRef(
-  implementation: (...args: any[]) => unknown,
-  kind: "fn" | "handler",
-): string {
-  const existing = (implementation as { implementationRef?: string })
-    .implementationRef;
-  const implementationRef = existing ?? (() => {
-    // Purely content-derived: `src` is the canonical content-addressed source
-    // location (`cf:module/<hash>/<path>:line:col`) under the ESM loader, and
-    // the builder-call-hoisting transformer + SES verifier guarantee one
-    // builder call per module-scope declaration, so (source, preview)
-    // uniquely identifies the implementation. (An order-dependent `ordinal`
-    // used to be folded in as a defense against inline duplicate
-    // declarations, which made refs build-order-dependent.)
-    const source = (implementation as { src?: string }).src ??
-      implementation.name;
-    const minted = createRef({
-      kind,
-      source,
-      preview: implementation.toString(),
-    }, "verified implementation").toString();
-
-    // Transition shim: graphs persisted before the ordinal removal carry
-    // ordinal-bearing refs, and `moduleToJSON` omits the function body for
-    // admitted (verified) modules — those stored refs only resolve if a fresh
-    // evaluation re-registers the implementation under the legacy form too.
-    // Consuming the frame counter HERE (first mint per function, same call
-    // sites as before) reproduces the pre-removal ordinal sequence exactly.
-    // Removed together with `implementationRef` itself — see
-    // docs/specs/content-addressed-action-identity.md.
-    const frame = getTopFrame();
-    if (frame) {
-      const legacy = createRef({
-        kind,
-        source,
-        preview: implementation.toString(),
-        ordinal: frame.generatedIdCounter++,
-      }, "verified implementation").toString();
-      registerVerifiedFunctionImplementation(legacy, implementation);
-    }
-
-    if (Object.isExtensible(implementation)) {
-      Object.defineProperty(implementation, "implementationRef", {
-        value: minted,
-        configurable: true,
-        writable: true,
-      });
-    }
-
-    return minted;
-  })();
-
-  registerVerifiedFunctionImplementation(implementationRef, implementation);
-  return implementationRef;
 }

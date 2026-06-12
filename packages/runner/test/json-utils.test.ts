@@ -804,7 +804,6 @@ describe("moduleToJSON", () => {
     const serialized = moduleToJSON({
       type: "javascript",
       implementation,
-      implementationRef: "main.tsx#000:doubled",
     } as any);
 
     expect(serialized).toMatchObject({
@@ -813,8 +812,6 @@ describe("moduleToJSON", () => {
       preview: "(value) => value * 2",
       location: "main.tsx:1:1",
     });
-    // Since the flip the legacy ref is runtime-only — never serialized.
-    expect("implementationRef" in serialized).toBe(false);
   });
 
   it("serializes non-javascript function-backed modules without leaking implementations", () => {
@@ -828,7 +825,6 @@ describe("moduleToJSON", () => {
     const serialized = moduleToJSON({
       type: "raw",
       implementation,
-      implementationRef: "main.tsx#001:raw",
     } as any);
 
     expect(serialized).toMatchObject({
@@ -837,7 +833,6 @@ describe("moduleToJSON", () => {
       location: "main.tsx:2:1",
     });
     expect("implementation" in serialized).toBe(false);
-    expect("implementationRef" in serialized).toBe(false);
   });
 
   it("keeps the fallback body when the registering runtime can't resolve the $implRef (standalone-engine registration)", async () => {

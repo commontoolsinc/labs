@@ -55,8 +55,8 @@ Phase 3 shipped in two PRs:
   modules only — so stored refs resolve solely through the FIFO-bounded
   artifact index (sync) or `loadPatternByIdentity` (async), neither of which
   covers the sync list builtins or cross-session llm-dialog reads.
-  Canary: `test/pre-e3-pattern-value-canary.test.ts` pins both stored
-  vintages (bare graph; ref+graph) loading and executing.
+  Canary: the stored-vintage canary pinned both graph vintages until E5
+  retired them (now `test/stored-pattern-rehydration.test.ts`).
 - **E4 (refs-only pattern JSON)**: the E3 blocker resolved —
   `addressableByIdentity` is session-lifetime (open question 1 extended to
   pattern artifacts; the FIFO eviction deleted), so sync resolution covers
@@ -69,9 +69,30 @@ Phase 3 shipped in two PRs:
   expected part of compilation). Stored graph vintages keep loading
   tolerantly; see §7's status block for the full record.
 
-Phase 4's remainder is the legacy javascript-function read path (the gate-2
-retained pair + the bundleId verification arm), still gated on stored-data
-evidence or a runtime-version cutoff. The §7 pattern-JSON flip shipped as E4.
+- **E5 (legacy read path retirement — MIGRATION COMPLETE)**: on the explicit
+  data-wipe decision (no production data to preserve, so gate 2's stored-data
+  evidence requirement dissolves), the entire legacy channel is gone:
+  `ensureImplementationRef` + the ordinal shim, the ambient registrar, the
+  string-keyed `verifiedFunctionIndex` + `getExecutableFunction`, the
+  runner's legacy resolution arm, `Module.implementationRef` itself, the
+  bundleId `writeAuthorizedBy` verification arm (+
+  `ImplementationIdentity.bundleId`, `provenance.bundleId`), and the stored-
+  vintage read tolerances. The two categories that still wrote legacy refs
+  got their endgame designs: builder calls inside a running action THROW at
+  creation time ("define the <kind> at module level", with a transformer-bug
+  hint — CT-1644's hoisting makes this unreachable from authored source), and
+  host-trusted values ride minted `host:<n>` PSEUDO-MODULES — registered as
+  symbols in the session-lifetime implementation index, serialized as normal
+  `$implRef`s, never granted CFC identity (§5, fail closed). A claim carrying
+  a legacy bundleId stamp is recognized as stamped-but-unservable and fails
+  closed rather than being re-bound to the next verified writer. Resolution
+  gains the live-trusted arm: a module whose implementation carries
+  trust-gated identity facts (provenance, or a host/artifact entry ref) runs
+  that function directly — the in-memory path that used to flow through the
+  legacy index.
+
+Phase 4 is COMPLETE: there is one resolution model — content-addressed
+`{ identity, symbol }`, by identity, everywhere.
 
 The design assumes the shipped state after the AMD-loader removal: the ESM
 module-record loader is the only loader, every module has a content-addressed
@@ -83,7 +104,7 @@ introduced the `$patternRef` sentinel, `builtins/op-pattern-ref.ts`).
 
 ## Last Updated
 
-2026-06-11
+2026-06-12
 
 ## Motivation
 

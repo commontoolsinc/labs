@@ -3,15 +3,16 @@
 Companion to [`content-addressed-action-identity.md`](./content-addressed-action-identity.md)
 (the design). One PR per letter; each lands green and is independently
 revertible. Phase 0 (ordinal-free `implementationRef` + legacy-alias shim)
-shipped in #3997; A–D shipped in #4006/#4008/#4009/#4013; E shipped in four
-PRs — E1 #4053, E2 #4064, E3 #4073 (pattern JSON dual-write), E4 (refs-only
-pattern JSON + session-lifetime artifact index) — see "PR E — the flip" for
-the recorded gating decisions per part. Phase 4's open remainder is retiring
-the legacy javascript-function read path (gate-2 pair + bundleId arm).
+shipped in #3997; A–D shipped in #4006/#4008/#4009/#4013; E shipped in five
+PRs — E1 #4053, E2 #4064, E3 #4073 (pattern JSON dual-write), E4 #4083
+(refs-only pattern JSON + session-lifetime artifact index), E5 (legacy read
+path retirement) — see "PR E — the flip" for the recorded decisions per
+part. **The migration is COMPLETE**: one resolution model, content-addressed
+`{ identity, symbol }`, everywhere.
 
 ## Last Updated
 
-2026-06-11
+2026-06-12
 
 ## Guiding constraints
 
@@ -536,6 +537,65 @@ is part of that piece's bundle and evaluates in the reading session. The one
 corner outside the construction — an op passed as a runtime VALUE from a
 program not running in this session — throws the descriptive sentinel error
 (tripwire; sync Actions cannot await the loader).
+
+### E5 — legacy read path retirement (the series closer)
+
+#### Decisions (recorded 2026-06-12, all user-directed)
+
+- **Data wipe**: no production data to preserve — gate 2's stored-data
+  evidence requirement dissolves; stored pre-flip graphs, bundleId-stamped
+  claims, and E3/E4 pattern-value vintages need no read support.
+- **Dynamic in-action artifacts: THROW.** Builder calls (lift/handler) inside
+  a running action fail at creation time: "define the <kind> at module level"
+  plus a transformer-bug hint (the CT-1644 hoist makes this unreachable from
+  authored source — `security.test.ts`'s hoist test now doubles as proof).
+  Mechanism: `builder/action-context.ts` ambient window, entered by
+  `invokeJavaScriptImplementation` for EVERY action (the old registrar only
+  armed for provenance-bearing invokers, which is why a suite-wide trace
+  under-counted the blast radius), asserted at the two mint sites in
+  `builder/module.ts`. The in-repo blast radius was the E1 regression test
+  (now pins the throw) and two hand-written unhoisted test shapes
+  (`pattern-scope`, ported to hoisted form).
+- **Host-trusted values: PSEUDO-MODULES.** Each `trustHostValue` call mints a
+  unique `host:<n>` identity (uniqueness over content-derivation — closures
+  with identical bytes are NOT interchangeable) and registers the walked
+  functions as its symbols in the engine's session-lifetime implementation
+  index, stamping `{ identity, symbol }` entry refs so `moduleToJSON` emits a
+  normal `$implRef` (body omitted — the live closure IS the value).
+  CFC identity stays undefined (no provenance recorded): §5's fail-closed
+  invariant, pinned in `host-pseudo-module.test.ts` + adversarial attack 11.
+  Pattern FACTORIES are excluded from the walk — they resolve through the
+  artifact index, and a host entry ref on a factory would poison the
+  op-sentinel path.
+
+#### What was deleted
+
+`ensureImplementationRef` + ordinal shim (+ `implementation-ref.test.ts`),
+the `setVerifiedFunctionRegistrar` ambient channel, the string-keyed
+`verifiedFunctionIndex` / `getExecutableFunction` /
+`registerDynamicVerifiedFunction`, the runner's legacy resolution arm,
+`Module.implementationRef`, the `unsafe-host:` CFC debugName arm, the
+bundleId `writeAuthorizedBy` verification arm (+
+`ImplementationIdentity.bundleId`, `provenance.bundleId`, engine threading),
+the stored-vintage read tolerances (`$opFallback`, dual-write carried
+graphs), and the pre-flip canary + fixture.
+
+#### What was added
+
+- The live-trusted resolution arm: a module whose implementation carries
+  trust-gated identity facts (module-eval provenance, or a host/artifact
+  entry ref — both written only behind trust gates) runs that function
+  directly. This is the in-memory instantiation path (trusted-builder tests,
+  dynamic factory instantiation) that used to resolve through the legacy
+  index; without it, live closures were silently severed into the SES
+  stringify fallback.
+- Claim semantics guard: a claim carrying a legacy bundleId stamp is
+  recognized as STAMPED (and unservable — fails closed at verification)
+  rather than treated as unstamped and re-bound to the next verified writer.
+- The stored-pattern canary slims to live behaviors
+  (`stored-pattern-rehydration.test.ts`): bare graphs from no-entry-ref
+  writers still execute; refs-only values rehydrate by identity (sync +
+  async net).
 
 ## Sequencing & parallelism
 

@@ -1,63 +1,49 @@
+import { setArtifactEntryRef } from "../builder/pattern-metadata.ts";
+import { isPattern } from "../builder/types.ts";
 import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 import type { HarnessedFunction } from "./types.ts";
 
-interface AssociatedFunction {
-  implementationRef: string;
-  implementation: HarnessedFunction;
-}
-
 /**
- * The engine's executable store. Two concerns remain after the
- * content-addressed identity migration (PR E2 of
- * docs/specs/content-addressed-action-identity-implementation-plan.md deleted
- * the per-load partitions, the loadId mappings, and the binding-metadata map
- * — CFC identity now flows exclusively through the provenance side tables in
- * harness/verified-provenance.ts):
- *
- * 1. The content-addressed implementation index (`{identity, symbol}` → fn) —
- *    the resolution backing for serialized `$implRef`s.
- * 2. The legacy string-keyed executable index (`implementationRef` → fn) —
- *    the RETAINED read path (gate-2 decision) for graphs persisted before the
- *    writer flip, plus the two categories `$implRef` cannot cover:
- *    host-trusted values and dynamic in-action-created artifacts.
+ * The engine's executable store: the content-addressed implementation index
+ * (`{identity, symbol}` → fn) — the single resolution backing for serialized
+ * `$implRef`s. (Identity E5 deleted the legacy string-keyed
+ * `implementationRef` index: stored data predating the writer flip is not
+ * supported anymore — see the data-wipe decision in the implementation plan —
+ * and the two categories that still wrote legacy refs are gone: in-action
+ * minting now throws at creation time, and host-trusted values ride minted
+ * pseudo-modules below.)
  */
 export class ExecutableRegistry {
-  // Legacy global executable index: minted content-derived ref → the live
-  // verified function. Populated by the builder's ambient registrar during
-  // verified evaluation (`ensureImplementationRef` →
-  // `registerVerifiedFunctionImplementation`) and by the runner's in-action
-  // registrar for dynamic artifacts. Strong and session-unbounded — this is
-  // what keeps a pre-flip stored graph (`implementationRef`, body omitted)
-  // resolvable after its module re-evaluates, independent of any bounded
-  // cache. Retires with the legacy read path (design Phase 4).
-  private readonly verifiedFunctionIndex = new Map<string, HarnessedFunction>();
-  private readonly trustedHostFunctionIndex = new Map<
-    string,
-    HarnessedFunction
-  >();
-  private trustedHostFunctionRefs = new WeakMap<HarnessedFunction, string>();
-  private nextTrustedHostFunctionId = 0;
   // Content-addressed implementation index: module identity → symbol → the
   // implementation function recorded by `Engine.recordModuleProvenance` during
-  // a verified evaluation. Deliberately STRONG and session-unbounded, like the
-  // legacy `verifiedFunctionIndex` whose eviction insurance it replaces: the
-  // bounded artifact index (`PatternManager.addressableByIdentity`, FIFO 1000)
-  // can roll a running pattern's module out mid-session, and a post-flip
-  // serialized graph carries ONLY `$implRef` — no legacy ref, and no body when
-  // the writer proved this index admits the ref. Retention is bounded by the
-  // set of DISTINCT verified implementations evaluated this session.
+  // a verified evaluation (and by `trustHostValue` for host pseudo-modules).
+  // Deliberately STRONG and session-unbounded: a serialized module carries
+  // ONLY `$implRef` (no body when the writer proved this index admits the
+  // ref), so resolution must never lose an implementation whose module
+  // evaluated this session. Retention is bounded by the set of DISTINCT
+  // verified implementations evaluated per session.
   private readonly verifiedImplementationsByEntryRef = new Map<
     string,
     Map<string, HarnessedFunction>
   >();
+  // Host pseudo-modules (identity E5, design §5): each `trustHostValue` call
+  // mints a UNIQUE `host:<n>` identity — uniqueness over content-derivation,
+  // deliberately: host functions are closure-bearing, so two with identical
+  // bytes are NOT interchangeable. Host values are in-session only (a live
+  // closure never survives a session), so a session-scoped counter is exactly
+  // the right lifetime, and the session-lifetime index above is exactly the
+  // right resolution home.
+  private nextHostModuleId = 0;
+  private readonly hostRegisteredFunctions = new WeakSet<HarnessedFunction>();
 
   clear(): void {
-    this.verifiedFunctionIndex.clear();
-    this.trustedHostFunctionIndex.clear();
-    this.trustedHostFunctionRefs = new WeakMap();
-    this.nextTrustedHostFunctionId = 0;
     this.verifiedImplementationsByEntryRef.clear();
+    this.nextHostModuleId = 0;
+    // hostRegisteredFunctions is a WeakSet (uniterable); entries age out with
+    // their functions. Stale membership after clear() is harmless: it only
+    // suppresses a re-registration, and the entry-ref the function already
+    // carries stays valid for the life of the object.
   }
 
   /**
@@ -88,38 +74,17 @@ export class ExecutableRegistry {
   }
 
   /**
-   * Admit a verified function into the global executable index under its
-   * minted content-derived ref. Called for every builder artifact minted
-   * during a verified evaluation (via the ambient registrar) and for dynamic
-   * in-action-created artifacts (via the runner's registrar). Overwrites: a
-   * later mint of the same content-derived ref points the index at the fresh
-   * function, and any two functions sharing a ref are interchangeable by
-   * construction (the ref folds in source and preview).
+   * Trust a host-provided value: walk it, and register every reachable
+   * function as a symbol of a freshly minted `host:<n>` pseudo-module —
+   * `{ identity, symbol }` entry ref stamped (so `moduleToJSON` emits a
+   * normal `$implRef`, body omitted) and the implementation admitted into the
+   * session-lifetime index above (so the `$implRef` resolves through the same
+   * arm as every verified module).
+   *
+   * Host trust is an EXECUTION grant only: no provenance is recorded, so
+   * CFC's policy-facing identity resolution fails closed for these functions
+   * (design §5 — pinned by test/host-pseudo-module.test.ts).
    */
-  registerVerifiedFunction(
-    implementationRef: string,
-    implementation: HarnessedFunction,
-  ): void {
-    this.verifiedFunctionIndex.set(implementationRef, implementation);
-  }
-
-  getVerifiedFunction(
-    implementationRef: string,
-  ): HarnessedFunction | undefined {
-    // Single global index: under content addressing any live instance of the
-    // same module is interchangeable (the SES verifier forbids module-scope
-    // mutable state, so two evaluations of one module identity differ only in
-    // object identity — never behavior).
-    return this.verifiedFunctionIndex.get(implementationRef);
-  }
-
-  getExecutableFunction(
-    implementationRef: string,
-  ): HarnessedFunction | undefined {
-    return this.getVerifiedFunction(implementationRef) ??
-      this.trustedHostFunctionIndex.get(implementationRef);
-  }
-
   trustHostValue(
     value: unknown,
     options: UnsafeHostTrustOptions,
@@ -129,18 +94,29 @@ export class ExecutableRegistry {
     ) {
       throw new Error("unsafe host trust requires a non-empty reason");
     }
-    const registry = new Map<string, HarnessedFunction>();
-    this.collectAssociatedFunctions(value, registry, new Set(), true);
-    for (const [implementationRef, implementation] of registry) {
-      this.trustedHostFunctionIndex.set(implementationRef, implementation);
-    }
+    const functions: HarnessedFunction[] = [];
+    this.collectHostFunctions(value, functions, new Set());
+    const fresh = functions.filter((fn) =>
+      !this.hostRegisteredFunctions.has(fn)
+    );
+    if (fresh.length === 0) return;
+    const identity = `host:${this.nextHostModuleId++}`;
+    fresh.forEach((implementation, index) => {
+      const symbol = `fn${index}`;
+      hardenVerifiedFunction(implementation as (...args: any[]) => unknown);
+      this.registerVerifiedImplementation(identity, symbol, implementation);
+      // First-write-wins in the entry-ref table keeps a re-trusted function's
+      // serialized ref stable; the WeakSet below prevents re-registration
+      // under a second identity in the first place.
+      setArtifactEntryRef(implementation, { identity, symbol });
+      this.hostRegisteredFunctions.add(implementation);
+    });
   }
 
-  private collectAssociatedFunctions(
+  private collectHostFunctions(
     value: unknown,
-    registry: Map<string, HarnessedFunction>,
+    functions: HarnessedFunction[],
     seen: Set<unknown>,
-    allowMintMissingRefs = false,
   ): void {
     if (!value || (typeof value !== "object" && typeof value !== "function")) {
       return;
@@ -150,102 +126,30 @@ export class ExecutableRegistry {
     }
     seen.add(value);
 
-    const associated = this.extractAssociatedFunction(
-      value,
-      allowMintMissingRefs,
-    );
-    if (associated) {
-      registry.set(associated.implementationRef, associated.implementation);
+    const implementation =
+      (value as { implementation?: unknown }).implementation;
+    if (typeof implementation === "function") {
+      functions.push(implementation as HarnessedFunction);
+    } else if (typeof value === "function" && !isPattern(value)) {
+      // A bare host helper. Pattern FACTORIES are excluded: patterns resolve
+      // through the artifact index, not the implementation index, and giving
+      // a factory a host entry ref would poison the op-sentinel path
+      // (substituteOpPatternRefs would stamp a `$patternRef` the artifact
+      // index cannot resolve). Their nodes' module implementations are
+      // registered by the walk below.
+      functions.push(value as HarnessedFunction);
     }
 
     for (const child of verifiedWalkChildValues(value as object)) {
-      this.collectAssociatedFunctions(
-        child,
-        registry,
-        seen,
-        allowMintMissingRefs,
-      );
+      this.collectHostFunctions(child, functions, seen);
     }
-  }
-
-  private extractAssociatedFunction(
-    value: unknown,
-    allowMintMissingRefs = false,
-  ): AssociatedFunction | null {
-    const record = value as {
-      implementationRef?: string;
-      implementation?: unknown;
-    };
-    if (typeof record.implementation === "function") {
-      const implementation = record.implementation as HarnessedFunction;
-      const implementationRef = typeof record.implementationRef === "string"
-        ? record.implementationRef
-        : allowMintMissingRefs
-        ? this.ensureTrustedHostImplementationRef(implementation)
-        : undefined;
-      if (!implementationRef) {
-        return null;
-      }
-      record.implementationRef ??= implementationRef;
-      return {
-        implementationRef,
-        implementation,
-      };
-    }
-    if (typeof value === "function") {
-      const implementation = value as HarnessedFunction;
-      const implementationRef = allowMintMissingRefs
-        ? this.ensureTrustedHostImplementationRef(implementation)
-        : (value as { implementationRef?: string }).implementationRef;
-      return implementationRef
-        ? {
-          implementationRef,
-          implementation,
-        }
-        : null;
-    }
-    // A ref-only record (no live implementation) carries nothing executable.
-    // The lookup that used to rebind such refs went away with the deleted
-    // pattern-scoped registries (#4013).
-    return null;
-  }
-
-  private ensureTrustedHostImplementationRef(
-    implementation: HarnessedFunction,
-  ): string {
-    const existing = this.trustedHostFunctionRefs.get(implementation) ??
-      (typeof (implementation as { implementationRef?: string })
-          .implementationRef ===
-          "string"
-        ? (implementation as { implementationRef?: string }).implementationRef
-        : undefined);
-    if (existing) {
-      hardenVerifiedFunction(implementation as (...args: any[]) => unknown);
-      return existing;
-    }
-
-    const implementationRef = `unsafe-host:${this.nextTrustedHostFunctionId++}`;
-    this.trustedHostFunctionRefs.set(implementation, implementationRef);
-    if (
-      Object.isExtensible(implementation) &&
-      typeof (implementation as { implementationRef?: string })
-          .implementationRef !==
-        "string"
-    ) {
-      Object.defineProperty(implementation, "implementationRef", {
-        value: implementationRef,
-        configurable: true,
-      });
-    }
-    hardenVerifiedFunction(implementation as (...args: any[]) => unknown);
-    return implementationRef;
   }
 }
 
 /**
  * Yield the child values to recurse into when walking a verified value graph
  * (used by {@link ExecutableRegistry.trustHostValue}'s
- * `collectAssociatedFunctions`).
+ * `collectHostFunctions`).
  *
  * Data properties — the AMD/CommonJS bundle shape (`exports.x = …`) — expose
  * their value directly. SES module-namespace exports — the ESM module-record

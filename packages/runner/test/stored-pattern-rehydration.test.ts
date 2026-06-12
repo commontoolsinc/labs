@@ -5,27 +5,20 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { Pattern } from "../src/builder/types.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import {
-  resolveOpPattern,
-  resolveStoredPattern,
-} from "../src/builtins/op-pattern-ref.ts";
+import { serializePatternGraph } from "../src/builder/json-utils.ts";
+import { resolveStoredPattern } from "../src/builtins/op-pattern-ref.ts";
 
 /**
- * PR E3 stored-pattern-value canary (docs/specs/content-addressed-action-
- * identity.md §7): pattern VALUES persisted to cells before the `$patternRef`
- * dual-write are bare node-graphs — no ref, no `$opFallback`. Two production
- * read paths consume them as graphs:
+ * Stored pattern-VALUE rehydration (design §7, identity E4/E5): the JSON
+ * boundary emits `{ $patternRef, argumentSchema, resultSchema }` and a stored
+ * value rehydrates BY IDENTITY — synchronously from the session-lifetime
+ * artifact index when the module evaluated in the reading session (every
+ * authored case, by construction), or source-free from the space's persisted
+ * compiled artifacts via the async net (llm-dialog's cold tool invocation).
  *
- *  - `runtime.run` on a deserialized graph (llm-dialog tool invocation reads
- *    `toolDef.pattern` raw from a cell and runs it), and
- *  - the list builtins' legacy branch (`resolveOpPattern` passes a
- *    non-sentinel graph through unchanged).
- *
- * The fixture was captured from the pre-E3 writer and committed verbatim
- * (test/fixtures/pre-e3-serialized-pattern.json). It must keep loading and
- * EXECUTING for as long as stored data can carry that vintage — this test is
- * the tripwire against a refs-only `Pattern.toJSON()` (or a reader change)
- * silently dropping the graph read path stored data still needs.
+ * Patterns with NO entry ref (manually constructed / dynamic / bare-Engine
+ * evaluation) still serialize their full graph, and a stored graph still
+ * executes via `runtime.run` — that is a live writer path, not a vintage.
  */
 
 const signer = await Identity.fromPassphrase("pre-e3-pattern-value-canary");
@@ -40,7 +33,7 @@ const fixture = JSON.parse(
   serialized: Record<string, Record<string, unknown>>;
 };
 
-describe("pre-E3 stored pattern-value canary", () => {
+describe("stored pattern-value rehydration", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 
@@ -84,56 +77,25 @@ describe("pre-E3 stored pattern-value canary", () => {
     return vs;
   };
 
-  it("pre-E3 vintage (bare graph, no $patternRef) still executes via runtime.run", async () => {
+  it("a stored full graph (no-entry-ref writer) still executes via runtime.run", async () => {
     setup();
-    const graph = fixture.serialized.preE3 as unknown as Pattern;
+    // The internal graph serializer's output is the same shape a
+    // no-entry-ref pattern serializes at the boundary; a stored graph must
+    // run without its module ever evaluating in the reading session.
+    const compiled = await runtime!.patternManager.compilePattern(
+      fixture.program,
+    );
+    const graph = JSON.parse(
+      JSON.stringify(serializePatternGraph(compiled as unknown as Pattern)),
+    ) as Pattern;
     expect("$patternRef" in graph).toBe(false);
     expect(Array.isArray(graph.nodes)).toBe(true);
 
-    // What llm-dialog's invoke does with a stored toolDef pattern: parse the
-    // cell value as a graph and run it. NOTE: deliberately no compile of the
-    // fixture program first — a stored graph must run without its module ever
-    // having been evaluated in this session.
-    const vs = await runGraph(structuredClone(graph), "canary-pre-e3-run");
+    const vs = await runGraph(graph, "stored-graph-run");
     expect(vs).toEqual([7, 8, 9]);
   });
 
-  it("pre-E3 vintage passes through resolveOpPattern's legacy graph branch", () => {
-    setup();
-    const graph = structuredClone(
-      fixture.serialized.preE3,
-    ) as unknown as Pattern;
-    const resolved = resolveOpPattern(runtime!, graph, "map");
-    expect(resolved).toBe(graph);
-  });
-
-  it("dual-write vintage ($patternRef + graph) still executes via runtime.run", async () => {
-    setup();
-    const graph = fixture.serialized.dualWrite as unknown as Pattern;
-    expect("$patternRef" in graph).toBe(true);
-    expect(Array.isArray(graph.nodes)).toBe(true);
-
-    // Again no compile first: the module is NOT in this session's identity
-    // index, so execution must come from the carried graph.
-    const vs = await runGraph(
-      structuredClone(graph),
-      "canary-dual-write-run",
-    );
-    expect(vs).toEqual([7, 8, 9]);
-  });
-
-  it("dual-write vintage resolves from its carried graph on an identity-cache miss", () => {
-    setup();
-    const value = structuredClone(
-      fixture.serialized.dualWrite,
-    ) as unknown as Pattern;
-    // Fresh runtime: nothing is in the identity index, so the sentinel-shaped
-    // value must resolve from the graph it carries.
-    const resolved = resolveOpPattern(runtime!, value, "map");
-    expect(resolved).toBe(value);
-  });
-
-  it("refs-only vintage (E4) resolves to the live canonical once its module evaluated", async () => {
+  it("a refs-only value resolves to the live canonical once its module evaluated", async () => {
     setup();
     const stored = structuredClone(fixture.serialized.refsOnly);
     expect("nodes" in stored).toBe(false);
@@ -146,13 +108,13 @@ describe("pre-E3 stored pattern-value canary", () => {
     const resolved = resolveStoredPattern(runtime!, stored);
     expect(resolved).toBe(compiled);
 
-    const vs = await runGraph(resolved as Pattern, "canary-refs-only-run");
+    const vs = await runGraph(resolved as Pattern, "refs-only-live-run");
     expect(vs).toEqual([7, 8, 9]);
   });
 
-  it("refs-only vintage loads by identity from storage when the module never evaluated (async net)", async () => {
+  it("a refs-only value loads by identity from storage when the module never evaluated (async net)", async () => {
     // Session 1 compiles WITH the space cache: compiled artifacts persist
-    // in-space as an expected part of compilation (E4 invariant). It stays
+    // in-space as part of the compilation step (awaited write-back). It stays
     // open while session 2 reads — the emulated storage tears down replica
     // state on dispose (same structure as resume-by-identity.test.ts).
     storageManager = StorageManager.emulate({ as: signer });
@@ -167,9 +129,6 @@ describe("pre-E3 stored pattern-value canary", () => {
         tx: tx1,
       });
       await tx1.commit();
-      // No flushCompileCacheWrites: the cold write-back is awaited INSIDE
-      // compilePattern (the E4 persistence contract) — deliberately not
-      // flushed here to pin that.
       await rt1.storageManager.synced();
 
       // Session 2 never evaluates the module; the stored refs-only value's
@@ -193,7 +152,7 @@ describe("pre-E3 stored pattern-value canary", () => {
       );
       expect(loaded).toBeDefined();
 
-      const vs = await runGraph(loaded as Pattern, "canary-refs-only-async");
+      const vs = await runGraph(loaded as Pattern, "refs-only-async-net");
       expect(vs).toEqual([7, 8, 9]);
     } finally {
       await rt1.dispose();

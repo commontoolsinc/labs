@@ -7,12 +7,10 @@ import { Engine } from "../src/harness/engine.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
-// The global executable index — the retained legacy read path (gate-2
-// decision, PR E2): pre-flip stored graphs, host-trusted values, and dynamic
-// in-action artifacts all resolve by `implementationRef` through it. The
-// former per-load partitions and the `beginVerifiedLoad` cross-load repair
-// are gone; the index is global, strong, and overwrite-on-re-registration.
-describe("Engine verified function registry", () => {
+// The engine's content-addressed implementation index — the single resolution
+// backing for serialized `$implRef`s (identity E5 deleted the legacy
+// string-keyed `implementationRef` index; this is what remains).
+describe("Engine verified implementation index", () => {
   let runtime: Runtime;
   let engine: Engine;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -36,53 +34,32 @@ describe("Engine verified function registry", () => {
     return (engine as any).executableRegistry;
   }
 
-  it("admits registered functions through the global index", () => {
-    const fn = Object.assign(() => "value", {
-      implementationRef: "main.tsx#000:handler",
-    });
+  it("admits registered implementations by { identity, symbol }", () => {
+    const fn = () => "value";
     const executableRegistry = getExecutableRegistry();
 
-    executableRegistry.registerVerifiedFunction(fn.implementationRef, fn);
+    executableRegistry.registerVerifiedImplementation("modA", "handler", fn);
 
-    expect(executableRegistry.getVerifiedFunction(fn.implementationRef))
-      .toBe(fn);
-    expect(executableRegistry.getExecutableFunction(fn.implementationRef))
-      .toBe(fn);
+    expect(engine.getVerifiedImplementation("modA", "handler")).toBe(fn);
+    expect(engine.getVerifiedImplementation("modA", "other")).toBeUndefined();
+    expect(engine.getVerifiedImplementation("modB", "handler")).toBeUndefined();
   });
 
-  it("re-registration of a content-derived ref points the index at the fresh function", () => {
-    // Two evaluations of the same module mint the same content-derived ref
-    // for behaviorally interchangeable functions (SES forbids module-scope
-    // mutable state); the index resolves to the latest.
-    const first = Object.assign(() => "first", {
-      implementationRef: "main.tsx#000:handler",
-    });
-    const second = Object.assign(() => "second", {
-      implementationRef: "main.tsx#000:handler",
-    });
+  it("re-registration of the same entry ref points the index at the fresh function", () => {
+    // Two evaluations of the same module identity register behaviorally
+    // interchangeable functions (SES forbids module-scope mutable state); the
+    // index resolves to the latest.
+    const first = () => "first";
+    const second = () => "second";
     const executableRegistry = getExecutableRegistry();
 
-    executableRegistry.registerVerifiedFunction(first.implementationRef, first);
-    executableRegistry.registerVerifiedFunction(
-      second.implementationRef,
+    executableRegistry.registerVerifiedImplementation("modA", "handler", first);
+    executableRegistry.registerVerifiedImplementation(
+      "modA",
+      "handler",
       second,
     );
 
-    expect(executableRegistry.getExecutableFunction(first.implementationRef))
-      .toBe(second);
-  });
-
-  it("dynamic in-action registrations admit through the same index (Harness channel)", () => {
-    const dynamic = Object.assign(() => "dynamic", {
-      implementationRef: "fid1:dynamic-artifact",
-    });
-
-    engine.registerDynamicVerifiedFunction(
-      dynamic.implementationRef,
-      dynamic,
-    );
-
-    expect(engine.getExecutableFunction(dynamic.implementationRef))
-      .toBe(dynamic);
+    expect(engine.getVerifiedImplementation("modA", "handler")).toBe(second);
   });
 });

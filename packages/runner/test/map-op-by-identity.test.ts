@@ -49,25 +49,10 @@ describe("op-pattern-ref helpers", () => {
     expect(resolved).toBe(fakePattern);
   });
 
-  it("falls back to the embedded op graph when the sentinel misses the cache", () => {
-    const fallbackGraph = { argumentSchema: true, nodes: [] } as never;
-    const fakeRuntime = {
-      patternManager: { artifactFromIdentitySync: () => undefined },
-    } as never;
-    const resolved = resolveOpPattern(
-      fakeRuntime,
-      {
-        $patternRef: { identity: "cf:module/miss", symbol: "s" },
-        $opFallback: fallbackGraph,
-      },
-      "map",
-    );
-    // Cache residency must not be a correctness requirement: an evicted op
-    // resolves via the retained embedded graph rather than hard-failing.
-    expect(resolved).toBe(fallbackGraph);
-  });
-
-  it("throws only when the sentinel misses AND has no embedded fallback", () => {
+  it("throws when the sentinel misses the session-lifetime index", () => {
+    // The artifact index never evicts, and the sentinel is stamped from the
+    // op's live artifact in the reading session — a miss is a bug, and the
+    // sentinel carries no fallback graph to paper over it (identity E4/E5).
     const fakeRuntime = {
       patternManager: { artifactFromIdentitySync: () => undefined },
     } as never;

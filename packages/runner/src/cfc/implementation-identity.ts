@@ -27,9 +27,6 @@ export const resolvePolicyFacingImplementationIdentity = (
   } = {},
 ): ImplementationIdentity | undefined => {
   const debugName = (module as { debugName?: string }).debugName;
-  if (typeof debugName === "string" && debugName.startsWith("unsafe-host:")) {
-    return undefined;
-  }
   if (typeof debugName !== "string" || debugName.length === 0) {
     return resolveProvenanceImplementationIdentity(options.implementation);
   }
@@ -87,7 +84,6 @@ const resolveProvenanceImplementationIdentity = (
     kind: "verified",
     moduleIdentity: provenance.identity,
     ...(provenance.symbol ? { symbol: provenance.symbol } : {}),
-    ...(provenance.bundleId ? { bundleId: provenance.bundleId } : {}),
     ...(provenance.bindingIdentity
       ? {
         sourceFile: normalizeIdentitySource(
