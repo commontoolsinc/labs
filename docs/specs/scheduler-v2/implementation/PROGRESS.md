@@ -1366,7 +1366,7 @@ Then continue step 3 as written.
 
 ## 03/step-4
 
-- [x] pending — speculation lineage registry
+- [x] 7891f157 — speculation lineage registry
 - Deviations: none. Verified the work-order caveat in
   `extended-storage-transaction.ts`: `commit()` always attaches the storage
   commit promise to `runCommitCallbacks(result)`, including read-only/no-op
@@ -1379,6 +1379,60 @@ Then continue step 3 as written.
   - `deno lint` on the same two files: passed (`Checked 2 files`).
   - `deno check packages/runner/src/scheduler/lineage.ts
     packages/runner/test/scheduler-lineage.test.ts`: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-lineage.test.ts`: passed, `1 passed (6 steps)`,
+    `0 failed`.
+
+## 03/step-5
+
+- [x] pending — lineage gating for handler-sent events
+- Deviations: no shared conflict-forcing helper exists in
+  `test/scheduler-retries.test.ts`; existing scheduler retry fixtures force
+  aborts directly. For the same-space red fixture, patched the emulated memory
+  server's next `transact()` after setup to return `ConflictError`, which
+  rejects after the client has built the origin commit/localSeq. The event
+  fixture calls `scheduler.queueEvent(..., { originTx })` at the same scheduler
+  boundary used by stream `Cell.set()` so the test stays focused on lineage
+  behavior. The handler-result piece-stop assertion is left for 03/step-6,
+  where the work order wires `runner.ts`.
+- Red-first recordings:
+  - Initial `cd packages/runner && ENV=test deno test --allow-ffi
+    --allow-env --allow-read --allow-write=/tmp,/var/folders
+    --allow-run=git test/scheduler-event-lineage.test.ts`: failed as
+    expected:
+    - same-space retry expected one committed descendant, actual `2`;
+    - permanent origin failure expected `[]`, actual two committed
+      descendants;
+    - both cross-space tests expected `idle()` to remain `pending`, actual
+      `resolved`.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/events.ts
+    packages/runner/src/scheduler/pull-events.ts
+    packages/runner/src/scheduler/continuation.ts
+    packages/runner/src/scheduler/pull-continuation.ts
+    packages/runner/test/scheduler-event-lineage.test.ts
+    packages/runner/test/scheduler-event-identity.test.ts`: passed
+    (`Checked 7 files`).
+  - `deno lint` on the same seven files: passed (`Checked 7 files`).
+  - `deno check` on the same seven files: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-event-lineage.test.ts`: passed, `1 passed (4 steps)`,
+    `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-event-identity.test.ts`: passed, `1 passed (4 steps)`,
+    `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-events.test.ts`: passed, `1 passed (14 steps)`,
+    `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull-handlers.test.ts`: passed, `1 passed (11 steps)`,
+    `0 failed`.
   - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
     --allow-read --allow-write=/tmp,/var/folders --allow-run=git
     test/scheduler-lineage.test.ts`: passed, `1 passed (6 steps)`,

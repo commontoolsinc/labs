@@ -13,6 +13,26 @@ export async function processPullQueuedEventDuringExecute(
   const queuedEvent = state.eventQueue[0];
   if (!queuedEvent) return;
 
+  if (queuedEvent.originTx !== undefined) {
+    const originStatus = state.lineageStatus(queuedEvent.originTx);
+    const sameSpace = state.getOriginLocalSeq(
+      queuedEvent.originTx,
+      queuedEvent.eventLink.space,
+    ) !== undefined;
+    if (originStatus === "failed") {
+      state.eventQueue.shift();
+      state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
+      state.handleError(
+        new Error("failed lineage origin remained queued"),
+        queuedEvent.action,
+      );
+      return;
+    }
+    if (!sameSpace && originStatus === "pending") {
+      return;
+    }
+  }
+
   if (
     queuedEvent.notBefore !== undefined &&
     queuedEvent.notBefore > performance.now()
@@ -91,6 +111,11 @@ export async function processPullQueuedEventDuringExecute(
     getActionTelemetryInfo: (target) => state.getActionTelemetryInfo(target),
     handleError: (error, target) => state.handleError(error, target),
     queueExecution: () => state.queueExecution(),
+    lineageStatus: (originTx) => state.lineageStatus(originTx),
+    releaseLineageEvent: (originTx, event) =>
+      state.releaseLineageEvent(originTx, event),
+    getOriginLocalSeq: (originTx, space) =>
+      state.getOriginLocalSeq(originTx, space),
     onEventCommitWrites: (sourceAction, writes) =>
       state.onEventCommitWrites?.(sourceAction, writes),
   }, queuedEvent);
