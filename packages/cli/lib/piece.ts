@@ -395,22 +395,26 @@ export async function newPiece(
   );
   const pieces = new PiecesController(manager);
 
-  // Try to ensure default pattern, but don't fail the entire operation
+  // The default pattern is a hard requirement for this command: even when the
+  // user's pattern doesn't use it, registration below (manager.add) sends an
+  // event to the default pattern's addPiece stream. Proceeding past a failure
+  // here can only end in "Cannot add pieces" — fail now, with the real cause.
   try {
     await timeCliPhase(
       "newPiece.ensureDefaultPattern",
       () => pieces.ensureDefaultPattern(),
     );
   } catch (error) {
-    console.warn(
-      `Warning: Could not initialize default pattern: ${
+    throw new Error(
+      `Could not initialize the space's default pattern: ${
         error instanceof Error ? error.message : String(error)
-      }`,
+      }\n` +
+        `The new piece cannot be registered in the space's piece list ` +
+        `without it.\n` +
+        `If this space's root pattern predates a runtime format change, ` +
+        `repair it with: ${cliCommand(["piece", "recreate-root"])}`,
+      { cause: error },
     );
-    console.warn(
-      "Patterns using wish({ query: '#mentionable' }) or wish({ query: '#default' }) may not work.",
-    );
-    // Continue anyway - user's pattern might not need defaultPattern
   }
 
   const program = await timeCliPhase(
