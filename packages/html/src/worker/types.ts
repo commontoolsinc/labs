@@ -255,6 +255,20 @@ export function normalizeRenderDeclassificationPolicy(
   return value === "allow" ? "allow" : "deny";
 }
 
+/**
+ * Host-supplied default render ceiling (spec §8.10.6, S16 phase D): the
+ * confidentiality a display surface admits when no authored boundary
+ * narrows further. `atoms` are admitted by structural equality (the place
+ * for acting-user identity atoms); `caveatKinds` admits Caveat-type atoms
+ * by kind (the display-dischargeable classes). Everything else renders as
+ * the blocked placeholder. Undefined = no default ceiling (today's
+ * behavior); the profile may only be tightened, not loosened, without a
+ * new release judgment.
+ */
+export interface RenderConfidentialityCeiling {
+  atoms?: readonly unknown[];
+  caveatKinds?: readonly string[];
+}
 
 /**
  * Options for the worker reconciler.
