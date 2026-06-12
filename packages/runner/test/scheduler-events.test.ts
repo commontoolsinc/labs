@@ -679,6 +679,88 @@ describe("event handling", () => {
     expect(resultCell.get()).toBe(0);
   });
 
+  it("settles the commit callback when no handler is registered", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "settles commit callback when no handler is registered 1",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    await tx.commit();
+
+    // No handler is registered for this cell, and the cell has no result /
+    // pattern metadata, so the piece-start fallback cannot register one
+    // either. The event can never be dispatched — the commit callback must
+    // still settle (with an errored tx) instead of being dropped silently.
+    const commitStatus = new Promise<string>((resolve) => {
+      runtime.scheduler.queueEvent(
+        eventCell.getAsNormalizedFullLink(),
+        1,
+        undefined,
+        (commitTx) => resolve(commitTx.status().status),
+      );
+    });
+
+    const status = await Promise.race([
+      commitStatus,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("commit callback never settled")),
+          1_000,
+        )
+      ),
+    ]);
+    expect(status).toBe("error");
+  });
+
+  it("settles the commit callback when the event handler throws", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "settles commit callback when the event handler throws 1",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    await tx.commit();
+
+    let errors = 0;
+    runtime.scheduler.onError(() => {
+      errors++;
+    });
+
+    const eventHandler: EventHandler = () => {
+      throw new Error("boom");
+    };
+    runtime.scheduler.addEventHandler(
+      eventHandler,
+      eventCell.getAsNormalizedFullLink(),
+    );
+
+    // A throwing handler is the final outcome for the event; the commit
+    // callback must observe it (errored tx) rather than wait forever.
+    const commitStatus = new Promise<string>((resolve) => {
+      runtime.scheduler.queueEvent(
+        eventCell.getAsNormalizedFullLink(),
+        1,
+        undefined,
+        (commitTx) => resolve(commitTx.status().status),
+      );
+    });
+
+    const status = await Promise.race([
+      commitStatus,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("commit callback never settled")),
+          1_000,
+        )
+      ),
+    ]);
+    expect(status).toBe("error");
+    expect(errors).toBe(1);
+  });
+
   it("should trigger recomputation of dependent cells", async () => {
     const eventCell = runtime.getCell<number>(
       space,
