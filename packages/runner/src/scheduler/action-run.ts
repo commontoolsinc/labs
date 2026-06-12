@@ -7,7 +7,6 @@ import type {
   ChangeGroup,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
-  IStorageTransaction,
 } from "../storage/interface.ts";
 import { isPermanentRejection } from "../storage/rejection.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
@@ -42,36 +41,6 @@ const logger = getLogger("scheduler", {
 export type ActionInvocationResult =
   | { ok: true; result: any }
   | { ok: false; error: unknown };
-
-export interface InFlightSourceState {
-  readonly inFlightSources: WeakMap<Action, Set<IStorageTransaction>>;
-}
-
-export function addInFlightSource(
-  state: InFlightSourceState,
-  action: Action,
-  source: IStorageTransaction,
-): void {
-  let sources = state.inFlightSources.get(action);
-  if (!sources) {
-    sources = new Set<IStorageTransaction>();
-    state.inFlightSources.set(action, sources);
-  }
-  sources.add(source);
-}
-
-export function removeInFlightSource(
-  state: InFlightSourceState,
-  action: Action,
-  source: IStorageTransaction,
-): void {
-  const sources = state.inFlightSources.get(action);
-  if (!sources) return;
-  sources.delete(source);
-  if (sources.size === 0) {
-    state.inFlightSources.delete(action);
-  }
-}
 
 export function invokeReactiveAction(state: {
   readonly runtime: Runtime;
@@ -138,10 +107,6 @@ export function watchReactiveActionCommit(state: {
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
   readonly markDirectDirty: (action: Action) => void;
   readonly queueExecution: () => void;
-  readonly removeInFlightSource: (
-    action: Action,
-    tx: IExtendedStorageTransaction["tx"],
-  ) => void;
   readonly restoreCfcTriggerReads: () => void;
 }): void {
   state.commitPromise.then(({ error }) => {
@@ -179,8 +144,6 @@ export function watchReactiveActionCommit(state: {
       // Clear retries after successful commit.
       state.retries.delete(state.action);
     }
-  }).finally(() => {
-    state.removeInFlightSource(state.action, state.tx.tx);
   }).catch((error) => {
     logger.error(
       "schedule-error",
@@ -249,7 +212,6 @@ export interface SchedulerActionRunState {
     addresses: readonly IMemorySpaceAddress[],
   ) => void;
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
-  readonly inFlightSourceState: InFlightSourceState;
   readonly actionTimingState: ActionTimingState;
   readonly pullDemandedFirstRunComputations: WeakSet<Action>;
   readonly pullDemandedContinuationComputations: WeakSet<Action>;
@@ -333,7 +295,6 @@ export async function runSchedulerAction(
   }
   (tx.tx as { debugActionId?: string }).debugActionId = actionId;
   tx.tx.sourceAction = action;
-  addInFlightSource(state.inFlightSourceState, action, tx.tx);
   const actionStartTime = performance.now();
 
   let result: any;
@@ -435,7 +396,6 @@ function rescheduleActionForImmediateRetry(
   },
 ): void {
   if (args.tx.status().status === "ready") args.tx.abort(args.error);
-  removeInFlightSource(state.inFlightSourceState, args.action, args.tx.tx);
   const retries = (state.retries.get(args.action) ?? 0) + 1;
   state.retries.set(args.action, retries);
   if (retries < MAX_RETRIES_FOR_REACTIVE) {
@@ -513,12 +473,6 @@ function finalizeReactiveActionCommit(
     resubscribe: state.resubscribe,
     markDirectDirty: state.markDirectDirty,
     queueExecution: state.queueExecution,
-    removeInFlightSource: (target, source) =>
-      removeInFlightSource(
-        state.inFlightSourceState,
-        target,
-        source,
-      ),
     restoreCfcTriggerReads: () => {
       if (
         args.cfcTriggerReads !== undefined && args.cfcTriggerReads.length > 0

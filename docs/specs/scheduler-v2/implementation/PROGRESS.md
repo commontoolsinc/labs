@@ -2727,7 +2727,7 @@ Verification:
 
 ## 06/step-1
 
-- [x] pending — storage transactions now carry `sourceAction`, stamped by
+- [x] 5c9cb3c31 — storage transactions now carry `sourceAction`, stamped by
   scheduler action runs and event dispatches.
 - Deviations: none.
 - Recordings:
@@ -2736,3 +2736,46 @@ Verification:
     packages/runner/src/scheduler/events.ts`: passed (`Checked 3 files`).
   - `deno lint` on the same three files: passed (`Checked 3 files`).
   - `deno check` on the same three files: passed.
+
+## 06/step-2+3
+
+- [x] pending — scheduler self-suppression now uses tx-carried object identity
+  and the in-flight source bookkeeping is deleted.
+- Deviations: none.
+- Recordings:
+  - Fixture pre-swap check after adding `scheduler-tx-identity.test.ts` on the
+    step-1 state: `cd packages/runner && ENV=test deno test --allow-ffi
+    --allow-env --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-tx-identity.test.ts`: passed, `1 passed (3 steps)`,
+    `0 failed`.
+  - Contract grep:
+    `grep -rn
+    "inFlightSources\|InFlightSourceState\|addInFlightSource\|removeInFlightSource"
+    packages/runner/src packages/runner/test/scheduler-cfc-trigger-reads.test.ts`:
+    no matches.
+  - `deno fmt packages/runner/src/scheduler/pull-notifications.ts
+    packages/runner/src/scheduler/action-run.ts packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/notifications.ts
+    packages/runner/test/scheduler-cfc-trigger-reads.test.ts
+    packages/runner/test/scheduler-tx-identity.test.ts`: passed
+    (`Checked 6 files`).
+  - `deno lint` on the same six files: passed (`Checked 6 files`).
+  - `deno check` on the same six files: passed.
+  - Focused tests:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-tx-identity.test.ts test/scheduler-cfc-trigger-reads.test.ts
+    test/scheduler-retries.test.ts`: passed, `6 passed (13 steps)`,
+    `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `593 passed (3099 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m6s`.
+- Exit checklist:
+  - `grep -rn "inFlightSources" packages/runner/src`: no matches.
+  - Suppression compares `notification.source.sourceAction === action` in
+    `pull-notifications.ts`; the diagnostic `actionId` is used only for
+    diagnostics around the check.
+  - `changeGroup` skip remains intact with the required explanatory comment.
+  - The three tx identity fixtures and `scheduler-retries.test.ts` are green in
+    the focused test command above.
+  - `runSchedulerAction` and `dispatchQueuedEvent` both stamp
+    `tx.tx.sourceAction`.
