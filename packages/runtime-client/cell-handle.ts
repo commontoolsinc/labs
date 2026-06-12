@@ -16,6 +16,7 @@ import {
   rebaseCfcLabelView,
 } from "@commonfabric/runner/cfc/label-view-core";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
+import { isRuntimeDisposedError } from "./shared/disposed-error.ts";
 import {
   type CellRef,
   type CfcLabelView,
@@ -119,7 +120,9 @@ export class CellHandle<T = unknown> {
       cell: this.ref(),
       value: CellHandle.serialize(value),
     }).catch((error) => {
-      console.error("[CellHandle] Set failed:", error);
+      if (!isRuntimeDisposedError(error)) {
+        console.error("[CellHandle] Set failed:", error);
+      }
     });
   }
 
@@ -129,7 +132,9 @@ export class CellHandle<T = unknown> {
       cell: this.ref(),
       event: CellHandle.serialize(event),
     }).catch((error) => {
-      console.error("[CellHandle] Send failed:", error);
+      if (!isRuntimeDisposedError(error)) {
+        console.error("[CellHandle] Send failed:", error);
+      }
     });
   }
 
