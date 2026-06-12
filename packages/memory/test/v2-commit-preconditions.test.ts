@@ -696,3 +696,94 @@ Deno.test("entity-absent failures keep receipt-exists through client round trip"
     await server.close();
   }
 });
+
+Deno.test("replayed receipt commit returns the stored result instead of an entity-absent rejection", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const commit = {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      preconditions: [{
+        kind: "entity-absent" as const,
+        id: "entity:receipt",
+      }],
+      operations: [{
+        op: "set" as const,
+        id: "entity:receipt",
+        value: toEntityDocument({ receipt: 1 }),
+      }],
+    };
+
+    const first = applyCommit(engine, {
+      sessionId: "session:replay-receipt",
+      commit,
+    });
+
+    // Identical same-session resend (same localSeq): replay detection runs
+    // BEFORE precondition validation, so the stored result comes back.
+    // Re-validating entity-absent here would check against the state the
+    // first application created and wrongly reject the idempotent replay.
+    const replayed = applyCommit(engine, {
+      sessionId: "session:replay-receipt",
+      commit,
+    });
+
+    assertEquals(replayed.seq, first.seq);
+    assertEquals(replayed.branch, first.branch);
+    assertEquals(read(engine, { id: "entity:receipt" }), {
+      value: { receipt: 1 },
+    });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("replayed localSeq with different content still fails as a replay mismatch", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:replay-mismatch",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        preconditions: [{
+          kind: "entity-absent",
+          id: "entity:receipt",
+        }],
+        operations: [{
+          op: "set",
+          id: "entity:receipt",
+          value: toEntityDocument({ receipt: 1 }),
+        }],
+      },
+    });
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:replay-mismatch",
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            preconditions: [{
+              kind: "entity-absent",
+              id: "entity:receipt",
+            }],
+            operations: [{
+              op: "set",
+              id: "entity:receipt",
+              value: toEntityDocument({ receipt: 2 }),
+            }],
+          },
+        }),
+      ProtocolError,
+      "commit replay mismatch",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
