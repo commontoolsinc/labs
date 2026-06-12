@@ -31,8 +31,19 @@ export class SpeculationLineage {
   private recordFor(origin: IExtendedStorageTransaction): OriginRecord {
     let record = this.byOrigin.get(origin);
     if (!record) {
-      record = { status: "pending", events: new Set(), pieceStops: [] };
+      const originStatus = origin.status().status;
+      record = {
+        status: originStatus === "done"
+          ? "confirmed"
+          : originStatus === "error"
+          ? "failed"
+          : "pending",
+        events: new Set(),
+        pieceStops: [],
+      };
       this.byOrigin.set(origin, record);
+      if (record.status !== "pending") return record;
+
       origin.addCommitCallback((_tx, result) => {
         const settled = this.byOrigin.get(origin);
         if (!settled) return;
@@ -92,11 +103,11 @@ export class SpeculationLineage {
 
   originStatus(origin: IExtendedStorageTransaction): OriginStatus {
     return this.byOrigin.get(origin)?.status ??
-      // Unknown origin ⇒ the record was settled and fully released. A
-      // still-queued event always finds its record (failure removes the
-      // event synchronously; success keeps the record until release()),
-      // so this fallback is only reachable after settlement — and it must
-      // be "confirmed": "pending" would park a cross-space event forever,
+      // Unknown origin ⇒ no active lineage record remains. A still-queued
+      // event with an already-failed origin creates a failed record and is
+      // dropped before release; successful origins keep the record until
+      // release(). This fallback is therefore after settlement/release — and
+      // must be "confirmed": "pending" would park a cross-space event forever,
       // since the commit callback that wakes it has already fired.
       "confirmed";
   }

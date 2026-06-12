@@ -1561,6 +1561,48 @@ is green on top of the fix.
 
 ## REVIEWER RESOLUTION — 03/step-6 stale-origin lineage docs
 
-- [x] pending — documented the reviewer-approved settled-origin lineage record
-  behavior in WO03 before implementation.
+- [x] 024dfb38f — documented the reviewer-approved settled-origin lineage
+  record behavior in WO03 before implementation.
 - Deviations: none.
+
+## REVIEWER RESOLUTION — 03/step-6 stale-origin lineage fix
+
+- [x] pending — lineage now initializes records from already-settled origin
+  transaction status before registering commit callbacks.
+- Deviations: none. Verified the missing caveat from 03/step-4 empirically:
+  `addCommitCallback` does not fire retroactively for already-settled
+  transactions, so record creation must inspect `origin.status()`.
+- Red-first recordings:
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-lineage.test.ts`: failed as expected before the fix:
+    already-committed origin actual `pending`, expected `confirmed`; already
+    failed origin actual `pending`, expected `failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-event-lineage.test.ts`: failed as expected before the fix
+    on the already-committed origin fixture:
+    `error: Promise resolution is still pending but the event loop has already resolved`.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler/lineage.ts
+    packages/runner/src/scheduler/pull-events.ts
+    packages/runner/test/scheduler-lineage.test.ts
+    packages/runner/test/scheduler-event-lineage.test.ts`: passed
+    (`Checked 4 files`).
+  - `deno lint` on the same four files: passed (`Checked 4 files`).
+  - `deno check` on the same four files: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-lineage.test.ts`: passed, `1 passed (8 steps)`,
+    `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-event-lineage.test.ts`: passed, `1 passed (6 steps)`,
+    `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/llm-dialog-outbox.test.ts`: passed, `1 passed (1 step)`,
+    `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/llm-dialog.test.ts`: passed, `1 passed (17 steps)`, `0 failed`.

@@ -16,6 +16,7 @@ type CommitCallback = Parameters<
 
 type TestOriginTx = IExtendedStorageTransaction & {
   settle(result: Result<Unit, CommitError>): void;
+  callbackCount(): number;
 };
 
 const eventLink: NormalizedFullLink = {
@@ -34,17 +35,34 @@ const errorResult: Result<Unit, CommitError> = {
   },
 };
 
-function createOriginTx(): TestOriginTx {
+function createOriginTx(
+  initialStatus: "ready" | "done" | "error" = "ready",
+): TestOriginTx {
   const callbacks: CommitCallback[] = [];
+  let status = initialStatus;
   const origin = {
     tx: {},
+    status() {
+      if (status === "error") {
+        return {
+          status,
+          journal: {},
+          error: errorResult.error,
+        };
+      }
+      return { status, journal: {} };
+    },
     addCommitCallback(callback: CommitCallback): void {
       callbacks.push(callback);
     },
     settle(result: Result<Unit, CommitError>): void {
+      status = result.error ? "error" : "done";
       for (const callback of callbacks) {
         callback(origin as TestOriginTx, result);
       }
+    },
+    callbackCount(): number {
+      return callbacks.length;
     },
   };
 
@@ -158,6 +176,32 @@ describe("SpeculationLineage", () => {
     const { lineage } = createLineageHooks();
 
     expect(lineage.originStatus(origin)).toBe("confirmed");
+  });
+
+  it("treats already-committed origins as confirmed without callbacks", () => {
+    const origin = createOriginTx("done");
+    const event = queuedEvent("evt:already-committed", origin);
+    const { lineage, removed, queueExecutions } = createLineageHooks();
+
+    lineage.recordEvent(origin, event);
+
+    expect(lineage.originStatus(origin)).toBe("confirmed");
+    expect(origin.callbackCount()).toBe(0);
+    expect(removed).toEqual([]);
+    expect(queueExecutions()).toBe(0);
+  });
+
+  it("treats already-failed origins as failed without callbacks", () => {
+    const origin = createOriginTx("error");
+    const event = queuedEvent("evt:already-failed", origin);
+    const { lineage, removed, queueExecutions } = createLineageHooks();
+
+    lineage.recordEvent(origin, event);
+
+    expect(lineage.originStatus(origin)).toBe("failed");
+    expect(origin.callbackCount()).toBe(0);
+    expect(removed).toEqual([]);
+    expect(queueExecutions()).toBe(0);
   });
 
   it("ignores duplicate settlement callbacks after failure cleanup", () => {

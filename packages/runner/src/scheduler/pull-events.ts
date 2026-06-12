@@ -1,9 +1,15 @@
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   dispatchQueuedEvent,
   preflightQueuedEventDependencies,
   type SchedulerEventExecutionState,
 } from "./events.ts";
 import type { Action } from "./types.ts";
+
+const logger = getLogger("scheduler", {
+  enabled: true,
+  level: "warn",
+});
 
 export async function processPullQueuedEventDuringExecute(
   state: SchedulerEventExecutionState,
@@ -22,10 +28,10 @@ export async function processPullQueuedEventDuringExecute(
     if (originStatus === "failed") {
       state.eventQueue.shift();
       state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
-      state.handleError(
-        new Error("failed lineage origin remained queued"),
-        queuedEvent.action,
-      );
+      logger.debug("scheduler-lineage", () => [
+        "Dropping event from failed lineage origin",
+        { eventId: queuedEvent.id },
+      ]);
       return;
     }
     if (!sameSpace && originStatus === "pending") {
