@@ -10,6 +10,7 @@ import type { Runtime } from "../runtime.ts";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
+  IPreconditionFailedError,
   MemorySpace,
 } from "../storage/interface.ts";
 import { isPermanentRejection } from "../storage/rejection.ts";
@@ -612,6 +613,10 @@ export async function dispatchQueuedEvent(state: {
     // the commit, dependent speculative transactions are rejected as well and
     // the normal retry path reruns the event.
     tx.commit().then((result) => {
+      const permanentRejection =
+        result.error && isPermanentRejection(result.error)
+          ? (result.error as IPreconditionFailedError).precondition
+          : undefined;
       if (!result.error && changedWrites.length > 0) {
         state.onEventCommitWrites?.(action, changedWrites);
       }
@@ -627,6 +632,7 @@ export async function dispatchQueuedEvent(state: {
           ? { writesTruncated: true }
           : {}),
         ...(result.error ? { error: result.error.message } : {}),
+        ...(permanentRejection !== undefined ? { permanentRejection } : {}),
       });
       if (
         result.error && retriesLeft > 0 &&
@@ -642,6 +648,15 @@ export async function dispatchQueuedEvent(state: {
       }
       runFinalCommitCallback();
       if (result.error) {
+        if (permanentRejection === "receipt-exists") {
+          logger.warn(
+            "event-lost-race",
+            () => [
+              "Event handling lost the receipt race",
+              { eventId: queuedEvent.id, handlerId },
+            ],
+          );
+        }
         logger.error(
           "schedule-error",
           "Event handler transaction failed after exhausting all retries",

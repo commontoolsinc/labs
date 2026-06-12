@@ -83,6 +83,11 @@ const logger = getLogger("extended-storage-transaction", {
   level: "error",
 });
 
+const createOnlyMarkKey = (
+  link: { id: string; scope?: unknown },
+): string =>
+  `${normalizeCellScope(link.scope as CellScope | undefined)}\0${link.id}`;
+
 type CfcInstrumentationHooks = {
   onRelevantTx?(): void;
   onPreparedTx?(): void;
@@ -105,6 +110,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private statusOverride?: StorageTransactionStatus;
   private commitCallbacksDispatched = false;
   private commitPreconditions = new Map<MemorySpace, CommitPrecondition[]>();
+  private createOnlyMarks = new Map<MemorySpace, Set<string>>();
   private outboxIdempotencyKeys = new Set<string>();
   private readOnlySource?: string;
   private narrowestReadScope: CellScope = "space";
@@ -617,6 +623,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   ): readonly CommitPrecondition[] | undefined {
     return this.tx.getCommitPreconditions?.(space) ??
       this.commitPreconditions.get(space);
+  }
+
+  markCreateOnly(
+    link: { space: MemorySpace; id: string; scope?: unknown },
+  ): void {
+    this.assertWritable("markCreateOnly");
+    let marks = this.createOnlyMarks.get(link.space);
+    if (!marks) {
+      marks = new Set();
+      this.createOnlyMarks.set(link.space, marks);
+    }
+    marks.add(createOnlyMarkKey(link));
+    this.tx.markCreateOnly?.(link);
   }
 
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
@@ -1190,6 +1209,12 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     space: MemorySpace,
   ): readonly CommitPrecondition[] | undefined {
     return this.wrapped.getCommitPreconditions?.(space);
+  }
+
+  markCreateOnly(
+    link: { space: MemorySpace; id: string; scope?: unknown },
+  ): void {
+    this.wrapped.markCreateOnly?.(link);
   }
 
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {

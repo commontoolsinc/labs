@@ -1004,7 +1004,13 @@ type WatchRefreshBatch = {
 };
 
 type NativeCommitOperation =
-  | { op: "set"; id: URI; scope?: CellScope; value: EntityDocument }
+  | {
+    op: "set";
+    id: URI;
+    scope?: CellScope;
+    value: EntityDocument;
+    createOnly?: true;
+  }
   | {
     op: "patch";
     id: URI;
@@ -1394,6 +1400,7 @@ class SpaceReplica implements ISpaceReplica {
                 id: operation.id,
                 scope: operation.scope,
                 value: toExplicitDocument(operation.value),
+                ...(operation.createOnly ? { createOnly: true as const } : {}),
               }
           ),
     );
@@ -1655,7 +1662,8 @@ class SpaceReplica implements ISpaceReplica {
     preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    const activePreconditions = getCommitPreconditionsConfig()
+    const emitCommitPreconditions = getCommitPreconditionsConfig();
+    const activePreconditions = emitCommitPreconditions
       ? (preconditions ?? [])
       : [];
     if (
@@ -1700,6 +1708,9 @@ class SpaceReplica implements ISpaceReplica {
                   id: operation.id,
                   scope: operation.scope,
                   value: operation.value,
+                  ...(emitCommitPreconditions && operation.createOnly
+                    ? { createOnly: true as const }
+                    : {}),
                 };
             }
           }),

@@ -1732,7 +1732,7 @@ is green on top of the fix.
 
 ## 04/step-3
 
-- [x] pending — memory v2 create-only `set` operations reject when the target
+- [x] 1b0395f1b — memory v2 create-only `set` operations reject when the target
   entity head already exists.
 - Deviations: added an extra deleted-head fixture because the engine `head`
   table is upserted by `delete`; tombstoned heads therefore count as existing
@@ -1754,3 +1754,67 @@ is green on top of the fix.
     passed, `8 passed`, `0 failed`.
   - `cd packages/memory && deno task test`: passed, `211 passed
     (95 steps)`, `0 failed`.
+
+## 04/step-4
+
+- [x] pending — every event handling result cell is marked as a create-only
+  receipt when the commit-preconditions protocol flag is enabled.
+- Deviations: none. Preserved existing cross-space handler-result
+  materialization: launched result cells still live in the resolved result
+  space; receipt-only no-launch handlers create `{}` in `processCell.space`.
+- Recordings:
+  - Constraint grep:
+
+```text
+$ grep -n "handleJavaScriptHandlerResult" packages/runner/src/runner.ts
+2502:  private handleJavaScriptHandlerResult(
+2981:            return this.handleJavaScriptHandlerResult(
+```
+
+  - `crypto.randomUUID()` fallback grep:
+
+```text
+$ rg -n "crypto\.randomUUID\(\)" packages/runner/src/runner.ts
+2884:        $event: tx.dispatchedEventId ?? crypto.randomUUID(),
+```
+
+  - Receipt mark site grep:
+
+```text
+$ rg -n "markCreateOnly" packages/runner/src
+packages/runner/src/runner.ts:1460:    markCreateOnlyResult: boolean = false,
+packages/runner/src/runner.ts:1476:        if (markCreateOnlyResult) {
+packages/runner/src/runner.ts:1477:          startTx.markCreateOnly?.(
+packages/runner/src/runner.ts:1517:    markCreateOnlyResult = false,
+packages/runner/src/runner.ts:1531:        if (markCreateOnlyResult) {
+packages/runner/src/runner.ts:1532:          startTx.markCreateOnly?.(
+packages/runner/src/runner.ts:2528:        tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
+packages/runner/src/runner.ts:2611:      tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
+packages/runner/src/runner.ts:2675:    markCreateOnlyResult = false,
+packages/runner/src/runner.ts:2696:        markCreateOnlyResult,
+packages/runner/src/storage/extended-storage-transaction.ts:563:  markCreateOnly(
+packages/runner/src/storage/extended-storage-transaction.ts:566:    this.assertWritable("markCreateOnly");
+packages/runner/src/storage/extended-storage-transaction.ts:573:    this.tx.markCreateOnly?.(link);
+packages/runner/src/storage/extended-storage-transaction.ts:1109:  markCreateOnly(
+packages/runner/src/storage/extended-storage-transaction.ts:1112:    this.wrapped.markCreateOnly?.(link);
+packages/runner/src/storage/interface.ts:587:  markCreateOnly?(
+packages/runner/src/storage/interface.ts:764:  markCreateOnly?(
+packages/runner/src/storage/v2-transaction.ts:862:  markCreateOnly(
+packages/runner/src/storage/v2-transaction.ts:865:    this.assertWritable("markCreateOnly()");
+```
+
+  - `deno fmt packages/runner/src/storage/interface.ts
+    packages/runner/src/storage/extended-storage-transaction.ts
+    packages/runner/src/storage/v2-transaction.ts
+    packages/runner/src/storage/v2.ts packages/runner/src/runner.ts
+    packages/runner/src/scheduler/events.ts packages/runner/src/telemetry.ts`:
+    passed (`Checked 7 files`).
+  - `deno lint` on the same seven files: passed (`Checked 7 files`).
+  - `deno check` on the same seven files: passed.
+  - `cd packages/runner && deno task test` with default
+    `commitPreconditions` off: passed, `590 passed (3091 steps)`,
+    `0 failed`, `0 ignored (10 steps)`, `2m5s`.
+  - `cd packages/runner && deno task test` with a temporary
+    `scheduler-test-utils.ts` default of `commitPreconditions: true`: passed,
+    `590 passed (3091 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m5s`.
+    The helper toggle was reverted before commit.
