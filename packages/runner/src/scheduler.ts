@@ -57,6 +57,7 @@ import {
 import { SchedulerMaterializers } from "./scheduler/materializers.ts";
 import { type DependencyUpdateState } from "./scheduler/dependency-updates.ts";
 import { SchedulerWriteIndex } from "./scheduler/scheduling-writes.ts";
+import { NodeRegistry } from "./scheduler/node-record.ts";
 import {
   SchedulerTriggerIndex,
   SchedulerTriggerSubscriptions,
@@ -285,15 +286,12 @@ export class Scheduler {
   private retries = new WeakMap<Action, number>();
 
   // Effect/computation tracking for pull-based scheduling
-  private effects = new Set<Action>();
-  private computations = new Set<Action>();
+  private nodes = new NodeRegistry();
   private dependents = new WeakMap<Action, Set<Action>>();
   private reverseDependencies = new WeakMap<Action, Set<Action>>();
   private activePullDemandActions = new WeakSet<Action>();
   private pullDemandedFirstRunComputations = new WeakSet<Action>();
   private pullDemandedContinuationComputations = new WeakSet<Action>();
-  // Track which actions are effects persistently (survives unsubscribe/re-subscribe)
-  private isEffectAction = new WeakMap<Action, boolean>();
   // In pull mode, `dirty` means direct dirty. `stale` additionally includes
   // actions with dirty upstream computations.
   private staleness = new SchedulerStaleness({
@@ -365,7 +363,7 @@ export class Scheduler {
   private delayControlState!: SchedulerDelayControlState;
 
   private writeIndex!: SchedulerWriteIndex;
-  private materializers = new SchedulerMaterializers(this.effects);
+  private materializers = new SchedulerMaterializers(this.nodes.effects);
   private dirtyDependencyCollectionState!: DirtyDependencyCollectionState;
   // Track actions scheduled for first time (bypass filter)
   private scheduledFirstTime = new Set<Action>();
@@ -869,13 +867,15 @@ export class Scheduler {
     token: symbol,
   ): boolean {
     return this.initialRehydrationTokens.get(action) === token &&
-      (this.effects.has(action) || this.computations.has(action)) &&
+      (this.nodes.effects.has(action) || this.nodes.computations.has(action)) &&
       !this.pending.has(action) &&
       !this.staleness.dirty.has(action);
   }
 
   private scheduleInitialActionRun(action: Action): void {
-    if (!this.effects.has(action) && !this.computations.has(action)) {
+    if (
+      !this.nodes.effects.has(action) && !this.nodes.computations.has(action)
+    ) {
       return;
     }
 
@@ -885,7 +885,7 @@ export class Scheduler {
     this.scheduledFirstTime.add(action);
 
     if (
-      !this.isEffectAction.get(action) &&
+      !this.nodes.isKnownEffect(action) &&
       this.writeIndex.getSchedulingWrites(action)?.length
     ) {
       this.scheduleAffectedEffects(action);
@@ -1112,8 +1112,8 @@ export class Scheduler {
    */
   getStats(): { effects: number; computations: number; pending: number } {
     return {
-      effects: this.effects.size,
-      computations: this.computations.size,
+      effects: this.nodes.effects.size,
+      computations: this.nodes.computations.size,
       pending: this.pending.size,
     };
   }
@@ -1122,14 +1122,14 @@ export class Scheduler {
    * Returns whether an action is registered as an effect.
    */
   isEffect(action: Action): boolean {
-    return this.effects.has(action);
+    return this.nodes.effects.has(action);
   }
 
   /**
    * Returns whether an action is registered as a computation.
    */
   isComputation(action: Action): boolean {
-    return this.computations.has(action);
+    return this.nodes.computations.has(action);
   }
 
   /**
@@ -1394,7 +1394,7 @@ export class Scheduler {
     return collectInitialExecuteDependenciesState({
       pendingDependencyCollection: this.pendingDependencyCollection,
       populateDependenciesCallbacks: this.populateDependenciesCallbacks,
-      effects: this.effects,
+      effects: this.nodes.effects,
       getSchedulingWrites: (action) =>
         this.writeIndex.getSchedulingWrites(action),
       collectDependenciesForAction: (action, populateDependencies, options) =>
@@ -1428,7 +1428,7 @@ export class Scheduler {
     collectPostEventDependenciesState({
       pendingDependencyCollection: this.pendingDependencyCollection,
       populateDependenciesCallbacks: this.populateDependenciesCallbacks,
-      effects: this.effects,
+      effects: this.nodes.effects,
       getSchedulingWrites: (action) =>
         this.writeIndex.getSchedulingWrites(action),
       collectDependenciesForAction: (action, populateDependencies, options) =>
@@ -1449,7 +1449,7 @@ export class Scheduler {
     return buildPullInitialSeeds({
       pending: this.pending,
       dirty: this.staleness.dirty,
-      effects: this.effects,
+      effects: this.nodes.effects,
       newActionsWithoutDependencies,
       eventBlockingDeps,
       computationDebounceFlushSeeds: this.delays.computationDebounceFlushSeeds,
@@ -1646,7 +1646,7 @@ export class Scheduler {
       diagnosisNonIdempotent: this.diagnosisNonIdempotent,
       causalEdges: this.causalEdges,
       idempotencyViolations: this.idempotencyViolations,
-      computations: this.computations,
+      computations: this.nodes.computations,
       setIdempotencyCheckMode: (enabled) => {
         this.idempotencyCheckMode = enabled;
       },
@@ -1670,12 +1670,12 @@ export class Scheduler {
 
   private createPullDemandState(): PullDemandState {
     return {
-      computations: this.computations,
-      effects: this.effects,
+      computations: this.nodes.computations,
+      effects: this.nodes.effects,
       dependents: this.dependents,
       dependencies: this.dependencies,
       actionParent: this.actionParent,
-      isEffectAction: this.isEffectAction,
+      nodes: this.nodes,
       pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
       pullDemandedContinuationComputations: this
         .pullDemandedContinuationComputations,
@@ -1688,8 +1688,8 @@ export class Scheduler {
   private createDelayControlState(): SchedulerDelayControlState {
     return {
       delays: this.delays,
-      computations: this.computations,
-      effects: this.effects,
+      computations: this.nodes.computations,
+      effects: this.nodes.effects,
       dirty: this.staleness.dirty,
       pending: this.pending,
       queueExecution: () => this.queueExecution(),
@@ -1704,11 +1704,11 @@ export class Scheduler {
       getTrace: () => this.dirtyDependencyTraceContext,
       dirty: this.staleness.dirty,
       pending: this.pending,
-      computations: this.computations,
+      computations: this.nodes.computations,
       reverseDependencies: this.reverseDependencies,
       dependencies: this.dependencies,
       writersByEntity: this.writeIndex.writersByEntity,
-      effects: this.effects,
+      effects: this.nodes.effects,
       materializerIndex: this.materializers,
       isStale: (target) => this.staleness.isStale(target),
       getSchedulingWrites: (target) =>
@@ -1758,7 +1758,7 @@ export class Scheduler {
   private createDirtySchedulingState(): DirtySchedulingState {
     return {
       staleness: this.staleness,
-      computations: this.computations,
+      computations: this.nodes.computations,
       scheduleComputationDebounce: (action) =>
         this.scheduleComputationDebounce(action),
       clearComputationDebounceState: (action) =>
@@ -1781,7 +1781,7 @@ export class Scheduler {
         this.causalEdges.push(edge);
       },
       actionChangeGroups: this.actionChangeGroups,
-      effects: this.effects,
+      effects: this.nodes.effects,
       pending: this.pending,
       dirty: this.staleness.dirty,
       conditionallyScheduledEffects: this.conditionallyScheduledEffects,
@@ -1820,7 +1820,7 @@ export class Scheduler {
 
   private createPendingPullRunnableState(): PendingPullRunnableState {
     return {
-      effects: this.effects,
+      effects: this.nodes.effects,
       isDemandedPullComputation: (action) =>
         this.isDemandedPullComputation(action),
       shouldRunFirstPullComputationInDemandContext: (action) =>
@@ -1830,7 +1830,7 @@ export class Scheduler {
 
   private createDirtyPullRunnableState(): DirtyPullRunnableState {
     return {
-      effects: this.effects,
+      effects: this.nodes.effects,
       isDemandedPullComputation: (action) =>
         this.isDemandedPullComputation(action),
       isThrottled: (action) => this.delays.isThrottled(action),
@@ -1852,7 +1852,7 @@ export class Scheduler {
       dependencies: this.dependencies,
       pending: this.pending,
       dirty: this.staleness.dirty,
-      effects: this.effects,
+      effects: this.nodes.effects,
       materializerIndex: this.materializers,
       dependents: this.dependents,
       pendingPullRunnableState: this.pendingPullRunnableState,
@@ -1869,8 +1869,8 @@ export class Scheduler {
     return {
       triggerIndex: this.triggerIndex,
       changedWritesHistory: this.changedWritesHistory,
-      effects: this.effects,
-      computations: this.computations,
+      effects: this.nodes.effects,
+      computations: this.nodes.computations,
       conditionallyScheduledEffects: this.conditionallyScheduledEffects,
       actionParent: this.actionParent,
       pending: this.pending,
@@ -1891,9 +1891,7 @@ export class Scheduler {
     return {
       actionChangeGroups: this.actionChangeGroups,
       changeGroupToActionId: this.changeGroupToActionId,
-      isEffectAction: this.isEffectAction,
-      effects: this.effects,
-      computations: this.computations,
+      nodes: this.nodes,
       getIdempotencyCheckMode: () => this.idempotencyCheckMode,
       queueExecution: () => this.queueExecution(),
       getActionId: (target) => this.getActionId(target),
@@ -1906,7 +1904,7 @@ export class Scheduler {
   private createPendingDependencyCollectionState(): PendingDependencyCollectionState {
     return {
       pendingDependencyCollection: this.pendingDependencyCollection,
-      effects: this.effects,
+      effects: this.nodes.effects,
       isThrottled: (action) => this.delays.isThrottled(action),
       getSchedulingWrites: (action) =>
         this.writeIndex.getSchedulingWrites(action),
@@ -1928,7 +1926,7 @@ export class Scheduler {
       actionParent: this.actionParent,
       pending: this.pending,
       scheduledFirstTime: this.scheduledFirstTime,
-      effects: this.effects,
+      effects: this.nodes.effects,
       dirty: this.staleness.dirty,
       stale: this.staleness.stale,
       writeIndex: this.writeIndex,
@@ -1972,8 +1970,7 @@ export class Scheduler {
       conditionallyScheduledEffects: this.conditionallyScheduledEffects,
       reverseDependencies: this.reverseDependencies,
       dependents: this.dependents,
-      effects: this.effects,
-      computations: this.computations,
+      nodes: this.nodes,
       pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
       pullDemandedContinuationComputations: this
         .pullDemandedContinuationComputations,
@@ -1993,7 +1990,7 @@ export class Scheduler {
   private createCycleBreakState(): PullCycleBreakState {
     return {
       dirty: this.staleness.dirty,
-      effects: this.effects,
+      effects: this.nodes.effects,
       runsThisExecute: this.runsThisExecute,
       pending: this.pending,
       isThrottled: (action) => this.delays.isThrottled(action),
@@ -2013,8 +2010,8 @@ export class Scheduler {
       getCollectSettleStats: () => this.collectSettleStats,
       pendingDependencyCollection: this.pendingDependencyCollection,
       populateDependenciesCallbacks: this.populateDependenciesCallbacks,
-      effects: this.effects,
-      computations: this.computations,
+      effects: this.nodes.effects,
+      computations: this.nodes.computations,
       pending: this.pending,
       dirty: this.staleness.dirty,
       dependencies: this.dependencies,
@@ -2070,7 +2067,7 @@ export class Scheduler {
     return {
       pending: this.pending,
       dirty: this.staleness.dirty,
-      effects: this.effects,
+      effects: this.nodes.effects,
       eventQueue: this.eventQueue,
       eventQueueWakeState: this.eventQueueWakeState,
       idlePromises: this.idlePromises,
@@ -2233,7 +2230,7 @@ export class Scheduler {
       pending: this.pending,
       actionRunTrace: this.actionRunTrace,
       actionParent: this.actionParent,
-      isEffectAction: this.isEffectAction,
+      nodes: this.nodes,
       diagnosisHistory: this.diagnosisHistory,
       diagnosisNonIdempotent: this.diagnosisNonIdempotent,
       idempotencyViolations: this.idempotencyViolations,
@@ -2272,7 +2269,7 @@ export class Scheduler {
         );
       },
       markReadersDirtyForChangedWrites: (target, changedWrites) => {
-        if (!this.computations.has(target)) return;
+        if (!this.nodes.computations.has(target)) return;
         clearSchedulerDirectDirty(this.dirtySchedulingState, target);
         markReadersDirtyForChangedWrites(
           this.writePropagationState,
@@ -2295,8 +2292,8 @@ export class Scheduler {
   private createGraphSnapshotState(): SchedulerGraphSnapshotState {
     return {
       pullMode: true,
-      effects: this.effects,
-      computations: this.computations,
+      effects: this.nodes.effects,
+      computations: this.nodes.computations,
       pending: this.pending,
       dirty: this.staleness.dirty,
       conditionallyScheduledEffects: this.conditionallyScheduledEffects,

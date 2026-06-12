@@ -24,6 +24,7 @@ import { toActionRunTraceAddress } from "./diagnostics.ts";
 import { buildSchedulerActionObservation } from "./persistent-observation.ts";
 import { filterIgnoredAddresses, txToReactivityLog } from "./reactivity.ts";
 import { type ActionTimingState, recordActionTime } from "./timing.ts";
+import type { NodeRegistry } from "./node-record.ts";
 import type {
   Action,
   ActionRunTraceEntry,
@@ -156,7 +157,7 @@ export function watchReactiveActionCommit(state: {
 export function appendActionRunTrace(state: {
   readonly actionRunTrace: ActionRunTraceEntry[];
   readonly actionParent: WeakMap<Action, Action>;
-  readonly isEffectAction: WeakMap<Action, boolean>;
+  readonly nodes: NodeRegistry;
   readonly getActionId: (action: Action | EventHandler) => string;
   readonly getSchedulingWrites: (
     action: Action,
@@ -180,7 +181,7 @@ export function appendActionRunTrace(state: {
   state.actionRunTrace.push({
     recordedAt: args.recordedAt ?? performance.now(),
     actionId: args.actionId,
-    actionType: state.isEffectAction.get(args.action)
+    actionType: state.nodes.isKnownEffect(args.action)
       ? "effect"
       : "computation",
     parentActionId: parentAction ? state.getActionId(parentAction) : undefined,
@@ -219,7 +220,7 @@ export interface SchedulerActionRunState {
   readonly pending: Set<Action>;
   readonly actionRunTrace: ActionRunTraceEntry[];
   readonly actionParent: WeakMap<Action, Action>;
-  readonly isEffectAction: WeakMap<Action, boolean>;
+  readonly nodes: NodeRegistry;
   readonly diagnosisHistory: Map<string, DiagnosisRecord[]>;
   readonly diagnosisNonIdempotent: NonIdempotentReport[];
   readonly idempotencyViolations: NonIdempotentReport[];
@@ -512,7 +513,7 @@ function warnOnWriteSurfaceViolations(
   },
   log: ReactivityLog,
 ): void {
-  if (state.isEffectAction.get(args.action)) return;
+  if (state.nodes.isKnownEffect(args.action)) return;
   if ((state.getMaterializerWriteEnvelopes(args.action) ?? []).length > 0) {
     return;
   }
@@ -581,7 +582,7 @@ function attachSchedulerActionObservation(
       schedulerObservationPieceId(args.actionId, telemetry),
     processGeneration: observationIdentity?.processGeneration ?? 0,
     actionId: args.actionId,
-    actionKind: state.isEffectAction.get(args.action)
+    actionKind: state.nodes.isKnownEffect(args.action)
       ? "effect"
       : "computation",
     implementationFingerprint: schedulerImplementationFingerprint(
@@ -703,7 +704,7 @@ function recordOptionalActionRunDiagnostics(
     appendActionRunTrace({
       actionRunTrace: state.actionRunTrace,
       actionParent: state.actionParent,
-      isEffectAction: state.isEffectAction,
+      nodes: state.nodes,
       getActionId: state.getActionId,
       getSchedulingWrites: state.getSchedulingWrites,
     }, {
@@ -732,11 +733,11 @@ function recordOptionalActionRunDiagnostics(
   // Inline idempotency re-run: when the mode is on, every
   // computation gets a second synchronous run against post-commit
   // state. An idempotent computation produces the same writes
-  // both times. Uses isEffectAction (persists past unsubscribe)
+  // both times. Uses the registry's known kind (persists past unsubscribe)
   // since execute() calls unsubscribe() before run().
   if (
     state.getIdempotencyCheckMode() &&
-    !state.isEffectAction.get(args.action)
+    !state.nodes.isKnownEffect(args.action)
   ) {
     logger.timeStart("scheduler", "run", "idempotencyRecheck");
     try {
