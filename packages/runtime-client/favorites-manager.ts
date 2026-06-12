@@ -15,6 +15,7 @@ import {
   Home,
   homeSchema,
 } from "@commonfabric/home-schemas";
+import { isRuntimeDisposedError } from "./shared/disposed-error.ts";
 
 type HandlerName = "addFavorite" | "removeFavorite";
 
@@ -100,6 +101,9 @@ export class FavoritesManager {
 
     // Start the subscription process
     setupSubscription().catch((error) => {
+      // A subscriber tearing down or the runtime being disposed while
+      // setup is in flight is an expected race, not a failure.
+      if (isDisposed || isRuntimeDisposedError(error)) return;
       const err = error instanceof Error ? error : new Error(String(error));
       if (onError) {
         onError(err);
@@ -109,9 +113,7 @@ export class FavoritesManager {
           err,
         );
       }
-      if (!isDisposed) {
-        callback([]);
-      }
+      callback([]);
     });
 
     // Return cleanup function
