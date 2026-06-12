@@ -420,10 +420,15 @@ set of module docs.
   (link-following, `sync()`-ing each cell for cross-session loads) +
   `verifySourceDocs` (Merkle `hash(content) === key` recompute). **Files:**
   `cell-cache.ts`.
-- **4.3.3 Compiled-set store.** ✅ Done. `writeCompiledDocs` stamps
-  `cf-compiled-by:<did>` via `ifc.addIntegrity`; `loadCompiledClosure` fail-closes
-  on a missing/mismatched label (treated as a miss). Requires an enforcing CFC
-  mode + `prepareCfc()` + commit. **Files:** `cell-cache.ts`, `cfc/metadata.ts`.
+- **4.3.3 Compiled-set store.** ✅ Done. `writeCompiledDocs` stamps the constant
+  `cf-compiled-by:cf-compiler` atom via `ifc.addIntegrity` — it attests to the
+  system compiler, not the user (a per-user `cf-compiled-by:<did>` atom made a
+  shared space's cache a permanent miss for every other member and made their
+  write-backs collide on the label merge). Minting is gated: prepare strips
+  `cf-compiled-by:` atoms from non-builtin-authored writes (audit S4 family).
+  `loadCompiledClosure` fail-closes on a missing/mismatched label (treated as a
+  miss). Requires an enforcing CFC mode + `prepareCfc()` + commit. **Files:**
+  `cell-cache.ts`, `cfc/metadata.ts`, `cfc/prepare.ts`.
 - **4.3.4 Engine seam.** ✅ Done. `Engine.compileToRecordGraph` accepts
   `precompiledModules` / `precompiledModulesFor` (cached bodies keyed by
   **content identity**, not path) and returns `entryIdentity` +

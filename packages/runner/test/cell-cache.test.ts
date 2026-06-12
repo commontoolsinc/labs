@@ -12,8 +12,8 @@ import type { CacheableModule } from "../src/harness/types.ts";
 import {
   buildSourceDocs,
   COMPILE_CACHE_RUNTIME_VERSION,
+  COMPILED_INTEGRITY_ATOM,
   compiledDocKey,
-  compiledIntegrityAtom,
   loadCompiledClosure,
   loadSourceClosure,
   loadVerifiedSourceClosure,
@@ -337,10 +337,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     await storageManager?.close();
   });
 
-  const opts = () => ({
-    runtimeVersion: RTVER,
-    compilerDid: runtime.userIdentityDID,
-  });
+  const opts = () => ({ runtimeVersion: RTVER });
 
   it("writes compiled docs with integrity and loads them back (warm hit)", async () => {
     const { modules, entryIdentity } = toModules(PROGRAM);
@@ -430,23 +427,40 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     expect(loaded.size).toBe(0);
   });
 
-  it("fail-closed: a different compiler principal is not accepted", async () => {
-    const { modules, entryIdentity } = toModules(PROGRAM);
+  it("fail-closed: a forged cf-compiled-by stamp from a non-builtin write is stripped", async () => {
+    // A write that self-attaches the compiler attestation through an authored
+    // schema, WITHOUT the compile-cache builtin authoring the write (audit S4:
+    // unattributed writes may not mint evidence). The atom must be stripped
+    // from the persisted label, so the loader treats the doc as unstamped.
+    const utilIdentity = identityOf(PROGRAM, "/util.ts");
+    const forgedSchema = {
+      type: "object",
+      ifc: { addIntegrity: [COMPILED_INTEGRITY_ATOM] },
+    } as const;
     const wtx = runtime.edit();
-    writeCompiledDocs(runtime, spaceA, modules, entryIdentity, opts(), wtx);
+    runtime.getCell(
+      spaceA,
+      compiledDocKey(RTVER, utilIdentity),
+      forgedSchema,
+      wtx,
+    )
+      .set({
+        kind: "compiled",
+        identity: utilIdentity,
+        code: "/* forged */",
+        filename: "/util.ts",
+        imports: [],
+      });
     wtx.prepareCfc();
-    await wtx.commit();
+    const { error } = await wtx.commit();
+    expect(error).toBe(undefined);
 
-    const otherDid = "did:key:someone-else";
-    expect(compiledIntegrityAtom(otherDid)).not.toBe(
-      compiledIntegrityAtom(opts().compilerDid),
-    );
     const rtx = runtime.edit();
     const loaded = await loadCompiledClosure(
       runtime,
       spaceA,
-      entryIdentity,
-      { runtimeVersion: RTVER, compilerDid: otherDid },
+      utilIdentity,
+      opts(),
       rtx,
     );
     rtx.abort?.();
@@ -521,7 +535,6 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     const { modules, importerIdentity, depIdentity } = fabricLinkedModules();
     const replicationOpts = {
       runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
-      compilerDid: runtime.userIdentityDID,
     };
     const wtx = runtime.edit();
     writeSourceDocs(runtime, spaceA, modules, importerIdentity, wtx);

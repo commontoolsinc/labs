@@ -208,10 +208,7 @@ describe("PatternManager fabric imports", () => {
         runtime,
         space,
         importer.entryIdentity,
-        {
-          runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
-          compilerDid: runtime.userIdentityDID,
-        },
+        { runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION },
         readTx,
       );
       readTx.abort?.();

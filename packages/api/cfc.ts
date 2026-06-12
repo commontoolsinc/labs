@@ -47,6 +47,28 @@ export const CFC_ATOM_TYPE = {
 
 export const CFC_RUNTIME_SUBJECT = "did:web:commonfabric.org#runtime";
 
+/**
+ * Compile-cache attestation atoms. String-shaped (not a `CFC_ATOM_TYPE`
+ * record) so the cache's label checks stay plain string comparisons. The
+ * prefix is the runtime-minted evidence family: prepare's
+ * `gateRuntimeMintedIntegrity` strips any `cf-compiled-by:` atom from a write
+ * not authored by a trusted builtin, so pattern-authored schemas cannot mint
+ * one (audit S4 posture).
+ */
+export const CFC_COMPILED_BY_ATOM_PREFIX = "cf-compiled-by:" as const;
+
+/**
+ * The single attestation stamped on compile-cache docs: the doc was emitted by
+ * the system compiler. Deliberately NOT bound to a user identity — the atom
+ * attests to the code that produced the doc, not to who ran it, so a shared
+ * space's compile cache is readable by every member. The hard (cryptographic)
+ * guarantee lands when compilation becomes server-only and the server attaches
+ * real attestation data; until then minting is gated to builtin-authored
+ * writes (see prefix doc above).
+ */
+export const CFC_COMPILED_BY_ATOM =
+  `${CFC_COMPILED_BY_ATOM_PREFIX}cf-compiler` as const;
+
 export const CFC_CONCEPT_KIND = {
   PromptInfluence: "https://commonfabric.org/cfc/concepts/prompt-influence",
   PromptInjectionRiskUnscreened:
