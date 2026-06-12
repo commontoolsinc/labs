@@ -50,6 +50,7 @@ import {
   parseLinkPrimitive,
 } from "../link-types.ts";
 import type { Cancel } from "../cancel.ts";
+import { recordCommitLocalSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import type {
   IMemoryAddress,
@@ -1657,6 +1658,9 @@ class SpaceReplica implements ISpaceReplica {
     }
 
     const localSeq = this.#nextLocalSeq++;
+    if (source !== undefined) {
+      recordCommitLocalSeq(source, this.#space, localSeq);
+    }
     const commit = withCommitTiming(
       ["commitOperations", "buildCommit"],
       (): ClientCommit => ({
