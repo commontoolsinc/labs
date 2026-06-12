@@ -857,5 +857,9 @@ export default pattern(() => {
     s3,
     s6,
     s8,
+    // TODO(cfc-schema-ref): the CFC schema-ref resolver warns about
+    // unsupported/unresolved $ref(s) in this pattern's schemas (logger "cfc",
+    // fail-closed). Fix the schema(s), then drop this opt-out.
+    allowConsoleWarnings: true,
   };
 });

@@ -477,7 +477,10 @@ export class PatternManager {
           const metaCell = this.getPatternMetaCell({ patternId, space });
           await metaCell.sync();
           if (metaCell.get()?.program) {
-            logger.warn("pattern", "Pattern already existed", patternId);
+            // Info, not warn: in a shared space every runtime after the first
+            // races the same meta save — finding it already landed is the
+            // normal idempotent outcome (every multi-user run hits this).
+            logger.info("pattern", "Pattern already existed", patternId);
             return;
           }
         } catch {

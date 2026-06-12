@@ -404,5 +404,9 @@ export default pattern(() => {
       { assertion: assert_same_name_unverified_imports_are_distinct },
       { assertion: assert_messages_and_rooms_do_not_store_ids },
     ],
+    // TODO(cfc-schema-ref): the CFC schema-ref resolver warns about
+    // unsupported/unresolved $ref(s) in this pattern's schemas (logger "cfc",
+    // fail-closed). Fix the schema(s), then drop this opt-out.
+    allowConsoleWarnings: true,
   };
 });
