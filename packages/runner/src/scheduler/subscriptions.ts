@@ -2,7 +2,13 @@ import type { Cancel } from "../cancel.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import type { ChangeGroup } from "../storage/interface.ts";
 import type { StorageNotificationState } from "./notifications.ts";
-import { pendingDependencyCollectionMightAffect } from "./dependency-graph.ts";
+import {
+  type DependencyGraphState,
+  isLive,
+  notifyNodeLivenessChange,
+  pendingDependencyCollectionMightAffect,
+  unregisterDependentEdge,
+} from "./dependency-graph.ts";
 import { type DependencyUpdateState } from "./dependency-updates.ts";
 import {
   readsOverlapWrites,
@@ -20,6 +26,7 @@ import type {
 
 type SchedulerActionTypeState = {
   readonly nodes: NodeRegistry;
+  readonly dependencyGraphState: DependencyGraphState;
   readonly getIdempotencyCheckMode: () => boolean;
   readonly queueExecution: () => void;
 };
@@ -193,7 +200,12 @@ export function updateSchedulerActionType(
       state.nodes.isKnownEffect(action)
     ? "effect"
     : "computation";
+  const existing = state.nodes.get(action);
+  const wasLive = existing
+    ? isLive(state.dependencyGraphState, existing)
+    : false;
   state.nodes.register(action, kind);
+  notifyNodeLivenessChange(state.dependencyGraphState, action, wasLive);
   const actionIsEffect = kind === "effect";
 
   if (actionIsEffect) {
@@ -264,6 +276,7 @@ export interface SchedulerUnsubscribeActionState {
   readonly conditionallyScheduledEffects: Map<Action, number>;
   readonly reverseDependencies: WeakMap<Action, Set<Action>>;
   readonly dependents: WeakMap<Action, Set<Action>>;
+  readonly dependencyGraphState: DependencyGraphState;
   readonly nodes: NodeRegistry;
   readonly pullDemandedFirstRunComputations: WeakSet<Action>;
   readonly pullDemandedContinuationComputations: WeakSet<Action>;
@@ -351,16 +364,17 @@ function removeReverseDependencyEdges(
 ): void {
   const dependencies = state.reverseDependencies.get(action);
   if (dependencies) {
-    for (const dependency of dependencies) {
-      const dependents = state.dependents.get(dependency);
-      dependents?.delete(action);
-      if (dependents && dependents.size === 0) {
-        state.dependents.delete(dependency);
-      }
+    for (const dependency of [...dependencies]) {
+      unregisterDependentEdge(state.dependencyGraphState, dependency, action);
     }
-    state.reverseDependencies.delete(action);
   }
-  state.dependents.delete(action);
+
+  const dependents = state.dependents.get(action);
+  if (dependents) {
+    for (const dependent of [...dependents]) {
+      unregisterDependentEdge(state.dependencyGraphState, action, dependent);
+    }
+  }
 }
 
 function clearActionTypeTracking(

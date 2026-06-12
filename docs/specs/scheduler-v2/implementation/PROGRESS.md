@@ -3846,3 +3846,50 @@ CT-1316, and the differing value is exact (registry `none` vs WeakMap
      (cutover fixture "keeps captured parent actions reachable before the
      parent registers").
 - Deviations: none.
+
+## 07/3b-liveness-refcounts
+
+- [x] 07/3b.1 — pending — introduced scheduler-v2 liveness refcount
+  maintenance in the dependency graph.
+- Fix shape:
+  - `DependencyGraphState` now carries `NodeRegistry` and the materializer
+    index so the graph layer can evaluate `isLive(record)`.
+  - `isLive(record)` is true for registered effects, positive `liveRefs`,
+    provisional demand, or materializer computations.
+  - New dependent edges add an upstream live ref when the reader is live;
+    removed edges drop that ref symmetrically.
+  - Node liveness transitions cascade upstream through writer edges, firing
+    only on whole-node live/non-live transitions rather than on raw
+    `liveRefs` 0/1 changes alone.
+  - `unsubscribe()` now removes graph edges before clearing materializer
+    registration, so materializer-driven live refs are dropped while the
+    action is still considered live.
+- Direction convention recorded in code:
+  - `dependents` is writer -> readers.
+  - `reverseDependencies` is reader -> writers.
+  - Liveness propagates from a live reader upstream through
+    `reverseDependencies`.
+- Scope note:
+  - This commit is the graph-layer refcount infrastructure from 3b.1. The
+    provisional-demand rewrite, `demand.ts` consumer replacement, and benchmark
+    gate remain pending for later 3b commits.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/dependency-graph.ts
+    packages/runner/src/scheduler/subscriptions.ts`: passed
+    (`Checked 3 files`, formatted `subscriptions.ts`).
+  - `deno lint` on the same 3 files: passed (`Checked 3 files`).
+  - `deno check` on the same 3 files: passed.
+  - Focused scheduler tests:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-effects.test.ts test/scheduler-pull.test.ts
+    test/scheduler-ordering.test.ts test/scheduler-v2-cutover.test.ts`:
+    passed, `5 passed (71 steps)`, `0 failed`.
+  - CT-1316:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/patterns-derive-return-pattern.test.ts`: passed,
+    `1 passed (5 steps)`, `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3107 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m7s`.
