@@ -2552,8 +2552,8 @@ Verification:
 
 ## 05/step-5
 
-- [x] pending — added a dev warning for computation writes outside the declared
-  static surface.
+- [x] 088100973 — added a dev warning for computation writes outside the
+  declared static surface.
 - Deviations: none.
 - Recordings:
   - `deno fmt packages/runner/src/scheduler/action-run.ts
@@ -2568,3 +2568,87 @@ Verification:
     --allow-read --allow-write=/tmp,/var/folders --allow-run=git
     test/scheduler-static-writes.test.ts`: passed, `1 passed (3 steps)`,
     `0 failed`.
+
+## 05/phase-end
+
+- [x] pending — WO05 exit checklist self-check complete.
+- Deviations: none.
+- Recordings:
+  - `cd packages/runner && deno task test`: passed,
+    `592 passed (3096 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m4s`.
+  - Phase benchmark command passed:
+    `cd packages/runner && deno bench --allow-read --allow-write --allow-net
+    --allow-ffi --allow-env --no-check test/scheduler.bench.ts
+    test/scheduler-demand-roots.bench.ts
+    test/scheduler-stale-propagation.bench.ts`.
+  - Benchmark deltas vs 05/step-0 baseline:
+    - `test/scheduler.bench.ts`:
+      - `Scheduler - 100 computations, shared entity reads`: 19.4 ms -> 19.7
+        ms (+1.5%).
+      - `Scheduler - wide graph (1 source, 100 readers)`: 17.9 ms -> 17.3 ms
+        (-3.4%).
+      - `Scheduler - 100 entities, sparse deps`: 17.3 ms -> 17.7 ms (+2.3%).
+      - `Scheduler - deep chain (50 levels)`: 11.5 ms -> 11.2 ms (-2.6%).
+      - `Scheduler - diamond pattern (10 diamonds)`: 9.6 ms -> 9.7 ms
+        (+1.0%).
+      - `Scheduler - repeated dirty marking`: 7.7 ms -> 7.7 ms (+0.0%).
+      - `Scheduler - subscribe/unsubscribe cycle (100x)`: 5.8 ms -> 5.6 ms
+        (-3.4%).
+      - `Scheduler - pull with resubscribe (50 pulls)`: 291.3 ms -> 288.4 ms
+        (-1.0%).
+      - `Overhead - setup/teardown only`: 1.3 ms -> 1.4 ms (+7.7%).
+      - `Overhead - create 100 cells (getCell + set)`: 15.4 ms -> 15.5 ms
+        (+0.6%).
+      - `Overhead - 100x getCell only (no set)`: 1.6 ms -> 1.6 ms (+0.0%).
+      - `Overhead - 100x set on existing cells`: 15.7 ms -> 15.5 ms (-1.3%).
+      - `Overhead - runtime.idle() empty`: 1.3 ms -> 1.2 ms (-7.7%).
+      - `Overhead - commit after 100 sets`: 15.9 ms -> 16.1 ms (+1.3%).
+      - `Overhead - empty commit`: 1.3 ms -> 1.2 ms (-7.7%).
+      - `Overhead - 100 raw tx.write + commit`: 7.1 ms -> 7.6 ms (+7.0%).
+      - `Utility - sortAndCompactPaths (100 paths)`: 21.7 us -> 21.1 us
+        (-2.8%).
+      - `Utility - sortAndCompactPaths (1000 paths)`: 280.5 us -> 281.3 us
+        (+0.3%).
+      - `Utility - addressesToPathByEntity (100 paths)`: 14.9 us -> 14.8 us
+        (-0.7%).
+      - `Utility - addressesToPathByEntity (1000 paths)`: 150.3 us -> 152.1
+        us (+1.2%).
+      - `Scheduler - bare subscribe (100x)`: 1.7 ms -> 1.6 ms (-5.9%).
+      - `Scheduler - subscribe 100 actions reading same entity`: 1.7 ms -> 1.6
+        ms (-5.9%).
+      - `Scheduler - resubscribe cycle (100x)`: 1.4 ms -> 1.3 ms (-7.1%).
+    - `test/scheduler-demand-roots.bench.ts`:
+      - `Scheduler demand roots - effect demand root`: 147.1 ms -> 144.1 ms
+        (-2.0%).
+      - `Scheduler demand roots - event demand root`: 131.8 ms -> 129.4 ms
+        (-1.8%).
+      - `Scheduler demand roots - mixed effect and event roots`: 169.0 ms ->
+        172.8 ms (+2.2%).
+      - `Scheduler demand roots - parent clears generated children`: 81.3 ms ->
+        82.6 ms (+1.6%).
+    - `test/scheduler-stale-propagation.bench.ts`:
+      - `Scheduler stale propagation - chain`: 105.5 ms -> 97.3 ms (-7.8%).
+      - `Scheduler stale propagation - diamond`: 94.7 ms -> 89.4 ms (-5.6%).
+      - `Scheduler stale propagation - wide fanout`: 244.0 ms -> 248.0 ms
+        (+1.6%).
+      - `Scheduler stale propagation - dynamic deps`: 82.9 ms -> 74.7 ms
+        (-9.9%).
+      - `Scheduler stale propagation - unchanged recompute`: 74.7 ms -> 73.2
+        ms (-2.0%).
+  - No benchmark regression exceeded 10%.
+- Exit checklist:
+  - `grep -rn
+    "buildKnownSchedulingWrites\|historicalMightWrite\|diffSchedulingWrites\|pruneStructuralAncestorWrites"
+    packages/runner/src`: no matches.
+  - `grep -rn "log\.writes"
+    packages/runner/src/scheduler/dependency-updates.ts`: no matches;
+    inspection confirms `setSchedulerDependencies` reads only `log.reads` and
+    `log.shallowReads`, and returns `state.writeIndex.getSchedulingWrites`.
+  - Observation payload compatibility held: `attachSchedulerActionObservation`
+    still sets both `currentKnownWrites` and `declaredWrites` to the registered
+    static surface.
+  - Static write fixtures A/B and the new surface-violation fixture are green:
+    `test/scheduler-static-writes.test.ts` passed, `1 passed (3 steps)`,
+    `0 failed`.
+  - Test rewrites were confined to the reviewer-approved named files; step 4
+    clean removal held without the decision-tree fallback.
