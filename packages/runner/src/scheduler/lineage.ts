@@ -31,7 +31,13 @@ export class SpeculationLineage {
   private recordFor(origin: IExtendedStorageTransaction): OriginRecord {
     let record = this.byOrigin.get(origin);
     if (!record) {
-      const originStatus = origin.status().status;
+      // A read-only transaction (cell.send() forwards its tx as the origin,
+      // which in read contexts is runtime.readTx()) never commits: it is not
+      // a speculative launch. Treat it as confirmed — "pending" would park
+      // cross-space events forever and addCommitCallback() throws on it.
+      const originStatus = origin.isReadOnly?.()
+        ? "done"
+        : origin.status().status;
       record = {
         status: originStatus === "done"
           ? "confirmed"

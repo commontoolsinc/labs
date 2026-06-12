@@ -428,6 +428,54 @@ describe("scheduler event lineage", () => {
     }
   });
 
+  it("treats read-only origin transactions as settled", async () => {
+    const stream = runtime.getCell<unknown>(
+      space,
+      "lineage read-only origin stream",
+      undefined,
+      tx,
+    );
+    const payloads = runtime.getCell<unknown[]>(
+      space,
+      "lineage read-only origin payloads",
+      undefined,
+      tx,
+    );
+    stream.set({ $stream: true });
+    payloads.set([]);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const handler: EventHandler = (handlerTx, event: unknown) => {
+      const current = payloads.withTx(handlerTx).get();
+      payloads.withTx(handlerTx).set([...current, event]);
+    };
+    runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+
+    // cell.send() forwards its transaction as the lineage origin; in read
+    // contexts that is a read-only readTx() which never commits. Such events
+    // are not speculative launches and must dispatch unconditionally instead
+    // of throwing from addCommitCallback() or parking forever.
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      "from-read-context",
+      undefined,
+      undefined,
+      false,
+      { originTx: runtime.readTx() },
+    );
+    await waitForSchedulerCondition(
+      runtime,
+      () => payloads.get().length >= 1,
+      "read-only-origin event did not dispatch",
+    );
+
+    expect(payloads.get()).toEqual(["from-read-context"]);
+  });
+
   it("parks cross-space follow-ups until the origin confirms", async () => {
     const streamA = runtime.getCell<unknown>(
       space,
