@@ -5371,3 +5371,59 @@ $ rg -n "queueInitialActionRehydration|initialRehydrationTokens|canApplyInitialA
   - Expected noisy passing logs remain: the reload fixture's transient
     `TypeError: Cannot read properties of undefined (reading 'length')` log
     while passing and experimental flag override messages.
+
+## 08/7.4-persistence-gates
+
+- [x] pending — completed the Phase 7 persistence gates and added the I2/I7
+  clean-resume witness.
+- Shape:
+  - Extended `scheduler-observations.test.ts` so a clean piece is created in
+    one runtime, resumed in a second runtime from the same emulated storage,
+    and verified to perform zero additional action runs.
+  - The same fixture patches the emulated memory server's `evaluateWatchSet`
+    during resume and asserts zero graph/watch cell-data fetches. Scheduler
+    snapshot queries use `listSchedulerActionSnapshots` and are intentionally
+    not counted as cell-data reads.
+  - Updated `reload-sibling-overdirty.test.ts` to resume the existing piece
+    with `runtime.start(resultCell)` instead of calling `runtime.run(...)` on
+    reload. Under the Phase 7 contract, `run(...)` creates a fresh local run
+    and no longer exercises persisted resume rehydration.
+- Recordings:
+  - `deno fmt` on the touched runner test files: passed (`Checked 2 files`).
+  - `deno lint` on the touched runner test files: passed (`Checked 2 files`).
+  - `deno check` on the touched runner test files: passed.
+  - Initial I2/I7 witness run:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-observations.test.ts`: passed, `1 passed (17 steps)`,
+    `0 failed`, `230ms`.
+  - Sibling reload focused regression after the contract update:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-sibling-overdirty.test.ts`: passed, `1 passed`, `0 failed`,
+    `350ms`.
+  - Phase 7 persistence pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts test/reload-sibling-overdirty.test.ts
+    test/scheduler-observations.test.ts`: passed, `3 passed (17 steps)`,
+    `0 failed`, `1s`.
+  - Full runner suite first attempt:
+    `cd packages/runner && deno task test`: failed, `594 passed (3099
+    steps)`, `1 failed`, `0 ignored (10 steps)`, `2m4s`. Failure was
+    `reload-sibling-overdirty.test.ts` expecting `rehydrate/ok > 0`; the
+    reload fixture still used `runtime.run(...)`, so it created a fresh local
+    run and saw no resume rehydration logs.
+  - Full runner suite after updating the sibling reload fixture:
+    `cd packages/runner && deno task test`: passed, `595 passed (3099 steps)`,
+    `0 failed`, `0 ignored (10 steps)`, `2m7s`.
+  - Scheduler persistent-state bench on Apple M3 Max / Deno 2.8.1:
+    `cd packages/runner && deno bench --no-check --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-persistent-state.bench.ts`:
+    clean 100 actions `2.5 ms`; targeted dirty 100 actions `2.3 ms`; clean
+    1000 actions `11.8 ms`; targeted dirty 1000 actions `6.9 ms`.
+  - Expected noisy passing logs remain: scheduler preflight/retry/error logs,
+    write-surface warnings in wish/raw map fixtures, and the reload fixture's
+    transient `TypeError: Cannot read properties of undefined (reading
+    'length')` log while passing.

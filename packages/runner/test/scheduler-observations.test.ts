@@ -78,6 +78,10 @@ type SchedulerSnapshotWithObservation =
   & SchedulerActionSnapshotResult
   & { observation: SchedulerActionObservation };
 
+type WatchSetCounterServer = {
+  evaluateWatchSet: (...args: unknown[]) => unknown;
+};
+
 const resultCellPieceId = (cell: Cell<unknown>): string => {
   const { scope, id } = cell.getAsNormalizedFullLink();
   return `${scope}:${id}`;
@@ -1405,11 +1409,13 @@ describe("persistent scheduler observations", () => {
     }
   });
 
-  it("uses persisted observations when a runner restarts a clean piece", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+  it("resumes a clean piece without rerunning or fetching cell data", async () => {
+    const runtimeAEnv = createSchedulerTestRuntime("https://example.test", {});
+    let runtimeBEnv: ReturnType<typeof createSchedulerTestRuntime> | undefined;
+    let restoreEvaluateWatchSet: (() => void) | undefined;
     try {
-      const { runtime, tx } = testRuntime;
-      const { commonfabric } = createTrustedBuilder(runtime);
+      const { runtime: runtimeA, storageManager, tx } = runtimeAEnv;
+      const { commonfabric } = createTrustedBuilder(runtimeA);
       const { lift, pattern } = commonfabric;
       let runs = 0;
       const cleanRestartPattern = pattern<{ value: number }>(
@@ -1422,29 +1428,63 @@ describe("persistent scheduler observations", () => {
         },
       );
 
-      const resultCell = runtime.getCell<{ doubled: number }>(
+      const resultCellA = runtimeA.getCell<{ doubled: number }>(
         space,
         "persistent scheduler clean restart",
         undefined,
         tx,
       );
-      const result = runtime.run(tx, cleanRestartPattern, {
+      const result = runtimeA.run(tx, cleanRestartPattern, {
         value: 5,
-      }, resultCell);
-      runtime.prepareTxForCommit(tx);
+      }, resultCellA);
+      runtimeA.prepareTxForCommit(tx);
       await tx.commit();
 
       expect(await result.pull()).toEqual({ doubled: 10 });
       expect(runs).toBe(1);
+      await runtimeA.storageManager.synced();
+      runtimeA.scheduler.dispose();
 
-      runtime.runner.stop(resultCell);
-      await runtime.start(resultCell);
-      await runtime.idle();
+      const server = (storageManager as unknown as {
+        server(): WatchSetCounterServer;
+      }).server();
+      const evaluateWatchSet = server.evaluateWatchSet.bind(server);
+      let cellDataReads = 0;
+      server.evaluateWatchSet = (...args: unknown[]) => {
+        cellDataReads++;
+        return evaluateWatchSet(...args);
+      };
+      restoreEvaluateWatchSet = () => {
+        server.evaluateWatchSet = evaluateWatchSet;
+      };
 
-      expect(resultCell.get()).toEqual({ doubled: 10 });
+      runtimeBEnv = createSchedulerTestRuntime("https://example.test", {
+        storageManager,
+      });
+      const runtimeB = runtimeBEnv.runtime;
+      runtimeB.unsafeTrustPattern(cleanRestartPattern, {
+        reason: "unit test fixture",
+      });
+      runtimeB.patternManager.registerPattern(cleanRestartPattern);
+      const resultCellB = runtimeB.getCell<{ doubled: number }>(
+        space,
+        "persistent scheduler clean restart",
+        undefined,
+      );
+      await runtimeB.start(resultCellB);
+      await runtimeB.idle();
+
+      expect(resultCellB.get()).toEqual({ doubled: 10 });
       expect(runs).toBe(1);
+      expect(cellDataReads).toBe(0);
     } finally {
-      await disposeSchedulerTestRuntime(testRuntime);
+      restoreEvaluateWatchSet?.();
+      runtimeAEnv.runtime.scheduler.dispose();
+      if (runtimeBEnv) {
+        await disposeSchedulerTestRuntime(runtimeBEnv);
+      } else {
+        await disposeSchedulerTestRuntime(runtimeAEnv);
+      }
     }
   });
 });
