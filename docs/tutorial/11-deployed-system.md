@@ -1,0 +1,129 @@
+# Chapter 11 — The Deployed System, End to End
+
+Every previous chapter examined one layer. This one assembles them: the
+server, the browser app, the headless executor, and the CLI — then re-runs
+Chapter 1's trace with all the machinery visible.
+
+## Toolshed: the server
+
+Toolshed (`packages/toolshed`) is a single Deno server that hosts everything
+the product needs server-side. Its route groups (`app.ts`) tell the story:
+
+- `storage/memory` — **the** sync endpoint: `GET /api/storage/memory` with a
+  WebSocket upgrade, bridging each socket to the memory server of Chapter 9
+  (one SQLite engine per space, sessions, watches).
+- `ai/llm` (+ `ai/img`, `ai/voice`, `ai/webreader`) — the LLM proxy behind
+  `generateText`/`generateObject` (Chapter 5): model routing, caching,
+  feedback. Patterns never hold API keys; the capability is mediated
+  server-side.
+- `blobs` — content-addressed binary storage (images etc., 10 MB cap),
+  per-space.
+- `patterns` — the pattern registry/discovery API.
+- `integrations/*` — OAuth flows (Google, Discord, ...) so pieces can hold
+  third-party credentials server-side; `webhooks` for inbound events.
+- `whoami`, `meta`, `health` — introspection; `shell` — serves the web app
+  itself.
+
+It boots its own `Runtime` instance too — the server is also a client of the
+fabric, which is what server-side piece execution rides on. Configuration is
+environment-driven (`HOST`, `PORT`, `MEMORY_DIR`/`DB_PATH`, compilation
+cache toggles); `docs/development/LOCAL_DEV_SERVERS.md` covers running it
+locally.
+
+## Shell: the browser client
+
+The shell (`packages/shell`) is deliberately thin — a login screen, a
+header, and a piece renderer around the runtime:
+
+- **Boot.** The page loads, opens the IndexedDB key store, and either runs
+  the passkey flow (Chapter 10) or restores the cached identity. The
+  Runtime itself — scheduler, replicas, compiled pattern execution — runs in
+  a **Web Worker** (`src/lib/runtime.ts`); the DOM thread talks to it
+  through a `RuntimeClient` transport. UI jank and pattern execution are
+  isolated from each other.
+- **Routing.** `/{spaceName}` shows the space's default pattern;
+  `/{spaceName}/{pieceIdOrSlug}` a specific piece; `/.embed/...` the same
+  without shell chrome. Navigation is an event (`cf-navigate`) kept in sync
+  with browser history — and `navigateTo()` from Chapter 5 bottoms out
+  here.
+- **Rendering.** To show a piece, the shell asks the runtime for the
+  piece's result cell, takes its `[UI]` VNode tree, and materializes it as
+  DOM: `cf-*` tags become the Lit web components of Chapter 4, whose
+  reactive slots are bound to cells via sinks. Updates flow cell → sink →
+  component re-render; there is no app-level render loop.
+
+## Background execution
+
+The background piece service (`packages/background-charm-service` — charm =
+piece, Chapter 1) is the proof that a piece is *not* a UI artifact. It runs
+as a headless process with an operator identity, connects to the same
+WebSocket endpoint, and maintains a registry cell of pieces that asked for
+background updates (the `bgUpdater` convention from Chapter 5; registration
+via the `cf-updater` component or the integrations API). Per space it
+spawns a worker that, on each poll tick (default 60 s), sends an event to
+each registered piece's `bgUpdater` stream — and from there it's just
+Chapter 8: the handler runs, transactions commit, watchers (including any
+open browsers) sync. Same graph, third kind of executor.
+
+## The CLI, revisited
+
+With the architecture visible, Chapter 6's CLI needs one sentence: `cf` is a
+fourth client — key file instead of passkey, terminal instead of DOM,
+loopback or remote transport — driving the identical runtime. That all four
+executors (shell, toolshed, background service, CLI) are *the same machine
+with different transports* is the architectural payoff of the local/remote
+symmetry noted in Chapter 9.
+
+## The full trace
+
+Chapter 1's checkbox, one last time — every step now has a chapter behind
+it. Alice and Bob both have `/{space}/todo-list` open; Alice's browser also
+ran `cf piece link` long ago to feed the list into a dashboard piece.
+
+1. **Click** (Ch. 4). Alice toggles `<cf-checkbox $checked={item.done} />`.
+   The Lit component writes `true` through the binding into the cell — a
+   `Writable` whose link is `(space, item-doc-id, ["value", ..., "done"])`.
+2. **Transaction** (Ch. 8). The write lands in a transaction journal in the
+   worker-hosted runtime. On commit, the replica applies it optimistically;
+   the trigger index dirties the `activeItems`/`completedItems` computeds;
+   pull-execution re-runs them; UI sinks fire; the row moves to "Completed"
+   in Alice's DOM — all before any network round trip.
+3. **Commit** (Ch. 9). The storage manager emits a `ClientCommit` — a
+   `patch` op on the item document plus the journal's read set — over the
+   session opened at login (signed `session.open`, Ch. 10). Toolshed's
+   engine validates the reads against the space's SQLite history inside one
+   write transaction, appends commit + revision rows, advances the head.
+   Had Bob concurrently patched the same item's `title`, both commits would
+   land — disjoint paths don't conflict; had he patched `done`, the loser
+   would revert and retry (Ch. 8/9).
+4. **Fan-out** (Ch. 9). The engine marks the item document dirty. The
+   debounced refresh re-walks affected watch graphs per session — Bob's
+   watch covers the list's documents via its schema selectors, as does the
+   dashboard's (the link from `cf piece link` is just a sigil link the
+   traversal follows). Each gets a `session/effect` with the new document
+   state; Alice's session is skipped as origin.
+5. **Remote update** (Ch. 8/11). Bob's worker integrates the upsert into
+   his replica; the notification hits his trigger index; the same computeds
+   re-run on his machine; his DOM updates. The dashboard piece — possibly
+   currently being recomputed by the background service rather than any
+   browser — sees the same change the same way.
+
+Total pattern-author code involved: one `$checked` binding and two
+`computed()` lines. Everything else — atomicity, conflict detection,
+sync, multi-client reactivity, auth, persistence — is the substrate doing
+its job. That ratio, more than any single mechanism, is the thesis of
+Common Fabric.
+
+## Where to go from here
+
+- **Build something**: re-read [Chapter 6](06-workflow.md) and start from
+  `packages/patterns/counter/`; the catalog stories
+  (`packages/patterns/catalog/stories/`) are the best UI reference.
+- **Runtime work**: `docs/development/DEVELOPMENT.md` for style and
+  principles, `docs/development/debugging/` for the error reference; the
+  scheduler (`packages/runner/src/scheduler.ts`) and the v2 engine
+  (`packages/memory/v2/engine.ts`) are the two files most worth reading
+  end to end.
+- **Open questions to watch in the code**: v2 space-level access control
+  (Ch. 10 caveat), branches/merge in the storage engine (Ch. 9), and the
+  CFC data-classification work (`packages/patterns/cfc-*`).
