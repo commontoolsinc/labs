@@ -3933,3 +3933,111 @@ CT-1316, and the differing value is exact (registry `none` vs WeakMap
     - No case exceeded the >10% regression STOP threshold.
   - `cd packages/runner && deno task test`: passed,
     `594 passed (3109 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m7s`.
+
+## IMPLEMENTER STOP — 07/3c.i closure ordering retry regression
+
+3c.i asks for a parity commit: after seed + upstream collection, add the live
+downstream closure of every dirty node to the work set, keep runtime gates
+unchanged, and expect zero behavior change. I implemented the closure in
+`pull-execution.ts` by walking `dependents` from dirty work-set roots, adding
+only nodes whose `SchedulerNode` is live according to the 3b liveness helper.
+This required a narrow `isLiveAction` settle-state predicate.
+
+Validation before the stop:
+
+- `deno fmt packages/runner/src/scheduler.ts
+  packages/runner/src/scheduler/execution.ts
+  packages/runner/src/scheduler/pull-execution.ts`: passed
+  (`Checked 3 files`).
+- `deno lint` on the same 3 files: passed (`Checked 3 files`).
+- `deno check` on the same 3 files: passed.
+- Cutover fixture pack:
+  `ENV=test deno test --allow-ffi --allow-env --allow-read
+  --allow-write=/tmp,/var/folders --allow-run=git
+  packages/runner/test/scheduler-v2-cutover.test.ts`: passed,
+  `1 passed (10 steps)`, `0 failed`; fixtures 3 and 4 stayed green.
+
+Full runner suite then failed one test:
+
+```text
+$ cd packages/runner && deno task test
+FAILED | 593 passed (3108 steps) | 1 failed (1 step) | 0 ignored (10 steps) (2m6s)
+
+reactive retries ... should preserve dependencies when retrying failed commits
+error: AssertionError: Values are not strictly equal.
+
+[Diff] Actual / Expected
+
+-   3
++   2
+
+at packages/runner/test/scheduler-retries.test.ts:187:31
+```
+
+The focused retry file reproduces the same failure:
+
+```text
+$ ENV=test deno test --allow-ffi --allow-env --allow-read \
+  --allow-write=/tmp,/var/folders --allow-run=git \
+  packages/runner/test/scheduler-retries.test.ts
+FAILED | 0 passed (1 step) | 1 failed (1 step) (61ms)
+```
+
+Initial read: the new closure can place a clean live downstream computation in
+the same order after an upstream dirty computation. In the retry fixture,
+`action1` writes `intermediate` and aborts for its first two attempts; with the
+closure, downstream `action2` can be present later in the same order and becomes
+dirty before its turn, so the unchanged v1 computation gate (`pending || dirty`)
+runs it once more before `action1` eventually succeeds. That contradicts the
+3c.i "zero behavioral change" expectation, even though the cutover
+effect-parity fixtures stay green.
+
+STOP question for reviewer: should 3c.i narrow the parity closure until 3c.ii
+(for example only clean effects / nodes whose current v1 gate would skip until
+synchronous invalidation), should the retry fixture expectation change for the
+new closure semantics, or should this wait for the 3c.ii single-channel run gate
+before including downstream computations?
+
+## REVIEWER VERDICT — 07/3c.i closure narrows to effects
+
+Correct stop, and your first option is the ruling. My "zero behavioral
+change" framing for 3c.i was over-broad: with v1's computation gate
+(`pending || dirty`) still active, ANY downstream computation placed in
+the order can be admitted one iteration early when an upstream member's
+optimistic commit dirties it mid-iteration. That is a real semantic
+shift, and `scheduler-retries` is a contract test — its expectation
+does not move (option 2 rejected), and deferring the whole closure
+(option 3) would orphan the parity instrument fixture 3 needs.
+
+1. **3c.i closure = live downstream EFFECTS only.** Effects keep their
+   v1 gates (conditional filter, changed-inputs check, pre-clear), so
+   their same-iteration placement is behavior-preserving — fixtures 3/4
+   are exactly their parity witnesses. Drop computations from the
+   closure walk; keep the `isLiveAction` predicate and the
+   `dependents`-walk scaffolding (3c.ii reuses them verbatim).
+2. **Computations join the closure in 3c.ii, in the same commit as the
+   invalid-at-turn run-gate** — the gate that makes their placement
+   sound (clean-at-turn ⇒ skipped, regardless of what dirtied whom
+   mid-iteration). Amend the work order's 3c.i/3c.ii text in-branch to
+   say this — own docs commit:
+   `docs(specs): scheduler-v2 WO07 — 3c.i closure is effects-only; computations join with the ii gate`.
+3. Add `test/scheduler-retries.test.ts` to 3c.ii's named gates (it
+   already runs in the suite; naming it makes the count assertion an
+   explicit parity witness for the computation-closure flip).
+4. Optional, scratch-only, do not block: one log line identifying what
+   dirties `action2` during a failed attempt (optimistic-apply
+   notification vs something else) — useful context for the 3c.ii
+   review, recorded here if cheap.
+5. Then: rerun the fixture pack + retries + full suite; commit 3c.i
+   with its planned message.
+
+## 07/3c.i-docs-amendment
+
+- [x] pending — amended 07/3c.i and 07/3c.ii work-order text per reviewer
+  ruling.
+- Fix shape:
+  - 3c.i downstream closure is now specified as live downstream effects only,
+    preserving v1 computation-gate behavior.
+  - 3c.ii now explicitly expands the closure to all live nodes in the same
+    commit as the invalid-at-turn run gate.
+  - `test/scheduler-retries.test.ts` is now an explicit 3c.ii gate.

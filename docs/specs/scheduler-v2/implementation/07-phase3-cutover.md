@@ -176,11 +176,14 @@ Read spec §7.1–7.3 and §7.7 again before starting. Four commits:
 
 **i. Closure ordering (parity commit).** In
 `buildPullIterationWorkSet`: after the existing seed+upstream collection,
-add the live downstream closure of every dirty node (walk `dependents`,
-include only live nodes) into the work set; toposort as today. Run-time
-gates unchanged. Expected: zero behavioral change (closure members that
-aren't pending/dirty are skipped at their turn by the existing checks);
-full suite green; fixture 3/4 counters unchanged.
+add the live downstream effect closure of every dirty node (walk
+`dependents`, include only live effect nodes) into the work set; toposort
+as today. Run-time gates unchanged. Expected: zero behavioral change
+(closure members that aren't pending/dirty are skipped at their turn by
+the existing checks); full suite green; fixture 3/4 counters unchanged.
+Computations intentionally stay out of this closure until 3c.ii because
+v1's computation gate (`pending || dirty`) can otherwise admit them one
+iteration early when an upstream member dirties them mid-iteration.
 
 **ii. Value-gated effects; channel deletion.** The flip and the deletion
 must be ONE commit:
@@ -199,6 +202,9 @@ must be ONE commit:
   `runnable = status ∈ {invalid, never-ran} ∧ live ∧ eligible ∧ passRuns < PASS_RUN_BUDGET`.
   Status→`clean` BEFORE invoking the fn (spec §7.3.1; self-changes are
   suppressed by `sourceAction`, external ones legitimately re-invalidate).
+- Expand the 3c.i downstream closure from live effects to all live nodes in
+  this same commit. The invalid-at-turn run gate makes computation placement
+  sound: clean computations included for ordering are skipped at turn.
 - DELETE in this commit: `write-propagation.ts` and all its state/wiring
   (`recordChangedComputationWrites`, `markReadersDirtyForChangedWrites`,
   `changedWritesHistory`, `onEventCommitWrites`),
@@ -212,6 +218,8 @@ must be ONE commit:
   fixtures 1/2/4 green (continuation now rides plain invalidation —
   remove the 3b provisional alias for `markPullDemandContinuation`, whose
   caller just died); convergence + ordering + events suites green;
+  `test/scheduler-retries.test.ts` green (computation-closure count
+  assertion stays at v1 parity);
   `test/scheduler-cfc-trigger-reads.test.ts` green (causes now live on
   the record — the consume/restore path in action-run reads
   `record.invalidCauses`).
