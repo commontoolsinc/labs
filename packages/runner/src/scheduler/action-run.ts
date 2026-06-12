@@ -332,6 +332,7 @@ export async function runSchedulerAction(
     tx.addCfcTriggerReads(cfcTriggerReads);
   }
   (tx.tx as { debugActionId?: string }).debugActionId = actionId;
+  tx.tx.sourceAction = action;
   addInFlightSource(state.inFlightSourceState, action, tx.tx);
   const actionStartTime = performance.now();
 

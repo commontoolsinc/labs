@@ -510,6 +510,13 @@ export interface IStorageTransaction {
    */
   immediate?: boolean;
   /**
+   * The scheduler action whose run opened this transaction (spec scheduler-v2
+   * P5). Change records derived from this transaction must not re-trigger this
+   * action. Compared by OBJECT IDENTITY — diagnostic action ids may collide
+   * across instances.
+   */
+  sourceAction?: object;
+  /**
    * Opt the transaction into writing to more than one memory space. By default
    * a transaction may write to a single space only. When enabled, commit()
    * commits each written space's changes as a separate per-space commit, in the

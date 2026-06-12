@@ -2571,7 +2571,7 @@ Verification:
 
 ## 05/phase-end
 
-- [x] pending — WO05 exit checklist self-check complete.
+- [x] 606cf649b — WO05 exit checklist self-check complete.
 - Deviations: none.
 - Recordings:
   - `cd packages/runner && deno task test`: passed,
@@ -2652,3 +2652,15 @@ Verification:
     `0 failed`.
   - Test rewrites were confined to the reviewer-approved named files; step 4
     clean removal held without the decision-tree fallback.
+
+## 06/step-1
+
+- [x] pending — storage transactions now carry `sourceAction`, stamped by
+  scheduler action runs and event dispatches.
+- Deviations: none.
+- Recordings:
+  - `deno fmt packages/runner/src/storage/interface.ts
+    packages/runner/src/scheduler/action-run.ts
+    packages/runner/src/scheduler/events.ts`: passed (`Checked 3 files`).
+  - `deno lint` on the same three files: passed (`Checked 3 files`).
+  - `deno check` on the same three files: passed.
