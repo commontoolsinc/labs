@@ -12,7 +12,7 @@ import type {
   IMemorySpaceAddress,
 } from "../storage/interface.ts";
 import { entityKey } from "./keys.ts";
-import type { Action, SpaceScopeAndURI } from "./types.ts";
+import type { Action, ReactivityLog, SpaceScopeAndURI } from "./types.ts";
 
 export interface TriggerIndexState {
   readonly triggers: Map<
@@ -23,6 +23,7 @@ export interface TriggerIndexState {
     SpaceScopeAndURI,
     Map<Action, SortedAndCompactPaths>
   >;
+  readonly actionTriggerEntities: WeakMap<Action, Set<SpaceScopeAndURI>>;
   addActionReads(
     action: Action,
     reads: IMemorySpaceAddress[],
@@ -104,6 +105,10 @@ export class SchedulerTriggerSubscriptions implements TriggerSubscriptionState {
     return this.state.triggerIndex.nonRecursiveTriggers;
   }
 
+  get actionTriggerEntities(): TriggerIndexState["actionTriggerEntities"] {
+    return this.state.triggerIndex.actionTriggerEntities;
+  }
+
   get cancels(): WeakMap<Action, Cancel> {
     return this.state.cancels;
   }
@@ -176,6 +181,10 @@ export class SchedulerTriggerIndex implements TriggerIndexState {
     SpaceScopeAndURI,
     Map<Action, SortedAndCompactPaths>
   >();
+  readonly actionTriggerEntities = new WeakMap<
+    Action,
+    Set<SpaceScopeAndURI>
+  >();
 
   addActionReads(
     action: Action,
@@ -213,6 +222,8 @@ export class SchedulerTriggerIndex implements TriggerIndexState {
       }
       pathsByAction.set(action, paths);
     }
+
+    this.actionTriggerEntities.set(action, entities);
 
     return { entities, triggerPathsByEntity };
   }
@@ -342,96 +353,107 @@ export function addTriggerPathsToIndex(
   return state.addActionReads(action, reads, shallowReads);
 }
 
-// Last-registered reads per (subscription state, action), so a re-run whose
-// read set is unchanged — the overwhelmingly common case for steady-state
-// sinks and settle re-runs — skips the O(read-entities) clear + re-add of
-// the trigger index. Keyed by the state's `cancels` map (stable identity per
-// scheduler) so actions never cross-contaminate between runtimes.
-const lastTriggerReadsByState = new WeakMap<
-  object,
-  WeakMap<Action, {
-    reads: IMemorySpaceAddress[];
-    shallowReads: IMemorySpaceAddress[];
-    result: {
-      entities: Set<SpaceScopeAndURI>;
-      triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
-    };
-  }>
->();
-
-const addressesEqual = (
-  a: readonly IMemorySpaceAddress[],
-  b: readonly IMemorySpaceAddress[],
-): boolean => {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    const x = a[i], y = b[i];
-    if (
-      x.space !== y.space || x.id !== y.id || x.type !== y.type ||
-      x.scope !== y.scope || x.path.length !== y.path.length
-    ) {
-      return false;
-    }
-    for (let j = 0; j < x.path.length; j++) {
-      if (x.path[j] !== y.path[j]) return false;
-    }
-  }
-  return true;
-};
-
-export function replaceActionTriggerPaths(
-  state: TriggerSubscriptionState,
+export function applyActionReadDelta(
+  state: TriggerIndexState,
   action: Action,
-  reads: IMemorySpaceAddress[],
-  shallowReads: IMemorySpaceAddress[],
+  prevLog: Pick<ReactivityLog, "reads" | "shallowReads">,
+  nextLog: Pick<ReactivityLog, "reads" | "shallowReads">,
 ): {
   entities: Set<SpaceScopeAndURI>;
   triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
 } {
-  let byAction = lastTriggerReadsByState.get(state.cancels);
-  // Only skip while the action is still registered: an unsubscribe runs the
-  // cancel (removing the action from the entity index), so a later
-  // re-subscribe must re-add even with identical reads.
-  const prev = state.cancels.has(action) ? byAction?.get(action) : undefined;
-  if (
-    prev !== undefined &&
-    addressesEqual(prev.reads, reads) &&
-    addressesEqual(prev.shallowReads, shallowReads)
-  ) {
-    return prev.result;
-  }
-  clearActionTriggers(state, action);
-  const result = addTriggerPathsToIndex(state, action, reads, shallowReads);
-  if (byAction === undefined) {
-    byAction = new WeakMap();
-    lastTriggerReadsByState.set(state.cancels, byAction);
-  }
-  byAction.set(action, { reads, shallowReads, result });
-  return result;
+  const prevPathsByEntity = addressesToPathByEntity(prevLog.reads);
+  const nextPathsByEntity = addressesToPathByEntity(nextLog.reads);
+  const prevNonRecursivePathsByEntity = addressesToPathByEntity(
+    prevLog.shallowReads,
+  );
+  const nextNonRecursivePathsByEntity = addressesToPathByEntity(
+    nextLog.shallowReads,
+  );
+
+  applyActionReadDeltaToMap(
+    state.triggers,
+    action,
+    prevPathsByEntity,
+    nextPathsByEntity,
+  );
+  applyActionReadDeltaToMap(
+    state.nonRecursiveTriggers,
+    action,
+    prevNonRecursivePathsByEntity,
+    nextNonRecursivePathsByEntity,
+  );
+
+  const entities = new Set<SpaceScopeAndURI>([
+    ...nextPathsByEntity.keys(),
+    ...nextNonRecursivePathsByEntity.keys(),
+  ]);
+  state.actionTriggerEntities.set(action, entities);
+
+  return { entities, triggerPathsByEntity: nextPathsByEntity };
 }
 
-export function clearActionTriggers(
+export function ensureCancelForActionTriggers(
   state: TriggerSubscriptionState,
   action: Action,
 ): void {
-  const cancel = state.cancels.get(action);
-  if (!cancel) return;
+  if (state.cancels.has(action)) return;
 
-  cancel();
-  state.cancels.delete(action);
-}
-
-export function setCancelForTriggerEntities(
-  state: TriggerSubscriptionState,
-  action: Action,
-  entities: Set<SpaceScopeAndURI>,
-): void {
   const actionId = state.getActionId(action);
   state.cancels.set(action, () => {
+    const entities = state.actionTriggerEntities.get(action) ?? new Set();
     state.onTriggerUnsubscribe?.(actionId, entities.size);
     state.removeActionFromEntities(action, entities);
+    state.actionTriggerEntities.delete(action);
   });
+}
+
+function applyActionReadDeltaToMap(
+  triggerMap: Map<SpaceScopeAndURI, Map<Action, SortedAndCompactPaths>>,
+  action: Action,
+  prevPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>,
+  nextPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>,
+): void {
+  const entities = new Set<SpaceScopeAndURI>([
+    ...prevPathsByEntity.keys(),
+    ...nextPathsByEntity.keys(),
+  ]);
+
+  for (const entity of entities) {
+    const prevPaths = prevPathsByEntity.get(entity);
+    const nextPaths = nextPathsByEntity.get(entity);
+    if (pathsEqual(prevPaths, nextPaths)) continue;
+
+    if (nextPaths === undefined) {
+      removeActionFromTriggerMap(triggerMap, entity, action);
+      continue;
+    }
+
+    let pathsByAction = triggerMap.get(entity);
+    if (!pathsByAction) {
+      pathsByAction = new Map();
+      triggerMap.set(entity, pathsByAction);
+    }
+    pathsByAction.set(action, nextPaths);
+  }
+}
+
+function pathsEqual(
+  a: SortedAndCompactPaths | undefined,
+  b: SortedAndCompactPaths | undefined,
+): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined || a.length !== b.length) {
+    return false;
+  }
+
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].length !== b[i].length) return false;
+    for (let j = 0; j < a[i].length; j++) {
+      if (a[i][j] !== b[i][j]) return false;
+    }
+  }
+  return true;
 }
 
 export function removeActionFromTriggerIndex(
