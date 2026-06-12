@@ -290,7 +290,6 @@ export class DebuggerController implements ReactiveController {
         // if (
         //   latestMarker?.type === "scheduler.run" ||
         //   latestMarker?.type === "scheduler.invocation" ||
-        //   latestMarker?.type === "scheduler.mode.change" ||
         //   latestMarker?.type === "scheduler.subscribe" ||
         //   latestMarker?.type === "scheduler.dependencies.update"
         // ) {
