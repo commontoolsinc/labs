@@ -396,6 +396,11 @@ export function planPullExecuteContinuation(state: {
   const now = state.now ?? performance.now();
   let nextDirtyPullRunAt: number | undefined;
   let nextDirtyPullRunWaitsForIdle = false;
+  const waitsForIdle = (action: Action) =>
+    state.effects.has(action) ||
+    state.materializerIndex.isMaterializer(action) ||
+    state.shouldRunFirstPullComputationInDemandContext(action);
+
   const noteFutureEligibility = (action: Action) => {
     if (state.isDebouncedComputationWaiting(action)) {
       const nextDebounceAt = state.getNextDebounceRunTime(action);
@@ -404,8 +409,7 @@ export function planPullExecuteContinuation(state: {
           nextDirtyPullRunAt,
           nextDebounceAt,
         );
-        nextDirtyPullRunWaitsForIdle ||= state.effects.has(action) ||
-          state.materializerIndex.isMaterializer(action);
+        nextDirtyPullRunWaitsForIdle ||= waitsForIdle(action);
         return true;
       }
     }
@@ -413,8 +417,7 @@ export function planPullExecuteContinuation(state: {
     const nextEligibleAt = state.getNextEligibleRunTime(action);
     if (nextEligibleAt !== undefined && nextEligibleAt > now) {
       nextDirtyPullRunAt = minDefined(nextDirtyPullRunAt, nextEligibleAt);
-      nextDirtyPullRunWaitsForIdle ||= state.effects.has(action) ||
-        state.materializerIndex.isMaterializer(action);
+      nextDirtyPullRunWaitsForIdle ||= waitsForIdle(action);
       return true;
     }
 
