@@ -750,7 +750,7 @@ export interface IExtendedStorageTransaction
    */
   addCommitPrecondition?(
     space: MemorySpace,
-    precondition: { kind: "origin-committed"; originLocalSeq: number },
+    precondition: CommitPrecondition,
   ): void;
   getCommitPreconditions?(
     space: MemorySpace,

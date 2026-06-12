@@ -1883,7 +1883,7 @@ introducing a numeric level in this unmerged stack.
 
 ## REVIEWER RESOLUTION — 04/step-5 entity-absent docs amendment
 
-- [x] pending — documented the reviewer-approved replacement of op-level
+- [x] 67a160c2c — documented the reviewer-approved replacement of op-level
   `createOnly` receipts with commit-level `entity-absent` preconditions.
 - Deviations: none. Progress also backfills 04/step-4 to `ee9b3c89e`.
 
@@ -1938,3 +1938,23 @@ Memory-owner note for the engine commit: keep the entity-absent lookup
 inside the same transaction scope as the other validations, and reuse
 the existing scope-key resolution helpers rather than re-deriving scope
 semantics.
+
+## REVIEWER RESOLUTION — 04/step-5 entity-absent memory engine
+
+- [x] pending — memory now uses commit-level `entity-absent` preconditions
+  instead of op-level `createOnly`, including precondition-only commits.
+- Deviations: widened the runner storage interface precondition type to the
+  memory `CommitPrecondition` union in this commit so the workspace
+  type-checks; runner emission logic remains for the next reviewer-requested
+  commit.
+- Recordings:
+  - `deno fmt packages/memory/v2.ts packages/memory/v2/engine.ts
+    packages/memory/test/v2-commit-preconditions.test.ts
+    packages/runner/src/storage/interface.ts`: passed (`Checked 4 files`).
+  - `deno lint` on the same four files: passed (`Checked 4 files`).
+  - `deno check` on the same four files: passed.
+  - `cd packages/memory && deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders test/v2-commit-preconditions.test.ts`:
+    passed, `10 passed`, `0 failed`.
+  - `cd packages/memory && deno task test`: passed, `211 passed
+    (95 steps)`, `0 failed`.

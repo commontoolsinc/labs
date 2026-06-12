@@ -3113,9 +3113,10 @@ const applyCommitTransaction = (
       "memory v2 schedulerObservationBatch commits must not include semantic operations",
     );
   }
+  const hasPreconditions = (commit.preconditions?.length ?? 0) > 0;
   if (
     commit.operations.length === 0 && !schedulerObservation &&
-    !hasSchedulerObservationBatch
+    !hasSchedulerObservationBatch && !hasPreconditions
   ) {
     throw new Error("memory v2 commit requires at least one operation");
   }
@@ -3164,7 +3165,10 @@ const applyCommitTransaction = (
     };
   }
 
-  validateCommitPreconditions(engine, sessionKey, commit);
+  validateCommitPreconditions(engine, sessionKey, branch, commit, {
+    principal,
+    sessionId,
+  });
   validateConfirmedReads(engine, branch, commit, { principal, sessionId });
   const resolvedPendingReads = resolvePendingReads(
     engine,
@@ -3320,21 +3324,6 @@ const writeOperation = (
           "memory v2 set operations require explicit document objects",
         );
       }
-      if (operation.createOnly) {
-        const existingHead = engine.statements.selectHead.get({
-          branch,
-          id: operation.id,
-          scope_key: scopeKey,
-        }) as HeadRow | undefined;
-        // The head table keeps the latest set or delete revision; either means
-        // this entity id has already been claimed for create-only receipts.
-        if (existingHead !== undefined) {
-          throw new PreconditionFailedError(
-            "receipt-exists",
-            `create-only set target already exists: ${operation.id}`,
-          );
-        }
-      }
       engine.statements.insertRevision.run({
         branch,
         id: operation.id,
@@ -3426,28 +3415,50 @@ const writeOperation = (
 const validateCommitPreconditions = (
   engine: Engine,
   sessionKey: string,
+  branch: BranchName,
   commit: ClientCommit,
+  scopeContext: { principal?: string; sessionId: SessionId },
 ): void => {
   for (const precondition of commit.preconditions ?? []) {
-    if (precondition.kind !== "origin-committed") {
-      throw new ProtocolError(
-        `unsupported commit precondition: ${
-          String((precondition as { kind?: unknown }).kind)
-        }`,
-      );
-    }
-
-    // Same-session commits are applied in order, so the origin's fate is
-    // decided when the follow-up arrives; an absent origin means rejection.
-    const row = engine.statements.selectPendingResolution.get({
-      session_id: sessionKey,
-      local_seq: precondition.originLocalSeq,
-    }) as { seq: number } | undefined;
-    if (!row) {
-      throw new PreconditionFailedError(
-        "origin-committed",
-        `origin commit not committed: localSeq ${precondition.originLocalSeq}`,
-      );
+    switch (precondition.kind) {
+      case "origin-committed": {
+        // Same-session commits are applied in order, so the origin's fate is
+        // decided when the follow-up arrives; an absent origin means rejection.
+        const row = engine.statements.selectPendingResolution.get({
+          session_id: sessionKey,
+          local_seq: precondition.originLocalSeq,
+        }) as { seq: number } | undefined;
+        if (!row) {
+          throw new PreconditionFailedError(
+            "origin-committed",
+            `origin commit not committed: localSeq ${precondition.originLocalSeq}`,
+          );
+        }
+        break;
+      }
+      case "entity-absent": {
+        const scopeKey = resolveScopeKey(precondition.scope, scopeContext);
+        const existingSetOrDelete = engine.statements.selectSetDeleteConflict
+          .get({
+            branch,
+            id: precondition.id,
+            scope_key: scopeKey,
+            after_seq: 0,
+          }) as { seq: number } | undefined;
+        if (existingSetOrDelete !== undefined) {
+          throw new PreconditionFailedError(
+            "receipt-exists",
+            `entity-absent precondition target already exists: ${precondition.id}`,
+          );
+        }
+        break;
+      }
+      default:
+        throw new ProtocolError(
+          `unsupported commit precondition: ${
+            String((precondition as { kind?: unknown }).kind)
+          }`,
+        );
     }
   }
 };
