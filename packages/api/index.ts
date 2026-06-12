@@ -2112,6 +2112,7 @@ export type GenerateTextFunction = (
 export type FetchOptions = {
   body?: JSONValue;
   headers?: Record<string, string>;
+  mutexTimeoutMs?: number;
   cache?:
     | "default"
     | "no-store"

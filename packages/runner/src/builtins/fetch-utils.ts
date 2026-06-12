@@ -27,9 +27,10 @@ export const internalSchema = internSchema(
  *
  * Two normalizations are applied before hashing:
  *
- * (1) The top-level `result` property is dropped. It exists only as a
- *     TypeScript type hint at call sites, never as a real fetch parameter,
- *     and so must not influence the hash.
+ * (1) The top-level `result` property and `options.mutexTimeoutMs` property
+ *     are dropped. `result` exists only as a TypeScript type hint at call
+ *     sites, and `mutexTimeoutMs` is a local scheduling knob. Neither is a
+ *     real fetch parameter, so neither must influence the hash.
  *
  * (2) `undefined`-valued object properties are dropped, recursively.
  *     Callers commonly materialize snapshots via unconditional object
@@ -50,6 +51,25 @@ export function computeInputHashFromValue<T extends Record<string, any>>(
     string,
     unknown
   >;
+  const options = inputsOnly.options;
+  if (
+    options !== null && typeof options === "object" &&
+    !Array.isArray(options)
+  ) {
+    const {
+      mutexTimeoutMs: _mutexTimeoutMs,
+      ...requestOptions
+    } = options as Record<string, unknown>;
+    const normalizedOptions = stripUndefinedProps(requestOptions) as Record<
+      string,
+      unknown
+    >;
+    if (Object.keys(normalizedOptions).length > 0) {
+      inputsOnly.options = normalizedOptions;
+    } else {
+      delete inputsOnly.options;
+    }
+  }
   return hashStringOf(stripUndefinedProps(inputsOnly));
 }
 
