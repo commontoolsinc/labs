@@ -71,6 +71,7 @@ export interface SetOperation {
   id: EntityId;
   scope?: CellScope;
   value: EntityDocument;
+  createOnly?: true;
 }
 
 export interface PatchOperation {
