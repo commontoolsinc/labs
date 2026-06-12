@@ -714,3 +714,29 @@ Implementer resolution: updated the work order to fold the
 `scheduler-cfc-trigger-reads.test.ts` direct push-notification import and push
 parameterization arm into the steps 2+3 compile-unit commit, with a focused
 test run and direct push-module grep in that commit's verification.
+
+## IMPLEMENTER RESOLUTION — 01/steps-2-3 final
+
+- [x] pending — remove push scheduler mode and pullMode branches
+- Deviations: per reviewer verdicts, this single compile-unit commit includes
+  the Step 2 push-module deletions, Step 3 `scheduler.ts` mode collapse, the
+  four `src/runner.ts` mode-API call-site edits, and the
+  `scheduler-cfc-trigger-reads.test.ts` direct push-notification arm removal.
+- Recordings:
+  - `deno fmt packages/runner/test/scheduler-cfc-trigger-reads.test.ts
+    packages/runner/src/scheduler.ts packages/runner/src/runner.ts`: passed
+    (`Checked 3 files`).
+  - `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-cfc-trigger-reads.test.ts`: passed,
+    `4 passed (8 steps)`, `0 failed`, `21ms`.
+  - `deno check src/scheduler.ts src/runner.ts`: passed.
+  - `cd packages/runner && deno task test`: passed,
+    `586 passed (3067 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m2s`.
+  - Corrected Step 3 grep:
+    `grep -n "pullMode\|PushScheduler\|push-" src/scheduler.ts` → exactly
+    one allowed match:
+    `2275:      pullMode: true,`.
+  - `ls src/scheduler | grep push`: no matches.
+  - `grep -rn "scheduler/push-\|processPush\|PushScheduler" src/ test/`: no
+    matches.

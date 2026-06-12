@@ -2586,41 +2586,7 @@ export class Runner {
         ),
       );
 
-    if (!this.runtime.scheduler.isPullModeEnabled()) {
-      const rawResult = tx.readValueOrThrow(
-        resultCell.getAsNormalizedFullLink(),
-        {
-          meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
-        },
-      );
-      const resultRedirects = findAllWriteRedirectCells(rawResult, processCell);
-      const readResultAction: Action = (tx) =>
-        resultRedirects.forEach((link) => tx.readValueOrThrow(link));
-
-      if (name) {
-        setRunnableName(readResultAction, `readResult:${name}`, {
-          setSrc: true,
-        });
-      }
-
-      const cancel = this.runtime.scheduler.subscribe(
-        readResultAction,
-        readResultAction,
-        { isEffect: true, ...schedulerRehydration },
-      );
-      tx.addCommitCallback((_committedTx, result) => {
-        if (result.error) {
-          cancel();
-          this.stop(resultCell);
-        }
-      });
-      addCancel(() => {
-        cancel();
-        this.stop(resultCell);
-      });
-    } else {
-      addCancel(() => this.stop(resultCell));
-    }
+    addCancel(() => this.stop(resultCell));
 
     return result;
   }
@@ -2697,7 +2663,7 @@ export class Runner {
   }
 
   private patternNeedsOneShotPull(pattern?: Pattern): boolean {
-    if (!this.runtime.scheduler.isPullModeEnabled() || !pattern) {
+    if (!pattern) {
       return false;
     }
     return pattern.nodes.some(({ module }) => {
@@ -2712,9 +2678,6 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
   ): void {
-    if (!this.runtime.scheduler.isPullModeEnabled()) {
-      return;
-    }
     const resultLink = resultCell.getAsNormalizedFullLink();
     tx.addCommitCallback((_committedTx, result) => {
       if (result.error) {
@@ -2725,9 +2688,6 @@ export class Runner {
   }
 
   private pullCellOnceInPullMode<T = any>(cell: Cell<T>): void {
-    if (!this.runtime.scheduler.isPullModeEnabled()) {
-      return;
-    }
     void cell.pull().catch((error) => {
       logger.error(
         "runner-start",
