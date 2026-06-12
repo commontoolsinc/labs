@@ -31,9 +31,13 @@ Any pattern not listed below (newly added, or missed) should be treated as
 
 Composable building blocks designed for embedding in other patterns
 (headless-able). Live under `primitives/`. See
-`docs/common/patterns/primitives.md`.
+`docs/common/patterns/primitives.md` for the composition contract and the
+adopter-first entry bar.
 
-`primitives/editable-list.tsx`.
+Currently no occupants. The first candidate (`EditableList`) was built, proven
+against real callers both headless and rendered, and retired under the kill
+criterion — no caller benefited (see the contract doc's "Lessons" section). New
+primitives require a named, real adopter before they are built.
 
 ## exemplar
 
@@ -116,62 +120,6 @@ intended as style references.
 Support files with no tier (not patterns): `deno.json`, `mod.ts`, `index.md`,
 `README.md`, `DEPRECATED_IDIOMS.md`, `PREEXISTING_BUGS.md`,
 `test-ui-helpers.ts`, `tools/` (codegen tooling).
-
----
-
-## `primitives/editable-list.tsx`
-
-**Tier: primitive.** The first composable primitive — an editable, checkable
-list designed to be embedded as a JSX tag inside other patterns. Headless-able:
-render its `[UI]` for a default row experience (checkbox + editable text +
-delete, a cf-message-input adder, cf-empty-state when empty), or ignore the
-`[UI]` and `.map()` your own rows while driving the exposed streams/cells.
-Mutations are addressed by live item reference via `equals()` /
-`items.remove(item)` — never array index, never a user-land `id` field, and no
-text-addressed layer: agents pass item references through tool-calls like any
-other caller (the serialization layer round-trips them as `@link`s). See
-`docs/common/patterns/primitives.md` for the full composition contract.
-
-**Keywords:** primitive, composable, list, editable, headless, identity, stream,
-embed, sub-pattern
-
-### Input Schema
-
-```ts
-interface EditableListItem {
-  // no `id` field — identity is the runtime's entity identity (equals())
-  done: boolean | Default<false>;
-  label: Default<string, "">; // default row reads this key
-  [extra: string]: any; // pass-through extra fields for headless rows
-}
-
-interface EditableListInput {
-  items?: Writable<EditableListItem[] | Default<[]>>;
-  adder?: Default<"quick" | "none", "quick">;
-  emptyMessage?: Default<string, "No items yet">;
-}
-```
-
-### Output Schema
-
-```ts
-interface EditableListOutput {
-  [NAME]: string;
-  [UI]: VNode;
-  items: EditableListItem[];
-  total: number;
-  active: number;
-  done: number;
-  // CORE: reference-addressed (equals() identity)
-  addItem: Stream<{ label?: string; item?: Partial<EditableListItem> }>;
-  removeItem: Stream<{ item: EditableListItem }>;
-  updateItem: Stream<
-    { item: EditableListItem; changes: Partial<EditableListItem> }
-  >;
-  toggleItem: Stream<{ item: EditableListItem; done?: boolean }>;
-  clearDone: Stream<unknown>;
-}
-```
 
 ---
 
