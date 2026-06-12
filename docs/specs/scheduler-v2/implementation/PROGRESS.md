@@ -4041,3 +4041,35 @@ does not move (option 2 rejected), and deferring the whole closure
   - 3c.ii now explicitly expands the closure to all live nodes in the same
     commit as the invalid-at-turn run gate.
   - `test/scheduler-retries.test.ts` is now an explicit 3c.ii gate.
+
+## 07/3c.i-closure-ordering
+
+- [x] pending — added live downstream effect closure ordering for scheduler
+  settle work sets.
+- Fix shape:
+  - `buildPullIterationWorkSet` now walks `dependents` from dirty work-set
+    roots after seed + upstream collection.
+  - The 3c.i closure adds only live effect nodes, per reviewer ruling, so
+    unchanged v1 computation gates cannot admit downstream computations early.
+  - The settle-loop state now exposes `isLiveAction` for the closure helper;
+    3c.ii will reuse this path when computations join the closure with the new
+    invalid-at-turn run gate.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/execution.ts
+    packages/runner/src/scheduler/pull-execution.ts`: passed
+    (`Checked 3 files`).
+  - `deno lint` on the same 3 files: passed (`Checked 3 files`).
+  - `deno check` on the same 3 files: passed.
+  - Cutover fixture pack:
+    `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    packages/runner/test/scheduler-v2-cutover.test.ts`: passed,
+    `1 passed (10 steps)`, `0 failed`.
+  - Retry parity witness:
+    `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    packages/runner/test/scheduler-retries.test.ts`: passed,
+    `1 passed (2 steps)`, `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3109 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m6s`.

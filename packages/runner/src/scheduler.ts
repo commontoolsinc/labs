@@ -2035,6 +2035,7 @@ export class Scheduler {
         this.delays.clearComputationDebounceState(action),
       conditionalEffectHasChangedInputs: (action) =>
         this.conditionalEffectHasChangedInputs(action),
+      isLiveAction: (action) => this.isLiveAction(action),
       handleError: (error, action) => this.handleError(error, action),
       runAction: (action) => this.run(action),
     };
@@ -2328,6 +2329,11 @@ export class Scheduler {
 
   private isLiveEffect(action: Action): boolean {
     return this.nodes.get(action)?.kind === "effect";
+  }
+
+  private isLiveAction(action: Action): boolean {
+    const record = this.nodes.get(action);
+    return record !== undefined && isLive(this.dependencyGraphState, record);
   }
 
   private isPullDemandRootEffect(action: Action): boolean {
