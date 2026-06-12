@@ -6,6 +6,7 @@ import {
   cfcLabelViewForCellWithStatus,
 } from "../src/cfc/label-view.ts";
 import {
+  atomsOutsideCeiling,
   CFC_LABEL_READ_FAILED_ATOM,
   cfcConfidentialityForObservationNode,
   cfcObservationFitsCeiling,
@@ -107,6 +108,31 @@ describe("LLM observation fail-closed on metadata read error (audit 22)", () => 
         ...REAL_CEILING,
       ]),
     ).toBe(false);
+  });
+
+  it("atomsOutsideCeiling owns the same ungrantable-marker rule", () => {
+    // The shared membership helper backs the prepare-time sink-request egress
+    // gate, where it is the ONLY enforcement — if it honored a ceiling that
+    // names the marker, the gate would disagree with cfcObservationFitsCeiling
+    // and a deployment config could allow-list the read-failure taint.
+    expect(
+      atomsOutsideCeiling(
+        [CFC_LABEL_READ_FAILED_ATOM],
+        [CFC_LABEL_READ_FAILED_ATOM, ...REAL_CEILING],
+      ),
+    ).toEqual([CFC_LABEL_READ_FAILED_ATOM]);
+    // Real atoms inside the ceiling stay inside; only the marker is forced out.
+    expect(
+      atomsOutsideCeiling(
+        [CFC_LABEL_READ_FAILED_ATOM, ...REAL_CEILING],
+        [CFC_LABEL_READ_FAILED_ATOM, ...REAL_CEILING],
+      ),
+    ).toEqual([CFC_LABEL_READ_FAILED_ATOM]);
+    // An undefined ceiling is "no bound declared" — nothing is outside it,
+    // marker included, matching cfcObservationFitsCeiling's early return. The
+    // sink gate never consults the helper for an undeclared ceiling.
+    expect(atomsOutsideCeiling([CFC_LABEL_READ_FAILED_ATOM], undefined))
+      .toEqual([]);
   });
 
   it("does NOT over-redact cleanly-unlabelled data (no error → no sentinel)", () => {

@@ -39,7 +39,7 @@ import { encodePointer } from "../../../memory/v2/path.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { atomPropagationClass } from "./atom-classes.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
-import { uniqueCfcAtoms } from "./observation.ts";
+import { atomsOutsideCeiling, uniqueCfcAtoms } from "./observation.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
@@ -2888,9 +2888,6 @@ const collectConsumedConfidentiality = (
   tx: IExtendedStorageTransaction,
 ): readonly unknown[] => {
   const atoms: unknown[] = [];
-  const addAtom = (atom: unknown): void => {
-    if (!atoms.some((existing) => deepEqual(existing, atom))) atoms.push(atom);
-  };
   for (const read of tx.getReadActivities?.() ?? []) {
     if (isInternalVerifierRead(read.meta)) continue;
     const metadata = storedMetadataFor(
@@ -2924,10 +2921,11 @@ const collectConsumedConfidentiality = (
         : (isPrefix(entryPath, path) ||
           (read.nonRecursive !== true && isPrefix(path, entryPath)));
       if (!overlapsRead) continue;
-      for (const atom of entry.label.confidentiality ?? []) addAtom(atom);
+      atoms.push(...(entry.label.confidentiality ?? []));
     }
   }
-  return atoms;
+  // Structural dedup (deep-equal) — the same dedup the rest of CFC uses.
+  return uniqueCfcAtoms(atoms);
 };
 
 // §5.2.1 / §7.3-7.5 egress gate: a recorded sink-request input whose sink
@@ -2943,7 +2941,12 @@ const verifySinkRequestCeilings = (
   const gatedSinks = new Map<string, readonly unknown[]>();
   for (const input of state.writePolicyInputs) {
     if (input.kind !== "sink-request") continue;
-    const ceiling = ceilings[input.sink];
+    // Own-property lookup only: a sink named like an Object.prototype member
+    // ("constructor", "hasOwnProperty", …) must mean "no ceiling declared",
+    // not resolve an inherited function (review on #3993).
+    const ceiling = Object.hasOwn(ceilings, input.sink)
+      ? ceilings[input.sink]
+      : undefined;
     if (ceiling !== undefined) gatedSinks.set(input.sink, ceiling);
   }
   if (gatedSinks.size === 0) return [];
@@ -2951,9 +2954,9 @@ const verifySinkRequestCeilings = (
   if (consumed.length === 0) return [];
   const reasons: string[] = [];
   for (const [sink, ceiling] of gatedSinks) {
-    const offending = consumed.filter((atom) =>
-      !ceiling.some((allowed) => deepEqual(allowed, atom))
-    );
+    // Same membership semantics as cfcObservationFitsCeiling (shared helper),
+    // so the egress gate and the observation fits-test cannot drift.
+    const offending = atomsOutsideCeiling(consumed, ceiling);
     if (offending.length > 0) {
       // Name the offending atom(s) so an observe-mode diagnostic identifies the
       // exact (sink, atom) pair that needs a ceiling entry (review on #3993).

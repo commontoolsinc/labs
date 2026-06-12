@@ -6,6 +6,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
+import { CFC_LABEL_READ_FAILED_ATOM } from "../src/cfc/observation.ts";
 import type { SinkMaxConfidentiality } from "../src/cfc/mod.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 
@@ -27,9 +28,28 @@ const CONFIDENTIAL_SCHEMA = internSchema(
   true,
 );
 
+// The fail-closed read-error marker (audit item 22) stored as a real label, as
+// taint propagation would persist it. Used to prove the egress gate treats it
+// as UNGRANTABLE even when a deployment ceiling explicitly lists it.
+const MARKER_LABELLED_SCHEMA = internSchema(
+  {
+    type: "object",
+    properties: {
+      secret: {
+        type: "string",
+        ifc: { confidentiality: [CFC_LABEL_READ_FAILED_ATOM] },
+      },
+    },
+    required: ["secret"],
+  } satisfies JSONSchema,
+  true,
+);
+
 const seedConfidentialCell = async (
   runtime: Runtime,
   id: string,
+  schema = CONFIDENTIAL_SCHEMA,
+  atoms: readonly unknown[] = ["medical"],
 ): Promise<void> => {
   const seed = runtime.edit();
   const target = runtime.getCell(signer.did(), id, undefined, seed);
@@ -43,12 +63,12 @@ const seedConfidentialCell = async (
     value: { secret: "rosebud" },
     cfc: {
       version: 1,
-      schemaHash: CONFIDENTIAL_SCHEMA.taggedHashString,
+      schemaHash: schema.taggedHashString,
       labelMap: {
         version: 1,
         entries: [{
           path: ["secret"],
-          label: { confidentiality: ["medical"] },
+          label: { confidentiality: [...atoms] },
         }],
       },
     },
@@ -56,9 +76,9 @@ const seedConfidentialCell = async (
   seed.writeOrThrow({
     space: signer.did(),
     scope: "space",
-    id: `cid:${CONFIDENTIAL_SCHEMA.taggedHashString}`,
+    id: `cid:${schema.taggedHashString}`,
     path: [],
-  }, { value: CONFIDENTIAL_SCHEMA.schema });
+  }, { value: schema.schema });
   expect((await seed.commit()).ok).toBeDefined();
 };
 
@@ -68,12 +88,13 @@ const readConfidentialThenSink = (
   runtime: Runtime,
   id: string,
   sink = "fetchData",
+  schema = CONFIDENTIAL_SCHEMA,
 ): { commit: () => Promise<{ ok?: unknown; error?: unknown }> } => {
   const tx = runtime.edit();
   const cell = runtime.getCell(
     signer.did(),
     id,
-    CONFIDENTIAL_SCHEMA.schema,
+    schema.schema,
     tx,
   );
   // Reading the labeled field marks the tx CFC-relevant and records the
@@ -267,6 +288,39 @@ describe("CFC sink-request confidentiality ceiling", () => {
         // With no CFC-relevant activity the boundary check is skipped entirely;
         // either way the public request must commit.
         expect((await tx.commit()).ok).toBeDefined();
+      },
+    );
+  });
+
+  it("rejects the read-failed marker even when the ceiling lists it (ungrantable)", async () => {
+    // CFC_LABEL_READ_FAILED_ATOM is the fail-closed taint for label-read
+    // errors (audit item 22). It is an exported string a deployment config
+    // could name in a sink ceiling — but granting it would re-open the
+    // fail-closed hole, so the egress gate must reject it even when the
+    // ceiling explicitly lists it, exactly like cfcObservationFitsCeiling.
+    await withRuntime(
+      {
+        mode: "enforce-explicit",
+        ceilings: { fetchData: [CFC_LABEL_READ_FAILED_ATOM, "medical"] },
+      },
+      async (runtime) => {
+        await seedConfidentialCell(
+          runtime,
+          "sink-ceiling-ungrantable",
+          MARKER_LABELLED_SCHEMA,
+          [CFC_LABEL_READ_FAILED_ATOM],
+        );
+        const { commit } = readConfidentialThenSink(
+          runtime,
+          "sink-ceiling-ungrantable",
+          "fetchData",
+          MARKER_LABELLED_SCHEMA,
+        );
+        const result = await commit();
+        expect(result.error).toBeDefined();
+        expect(String((result.error as Error).message)).toContain(
+          "exceeds ceiling for fetchData",
+        );
       },
     );
   });

@@ -57,6 +57,7 @@ import {
   cfcObservationFitsCeiling,
   type CfcObservationResult,
   joinCfcObservedConfidentiality,
+  meetCfcObservationCeilings,
   uniqueCfcAtoms,
 } from "../cfc/observation.ts";
 import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
@@ -1298,9 +1299,16 @@ function materializeDialogRequestSnapshot(
 ): DialogRequestSnapshot {
   const { system, maxTokens, model } = inputs.withTx(tx).get();
   const context = inputs.key("context").withTx(tx).get();
-  const observationMaxConfidentiality = inputs.key(
-    "observationMaxConfidentiality",
-  ).withTx(tx).get() as readonly unknown[] | undefined;
+  // Bound the pattern-supplied observation ceiling by the deployment's llmDialog
+  // ceiling so post-commit tool-loop reads (which carry no sink-request input)
+  // cannot exceed it (#3993 review).
+  const observationMaxConfidentiality = effectiveObservationCeiling(
+    runtime,
+    "llmDialog",
+    inputs.key("observationMaxConfidentiality").withTx(tx).get() as
+      | readonly unknown[]
+      | undefined,
+  );
   const toolsCell = inputs.key("tools").withTx(tx) as Cell<
     Record<string, Schema<typeof LLMToolSchema>>
   >;
@@ -1317,8 +1325,12 @@ function materializeDialogRequestSnapshot(
     };
   }
 
-  const cellsDocs = observationMaxConfidentiality &&
-      observationMaxConfidentiality.length > 0
+  // A DECLARED bound — even the empty one — engages observation-aware
+  // serialization: [] means "public only" (cfcObservationFitsCeiling), and the
+  // deployment sink ceiling folds in as exactly that, so treating it like the
+  // absent bound would disable redaction right when the strictest bound is set
+  // (#3993 review).
+  const cellsDocs = observationMaxConfidentiality !== undefined
     ? buildAvailableCellsDocumentationWithObservation(
       runtime,
       space,
@@ -1422,8 +1434,9 @@ function buildAvailableCellsDocumentationWithObservation(
     }
 
     try {
-      let value = observationMaxConfidentiality &&
-          observationMaxConfidentiality.length > 0
+      // Declared-empty bound (public only) must take the observation-aware
+      // read path too — see the cellsDocs guard above (#3993 review).
+      let value = observationMaxConfidentiality !== undefined
         ? readCellValueForObservation(concreteCell)
         : concreteCell.get() ?? concreteCell.getRaw();
       if (
@@ -1861,6 +1874,36 @@ type ToolCallExecutionResult = {
   observedConfidentiality?: readonly unknown[];
 };
 
+/**
+ * Fold the deployment's per-sink confidentiality ceiling into a
+ * pattern-supplied observation bound, yielding the EFFECTIVE bound the LLM
+ * builtins enforce while serializing reads for the model.
+ *
+ * The pattern-supplied `observationMaxConfidentiality` is adversary-controlled
+ * in the CFC threat model (and unbounded when omitted), so a deployment that
+ * declares a ceiling for this sink must additionally bound every value that can
+ * reach the model — including the post-commit tool-loop reads, which carry no
+ * `sink-request` input and so are never gated by `prepareBoundaryCommit`
+ * (#3993 review). The meet (`pattern ∧ deployment`) is the intersection of the
+ * two allowlists: pattern omitted → deployment ceiling alone; sink has no
+ * deployment ceiling → pattern bound alone (unchanged behavior); declared empty
+ * deployment ceiling → public-only regardless of the pattern bound.
+ */
+function effectiveObservationCeiling(
+  runtime: Runtime,
+  sink: string,
+  patternBound: readonly unknown[] | undefined,
+): readonly unknown[] | undefined {
+  const ceilings = runtime.cfcSinkMaxConfidentiality;
+  // Object.hasOwn guard: the sink name is a runner-controlled literal today, but
+  // a name colliding with an Object.prototype member must resolve to "no
+  // ceiling", not an inherited function.
+  const deploymentCeiling = Object.hasOwn(ceilings, sink)
+    ? ceilings[sink]
+    : undefined;
+  return meetCfcObservationCeilings(patternBound, deploymentCeiling);
+}
+
 function toolAllowsObservedConfidentiality(
   toolCatalog: ToolCatalog,
   toolName: string,
@@ -2004,6 +2047,7 @@ export const llmToolExecutionHelpers = {
   prepareSchemaForLLM,
   serializeForLLMObservation,
   toolAllowsObservedConfidentiality,
+  effectiveObservationCeiling,
 };
 
 /**
@@ -2837,11 +2881,18 @@ async function startRequest(
   const { system, maxTokens, model } = inputs.get();
   const queueName = capturedRequest?.queueName ??
     (inputs.key("queue").get() as unknown as string | undefined);
+  // The snapshot already carries the deployment-bounded ceiling. When there is
+  // no snapshot, fold the deployment llmDialog ceiling in here too so a
+  // direct/recovery path can't observe past it (#3993 review).
   const observationMaxConfidentiality = capturedRequest
     ?.observationMaxConfidentiality ??
-    (inputs.key("observationMaxConfidentiality").get() as
-      | readonly unknown[]
-      | undefined);
+    effectiveObservationCeiling(
+      runtime,
+      "llmDialog",
+      inputs.key("observationMaxConfidentiality").get() as
+        | readonly unknown[]
+        | undefined,
+    );
   const builtinTools = inputs.key("builtinTools").get() !== false;
 
   const messagesCell = inputs.key("messages");
@@ -2896,10 +2947,13 @@ async function startRequest(
     };
   }
 
-  // Build available cells documentation (both context and pinned cells)
+  // Build available cells documentation (both context and pinned cells).
+  // This rebuild happens POST-COMMIT (no sink-request input gates these
+  // reads), so a declared bound — including the empty "public only" one the
+  // deployment sink ceiling can fold in — must engage observation-aware
+  // serialization; only the truly absent bound may skip it (#3993 review).
   const context = inputs.key("context").get();
-  const cellsDocs = observationMaxConfidentiality &&
-      observationMaxConfidentiality.length > 0
+  const cellsDocs = observationMaxConfidentiality !== undefined
     ? buildAvailableCellsDocumentationWithObservation(
       runtime,
       space,

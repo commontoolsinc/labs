@@ -92,8 +92,9 @@ export const cfcObservationFitsCeiling = (
   // The read-failed marker is UNGRANTABLE: an observation that carries it never
   // fits a declared ceiling, even one that names the marker. The atom is an
   // exported string, so an author-supplied ceiling could otherwise allow-list it
-  // and defeat the fail-closed redaction (audit item 22). Reject it explicitly
-  // before the per-atom membership check rather than relying on its absence.
+  // and defeat the fail-closed redaction (audit item 22). atomsOutsideCeiling
+  // already forces the marker outside every declared ceiling; keep this explicit
+  // rejection too as defense in depth for the redaction path.
   if (
     confidentiality.some((value) =>
       deepEqual(value, CFC_LABEL_READ_FAILED_ATOM)
@@ -102,9 +103,64 @@ export const cfcObservationFitsCeiling = (
     return false;
   }
 
-  return confidentiality.every((value) =>
-    observationMaxConfidentiality.some((allowed) => deepEqual(allowed, value))
-  );
+  return atomsOutsideCeiling(confidentiality, observationMaxConfidentiality)
+    .length === 0;
+};
+
+/**
+ * The confidentiality atoms in `confidentiality` that fall OUTSIDE `ceiling`
+ * (the membership complement that makes `cfcObservationFitsCeiling` false). An
+ * `undefined` ceiling means "no ceiling" — nothing is outside it. A declared but
+ * empty ceiling is "public only", so every confidential atom is outside it.
+ *
+ * `CFC_LABEL_READ_FAILED_ATOM` is UNGRANTABLE (audit item 22): it is always
+ * outside a DECLARED ceiling, even one that explicitly lists it, so a config
+ * naming the exported marker string cannot allow-list a swallowed label-read
+ * error. An `undefined` ceiling still admits it — no bound declared means no
+ * check at all, matching `cfcObservationFitsCeiling`'s early return (the
+ * sink-request gate never consults this helper for an undeclared ceiling).
+ *
+ * Shared by the prepare-time sink-request ceiling check so the gate and the
+ * fits-test agree on membership semantics — including the ungrantable marker —
+ * by construction (deep-equal over structured atoms).
+ */
+export const atomsOutsideCeiling = (
+  confidentiality: readonly unknown[],
+  ceiling: CfcObservationMaxConfidentiality,
+): ImmutableJSONValue[] => {
+  if (ceiling === undefined) {
+    return [];
+  }
+  return confidentiality.filter((value) =>
+    deepEqual(value, CFC_LABEL_READ_FAILED_ATOM) ||
+    !ceiling.some((allowed) => deepEqual(allowed, value))
+  ) as ImmutableJSONValue[];
+};
+
+/**
+ * Meet two confidentiality ceilings (allowlists) into the effective bound that
+ * satisfies BOTH: a value fits the result iff it fits each input. Since fitting
+ * means "every atom is a ceiling member" (`cfcObservationFitsCeiling`), fitting
+ * both means the atom set sits within the set INTERSECTION of the two
+ * allowlists.
+ *
+ * Edge cases (each preserves `cfcObservationFitsCeiling` semantics):
+ * - `undefined` ceiling = "no ceiling" = allow everything, so it is the
+ *   identity: `meet(undefined, x) === x` and `meet(x, undefined) === x`.
+ * - A declared empty ceiling is "public only", and intersection with anything
+ *   stays empty, so `meet([], x)` is public-only — the strict bound wins.
+ *
+ * Used to fold a deployment per-sink ceiling into a pattern-supplied observation
+ * bound so post-commit LLM tool-loop reads cannot exceed the deployment ceiling
+ * (review follow-up to #3993).
+ */
+export const meetCfcObservationCeilings = (
+  a: CfcObservationMaxConfidentiality,
+  b: CfcObservationMaxConfidentiality,
+): CfcObservationMaxConfidentiality => {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return a.filter((value) => b.some((other) => deepEqual(other, value)));
 };
 
 export const cfcJsonPointerForPath = (
