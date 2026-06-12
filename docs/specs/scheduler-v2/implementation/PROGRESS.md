@@ -864,3 +864,12 @@ comment line in the Step 4 code-commit scope.
   `cell-read-path.bench.ts`, `cell-set-array-shape.bench.ts`,
   `cell-set-nested-array-docs.bench.ts`, `cell-set-shape.bench.ts`) before
   manual interruption during `cell-set.bench.ts` per the work-order allowance.
+
+## 02/step-1
+
+- [x] pending — event-id minting helper
+- Deviations: none.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler/event-identity.ts`: passed
+    (`Checked 1 file`).
+  - `deno check src/scheduler/event-identity.ts`: passed.
