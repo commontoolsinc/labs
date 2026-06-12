@@ -1,8 +1,23 @@
-import { Program } from "@commonfabric/js-compiler";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import {
+  collectImportSpecifiers,
+  FileSystemProgramResolver,
+  type Program,
+  type ProgramResolver,
+  resolveImportSpecifier,
+  type Source,
+} from "@commonfabric/js-compiler";
+import { TARGET } from "@commonfabric/js-compiler/typescript";
 import { Identity } from "@commonfabric/identity";
-import { Runtime } from "@commonfabric/runner";
+import {
+  type MemorySpace,
+  parseFabricRef,
+  Runtime,
+  type RuntimeProgram,
+} from "@commonfabric/runner";
 import { experimentalOptionsFromEnv } from "./utils.ts";
+
+const FABRIC_IMPORTS_REQUIRE_SPACE_MESSAGE =
+  "fabric imports require a space context (options.fabricImports)";
 
 async function createRuntime() {
   const { StorageManager } = await import(
@@ -27,6 +42,7 @@ export interface ProcessOptions {
   showTransformed?: boolean;
   mainExport?: string;
   verboseErrors?: boolean;
+  space?: string;
 }
 
 export async function process(
@@ -40,23 +56,45 @@ export async function process(
   // that state, so `fn.src` stays a raw bundle coordinate and CFC verified-
   // binding identities (writeAuthorizedBy) fail under enforcement.
   const engine = runtime.harness;
-  const program = await engine.resolve(
-    new FileSystemProgramResolver(options.main, options.rootPath),
+  const resolver = new FileSystemProgramResolver(
+    options.main,
+    options.rootPath,
   );
+  let program: RuntimeProgram;
+  if (options.space) {
+    program = await collectLocalProgram(resolver, { fabricImports: "allow" });
+  } else {
+    // engine.resolve fails fabric specifiers as generic unresolved modules;
+    // scan first so they get the friendlier requires-a-space message.
+    await collectLocalProgram(resolver, { fabricImports: "reject" });
+    program = await engine.resolve(resolver);
+  }
   if (options.mainExport) {
     program.mainExport = options.mainExport;
   }
   const getTransformedProgram = options.showTransformed
     ? renderTransformed
     : undefined;
-  const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
-    program,
-    {
-      noCheck: !options.check,
-      getTransformedProgram,
-      verboseErrors: options.verboseErrors,
-    },
-  );
+  const { id, graph, mainSpecifier, resolvedPins } = await engine
+    .compileToRecordGraph(
+      program,
+      {
+        noCheck: !options.check,
+        getTransformedProgram,
+        verboseErrors: options.verboseErrors,
+        fabricImports: options.space
+          ? {
+            space: options.space as MemorySpace,
+            allowUnpinned: true,
+          }
+          : undefined,
+      },
+    );
+  for (const pin of resolvedPins) {
+    console.error(
+      `resolved ${pin.specifier} -> @${pin.resolvedIdentity} (not pinned; deploy or run cf deps update to pin)`,
+    );
+  }
 
   // Concatenated per-module compiled bodies (the same composition the SES
   // loader evaluates), for inspection via --output.
@@ -85,4 +123,53 @@ function renderTransformed(program: Program) {
     console.log(`// transformed: ${name}`);
     console.log(contents);
   }
+}
+
+/**
+ * Walk a local resolver's import graph into a Program, leaving fabric (cf:)
+ * specifiers to the engine's FabricAwareResolver. Malformed cf: specifiers
+ * fail here with their parse error; valid ones either pass through
+ * (`"allow"`) or trigger the requires-a-space error (`"reject"`, for compiles
+ * with no fabric context). Shared by `cf dev`/`cf check` and `cf deps`.
+ */
+export async function collectLocalProgram(
+  resolver: ProgramResolver,
+  options: { fabricImports: "allow" | "reject" },
+): Promise<Program> {
+  const main = await resolver.main();
+  const pending = [main];
+  const seen = new Set<string>();
+  const files: Source[] = [];
+
+  while (pending.length > 0) {
+    const source = pending.shift()!;
+    if (seen.has(source.name)) continue;
+    seen.add(source.name);
+    files.push(source);
+
+    for (const specifier of collectImportSpecifiers(source, TARGET)) {
+      if (specifier.startsWith("cf:")) {
+        parseFabricRef(specifier); // malformed → FabricRefError, here
+        if (options.fabricImports === "reject") {
+          throw new Error(FABRIC_IMPORTS_REQUIRE_SPACE_MESSAGE);
+        }
+        continue;
+      }
+
+      const identifier = resolveImportSpecifier(specifier, source);
+      if (!isFileSystemSourceIdentifier(identifier) || seen.has(identifier)) {
+        continue;
+      }
+      const resolved = await resolver.resolveSource(identifier);
+      if (resolved !== undefined) pending.push(resolved);
+    }
+  }
+
+  return { main: main.name, files };
+}
+
+function isFileSystemSourceIdentifier(
+  identifier: string,
+): identifier is Source["name"] {
+  return identifier.startsWith("/");
 }

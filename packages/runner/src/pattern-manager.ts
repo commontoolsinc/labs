@@ -1,4 +1,9 @@
+import ts from "typescript";
 import { getLogger } from "@commonfabric/utils/logger";
+import {
+  collectImportSpecifiers,
+  type Source,
+} from "@commonfabric/js-compiler";
 import { Module, Pattern, Schema } from "./builder/types.ts";
 import {
   getArtifactEntryRef,
@@ -27,9 +32,15 @@ import {
   loadCompiledClosure,
   loadVerifiedSourceClosure,
   ROOT_LINK_SPECIFIER,
+  type SourceDoc,
   writeCompiledDocs,
   writeSourceDocs,
 } from "./compilation-cache/cell-cache.ts";
+import {
+  isFabricImportSpecifier,
+  parseFabricRef,
+  pinnedIdentity,
+} from "./sandbox/fabric-import-specifier.ts";
 import { URI } from "./sigil-types.ts";
 import { toURI } from "./uri-utils.ts";
 import { parseLink } from "./link-utils.ts";
@@ -48,6 +59,54 @@ const MAX_PATTERN_CACHE_SIZE = 100;
 // bundle is ~10 modules), and entries are cheap (a reference to an already-live
 // namespace).
 const MAX_EVALUATED_MODULE_CACHE_SIZE = 1000;
+const FABRIC_IMPORT_SCAN_TARGET = ts.ScriptTarget.ES2023;
+
+/**
+ * Re-derive a stored module's fabric edges from its SOURCE text (source docs
+ * deliberately do not store them as links). Unpinned specifiers are skipped:
+ * they carry no target identity to link, and they cannot legitimately occur
+ * here — the cell-cache write path refuses to persist modules with unpinned
+ * fabric imports (`assertNoUnpinnedFabricImports`), so a skip only ever drops
+ * an edge from data that predates that guard.
+ */
+function fabricImportRefsFromSource(
+  doc: SourceDoc,
+): CacheableModule["imports"] {
+  const source: Source = { name: doc.filename, contents: doc.code };
+  const refs: CacheableModule["imports"] = [];
+  const seen = new Set<string>();
+  for (
+    const specifier of collectImportSpecifiers(
+      source,
+      FABRIC_IMPORT_SCAN_TARGET,
+    )
+  ) {
+    if (!isFabricImportSpecifier(specifier)) continue;
+    const ref = parseFabricRef(specifier);
+    if (ref === undefined) continue;
+    const targetIdentity = pinnedIdentity(ref);
+    if (targetIdentity === undefined) continue;
+    const key = `${specifier}\0${targetIdentity}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    refs.push({ specifier, targetIdentity });
+  }
+  return refs;
+}
+
+function uniqueCacheableImports(
+  imports: CacheableModule["imports"],
+): CacheableModule["imports"] {
+  const seen = new Set<string>();
+  const out: CacheableModule["imports"] = [];
+  for (const imp of imports) {
+    const key = `${imp.specifier}\0${imp.targetIdentity}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(imp);
+  }
+  return out;
+}
 
 export const patternMetaSchema = internSchema(
   {
@@ -523,7 +582,12 @@ export class PatternManager {
     entryIdentity: string,
     fromSpace: MemorySpace,
     toSpace: MemorySpace,
+    visited = new Set<string>(),
   ): Promise<void> {
+    const visitKey = `${fromSpace}\0${toSpace}\0${entryIdentity}`;
+    if (visited.has(visitKey)) return;
+    visited.add(visitKey);
+
     // The origin-space closure may have been produced by THIS session's cold
     // compile, whose write-back is itself fire-and-forget and may not have
     // committed yet. A lost race would throw here — and for a handler-created
@@ -565,10 +629,15 @@ export class PatternManager {
       throw new Error("source closure unavailable in origin space");
     }
     const modules: CacheableModule[] = [];
+    const fabricDependencies = new Set<string>();
     for (const [identity, doc] of sourceDocs) {
       const compiled = compiledDocs.get(identity);
       if (!compiled) {
         throw new Error(`compiled doc missing for ${identity}`);
+      }
+      const fabricImports = fabricImportRefsFromSource(doc);
+      for (const imp of fabricImports) {
+        fabricDependencies.add(imp.targetIdentity);
       }
       modules.push({
         identity,
@@ -580,12 +649,15 @@ export class PatternManager {
           : {}),
         // The write functions re-derive the entry's root links; keep only the
         // real import edges.
-        imports: doc.imports
-          .filter((imp) => !imp.specifier.startsWith(ROOT_LINK_SPECIFIER))
-          .map((imp) => ({
-            specifier: imp.specifier,
-            targetIdentity: imp.identity,
-          })),
+        imports: uniqueCacheableImports([
+          ...doc.imports
+            .filter((imp) => !imp.specifier.startsWith(ROOT_LINK_SPECIFIER))
+            .map((imp) => ({
+              specifier: imp.specifier,
+              targetIdentity: imp.identity,
+            })),
+          ...fabricImports,
+        ]),
       });
     }
     const { error } = await this.runtime.editWithRetry((tx) => {
@@ -600,6 +672,15 @@ export class PatternManager {
       );
     });
     if (error) throw error;
+
+    for (const dependencyIdentity of fabricDependencies) {
+      await this.replicateClosures(
+        dependencyIdentity,
+        fromSpace,
+        toSpace,
+        visited,
+      );
+    }
   }
 
   private async syncLinkedPatternSource(
@@ -679,7 +760,10 @@ export class PatternManager {
       return await this.compileViaCellCache(program, cacheCtx);
     }
     const { id, graph, mainSpecifier, entryIdentity } = await this.runtime
-      .harness.compileToRecordGraph(program);
+      .harness.compileToRecordGraph(
+        program,
+        cacheCtx ? { fabricImports: { space: cacheCtx.space } } : {},
+      );
     cacheCtx?.onEntryIdentity?.(entryIdentity);
     const result = this.runtime.harness.evaluateRecordGraph(
       id,
@@ -745,6 +829,7 @@ export class PatternManager {
     let compiled;
     try {
       compiled = await harness.compileToRecordGraph(program, {
+        fabricImports: { space },
         // The bodies returned below come from `loadCompiledClosure`, an
         // integrity-gated (`requiredIntegrity`, fail-closed) read of the
         // compiled set. On a full hit the CFC integrity label is the security
@@ -952,7 +1037,14 @@ export class PatternManager {
     } finally {
       readTx.abort?.("load-pattern-by-identity read complete");
     }
-    if (!closure.has(entryIdentity)) return undefined;
+    if (!closure.has(entryIdentity)) {
+      return await this.tryColdLoadByIdentity(
+        entryIdentity,
+        symbol,
+        space,
+        cacheOpts,
+      );
+    }
 
     const cachedModules: CachedCompiledModule[] = [...closure].map(
       ([identity, doc]) => ({
@@ -983,6 +1075,95 @@ export class PatternManager {
       return pattern;
     } catch (error) {
       logger.warn("load-pattern-by-identity-miss", () => [
+        `entry=${entryIdentity}`,
+        `symbol=${symbol}`,
+        String(error),
+      ]);
+      return await this.tryColdLoadByIdentity(
+        entryIdentity,
+        symbol,
+        space,
+        cacheOpts,
+      );
+    }
+  }
+
+  /**
+   * Runtime-version-bump recovery for a content-addressed pattern reference:
+   * recompile from the verified source closure, letting fabric imports refetch
+   * their own source closures from the same space.
+   */
+  private async tryColdLoadByIdentity(
+    entryIdentity: string,
+    symbol: string,
+    space: MemorySpace,
+    cacheOpts: { runtimeVersion: string; compilerDid: string },
+  ): Promise<Pattern | undefined> {
+    const harness = this.runtime.harness;
+    const readTx = this.runtime.edit();
+    let sourceDocs;
+    try {
+      sourceDocs = await loadVerifiedSourceClosure(
+        this.runtime,
+        space,
+        entryIdentity,
+        readTx,
+      );
+    } finally {
+      readTx.abort?.("load-pattern-by-identity source read complete");
+    }
+    if (sourceDocs === undefined) return undefined;
+    const entry = sourceDocs.get(entryIdentity);
+    if (entry === undefined) return undefined;
+
+    const sourceFiles: Source[] = [...sourceDocs.values()].map((doc) => ({
+      name: doc.filename,
+      contents: doc.code,
+    }));
+
+    try {
+      const compiled = await harness.compileResolvedToRecordGraph(
+        sourceFiles,
+        entry.filename,
+        { fabricImports: { space } },
+      );
+      if (compiled.entryIdentity !== entryIdentity) {
+        throw new Error(
+          `source closure recompiled to ${compiled.entryIdentity}, expected ${entryIdentity}`,
+        );
+      }
+      const cachedModules: CachedCompiledModule[] = compiled.modules.map(
+        (module) => ({
+          identity: module.identity,
+          filename: module.filename,
+          code: module.js,
+          ...(module.sourceMap !== undefined
+            ? { sourceMap: module.sourceMap as never }
+            : {}),
+          imports: module.imports,
+        }),
+      );
+      const result = await harness.evaluateCachedModules(
+        cachedModules,
+        entryIdentity,
+        { sourceFiles },
+      );
+      const pattern = this.patternFromMain(result, symbol, entryIdentity);
+      const writeBack = this.writeBackCompileCache(
+        space,
+        compiled.modules,
+        entryIdentity,
+        cacheOpts,
+      );
+      this.compileCacheWrites.add(writeBack);
+      this.pendingCacheWriteBacks.add(writeBack);
+      writeBack.finally(() => {
+        this.compileCacheWrites.delete(writeBack);
+        this.pendingCacheWriteBacks.delete(writeBack);
+      });
+      return pattern;
+    } catch (error) {
+      logger.warn("load-pattern-by-identity-source-miss", () => [
         `entry=${entryIdentity}`,
         `symbol=${symbol}`,
         String(error),

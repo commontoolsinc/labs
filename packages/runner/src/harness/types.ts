@@ -3,6 +3,7 @@ import type {
   ProgramResolver,
   Source,
 } from "@commonfabric/js-compiler";
+import type { MemorySpace } from "../runtime.ts";
 import type {
   CachedCompiledModule,
   CompiledModuleGraph,
@@ -57,6 +58,32 @@ export interface TypeScriptHarnessProcessOptions {
   // on a miss/partial hit: freshly compiled bodies are always SES-verified.
   // Never set for direct `precompiledModules` injection (untrusted bytes).
   trustedBodies?: boolean;
+  /**
+   * Enables fabric (cf:) imports for this compile: the space whose cell-cache
+   * source docs fabric refs are fetched from and verified against. Absent means
+   * any fabric specifier in the authored program is a compile error.
+   */
+  fabricImports?: FabricImportOptions;
+}
+
+export interface FabricImportOptions {
+  space: MemorySpace;
+  /**
+   * Dev-only: resolve unpinned mutable refs by chasing the live pointer.
+   * The resulting compile is NOT cacheable — module identity folds the
+   * (unpinned) specifier text, so the chase result varies under a fixed
+   * identity, and persisting it would make `pattern:`/`compileCache:` docs
+   * key-unstable. The cell-cache write path enforces this
+   * (`assertNoUnpinnedFabricImports`); callers that write compiled artifacts
+   * back must never set this flag.
+   */
+  allowUnpinned?: boolean;
+}
+
+export interface ResolvedFabricPin {
+  specifier: string;
+  resolvedIdentity: string;
+  chain: string[];
 }
 
 /** A cached/compiled per-module artifact: emitted JS plus optional source map. */
@@ -130,6 +157,7 @@ export interface Harness extends EventTarget {
     mainSpecifier: string;
     entryIdentity: string;
     modules: CacheableModule[];
+    resolvedPins: ResolvedFabricPin[];
   }>;
 
   // Evaluate a verified ESM record graph produced by `compileToRecordGraph`.
@@ -153,6 +181,7 @@ export interface Harness extends EventTarget {
   compileResolvedToRecordGraph(
     resolvedFiles: Source[],
     entryFilename: string,
+    options?: { fabricImports?: FabricImportOptions },
   ): Promise<{ modules: CacheableModule[]; entryIdentity: string }>;
 
   // Resolves a `ProgramResolver` into a `Program` using the engine's

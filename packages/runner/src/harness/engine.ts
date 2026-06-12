@@ -5,10 +5,12 @@ import {
   type Exports,
   type Harness,
   type HarnessedFunction,
+  type ResolvedFabricPin,
   type RuntimeProgram,
   type TypeScriptHarnessProcessOptions,
 } from "./types.ts";
 import {
+  collectImportSpecifiers,
   getTypeScriptEnvironmentTypes,
   InMemoryProgram,
   type MappedPosition,
@@ -17,22 +19,29 @@ import {
   type Source,
   TypeScriptCompiler,
 } from "@commonfabric/js-compiler";
+import ts from "typescript";
 import {
   CommonFabricTransformerPipeline,
   OpaqueRefErrorTransformer,
 } from "@commonfabric/ts-transformers";
 import { getLogger } from "@commonfabric/utils/logger";
-import { Runtime } from "../runtime.ts";
+import { type MemorySpace, Runtime } from "../runtime.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { StaticCache } from "@commonfabric/static";
 import { pretransformProgramForModules } from "./pretransform.ts";
-import { resolveModuleImports } from "./module-identity.ts";
+import {
+  type ModuleImportEdges,
+  resolveModuleImports,
+} from "./module-identity.ts";
 import {
   buildRecordsFromCompiled,
   type CachedCompiledModule,
+  cachedModuleSourceNames,
   type CompiledModuleGraph,
   compileSourcesToRecords,
-  computeModuleIdentities,
+  computeFabricModuleIdentities,
+  FABRIC_MOUNT_ROOT,
+  type FabricMount,
 } from "../sandbox/module-record-compiler.ts";
 import {
   composeBundleSourceMap,
@@ -68,8 +77,11 @@ import {
   readBindingIdentity,
   recordVerifiedProvenance,
 } from "./verified-provenance.ts";
+import { FabricAwareResolver } from "./fabric-resolver.ts";
+import { isFabricImportSpecifier } from "../sandbox/fabric-import-specifier.ts";
 
 const logger = getLogger("engine");
+const IMPORT_SCAN_TARGET = ts.ScriptTarget.ES2023;
 
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {
@@ -218,29 +230,49 @@ export class Engine extends EventTarget implements Harness {
       mainSpecifier: string;
       entryIdentity: string;
       modules: CacheableModule[];
+      resolvedPins: ResolvedFabricPin[];
     }
   > {
     logger.timeStart("compileToRecordGraph");
     try {
       const id = options.identifier ?? computeId(program);
+      assertNoReservedFabricPaths(program.files);
       const mappedProgram = pretransformProgramForModules(program, id);
-      const resolver = new EngineProgramResolver(
+      assertFabricImportsHaveSpace(mappedProgram.files, options);
+      const engineResolver = new EngineProgramResolver(
         mappedProgram,
         this.ctRuntime.staticCache,
       );
+      const fabricResolver = options.fabricImports
+        ? new FabricAwareResolver(engineResolver, {
+          runtime: this.ctRuntime,
+          space: options.fabricImports.space,
+          allowUnpinned: options.fabricImports.allowUnpinned,
+        })
+        : undefined;
+      const resolver = fabricResolver ?? engineResolver;
       const resolvedProgram = await this.resolve(resolver);
+      const mounts = fabricResolver?.mounts() ?? [];
+      const specifierAliases = fabricResolver?.specifierAliases() ?? new Map();
+      const resolvedPins = fabricResolver?.resolvedPins() ?? [];
+      const resolvedFiles = uniqueSourcesByName(resolvedProgram.files);
+      const resolvedForCompile = { ...resolvedProgram, files: resolvedFiles };
 
       // Authored (non-.d.ts) sources are the modules that must have a body.
-      const moduleFiles = resolvedProgram.files.filter((f) =>
+      const moduleFiles = resolvedFiles.filter((f) =>
         !f.name.endsWith(".d.ts")
       );
 
       // Prefix-free content identity per resolved module path. Computed here
       // (cheap, no TS compile) so the cache-hit check and the write-back
       // descriptors agree with the graph's `cf:module/<hash>` specifiers.
-      const identityByPath = computeModuleIdentities(moduleFiles, {
-        idPrefix: `/${id}`,
-      });
+      const identityByPath = computeFabricModuleIdentities(
+        moduleFiles,
+        mounts,
+        {
+          idPrefix: `/${id}`,
+        },
+      );
       const entryIdentity = identityByPath.get(mappedProgram.main)!;
 
       // Cache hit: every emitted module already has a cached compiled body
@@ -278,9 +310,10 @@ export class Engine extends EventTarget implements Harness {
         }
       } else {
         const { compiler } = await this.getCompilerInternals();
-        const modules = compiler.compileToModules(resolvedProgram, {
+        const modules = compiler.compileToModules(resolvedForCompile, {
           noCheck: options.noCheck,
           runtimeModules: Engine.runtimeModuleNames(),
+          specifierAliases,
           getTransformedProgram: options.getTransformedProgram
             ? (nextProgram) => options.getTransformedProgram?.(nextProgram)
             : undefined,
@@ -324,6 +357,7 @@ export class Engine extends EventTarget implements Harness {
         precompiledBodies,
         precompiledSourceMaps,
         runtimeModules: runtimeModulesOption,
+        specifierAliases,
         // Strip the whole-program `/<id>` prefix from per-module identities so
         // `cf:module/<hash>` is entry-point independent and dedupes across
         // programs (the content-addressed cache keys off these identities).
@@ -410,15 +444,15 @@ export class Engine extends EventTarget implements Harness {
       const modules: CacheableModule[] = moduleFiles.map((file) => {
         const identity = identityByPath.get(file.name)!;
         const sourceMap = precompiledSourceMaps.get(file.name);
-        const imports = (importEdges.get(file.name)?.internalDeps ?? []).map((
-          dep,
-        ) => ({
-          specifier: dep.specifier,
-          targetIdentity: identityByPath.get(dep.target)!,
-        }));
+        const imports = cacheableImportsFor(
+          file.name,
+          importEdges,
+          identityByPath,
+          specifierAliases,
+        );
         return {
           identity,
-          filename: stripModuleIdPrefix(file.name, id),
+          filename: storedFilenameFor(file.name, id, mounts),
           source: file.contents,
           js: precompiledBodies.get(file.name)!,
           ...(sourceMap === undefined ? {} : { sourceMap }),
@@ -426,7 +460,14 @@ export class Engine extends EventTarget implements Harness {
         };
       });
 
-      return { id, graph, mainSpecifier, entryIdentity, modules };
+      return {
+        id,
+        graph,
+        mainSpecifier,
+        entryIdentity,
+        modules,
+        resolvedPins,
+      };
     } finally {
       logger.timeEnd("compileToRecordGraph");
     }
@@ -453,24 +494,45 @@ export class Engine extends EventTarget implements Harness {
   async compileResolvedToRecordGraph(
     resolvedFiles: Source[],
     entryFilename: string,
+    options: {
+      fabricImports?: TypeScriptHarnessProcessOptions["fabricImports"];
+    } = {},
   ): Promise<{ modules: CacheableModule[]; entryIdentity: string }> {
     const { compiler } = await this.getCompilerInternals();
+    assertNoReservedFabricPaths(resolvedFiles);
+    assertFabricImportsHaveSpace(resolvedFiles, options);
     // Resolve to add the runtime `.d.ts` type environment, WITHOUT pretransform
     // (no re-inject/re-prefix — the stored source is already transformed).
-    const resolver = new EngineProgramResolver(
+    const engineResolver = new EngineProgramResolver(
       { main: entryFilename, files: resolvedFiles },
       this.ctRuntime.staticCache,
     );
+    const fabricResolver = options.fabricImports
+      ? new FabricAwareResolver(engineResolver, {
+        runtime: this.ctRuntime,
+        space: options.fabricImports.space,
+        allowUnpinned: options.fabricImports.allowUnpinned,
+      })
+      : undefined;
+    const resolver = fabricResolver ?? engineResolver;
     const resolvedProgram = await this.resolve(resolver);
-    const moduleFiles = resolvedProgram.files.filter((f) =>
+    const mounts = fabricResolver?.mounts() ?? [];
+    const specifierAliases = fabricResolver?.specifierAliases() ?? new Map();
+    const resolvedProgramFiles = uniqueSourcesByName(resolvedProgram.files);
+    const resolvedForCompile = {
+      ...resolvedProgram,
+      files: resolvedProgramFiles,
+    };
+    const moduleFiles = resolvedProgramFiles.filter((f) =>
       !f.name.endsWith(".d.ts")
     );
     // Identities recompute prefix-free over the (already-normalized) closure —
     // they match the stored identities the source docs were keyed by.
-    const identityByPath = computeModuleIdentities(moduleFiles);
+    const identityByPath = computeFabricModuleIdentities(moduleFiles, mounts);
 
-    const emitted = compiler.compileToModules(resolvedProgram, {
+    const emitted = compiler.compileToModules(resolvedForCompile, {
       runtimeModules: Engine.runtimeModuleNames(),
+      specifierAliases,
       beforeTransformers: (program) => {
         const pipeline = new CommonFabricTransformerPipeline();
         return {
@@ -490,15 +552,15 @@ export class Engine extends EventTarget implements Harness {
     const importEdges = resolveModuleImports({ main: "", files: moduleFiles });
     const modules: CacheableModule[] = moduleFiles.map((file) => {
       const out = emitted.get(file.name)!;
-      const imports = (importEdges.get(file.name)?.internalDeps ?? []).map((
-        dep,
-      ) => ({
-        specifier: dep.specifier,
-        targetIdentity: identityByPath.get(dep.target)!,
-      }));
+      const imports = cacheableImportsFor(
+        file.name,
+        importEdges,
+        identityByPath,
+        specifierAliases,
+      );
       return {
         identity: identityByPath.get(file.name)!,
-        filename: file.name,
+        filename: storedFilenameFor(file.name, undefined, mounts),
         source: file.contents,
         js: out.js,
         ...(out.sourceMap === undefined ? {} : { sourceMap: out.sourceMap }),
@@ -891,10 +953,17 @@ export class Engine extends EventTarget implements Harness {
       // and the identities are authoritative. Also populate the canonical
       // source map so `fn.src` resolves to `cf:module/<identity>/<path>`.
       registerHashes: () => {
+        // Keyed by the same (collision-disambiguated) source names the record
+        // graph uses for sourceURLs, so stack-resolved fn.src coordinates land
+        // on the right module even when an importer and its fabric dependency
+        // share a filename. The canonical value keeps the AUTHORED filename —
+        // unchanged continuity with the source-compile path.
+        const sourceNames = cachedModuleSourceNames(modules);
         for (const m of modules) {
-          this.moduleHashByPrefixedSource.set(m.filename, m.identity);
+          const name = sourceNames.get(m.identity)!;
+          this.moduleHashByPrefixedSource.set(name, m.identity);
           this.canonicalSourceByPrefixed.set(
-            m.filename,
+            name,
             `cf:module/${m.identity}${m.filename}`,
           );
         }
@@ -1087,6 +1156,102 @@ function computeId(program: Program): string {
     ...program.files.filter(({ name }) => !name.endsWith(".d.ts")),
   ];
   return hashOf(source).toString();
+}
+
+function assertNoReservedFabricPaths(files: readonly Source[]): void {
+  for (const file of files) {
+    if (file.name.startsWith(FABRIC_MOUNT_ROOT)) {
+      throw new Error("/~cf/ is a reserved namespace");
+    }
+  }
+}
+
+function assertFabricImportsHaveSpace(
+  files: readonly Source[],
+  options: { fabricImports?: { space: MemorySpace } },
+): void {
+  if (options.fabricImports !== undefined) return;
+  for (const file of files) {
+    for (
+      const specifier of collectImportSpecifiers(file, IMPORT_SCAN_TARGET)
+    ) {
+      if (isFabricImportSpecifier(specifier)) {
+        throw new Error(
+          "fabric imports require a space context (options.fabricImports)",
+        );
+      }
+    }
+  }
+}
+
+function uniqueSourcesByName(files: readonly Source[]): Source[] {
+  const byName = new Map<string, Source>();
+  for (const file of files) {
+    const previous = byName.get(file.name);
+    if (previous !== undefined) {
+      if (previous.contents !== file.contents) {
+        throw new Error(
+          `Conflicting resolved source contents for '${file.name}'`,
+        );
+      }
+      continue;
+    }
+    byName.set(file.name, file);
+  }
+  return [...byName.values()];
+}
+
+function cacheableImportsFor(
+  fileName: string,
+  importEdges: ReadonlyMap<string, ModuleImportEdges>,
+  identityByPath: ReadonlyMap<string, string>,
+  specifierAliases: ReadonlyMap<string, string>,
+): CacheableModule["imports"] {
+  const edges = importEdges.get(fileName);
+  const internal = (edges?.internalDeps ?? []).map((dep) => ({
+    specifier: dep.specifier,
+    targetIdentity: requiredIdentity(identityByPath, dep.target),
+  }));
+  const fabric = (edges?.externalDeps ?? [])
+    .filter(isFabricImportSpecifier)
+    .map((specifier) => {
+      const target = specifierAliases.get(specifier);
+      if (target === undefined) {
+        throw new Error(
+          `unresolved fabric specifier '${specifier}' survived compile`,
+        );
+      }
+      return {
+        specifier,
+        targetIdentity: requiredIdentity(identityByPath, target),
+      };
+    });
+  return [...internal, ...fabric];
+}
+
+function requiredIdentity(
+  identityByPath: ReadonlyMap<string, string>,
+  path: string,
+): string {
+  const identity = identityByPath.get(path);
+  if (identity === undefined) {
+    throw new Error(`No module identity computed for '${path}'`);
+  }
+  return identity;
+}
+
+function storedFilenameFor(
+  name: string,
+  id: string | undefined,
+  mounts: readonly FabricMount[],
+): string {
+  for (const mount of mounts) {
+    const prefix = `${FABRIC_MOUNT_ROOT}${mount.entryIdentity}`;
+    if (name.startsWith(`${prefix}/`)) {
+      return name.slice(prefix.length);
+    }
+  }
+  return id === undefined ? name : stripModuleIdPrefix(name, id);
 }
 
 /**

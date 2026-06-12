@@ -122,13 +122,16 @@ class VirtualFs implements ModuleResolutionHost {
 
 class TypeScriptHost extends VirtualFs implements CompilerHost {
   private allowedRuntimeModules: string[];
+  private specifierAliases?: ReadonlyMap<string, string>;
   constructor(
     source: Program,
     typeLibs: TypeLibs,
     allowedRuntimeModules: string[],
+    specifierAliases?: ReadonlyMap<string, string>,
   ) {
     super(source, typeLibs, DEBUG_VIRTUAL_FS);
     this.allowedRuntimeModules = allowedRuntimeModules;
+    this.specifierAliases = specifierAliases;
   }
 
   getDefaultLibFileName(_options: CompilerOptions): string {
@@ -179,6 +182,17 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
   ): readonly ResolvedModuleWithFailedLookupLocations[] {
     return moduleLiterals.map((literal) => {
       const name = literal.text;
+      const aliased = this.specifierAliases?.get(name);
+      if (aliased !== undefined) {
+        return {
+          resolvedModule: {
+            resolvedFileName: aliased,
+            extension: aliased.endsWith(".tsx")
+              ? ts.Extension.Tsx
+              : ts.Extension.Ts,
+          },
+        };
+      }
       if (name[0] === "." || name[0] === "/") {
         const resolved = path.join(path.dirname(containingFile), name);
         return {
@@ -230,6 +244,12 @@ export interface TypeScriptCompilerOptions {
   // Optional mapping of runtime module name e.g. `"@commonfabric/framework"`,
   // and its corresponding type definitions.
   runtimeModules?: string[];
+  /**
+   * Maps an import specifier (verbatim text) to a program file name. Used for
+   * scheme-prefixed specifiers that the path-join and runtime-module rules
+   * cannot resolve. The target must be a file in the program.
+   */
+  specifierAliases?: ReadonlyMap<string, string>;
   // Transformations to run before JS transforms.
   // Can return either an array of transformer factories (simple case)
   // or a TransformerPipelineResult with factories and getDiagnostics.
@@ -288,7 +308,12 @@ export class TypeScriptCompiler {
     // themselves.
     tsOptions.skipLibCheck = true;
 
-    const host = new TypeScriptHost(program, this.typeLibs, runtimeModules);
+    const host = new TypeScriptHost(
+      program,
+      this.typeLibs,
+      runtimeModules,
+      inputOptions.specifierAliases,
+    );
     const tsProgram = ts.createProgram(sourceNames, tsOptions, host);
 
     const checker = new Checker(tsProgram, {

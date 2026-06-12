@@ -294,6 +294,11 @@ export interface CompileSourcesOptions {
    * be consistent with `idPrefix` / `runtimeFingerprint`.
    */
   identityByPath?: Map<string, string>;
+  /**
+   * Maps an authored import specifier to a concrete file already present in the
+   * program. Used for scheme-prefixed fabric refs mounted under reserved paths.
+   */
+  specifierAliases?: ReadonlyMap<string, string>;
 }
 
 export interface CompiledModuleGraph {
@@ -364,6 +369,73 @@ export function computeModuleIdentities(
   return identityByPath;
 }
 
+export const FABRIC_MOUNT_ROOT = "/~cf/";
+
+export interface FabricMount {
+  /** Terminal identity the subtree was fetched by and must hash back to. */
+  entryIdentity: string;
+  /** Mounted path of the subtree's entry file. */
+  entryPath: string;
+  /** The fabric specifiers that resolve to this mount. */
+  specifiers: string[];
+}
+
+/**
+ * Compute module identities for a program that may include mounted fabric
+ * subtrees. Authored files keep the existing idPrefix behavior; each mount is
+ * hashed as its own standalone source set by stripping `/~cf/<identity>`.
+ */
+export function computeFabricModuleIdentities(
+  sources: Source[],
+  mounts: readonly FabricMount[],
+  options: { idPrefix?: string; runtimeFingerprint?: string } = {},
+): Map<string, string> {
+  const authored: Source[] = [];
+  const mountFiles = new Map<FabricMount, Source[]>();
+  for (const mount of mounts) mountFiles.set(mount, []);
+
+  for (const source of sources) {
+    if (!source.name.startsWith(FABRIC_MOUNT_ROOT)) {
+      authored.push(source);
+      continue;
+    }
+
+    const mount = mounts.find((candidate) =>
+      source.name.startsWith(mountPrefix(candidate))
+    );
+    if (mount === undefined) {
+      throw new Error(
+        `corrupt fabric mount assembly: '${source.name}' is under ${FABRIC_MOUNT_ROOT} but matches no mount`,
+      );
+    }
+    mountFiles.get(mount)!.push(source);
+  }
+
+  const result = computeModuleIdentities(authored, options);
+  for (const mount of mounts) {
+    const identities = computeModuleIdentities(mountFiles.get(mount) ?? [], {
+      idPrefix: `${FABRIC_MOUNT_ROOT}${mount.entryIdentity}`,
+      ...(options.runtimeFingerprint !== undefined
+        ? { runtimeFingerprint: options.runtimeFingerprint }
+        : {}),
+    });
+    const actual = identities.get(mount.entryPath);
+    if (actual !== mount.entryIdentity) {
+      throw new Error(
+        `integrity failure for fabric mount ${mount.entryIdentity}: mounted entry '${mount.entryPath}' hashed to '${actual}'`,
+      );
+    }
+    for (const [path, identity] of identities) {
+      result.set(path, identity);
+    }
+  }
+  return result;
+}
+
+function mountPrefix(mount: FabricMount): string {
+  return `${FABRIC_MOUNT_ROOT}${mount.entryIdentity}/`;
+}
+
 export function compileSourcesToRecords(
   sources: Source[],
   options: CompileSourcesOptions = {},
@@ -418,9 +490,18 @@ export function compileSourcesToRecords(
       const source = sourceByName.get(current);
       if (!raw || !source) continue;
       for (const targetSpec of raw.starTargets) {
-        const resolved = resolveImportSpecifier(targetSpec, source);
-        const internal = findInternalTarget(fileNames, resolved);
+        const aliased = options.specifierAliases?.get(targetSpec);
+        const internal = aliased ??
+          findInternalTarget(
+            fileNames,
+            resolveImportSpecifier(targetSpec, source),
+          );
         if (internal !== undefined) {
+          if (!fileNames.has(internal)) {
+            throw new Error(
+              `specifier alias '${targetSpec}' -> '${internal}' does not name a program file`,
+            );
+          }
           reachableInternal.add(internal);
           stack.push(internal);
         } else {
@@ -496,6 +577,15 @@ export function compileSourcesToRecords(
         resolutions[spec] = specifierByPath.get(internal)!;
       } else if (spec in runtimeModules) {
         resolutions[spec] = `cf:runtime/${spec}`;
+      } else if (options.specifierAliases?.has(spec)) {
+        const target = options.specifierAliases.get(spec)!;
+        const targetSpecifier = specifierByPath.get(target);
+        if (targetSpecifier === undefined) {
+          throw new Error(
+            `specifier alias '${spec}' -> '${target}' does not name a program file`,
+          );
+        }
+        resolutions[spec] = targetSpecifier;
       } else {
         // Unknown external; leave as-is so a missing-record error is explicit.
         resolutions[spec] = spec;
@@ -606,6 +696,36 @@ export interface CachedCompiledModule {
 }
 
 /**
+ * Unique per-module source name for a cached closure. A single program's
+ * closure has unique filenames, but a fabric importer's closure also carries
+ * its imported subtrees' modules, which routinely share names (`/main.tsx`).
+ * The cached record path keys several side tables by source name
+ * (`specifierByPath` → per-module source maps, export map,
+ * `exportsByIdentity`; the engine's fn.src canonicalization) — a name
+ * collision silently drops one module from all of them. Disambiguate
+ * colliding names with the mount-root convention; a collision-free closure
+ * keeps plain filenames (byte-identical to pre-fabric behavior).
+ */
+export function cachedModuleSourceNames(
+  modules: readonly CachedCompiledModule[],
+): Map<string, string> {
+  const counts = new Map<string, number>();
+  for (const m of modules) {
+    counts.set(m.filename, (counts.get(m.filename) ?? 0) + 1);
+  }
+  const names = new Map<string, string>();
+  for (const m of modules) {
+    names.set(
+      m.identity,
+      counts.get(m.filename)! > 1
+        ? `${FABRIC_MOUNT_ROOT}${m.identity}${m.filename}`
+        : m.filename,
+    );
+  }
+  return names;
+}
+
+/**
  * Build a verified-able record graph **directly from cached compiled modules** —
  * no TypeScript source, no `resolve`, no recompile. This is the warm load path:
  * the content-addressed cache already holds each module's compiled body + its
@@ -625,6 +745,7 @@ export function buildRecordsFromCompiled(
   const runtimeModules = options.runtimeModules ?? {};
   const specifierOf = (identity: string) => `cf:module/${identity}`;
   const byIdentity = new Map(modules.map((m) => [m.identity, m]));
+  const sourceNames = cachedModuleSourceNames(modules);
 
   // Direct export names + `export *` edges (as dependency identities) per module.
   const direct = new Map<
@@ -675,7 +796,7 @@ export function buildRecordsFromCompiled(
 
   for (const m of modules) {
     const specifier = specifierOf(m.identity);
-    specifierByPath.set(m.filename, specifier);
+    specifierByPath.set(sourceNames.get(m.identity)!, specifier);
     compiledBodies.set(specifier, m.code);
     if (m.sourceMap) moduleSourceMaps.set(specifier, m.sourceMap);
 
@@ -694,7 +815,10 @@ export function buildRecordsFromCompiled(
 
     const exportNames = resolveFullExports(m.identity);
     const namespaceExports = [...exportNames, "__esModule"];
-    const sourceUrl = m.filename.replace(/[\r\n\u2028\u2029]/g, "_");
+    const sourceUrl = sourceNames.get(m.identity)!.replace(
+      /[\r\n\u2028\u2029]/g,
+      "_",
+    );
     const compiled = m.code;
     records.set(specifier, {
       imports: importSpecs,

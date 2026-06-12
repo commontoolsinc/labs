@@ -138,6 +138,44 @@ describe("TypeScriptCompiler", () => {
     expect(modules.get("/main.tsx")!.js).toContain('require("@std/math")');
   });
 
+  it("uses specifier aliases for type resolution without rewriting emitted imports", () => {
+    const compiler = new TypeScriptCompiler(types);
+    const specifierAliases = new Map([["x-scheme:thing", "/dep.tsx"]]);
+    const program = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents:
+            `import { value } from "x-scheme:thing";\nexport const run = (): string => value;`,
+        },
+        {
+          name: "/dep.tsx",
+          contents: `export const value: string = "ok";`,
+        },
+      ],
+    };
+
+    const modules = compiler.compileToModules(program, { specifierAliases });
+    expect(modules.get("/main.tsx")!.js).toContain(
+      'require("x-scheme:thing")',
+    );
+
+    const badProgram = {
+      ...program,
+      files: [
+        {
+          name: "/main.tsx",
+          contents:
+            `import { missing } from "x-scheme:thing";\nexport const run = missing;`,
+        },
+        program.files[1],
+      ],
+    };
+    expect(() => compiler.compileToModules(badProgram, { specifierAliases }))
+      .toThrow(`has no exported member 'missing'.`);
+  });
+
   it("Resolves nested relative type imports from runtime module typedefs", async () => {
     const compiler = new TypeScriptCompiler(types);
     const program = new InMemoryProgram("/main.tsx", {

@@ -31,6 +31,8 @@ function files(map: Record<string, string>): Source[] {
   return Object.entries(map).map(([name, contents]) => ({ name, contents }));
 }
 
+const FABRIC_HASH = "Avcny13Rj8q-2ClANy_-k0ikWWQcXx7QTdsiqGfrC1c";
+
 describe("compileSourcesToRecords + importModuleGraphNow (end to end)", () => {
   it("loads a multi-module compiled program through the SES module graph", () => {
     const sources = files({
@@ -89,6 +91,51 @@ describe("compileSourcesToRecords + importModuleGraphNow (end to end)", () => {
       records,
     }) as { run(): number };
     expect(ns.run()).toBe(42);
+  });
+
+  it("resolves specifier aliases to content-addressed module records", () => {
+    const fabricSpecifier = `cf:pattern:${FABRIC_HASH}`;
+    const mountedPath = `/~cf/${FABRIC_HASH}/main.tsx`;
+    const sources = files({
+      "/a.tsx": `import { x } from "${fabricSpecifier}";\nexport const y = x;`,
+      [mountedPath]: `export const x = 1;`,
+    });
+    const { records, specifierByPath } = compileSourcesToRecords(sources, {
+      specifierAliases: new Map([[fabricSpecifier, mountedPath]]),
+      identityByPath: new Map([
+        ["/a.tsx", "importer-identity"],
+        [mountedPath, "mounted-identity"],
+      ]),
+    });
+
+    const record = records.get(specifierByPath.get("/a.tsx")!)!;
+    expect(record.resolutions?.[fabricSpecifier]).toBe(
+      "cf:module/mounted-identity",
+    );
+  });
+
+  it("resolves export-star specifier aliases when collecting exports", () => {
+    const fabricSpecifier = `cf:pattern:${FABRIC_HASH}`;
+    const mountedPath = `/~cf/${FABRIC_HASH}/main.tsx`;
+    const sources = files({
+      "/a.tsx": `export * from "${fabricSpecifier}";\nexport const own = 2;`,
+      [mountedPath]: `export const imported = 1;`,
+    });
+    const { records, specifierByPath } = compileSourcesToRecords(sources, {
+      specifierAliases: new Map([[fabricSpecifier, mountedPath]]),
+      identityByPath: new Map([
+        ["/a.tsx", "importer-identity"],
+        [mountedPath, "mounted-identity"],
+      ]),
+    });
+
+    const record = records.get(specifierByPath.get("/a.tsx")!)!;
+    expect(new Set(record.exports)).toEqual(
+      new Set(["imported", "own", "__esModule"]),
+    );
+    expect(record.resolutions?.[fabricSpecifier]).toBe(
+      "cf:module/mounted-identity",
+    );
   });
 
   it("resolves a default import across modules (esModuleInterop)", () => {
