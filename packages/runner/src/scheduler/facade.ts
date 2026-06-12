@@ -114,7 +114,7 @@ import {
   type SchedulerDelayControlState,
   scheduleWithDebounce as scheduleWithDebounceState,
 } from "./delay-control.ts";
-import { SchedulerDelays } from "./delays.ts";
+import { SchedulerGates } from "./gates.ts";
 import {
   markInvalid as markInvalidRecord,
   type StorageNotificationState,
@@ -339,7 +339,8 @@ export class Scheduler {
   private eventQueueWakeState!: EventQueueWakeState;
   private eventQueueState!: SchedulerEventQueueState;
   private eventExecutionState!: SchedulerEventExecutionState;
-  private delays = new SchedulerDelays({
+  private gates = new SchedulerGates({
+    nodes: this.nodes,
     actionStats: this.actionStats,
     getActionId: (action) => this.getActionId(action),
   });
@@ -597,13 +598,13 @@ export class Scheduler {
 
     const { actionOptions } = observation;
     if (actionOptions?.debounceMs !== undefined) {
-      this.delays.setDebounce(action, actionOptions.debounceMs);
+      this.gates.setDebounce(action, actionOptions.debounceMs);
     }
     if (actionOptions?.noDebounce !== undefined) {
-      this.delays.setNoDebounce(action, actionOptions.noDebounce);
+      this.gates.setNoDebounce(action, actionOptions.noDebounce);
     }
     if (actionOptions?.throttleMs !== undefined) {
-      this.delays.setThrottle(action, actionOptions.throttleMs);
+      this.gates.setThrottle(action, actionOptions.throttleMs);
     }
 
     if (
@@ -995,21 +996,21 @@ export class Scheduler {
    * If triggered again during the delay, the timer resets.
    */
   setDebounce(action: Action, ms: number): void {
-    this.delays.setDebounce(action, ms);
+    this.gates.setDebounce(action, ms);
   }
 
   /**
    * Gets the current debounce delay for an action, if set.
    */
   getDebounce(action: Action): number | undefined {
-    return this.delays.getDebounce(action);
+    return this.gates.getDebounce(action);
   }
 
   /**
    * Clears the debounce setting for an action.
    */
   clearDebounce(action: Action): void {
-    this.delays.clearDebounce(action);
+    this.gates.clearDebounce(action);
   }
 
   /**
@@ -1018,7 +1019,7 @@ export class Scheduler {
    * By default, slow actions (> 50ms avg after 3 runs) will automatically get debounced.
    */
   setNoDebounce(action: Action, optOut: boolean): void {
-    this.delays.setNoDebounce(action, optOut);
+    this.gates.setNoDebounce(action, optOut);
   }
 
   // ============================================================
@@ -1033,21 +1034,21 @@ export class Scheduler {
    * dependencies are throttled are parked until the earliest eligible wake time.
    */
   setThrottle(action: Action, ms: number): void {
-    this.delays.setThrottle(action, ms);
+    this.gates.setThrottle(action, ms);
   }
 
   /**
    * Gets the current throttle period for an action, if set.
    */
   getThrottle(action: Action): number | undefined {
-    return this.delays.getThrottle(action);
+    return this.gates.getThrottle(action);
   }
 
   /**
    * Clears the throttle setting for an action.
    */
   clearThrottle(action: Action): void {
-    this.delays.clearThrottle(action);
+    this.gates.clearThrottle(action);
   }
 
   /**
@@ -1292,7 +1293,7 @@ export class Scheduler {
   dispose(): void {
     this.disposed = true;
     // Clear all active debounce timers
-    this.delays.clearActiveDebounceTimers();
+    this.gates.clearActiveDebounceTimers();
     if (this.pendingQueueTaskTimer !== null) {
       clearTimeout(this.pendingQueueTaskTimer);
       this.pendingQueueTaskTimer = null;
@@ -1373,7 +1374,7 @@ export class Scheduler {
     // Build initial seeds for pull mode (effects + special actions).
     return buildPullInitialSeeds({
       eventBlockingDeps,
-      computationDebounceFlushSeeds: this.delays.computationDebounceFlushSeeds,
+      computationDebounceFlushSeeds: this.gates.computationDebounceFlushSeeds,
     });
   }
 
@@ -1557,7 +1558,7 @@ export class Scheduler {
 
   private createDelayControlState(): SchedulerDelayControlState {
     return {
-      delays: this.delays,
+      gates: this.gates,
       computations: this.nodes.computations,
       effects: this.nodes.effects,
       isInvalid: (action) => this.isInvalidAction(action),
@@ -1687,7 +1688,7 @@ export class Scheduler {
       effects: this.nodes.effects,
       isDemandedPullComputation: (action) =>
         this.isDemandedPullComputation(action),
-      isThrottled: (action) => this.delays.isThrottled(action),
+      isThrottled: (action) => this.gates.isThrottled(action),
     };
   }
 
@@ -1711,7 +1712,7 @@ export class Scheduler {
         .dirtyPullRunnableStateWithDebounce,
       isLiveAction: (action) => this.isLiveAction(action),
       hasActiveDebounceTimer: (action) =>
-        this.delays.hasActiveDebounceTimer(action),
+        this.gates.hasActiveDebounceTimer(action),
       getNextEligibleRunTime: (action) => this.getNextEligibleRunTime(action),
       // backgroundTasks holds exactly the in-flight initial-rehydration tasks
       // (the only add() site is queueInitialActionRehydration).
@@ -1741,12 +1742,13 @@ export class Scheduler {
       pending: this.pending,
       effects: this.nodes.effects,
       writeIndex: this.writeIndex,
+      adoptGateConfig: (action) => this.gates.adopt(action),
       setDebounce: (action, ms) => this.setDebounce(action, ms),
       setNoDebounce: (action, optOut) => this.setNoDebounce(action, optOut),
       setThrottle: (action, ms) => this.setThrottle(action, ms),
       getSchedulingWrites: (action) =>
         this.writeIndex.getSchedulingWrites(action),
-      isThrottled: (action) => this.delays.isThrottled(action),
+      isThrottled: (action) => this.gates.isThrottled(action),
       isDebouncedComputationWaiting: (action) =>
         this.isDebouncedComputationWaiting(action),
       isInvalid: (action) => this.isInvalidAction(action),
@@ -1781,9 +1783,9 @@ export class Scheduler {
       writeIndex: this.writeIndex,
       getActionId: (target) => this.getActionId(target),
       clearInvalid: (target) => this.clearInvalidAction(target),
-      cancelDebounceTimer: (target) => this.delays.cancelDebounceTimer(target),
+      cancelDebounceTimer: (target) => this.gates.cancelDebounceTimer(target),
       clearComputationDebounceState: (target, targetOptions) =>
-        this.delays.clearComputationDebounceState(target, targetOptions),
+        this.gates.clearComputationDebounceState(target, targetOptions),
     };
   }
 
@@ -1804,12 +1806,12 @@ export class Scheduler {
       collectPullIterationSeeds: (seeds) =>
         this.collectPullIterationSeeds(seeds),
       getActionId: (action) => this.getActionId(action),
-      isThrottled: (action) => this.delays.isThrottled(action),
+      isThrottled: (action) => this.gates.isThrottled(action),
       getNextEligibleRunTime: (action) => this.getNextEligibleRunTime(action),
       isDebouncedComputationWaiting: (action) =>
         this.isDebouncedComputationWaiting(action),
       clearComputationDebounceState: (action) =>
-        this.delays.clearComputationDebounceState(action),
+        this.gates.clearComputationDebounceState(action),
       isLiveAction: (action) => this.isLiveAction(action),
       runAction: (action) => this.run(action),
     };
@@ -1957,12 +1959,12 @@ export class Scheduler {
         this.writeIndex.getSchedulingWrites(target),
       getMaterializerWriteEnvelopes: (target) =>
         this.materializers.getMaterializerWriteEnvelopes(target),
-      getDebounce: (target) => this.delays.getDebounce(target),
-      getNoDebounce: (target) => this.delays.getNoDebounce(target),
-      getThrottle: (target) => this.delays.getThrottle(target),
+      getDebounce: (target) => this.gates.getDebounce(target),
+      getNoDebounce: (target) => this.gates.getNoDebounce(target),
+      getThrottle: (target) => this.gates.getThrottle(target),
       maybeAutoDebounce: (target) => this.maybeAutoDebounce(target),
       markActionHasRun: (target) => {
-        this.delays.markActionHasRun(target);
+        this.gates.markActionHasRun(target);
         this.initialRehydrationTokens.delete(target);
       },
       markNodeHasRun: (target) => this.markNodeHasRun(target),
@@ -1991,10 +1993,10 @@ export class Scheduler {
       dependents: this.dependents,
       nodes: this.nodes,
       actionStats: this.actionStats,
-      getDebounce: (action) => this.delays.getDebounce(action),
-      getThrottle: (action) => this.delays.getThrottle(action),
+      getDebounce: (action) => this.gates.getDebounce(action),
+      getThrottle: (action) => this.gates.getThrottle(action),
       hasActiveDebounceTimer: (action) =>
-        this.delays.hasActiveDebounceTimer(action),
+        this.gates.hasActiveDebounceTimer(action),
       getActionId: (action) => this.getActionId(action),
       getSchedulingWrites: (action) =>
         this.writeIndex.getSchedulingWrites(action),
@@ -2062,10 +2064,7 @@ export class Scheduler {
   }
 
   private getNextEligibleRunTime(action: Action): number | undefined {
-    const now = performance.now();
-    const throttleAt = this.delays.getNextEligibleRunTime(action);
-    const backoffAt = this.nodes.get(action)?.backoffUntil;
-    return maxFutureTime(now, throttleAt, backoffAt);
+    return this.gates.getNextEligibleRunTime(action);
   }
 
   private markActionInvalid(
@@ -2100,7 +2099,7 @@ export class Scheduler {
     if (this.nodes.computations.has(action)) {
       this.scheduleComputationDebounce(action);
     }
-    if (this.nodes.effects.has(action) && this.delays.getDebounce(action)) {
+    if (this.nodes.effects.has(action) && this.gates.getDebounce(action)) {
       this.scheduleWithDebounce(action);
       return;
     }
@@ -2149,8 +2148,7 @@ export class Scheduler {
   }
 
   private clearNodeBackoff(record: SchedulerNode): void {
-    record.backoffUntil = undefined;
-    record.backoffFailures = 0;
+    this.gates.clearBackoff(record);
   }
 
   private hasPendingLineageHeadEvent(): boolean {
@@ -2253,16 +2251,4 @@ export class Scheduler {
       ]);
     }
   }
-}
-
-function maxFutureTime(
-  now: number,
-  ...times: Array<number | undefined>
-): number | undefined {
-  let max: number | undefined;
-  for (const time of times) {
-    if (time === undefined || time <= now) continue;
-    max = max === undefined ? time : Math.max(max, time);
-  }
-  return max;
 }

@@ -278,10 +278,10 @@ export function planBudgetBackoff(state: {
     }
 
     const delayMs = nextBackoffDelayMs(record);
-    record.backoffFailures++;
-    record.backoffUntil = now + delayMs;
+    record.gate.backoffStreak++;
+    record.gate.backoffUntil = now + delayMs;
     actions.push(action);
-    backoffUntil = minDefined(backoffUntil, record.backoffUntil);
+    backoffUntil = minDefined(backoffUntil, record.gate.backoffUntil);
   }
 
   return {
@@ -334,7 +334,7 @@ function isBudgetBackoffCandidate(
 
 function nextBackoffDelayMs(record: SchedulerNode): number {
   return Math.min(
-    BACKOFF_BASE_MS * 2 ** record.backoffFailures,
+    BACKOFF_BASE_MS * 2 ** record.gate.backoffStreak,
     BACKOFF_MAX_MS,
   );
 }

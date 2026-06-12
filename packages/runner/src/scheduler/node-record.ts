@@ -4,6 +4,16 @@ import type { Action } from "./types.ts";
 export type NodeKind = "computation" | "effect";
 export type NodeStatus = "never-ran" | "clean" | "invalid";
 
+export interface SchedulerGateState {
+  debounceMs?: number;
+  noAutoDebounce?: boolean;
+  throttleMs?: number;
+  debounceReadyAt?: number;
+  throttleReadyAt?: number;
+  backoffUntil?: number;
+  backoffStreak: number;
+}
+
 export interface SchedulerNode {
   readonly action: Action;
   // Mutable for the one sanctioned transition: computation → effect
@@ -17,9 +27,8 @@ export interface SchedulerNode {
   liveRefs: number;
   provisionalDemand: boolean;
   provisionalDemandPass?: number;
+  gate: SchedulerGateState;
   passRuns: number;
-  backoffUntil?: number;
-  backoffFailures: number;
   retries: number;
 }
 
@@ -71,8 +80,8 @@ export class NodeRegistry {
       invalidCauses: [],
       liveRefs: 0,
       provisionalDemand: false,
+      gate: { backoffStreak: 0 },
       passRuns: 0,
-      backoffFailures: 0,
       retries: 0,
     };
     this.records.set(action, record);

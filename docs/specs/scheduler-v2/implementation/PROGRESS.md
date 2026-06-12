@@ -4958,3 +4958,49 @@ packages/runner/test/scheduler-bench-helpers.ts:62:  ["event/populate", "schedul
   - Expected noisy passing logs remain: scheduler write-surface warnings,
     deliberate event/retry/preflight error logs, createRef no-cause warnings,
     traversal warnings, and the reload-rehydration transient `TypeError`.
+
+## 08/5.1-gate-state
+
+- [x] pending — introduced scheduler gate state on node records and moved
+  debounce/throttle/backoff ownership behind `SchedulerGates`.
+- Reviewer poll:
+  - No new reviewer verdict was present after the latest Phase 4 poll markers
+    at the start of this heartbeat.
+- Shape:
+  - Added `scheduler/gates.ts` with per-node gate fields for
+    `debounceMs`, `noAutoDebounce`, `throttleMs`, `debounceReadyAt`,
+    `throttleReadyAt`, `backoffUntil`, and `backoffStreak`.
+  - Public `setDebounce`/`setThrottle` before registration is preserved by
+    staging gate config for unregistered action functions and adopting it when
+    registration creates/activates the node record.
+  - Moved pass-budget backoff storage from top-level `SchedulerNode` fields
+    into `record.gate`.
+  - Left the separate debounce timers, computation debounce flush seed set,
+    and event wake timer intact for the later Phase 5.2/5.3 deletion steps.
+- Recordings:
+  - `deno fmt` on the touched scheduler source files: passed (`Checked 6
+    files`).
+  - `deno lint` on the touched scheduler source files: passed (`Checked 6
+    files`).
+  - `deno check` on the touched scheduler source files: passed.
+  - Phase 5 contract debounce file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-timing.test.ts`: passed, `1 passed (14 steps)`,
+    `0 failed`, `977ms`.
+  - Phase 5 contract throttle file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-throttle.test.ts`: passed, `1 passed (10 steps)`,
+    `0 failed`, `2s`.
+  - Event parking focused file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-events.test.ts`: passed, `1 passed (15 steps)`,
+    `0 failed`, `291ms`.
+  - Backoff focused file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-convergence.test.ts`: passed, `1 passed (15 steps)`,
+    `0 failed`, `1s`.
+  - Expected noisy passing logs remain: scheduler event/retry/error-path logs.
