@@ -3,14 +3,12 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { Action } from "../src/scheduler.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
-import { markSchedulerDirty } from "../src/scheduler/staleness.ts";
 
 const signer = await Identity.fromPassphrase("bench operator");
 const space = signer.did();
 
 type SchedulerInternals = {
   markDirty: (action: Action) => void;
-  scheduleAffectedEffects: (action: Action) => void;
   collectDirtyDependencies: (
     action: Action,
     workSet: Set<Action>,
@@ -22,16 +20,12 @@ function getSchedulerInternals(
   scheduler: Runtime["scheduler"],
 ): SchedulerInternals {
   const internal = scheduler as unknown as {
-    dirtySchedulingState: Parameters<typeof markSchedulerDirty>[0];
-    scheduleAffectedEffects: SchedulerInternals["scheduleAffectedEffects"];
+    markAndScheduleInvalidAction: SchedulerInternals["markDirty"];
     collectDirtyDependencies: SchedulerInternals["collectDirtyDependencies"];
   };
 
   return {
-    markDirty: (action) =>
-      markSchedulerDirty(internal.dirtySchedulingState, action),
-    scheduleAffectedEffects: (action) =>
-      internal.scheduleAffectedEffects(action),
+    markDirty: (action) => internal.markAndScheduleInvalidAction(action),
     collectDirtyDependencies: (action, workSet, memo) =>
       internal.collectDirtyDependencies(action, workSet, memo),
   };
@@ -133,7 +127,6 @@ Deno.bench(
 
     for (let i = 0; i < 20; i++) {
       schedulerInternal.markDirty(computation);
-      schedulerInternal.scheduleAffectedEffects(computation);
       await runtime.scheduler.idle();
     }
 
@@ -152,7 +145,6 @@ Deno.bench(
 
     for (let i = 0; i < 10; i++) {
       schedulerInternal.markDirty(computation);
-      schedulerInternal.scheduleAffectedEffects(computation);
       await runtime.scheduler.idle();
     }
 

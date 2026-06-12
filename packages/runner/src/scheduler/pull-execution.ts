@@ -10,6 +10,8 @@ import {
   summarizeSettleIteration,
   summarizeSettleRun,
 } from "./execution.ts";
+import { PASS_RUN_BUDGET } from "./constants.ts";
+import { isInvalidOrNeverRan } from "./pull-scheduling.ts";
 
 const logger = getLogger("scheduler", {
   enabled: true,
@@ -26,7 +28,7 @@ function buildPullIterationWorkSet(state: {
   readonly initialSeeds: ReadonlySet<Action>;
   readonly settleIter: number;
   readonly dirty: ReadonlySet<Action>;
-  readonly effects: ReadonlySet<Action>;
+  readonly nodes: SchedulerSettleLoopState["nodes"];
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly isLiveAction: (action: Action) => boolean;
   readonly collectPullIterationSeeds: (iterationSeeds: Set<Action>) => void;
@@ -84,7 +86,7 @@ function buildPullIterationWorkSet(state: {
   }
 
   const dirtyDependencyCount = workSet.size - iterationSeeds.size;
-  addLiveDownstreamEffectClosure(state, workSet);
+  addLiveDownstreamClosure(state, workSet);
 
   return {
     workSet,
@@ -93,14 +95,17 @@ function buildPullIterationWorkSet(state: {
   };
 }
 
-function addLiveDownstreamEffectClosure(state: {
+function addLiveDownstreamClosure(state: {
   readonly dirty: ReadonlySet<Action>;
-  readonly effects: ReadonlySet<Action>;
+  readonly nodes: SchedulerSettleLoopState["nodes"];
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly isLiveAction: (action: Action) => boolean;
 }, workSet: Set<Action>): void {
   const visited = new Set<Action>();
-  const dirtyRoots = [...workSet].filter((action) => state.dirty.has(action));
+  const dirtyRoots = [...workSet].filter((action) => {
+    const record = state.nodes.get(action);
+    return record !== undefined && isInvalidOrNeverRan(record);
+  });
 
   const visit = (action: Action): void => {
     if (visited.has(action)) return;
@@ -110,7 +115,6 @@ function addLiveDownstreamEffectClosure(state: {
     if (!dependents) return;
 
     for (const dependent of dependents) {
-      if (!state.effects.has(dependent)) continue;
       if (!state.isLiveAction(dependent)) continue;
       workSet.add(dependent);
       visit(dependent);
@@ -244,7 +248,6 @@ function preparePullSettleIteration(
   });
 
   const order = orderPullWorkSet(state, workSet, settleIter);
-  clearPullEffectsBeforeRun(state, order);
 
   return { settled: false, workSet, order };
 }
@@ -263,7 +266,7 @@ function buildAndLogPullIterationWorkSet(
     initialSeeds,
     settleIter,
     dirty: state.dirty,
-    effects: state.effects,
+    nodes: state.nodes,
     dependents: state.dependents,
     isLiveAction: state.isLiveAction,
     collectPullIterationSeeds: state.collectPullIterationSeeds,
@@ -315,20 +318,6 @@ function orderPullWorkSet(
   return order;
 }
 
-function clearPullEffectsBeforeRun(
-  state: SchedulerSettleLoopState,
-  order: readonly Action[],
-): void {
-  // Implicit cycle detection for effects:
-  // Clear dirty flags for all effects upfront. If an effect becomes dirty again
-  // by the time we run it, something in the execution re-dirtied it -> cycle.
-  for (const fn of order) {
-    if (state.effects.has(fn)) {
-      state.clearDirty(fn);
-    }
-  }
-}
-
 async function runPullSettleOrder(
   state: SchedulerSettleLoopState,
   order: readonly Action[],
@@ -352,50 +341,46 @@ async function runPullSettleAction(
   if (!isPullSettleActionStillRunnable(state, fn)) return 0;
   if (deferEffectForLateMaterializerDependency(state, fn)) return 0;
   if (skipPullDelayedSettleAction(state, fn)) return 0;
-  if (skipUnchangedConditionalEffect(state, fn)) return 0;
 
-  // Clean up from pending/dirty before running
+  // Clean up explicit scheduling state before running. The node status is
+  // set clean inside runSchedulerAction before invoking the action body.
   state.pending.delete(fn);
-  state.conditionallyScheduledEffects.delete(fn);
   if (state.computations.has(fn)) {
     state.clearComputationDebounceState(fn);
   }
-  if (state.effects.has(fn)) {
-    state.clearDirty(fn);
-  }
+  state.clearDirty(fn);
 
   state.filterStats.executed++;
-  if (!recordSettleActionRun(state, fn)) return 1;
+  if (!recordSettleActionRun(state, fn)) {
+    clearInvalidSettleAction(state, fn);
+    return 1;
+  }
 
   await state.runAction(fn);
   return 1;
+}
+
+function clearInvalidSettleAction(
+  state: SchedulerSettleLoopState,
+  fn: Action,
+): void {
+  const record = state.nodes.get(fn);
+  if (!record) return;
+  if (record.status === "invalid") {
+    record.status = "clean";
+  }
+  record.invalidCauses = [];
 }
 
 function isPullSettleActionStillRunnable(
   state: SchedulerSettleLoopState,
   fn: Action,
 ): boolean {
-  const isInPending = state.pending.has(fn);
-  const isInDirty = state.dirty.has(fn);
-
-  // For effects: we cleared dirty upfront, so check if re-dirtied (cycle)
-  if (state.effects.has(fn)) {
-    if (state.dirty.has(fn)) {
-      // Effect was re-dirtied during this tick -> cycle detected
-      logger.debug("schedule-cycle", () => [
-        `[CYCLE] Effect ${
-          state.getActionId(fn)
-        } re-dirtied, skipping (cycle detected)`,
-      ]);
-      // Skip this effect - it will run on a future tick after cycle settles
-      state.pending.delete(fn);
-      return false;
-    }
-    return isInPending;
-  }
-
-  // For computations: must be pending or dirty
-  return isInPending || isInDirty;
+  const record = state.nodes.get(fn);
+  return record !== undefined &&
+    isInvalidOrNeverRan(record) &&
+    (state.isLiveAction(fn) || state.pending.has(fn)) &&
+    record.passRuns < PASS_RUN_BUDGET;
 }
 
 function deferEffectForLateMaterializerDependency(
@@ -441,31 +426,8 @@ function skipPullDelayedSettleAction(
     // Don't clear from pending or dirty - action stays in its current state
     // but we remove from pending so it doesn't run this cycle
     state.pending.delete(fn);
-    // Keep pull-mode effects dirty so they wake when the throttle expires.
-    if (state.effects.has(fn)) {
-      state.markDirectDirty(fn);
-    }
     return true;
   }
 
   return false;
-}
-
-function skipUnchangedConditionalEffect(
-  state: SchedulerSettleLoopState,
-  fn: Action,
-): boolean {
-  if (
-    !state.effects.has(fn) ||
-    !state.conditionallyScheduledEffects.has(fn) ||
-    state.conditionalEffectHasChangedInputs(fn)
-  ) {
-    return false;
-  }
-
-  state.conditionallyScheduledEffects.delete(fn);
-  state.pending.delete(fn);
-  state.clearDirty(fn);
-  state.filterStats.filtered++;
-  return true;
 }

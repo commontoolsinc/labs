@@ -79,7 +79,6 @@ const timingKeys = [
     "writerLookup",
     "scheduler/execute/collectDirtyDependencies/writerLookup",
   ],
-  ["scheduleAffectedEffects", "scheduler/scheduleAffectedEffects"],
   ["run", "scheduler/run"],
   ["run/action", "scheduler/run/action"],
   ["run/commit", "scheduler/run/commit"],

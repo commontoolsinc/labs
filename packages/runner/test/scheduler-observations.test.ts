@@ -440,7 +440,7 @@ describe("persistent scheduler observations", () => {
     }
   });
 
-  it("rehydrates failed scheduler observations as runnable work", async () => {
+  it("rehydrates failed scheduler observations as invalid work", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const failedPersistedAction = () => {};
@@ -476,13 +476,13 @@ describe("persistent scheduler observations", () => {
       expect(rehydrated).toBe(true);
       expect(testRuntime.runtime.scheduler.isDirty(failedPersistedAction))
         .toBe(true);
-      expect(testRuntime.runtime.scheduler.getStats().pending).toBe(1);
+      expect(testRuntime.runtime.scheduler.getStats().pending).toBe(0);
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
     }
   });
 
-  it("rehydrates dirty scheduler observations as runnable work", async () => {
+  it("rehydrates dirty scheduler observations as invalid work", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const dirtyPersistedAction = () => {};
@@ -518,7 +518,7 @@ describe("persistent scheduler observations", () => {
       expect(testRuntime.runtime.scheduler.isDirty(dirtyPersistedAction)).toBe(
         true,
       );
-      expect(testRuntime.runtime.scheduler.getStats().pending).toBe(1);
+      expect(testRuntime.runtime.scheduler.getStats().pending).toBe(0);
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
     }

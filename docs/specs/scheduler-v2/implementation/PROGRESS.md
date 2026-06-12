@@ -4192,3 +4192,65 @@ does not move (option 2 rejected), and deferring the whole closure
     `1 passed (2 steps)`, `0 failed`.
   - `cd packages/runner && deno task test`: passed,
     `594 passed (3109 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m6s`.
+
+## 07/3c.ii-value-gated-effects-channel-deletion
+
+- [x] pending — migrated scheduler invalidation to node status and deleted the
+  duplicate write-propagation/scheduled-effect channels.
+- Fix shape:
+  - `record.status`/`record.invalidCauses` now own invalidation state; storage
+    notifications call the `markInvalid` entry point and action runs consume
+    or restore causes from the node record.
+  - The settle work-set closure now includes all live downstream nodes, while
+    the turn gate runs only invalid/never-ran live eligible nodes under
+    `PASS_RUN_BUDGET`; clean computations included for ordering are skipped.
+  - Deleted the write-propagation module and the `changedWritesHistory`,
+    `conditionallyScheduledEffects`, `scheduledFirstTime`,
+    `scheduleAffectedEffects`, and `scheduledEffects` trace channels.
+  - First-run no-output computations discovered during dependency collection
+    receive provisional demand so startup/restart semantics stay live.
+  - Initial clean rehydration refuses to overwrite a node once the dirty mirror
+    or invalid status shows it has been invalidated during the async load.
+  - Stale-input resubscribe skips debounced computation writers so the debounce
+    wake path, not same-turn effect revalidation, controls the trailing flush.
+  - Scheduler tests use `StorageManager.emulate({ as: signer })` through
+    `createSchedulerTestRuntime`; `rg` found no other scheduler storage
+    configuration in runner scheduler helpers. The representative synchronous
+    notification assertion runs in `scheduler-pull.test.ts`.
+- Recordings:
+  - Deletion grep returned no matches:
+
+```text
+$ rg -n "cfcTriggerReads|changedWritesHistory|conditionallyScheduledEffects|scheduledFirstTime|scheduleAffectedEffects|markEffectConditionallyScheduled|conditionalEffectHasChangedInputs|markPullDemandContinuation|recordChangedComputationWrites|markReadersDirtyForChangedWrites|writePropagation|TriggerTraceScheduledEffect|scheduledEffects|mark-dirty|already-dirty|schedule-effect" packages/runner/src packages/runner/test
+```
+
+  - `git diff --check`: passed.
+  - `deno fmt` on the 29 touched source/test files: passed (`Checked 29 files`).
+  - `deno lint` on the same 29 files: passed.
+  - `deno check` on the same 29 files: passed.
+  - Persistent rehydration trio:
+    `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    packages/runner/test/scheduler-observations.test.ts
+    packages/runner/test/reload-rehydration.test.ts
+    packages/runner/test/reload-sibling-overdirty.test.ts`: passed,
+    `3 passed (22 steps)`, `0 failed`.
+  - Regression set:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/ensure-piece-running.test.ts test/runner.test.ts
+    test/scheduler-timing.test.ts`: passed, `7 passed (72 steps)`,
+    `0 failed`.
+  - 3c.ii gate pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts test/scheduler-cfc-trigger-reads.test.ts
+    test/scheduler-retries.test.ts test/scheduler-pull.test.ts
+    test/scheduler-convergence.test.ts test/scheduler-ordering.test.ts
+    test/scheduler-events.test.ts`: passed, `11 passed (92 steps)`,
+    `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3108 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m6s`.
+  - Expected noisy passing logs remain: legacy cycle-cap telemetry in
+    convergence cases and the reload-rehydration fixture's expected
+    `TypeError`.

@@ -788,19 +788,14 @@ describe("event handling", () => {
     expect(eventCount).toBe(1);
     expect(eventResultCell.get()).toBe(1);
 
-    // Pull mode currently runs event-reader effects twice per event
-    // commit: once from the synchronous commit notification and once
-    // from the post-ack onEventCommitWrites path (scheduler-v2
-    // inventory §4, channel #2). These counts drop back to 2/3 when
-    // phase 3c.ii deletes the duplicate channel — tighten them then.
-    expect(actionCount).toBe(3);
+    expect(actionCount).toBe(2);
 
     runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 2);
     await eventResultCell.pull();
 
     expect(eventCount).toBe(2);
     expect(eventResultCell.get()).toBe(2);
-    expect(actionCount).toBe(5);
+    expect(actionCount).toBe(3);
     expect(lastEventSeen).toBe(2);
   });
 

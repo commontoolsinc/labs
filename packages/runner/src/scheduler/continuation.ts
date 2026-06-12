@@ -14,9 +14,6 @@ export interface ExecuteContinuationState {
   readonly eventQueue: readonly QueuedEvent[];
   readonly eventQueueWakeState: EventQueueWakeState;
   readonly idlePromises: (() => void)[];
-  readonly scheduledFirstTime: Set<Action>;
-  readonly conditionallyScheduledEffects: ReadonlyMap<Action, number>;
-  readonly changedWritesHistory: unknown[];
   readonly consumeRerunAfterCurrentExecute: () => boolean;
   readonly isDemandedPullComputation: (action: Action) => boolean;
   readonly materializerIndex: MaterializerIndexState;
@@ -84,11 +81,6 @@ export function applyQuiescentContinuation(
 
   // Reset settling tracker on idle.
   state.resetSettlingTracker();
-
-  state.scheduledFirstTime.clear();
-  if (state.conditionallyScheduledEffects.size === 0) {
-    state.changedWritesHistory.length = 0;
-  }
 }
 
 export function queueAnotherExecutionTick(
