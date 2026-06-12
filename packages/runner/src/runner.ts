@@ -2845,9 +2845,14 @@ export class Runner {
         ...(inputs as Record<string, any>),
         $event: event,
       };
+      // Spec scheduler-v2 §7.6 / decision 13: the handler's result cell — and
+      // every id minted in this frame — derives from the durable event id, so
+      // retries of the same event reuse the same ids and duplicate handlings
+      // collide on the receipt. The fallback covers non-dispatch invocations
+      // (tests calling the handler directly).
       const cause = {
         ...(inputs as Record<string, any>),
-        $event: crypto.randomUUID(),
+        $event: tx.dispatchedEventId ?? crypto.randomUUID(),
       };
       const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
         module,

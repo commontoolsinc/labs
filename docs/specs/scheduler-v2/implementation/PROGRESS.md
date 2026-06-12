@@ -1665,7 +1665,7 @@ is green on top of the fix.
 
 ## 04/step-1
 
-- [x] pending — one handler per event link; replacement warns and the last
+- [x] 364e86ad4 — one handler per event link; replacement warns and the last
   registration wins.
 - Deviations: used `scheduler-events.test.ts` because the file now type-checks
   cleanly; asserted the warn through `getLoggerCountsBreakdown`.
@@ -1686,3 +1686,18 @@ is green on top of the fix.
     `0 failed`.
   - `cd packages/runner && deno task test`: passed,
     `590 passed (3091 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m5s`.
+
+## 04/step-2
+
+- [x] pending — handler-frame causes derive from the durable event id, falling
+  back to `crypto.randomUUID()` only for non-dispatch invocations.
+- Deviations: none.
+- Recordings:
+  - No baked per-attempt-id failures observed.
+  - `deno fmt packages/runner/src/runner.ts`: passed (`Checked 1 file`).
+  - `deno lint packages/runner/src/runner.ts`: passed (`Checked 1 file`).
+  - `deno check packages/runner/src/runner.ts`: passed.
+  - `cd packages/runner && deno task test`: passed,
+    `590 passed (3091 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m5s`.
+  - `cd packages/patterns && deno task test`: passed; package test task is
+    currently a stub (`No tests defined.`).
