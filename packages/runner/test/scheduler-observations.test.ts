@@ -67,13 +67,6 @@ const writeLink = {
   path: writeAddress.path.slice(1),
 };
 
-const declaredWrite = {
-  space: "did:key:space" as const,
-  scope: "space" as const,
-  id: "of:declared" as const,
-  path: ["value"],
-};
-
 const materializerEnvelope = {
   space: "did:key:space" as const,
   scope: "space" as const,
@@ -178,8 +171,6 @@ describe("persistent scheduler observations", () => {
       observedAtSeq: 42,
       transactionKind: "action-run",
       transactionLog,
-      currentKnownWrites: [writeAddress],
-      declaredWrites: [declaredWrite],
       materializerWriteEnvelopes: [materializerEnvelope],
       actionOptions: {
         debounceMs: 25,
@@ -188,20 +179,20 @@ describe("persistent scheduler observations", () => {
 
     expect(observation).toMatchObject(
       {
-        version: 1,
+        version: 2,
         actionId: "pattern.tsx:computed:1",
         actionKind: "computation",
         observedAtSeq: 42,
         reads: [readAddress],
         shallowReads: [shallowReadAddress],
         actualChangedWrites: [writeAddress],
-        currentKnownWrites: [writeAddress],
-        declaredWrites: [declaredWrite],
         materializerWriteEnvelopes: [materializerEnvelope],
         actionOptions: { debounceMs: 25 },
       } satisfies Partial<SchedulerActionObservation>,
     );
     expect("attemptedWrites" in observation).toBe(false);
+    expect("currentKnownWrites" in observation).toBe(false);
+    expect("declaredWrites" in observation).toBe(false);
     expect(isSchedulerActionObservation(observation)).toBe(true);
   });
 
@@ -264,7 +255,6 @@ describe("persistent scheduler observations", () => {
               shallowReads: [],
               writes: [],
             },
-            currentKnownWrites: [writeAddress],
           }),
         });
 
@@ -282,7 +272,7 @@ describe("persistent scheduler observations", () => {
     }
   });
 
-  it("persists the static scheduling surface when an action write path changes", async () => {
+  it("rehydrates static scheduling surface from live annotations", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const { runtime, tx } = testRuntime;
@@ -351,7 +341,8 @@ describe("persistent scheduler observations", () => {
       });
 
       await runtime.scheduler.run(changingWriter);
-      expect(observations.at(-1)?.currentKnownWrites).toEqual(staticSurface);
+      expect(observations.at(-1)?.currentKnownWrites).toBeUndefined();
+      expect(observations.at(-1)?.declaredWrites).toBeUndefined();
 
       const triggerTx = runtime.edit();
       selector.withTx(triggerTx).set(true);
@@ -362,7 +353,8 @@ describe("persistent scheduler observations", () => {
       expect(changedObservation?.actualChangedWrites).toEqual([
         toMemorySpaceAddress(secondTarget.getAsNormalizedFullLink()),
       ]);
-      expect(changedObservation?.currentKnownWrites).toEqual(staticSurface);
+      expect(changedObservation?.currentKnownWrites).toBeUndefined();
+      expect(changedObservation?.declaredWrites).toBeUndefined();
 
       const restoredChangingWriter = Object.assign((() => {}) as Action, {
         writes: [
@@ -412,7 +404,6 @@ describe("persistent scheduler observations", () => {
               shallowReads: [],
               writes: [],
             },
-            currentKnownWrites: [writeAddress],
             status: "failed",
             errorFingerprint: "error:test",
           }),
@@ -455,7 +446,6 @@ describe("persistent scheduler observations", () => {
               shallowReads: [],
               writes: [],
             },
-            currentKnownWrites: [writeAddress],
           }),
         });
 
@@ -513,7 +503,6 @@ describe("persistent scheduler observations", () => {
           shallowReads: [],
           writes: [],
         },
-        currentKnownWrites: [writeAddress],
       });
 
       testRuntime.runtime.scheduler.subscribe(preloadedPersistedAction, {
@@ -1241,7 +1230,6 @@ describe("persistent scheduler observations", () => {
               shallowReads: [],
               writes: [],
             },
-            currentKnownWrites: [writeAddress],
           }),
         }),
       ).toBe(true);
@@ -1278,7 +1266,6 @@ describe("persistent scheduler observations", () => {
           shallowReads: [],
           writes: [],
         },
-        currentKnownWrites: [writeAddress],
       });
 
       testRuntime.runtime.scheduler.subscribe(stalePersistedAction, {

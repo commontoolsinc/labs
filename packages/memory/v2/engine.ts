@@ -778,7 +778,7 @@ export interface SchedulerObservationAddress {
 }
 
 export interface SchedulerActionObservation {
-  version: 1;
+  version: 1 | 2;
   ownerSpace?: string;
   branch: BranchName;
   pieceId: string;
@@ -793,8 +793,8 @@ export interface SchedulerActionObservation {
   reads: SchedulerObservationAddress[];
   shallowReads: SchedulerObservationAddress[];
   actualChangedWrites: SchedulerObservationAddress[];
-  currentKnownWrites: SchedulerObservationAddress[];
-  declaredWrites: SchedulerObservationAddress[];
+  currentKnownWrites?: SchedulerObservationAddress[];
+  declaredWrites?: SchedulerObservationAddress[];
   materializerWriteEnvelopes: SchedulerObservationAddress[];
   ignoredSchedulingWrites?: SchedulerObservationAddress[];
   actionOptions?: {
@@ -2253,10 +2253,20 @@ function normalizeSchedulerObservation(
     actualChangedWrites: observation.actualChangedWrites.map(
       normalizeSchedulerAddress,
     ),
-    currentKnownWrites: observation.currentKnownWrites.map(
-      normalizeSchedulerAddress,
-    ),
-    declaredWrites: observation.declaredWrites.map(normalizeSchedulerAddress),
+    ...(observation.currentKnownWrites
+      ? {
+        currentKnownWrites: observation.currentKnownWrites.map(
+          normalizeSchedulerAddress,
+        ),
+      }
+      : {}),
+    ...(observation.declaredWrites
+      ? {
+        declaredWrites: observation.declaredWrites.map(
+          normalizeSchedulerAddress,
+        ),
+      }
+      : {}),
     materializerWriteEnvelopes: observation.materializerWriteEnvelopes.map(
       normalizeSchedulerAddress,
     ),
@@ -2823,11 +2833,11 @@ function schedulerWriteIndexEntries(
   observation: SchedulerActionObservation,
 ): SchedulerWriteIndexRow[] {
   return [
-    ...observation.currentKnownWrites.map((address) => ({
+    ...(observation.currentKnownWrites ?? []).map((address) => ({
       address,
       kind: "current-known" as const,
     })),
-    ...observation.declaredWrites.map((address) => ({
+    ...(observation.declaredWrites ?? []).map((address) => ({
       address,
       kind: "declared" as const,
     })),

@@ -543,11 +543,6 @@ function attachSchedulerActionObservation(
   }
 
   const annotated = args.action as Partial<TelemetryAnnotations>;
-  const ignoredSchedulingWrites = annotated.ignoredSchedulingWrites ?? [];
-  const declaredWrites = sortAndCompactPaths(filterIgnoredAddresses(
-    (annotated.writes ?? []).map(toMemorySpaceAddress),
-    ignoredSchedulingWrites,
-  ));
   const telemetry = state.getActionTelemetryInfo(args.action);
   const actionOptions = schedulerActionOptions(state, args.action);
   const observationIdentity = annotated.schedulerObservationIdentity;
@@ -573,8 +568,6 @@ function attachSchedulerActionObservation(
     observedAtSeq: 0,
     transactionKind: "action-run",
     transactionLog: log,
-    currentKnownWrites: declaredWrites,
-    declaredWrites,
     materializerWriteEnvelopes:
       state.getMaterializerWriteEnvelopes(args.action) ?? [],
     ignoredSchedulingWrites: filterIgnoredAddresses(
@@ -642,8 +635,8 @@ export function schedulerImplementationFingerprint(
   return `action:${telemetryId}:${actionId}`;
 }
 
-export function schedulerRuntimeFingerprint(mode: "pull" | "push"): string {
-  return `runner:scheduler:${mode}`;
+export function schedulerRuntimeFingerprint(_mode?: "pull" | "push"): string {
+  return "runner:scheduler:v2";
 }
 
 function schedulerActionOptions(

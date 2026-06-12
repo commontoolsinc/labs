@@ -560,8 +560,7 @@ export class Scheduler {
     this.resubscribe(action, {
       reads: observation.reads,
       shallowReads: observation.shallowReads,
-      // Static dependency setup ignores this in favor of the live annotation.
-      writes: observation.currentKnownWrites,
+      writes: [],
     }, {
       isEffect: observation.actionKind === "effect",
     });
