@@ -564,6 +564,14 @@ function warnOnWriteSurfaceViolations(
 
   const surface = state.getSchedulingWrites(args.action) ?? [];
   for (const write of log.writes) {
+    // Per-user/per-session slots are runtime-mediated writes (scope-default
+    // initialization, UI state) that authored surfaces do not declare —
+    // exempt them so this declaration-gap diagnostic tracks authored
+    // space-scoped writes only.
+    // WATCH(scheduler-v2): re-include once scoped-slot writes are declared.
+    if (normalizeCellScope(write.scope) !== "space") {
+      continue;
+    }
     if (
       surface.some((surfaceWrite) => surfaceCoversWrite(surfaceWrite, write))
     ) {

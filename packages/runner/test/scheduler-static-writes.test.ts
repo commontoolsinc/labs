@@ -143,6 +143,80 @@ describe("static write surface demand", () => {
     }
   });
 
+  it("does not warn for scoped-slot writes outside the declared surface", async () => {
+    getLogger("scheduler").resetCounts();
+    const source = runtime.getCell<number>(
+      space,
+      "static-writes-scoped-source",
+      undefined,
+      tx,
+    );
+    const declared = runtime.getCell<number>(
+      space,
+      "static-writes-scoped-declared",
+      undefined,
+      tx,
+    );
+    const scopedTarget = runtime.getCell<number>(
+      space,
+      "static-writes-scoped-target",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    declared.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Per-user/per-session slots are runtime-mediated (scope defaults,
+    // UI state) and not part of the authored surface; the declaration-gap
+    // diagnostic must not flag them.
+    const scopedLink = {
+      ...scopedTarget.getAsNormalizedFullLink(),
+      scope: "session" as const,
+    };
+    let runs = 0;
+    const declaredLink = declared.getAsNormalizedFullLink();
+    const writer = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        runs++;
+        const value = source.withTx(actionTx).get();
+        runtime.getCellFromLink<number>(scopedLink, undefined, actionTx)
+          .send(value);
+      }) as Action,
+      {
+        writes: [declaredLink],
+      },
+    );
+
+    runtime.scheduler.subscribe(
+      writer,
+      {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(declaredLink)],
+      },
+      {},
+    );
+
+    const cancel = declared.withTx(tx).sink(() => {});
+    try {
+      source.withTx(tx).send(2);
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.scheduler.idle();
+
+      expect(runs).toBe(1);
+      expect(
+        getLoggerCountsBreakdown().scheduler?.["write-surface-violation"]
+          ?.warn ?? 0,
+      ).toBe(0);
+    } finally {
+      cancel();
+      getLogger("scheduler").resetCounts();
+    }
+  });
+
   it("warns when a computation writes outside its declared surface", async () => {
     getLogger("scheduler").resetCounts();
     const source = runtime.getCell<number>(
