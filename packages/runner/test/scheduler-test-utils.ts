@@ -17,10 +17,6 @@ import {
 } from "../src/scheduler.ts";
 import { setSchedulerDependencies } from "../src/scheduler/dependency-updates.ts";
 import {
-  isDemandedPullComputation,
-  type PullDemandState,
-} from "../src/scheduler/demand.ts";
-import {
   clearSchedulerDirectDirty,
   getUpstreamStaleCount as getUpstreamStaleCountFromState,
   isActionStale,
@@ -116,7 +112,7 @@ function getStaleSchedulerInternals(
     nodes: {
       register: (action: Action, kind: "effect" | "computation") => unknown;
     };
-    pullDemandState: PullDemandState;
+    isDemandedPullComputation: (action: Action) => boolean;
     updateDependents: StaleSchedulerInternals["updateDependents"];
     collectDirtyDependencies: StaleSchedulerInternals[
       "collectDirtyDependencies"
@@ -129,7 +125,7 @@ function getStaleSchedulerInternals(
     dirty: internal.staleness.dirty,
     isStale: (action) => isActionStale(internal.staleness, action),
     isDemandedPullComputation: (action) =>
-      isDemandedPullComputation(internal.pullDemandState, action),
+      internal.isDemandedPullComputation(action),
     getUpstreamStaleCount: (action) =>
       getUpstreamStaleCountFromState(internal.staleness, action),
     clearDirectDirty: (action) =>

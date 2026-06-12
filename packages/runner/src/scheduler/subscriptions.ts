@@ -7,6 +7,7 @@ import {
   isLive,
   notifyNodeLivenessChange,
   pendingDependencyCollectionMightAffect,
+  setNodeProvisionalDemand,
   unregisterDependentEdge,
 } from "./dependency-graph.ts";
 import { type DependencyUpdateState } from "./dependency-updates.ts";
@@ -281,8 +282,6 @@ export interface SchedulerUnsubscribeActionState {
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly dependencyGraphState: DependencyGraphState;
   readonly nodes: NodeRegistry;
-  readonly pullDemandedFirstRunComputations: WeakSet<Action>;
-  readonly pullDemandedContinuationComputations: WeakSet<Action>;
   readonly writeIndex: WriterIndexState;
   readonly populateDependenciesCallbacks: WeakMap<
     Action,
@@ -384,9 +383,11 @@ function clearActionTypeTracking(
   state: SchedulerUnsubscribeActionState,
   action: Action,
 ): void {
+  const record = state.nodes.get(action);
+  if (record?.provisionalDemand) {
+    setNodeProvisionalDemand(state.dependencyGraphState, record, false);
+  }
   state.nodes.remove(action);
-  state.pullDemandedFirstRunComputations.delete(action);
-  state.pullDemandedContinuationComputations.delete(action);
 }
 
 function removeActionWriteIndexes(
