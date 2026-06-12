@@ -5320,3 +5320,54 @@ $ rg -n "queueInitialActionRehydration|initialRehydrationTokens|canApplyInitialA
     `TypeError: Cannot read properties of undefined (reading 'length')` log
     while passing, experimental flag override messages, and known
     write-surface warnings in pattern/builtin fixtures.
+
+## 08/7.3-slim-observation-payload
+
+- [x] pending — scheduler observations now write payload version 2 without
+  persisted current/declared write surfaces.
+- Reviewer poll:
+  - No new reviewer verdict marker was present after the latest Phase 7 progress
+    entries at the start of this heartbeat.
+- Shape:
+  - `buildSchedulerActionObservation(...)` now emits `version: 2` and omits
+    `currentKnownWrites` / `declaredWrites` from new observations.
+  - Runner and memory readers accept both v1 and v2 observation rows. V1 rows
+    still require the old fields; v2 rows do not. Memory normalization and write
+    indexing preserve old fields only when present.
+  - Runtime fingerprint is now `runner:scheduler:v2`; old
+    `runner:scheduler:pull` rows become fingerprint misses and cost one fresh
+    node run on resume.
+  - Rehydration restores the write surface from the live action annotation, not
+    from persisted observation fields.
+  - Added memory coverage that slim v2 observations store and reload without
+    the old fields.
+- Recordings:
+  - `deno fmt` on the touched runner and memory source/test files: passed
+    (`Checked 8 files`).
+  - `deno lint` on the touched runner and memory source/test files: passed
+    (`Checked 8 files`).
+  - `deno check` on the touched runner and memory source/test files: passed.
+  - Phase 7.3 focused persistence pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts test/scheduler-observations.test.ts`:
+    passed, `2 passed (17 steps)`, `0 failed`, `999ms`.
+  - Memory v2 scheduler state pack:
+    `cd packages/memory && deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/v2-scheduler-state-test.ts`: passed, `20 passed`, `0 failed`,
+    `174ms`.
+  - Memory v2 stacked commit regression:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/memory-v2-stacked-commit.test.ts`: passed, `47 passed`, `0 failed`,
+    `1s`.
+  - Scheduler persistent-state bench on Apple M3 Max / Deno 2.8.1:
+    `cd packages/runner && deno bench --no-check --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-persistent-state.bench.ts`:
+    clean 100 actions `3.0 ms`; targeted dirty 100 actions `2.9 ms`; clean
+    1000 actions `15.3 ms`; targeted dirty 1000 actions `8.1 ms`.
+  - Expected noisy passing logs remain: the reload fixture's transient
+    `TypeError: Cannot read properties of undefined (reading 'length')` log
+    while passing and experimental flag override messages.

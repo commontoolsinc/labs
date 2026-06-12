@@ -19,7 +19,7 @@ export interface SchedulerActionOptions {
 }
 
 export interface SchedulerActionObservation {
-  version: 1;
+  version: 1 | 2;
   ownerSpace?: string;
   branch: string;
   pieceId: string;
@@ -34,8 +34,8 @@ export interface SchedulerActionObservation {
   reads: IMemorySpaceAddress[];
   shallowReads: IMemorySpaceAddress[];
   actualChangedWrites: IMemorySpaceAddress[];
-  currentKnownWrites: IMemorySpaceAddress[];
-  declaredWrites: IMemorySpaceAddress[];
+  currentKnownWrites?: IMemorySpaceAddress[];
+  declaredWrites?: IMemorySpaceAddress[];
   materializerWriteEnvelopes: IMemorySpaceAddress[];
   ignoredSchedulingWrites?: IMemorySpaceAddress[];
   actionOptions?: SchedulerActionOptions;
@@ -64,7 +64,6 @@ export interface BuildSchedulerActionObservationOptions {
   transactionKind: SchedulerObservationTransactionKind;
   transactionLog: TransactionReactivityLog;
   currentKnownWrites?: readonly IMemorySpaceAddress[];
-  declaredWrites?: readonly IMemorySpaceAddress[];
   materializerWriteEnvelopes?: readonly IMemorySpaceAddress[];
   ignoredSchedulingWrites?: readonly IMemorySpaceAddress[];
   actionOptions?: SchedulerActionOptions;
@@ -76,7 +75,7 @@ export function buildSchedulerActionObservation(
   options: BuildSchedulerActionObservationOptions,
 ): SchedulerActionObservation {
   return {
-    version: 1,
+    version: 2,
     ...(options.ownerSpace !== undefined
       ? { ownerSpace: options.ownerSpace }
       : {}),
@@ -95,8 +94,10 @@ export function buildSchedulerActionObservation(
     reads: cloneAddresses(options.transactionLog.reads),
     shallowReads: cloneAddresses(options.transactionLog.shallowReads),
     actualChangedWrites: cloneAddresses(options.transactionLog.writes),
+    // Persist the live write surface (slim only `declaredWrites`): rehydration
+    // restores annotation-less actions' surfaces from this field — the live
+    // ReactivityLog that produced it is gone after a process restart.
     currentKnownWrites: cloneAddresses(options.currentKnownWrites ?? []),
-    declaredWrites: cloneAddresses(options.declaredWrites ?? []),
     materializerWriteEnvelopes: cloneAddresses(
       options.materializerWriteEnvelopes ?? [],
     ),
@@ -123,7 +124,8 @@ export function isSchedulerActionObservation(
     return false;
   }
   const candidate = value as Partial<SchedulerActionObservation>;
-  return candidate.version === 1 &&
+  const version = candidate.version;
+  return (version === 1 || version === 2) &&
     (candidate.ownerSpace === undefined ||
       typeof candidate.ownerSpace === "string") &&
     typeof candidate.branch === "string" &&
@@ -138,8 +140,8 @@ export function isSchedulerActionObservation(
     Array.isArray(candidate.reads) &&
     Array.isArray(candidate.shallowReads) &&
     Array.isArray(candidate.actualChangedWrites) &&
-    Array.isArray(candidate.currentKnownWrites) &&
-    Array.isArray(candidate.declaredWrites) &&
+    (version === 2 || Array.isArray(candidate.currentKnownWrites)) &&
+    (version === 2 || Array.isArray(candidate.declaredWrites)) &&
     Array.isArray(candidate.materializerWriteEnvelopes) &&
     isSchedulerObservationStatus(candidate.status);
 }

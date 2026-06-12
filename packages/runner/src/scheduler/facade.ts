@@ -553,7 +553,7 @@ export class Scheduler {
     const surface = resolveRegistrationSurface(action, {
       reads: [],
       shallowReads: [],
-      writes: observation.currentKnownWrites,
+      writes: observation.currentKnownWrites ?? [],
     });
     if (observation.actionKind !== "effect" && surface.length > 0) {
       this.writeIndex.setSurface(action, surface);
@@ -567,8 +567,7 @@ export class Scheduler {
     this.resubscribe(action, {
       reads: observation.reads,
       shallowReads: observation.shallowReads,
-      // Static dependency setup ignores this in favor of the live annotation.
-      writes: observation.currentKnownWrites,
+      writes: [],
     }, {
       isEffect: observation.actionKind === "effect",
     });

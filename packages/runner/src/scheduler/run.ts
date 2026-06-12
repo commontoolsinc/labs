@@ -556,11 +556,6 @@ function attachSchedulerActionObservation(
   }
 
   const annotated = args.action as Partial<TelemetryAnnotations>;
-  const ignoredSchedulingWrites = annotated.ignoredSchedulingWrites ?? [];
-  const declaredWrites = sortAndCompactPaths(filterIgnoredAddresses(
-    (annotated.writes ?? []).map(toMemorySpaceAddress),
-    ignoredSchedulingWrites,
-  ));
   const telemetry = state.getActionTelemetryInfo(args.action);
   const actionOptions = schedulerActionOptions(state, args.action);
   const observationIdentity = annotated.schedulerObservationIdentity;
@@ -586,12 +581,11 @@ function attachSchedulerActionObservation(
     observedAtSeq: 0,
     transactionKind: "action-run",
     transactionLog: log,
-    // The live registered surface — for actions without a `.writes`
-    // annotation it came from subscribe's ReactivityLog, which
-    // declaredWrites (annotation-only) does not capture.
-    currentKnownWrites: state.getSchedulingWrites(args.action) ??
-      declaredWrites,
-    declaredWrites,
+    // The live registered surface — for actions without a `.writes` annotation
+    // it came from subscribe's ReactivityLog. Persisted so rehydration can
+    // restore the surface (the log is gone after a restart). `declaredWrites`
+    // (annotation-only) is slimmed out; the annotation is still available live.
+    currentKnownWrites: state.getSchedulingWrites(args.action) ?? [],
     materializerWriteEnvelopes:
       state.getMaterializerWriteEnvelopes(args.action) ?? [],
     ignoredSchedulingWrites: filterIgnoredAddresses(
@@ -659,8 +653,8 @@ export function schedulerImplementationFingerprint(
   return `action:${telemetryId}:${actionId}`;
 }
 
-export function schedulerRuntimeFingerprint(mode: "pull" | "push"): string {
-  return `runner:scheduler:${mode}`;
+export function schedulerRuntimeFingerprint(_mode?: "pull" | "push"): string {
+  return "runner:scheduler:v2";
 }
 
 function schedulerActionOptions(

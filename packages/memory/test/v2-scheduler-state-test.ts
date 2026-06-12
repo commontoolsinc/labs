@@ -150,6 +150,42 @@ Deno.test("memory v2 stores no-op scheduler observations without semantic commit
   }
 });
 
+Deno.test("memory v2 accepts slim v2 scheduler observations", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const {
+      currentKnownWrites: _currentKnownWrites,
+      declaredWrites: _declaredWrites,
+      ...slimObservation
+    } = {
+      ...observation,
+      version: 2 as const,
+      actionId: "pattern.tsx:computed:v2",
+    };
+
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      observedAtSeq: headSeq(engine),
+      observation: slimObservation,
+    });
+
+    const snapshot = getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      pieceId: slimObservation.pieceId,
+      processGeneration: slimObservation.processGeneration,
+      actionId: slimObservation.actionId,
+    });
+    assertEquals(snapshot?.observation.version, 2);
+    assertEquals(snapshot?.observation.currentKnownWrites, undefined);
+    assertEquals(snapshot?.observation.declaredWrites, undefined);
+    assertEquals(countRows(engine, "scheduler_write_index"), 0);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 paginates scheduler action snapshots", async () => {
   const { engine, path } = await createEngine();
 
