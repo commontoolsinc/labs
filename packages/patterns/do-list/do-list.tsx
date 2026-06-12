@@ -209,8 +209,9 @@ const updateItemByTitleHandler = handler<
   // the entity identity and orphans every previously-held item reference
   // (see updateItemHandler above). All case-insensitive matches are updated,
   // matching the original `.map()` semantics.
+  const needle = title.toLowerCase();
   for (let index = 0; index < currentItems.length; index++) {
-    if (currentItems[index].title?.toLowerCase() !== title.toLowerCase()) {
+    if (currentItems[index].title?.toLowerCase() !== needle) {
       continue;
     }
     const element = items.key(index);
