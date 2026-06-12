@@ -1,8 +1,8 @@
-import type { SchedulerDelays } from "./delays.ts";
+import type { SchedulerGates } from "./gates.ts";
 import type { Action } from "./types.ts";
 
 export interface SchedulerDelayControlState {
-  readonly delays: SchedulerDelays;
+  readonly gates: SchedulerGates;
   readonly computations: ReadonlySet<Action>;
   readonly effects: ReadonlySet<Action>;
   readonly isInvalid: (action: Action) => boolean;
@@ -16,7 +16,7 @@ export function canAutomaticallyDebounce(
   state: SchedulerDelayControlState,
   action: Action,
 ): boolean {
-  return state.delays.canAutomaticallyDebounce(action, {
+  return state.gates.canAutomaticallyDebounce(action, {
     effects: state.effects,
   });
 }
@@ -25,7 +25,7 @@ export function getNextDebounceRunTime(
   state: SchedulerDelayControlState,
   action: Action,
 ): number | undefined {
-  return state.delays.getNextDebounceRunTime(
+  return state.gates.getNextDebounceRunTime(
     action,
     {
       computations: state.computations,
@@ -39,7 +39,7 @@ export function isDebouncedComputationWaiting(
   state: SchedulerDelayControlState,
   action: Action,
 ): boolean {
-  return state.delays.isDebouncedComputationWaiting(
+  return state.gates.isDebouncedComputationWaiting(
     action,
     debouncedComputationContext(state),
   );
@@ -49,7 +49,7 @@ export function scheduleComputationDebounce(
   state: SchedulerDelayControlState,
   action: Action,
 ): void {
-  state.delays.scheduleComputationDebounce(
+  state.gates.scheduleComputationDebounce(
     action,
     debouncedComputationContext(state),
   );
@@ -59,7 +59,7 @@ export function scheduleWithDebounce(
   state: SchedulerDelayControlState,
   action: Action,
 ): void {
-  state.delays.scheduleWithDebounce(
+  state.gates.scheduleWithDebounce(
     action,
     {
       pending: state.pending,
@@ -80,7 +80,7 @@ export function maybeAutoDebounce(
     thresholdMs: number;
   }
   | undefined {
-  return state.delays.maybeAutoDebounce(action, {
+  return state.gates.maybeAutoDebounce(action, {
     canAutomaticallyDebounce: (candidate) =>
       canAutomaticallyDebounce(state, candidate),
   });

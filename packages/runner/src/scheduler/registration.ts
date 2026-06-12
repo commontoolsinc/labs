@@ -88,6 +88,7 @@ export interface SchedulerSubscribeActionState {
   readonly pending: Set<Action>;
   readonly effects: ReadonlySet<Action>;
   readonly writeIndex: WriterIndexState;
+  readonly adoptGateConfig: (action: Action) => void;
   readonly setDebounce: (action: Action, ms: number) => void;
   readonly setNoDebounce: (action: Action, optOut: boolean) => void;
   readonly setThrottle: (action: Action, ms: number) => void;
@@ -135,16 +136,6 @@ export function subscribePullSchedulerAction(
     options,
   );
 
-  if (debounce !== undefined) {
-    state.setDebounce(action, debounce);
-  }
-  if (noDebounce !== undefined) {
-    state.setNoDebounce(action, noDebounce);
-  }
-  if (throttle !== undefined) {
-    state.setThrottle(action, throttle);
-  }
-
   const actionIsEffect = updateSchedulerActionType(
     state.subscriptionState,
     action,
@@ -154,6 +145,17 @@ export function subscribePullSchedulerAction(
       queueComputation: state.subscriptionState.getIdempotencyCheckMode(),
     },
   );
+  state.adoptGateConfig(action);
+
+  if (debounce !== undefined) {
+    state.setDebounce(action, debounce);
+  }
+  if (noDebounce !== undefined) {
+    state.setNoDebounce(action, noDebounce);
+  }
+  if (throttle !== undefined) {
+    state.setThrottle(action, throttle);
+  }
 
   registerParentChildAction(state.subscriptionState, action);
   const record = state.subscriptionState.nodes.get(action);
