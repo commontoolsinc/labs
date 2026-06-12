@@ -120,6 +120,7 @@ import {
 import { cellRefToKey } from "../shared/utils.ts";
 import { RemoteResponse } from "@commonfabric/runtime-client";
 import {
+  normalizeRenderConfidentialityCeiling,
   normalizeRenderDeclassificationPolicy,
   type RenderConfidentialityCeiling,
   type RenderDeclassificationPolicy,
@@ -443,7 +444,8 @@ export class RuntimeProcessor {
     // any present-but-unknown value becomes "deny"; absent stays "allow".
     processor.renderDeclassificationPolicy =
       normalizeRenderDeclassificationPolicy(data.renderDeclassificationPolicy);
-    processor.renderConfidentialityCeiling = data.renderConfidentialityCeiling;
+    processor.renderConfidentialityCeiling =
+      normalizeRenderConfidentialityCeiling(data.renderConfidentialityCeiling);
     // Site-table v0: the home space carries did → host hints; the
     // runtime reads them as its live host lookup (2026-06-09 federation
     // session — "move the lookup into the runtime itself"). Refusals

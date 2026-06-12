@@ -271,6 +271,33 @@ export interface RenderConfidentialityCeiling {
 }
 
 /**
+ * Normalize an untrusted render-confidentiality ceiling.
+ *
+ * Like the declassification policy, the ceiling crosses postMessage seams
+ * (e.g. `InitializationData`) with no runtime validation. Fail-closed here
+ * means a present-but-malformed value becomes the EMPTY ceiling (public-only
+ * rendering) — never a mount crash, and never fail-open to unbounded. Only
+ * an absent value keeps the documented no-ceiling default; malformed fields
+ * inside an otherwise well-formed ceiling drop to empty individually.
+ */
+export function normalizeRenderConfidentialityCeiling(
+  value: unknown,
+): RenderConfidentialityCeiling | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "object" || value === null) return {};
+  const { atoms, caveatKinds } = value as {
+    atoms?: unknown;
+    caveatKinds?: unknown;
+  };
+  return {
+    atoms: Array.isArray(atoms) ? atoms : [],
+    caveatKinds: Array.isArray(caveatKinds)
+      ? caveatKinds.filter((kind): kind is string => typeof kind === "string")
+      : [],
+  };
+}
+
+/**
  * Options for the worker reconciler.
  */
 export interface WorkerReconcilerOptions {

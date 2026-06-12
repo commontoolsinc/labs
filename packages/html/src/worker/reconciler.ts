@@ -44,9 +44,11 @@ import type {
 } from "./types.ts";
 import {
   isWorkerVNode,
+  normalizeRenderConfidentialityCeiling,
   normalizeRenderDeclassificationPolicy,
 } from "./types.ts";
 import {
+  CFC_LABEL_READ_FAILED_ATOM,
   type CfcLabelView,
   cfcLabelViewForCell,
   markRendererTrustedEvent,
@@ -123,7 +125,11 @@ export class WorkerReconciler {
     this.renderDeclassificationPolicy = normalizeRenderDeclassificationPolicy(
       options.renderDeclassificationPolicy,
     );
-    const ceiling = options.renderConfidentialityCeiling;
+    // Same seam discipline: malformed ceilings normalize to the empty
+    // (public-only) ceiling rather than crashing or failing open.
+    const ceiling = normalizeRenderConfidentialityCeiling(
+      options.renderConfidentialityCeiling,
+    );
     this.rootRenderPolicy = ceiling === undefined ? DEFAULT_RENDER_POLICY : {
       declassifyConfidentiality: [],
       maxConfidentiality: [...(ceiling.atoms ?? [])],
@@ -872,26 +878,40 @@ export class WorkerReconciler {
         return true;
       }
       return schemaLabels.every((atom) =>
-        policy.declassifyConfidentiality.some((declassified) =>
-          deepEqual(declassified, atom)
-        ) ||
-        this.canRenderConfidentialityAtom(atom, policy)
+        this.atomRenderableUnderPolicy(atom, policy)
       );
     }
 
     for (const atom of this.confidentialityLabels(labelView)) {
-      if (
-        policy.declassifyConfidentiality.some((declassified) =>
-          deepEqual(declassified, atom)
-        )
-      ) {
-        continue;
-      }
-      if (!this.canRenderConfidentialityAtom(atom, policy)) {
+      if (!this.atomRenderableUnderPolicy(atom, policy)) {
         return false;
       }
     }
     return true;
+  }
+
+  /**
+   * Per-atom admission under a render policy. The read-failure marker is
+   * UNGRANTABLE (audit item 22): it means "the label could not be read", so
+   * neither author declassification nor a ceiling entry — even one naming
+   * the exported marker string — may admit it. Every other atom checks
+   * declassification first, then the ceiling.
+   */
+  private atomRenderableUnderPolicy(
+    atom: unknown,
+    policy: RenderPolicy,
+  ): boolean {
+    if (deepEqual(atom, CFC_LABEL_READ_FAILED_ATOM)) {
+      return false;
+    }
+    if (
+      policy.declassifyConfidentiality.some((declassified) =>
+        deepEqual(declassified, atom)
+      )
+    ) {
+      return true;
+    }
+    return this.canRenderConfidentialityAtom(atom, policy);
   }
 
   private confidentialityLabels(labelView: CfcLabelView): readonly unknown[] {

@@ -2364,6 +2364,128 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         }
       },
     );
+
+    // Audit item 22 (ungrantable marker): "cfc:label-read-failed" means
+    // "the label could not be read", so it must never fit a render policy —
+    // even one that names the exported marker string — in either the
+    // ceiling or the declassification direction.
+    await t.step(
+      "neither ceiling nor declassification admits the read-failure marker",
+      async () => {
+        const seedTx = runtime.edit();
+        const markerCellSeed = runtime.getCell<string>(
+          signer.did(),
+          "cfc-render-policy-read-failed",
+          undefined,
+          seedTx,
+        );
+        const markerLink = markerCellSeed.getAsNormalizedFullLink();
+        seedTx.writeOrThrow({
+          space: signer.did(),
+          id: markerLink.id!,
+          type: "application/json",
+          path: [],
+        }, {
+          value: "Label-read-failed content",
+          cfc: {
+            version: 1,
+            schemaHash: "test-schema",
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: [],
+                // The exported marker string verbatim — the bypass shape is
+                // a config that allow-lists it.
+                label: { confidentiality: ["cfc:label-read-failed"] },
+              }],
+            },
+          },
+        });
+        assertEquals((await seedTx.commit()).ok !== undefined, true);
+        const markerLabeled = runtime.getCell<string>(
+          signer.did(),
+          "cfc-render-policy-read-failed",
+        );
+
+        const ceiling = createOpsCollector();
+        const ceilingReconciler = new WorkerReconciler({
+          onOps: ceiling.onOps,
+          renderConfidentialityCeiling: {
+            atoms: ["cfc:label-read-failed"],
+          },
+        });
+        const cancelCeiling = ceilingReconciler.mount(markerLabeled);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = ceiling.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Label-read-failed content"),
+            false,
+          );
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancelCeiling();
+        }
+
+        const declassify = createOpsCollector();
+        const declassifyReconciler = new WorkerReconciler({
+          onOps: declassify.onOps,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: {
+            maxConfidentiality: [],
+            declassifyConfidentiality: ["cfc:label-read-failed"],
+          },
+          children: [markerLabeled as never],
+        };
+        const cancelDeclassify = declassifyReconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = declassify.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Label-read-failed content"),
+            false,
+          );
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancelDeclassify();
+        }
+      },
+    );
+
+    // The ceiling crosses the postMessage seam unvalidated; a malformed
+    // shape must fail CLOSED (empty ceiling — public-only rendering), never
+    // crash the mount and never fail open to unbounded.
+    await t.step(
+      "a malformed ceiling fails closed instead of crashing the mount",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: 7,
+            caveatKinds: "signed-release",
+          } as never,
+        });
+        const cancel = reconciler.mount(confidential);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            false,
+          );
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
   } finally {
     await runtime.dispose();
     await storageManager.close();

@@ -88,6 +88,7 @@ export {
   validateAgainstSchema,
 } from "./schema-sanitization.ts";
 export {
+  CFC_LABEL_READ_FAILED_ATOM,
   cfcConfidentialityForObservationNode,
   cfcJsonPointerForPath,
   cfcObservationFitsCeiling,

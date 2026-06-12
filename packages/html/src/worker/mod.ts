@@ -23,5 +23,6 @@ export type {
 } from "./types.ts";
 export {
   isWorkerVNode,
+  normalizeRenderConfidentialityCeiling,
   normalizeRenderDeclassificationPolicy,
 } from "./types.ts";
