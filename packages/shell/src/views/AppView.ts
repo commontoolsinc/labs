@@ -239,11 +239,14 @@ export class XAppView extends BaseView {
         void this.#refreshSlugTarget(rt, space, slug, token, key, true);
       });
     }).catch((error) => {
-      if (
-        this.slugSubscriptionToken === token && !isRuntimeDisposedError(error)
-      ) {
-        console.error("[AppView] Failed to watch slug cell:", error);
+      if (this.slugSubscriptionToken !== token) return;
+      if (isRuntimeDisposedError(error)) {
+        // Reset the subscription key so a replacement runtime for the
+        // same space/slug re-subscribes instead of matching the stale key.
+        this.#clearSlugSubscription();
+        return;
       }
+      console.error("[AppView] Failed to watch slug cell:", error);
     });
   }
 
