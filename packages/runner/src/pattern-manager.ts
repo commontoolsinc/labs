@@ -61,6 +61,14 @@ const MAX_PATTERN_CACHE_SIZE = 100;
 const MAX_EVALUATED_MODULE_CACHE_SIZE = 1000;
 const FABRIC_IMPORT_SCAN_TARGET = ts.ScriptTarget.ES2023;
 
+/**
+ * Re-derive a stored module's fabric edges from its SOURCE text (source docs
+ * deliberately do not store them as links). Unpinned specifiers are skipped:
+ * they carry no target identity to link, and they cannot legitimately occur
+ * here — the cell-cache write path refuses to persist modules with unpinned
+ * fabric imports (`assertNoUnpinnedFabricImports`), so a skip only ever drops
+ * an edge from data that predates that guard.
+ */
 function fabricImportRefsFromSource(
   doc: SourceDoc,
 ): CacheableModule["imports"] {

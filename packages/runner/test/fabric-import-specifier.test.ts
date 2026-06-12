@@ -155,6 +155,9 @@ describe("fabric import specifiers", () => {
       "cf:/",
       "cf://",
       "cf:/kitchen/",
+      "cf:todo-list//x",
+      "cf:todo-list/",
+      "cf:/kitchen/todo-list//deep/x",
     ];
 
     for (const specifier of invalid) {
@@ -175,6 +178,21 @@ describe("fabric import specifiers", () => {
     const pinned = withPin(ref, HASH);
     expect(formatFabricRef(ref)).toBe("cf:/kitchen/todo-list");
     expect(formatFabricRef(pinned)).toBe(`cf:/kitchen/todo-list@${HASH}`);
+  });
+
+  it("withPin on a pattern: URI ref is consistent with the conflicting-pin rule", () => {
+    const ref = parseFabricRef(`cf:pattern:${HASH}`)!;
+    // Equal pin: already content-addressed; no pin is added.
+    expect(formatFabricRef(withPin(ref, HASH))).toBe(`cf:pattern:${HASH}`);
+    // Different pin: contradicts the content address - never representable.
+    expect(() => withPin(ref, HASH_B)).toThrow("conflicting pin");
+  });
+
+  it("formatFabricRef refuses a host-qualified ref without a space", () => {
+    const ref = parseFabricRef("cf://host.example/kitchen/todo-list")!;
+    expect(() => formatFabricRef({ ...ref, space: undefined })).toThrow(
+      "host-qualified refs require a space",
+    );
   });
 
   it("accepts real module identities produced by computeModuleHashes", () => {

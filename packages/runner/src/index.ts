@@ -173,6 +173,12 @@ export {
   type FabricChaseResult,
   resolveFabricRefToIdentity,
 } from "./fabric-ref-resolution.ts";
+export {
+  type FabricRef,
+  FabricRefError,
+  isFabricImportSpecifier,
+  parseFabricRef,
+} from "./sandbox/fabric-import-specifier.ts";
 export { type PinRewrite, rewriteFabricPins } from "./fabric-pin-rewrite.ts";
 export {
   resolveSlugTargetCell,

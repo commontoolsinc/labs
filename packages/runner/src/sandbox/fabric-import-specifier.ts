@@ -52,6 +52,9 @@ export function parseFabricRef(specifier: string): FabricRef | undefined {
   if (refToken === undefined || refToken.length === 0) {
     throw new FabricRefError("Slug must not be empty.", specifier);
   }
+  if (subpathSegments.some((segment) => segment.length === 0)) {
+    throw new FabricRefError("empty path segment", specifier);
+  }
 
   const ref = parseRefToken(refToken, specifier);
   validateSpace(space, specifier);
@@ -84,8 +87,14 @@ export function isFabricImportSpecifier(specifier: string): boolean {
 }
 
 export function formatFabricRef(ref: FabricRef): string {
+  if (ref.host !== undefined && ref.space === undefined) {
+    throw new FabricRefError(
+      "host-qualified refs require a space",
+      `cf://${ref.host}/…`,
+    );
+  }
   const prefix = ref.host !== undefined
-    ? `//${ref.host}/${ref.space ?? ""}/`
+    ? `//${ref.host}/${ref.space}/`
     : ref.space !== undefined
     ? `/${ref.space}/`
     : "";
@@ -115,6 +124,15 @@ export function pinnedIdentity(ref: FabricRef): string | undefined {
 export function withPin(ref: FabricRef, pin: string): FabricRef {
   if (!HASH_RE.test(pin)) {
     throw new FabricRefError("malformed pin", formatFabricRef(ref));
+  }
+  // A pattern: URI ref is already content-addressed: an equal pin is
+  // redundant (normalized away, mirroring parse) and a different pin is the
+  // same contradiction parseFabricRef rejects — never representable.
+  if (ref.ref.kind === "uri" && ref.ref.scheme === "pattern") {
+    if (ref.ref.hash !== pin) {
+      throw new FabricRefError("conflicting pin", formatFabricRef(ref));
+    }
+    return { ...ref };
   }
   return { ...ref, pin };
 }
