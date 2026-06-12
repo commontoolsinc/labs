@@ -580,6 +580,15 @@ export interface IStorageTransaction {
   ): readonly CommitPrecondition[] | undefined;
 
   /**
+   * Mark an entity this transaction creates as create-only: the commit fails
+   * with PreconditionFailedError("receipt-exists") if the entity already has a
+   * head (scheduler-v2 §7.6 receipts).
+   */
+  markCreateOnly?(
+    link: { space: MemorySpace; id: string; scope?: unknown },
+  ): void;
+
+  /**
    * Optional: record a folded SQLite write onto this transaction so it commits
    * ATOMICALLY with the cell ops targeting `space` (one commit = cell ops + a
    * `sqlite` op; on SQL failure the whole commit aborts). Claims `space` as a
@@ -746,6 +755,15 @@ export interface IExtendedStorageTransaction
   getCommitPreconditions?(
     space: MemorySpace,
   ): readonly CommitPrecondition[] | undefined;
+
+  /**
+   * Mark an entity this transaction creates as create-only: the commit fails
+   * with PreconditionFailedError("receipt-exists") if the entity already has a
+   * head (scheduler-v2 §7.6 receipts).
+   */
+  markCreateOnly?(
+    link: { space: MemorySpace; id: string; scope?: unknown },
+  ): void;
 
   getCfcState(): Readonly<CfcTxState>;
   setCfcEnforcementMode(mode: CfcEnforcementMode): void;
@@ -1297,6 +1315,7 @@ export type NativeStorageCommitOperation =
     type: MediaType;
     scope?: CellScope;
     value: FabricValue;
+    createOnly?: true;
   }
   | {
     op: "delete";

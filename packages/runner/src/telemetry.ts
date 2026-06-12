@@ -167,6 +167,7 @@ export type RuntimeTelemetryMarker = {
   writes: string[];
   writesTruncated?: boolean;
   error?: string;
+  permanentRejection?: "origin-committed" | "receipt-exists";
 } | {
   type: "scheduler.event.preflight";
   handlerId: string;
