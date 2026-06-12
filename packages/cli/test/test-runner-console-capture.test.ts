@@ -70,7 +70,7 @@ describe(
     it("allowConsoleErrors and allowConsoleWarnings are independent", async () => {
       // allowConsoleErrors does NOT suppress warnings — they must be opted out
       // separately with allowConsoleWarnings.
-      const { passed, failed, results } = await runTests(
+      const { failed, results } = await runTests(
         fixture("console-error-allowed.test.tsx"),
         { root: FIXTURES },
       );
