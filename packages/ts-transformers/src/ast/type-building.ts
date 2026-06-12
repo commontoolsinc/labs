@@ -639,8 +639,15 @@ export function buildTypeElementsFromCaptureTree(
           questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
         }
       }
-    } else if (childNode.properties.size > 0) {
-      // Intermediate node - need to get type to check optionality
+    } else {
+      // Intermediate node - need to get type to check optionality. Every node
+      // from groupCapturesByRoot carries an expression or at least one child,
+      // so a node without an expression is an intermediate node.
+      if (childNode.properties.size <= 0) {
+        throw new Error(
+          "Invariant violated: child node has neither expression nor child",
+        );
+      }
       if (parentType) {
         // We have a parent type - look up this property
         const propSymbol = parentType.getProperty(propName);
@@ -696,9 +703,6 @@ export function buildTypeElementsFromCaptureTree(
           typeRegistry: context.options.state?.typeRegistry,
         },
       );
-    } else {
-      // Fallback to unknown
-      typeNode = factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
     }
 
     properties.push(
