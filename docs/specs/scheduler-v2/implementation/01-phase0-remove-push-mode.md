@@ -225,15 +225,20 @@ Commit (covers steps 2+3):
    Expected: no matches. The former four `src/runner.ts` sites were folded
    into the steps 2+3 compile-unit commit. Anything else: STOP and report.
 2. Telemetry: in `src/telemetry.ts`, locate the `scheduler.mode.change`
-   event type member and delete it (grep `mode.change` — expected: the
-   type definition only, since the emit sites died with
-   enable/disablePullMode; any other site: STOP).
+   event type member and delete it. Use the corrected grep
+   `scheduler\.mode\.change` — expected pre-edit matches are the type
+   definition and the stale shell comment line listed below; anything else:
+   STOP.
+3. Shell stale comment: in
+   `../../packages/shell/src/lib/debugger-controller.ts`, delete exactly the
+   commented `latestMarker?.type === "scheduler.mode.change" ||` line from the
+   dead auto-refresh block. Do not touch anything else in that file.
 
 Verify: `deno check src/runner.ts src/telemetry.ts`; full runner suite;
 additionally run the html/ui package checks if telemetry types are imported
 there:
 ```bash
-grep -rn "mode.change" ../../packages --include="*.ts"
+grep -rn "scheduler\.mode\.change" ../../packages --include="*.ts"
 ```
 Expected: no matches.
 
