@@ -26,6 +26,10 @@ import { RuntimeTransport } from "./transport.ts";
 import { EventEmitter } from "./emitter.ts";
 import { $onCellUpdate, CellHandle } from "../cell-handle.ts";
 import { cellRefToKey } from "../shared/utils.ts";
+import {
+  isRuntimeDisposedError,
+  RuntimeDisposedError,
+} from "../shared/disposed-error.ts";
 
 const ipcLogger = getLogger("runtime-client");
 
@@ -104,6 +108,15 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     if (!this.#initialized && data.type !== RequestType.Initialize) {
       throw new Error("RuntimeConnection is uninitialized.");
     }
+    if (this.#disposed && data.type !== RequestType.Dispose) {
+      // Reject instead of sending into a (soon-to-be) dead transport,
+      // where the request would only ever time out.
+      return Promise.reject(
+        new RuntimeDisposedError(
+          `RuntimeConnection is disposed (request: ${data.type})`,
+        ),
+      );
+    }
     const timeout = timeoutMs ?? this.#timeoutMs;
     const msgId = this.#nextMsgId++;
     const message = { msgId, data };
@@ -166,7 +179,9 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       type: RequestType.CellSubscribe,
       cell: cell.ref(),
     }).catch((error) => {
-      console.error("[RuntimeClient] Subscription failed:", error);
+      if (!isRuntimeDisposedError(error)) {
+        console.error("[RuntimeClient] Subscription failed:", error);
+      }
       this.#subscribed.delete(key);
     });
     return;
@@ -192,7 +207,9 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       type: RequestType.CellUnsubscribe,
       cell: cell.ref(),
     }).catch((error) => {
-      console.error("[RuntimeClient] Unsubscription failed:", error);
+      if (!isRuntimeDisposedError(error)) {
+        console.error("[RuntimeClient] Unsubscription failed:", error);
+      }
     });
     return;
   }
@@ -201,7 +218,9 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     this.#disposed = true;
     for (const pending of this.#pendingRequests.values()) {
       clearTimeout(pending.timeoutId);
-      pending.deferred.reject(new Error("Disposing runtime connection"));
+      pending.deferred.reject(
+        new RuntimeDisposedError("Disposing runtime connection"),
+      );
     }
     this.#pendingRequests.clear();
 
@@ -374,11 +393,13 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       event,
       nodeId,
     }).catch((error) => {
-      console.error(
-        "[RuntimeClient] VDom event dispatch failed:",
-        error instanceof Error ? error.message : String(error),
-        error,
-      );
+      if (!isRuntimeDisposedError(error)) {
+        console.error(
+          "[RuntimeClient] VDom event dispatch failed:",
+          error instanceof Error ? error.message : String(error),
+          error,
+        );
+      }
     });
   }
 

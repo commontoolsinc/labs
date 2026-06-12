@@ -105,6 +105,11 @@ export class Page extends EventTarget {
       for (const method of methods) {
         newConsole[method] = (...args: unknown[]) => {
           const formatted = args.map((value) => {
+            if (value instanceof Error) {
+              // Error properties are non-enumerable — JSON.stringify yields
+              // "{}". The stack includes name + message.
+              return value.stack ?? `${value.name}: ${value.message}`;
+            }
             if (value && typeof value === "object") {
               try {
                 return JSON.stringify(value);
