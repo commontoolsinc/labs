@@ -180,65 +180,162 @@ join = dedup union — all sorry-free, `lake build` green), correspondence-block
 sync `6ac0060f`. SC-16 landed as new §8.10.6; SC-1 as §8.12.8 + §4.6.4
 `LabelComponent`; SC-6/SC-13 as §18.6.1-3.
 
-## New observations (from applying SC-1..16; not yet designed)
+## New observations (from applying SC-1..16; re-scoped by the 2026-06-12
+## verification sweep)
 
-**SC-17 [clarify] `provenance` propagation class × §8.4 exact copies.** Whether
-provenance-class evidence (event/gesture-shaped atoms) survives an `exactCopyOf`
-transition is unstated. Decide and state it (lean: it survives — exact copy
-preserves the value identity the evidence binds to — but say so).
+A targeted verification sweep (2026-06-12) checked each open item against the
+spec as it stands after SC-1..16. Several were narrower than recorded — the
+spec already had a position — and two acquired owner decisions. Status per
+item below.
 
-**SC-18 [normative] `canWrite` rejection semantics under derived taint.**
-§8.12.4's writer rule (data label must fit the store label) has no defined
-behavior when a _derived_ (flow) label exceeds the declared store policy:
-reject, auto-upgrade, or persist-and-flag. Currently only matrix-level coverage
-in §18.6.3; belongs with the queued enforcement-ladder item (audit 3.1).
+**SC-17 [reconcile → decided] `provenance` class × §8.4 exact copies —
+provenance SURVIVES; nothing drops on a verified exact copy.** Verification
+found this is not a gap but a conflict: §15.1.1 bars provenance atoms from
+every carriage path ("**no** binding verification, projection scoping, or
+endorsed transformer may carry them onto an output either") and §3.1.6.2's
+output-integrity enumeration ("exactly" items 1–3) admits them nowhere, while
+§8.4.2's verification pseudocode preserves the input path's integrity
+**unfiltered** when `refer(input) == refer(output)`. Owner decision
+(2026-06-12): §8.4.2 is right and the class machinery is overly cautious — a
+runtime-verified exact copy preserves the **entire** integrity label, all
+classes; the output IS the value the evidence attaches to, so there is
+nothing for any class to lose. §15.1.1's bar is re-scoped to what its
+rationale actually protects: **registry claims** (endorsed transformers,
+projection scoping) may never claim preservation authority over provenance
+evidence; runtime-**verified** identity transitions (pass-through §8.2, exact
+copy §8.4) are not claims and carry everything. Edits: §3.1.6.2 gets a
+lead-in stating verified pass-through/exact-copy preserve all input integrity
+at the path, with the class rule applying to value-changing computations;
+§15.1.1's "no … may carry" narrows to registry claims; check
+`formal/Cfc/Proofs/PropagationClass.lean` for any lemma encoding the broader
+bar and keep the correspondence note honest.
+
+**SC-18 [normative] Writer-fit under derived labels — confidentiality
+direction verified non-silent; integrity direction decided.** Verification:
+the confidentiality side is already addressed. §8.12.4 states writer-fit
+"remains an enforcement question against the declared policy" (a
+non-rejecting deployment still persists the derived component; readers are
+protected by the effective-label floor; "the derived component is a
+measurement, not a write ceiling"), and §8.12.5 enumerates reject / upgrade /
+new-store with upgrade blessed as monotone-safe. Genuinely open there: (a) no
+standard profile picks a **default** the way §8.10.6 does for display; (b)
+whether `enforce-strict` makes writer-fit itself reject — §18.6.3's
+derived-consuming list names the display ceiling and missing-policy rules,
+not writer-fit; (c) the rejection error contract and the audit/diagnostics
+contract for persist-and-flag.
+
+The **integrity direction** is genuinely unstated (§8.12.4's `canWrite`
+checks confidentiality only; §8.10.3's `requiredIntegrity` is consume-side)
+and is now decided (owner, 2026-06-12): the schema's `requiredIntegrity` is a
+**floor**, typically a concept-level principal/pattern (e.g. "minted by a
+valid GPS measurement"); a write conforms iff the value's integrity satisfies
+the floor by pattern match / exchange-rule derivation — any concrete
+measurement sits above the concept in the trust lattice and passes. Writes
+**above** the floor are always acceptable; an overwrite is checked against
+the **declared floor only**, never against the prior value's integrity —
+sibling replacement (B not ≥ A, both ≥ floor) conforms, and **no meet across
+successive writes** is taken (the derived integrity component is
+replace-on-overwrite per §8.12.8). Also state the near-collision explicitly:
+§8.12.1's store-label integrity rule ("can only remove atoms") governs the
+declared label as a **claim** about contents; the `requiredIntegrity` floor
+is a **requirement**, and tightening it is the restrictive (allowed)
+direction — the two must not be conflated. Write-side floor checking needs a
+home in §8.10 (today §8.10.3 is input/consume-side only).
 
 **SC-19 [clarify] Blanket "confidentiality always joins" dependency.**
-§15.2/§15.3 now lean on the rule that confidentiality atoms uniformly join; if
-an atom family with non-join combination semantics ever lands, those sections
-need revisiting. Record the assumption where the rule is stated.
+Verified open (the rule is stated as fact in §15.1 and §3.1.2, nowhere
+recorded as a revisit-trigger assumption). Record the assumption where the
+rule is stated; one sentence.
 
-**SC-20 [registry] `UserSurfaceInput` registry status.** Runtime-minted- gated
-in the implementation (`RUNTIME_MINTED_INTEGRITY_ATOM_TYPES`) but listed as
-merely an "example" in §15.6 — promote to a registered atom with its minting
-discipline.
+**SC-20 [registry] `UserSurfaceInput` registry status.** Verified: §15.6
+lists it in the explicitly non-normative example/extension table, classed
+**value-bound** (`valueDigest`-bound), with no minting discipline — while the
+implementation gates it in `RUNTIME_MINTED_INTEGRITY_ATOM_TYPES`. Promote to
+a registered atom with its minting discipline (runtime-minted only), keeping
+or justifying the value-bound class.
 
-**SC-21 [normative] Read-classification markers as the J exclusion profile.**
-Phase B (pointwise precision) only holds because flow derivation excludes
-machinery reads, and post-#3911 the traversal journal cannot distinguish
-machinery from consumption on its own: dependency seeding, link/slot
-dereference, and scheduling tags all journal as ordinary reads. The
-implementation closes this with explicit read-classification markers
-(`internalVerifierRead`, `linkResolutionProbe`, `schedulerDependencyRead`)
-plus the link-origin/pointer-vs-content split; J consumes only unmarked
-content reads. The spec states the pointer/content split (SC-8) but not the
-marker vocabulary or the obligation that every runtime-internal read path be
-classified — an unmarked machinery read silently coarsens J (sound), while a
-wrongly-marked consumption read is a leak (unsound, the dangerous direction).
-Make the profile normative: enumerate the classes, state the
-default-is-consumption rule, and require that markers are only attachable by
-runtime code (never pattern-controlled).
+**SC-21 [normative] Read-classification markers — shrunk to a delta.**
+Verification: §18.6.1–.2 already enumerate four exclusion classes
+(verifier-internal reads, which "MUST be marked as such in the journal per
+§8.10.1"; label-metadata reads at `/cfc/...`; program/source text;
+content-addressed schema docs), state the default (everything else is
+consumed), and flag the invariant-12 revisit; §4.6.3 has the
+reference-without-dereference mapping and §8.9.2 makes trigger reads
+normatively INCLUDED. Remaining delta: (a) the implementation's
+`linkResolutionProbe` (coordinator link/slot scaffolding) and
+`schedulerDependencyRead` (dependency seeding) are machinery but not
+"verification machinery" — either generalize class 1 to runtime-internal
+machinery reads or add them as named classes; (b) state explicitly that
+markers are attachable only by runtime code, never pattern-controlled; (c)
+state the asymmetry: over-exclusion is unsound (leak), under-exclusion merely
+coarsens J.
 
-## Queue (from the audit, not yet worked through in a design session)
+**SC-22 [normative] Implementation identity = content hash of the code
+artifact + symbol within it — §8.15.** §8.15.6 currently says "the handler's
+identity (code hash) is the unit of write authorization—no separate naming
+scheme is required" and leaves the hash target and rebinding semantics
+undefined (audit 3.4). Owner decision (2026-06-12), matching the shipped
+scheme (identity PRs E1–E4; `docs/specs/content-addressed-action-identity.md`
+in the labs repo): implementation identity is the pair **(content hash of the
+verified code artifact, symbol/binding path within it)**. Same artifact hash
++ same symbol = same identity wherever the artifact is loaded; any code
+change changes the hash and with it every identity within the artifact —
+rebinding is re-authorization, not inheritance; `writeAuthorizedBy`
+references resolve against this pair. Replace §8.15.6's "no separate naming
+scheme" claim with the pair definition and state the rebinding rule.
+
+## Queue (from the audit; statuses re-checked by the 2026-06-12 sweep where
+## noted)
 
 These were identified during the audit as spec-absent implementation mechanisms
 that should become normative text once their design sessions happen; listed so
 this file is the single tracking place:
 
 - Enforcement-mode ladder semantics incl. `enforce-strict` (audit 3.1 —
-  partially covered by SC-13).
-- Setup-projection structural provenance carve-out (audit 3.3).
-- Implementation-identity scheme (`bundleId`/`sourceFile`/`bindingPath`,
-  rebinding rules) as the write-authority root of trust (audit 3.4).
-- `ownerPrincipal` / `__ctCurrentPrincipal` + companion-claim chain (audit 3.5).
-- `addIntegrity` annotation (audit 3.6).
+  partially covered by SC-13; the writer-fit remainder is SC-18 (a)–(c)).
+- Setup-projection structural provenance carve-out (audit 3.3). Not
+  re-verified.
+- ~~Implementation-identity scheme (audit 3.4)~~ — superseded by **SC-22**
+  (decided: artifact content hash + symbol).
+- `ownerPrincipal` / `__ctCurrentPrincipal` + companion-claim chain (audit
+  3.5). **Verified silent** 2026-06-12: no principal-resolution chain in §6 or
+  §8.15 — confirmed open.
+- ~~`addIntegrity` annotation (audit 3.6)~~ — **verified: spec already
+  explicit.** §8.8/§8.7.3 define `addedIntegrity` with semantics (transformer-
+  minted output atoms, boundary-verified). The remaining work is
+  **implementation conformance**, not spec text: the code's `addIntegrity`
+  spelling and the schema-merge path that silently drops the annotation need
+  to align with the spec's name and honor it (or visibly reject it).
 - Claim-only labelMap entries as policy-applicability markers (audit 3.7 —
-  partially covered by SC-1's component model).
+  partially covered by SC-1's component model). Not re-verified.
 - Carried label views / dereference-trace merging / `LinkReference` atom (audit
-  3.8 — atom registration covered by SC-10).
-- uiContract trusted-event system as normative (audit 3.9).
-- Schema-merge per-key direction table (audit 3.10).
+  3.8 — atom registration covered by SC-10). Not re-verified.
+- uiContract trusted-event system as normative (audit 3.9). Not re-verified.
+- Schema-merge per-key direction table (audit 3.10). **Verified silent**
+  2026-06-12: §4.2.2.1 covers schema evolution, not per-key conflict
+  resolution between composed schemas' IFC annotations — confirmed open.
 - Post-commit outbox + sink-release re-verification contract (audit 3.11).
-- Schema-sanitization / contamination scoping promotion from ch. 14 to normative
-  (audit 3.12).
-- `/value` envelope-prefix wire-format decision (audit Wave 4 #28).
+  **Verified silent** 2026-06-12: §8.10 is entirely pre-commit — confirmed
+  open.
+- Schema-sanitization / contamination scoping promotion from ch. 14 to
+  normative (audit 3.12). Not re-verified.
+- ~~`/value` envelope-prefix wire-format decision (audit Wave 4 #28)~~ —
+  **verified: decided by the spec.** §4.6.4/§4.6.5 normatively require the
+  `/value` envelope prefix for persisted payload labels and value-relative
+  normalization before IFC matching. Remaining work is **implementation
+  conformance** (or documenting equivalence), not a decision.
+
+## Also noted by the sweep (not previously tracked)
+
+- §8.10.6 already specifies the display-ceiling atom families exactly
+  (`User(actingUser)` + `PersonalSpace`/`Space`-with-`HasRole` principal forms
+  resolved by exchange rules, plus the deployment-declared caveat-kind
+  allow-list seeded from influence-class kinds). The shell ceiling flip is
+  therefore **implementation alignment** — the runner's render-gate atom
+  vocabulary does not currently use the §15.2 shapes, and the
+  exchange-rule resolution step does not exist in the reconciler — not an
+  atom-shape design question.
+- §8.12.8 already documents the observation-class residuals (existence
+  channel; pointer-identity-at-a-slot) as profile residuals with
+  `PathLabelTemplate` named as the fix; the open part of that build is the
+  envelope persistence/population design, tracked with SC-4/SC-8.
