@@ -129,6 +129,38 @@ export interface SchedulerEventQueueState {
   ) => void;
 }
 
+/**
+ * Settle an event that will never be dispatched. The onCommit contract is that
+ * it runs after the final outcome of the event, including failure — a dropped
+ * event is such an outcome. Callers awaiting onCommit (e.g. stream.send with a
+ * commit callback) would otherwise wait forever; that is how a space whose
+ * default pattern fails to instantiate turned `cf piece new` into an
+ * indefinite hang. The callback receives an aborted transaction so
+ * `tx.status()` reports `error` with the drop reason.
+ */
+function notifyEventDropped(
+  state: SchedulerEventQueueState,
+  args: {
+    readonly eventLink: NormalizedFullLink;
+    readonly onCommit?: QueuedEvent["onCommit"];
+  },
+  reason: string,
+): void {
+  logger.warn("scheduler", reason, { eventLink: args.eventLink });
+  if (!args.onCommit) return;
+  const tx = state.runtime.edit();
+  tx.abort(new Error(reason));
+  try {
+    args.onCommit(tx);
+  } catch (callbackError) {
+    logger.error(
+      "schedule-error",
+      "Error in event commit callback:",
+      callbackError,
+    );
+  }
+}
+
 export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly eventLink: NormalizedFullLink;
   readonly event: unknown;
@@ -180,12 +212,29 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           true,
           { eventId: id, originTx: args.originTx },
         );
+      } else {
+        notifyEventDropped(
+          state,
+          args,
+          `Event dropped: no handler registered for ${args.eventLink.id} ` +
+            `and its piece could not be started`,
+        );
       }
     })();
     state.backgroundTasks.add(startTask);
     startTask.finally(() => {
       state.backgroundTasks.delete(startTask);
     });
+  } else if (!handlerFound) {
+    // Second pass after a piece start that still registered no handler for
+    // this stream (e.g. the piece "started" but its nodes failed to
+    // instantiate). Trying again won't change this, so settle the event now.
+    notifyEventDropped(
+      state,
+      args,
+      `Event dropped: no handler registered for ${args.eventLink.id} ` +
+        `after starting its piece`,
+    );
   }
 }
 
@@ -595,6 +644,10 @@ export async function dispatchQueuedEvent(state: {
         if (tx.status().status === "ready") {
           tx.abort(error);
         }
+        // A throwing handler is a final outcome for this event — settle the
+        // commit callback (with the aborted tx) instead of leaving callers
+        // that await it hanging.
+        runFinalCommitCallback();
       }
       return;
     }
