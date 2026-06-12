@@ -4,8 +4,6 @@ import { expandGlob } from "@std/fs";
 import { cliText } from "../lib/cli-name.ts";
 import { discoverTestFiles, runTests } from "../lib/test-runner.ts";
 
-const schedulerModes = ["default", "push", "pull"] as const;
-
 export const test = new Command()
   .name("test")
   .description("Run pattern tests (.test.tsx files).")
@@ -57,11 +55,6 @@ export const test = new Command()
     "--stats-action-limit <count:number>",
     "Number of per-step scheduler action deltas to print in verbose mode.",
     { default: 10 },
-  )
-  .option(
-    "--scheduler-mode <mode:string>",
-    "Scheduler mode for test runtimes: default, push, or pull.",
-    { default: "default" },
   )
   .option(
     "--storage-stats",
@@ -136,15 +129,6 @@ export const test = new Command()
         .map((part) => part.trim())
         .filter(Boolean)
       : undefined;
-    const schedulerMode = schedulerModes.find((mode) =>
-      mode === options.schedulerMode
-    );
-    if (!schedulerMode) {
-      console.error(
-        "Error: --scheduler-mode must be one of: default, push, pull",
-      );
-      Deno.exit(1);
-    }
 
     // Run tests
     const { failed } = await runTests(uniqueTestFiles, {
@@ -154,7 +138,6 @@ export const test = new Command()
       statsThreshold: options.statsThreshold,
       statsInclude,
       statsActionLimit: options.statsActionLimit,
-      schedulerMode,
       storageStats: options.storageStats,
       storageStatsLimit: options.storageStatsLimit,
     });
