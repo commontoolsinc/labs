@@ -4417,3 +4417,247 @@ $ rg -n "scheduler\.subscribe\(" packages --glob '!packages/runner/**'
   - Expected noisy passing logs remain: scheduler error-path tests,
     traversal warnings, rehydration timeout warning, and existing
     write-surface/wish warnings.
+
+## 08/4.0-baselines
+
+- [x] pending — recorded Phase 4 startup/pull-seed baselines and added the
+  cold-replica convergence fixture before removing registration prefetch.
+- Deviations:
+  - The cold-replica fixture uses an empty server-side source document created
+    by the writer before reader startup, then fills the value from the second
+    client connection after `start()` returns. This keeps the reader's local
+    source replica cold at startup while giving the current prefetch path a
+    server document to sync/watch. A stricter fully absent-source-root variant
+    did not converge in this harness before the Phase 4 change, so it would not
+    satisfy the fixture-first requirement.
+  - After the post-start writer update, the fixture uses only `reader.idle()`
+    plus timer ticks while waiting for convergence; it does not call
+    `pull()`, reader source `sync()`, or any manual storage nudge.
+- Recordings:
+  - Reload/rehydration baseline:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts`: passed, `1 passed`, `0 failed`,
+    `711ms`. The test asserts `rehydrate/miss/no-snapshot = 0`; this focused
+    run did not print the exact counter values. The expected transient
+    `TypeError: Cannot read properties of undefined (reading 'length')` log
+    appeared while the test still passed.
+  - Cold-replica fixture:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-cold-replica.test.ts`: passed, `1 passed (1 step)`,
+    `0 failed`, `253ms`.
+  - Focused Phase 4.0 test pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts test/scheduler-cold-replica.test.ts`:
+    passed, `2 passed (1 step)`, `0 failed`, `1s`.
+  - Pull-seed bench baseline:
+    `cd packages/runner && deno bench --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull-seeds.bench.ts`: passed on Apple M3 Max / Deno 2.8.1.
+    Results: 50 effects / 20 reschedules `84.4ms`; 200 effects /
+    10 reschedules `104.2ms`.
+  - `deno fmt packages/runner/test/scheduler-cold-replica.test.ts`: passed
+    (`Checked 1 file`).
+  - `deno lint packages/runner/test/scheduler-cold-replica.test.ts`: passed
+    (`Checked 1 file`).
+  - `deno check packages/runner/test/scheduler-cold-replica.test.ts`: passed.
+  - `git diff --check`: passed.
+  - `cd packages/runner && deno task test`: passed,
+    `595 passed (3101 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m1s`.
+  - Expected noisy passing logs remain: scheduler write-surface warnings,
+    deliberate event/retry error logs, createRef no-cause warnings, and the
+    reload-rehydration transient `TypeError`.
+
+## 08/4.1-declared-read-ordering
+
+- [x] pending — removed JS/raw registration prefetch closures and moved
+  annotated `reads` into scheduler node records as never-ran ordering hints.
+- Reviewer poll:
+  - No new reviewer verdict was present after the latest `IMPLEMENTER STOP` at
+    the start of this work session.
+- Fix shape:
+  - `instantiateJavaScriptActionNode` and `instantiateRawNode` no longer build
+    per-node `populateDependencies` closures or pass them during scheduler
+    registration. The runner registers those actions with options only.
+  - Scheduler node records now store `declaredReads` derived from annotated
+    `reads`. Topological ordering and the settle work-set use these reads only
+    while a node is `never-ran`.
+  - Declared reads are not added to the trigger index and are not persistent
+    demand evidence. When a live never-ran reader's declared reads overlap an
+    invalid/never-ran writer's static surface, settle pulls that writer for the
+    current pass only so ordering can run producer before consumer.
+  - Existing output-less/no-callback registrations still enter
+    `pendingDependencyCollection` to preserve the existing no-output first-run
+    path, but no callback is installed or invoked.
+  - Added a cutover fixture proving that a never-ran node with overlapping
+    declared reads is not invalidated by a storage change from those declared
+    reads alone.
+- Debug notes:
+  - The first full-suite attempt after deleting registration prefetch exposed
+    two gaps: output-less/no-callback computations were skipped, and the raw
+    `wish({ query: computed(...) })` case could run before its computed input.
+  - The final `wish` fix keeps declared-read pull-through pass-local: it makes
+    the overlapping writer runnable for that settle pass without marking it
+    live, pending, demanded, or trigger-subscribed.
+- Recordings:
+  - `deno fmt` on the touched source/test files: passed (`Checked 7 files`).
+  - `deno lint` on the touched source/test files: passed (`Checked 7 files`).
+  - `deno check` on the touched source/test files: passed.
+  - Focused regression pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/ensure-piece-running.test.ts test/runner.test.ts test/wish.test.ts`:
+    passed, `9 passed (127 steps)`, `0 failed`, `2s`.
+  - Phase 4.1 focused pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts test/scheduler-cold-replica.test.ts
+    test/patterns-ifelse.test.ts test/navigate-handler.test.ts`: passed,
+    `7 passed (16 steps)`, `0 failed`, `1s`.
+  - Broad scheduler pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts test/scheduler-ordering.test.ts
+    test/scheduler-pull.test.ts test/scheduler-events.test.ts
+    test/scheduler-cold-replica.test.ts`: passed, `6 passed (67 steps)`,
+    `0 failed`, `2s`.
+  - `git diff --check`: passed.
+  - `cd packages/runner && deno task test`: passed,
+    `595 passed (3102 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m1s`.
+  - Expected noisy passing logs remain: scheduler write-surface warnings,
+    deliberate event/retry error logs, createRef no-cause warnings, and
+    traversal warnings.
+
+## 08/4.2-delete-collection-machinery
+
+- [x] pending — deleted scheduler-side dependency collection and narrowed
+  registration to static/immediate dependency logs while preserving handler
+  event preflight populate.
+- Reviewer poll:
+  - No new reviewer verdict was present after the latest `IMPLEMENTER STOP` at
+    the start of this heartbeat.
+- Fix shape:
+  - Deleted `scheduler/dependency-collection.ts` and removed collection state
+    from scheduler facade, registration, execution, settle loop, dependency
+    graph, and stale test helpers.
+  - Removed scheduler-side populate callback storage and collection helpers:
+    subscribe/register now accept options or an immediate `ReactivityLog`.
+  - Kept `handler.populateDependencies`, `addEventHandler`'s third parameter,
+    and event preflight dependency population intact.
+  - Removed raw builtin `populateDependencies`; raw builtins can now provide an
+    immediate dependency log, and `navigateTo` uses declared reads as its static
+    dependency log.
+  - Preserved the output-less/no-callback first-run path through the existing
+    pending work set, and kept static-log no-write computations dormant until
+    demanded.
+  - Updated stale callback-argument tests to pass explicit `ReactivityLog`
+    dependencies instead of the deleted collection callback slot.
+- Debug notes:
+  - The first full-suite attempt after the deletion failed during type-check on
+    `scheduler-pull-idempotency.test.ts`; those tests still passed callback
+    arguments to `scheduler.subscribe`. Replacing the callbacks with explicit
+    read/write logs fixed the suite.
+  - `navigateTo` releases navigation from the transaction commit callback and
+    requeues scheduler execution after writing its result so idle observes the
+    commit-gated navigation release without relying on prefetch timing.
+- Exit greps:
+  - Deleted collection names returned no matches:
+
+```text
+$ rg -n "populateDependenciesCallbacks|pendingDependencyCollection|dependency-collection" packages/runner/src packages/runner/test
+```
+
+  - `populateDependencies` matches only handler/event paths:
+
+```text
+$ rg -n "populateDependencies" packages/runner/src packages/runner/test
+packages/runner/src/runner.ts:3093:    const populateDependencies = reads.length > 0
+packages/runner/src/runner.ts:3125:        populateDependencies,
+packages/runner/src/scheduler/facade.ts:951:    populateDependencies?: (
+packages/runner/src/scheduler/facade.ts:961:      populateDependencies,
+packages/runner/src/scheduler/events.ts:196:  readonly populateDependencies?: (
+packages/runner/src/scheduler/events.ts:201:  if (args.populateDependencies) {
+packages/runner/src/scheduler/events.ts:202:    args.handler.populateDependencies = args.populateDependencies;
+packages/runner/src/scheduler/events.ts:299:  depTx.setReadOnly?.("scheduler.populateDependencies()");
+packages/runner/src/scheduler/events.ts:308:    handler.populateDependencies?.(depTx, eventValue);
+packages/runner/src/scheduler/events.ts:343:  // after populateDependencies errors so the transaction is closed.
+packages/runner/src/scheduler/events.ts:491:  if (handler.populateDependencies) {
+packages/runner/src/scheduler/types.ts:43:    populateDependencies?: (
+```
+
+  - Deleted helper/type names only remain in event preflight telemetry labels:
+
+```text
+$ rg -n "collectInitialExecuteDependencies|collectPostEventDependencies|collectPendingDependencyActions|collectPullSettlePreRunDependencies|PopulateDependencies" packages/runner/src packages/runner/test
+packages/runner/src/scheduler/events.ts:305:    "pullPopulateDependencies",
+packages/runner/src/scheduler/events.ts:318:      "pullPopulateDependencies",
+packages/runner/test/scheduler-bench-helpers.ts:62:  ["event/populate", "scheduler/execute/event/pullPopulateDependencies"],
+```
+
+- Recordings:
+  - `deno fmt packages/runner/test/scheduler-pull-idempotency.test.ts`:
+    passed (`Checked 1 file`) after the stale test fix.
+  - `deno lint` on the touched source/test files: passed (`Checked 19 files`).
+  - `deno check` on the touched source/test files: passed.
+  - Focused idempotency regression:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull-idempotency.test.ts`: passed,
+    `1 passed (5 steps)`, `0 failed`, `75ms`.
+  - Touched bench:
+    `cd packages/runner && deno bench --no-check --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-materializer-fanout.bench.ts`: passed on Apple M3 Max /
+    Deno 2.8.1. Results: 100 readers `22.0ms`, 1000 readers `64.2ms`,
+    static declared write control `14.9ms`.
+  - `git diff --check`: passed.
+  - `cd packages/runner && deno task test`: passed,
+    `595 passed (3102 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m2s`.
+  - Expected noisy passing logs remain: scheduler write-surface warnings,
+    deliberate event/retry/preflight error logs, createRef no-cause warnings,
+    and traversal warnings.
+
+## 08/4.3-phase-4-gates
+
+- [x] pending — re-ran the Phase 4 gates and added the dormant-registration
+  cell-data-read assertion requested by the work order.
+- Gate shape:
+  - Added `runner.test.ts` coverage for a JavaScript-node piece with a linked
+    input and no downstream demand. After setup/registration, the test wraps
+    scheduler-created transactions during `idle()` and asserts the piece does
+    not run and performs zero reads of the linked source document.
+  - Re-ran the cold-replica startup fixture, the declared-read cutover fixture
+    pack, the reload rehydration fixture, and the full runner suite.
+- Recordings:
+  - `deno fmt packages/runner/test/runner.test.ts`: passed (`Checked 1 file`).
+  - `deno lint packages/runner/test/runner.test.ts`: passed (`Checked 1 file`).
+  - `deno check packages/runner/test/runner.test.ts`: passed.
+  - Focused runner fixture:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/runner.test.ts`: passed, `4 passed (42 steps)`, `0 failed`, `460ms`.
+  - Phase 4.3 focused gate pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-cold-replica.test.ts test/scheduler-v2-cutover.test.ts
+    test/reload-rehydration.test.ts test/runner.test.ts`: passed,
+    `7 passed (54 steps)`, `0 failed`, `2s`. The reload fixture still emits
+    the expected transient `TypeError` log while passing; it asserts
+    `rehydrate/ok > 0` and `rehydrate/miss/no-snapshot = 0`.
+  - Default-app/reload comparison:
+    `reload-rehydration.test.ts` completed inside the gate pack in `426ms`
+    versus the 4.0 recorded `711ms`; `rehydrate/miss/no-snapshot` remained
+    asserted at `0`.
+  - Pull-seed bench:
+    `cd packages/runner && deno bench --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull-seeds.bench.ts`: passed on Apple M3 Max / Deno 2.8.1.
+    Results: 50 effects / 20 reschedules `79.9ms` (4.0 baseline `84.4ms`);
+    200 effects / 10 reschedules `106.1ms` (4.0 baseline `104.2ms`).
+  - `cd packages/runner && deno task test`: passed,
+    `595 passed (3103 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m4s`.
+  - Expected noisy passing logs remain: scheduler write-surface warnings,
+    deliberate event/retry/preflight error logs, createRef no-cause warnings,
+    traversal warnings, and the reload-rehydration transient `TypeError`.

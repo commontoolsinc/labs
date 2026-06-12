@@ -51,7 +51,6 @@ import {
 } from "./diagnosis.ts";
 import {
   type DependencyGraphState,
-  hasDependentPath,
   isLive,
   notifyNodeLivenessChange,
   registerDependentsForWriterSurface,
@@ -68,10 +67,6 @@ import {
   type TriggerSubscriptionState,
 } from "./trigger-index.ts";
 import {
-  collectDependenciesForAction as collectDependenciesForActionState,
-  type DependencyCollectionState,
-} from "./dependency-collection.ts";
-import {
   collectInvalidUpstreamForLog as collectInvalidUpstreamForLogState,
   type EventPreflightDependencyState,
   snapshotEventPreflightTraceContext,
@@ -84,8 +79,6 @@ import {
 } from "./run.ts";
 import {
   buildPullInitialSeeds,
-  collectInitialExecuteDependencies as collectInitialExecuteDependenciesState,
-  collectPostEventDependencies as collectPostEventDependenciesState,
   createSettlingTracker,
   markExecuteStart,
   markNonSettlingEpisode,
@@ -165,14 +158,11 @@ import type {
   ActionRunTraceEntry,
   EventHandler,
   EventPreflightTraceContext,
-  PopulateDependencies,
-  PopulateDependenciesEntry,
   QueuedEvent,
   ReactivityLog,
   SchedulerObservationIdentity,
   SettleStats,
   SettleStatsHistoryEntry,
-  SpaceScopeAndURI,
   TelemetryAnnotations,
   TriggerTraceEntry,
 } from "./types.ts";
@@ -186,8 +176,6 @@ const logger = getLogger("scheduler", {
 });
 const DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS = 10_000;
 
-type PendingDependencyCollectionState =
-  SchedulerSubscribeActionState["pendingDependencyCollectionState"];
 type FilterStatsState = { filtered: number; executed: number };
 type SchedulerStorageRehydrationOptions =
   & SchedulerObservationIdentity
@@ -201,6 +189,47 @@ type SchedulerStorageRehydrationOptions =
     awaitSync?: boolean;
   };
 
+type SchedulerRegistrationInput = ReactivityLog;
+type SchedulerRegisterOptions = {
+  isEffect?: boolean;
+  debounce?: number;
+  noDebounce?: boolean;
+  throttle?: number;
+  changeGroup?: ChangeGroup;
+  rehydrateFromStorage?: SchedulerStorageRehydrationOptions;
+};
+
+function isReactivityLog(value: unknown): value is ReactivityLog {
+  const candidate = value as Partial<ReactivityLog> | null;
+  return candidate !== null &&
+    typeof candidate === "object" &&
+    Array.isArray(candidate.reads) &&
+    Array.isArray(candidate.shallowReads) &&
+    Array.isArray(candidate.writes);
+}
+
+function normalizeRegistrationArgs(
+  dependenciesOrOptions?: SchedulerRegistrationInput | SchedulerRegisterOptions,
+  options: SchedulerRegisterOptions = {},
+): {
+  dependencies?: SchedulerRegistrationInput;
+  options: SchedulerRegisterOptions;
+} {
+  if (
+    dependenciesOrOptions === undefined ||
+    !isReactivityLog(dependenciesOrOptions)
+  ) {
+    return {
+      options: dependenciesOrOptions ?? options,
+    };
+  }
+
+  return {
+    dependencies: dependenciesOrOptions,
+    options,
+  };
+}
+
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
 export type {
@@ -210,7 +239,6 @@ export type {
   AnnotatedAction,
   AnnotatedEventHandler,
   EventHandler,
-  PopulateDependencies,
   ReactivityLog,
   SettleIterationStats,
   SettleStats,
@@ -347,17 +375,6 @@ export class Scheduler {
     DirtyPullRunnableStateWithDebounce;
   private pullSchedulingState!: PullSchedulingState;
   private subscriptionState!: SchedulerSubscriptionState;
-
-  // Dependency population callbacks for first-time subscriptions
-  // Called in execute() to discover what cells the action will read
-  private populateDependenciesCallbacks = new WeakMap<
-    Action,
-    PopulateDependenciesEntry
-  >();
-  // Actions that need dependency population before first run
-  private pendingDependencyCollection = new Set<Action>();
-  private pendingDependencyCollectionState!: PendingDependencyCollectionState;
-  private dependencyCollectionState!: DependencyCollectionState;
   private subscribeActionState!: SchedulerSubscribeActionState;
   private unsubscribeState!: SchedulerUnsubscribeActionState;
 
@@ -446,29 +463,27 @@ export class Scheduler {
   /**
    * Subscribes an action to run when its dependencies change.
    *
-   * The action will be scheduled to run immediately. Before running, the
-   * populateDependencies callback will be called to discover what cells the
-   * action will read. After running, the scheduler automatically re-subscribes
-   * using the reactivity log from the run.
+   * The action will be scheduled to run immediately. After running, the
+   * scheduler automatically re-subscribes using the reactivity log from the
+   * run.
    *
    * @param action The action to subscribe
-   * @param populateDependencies Callback to discover the action's read dependencies,
-   *   or a ReactivityLog for backwards compatibility (deprecated)
+   * @param dependencies Optional callback or immediate ReactivityLog for
+   *   backwards compatibility
    * @param options Configuration options for the subscription
    * @returns A cancel function to unsubscribe
    */
   register(
     action: Action,
-    populateDependencies: PopulateDependencies | ReactivityLog,
-    options: {
-      isEffect?: boolean;
-      debounce?: number;
-      noDebounce?: boolean;
-      throttle?: number;
-      changeGroup?: ChangeGroup;
-      rehydrateFromStorage?: SchedulerStorageRehydrationOptions;
-    } = {},
+    dependenciesOrOptions?:
+      | SchedulerRegistrationInput
+      | SchedulerRegisterOptions,
+    maybeOptions: SchedulerRegisterOptions = {},
   ): Cancel {
+    const { dependencies, options } = normalizeRegistrationArgs(
+      dependenciesOrOptions,
+      maybeOptions,
+    );
     const { rehydrateFromStorage } = options;
     if (rehydrateFromStorage) {
       this.setActionObservationIdentity(action, rehydrateFromStorage);
@@ -485,7 +500,7 @@ export class Scheduler {
     const cancel = subscribePullSchedulerAction(
       this.subscribeActionState,
       action,
-      populateDependencies,
+      dependencies,
       subscribeOptions,
     );
     if (rehydrateFromStorage) {
@@ -500,17 +515,12 @@ export class Scheduler {
    */
   subscribe(
     action: Action,
-    populateDependencies: PopulateDependencies | ReactivityLog,
-    options: {
-      isEffect?: boolean;
-      debounce?: number;
-      noDebounce?: boolean;
-      throttle?: number;
-      changeGroup?: ChangeGroup;
-      rehydrateFromStorage?: SchedulerStorageRehydrationOptions;
-    } = {},
+    dependenciesOrOptions?:
+      | SchedulerRegistrationInput
+      | SchedulerRegisterOptions,
+    maybeOptions: SchedulerRegisterOptions = {},
   ): Cancel {
-    return this.register(action, populateDependencies, options);
+    return this.register(action, dependenciesOrOptions, maybeOptions);
   }
 
   /**
@@ -605,7 +615,6 @@ export class Scheduler {
       record.invalidCauses = [];
     }
     this.pending.delete(action);
-    this.pendingDependencyCollection.delete(action);
     return true;
   }
 
@@ -843,7 +852,6 @@ export class Scheduler {
       return;
     }
 
-    this.pendingDependencyCollection.add(action);
     this.markAndScheduleInvalidAction(action);
   }
 
@@ -1315,16 +1323,7 @@ export class Scheduler {
     if (this.runningPromise) await this.runningPromise;
 
     this.beginExecuteCycle();
-    const initialDependencyCollection = this
-      .collectInitialExecuteDependencies();
-    this.markFirstRunNoOutputComputationsDemanded(
-      initialDependencyCollection.newActionsWithoutDependencies,
-    );
     const eventBlockingDeps = await this.processExecuteEventPhase();
-    const postEventDependencyCollection = this.collectPostEventDependencies();
-    this.markFirstRunNoOutputComputationsDemanded(
-      postEventDependencyCollection.newActionsWithoutDependencies,
-    );
     const initialSeeds = this.buildInitialExecuteSeeds(eventBlockingDeps);
 
     const settleResult = await this.runSettleLoop(initialSeeds);
@@ -1345,25 +1344,6 @@ export class Scheduler {
     markExecuteStart(this.settlingTracker);
   }
 
-  private collectInitialExecuteDependencies(): {
-    newActionsWithoutDependencies: Action[];
-  } {
-    return collectInitialExecuteDependenciesState({
-      pendingDependencyCollection: this.pendingDependencyCollection,
-      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
-      effects: this.nodes.effects,
-      getSchedulingWrites: (action) =>
-        this.writeIndex.getSchedulingWrites(action),
-      collectDependenciesForAction: (action, populateDependencies, options) =>
-        this.collectDependenciesForAction(
-          action,
-          populateDependencies,
-          options,
-        ),
-      getActionId: (action) => this.getActionId(action),
-    });
-  }
-
   private async processExecuteEventPhase(): Promise<Set<Action>> {
     // Track dirty dependencies that block events - these must be added to workSet
     const eventBlockingDeps = new Set<Action>();
@@ -1380,25 +1360,6 @@ export class Scheduler {
     }
   }
 
-  private collectPostEventDependencies(): {
-    newActionsWithoutDependencies: Action[];
-  } {
-    return collectPostEventDependenciesState({
-      pendingDependencyCollection: this.pendingDependencyCollection,
-      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
-      effects: this.nodes.effects,
-      getSchedulingWrites: (action) =>
-        this.writeIndex.getSchedulingWrites(action),
-      collectDependenciesForAction: (action, populateDependencies, options) =>
-        this.collectDependenciesForAction(
-          action,
-          populateDependencies,
-          options,
-        ),
-      getActionId: (action) => this.getActionId(action),
-    });
-  }
-
   private buildInitialExecuteSeeds(
     eventBlockingDeps: Iterable<Action>,
   ): Set<Action> {
@@ -1407,15 +1368,6 @@ export class Scheduler {
       eventBlockingDeps,
       computationDebounceFlushSeeds: this.delays.computationDebounceFlushSeeds,
     });
-  }
-
-  private markFirstRunNoOutputComputationsDemanded(actions: readonly Action[]) {
-    for (const action of actions) {
-      const record = this.nodes.get(action);
-      if (record?.kind === "computation" && record.status === "never-ran") {
-        this.markProvisionalDemand(record);
-      }
-    }
   }
 
   private async runSettleLoop(
@@ -1496,24 +1448,6 @@ export class Scheduler {
     stopSchedulerDiagnosis(this.diagnosisControlState);
   }
 
-  private collectDependenciesForAction(
-    action: Action,
-    populateDependencies: PopulateDependenciesEntry,
-    options: {
-      errorLogLabel: string;
-      errorMessage: (action: Action, error: unknown) => string;
-      updateDependents?: boolean;
-      useRawReadsForTriggers?: boolean;
-    },
-  ): { log: ReactivityLog; entities: Set<SpaceScopeAndURI> } {
-    return collectDependenciesForActionState(
-      this.dependencyCollectionState,
-      action,
-      populateDependencies,
-      options,
-    );
-  }
-
   /**
    * Updates the reverse dependency graph (dependents map).
    * For each action that writes to paths this action reads, add this action as a dependent.
@@ -1556,15 +1490,12 @@ export class Scheduler {
       .createDirtyPullRunnableStateWithDebounce();
     this.pullSchedulingState = this.createPullSchedulingState();
     this.subscriptionState = this.createSubscriptionState();
-    this.pendingDependencyCollectionState = this
-      .createPendingDependencyCollectionState();
     this.subscribeActionState = this.createSubscribeActionState();
     this.unsubscribeState = this.createUnsubscribeState();
     this.settleLoopState = this.createSettleLoopState();
     this.executeContinuationState = this.createExecuteContinuationState();
     this.eventQueueState = this.createEventQueueState();
     this.eventExecutionState = this.createEventExecutionState();
-    this.dependencyCollectionState = this.createDependencyCollectionState();
     this.actionRunState = this.createActionRunState();
     this.graphSnapshotState = this.createGraphSnapshotState();
   }
@@ -1789,26 +1720,11 @@ export class Scheduler {
     };
   }
 
-  private createPendingDependencyCollectionState(): PendingDependencyCollectionState {
-    return {
-      pendingDependencyCollection: this.pendingDependencyCollection,
-      effects: this.nodes.effects,
-      isThrottled: (action) => this.delays.isThrottled(action),
-      getSchedulingWrites: (action) =>
-        this.writeIndex.getSchedulingWrites(action),
-      hasDependentPath: (from, to) =>
-        hasDependentPath(this.dependents, from, to),
-    };
-  }
-
   private createSubscribeActionState(): SchedulerSubscribeActionState {
     return {
       subscriptionState: this.subscriptionState,
       dependencyUpdateState: this.dependencyUpdateState,
       triggerSubscriptionState: this.triggerSubscriptionState,
-      pendingDependencyCollectionState: this.pendingDependencyCollectionState,
-      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
-      pendingDependencyCollection: this.pendingDependencyCollection,
       markProvisionalDemand: (record) => this.markProvisionalDemand(record),
       pending: this.pending,
       effects: this.nodes.effects,
@@ -1851,8 +1767,6 @@ export class Scheduler {
       dependencyGraphState: this.dependencyGraphState,
       nodes: this.nodes,
       writeIndex: this.writeIndex,
-      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
-      pendingDependencyCollection: this.pendingDependencyCollection,
       getActionId: (target) => this.getActionId(target),
       clearInvalid: (target) => this.clearInvalidAction(target),
       cancelDebounceTimer: (target) => this.delays.cancelDebounceTimer(target),
@@ -1864,8 +1778,6 @@ export class Scheduler {
   private createSettleLoopState(): SchedulerSettleLoopState {
     return {
       getCollectSettleStats: () => this.collectSettleStats,
-      pendingDependencyCollection: this.pendingDependencyCollection,
-      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
       effects: this.nodes.effects,
       computations: this.nodes.computations,
       pending: this.pending,
@@ -1877,12 +1789,6 @@ export class Scheduler {
       getSchedulingWrites: (action) =>
         this.writeIndex.getSchedulingWrites(action),
       getSchedulingWritesMap: () => this.writeIndex.getSchedulingWritesMap(),
-      collectDependenciesForAction: (action, populateDependencies, options) =>
-        this.collectDependenciesForAction(
-          action,
-          populateDependencies,
-          options,
-        ),
       collectPullIterationSeeds: (seeds) =>
         this.collectPullIterationSeeds(seeds),
       getActionId: (action) => this.getActionId(action),
@@ -2006,15 +1912,6 @@ export class Scheduler {
           this.eventPreflightDependencyState,
           trace,
         ),
-    };
-  }
-
-  private createDependencyCollectionState(): DependencyCollectionState {
-    return {
-      runtime: this.runtime,
-      dependencyUpdateState: this.dependencyUpdateState,
-      triggerSubscriptionState: this.triggerSubscriptionState,
-      updateDependents: (action, log) => this.updateDependents(action, log),
     };
   }
 

@@ -87,7 +87,7 @@ async function setupMaterializerFanoutGraph(
       readerRuns[index]++;
       target.withTx(actionTx).key(key).get();
     };
-    runtime.scheduler.subscribe(reader, reader, { isEffect: true });
+    runtime.scheduler.subscribe(reader, { isEffect: true });
   }
 
   await runtime.scheduler.idle();
@@ -149,7 +149,7 @@ async function setupStaticWriteGraph(
     effectRuns.value++;
     target.withTx(actionTx).get();
   };
-  runtime.scheduler.subscribe(effect, effect, { isEffect: true });
+  runtime.scheduler.subscribe(effect, { isEffect: true });
   await runtime.scheduler.idle();
   computationRuns = 0;
   effectRuns.value = 0;

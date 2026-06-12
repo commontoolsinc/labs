@@ -9,7 +9,6 @@ export type SchedulerActionKind =
   | "event-handler";
 
 export type SchedulerObservationTransactionKind =
-  | "dependency-collection"
   | "action-run"
   | "event-preflight";
 
@@ -163,8 +162,7 @@ function isSchedulerActionKind(value: unknown): value is SchedulerActionKind {
 function isSchedulerObservationTransactionKind(
   value: unknown,
 ): value is SchedulerObservationTransactionKind {
-  return value === "dependency-collection" ||
-    value === "action-run" ||
+  return value === "action-run" ||
     value === "event-preflight";
 }
 

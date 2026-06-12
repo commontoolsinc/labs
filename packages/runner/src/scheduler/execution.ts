@@ -1,4 +1,3 @@
-import { getLogger } from "@commonfabric/utils/logger";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import {
   BACKOFF_BASE_MS,
@@ -9,17 +8,10 @@ import type { MaterializerIndexState } from "./materializers.ts";
 import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
 import type {
   Action,
-  PopulateDependenciesEntry,
   ReactivityLog,
   SettleIterationStats,
   SettleStats,
-  SpaceScopeAndURI,
 } from "./types.ts";
-
-const logger = getLogger("scheduler", {
-  enabled: true,
-  level: "warn",
-});
 
 export interface SettlingTracker {
   windowStart: number;
@@ -134,156 +126,6 @@ export function buildPullInitialSeeds(state: {
   return initialSeeds;
 }
 
-export interface ExecuteDependencyCollectionState {
-  readonly pendingDependencyCollection: Set<Action>;
-  readonly populateDependenciesCallbacks: WeakMap<
-    Action,
-    PopulateDependenciesEntry
-  >;
-  readonly effects: ReadonlySet<Action>;
-  readonly getSchedulingWrites: (
-    action: Action,
-  ) => readonly unknown[] | undefined;
-  readonly collectDependenciesForAction: (
-    action: Action,
-    populateDependencies: PopulateDependenciesEntry,
-    options: {
-      readonly errorLogLabel: string;
-      readonly errorMessage: (target: Action, error: unknown) => string;
-      readonly useRawReadsForTriggers?: boolean;
-    },
-  ) => { log: ReactivityLog; entities: Set<SpaceScopeAndURI> };
-  readonly getActionId: (action: Action) => string;
-}
-
-export function collectInitialExecuteDependencies(
-  state: ExecuteDependencyCollectionState,
-): {
-  collectedActions: Action[];
-  newActionsWithoutDependencies: Action[];
-} {
-  logger.timeStart("scheduler", "execute", "depCollect");
-  try {
-    // Find computation actions whose writes are still unknown. We run them on
-    // the first cycle to capture writes that cannot be inferred from declared
-    // outputs.
-    //
-    // TODO(seefeld): Once we more reliably capture what they can write via
-    // WriteableCell or so, then we can treat this more deliberately via the
-    // dependency collection process above. We'll have to re-run it whenever
-    // inputs change, as they might change what they can write to. We hope that
-    // for now this will be sufficiently captured in mightWrite.
-    return collectPendingDependencyActions({
-      pendingDependencyCollection: state.pendingDependencyCollection,
-      populateDependenciesCallbacks: state.populateDependenciesCallbacks,
-      effects: state.effects,
-      getSchedulingWrites: state.getSchedulingWrites,
-      collectDependenciesForAction: (action, populateDependencies) =>
-        state.collectDependenciesForAction(action, populateDependencies, {
-          errorLogLabel: "schedule-dep-error",
-          errorMessage: (target, error) =>
-            `Error populating dependencies for ${
-              state.getActionId(target)
-            }: ${error}`,
-        }),
-      onCollected: (action, { log, entities }) =>
-        logger.debug("schedule-dep-collect", () => [
-          `Collected dependencies for ${
-            state.getActionId(action)
-          }: ${log.reads.length} reads, ${log.writes.length} writes, ${entities.size} entities`,
-        ]),
-    });
-  } finally {
-    logger.timeEnd("scheduler", "execute", "depCollect");
-  }
-}
-
-export function collectPostEventDependencies(
-  state: ExecuteDependencyCollectionState,
-): {
-  collectedActions: Action[];
-  newActionsWithoutDependencies: Action[];
-} {
-  // Process any newly subscribed actions that were added during event handling.
-  // This handles cases like event handlers that create sub-patterns whose
-  // computations need their dependencies discovered before we build the workSet.
-  if (state.pendingDependencyCollection.size === 0) {
-    return { collectedActions: [], newActionsWithoutDependencies: [] };
-  }
-
-  return collectPendingDependencyActions({
-    pendingDependencyCollection: state.pendingDependencyCollection,
-    populateDependenciesCallbacks: state.populateDependenciesCallbacks,
-    effects: state.effects,
-    getSchedulingWrites: state.getSchedulingWrites,
-    collectDependenciesForAction: (action, populateDependencies) =>
-      state.collectDependenciesForAction(action, populateDependencies, {
-        errorLogLabel: "schedule-dep-error-post-event",
-        errorMessage: (target, error) =>
-          `Error populating dependencies for ${
-            state.getActionId(target)
-          }: ${error}`,
-      }),
-    onCollected: (action) =>
-      logger.debug("schedule-dep-collect-post-event", () => [
-        `Collected dependencies for ${state.getActionId(action)}`,
-      ]),
-  });
-}
-
-export function collectPendingDependencyActions(state: {
-  readonly pendingDependencyCollection: Set<Action>;
-  readonly populateDependenciesCallbacks: WeakMap<
-    Action,
-    PopulateDependenciesEntry
-  >;
-  readonly effects: ReadonlySet<Action>;
-  readonly getSchedulingWrites: (
-    action: Action,
-  ) => readonly unknown[] | undefined;
-  readonly collectDependenciesForAction: (
-    action: Action,
-    populateDependencies: PopulateDependenciesEntry,
-  ) => { log: ReactivityLog; entities: Set<SpaceScopeAndURI> };
-  readonly onCollected?: (
-    action: Action,
-    result: { log: ReactivityLog; entities: Set<SpaceScopeAndURI> },
-  ) => void;
-  readonly clearAfterCollect?: boolean;
-}): {
-  collectedActions: Action[];
-  newActionsWithoutDependencies: Action[];
-} {
-  const collectedActions: Action[] = [];
-
-  // Snapshot the collection before any callbacks can mutate the underlying set.
-  for (const action of [...state.pendingDependencyCollection]) {
-    const populateDependencies = state.populateDependenciesCallbacks.get(
-      action,
-    );
-    if (!populateDependencies) continue;
-
-    const result = state.collectDependenciesForAction(
-      action,
-      populateDependencies,
-    );
-    state.onCollected?.(action, result);
-    collectedActions.push(action);
-  }
-
-  const newActionsWithoutDependencies = [...state.pendingDependencyCollection]
-    .filter((action) =>
-      !state.effects.has(action) &&
-      (state.getSchedulingWrites(action)?.length ?? 0) === 0
-    );
-
-  if (state.clearAfterCollect ?? true) {
-    state.pendingDependencyCollection.clear();
-  }
-
-  return { collectedActions, newActionsWithoutDependencies };
-}
-
 export type SchedulerSettleResult = {
   settledEarly: boolean;
   maxSettleIterations: number;
@@ -295,11 +137,6 @@ export type SchedulerSettleResult = {
 
 export interface SchedulerSettleLoopState {
   readonly getCollectSettleStats: () => boolean;
-  readonly pendingDependencyCollection: Set<Action>;
-  readonly populateDependenciesCallbacks: WeakMap<
-    Action,
-    PopulateDependenciesEntry
-  >;
   readonly effects: ReadonlySet<Action>;
   readonly computations: ReadonlySet<Action>;
   readonly pending: Set<Action>;
@@ -315,15 +152,6 @@ export interface SchedulerSettleLoopState {
     Action,
     IMemorySpaceAddress[]
   >;
-  readonly collectDependenciesForAction: (
-    action: Action,
-    populateDependencies: PopulateDependenciesEntry,
-    options: {
-      readonly errorLogLabel: string;
-      readonly errorMessage: (target: Action, error: unknown) => string;
-      readonly useRawReadsForTriggers?: boolean;
-    },
-  ) => { log: ReactivityLog; entities: Set<SpaceScopeAndURI> };
   readonly collectPullIterationSeeds: (seeds: Set<Action>) => void;
   readonly getActionId: (action: Action) => string;
   readonly isThrottled: (action: Action) => boolean;
