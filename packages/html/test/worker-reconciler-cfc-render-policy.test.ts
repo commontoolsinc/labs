@@ -2126,6 +2126,366 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         }
       },
     );
+
+    // --- Default render ceiling (spec §8.10.6, S16 phase D) ---------------
+    // A host-supplied root ceiling gates labeled cells with NO authored
+    // boundary in the tree: atoms render only when listed exactly or when
+    // they are Caveat atoms of an allow-listed kind.
+
+    const PROMPT_INFLUENCE_KIND =
+      "https://commonfabric.org/cfc/concepts/prompt-influence";
+    const influenceCaveatAtom = {
+      type: "https://commonfabric.org/cfc/atom/Caveat",
+      kind: PROMPT_INFLUENCE_KIND,
+      source: "of:influence-source",
+    };
+
+    const caveatTx = runtime.edit();
+    const influenced = runtime.getCell<string>(
+      signer.did(),
+      "cfc-render-policy-influenced",
+      undefined,
+      caveatTx,
+    );
+    const influencedLink = influenced.getAsNormalizedFullLink();
+    caveatTx.writeOrThrow({
+      space: signer.did(),
+      id: influencedLink.id!,
+      type: "application/json",
+      path: [],
+    }, {
+      value: "Influenced draft text",
+      cfc: {
+        version: 1,
+        schemaHash: "test-influence-schema",
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: [],
+            label: { confidentiality: [influenceCaveatAtom] },
+          }],
+        },
+      },
+    });
+    assertEquals((await caveatTx.commit()).ok !== undefined, true);
+
+    const plainRoot = (child: unknown): WorkerVNode => ({
+      type: "vnode",
+      name: "div",
+      props: {},
+      children: [child as never],
+    });
+
+    await t.step(
+      "default ceiling blocks unlisted atoms with no authored boundary",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderConfidentialityCeiling: { atoms: [], caveatKinds: [] },
+        });
+        const cancel = reconciler.mount(plainRoot(confidential));
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            false,
+          );
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "default ceiling admits exactly listed atoms",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [healthRecordAtom],
+            caveatKinds: [],
+          },
+        });
+        const cancel = reconciler.mount(plainRoot(confidential));
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "default ceiling admits allow-listed caveat kinds and blocks others",
+      async () => {
+        const allowed = createOpsCollector();
+        const allowedReconciler = new WorkerReconciler({
+          onOps: allowed.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [],
+            caveatKinds: [PROMPT_INFLUENCE_KIND],
+          },
+        });
+        const cancelAllowed = allowedReconciler.mount(plainRoot(influenced));
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = allowed.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Influenced draft text"), true);
+        } finally {
+          cancelAllowed();
+        }
+
+        const blocked = createOpsCollector();
+        const blockedReconciler = new WorkerReconciler({
+          onOps: blocked.onOps,
+          renderConfidentialityCeiling: { atoms: [], caveatKinds: [] },
+        });
+        const cancelBlocked = blockedReconciler.mount(plainRoot(influenced));
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = blocked.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Influenced draft text"), false);
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancelBlocked();
+        }
+      },
+    );
+
+    await t.step(
+      "authored boundaries still narrow under the default ceiling",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [healthRecordAtom],
+            caveatKinds: [],
+          },
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: { maxConfidentiality: [] },
+          children: [confidential as never],
+        };
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            false,
+          );
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    // The mounted root cell is an egress like any descendant cell: its own
+    // label must pass the root policy before its resolved content renders.
+    await t.step(
+      "default ceiling gates a labeled cell mounted as the root",
+      async () => {
+        const blocked = createOpsCollector();
+        const blockedReconciler = new WorkerReconciler({
+          onOps: blocked.onOps,
+          renderConfidentialityCeiling: { atoms: [], caveatKinds: [] },
+        });
+        const cancelBlocked = blockedReconciler.mount(confidential);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = blocked.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            false,
+          );
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancelBlocked();
+        }
+
+        const admitted = createOpsCollector();
+        const admittedReconciler = new WorkerReconciler({
+          onOps: admitted.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [healthRecordAtom],
+            caveatKinds: [],
+          },
+        });
+        const cancelAdmitted = admittedReconciler.mount(confidential);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = admitted.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            true,
+          );
+        } finally {
+          cancelAdmitted();
+        }
+      },
+    );
+
+    await t.step(
+      "a labeled root cell still renders when no ceiling is configured",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+        const cancel = reconciler.mount(confidential);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    // Audit item 22 (ungrantable marker): "cfc:label-read-failed" means
+    // "the label could not be read", so it must never fit a render policy —
+    // even one that names the exported marker string — in either the
+    // ceiling or the declassification direction.
+    await t.step(
+      "neither ceiling nor declassification admits the read-failure marker",
+      async () => {
+        const seedTx = runtime.edit();
+        const markerCellSeed = runtime.getCell<string>(
+          signer.did(),
+          "cfc-render-policy-read-failed",
+          undefined,
+          seedTx,
+        );
+        const markerLink = markerCellSeed.getAsNormalizedFullLink();
+        seedTx.writeOrThrow({
+          space: signer.did(),
+          id: markerLink.id!,
+          type: "application/json",
+          path: [],
+        }, {
+          value: "Label-read-failed content",
+          cfc: {
+            version: 1,
+            schemaHash: "test-schema",
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: [],
+                // The exported marker string verbatim — the bypass shape is
+                // a config that allow-lists it.
+                label: { confidentiality: ["cfc:label-read-failed"] },
+              }],
+            },
+          },
+        });
+        assertEquals((await seedTx.commit()).ok !== undefined, true);
+        const markerLabeled = runtime.getCell<string>(
+          signer.did(),
+          "cfc-render-policy-read-failed",
+        );
+
+        const ceiling = createOpsCollector();
+        const ceilingReconciler = new WorkerReconciler({
+          onOps: ceiling.onOps,
+          renderConfidentialityCeiling: {
+            atoms: ["cfc:label-read-failed"],
+          },
+        });
+        const cancelCeiling = ceilingReconciler.mount(markerLabeled);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = ceiling.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Label-read-failed content"),
+            false,
+          );
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancelCeiling();
+        }
+
+        const declassify = createOpsCollector();
+        const declassifyReconciler = new WorkerReconciler({
+          onOps: declassify.onOps,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: {
+            maxConfidentiality: [],
+            declassifyConfidentiality: ["cfc:label-read-failed"],
+          },
+          children: [markerLabeled as never],
+        };
+        const cancelDeclassify = declassifyReconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = declassify.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Label-read-failed content"),
+            false,
+          );
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancelDeclassify();
+        }
+      },
+    );
+
+    // The ceiling crosses the postMessage seam unvalidated; a malformed
+    // shape must fail CLOSED (empty ceiling — public-only rendering), never
+    // crash the mount and never fail open to unbounded.
+    await t.step(
+      "a malformed ceiling fails closed instead of crashing the mount",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: 7,
+            caveatKinds: "signed-release",
+          } as never,
+        });
+        const cancel = reconciler.mount(confidential);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            false,
+          );
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
   } finally {
     await runtime.dispose();
     await storageManager.close();
