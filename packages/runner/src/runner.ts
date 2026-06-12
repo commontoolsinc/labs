@@ -66,10 +66,7 @@ import {
   ignoreReadForScheduling,
   markReadAsAttemptedWrite,
 } from "./scheduler.ts";
-import {
-  internalVerifierRead,
-  schedulerDependencyRead,
-} from "./storage/reactivity-log.ts";
+import { schedulerDependencyRead } from "./storage/reactivity-log.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellScope, narrowestScope } from "./scope.ts";
@@ -2519,7 +2516,6 @@ export class Runner {
     processCell: Cell<any>,
     addCancel: AddCancel,
     cause: Record<string, any>,
-    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
   ): any {
     if (
       !validateAndCheckOpaqueRefs(result, name) &&
@@ -2850,7 +2846,6 @@ export class Runner {
       inputs,
       reads,
       writes,
-      schedulerRehydration,
       streamLink,
     }: JavaScriptNodeContext & { streamLink: NormalizedFullLink },
   ): void {
@@ -2968,7 +2963,6 @@ export class Runner {
               processCell,
               addCancel,
               cause,
-              schedulerRehydration,
             );
           } finally {
             logger.timeEnd("stream", "postRun");

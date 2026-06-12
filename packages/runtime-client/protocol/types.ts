@@ -53,7 +53,6 @@ export enum RequestType {
   RegisterSpaceHost = "runtime:registerSpaceHost",
   FlushCompileCacheWrites = "runtime:flushCompileCacheWrites",
   GetGraphSnapshot = "runtime:getGraphSnapshot",
-  SetPullMode = "runtime:setPullMode",
   GetLoggerCounts = "runtime:getLoggerCounts",
   SetLoggerLevel = "runtime:setLoggerLevel",
   SetLoggerEnabled = "runtime:setLoggerEnabled",
@@ -280,11 +279,6 @@ export interface FlushCompileCacheWritesRequest extends BaseRequest {
 
 export interface GetGraphSnapshotRequest extends BaseRequest {
   type: RequestType.GetGraphSnapshot;
-}
-
-export interface SetPullModeRequest extends BaseRequest {
-  type: RequestType.SetPullMode;
-  pullMode: boolean;
 }
 
 export interface GetLoggerCountsRequest extends BaseRequest {
@@ -650,7 +644,6 @@ export type IPCClientRequest =
   | GetHomeSpaceCellRequest
   | EnsureHomePatternRunningRequest
   | GetGraphSnapshotRequest
-  | SetPullModeRequest
   | GetLoggerCountsRequest
   | SetLoggerLevelRequest
   | SetLoggerEnabledRequest
@@ -862,10 +855,6 @@ export type Commands = {
   [RequestType.GetGraphSnapshot]: {
     request: GetGraphSnapshotRequest;
     response: GraphSnapshotResponse;
-  };
-  [RequestType.SetPullMode]: {
-    request: SetPullModeRequest;
-    response: EmptyResponse;
   };
   [RequestType.GetLoggerCounts]: {
     request: GetLoggerCountsRequest;
