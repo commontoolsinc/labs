@@ -22,9 +22,10 @@ export const generateImage: AppRouteHandler<GenerateImageRoute> = async (c) => {
     ? { width, height }
     : undefined;
 
-  const cacheKey = customSize === undefined
-    ? prompt
-    : JSON.stringify({ prompt, ...customSize });
+  const cacheKey = JSON.stringify({
+    prompt,
+    image_size: customSize ?? "square",
+  });
   const promptSha = await sha256(cacheKey);
   const cachePath = `${CACHE_DIR}/${promptSha}.webp`;
 
