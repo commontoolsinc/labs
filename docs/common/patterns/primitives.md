@@ -115,8 +115,8 @@ are not part of a primitive contract.)
 These rules are enforced as critic checks
 (`docs/common/ai/pattern-critique-guide.md` §15) and applied across the real
 list patterns (do-list, store-mapper, fair-share, shopping-list,
-habit-tracker, project-list, budget-tracker — the identity-preserving update
-sweep).
+habit-tracker, project-list, budget-tracker, map-demo — the
+identity-preserving update sweep, #4085).
 
 ## Headless vs default rendering
 
@@ -190,12 +190,12 @@ critic checks, and the held-reference test technique. The durable lesson on
 sufficient — the reusable unit must also be *bigger than the glue needed to
 adopt it* and *smaller than the per-caller personality it sits inside*.
 Candidate primitives should be sized accordingly, and pure-logic helpers
-(plain modules, the `(m)` tier in PATTERN_PRIMITIVES.md) considered before
-sub-patterns.
+(plain modules — the `(m)` tier in the Pattern Primitives design doc, PR
+#4039) considered before sub-patterns.
 
 ## See also
 
 - [Pattern Composition](./composition.md) — the embedding mechanics.
 - [Reactivity](../concepts/reactivity.md) — why `Writable<>` shares a cell.
-- `docs/features/PATTERN_PRIMITIVES.md` — the census, tiers, and process this
-  tier plugs into (PR #4039).
+- The Pattern Primitives design doc (`docs/features/PATTERN_PRIMITIVES.md`,
+  landing via PR #4039) — the census, tiers, and process this tier plugs into.
