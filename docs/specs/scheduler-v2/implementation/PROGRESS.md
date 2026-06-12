@@ -2528,3 +2528,43 @@ Verification:
     `4 passed (83 steps)`, `0 failed`.
 - `cd packages/runner && deno task test`: `ok | 592 passed (3095 steps) |
   0 failed | 0 ignored (10 steps) (2m4s)`.
+
+## 05/step-2+3
+
+- [x] 6a9377bbe — scheduling writes are static declared surfaces registered at
+  subscribe time.
+- Deviations: reviewer-authorized residual rewrites documented above; effects
+  have no scheduler-visible write surface, and pull-root debounce protection is
+  the explicit `noDebounce` opt-out.
+- Recordings: see the `IMPLEMENTER RESOLUTION — 05/step-3 timing companion
+  rewrite` verification above.
+
+## 05/step-4
+
+- [x] no commit — clean removal held; no ordering-only effect write fallback
+  was needed.
+- Deviations: none.
+- Recordings:
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-ordering.test.ts test/scheduler-convergence.test.ts`:
+    passed, `3 passed (32 steps)`, `0 failed`.
+
+## 05/step-5
+
+- [x] pending — added a dev warning for computation writes outside the declared
+  static surface.
+- Deviations: none.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler/action-run.ts
+    packages/runner/test/scheduler-static-writes.test.ts`: passed
+    (`Checked 2 files`).
+  - `deno lint packages/runner/src/scheduler/action-run.ts
+    packages/runner/test/scheduler-static-writes.test.ts`: passed
+    (`Checked 2 files`).
+  - `deno check packages/runner/src/scheduler/action-run.ts
+    packages/runner/test/scheduler-static-writes.test.ts`: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-static-writes.test.ts`: passed, `1 passed (3 steps)`,
+    `0 failed`.

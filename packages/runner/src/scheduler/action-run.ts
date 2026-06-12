@@ -2,6 +2,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
 import type { Runtime } from "../runtime.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
+import { normalizeCellScope } from "../scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -488,6 +489,7 @@ function finalizeReactiveActionCommit(
   }, {
     beforeCommit: () => {
       log = txToReactivityLog(args.tx);
+      warnOnWriteSurfaceViolations(state, args, log);
       attachSchedulerActionObservation(state, args, log);
     },
   });
@@ -545,6 +547,44 @@ function finalizeReactiveActionCommit(
     changedComputationWrites,
   );
   args.resolve(args.result);
+}
+
+function warnOnWriteSurfaceViolations(
+  state: SchedulerActionRunState,
+  args: {
+    readonly action: Action;
+    readonly actionId: string;
+  },
+  log: ReactivityLog,
+): void {
+  if (state.isEffectAction.get(args.action)) return;
+  if ((state.getMaterializerWriteEnvelopes(args.action) ?? []).length > 0) {
+    return;
+  }
+
+  const surface = state.getSchedulingWrites(args.action) ?? [];
+  for (const write of log.writes) {
+    if (
+      surface.some((surfaceWrite) => surfaceCoversWrite(surfaceWrite, write))
+    ) {
+      continue;
+    }
+    logger.warn("write-surface-violation", () => [
+      `Action ${args.actionId} wrote outside its declared surface`,
+      write,
+    ]);
+  }
+}
+
+function surfaceCoversWrite(
+  surface: IMemorySpaceAddress,
+  write: IMemorySpaceAddress,
+): boolean {
+  return surface.space === write.space &&
+    surface.id === write.id &&
+    normalizeCellScope(surface.scope) === normalizeCellScope(write.scope) &&
+    surface.path.length <= write.path.length &&
+    surface.path.every((segment, index) => segment === write.path[index]);
 }
 
 function attachSchedulerActionObservation(
