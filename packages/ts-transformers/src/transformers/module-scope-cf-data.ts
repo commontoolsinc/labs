@@ -198,12 +198,19 @@ function shouldWrapTopLevelExpression(
 }
 
 /**
- * True when an object/array literal has a function-valued member visible in the
- * source (a shorthand method, get/set accessor, or a property/element whose
- * value is an arrow/function/class expression — recursively through nested
- * literals). Bindings reached via shorthand (`{ foo }`) or spread (`{ ...x }`)
- * are not inspected: their value is not syntactically present here, so they
- * keep the prior wrap-and-validate behavior.
+ * True when an object/array literal stores a function as a member VALUE, visible
+ * in the source (a shorthand method, or a property/element whose value is an
+ * arrow/function/class expression — recursively through nested literals). Such a
+ * literal can never be valid `__cf_data` (the plain-data validator rejects
+ * function values at any depth), so wrapping it only ever produces a load-time
+ * crash.
+ *
+ * Get/set accessors are deliberately NOT treated as function-like: an accessor's
+ * property VALUE is whatever the getter returns (read and validated by
+ * `freezeVerifiedPlainData`), so an accessor-backed data snapshot is valid plain
+ * data and must still be wrapped. Bindings reached via shorthand (`{ foo }`) or
+ * spread (`{ ...x }`) are not inspected — their value is not syntactically
+ * present here — so they keep the prior wrap-and-validate behavior.
  */
 function literalContainsFunctionLike(node: ts.Expression): boolean {
   const expr = unwrapExpression(node);
@@ -216,11 +223,7 @@ function literalContainsFunctionLike(node: ts.Expression): boolean {
   }
   if (ts.isObjectLiteralExpression(expr)) {
     return expr.properties.some((property) => {
-      if (
-        ts.isMethodDeclaration(property) ||
-        ts.isGetAccessorDeclaration(property) ||
-        ts.isSetAccessorDeclaration(property)
-      ) {
+      if (ts.isMethodDeclaration(property)) {
         return true;
       }
       if (ts.isPropertyAssignment(property)) {

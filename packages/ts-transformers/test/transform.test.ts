@@ -605,7 +605,9 @@ const data = { kind: "Caveat", base: "https://example.org/" };
 
 const dataArray = ["a", "b", "c"];
 
-export { helpers, nestedFns, fnArray, data, dataArray };
+const accessorData = { get open() { return "Open"; } };
+
+export { helpers, nestedFns, fnArray, data, dataArray, accessorData };
 `;
 
     const output = await transformFiles({
@@ -635,6 +637,12 @@ export { helpers, nestedFns, fnArray, data, dataArray };
     assertStringIncludes(
       main,
       'const dataArray = __cfHelpers.__cf_data(["a", "b", "c"]);',
+    );
+    // An accessor's value is what the getter returns (read + validated at
+    // runtime), so an accessor-backed snapshot is data and stays wrapped.
+    assertStringIncludes(
+      main,
+      "const accessorData = __cfHelpers.__cf_data({ get open() { return ",
     );
   });
 
