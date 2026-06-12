@@ -23,10 +23,6 @@ import { RetryImmediately } from "./retry-immediately.ts";
 import { toActionRunTraceAddress } from "./diagnostics.ts";
 import { buildSchedulerActionObservation } from "./persistent-observation.ts";
 import { filterIgnoredAddresses, txToReactivityLog } from "./reactivity.ts";
-import {
-  buildKnownSchedulingWrites,
-  pruneStructuralAncestorWrites,
-} from "./scheduling-writes.ts";
 import { type ActionTimingState, recordActionTime } from "./timing.ts";
 import type {
   Action,
@@ -275,12 +271,6 @@ export interface SchedulerActionRunState {
     action: Action | EventHandler,
   ) => SchedulerActionInfo | undefined;
   readonly getSchedulingWrites: (
-    action: Action,
-  ) => readonly IMemorySpaceAddress[] | undefined;
-  readonly getCurrentKnownSchedulingWrites: (
-    action: Action,
-  ) => readonly IMemorySpaceAddress[] | undefined;
-  readonly getHistoricalMightWrite: (
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;
   readonly getMaterializerWriteEnvelopes: (
@@ -584,23 +574,6 @@ function attachSchedulerActionObservation(
     (annotated.writes ?? []).map(toMemorySpaceAddress),
     ignoredSchedulingWrites,
   ));
-  const { newCurrentKnownWrites } = buildKnownSchedulingWrites({
-    writes: pruneStructuralAncestorWrites(
-      sortAndCompactPaths(
-        filterIgnoredAddresses(log.writes, ignoredSchedulingWrites),
-        false,
-      ),
-    ),
-    declaredWrites,
-    existingCurrentWrites: filterIgnoredAddresses(
-      state.getCurrentKnownSchedulingWrites(args.action) ?? [],
-      ignoredSchedulingWrites,
-    ),
-    existingHistoricalWrites: filterIgnoredAddresses(
-      state.getHistoricalMightWrite(args.action) ?? [],
-      ignoredSchedulingWrites,
-    ),
-  });
   const telemetry = state.getActionTelemetryInfo(args.action);
   const actionOptions = schedulerActionOptions(state, args.action);
   const observationIdentity = annotated.schedulerObservationIdentity;
@@ -626,7 +599,7 @@ function attachSchedulerActionObservation(
     observedAtSeq: 0,
     transactionKind: "action-run",
     transactionLog: log,
-    currentKnownWrites: newCurrentKnownWrites,
+    currentKnownWrites: declaredWrites,
     declaredWrites,
     materializerWriteEnvelopes:
       state.getMaterializerWriteEnvelopes(args.action) ?? [],

@@ -60,6 +60,13 @@ const writeAddress = {
   path: ["value", "output"],
 };
 
+const writeLink = {
+  space: writeAddress.space,
+  scope: writeAddress.scope,
+  id: writeAddress.id,
+  path: writeAddress.path.slice(1),
+};
+
 const declaredWrite = {
   space: "did:key:space" as const,
   scope: "space" as const,
@@ -208,7 +215,10 @@ describe("persistent scheduler observations", () => {
   it("rehydrates clean scheduler observations without rerun pressure", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
-      const persistedAction = () => {};
+      const persistedAction = Object.assign(
+        function persistedAction() {},
+        { writes: [writeLink] },
+      );
       testRuntime.runtime.scheduler.subscribe(persistedAction, {
         reads: [],
         shallowReads: [],
@@ -251,7 +261,7 @@ describe("persistent scheduler observations", () => {
     }
   });
 
-  it("persists the post-run scheduling writes when an action write path changes", async () => {
+  it("persists the static scheduling surface when an action write path changes", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const { runtime, tx } = testRuntime;
@@ -294,14 +304,24 @@ describe("persistent scheduler observations", () => {
       }) as typeof runtime.edit;
 
       let runs = 0;
-      const changingWriter: Action = (
-        actionTx: IExtendedStorageTransaction,
-      ) => {
-        runs++;
-        const writeSecondTarget = selector.withTx(actionTx).get();
-        const target = writeSecondTarget ? secondTarget : firstTarget;
-        target.withTx(actionTx).set(runs);
-      };
+      const staticSurface = [
+        toMemorySpaceAddress(firstTarget.getAsNormalizedFullLink()),
+        toMemorySpaceAddress(secondTarget.getAsNormalizedFullLink()),
+      ];
+      const changingWriter = Object.assign(
+        function changingWriter(actionTx: IExtendedStorageTransaction) {
+          runs++;
+          const writeSecondTarget = selector.withTx(actionTx).get();
+          const target = writeSecondTarget ? secondTarget : firstTarget;
+          target.withTx(actionTx).set(runs);
+        },
+        {
+          writes: [
+            firstTarget.getAsNormalizedFullLink(),
+            secondTarget.getAsNormalizedFullLink(),
+          ],
+        },
+      ) as Action;
 
       runtime.scheduler.subscribe(changingWriter, {
         reads: [toMemorySpaceAddress(selector.getAsNormalizedFullLink())],
@@ -310,9 +330,7 @@ describe("persistent scheduler observations", () => {
       });
 
       await runtime.scheduler.run(changingWriter);
-      expect(observations.at(-1)?.currentKnownWrites).toEqual([
-        toMemorySpaceAddress(firstTarget.getAsNormalizedFullLink()),
-      ]);
+      expect(observations.at(-1)?.currentKnownWrites).toEqual(staticSurface);
 
       const triggerTx = runtime.edit();
       selector.withTx(triggerTx).set(true);
@@ -323,11 +341,14 @@ describe("persistent scheduler observations", () => {
       expect(changedObservation?.actualChangedWrites).toEqual([
         toMemorySpaceAddress(secondTarget.getAsNormalizedFullLink()),
       ]);
-      expect(changedObservation?.currentKnownWrites).toEqual([
-        toMemorySpaceAddress(secondTarget.getAsNormalizedFullLink()),
-      ]);
+      expect(changedObservation?.currentKnownWrites).toEqual(staticSurface);
 
-      const restoredChangingWriter: Action = () => {};
+      const restoredChangingWriter = Object.assign((() => {}) as Action, {
+        writes: [
+          firstTarget.getAsNormalizedFullLink(),
+          secondTarget.getAsNormalizedFullLink(),
+        ],
+      });
       (restoredChangingWriter as { src?: string }).src = "changingWriter";
       expect(
         runtime.scheduler.rehydrateActionFromObservation(
@@ -335,9 +356,9 @@ describe("persistent scheduler observations", () => {
           { observation: changedObservation! },
         ),
       ).toBe(true);
-      expect(runtime.scheduler.getMightWrite(restoredChangingWriter)).toEqual([
-        toMemorySpaceAddress(secondTarget.getAsNormalizedFullLink()),
-      ]);
+      expect(runtime.scheduler.getMightWrite(restoredChangingWriter)).toEqual(
+        staticSurface,
+      );
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
     }
@@ -455,9 +476,12 @@ describe("persistent scheduler observations", () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       let runs = 0;
-      const autoPersistedAction = () => {
-        runs++;
-      };
+      const autoPersistedAction = Object.assign(
+        function autoPersistedAction() {
+          runs++;
+        },
+        { writes: [writeLink] },
+      );
       const actionId = "autoPersistedAction";
       const provider = testRuntime.runtime.storageManager.open(space) as {
         listSchedulerActionSnapshots?: (
@@ -550,7 +574,10 @@ describe("persistent scheduler observations", () => {
         });
 
       let populateCalls = 0;
-      const rehydratingAction = () => {};
+      const rehydratingAction = Object.assign(
+        function rehydratingAction() {},
+        { writes: [writeLink] },
+      );
       runtime.scheduler.subscribe(rehydratingAction, () => {
         populateCalls++;
       }, {
@@ -1266,12 +1293,15 @@ describe("persistent scheduler observations", () => {
     }
   });
 
-  it("backfills dependents when rehydrated currentKnownWrites restore a no-op writer", async () => {
+  it("backfills dependents when the live surface restores a no-op writer", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const { runtime } = testRuntime;
       const persistedReader = () => {};
-      const persistedWriter = () => {};
+      const persistedWriter = Object.assign(
+        function persistedWriter() {},
+        { writes: [writeLink] },
+      );
 
       runtime.scheduler.subscribe(persistedReader, {
         reads: [writeAddress],
@@ -1407,9 +1437,8 @@ describe("persistent scheduler observations", () => {
       });
       await runtime.idle();
 
-      expect(runtime.scheduler.getMightWrite(canceledBeforeRehydrate)).toEqual(
-        [],
-      );
+      expect(runtime.scheduler.getMightWrite(canceledBeforeRehydrate))
+        .toBeUndefined();
       expect(
         runtime.scheduler.getGraphSnapshot().nodes.some((node) =>
           node.id === "canceledBeforeRehydrate"
@@ -1487,9 +1516,8 @@ describe("persistent scheduler observations", () => {
       await runtime.idle();
 
       expect(runtime.scheduler.isDirty(dirtyBeforeRehydrate)).toBe(true);
-      expect(runtime.scheduler.getMightWrite(dirtyBeforeRehydrate)).toEqual(
-        [],
-      );
+      expect(runtime.scheduler.getMightWrite(dirtyBeforeRehydrate))
+        .toBeUndefined();
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
     }
@@ -1553,7 +1581,7 @@ describe("persistent scheduler observations", () => {
 
       expect(runs).toBe(1);
       expect(testRuntime.runtime.scheduler.getMightWrite(stalePersistedAction))
-        .toEqual([writeAddress]);
+        .toBeUndefined();
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
     }

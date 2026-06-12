@@ -982,6 +982,7 @@ export class CellImpl<T extends FabricValue>
       // Subscribe as an effect so it runs in the next cycle.
       const cancel = this.runtime.scheduler.subscribe(action, action, {
         isEffect: true,
+        noDebounce: true,
       });
 
       // Wait for the scheduler to process all pending work, then resolve.

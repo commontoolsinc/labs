@@ -50,18 +50,24 @@ describe("static write surface demand", () => {
     tx = runtime.edit();
 
     let runs = 0;
-    const writer: Action = (actionTx) => {
-      runs++;
-      const value = source.withTx(actionTx).get();
-      output.withTx(actionTx).send(value * 10);
-    };
+    const outputLink = output.getAsNormalizedFullLink();
+    const writer = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        runs++;
+        const value = source.withTx(actionTx).get();
+        output.withTx(actionTx).send(value * 10);
+      }) as Action,
+      {
+        writes: [outputLink],
+      },
+    );
 
     runtime.scheduler.subscribe(
       writer,
       {
         reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+        writes: [toMemorySpaceAddress(outputLink)],
       },
       {},
     );
@@ -94,18 +100,24 @@ describe("static write surface demand", () => {
     tx = runtime.edit();
 
     let runs = 0;
-    const writer: Action = (actionTx) => {
-      runs++;
-      const value = source.withTx(actionTx).get();
-      output.withTx(actionTx).send(value * 10);
-    };
+    const outputLink = output.getAsNormalizedFullLink();
+    const writer = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        runs++;
+        const value = source.withTx(actionTx).get();
+        output.withTx(actionTx).send(value * 10);
+      }) as Action,
+      {
+        writes: [outputLink],
+      },
+    );
 
     runtime.scheduler.subscribe(
       writer,
       {
         reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+        writes: [toMemorySpaceAddress(outputLink)],
       },
       {},
     );

@@ -1,19 +1,16 @@
 import {
   arraysOverlap,
   nonRecursiveReadMayOverlapWrite,
-  sortAndCompactPaths,
 } from "../reactive-dependencies.ts";
 import { normalizeCellScope } from "../scope.ts";
-import type {
-  IMemorySpaceAddress,
-  MemoryAddressPathComponent,
-} from "../storage/interface.ts";
+import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import { entityKey } from "./keys.ts";
 import type { Action, SpaceScopeAndURI } from "./types.ts";
 
 export interface WriterIndexState {
   readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly actionWriteEntities: WeakMap<Action, Set<SpaceScopeAndURI>>;
+  setSurface(action: Action, surface: IMemorySpaceAddress[]): void;
   updateWriterIndex(
     action: Action,
     nextSchedulingWrites: readonly IMemorySpaceAddress[],
@@ -27,20 +24,14 @@ export interface WriterIndexState {
 
 export interface SchedulingWriteState {
   readonly currentKnownWrites: WeakMap<Action, IMemorySpaceAddress[]>;
-  readonly historicalMightWrite: WeakMap<Action, IMemorySpaceAddress[]>;
-  readonly useHistoricalMightWrite: () => boolean;
   getSchedulingWrites(action: Action): IMemorySpaceAddress[] | undefined;
   getSchedulingWritesMap(): WeakMap<Action, IMemorySpaceAddress[]>;
 }
 
 export class SchedulerWriteIndex
   implements WriterIndexState, SchedulingWriteState {
-  // Current-known writes are rebuilt on each dependency update from actual
-  // writes plus declared writes. This is the default scheduling view.
+  // Current-known writes are the action's static declared write surface.
   readonly currentKnownWrites = new WeakMap<Action, IMemorySpaceAddress[]>();
-  // Historical writes preserve the legacy cumulative union and are only used
-  // when the experimental historical-write mode is enabled.
-  readonly historicalMightWrite = new WeakMap<Action, IMemorySpaceAddress[]>();
   // Index: entity -> actions that write to it (for fast dependency lookup).
   // Updated from the active scheduling write set.
   readonly writersByEntity = new Map<SpaceScopeAndURI, Set<Action>>();
@@ -50,26 +41,18 @@ export class SchedulerWriteIndex
     Set<SpaceScopeAndURI>
   >();
 
-  constructor(
-    private readonly state: {
-      readonly useHistoricalMightWrite: () => boolean;
-    },
-  ) {}
-
-  useHistoricalMightWrite(): boolean {
-    return this.state.useHistoricalMightWrite();
-  }
-
   getSchedulingWrites(action: Action): IMemorySpaceAddress[] | undefined {
-    return this.useHistoricalMightWrite()
-      ? this.historicalMightWrite.get(action)
-      : this.currentKnownWrites.get(action);
+    return this.currentKnownWrites.get(action);
   }
 
   getSchedulingWritesMap(): WeakMap<Action, IMemorySpaceAddress[]> {
-    return this.useHistoricalMightWrite()
-      ? this.historicalMightWrite
-      : this.currentKnownWrites;
+    return this.currentKnownWrites;
+  }
+
+  /** Registers the action's static write surface (idempotent). */
+  setSurface(action: Action, surface: IMemorySpaceAddress[]): void {
+    this.currentKnownWrites.set(action, surface);
+    this.updateWriterIndex(action, surface);
   }
 
   updateWriterIndex(
@@ -161,70 +144,6 @@ export function updateWriterIndex(
   return state.updateWriterIndex(action, nextSchedulingWrites);
 }
 
-export function buildKnownSchedulingWrites(state: {
-  readonly writes: readonly IMemorySpaceAddress[];
-  readonly declaredWrites: readonly IMemorySpaceAddress[];
-  readonly existingCurrentWrites: readonly IMemorySpaceAddress[];
-  readonly existingHistoricalWrites: readonly IMemorySpaceAddress[];
-}): {
-  newCurrentKnownWrites: IMemorySpaceAddress[];
-  newHistoricalMightWrite: IMemorySpaceAddress[];
-} {
-  const observedWrites = state.writes.length > 0
-    ? state.writes
-    : state.existingCurrentWrites;
-  const dynamicParentWrites = deriveDynamicCollectionParentWrites(
-    state.writes,
-    state.declaredWrites,
-  );
-  const declaredAncestorWrites = deriveDeclaredAncestorWrites(
-    state.writes,
-    state.declaredWrites,
-  );
-  const newCurrentKnownWrites = sortAndCompactPaths([
-    ...state.declaredWrites,
-    ...observedWrites,
-    ...dynamicParentWrites,
-    ...declaredAncestorWrites,
-  ]);
-  const newHistoricalMightWrite = sortAndCompactPaths([
-    ...state.existingHistoricalWrites,
-    ...newCurrentKnownWrites,
-  ]);
-  return { newCurrentKnownWrites, newHistoricalMightWrite };
-}
-
-export function diffSchedulingWrites(
-  previousSchedulingWrites: readonly IMemorySpaceAddress[],
-  nextSchedulingWrites: readonly IMemorySpaceAddress[],
-): {
-  addedWrites: IMemorySpaceAddress[];
-  removedWrites: IMemorySpaceAddress[];
-} {
-  const addedWrites = nextSchedulingWrites.filter((write) =>
-    !previousSchedulingWrites.some((existing) =>
-      schedulingWriteSubsumes(existing, write)
-    )
-  );
-  const removedWrites = previousSchedulingWrites.filter((write) =>
-    !nextSchedulingWrites.some((existing) =>
-      schedulingWriteSubsumes(existing, write)
-    )
-  );
-  return { addedWrites, removedWrites };
-}
-
-function schedulingWriteSubsumes(
-  existing: IMemorySpaceAddress,
-  write: IMemorySpaceAddress,
-): boolean {
-  return existing.space === write.space &&
-    existing.id === write.id &&
-    normalizeCellScope(existing.scope) === normalizeCellScope(write.scope) &&
-    existing.path.length <= write.path.length &&
-    arraysOverlap(existing.path, write.path);
-}
-
 export function readsOverlapWrites(
   reads: readonly IMemorySpaceAddress[],
   shallowReads: readonly IMemorySpaceAddress[],
@@ -259,89 +178,4 @@ export function readsOverlapWrites(
   }
 
   return false;
-}
-
-export function pruneStructuralAncestorWrites(
-  writes: readonly IMemorySpaceAddress[],
-): IMemorySpaceAddress[] {
-  // Transaction reactivity logs include ancestor paths when a child write
-  // changes shallow structure. For scheduling writes, the descendant path is
-  // precise enough; keeping the ancestor would make unrelated shallow root
-  // readers depend on this action.
-  return writes.filter((write) =>
-    !writes.some((other) =>
-      other !== write &&
-      other.space === write.space &&
-      other.id === write.id &&
-      other.type === write.type &&
-      write.path.length < other.path.length &&
-      arraysOverlap(write.path, other.path)
-    )
-  );
-}
-
-export function deriveDynamicCollectionParentWrites(
-  writes: readonly IMemorySpaceAddress[],
-  declaredWrites: readonly IMemorySpaceAddress[],
-): IMemorySpaceAddress[] {
-  return deriveDeclaredAncestorWritesMatching(
-    writes,
-    declaredWrites,
-    (declaredWrite, write) =>
-      isDynamicCollectionSegment(write.path[declaredWrite.path.length]),
-  );
-}
-
-export function deriveDeclaredAncestorWrites(
-  writes: readonly IMemorySpaceAddress[],
-  declaredWrites: readonly IMemorySpaceAddress[],
-): IMemorySpaceAddress[] {
-  return deriveDeclaredAncestorWritesMatching(
-    writes,
-    declaredWrites,
-    () => true,
-  );
-}
-
-function deriveDeclaredAncestorWritesMatching(
-  writes: readonly IMemorySpaceAddress[],
-  declaredWrites: readonly IMemorySpaceAddress[],
-  predicate: (
-    declaredWrite: IMemorySpaceAddress,
-    write: IMemorySpaceAddress,
-  ) => boolean,
-): IMemorySpaceAddress[] {
-  const ancestorWrites: IMemorySpaceAddress[] = [];
-  for (const declaredWrite of declaredWrites) {
-    for (const write of writes) {
-      if (
-        declaredWriteIsAncestorOfWrite(declaredWrite, write) &&
-        predicate(declaredWrite, write)
-      ) {
-        ancestorWrites.push(declaredWrite);
-        break;
-      }
-    }
-  }
-  return ancestorWrites;
-}
-
-function declaredWriteIsAncestorOfWrite(
-  declaredWrite: IMemorySpaceAddress,
-  write: IMemorySpaceAddress,
-): boolean {
-  return declaredWrite.space === write.space &&
-    declaredWrite.id === write.id &&
-    declaredWrite.type === write.type &&
-    normalizeCellScope(declaredWrite.scope) ===
-      normalizeCellScope(write.scope) &&
-    declaredWrite.path.length < write.path.length &&
-    arraysOverlap(declaredWrite.path, write.path);
-}
-
-function isDynamicCollectionSegment(
-  segment: MemoryAddressPathComponent | undefined,
-): boolean {
-  if (typeof segment === "number") return Number.isInteger(segment);
-  return typeof segment === "string" && /^(0|[1-9]\d*)$/.test(segment);
 }

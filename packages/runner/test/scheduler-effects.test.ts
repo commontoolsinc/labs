@@ -270,16 +270,28 @@ describe("effect/computation tracking", () => {
     tx = runtime.edit();
 
     // Action 1: reads source, writes intermediate
-    const action1: Action = (actionTx) => {
-      const val = source.withTx(actionTx).get();
-      intermediate.withTx(actionTx).send(val * 10);
-    };
+    const intermediateLink = intermediate.getAsNormalizedFullLink();
+    const action1 = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        const val = source.withTx(actionTx).get();
+        intermediate.withTx(actionTx).send(val * 10);
+      }) as Action,
+      {
+        writes: [intermediateLink],
+      },
+    );
 
     // Action 2: reads intermediate, writes output
-    const action2: Action = (actionTx) => {
-      const val = intermediate.withTx(actionTx).get();
-      output.withTx(actionTx).send(val + 5);
-    };
+    const outputLink = output.getAsNormalizedFullLink();
+    const action2 = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        const val = intermediate.withTx(actionTx).get();
+        output.withTx(actionTx).send(val + 5);
+      }) as Action,
+      {
+        writes: [outputLink],
+      },
+    );
 
     // Subscribe action1 first (writes to intermediate)
     runtime.scheduler.subscribe(
@@ -287,7 +299,7 @@ describe("effect/computation tracking", () => {
       {
         reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [toMemorySpaceAddress(intermediate.getAsNormalizedFullLink())],
+        writes: [toMemorySpaceAddress(intermediateLink)],
       },
       {},
     );
@@ -299,7 +311,7 @@ describe("effect/computation tracking", () => {
       {
         reads: [toMemorySpaceAddress(intermediate.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+        writes: [toMemorySpaceAddress(outputLink)],
       },
       {},
     );
@@ -328,16 +340,22 @@ describe("effect/computation tracking", () => {
     runtime.scheduler.subscribe(effect, effect, { isEffect: true });
     await runtime.scheduler.idle();
 
-    const computation: Action = (actionTx) => {
-      data.withTx(actionTx).key("foo").set(2);
-    };
+    const fooLink = data.key("foo").getAsNormalizedFullLink();
+    const computation = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        data.withTx(actionTx).key("foo").set(2);
+      }) as Action,
+      {
+        writes: [fooLink],
+      },
+    );
     runtime.scheduler.subscribe(
       computation,
       {
         reads: [],
         shallowReads: [],
         writes: [
-          toMemorySpaceAddress(data.key("foo").getAsNormalizedFullLink()),
+          toMemorySpaceAddress(fooLink),
         ],
       },
       {},
@@ -347,7 +365,7 @@ describe("effect/computation tracking", () => {
     expect(dependents.has(effect)).toBe(true);
   });
 
-  it("should backfill only when new writer paths overlap existing reads", async () => {
+  it("should keep writer paths fixed over resubscribe logs", async () => {
     const data = runtime.getCell<{ foo: number; bar: number }>(
       space,
       "backfill-writer-paths",
@@ -365,16 +383,22 @@ describe("effect/computation tracking", () => {
     runtime.scheduler.subscribe(effect, effect, { isEffect: true });
     await runtime.scheduler.idle();
 
-    const computation: Action = (actionTx) => {
-      data.withTx(actionTx).key("foo").set(2);
-    };
+    const fooLink = data.key("foo").getAsNormalizedFullLink();
+    const computation = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        data.withTx(actionTx).key("foo").set(2);
+      }) as Action,
+      {
+        writes: [fooLink],
+      },
+    );
     runtime.scheduler.subscribe(
       computation,
       {
         reads: [],
         shallowReads: [],
         writes: [
-          toMemorySpaceAddress(data.key("foo").getAsNormalizedFullLink()),
+          toMemorySpaceAddress(fooLink),
         ],
       },
       {},
@@ -393,7 +417,7 @@ describe("effect/computation tracking", () => {
     });
 
     const updatedDependents = runtime.scheduler.getDependents(computation);
-    expect(updatedDependents.has(effect)).toBe(true);
+    expect(updatedDependents.has(effect)).toBe(false);
   });
 
   it("should prune ignored scheduling writes from mightWrite and dependents", async () => {
@@ -415,7 +439,10 @@ describe("effect/computation tracking", () => {
     await tx.commit();
     tx = runtime.edit();
 
+    const outputLink = output.getAsNormalizedFullLink();
+    const childProcessLink = childProcess.getAsNormalizedFullLink();
     const action: Action & {
+      writes?: ReturnType<typeof output.getAsNormalizedFullLink>[];
       ignoredSchedulingWrites?: ReturnType<
         typeof childProcess.getAsNormalizedFullLink
       >[];
@@ -425,28 +452,28 @@ describe("effect/computation tracking", () => {
         pattern: getSigilLink("of:child-pattern"),
       });
     };
+    action.writes = [outputLink, childProcessLink];
+    action.ignoredSchedulingWrites = [childProcessLink];
 
     runtime.scheduler.subscribe(
       action,
       {
         reads: [],
         shallowReads: [],
-        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+        writes: [toMemorySpaceAddress(outputLink)],
       },
       {},
     );
 
     await runtime.scheduler.run(action);
 
-    const childProcessId = childProcess.getAsNormalizedFullLink().id;
+    const outputId = outputLink.id;
+    const childProcessId = childProcessLink.id;
     expect(
       runtime.scheduler.getMightWrite(action)?.some((write) =>
-        write.id === childProcessId
+        write.id === outputId
       ),
     ).toBe(true);
-    action.ignoredSchedulingWrites = [childProcess.getAsNormalizedFullLink()];
-    await runtime.scheduler.run(action);
-
     expect(
       runtime.scheduler.getMightWrite(action)?.some((write) =>
         write.id === childProcessId
@@ -454,7 +481,7 @@ describe("effect/computation tracking", () => {
     ).toBe(false);
   });
 
-  it("should drop stale dependents when writes move to a different cell", async () => {
+  it("should keep dependents when resubscribe logs move outside the static surface", async () => {
     const cellA = runtime.getCell<number>(
       space,
       "write-switch-cell-a",
@@ -478,13 +505,16 @@ describe("effect/computation tracking", () => {
     runtime.scheduler.subscribe(effect, effect, { isEffect: true });
     await runtime.scheduler.idle();
 
-    const computation: Action = () => {};
+    const cellALink = cellA.getAsNormalizedFullLink();
+    const computation = Object.assign((() => {}) as Action, {
+      writes: [cellALink],
+    });
     runtime.scheduler.subscribe(
       computation,
       {
         reads: [],
         shallowReads: [],
-        writes: [toMemorySpaceAddress(cellA.getAsNormalizedFullLink())],
+        writes: [toMemorySpaceAddress(cellALink)],
       },
       {},
     );
@@ -497,9 +527,7 @@ describe("effect/computation tracking", () => {
       writes: [toMemorySpaceAddress(cellB.getAsNormalizedFullLink())],
     });
 
-    expect(runtime.scheduler.getDependents(computation).has(effect)).toBe(
-      false,
-    );
+    expect(runtime.scheduler.getDependents(computation).has(effect)).toBe(true);
   });
 
   it("should ignore attemptedWrites as scheduler dependency evidence", async () => {
@@ -633,9 +661,11 @@ describe("effect/computation tracking", () => {
         sideTarget.withTx(actionTx).set({ value });
       },
       {
+        writes: [output.getAsNormalizedFullLink()],
         materializerWriteEnvelopes: [sideTarget.getAsNormalizedFullLink()],
       },
     ) as Action & {
+      writes: ReturnType<typeof output.getAsNormalizedFullLink>[];
       materializerWriteEnvelopes: ReturnType<
         typeof sideTarget.getAsNormalizedFullLink
       >[];
@@ -684,7 +714,7 @@ describe("effect/computation tracking", () => {
     );
   });
 
-  it("should not make broad attempted writes into materializer dependents", async () => {
+  it("should keep broad materializer envelopes out of ordinary dependents", async () => {
     const source = runtime.getCell<number>(
       space,
       "materializer-fanout-source",
@@ -734,7 +764,7 @@ describe("effect/computation tracking", () => {
     await runtime.idle();
 
     expect(runtime.scheduler.getDependents(materializer).has(changedEffect))
-      .toBe(true);
+      .toBe(false);
     expect(runtime.scheduler.getDependents(materializer).has(stableEffect))
       .toBe(false);
   });
@@ -1003,14 +1033,20 @@ describe("effect/computation tracking", () => {
     tx = runtime.edit();
 
     let computationRuns = 0;
-    const computation: Action = (actionTx) => {
-      computationRuns++;
-      target.withTx(actionTx).set(source.withTx(actionTx).get());
-    };
+    const targetLink = target.getAsNormalizedFullLink();
+    const computation = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        computationRuns++;
+        target.withTx(actionTx).set(source.withTx(actionTx).get());
+      }) as Action,
+      {
+        writes: [targetLink],
+      },
+    );
     runtime.scheduler.subscribe(computation, {
       reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
       shallowReads: [],
-      writes: [toMemorySpaceAddress(target.getAsNormalizedFullLink())],
+      writes: [toMemorySpaceAddress(targetLink)],
     });
     await runtime.idle();
     expect(computationRuns).toBe(0);
