@@ -127,8 +127,7 @@ describe("cli fabric deps", () => {
 
   it("collectLocalProgram walks local files and dispatches on fabric refs", async () => {
     const resolver = new InMemoryProgram("/main.tsx", {
-      "/main.tsx":
-        `import { s } from "./schemas.tsx";\nexport default s;`,
+      "/main.tsx": `import { s } from "./schemas.tsx";\nexport default s;`,
       "/schemas.tsx": `import dep from "cf:dep";\nexport const s = dep;`,
     });
 
