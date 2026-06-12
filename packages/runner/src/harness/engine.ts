@@ -612,7 +612,6 @@ export class Engine extends EventTarget implements Harness {
       // a from-zero scan, and any mis-attribution degrades fail-closed at the
       // CFC identity layer — see the fn.src note in the design doc.)
       const script = [...graph.compiledBodies.values()].join("\n");
-      const bundleId = hashOf(script).toString();
       // Register a composed bundle source map for `${evalId}.js` so that
       // `fn.src` coordinates (resolved against `script`) map back to the
       // original authored sources — without this the ESM loader yields raw
@@ -732,7 +731,6 @@ export class Engine extends EventTarget implements Harness {
       this.recordModuleProvenance(
         exportsByIdentity,
         graph.registrationSink,
-        bundleId,
       );
 
       // `graph.registrationSink` was populated by each module's `__cfReg` during
@@ -761,7 +759,6 @@ export class Engine extends EventTarget implements Harness {
   private recordModuleProvenance(
     exportsByIdentity: Map<string, Exports>,
     registrationSink: Map<string, Map<string, unknown>>,
-    bundleId: string,
   ): void {
     const record = (identity: string, symbol: string, value: unknown) => {
       if (!isTrustedBuilderArtifact(value)) return;
@@ -788,7 +785,6 @@ export class Engine extends EventTarget implements Harness {
       recordVerifiedProvenance(implementation, {
         identity,
         symbol,
-        bundleId,
         ...(bindingIdentity ? { bindingIdentity } : {}),
       });
       // The strong content-addressed implementation index — the resolution

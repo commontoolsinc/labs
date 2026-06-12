@@ -152,7 +152,6 @@ describe("CFC builtin implementation identity", () => {
     recordVerifiedProvenance(implementation, {
       identity: "module-hash-1",
       symbol: "localFunction",
-      bundleId: "bundle-hash-1",
       bindingIdentity: {
         sourceFile: "/main.tsx",
         bindingPath: ["localFunction"],
@@ -165,7 +164,6 @@ describe("CFC builtin implementation identity", () => {
       kind: "verified",
       moduleIdentity: "module-hash-1",
       symbol: "localFunction",
-      bundleId: "bundle-hash-1",
       sourceFile: "/main.tsx",
       bindingPath: ["localFunction"],
       sourceLocation: { line: 4, column: 12 },

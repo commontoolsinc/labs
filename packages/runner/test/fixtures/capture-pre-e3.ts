@@ -1,10 +1,5 @@
-// One-off capture script for the pre-E3 serialized-pattern fixture.
+// One-off capture script for the stored pattern-value fixture.
 // Run: deno run -A test/fixtures/capture-pre-e3.ts (from packages/runner)
-//
-// The `preE3` vintage was captured BEFORE the $patternRef dual-write and is
-// preserved verbatim when re-running (committed stored data does not change
-// because the writer did). Re-running against the current checkout refreshes
-// only the `dualWrite` vintage.
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../../src/runtime.ts";
@@ -44,23 +39,12 @@ const fixtureUrl = new URL(
   "./pre-e3-serialized-pattern.json",
   import.meta.url,
 );
-let preE3 = serialized;
-let dualWrite = serialized;
-try {
-  const existing = JSON.parse(await Deno.readTextFile(fixtureUrl));
-  if (existing?.serialized?.preE3) preE3 = existing.serialized.preE3;
-  if (existing?.serialized?.dualWrite) {
-    dualWrite = existing.serialized.dualWrite;
-  }
-} catch {
-  // First capture: the current writer IS the pre-E3 writer.
-}
 
 const fixture = {
   comment:
-    "Stored pattern-VALUE vintages. preE3 (writer before the E3 $patternRef dual-write): a bare node-graph. dualWrite (E3 writer): $patternRef alongside the graph. refsOnly (E4 writer, current): $patternRef + schemas, no graph — rehydrates by identity only. The graph-bearing vintages must keep executing through the graph read paths (runtime.run on a deserialized graph; resolveOpPattern) for as long as stored data can carry them; earlier vintages are preserved verbatim on re-capture. Refresh refsOnly by re-running test/fixtures/capture-pre-e3.ts.",
+    "Stored pattern-VALUE fixture: refsOnly is the current writer's boundary output ($patternRef + schemas, no graph). Earlier vintages (preE3 bare graph, E3 dual-write) were dropped with the legacy read path (identity E5, data-wipe decision). Refresh by re-running test/fixtures/capture-pre-e3.ts.",
   program: PROGRAM,
-  serialized: { preE3, dualWrite, refsOnly: serialized },
+  serialized: { refsOnly: serialized },
 };
 
 await Deno.writeTextFile(

@@ -298,53 +298,8 @@ export default pattern<{ out: string }>(({ out }) => ({
   });
 });
 
-describe("provenance bundleId fallback (legacy claim compat)", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
-  let runtime: Runtime | undefined;
-
-  afterEach(async () => {
-    await runtime?.dispose();
-    await storageManager?.close();
-    runtime = undefined;
-    storageManager = undefined;
-  });
-
-  // NOTE (PR E2): the former "falls back to verifiedLoadId when the bundle id
-  // is unregistered" behavior is deliberately GONE with the loadId machinery.
-  // Claims stamped with a raw load id could never verify across sessions
-  // anyway (load ids embed a per-session counter), and same-session claims
-  // written since #4009 carry moduleIdentity, which wins arm selection.
-  it("carries the evaluation's bundleId via provenance", async () => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-      cfcEnforcementMode: "observe",
-    });
-    const pattern = await runtime.patternManager.compilePattern(PROGRAM);
-    await runtime.idle();
-    const node = pattern.nodes.find((n) =>
-      (n.module as Module).type === "javascript" &&
-      (n.module as Module).wrapper === "handler"
-    );
-    const module = node!.module as Module;
-    const fn = module.implementation as HarnessedFunction;
-
-    // Post-flip stored graphs carry no `implementationRef`, so resolution of a
-    // rehydrated module yields NO verifiedLoadId — but a stored legacy
-    // bundleId-only `writeAuthorizedBy` claim still needs the live identity to
-    // carry the bundle id or it fails closed. The id therefore rides on the
-    // provenance recorded at evaluation time.
-    expect(getVerifiedProvenance(fn)?.bundleId).toBeDefined();
-    const identity = resolvePolicyFacingImplementationIdentity(module, {
-      implementation: fn,
-    });
-    expect(identity?.kind).toBe("verified");
-    expect((identity as { bundleId?: string }).bundleId).toBe(
-      getVerifiedProvenance(fn)!.bundleId,
-    );
-  });
-});
+// (The "provenance bundleId fallback" suite retired with the bundleId
+// verification arm — identity E5, data-wipe decision.)
 
 describe("$implRef resolution arm (Runner.resolveJavaScriptFunction)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;

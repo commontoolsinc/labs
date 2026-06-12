@@ -142,23 +142,8 @@ describe("refs-only pattern JSON at the boundary", () => {
   });
 });
 
-describe("resolveOpPattern stored-vintage reads", () => {
-  it("falls back to the carried graph of an E3 dual-write value on a miss", () => {
-    const dualWriteValue = {
-      $patternRef: { identity: "cf:module/evicted", symbol: "s" },
-      argumentSchema: true,
-      resultSchema: true,
-      result: {},
-      nodes: [],
-    } as never;
-    const fakeRuntime = {
-      patternManager: { artifactFromIdentitySync: () => undefined },
-    } as never;
-    const resolved = resolveOpPattern(fakeRuntime, dualWriteValue, "map");
-    expect(resolved).toBe(dualWriteValue);
-  });
-
-  it("throws when the value misses the index and carries no graph", () => {
+describe("resolveOpPattern", () => {
+  it("throws when a ref's module never evaluated in this session", () => {
     const fakeRuntime = {
       patternManager: { artifactFromIdentitySync: () => undefined },
     } as never;
@@ -169,6 +154,11 @@ describe("resolveOpPattern stored-vintage reads", () => {
         "map",
       )
     ).toThrow(/did not evaluate in this session/);
+  });
+
+  it("passes a plain stored graph through (no-entry-ref writer)", () => {
+    const graph = { nodes: [], result: {} } as never;
+    expect(resolveOpPattern({} as never, graph, "map")).toBe(graph);
   });
 });
 
@@ -198,19 +188,6 @@ describe("resolveStoredPattern (stored tool patterns)", () => {
       patternManager: { artifactFromIdentitySync: () => undefined },
     } as never;
     expect(resolveStoredPattern(fakeRuntime, refValue)).toBeUndefined();
-  });
-
-  it("reads pre-E4 sentinel vintages tolerantly ($opFallback)", () => {
-    const fallbackGraph = { argumentSchema: true, nodes: [] };
-    const fakeRuntime = {
-      patternManager: { artifactFromIdentitySync: () => undefined },
-    } as never;
-    expect(
-      resolveStoredPattern(fakeRuntime, {
-        $patternRef: { identity: "cf:module/old", symbol: "s" },
-        $opFallback: fallbackGraph,
-      }),
-    ).toBe(fallbackGraph);
   });
 
   it("passes plain stored graphs and nullish values through", () => {

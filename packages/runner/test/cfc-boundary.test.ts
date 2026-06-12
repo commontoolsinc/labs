@@ -5669,7 +5669,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("rejects writeAuthorizedBy when the verified bundle identity differs", async () => {
+  it("rejects a legacy bundleId-only writeAuthorizedBy claim (arm retired, identity E5)", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
@@ -5680,7 +5680,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       });
       tx.setCfcImplementationIdentity({
         kind: "verified",
-        bundleId: "bundle-hash-1",
+        moduleIdentity: "module-hash-1",
         sourceFile: "/main.tsx",
         bindingPath: ["localFunction"],
       });

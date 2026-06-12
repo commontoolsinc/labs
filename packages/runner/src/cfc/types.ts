@@ -219,14 +219,11 @@ export type ImplementationIdentity =
     /**
      * Content-addressed module identity (prefix-free `cf:module/<hash>`
      * hash) — reload-stable and robust to unrelated module changes in the
-     * same program. Present on provenance-resolved identities; `bundleId`
-     * (the per-program concatenated-script hash) is retained alongside for
-     * stored writeAuthorizedBy claims written before the switch.
+     * same program.
      */
     moduleIdentity?: string;
     /** Export/`__cfReg` symbol of the registered factory, when module-scope. */
     symbol?: string;
-    bundleId?: string;
     sourceFile?: string;
     bindingPath?: string[];
     sourceLocation?: { line: number; column: number };

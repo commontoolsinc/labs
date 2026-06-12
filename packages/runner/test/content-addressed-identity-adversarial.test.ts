@@ -838,210 +838,57 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
   };
 
   // ---------------------------------------------------------------------------
-  // Attack 8 — the bundleId verification arm is now LIVE (provenance carries a
-  // bundleId), so it becomes an attack target. It must stay strictly bounded:
-  // it serves ONLY stored legacy bundleId-only claims, never lets a bundleId
-  // back-door a moduleIdentity-bearing claim, and never matches on empty ids.
-  // (attack 5 line 646 already pins the OTHER direction: a bundleId-only claim
-  // vs a bundleId-less identity. These pin the inverse + the empties.)
+  // Attacks 8 + 9 (historical) — the legacy bundleId verification arm and the
+  // dynamic-artifact registrar are GONE (identity E5): a claim without a
+  // moduleIdentity fails closed, and minting builder artifacts inside an
+  // action throws at creation time (test/dynamic-builder-call-throw.test.ts).
+  // What remains to pin is the fail-closed floor for stored bundleId-only
+  // claims: they never verify, against ANY identity.
   // ---------------------------------------------------------------------------
-  describe("attack 8: bundleId arm cannot launder a moduleIdentity claim", () => {
-    it("a claim carrying BOTH ids selects the moduleIdentity arm: matching bundleId + WRONG moduleIdentity fails closed", async () => {
-      // The claim has moduleIdentity, so `identityArmMatches` consults ONLY the
-      // moduleIdentity arm — a matching bundleId must NOT be a fallback that
-      // satisfies it (no cross-arm confusion in the new live-bundleId world).
+  describe("attacks 8+9 (retired arms): bundleId-only claims always fail closed", () => {
+    it("a bundleId-only claim is rejected even when the writer is fully verified", async () => {
       const { digest, result } = await driveE2Claim(
         {
           __ctWriterIdentityOf: {
-            moduleIdentity: "owner-module",
-            bundleId: "shared-bundle",
-            file: "/owner.tsx",
-            path: ["ownerHandler"],
+            bundleId: "ANY_BUNDLE",
+            file: "/main.tsx",
+            path: ["localFunction"],
           },
         },
         {
           kind: "verified",
-          moduleIdentity: "attacker-module", // selected arm: MISMATCH
-          bundleId: "shared-bundle", // matches, but must be ignored
-          sourceFile: "/owner.tsx",
-          bindingPath: ["ownerHandler"],
+          moduleIdentity: "module-hash-1",
+          sourceFile: "/main.tsx",
+          bindingPath: ["localFunction"],
         },
-        "attack8-bothids-modmismatch",
+        "attack8-bundle-only-rejected",
       );
       expect(digest).toBe("");
       expect(result.error).toBeDefined();
     });
 
-    it("a legacy bundleId-only claim fails closed against a verified writer with a DIFFERENT bundleId", async () => {
+    it("a claim carrying BOTH ids verifies on moduleIdentity alone (bundleId is inert)", async () => {
       const { digest, result } = await driveE2Claim(
         {
           __ctWriterIdentityOf: {
-            bundleId: "owner-bundle",
-            file: "/owner.tsx",
-            path: ["ownerHandler"],
+            bundleId: "IGNORED",
+            moduleIdentity: "module-hash-1",
+            file: "/main.tsx",
+            path: ["localFunction"],
           },
         },
         {
           kind: "verified",
-          moduleIdentity: "attacker-module",
-          bundleId: "attacker-bundle", // does NOT match the claim's bundleId
-          sourceFile: "/owner.tsx",
-          bindingPath: ["ownerHandler"],
+          moduleIdentity: "module-hash-1",
+          sourceFile: "/main.tsx",
+          bindingPath: ["localFunction"],
         },
-        "attack8-wrong-bundle",
+        "attack8-both-ids-module-arm",
       );
-      expect(digest).toBe("");
-      expect(result.error).toBeDefined();
-    });
-
-    it("an empty-string bundleId on both sides does NOT match (length>0 guard, no vacuous bundle)", async () => {
-      const { digest, result } = await driveE2Claim(
-        {
-          __ctWriterIdentityOf: {
-            bundleId: "",
-            file: "/owner.tsx",
-            path: ["ownerHandler"],
-          },
-        },
-        {
-          kind: "verified",
-          moduleIdentity: "m",
-          bundleId: "", // empty == empty, but the arm requires length > 0
-          sourceFile: "/owner.tsx",
-          bindingPath: ["ownerHandler"],
-        },
-        "attack8-empty-bundle",
-      );
-      expect(digest).toBe("");
-      expect(result.error).toBeDefined();
-    });
-
-    it("a legacy bundleId-only claim with matching bundleId but WRONG path fails closed (path still checked)", async () => {
-      const { digest, result } = await driveE2Claim(
-        {
-          __ctWriterIdentityOf: {
-            bundleId: "shared-bundle",
-            file: "/owner.tsx",
-            path: ["ownerHandler"],
-          },
-        },
-        {
-          kind: "verified",
-          moduleIdentity: "m",
-          bundleId: "shared-bundle", // arm matches
-          sourceFile: "/owner.tsx", // file matches
-          bindingPath: ["attackerHandler"], // path does NOT
-        },
-        "attack8-bundle-pathmismatch",
-      );
-      expect(digest).toBe("");
-      expect(result.error).toBeDefined();
-    });
-
-    it("control: a legacy bundleId-only claim with fully-matching bundleId+file+path is accepted (arm is not vacuous)", async () => {
-      const { digest, result } = await driveE2Claim(
-        {
-          __ctWriterIdentityOf: {
-            bundleId: "match-bundle",
-            file: "/owner.tsx",
-            path: ["ownerHandler"],
-          },
-        },
-        {
-          kind: "verified",
-          moduleIdentity: "any-module", // irrelevant: claim has no moduleIdentity
-          bundleId: "match-bundle",
-          sourceFile: "/owner.tsx",
-          bindingPath: ["ownerHandler"],
-        },
-        "attack8-bundle-accept",
-      );
-      // The bundleId arm passes; any residual failure must not be writeAuthorizedBy.
       expect(typeof digest).toBe("string");
       if (result.error) {
         expect(String(result.error)).not.toContain("writeAuthorizedBy");
       }
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // Attack 9 — dynamic (in-action) artifacts inherit the invoker's bundleId.
-  // A dynamic identity carries a bundleId but NO symbol and NO bindingPath, so
-  // it can never satisfy a verified-BINDING (bindingPath) claim, and its
-  // inherited bundleId cannot be aimed at a foreign owner's protected field.
-  // ---------------------------------------------------------------------------
-  describe("attack 9: dynamic-artifact bundleId inheritance cannot escalate", () => {
-    it("a dynamic provenance fn resolves verified with the inherited bundleId but NO bindingPath/symbol", () => {
-      const fn = Object.assign(() => undefined, {
-        src: "cf:module/DYN_INHERIT/main.tsx:3:2",
-      });
-      // Mirrors the in-action registrar: identity from canonical src, dynamic,
-      // inheriting the verified invoker's bundleId — but no export symbol.
-      recordVerifiedProvenance(fn, {
-        identity: "DYN_INHERIT",
-        dynamic: true,
-        bundleId: "INHERITED_BUNDLE",
-      });
-      const identity = resolvePolicyFacingImplementationIdentity(
-        { type: "javascript" } as Module,
-        { implementation: fn },
-      );
-      expect(identity?.kind).toBe("verified");
-      const v = identity as {
-        kind: "verified";
-        bundleId?: string;
-        symbol?: string;
-        bindingPath?: string[];
-      };
-      expect(v.bundleId).toBe("INHERITED_BUNDLE");
-      expect(v.symbol).toBeUndefined();
-      // The absence of bindingPath is what stops it satisfying a binding claim.
-      expect(v.bindingPath).toBeUndefined();
-    });
-
-    it("a dynamic identity (bundleId only, NO file/path) cannot satisfy a legacy bundleId claim aimed at an owner's field", async () => {
-      // Even though the inherited bundleId matches, the dynamic identity has no
-      // sourceFile/bindingPath, so the file/path equality checks reject — a
-      // dynamic artifact can never reach into a foreign owner's protected cell.
-      const { digest, result } = await driveE2Claim(
-        {
-          __ctWriterIdentityOf: {
-            bundleId: "INHERITED_BUNDLE",
-            file: "/victim.tsx",
-            path: ["ownerHandler"],
-          },
-        },
-        {
-          kind: "verified",
-          moduleIdentity: "DYN_INHERIT",
-          bundleId: "INHERITED_BUNDLE", // arm matches...
-          // ...but no sourceFile and no bindingPath (a dynamic artifact).
-        },
-        "attack9-dynamic-nopath",
-      );
-      expect(digest).toBe("");
-      expect(result.error).toBeDefined();
-    });
-
-    it("a verified-BINDING claim cannot be satisfied by a dynamic (bindingPath-less) identity", async () => {
-      const { digest, result } = await driveE2Claim(
-        {
-          __ctWriterIdentityOf: {
-            moduleIdentity: "DYN_INHERIT",
-            file: "/victim.tsx",
-            path: ["ownerHandler"],
-          },
-        },
-        {
-          kind: "verified",
-          moduleIdentity: "DYN_INHERIT", // even module matches
-          bundleId: "INHERITED_BUNDLE",
-          // no bindingPath → rejected at the `!identity.bindingPath` gate.
-        },
-        "attack9-dynamic-binding-claim",
-      );
-      expect(digest).toBe("");
-      expect(result.error).toBeDefined();
     });
   });
 

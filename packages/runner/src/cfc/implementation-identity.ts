@@ -84,7 +84,6 @@ const resolveProvenanceImplementationIdentity = (
     kind: "verified",
     moduleIdentity: provenance.identity,
     ...(provenance.symbol ? { symbol: provenance.symbol } : {}),
-    ...(provenance.bundleId ? { bundleId: provenance.bundleId } : {}),
     ...(provenance.bindingIdentity
       ? {
         sourceFile: normalizeIdentitySource(
