@@ -5554,3 +5554,18 @@ $ rg -n "queueInitialActionRehydration|initialRehydrationTokens|canApplyInitialA
   verify the entity-absent arm survives the merge with `3a0503bc4`'s
   validation ordering (preconditions validate ahead of every commit shape,
   shape checks at the wire boundary) intact.
+
+## REVIEWER RECORD — E2 merged + replay-ordering fixtures
+
+- #4096 (E2) MERGED to main (`368719502`); cascade advanced to 05-phase1 in
+  the parallel session. Rebase integration reviewed and verified: replay
+  detection hoisted ABOVE precondition validation (entity-absent must not
+  re-validate on idempotent same-session resends), per-kind switch with
+  originLocalSeq check scoped to origin-committed, deferred-navigate receipt
+  mark moved onto the creating (handler) transaction (`3d6505f18` — old
+  placement rejected FIRST deliveries as receipt-exists and left
+  redeliveries unguarded).
+- The reviewer ask (replay fixture pinning the hoist) did not land before
+  merge; supplied directly as PR #4127 (test-only): identical resend →
+  stored result; mismatched resend → ProtocolError replay mismatch; both
+  verified red against the inverted ordering.
