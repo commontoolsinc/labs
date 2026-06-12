@@ -203,6 +203,22 @@ in the implementation (`RUNTIME_MINTED_INTEGRITY_ATOM_TYPES`) but listed as
 merely an "example" in §15.6 — promote to a registered atom with its minting
 discipline.
 
+**SC-21 [normative] Read-classification markers as the J exclusion profile.**
+Phase B (pointwise precision) only holds because flow derivation excludes
+machinery reads, and post-#3911 the traversal journal cannot distinguish
+machinery from consumption on its own: dependency seeding, link/slot
+dereference, and scheduling tags all journal as ordinary reads. The
+implementation closes this with explicit read-classification markers
+(`internalVerifierRead`, `linkResolutionProbe`, `schedulerDependencyRead`)
+plus the link-origin/pointer-vs-content split; J consumes only unmarked
+content reads. The spec states the pointer/content split (SC-8) but not the
+marker vocabulary or the obligation that every runtime-internal read path be
+classified — an unmarked machinery read silently coarsens J (sound), while a
+wrongly-marked consumption read is a leak (unsound, the dangerous direction).
+Make the profile normative: enumerate the classes, state the
+default-is-consumption rule, and require that markers are only attachable by
+runtime code (never pattern-controlled).
+
 ## Queue (from the audit, not yet worked through in a design session)
 
 These were identified during the audit as spec-absent implementation mechanisms
