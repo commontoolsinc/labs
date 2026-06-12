@@ -1,4 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import { CFC_COMPILED_BY_ATOM } from "@commonfabric/api/cfc";
 import { computeModuleHashes } from "../harness/module-identity.ts";
 import type { CacheableModule } from "../harness/types.ts";
 import type { MemorySpace, Runtime } from "../runtime.ts";
@@ -70,7 +71,11 @@ export interface CompiledDoc extends ModuleDocBase {
  * set, keyed by content identity alone, persists across the bump). There is no
  * automatic build fingerprint at runtime, so this is bumped by hand.
  */
-export const COMPILE_CACHE_RUNTIME_VERSION = "cf/esm-compile/v1";
+// v2: compiled docs are stamped with the constant `cf-compiled-by:cf-compiler`
+// atom instead of a per-user DID atom. v1 docs carry the old per-DID atoms; a
+// v2 write to the same key would be rejected by the label merge (addIntegrity
+// cannot be weakened), so the namespace bump orphans them instead.
+export const COMPILE_CACHE_RUNTIME_VERSION = "cf/esm-compile/v2";
 
 /** Cell key (id) for a source-set document. */
 export function sourceDocKey(identity: string): string {
@@ -441,17 +446,19 @@ export async function loadVerifiedSourceClosure(
 // --- Compiled-set store (4.3.3): `compileCache:<rtver>/<identity>` + CFC ------
 
 /**
- * The CFC integrity atom stamped on a compiled document. A plain literal string
- * bound to the compiler's principal DID: structured `represents-principal`
- * atoms are runtime-resolved and rejected/owner-coupled, so the DID is baked
- * into the string instead. In the interim the label is client-asserted (a
- * same-space writer could stamp it); the hard guarantee lands when the server
- * becomes the sole acceptor of this write integrity. See the threat model in
- * docs/specs/module-loading.md.
+ * The CFC integrity atom stamped on a compiled document: the constant
+ * `cf-compiled-by:cf-compiler`, attesting that the doc was emitted by the
+ * system compiler. The atom covers the CODE that produced the doc, not the
+ * user who ran it — deliberately, so a shared space's compile cache is
+ * readable by every member (a per-user atom made every other member a
+ * permanent cache miss AND made their write-backs collide on the label merge).
+ * Minting is gated: prepare strips `cf-compiled-by:` atoms from any write not
+ * authored by a trusted builtin, and `writeCompiledDocs` below is the one
+ * legitimate minter. The hard guarantee lands when the server becomes the sole
+ * acceptor of this write integrity and attaches real attestation data. See the
+ * threat model in docs/specs/module-loading.md.
  */
-export function compiledIntegrityAtom(compilerDid: string): string {
-  return `cf-compiled-by:${compilerDid}`;
-}
+export const COMPILED_INTEGRITY_ATOM: string = CFC_COMPILED_BY_ATOM;
 
 const compiledDocProperties = {
   kind: { type: "string" },
@@ -507,11 +514,11 @@ export const COMPILED_DOC_SCHEMA = {
  * Write schema: stamps the compiler integrity atom on the stored value. Flat
  * (no recursive `$ref`) — writing a single document does not transitively load.
  */
-export function compiledDocWriteSchema(compilerDid: string): JSONSchema {
+export function compiledDocWriteSchema(): JSONSchema {
   return {
     type: "object",
     properties: compiledDocProperties,
-    ifc: { addIntegrity: [compiledIntegrityAtom(compilerDid)] },
+    ifc: { addIntegrity: [COMPILED_INTEGRITY_ATOM] },
   };
 }
 
@@ -557,39 +564,52 @@ export function writeCompiledDocs(
   space: MemorySpace,
   modules: readonly CacheableModule[],
   entryIdentity: string,
-  opts: { runtimeVersion: string; compilerDid: string },
+  opts: { runtimeVersion: string },
   tx: IExtendedStorageTransaction,
 ): void {
   assertNoUnpinnedFabricImports(modules);
   const extraRoots = unreachedRoots(modules, entryIdentity);
-  const schema = compiledDocWriteSchema(opts.compilerDid);
-  for (const module of modules) {
-    const cell = runtime.getCell(
-      space,
-      compiledDocKey(opts.runtimeVersion, module.identity),
-      schema,
-      tx,
-    );
-    cell.set({
-      kind: "compiled",
-      identity: module.identity,
-      code: module.js,
-      filename: module.filename,
-      ...(module.sourceMap !== undefined
-        ? { sourceMap: module.sourceMap }
-        : {}),
-      imports: storedImportRefs(module, entryIdentity, extraRoots, {
-        includeFabricEdges: true,
-      }).map((ref) => ({
-        specifier: ref.specifier,
-        link: runtime.getCell(
-          space,
-          compiledDocKey(opts.runtimeVersion, ref.identity),
-          undefined,
-          tx,
-        ).getAsLink(),
-      })),
-    } as StoredCompiledDoc);
+  const schema = compiledDocWriteSchema();
+  // Attribute these writes to the compile-cache builtin for the duration of
+  // the doc writes: prepare's runtime-minted-evidence gate strips the
+  // `cf-compiled-by:` atom from any write whose recorded author is not a
+  // trusted builtin, and the author is captured per write at record time.
+  const priorIdentity = tx.getCfcState().implementationIdentity;
+  tx.setCfcImplementationIdentity({
+    kind: "builtin",
+    builtinId: "compile-cache",
+  });
+  try {
+    for (const module of modules) {
+      const cell = runtime.getCell(
+        space,
+        compiledDocKey(opts.runtimeVersion, module.identity),
+        schema,
+        tx,
+      );
+      cell.set({
+        kind: "compiled",
+        identity: module.identity,
+        code: module.js,
+        filename: module.filename,
+        ...(module.sourceMap !== undefined
+          ? { sourceMap: module.sourceMap }
+          : {}),
+        imports: storedImportRefs(module, entryIdentity, extraRoots, {
+          includeFabricEdges: true,
+        }).map((ref) => ({
+          specifier: ref.specifier,
+          link: runtime.getCell(
+            space,
+            compiledDocKey(opts.runtimeVersion, ref.identity),
+            undefined,
+            tx,
+          ).getAsLink(),
+        })),
+      } as StoredCompiledDoc);
+    }
+  } finally {
+    tx.setCfcImplementationIdentity(priorIdentity);
   }
 }
 
@@ -616,10 +636,10 @@ export async function loadCompiledClosure(
   runtime: Runtime,
   space: MemorySpace,
   entryIdentity: string,
-  opts: { runtimeVersion: string; compilerDid: string },
+  opts: { runtimeVersion: string },
   tx: IExtendedStorageTransaction,
 ): Promise<Map<string, CompiledDoc>> {
-  const atom = compiledIntegrityAtom(opts.compilerDid);
+  const atom = COMPILED_INTEGRITY_ATOM;
   const out = new Map<string, CompiledDoc>();
   const visited = new Set<string>();
 

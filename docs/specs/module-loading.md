@@ -427,19 +427,26 @@ The cache is designed around this:
   is unforgeable (below), re-verification is redundant.
 - **Per-space containment, then server-only writes.** The cache is per-space, so
   cross-tenant poisoning is impossible — only a space's own writers can affect
-  its cache. While compilation is still client-side, the integrity label is
-  client-asserted, so within a space it amounts to self-poisoning (acceptable,
-  and contained by the per-space scope). The end state moves **compilation to the
-  server**: the server becomes the sole acceptor of that write integrity (it
-  only stamps the label from its own compilation step), making the label a hard
-  guarantee — with no change to the read path, which already requires it.
+  its cache. The stamp is the constant `cf-compiled-by:cf-compiler` atom: it
+  attests to the **code** that produced the doc (the system compiler), not the
+  user who ran it, so every member of a shared space reads one cache (a
+  per-user stamp made every other member a permanent miss and made their
+  write-backs collide on the label merge). Minting is gated — prepare strips
+  `cf-compiled-by:` atoms from any write not authored by a trusted builtin — so
+  pattern code cannot stamp a forged doc. While compilation is still
+  client-side, the label remains client-asserted at the raw-storage level, so
+  within a space it amounts to self-poisoning (acceptable, and contained by the
+  per-space scope). The end state moves **compilation to the server**: the
+  server becomes the sole acceptor of that write integrity and can attach real
+  attestation data, making the label a hard guarantee — with no change to the
+  read path, which already requires it.
 - **Cross-space closure replication (CT-1687).** Cache docs do not only live
   where they compiled: when a pattern materializes a child piece in another
   space (`Factory.inSpace(...)`), the runner replicates the child pattern's
   source + compiled closures into the child's space so the piece is
   independently loadable there (`PatternManager.replicatePatternToSpace`).
   Chain-of-custody holds — compiled docs are read through the integrity-gated
-  loader (a user can only replicate docs already carrying their own stamp) and
+  loader (only docs already carrying the compiler stamp replicate) and
   re-stamped on the child-space write by a legitimate child-space writer. Note
   for the server-compilation end state: a client can then no longer stamp
   replicated compiled docs, so child spaces will need server-side replication

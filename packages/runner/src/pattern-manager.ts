@@ -598,7 +598,6 @@ export class PatternManager {
     await Promise.allSettled([...this.pendingCacheWriteBacks]);
     const cacheOpts = {
       runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
-      compilerDid: this.runtime.userIdentityDID,
     };
     const readTx = this.runtime.edit();
     let sourceDocs;
@@ -792,10 +791,8 @@ export class PatternManager {
   ): Promise<Pattern> {
     const harness = this.runtime.harness;
     const { space } = cacheCtx;
-    const compilerDid = this.runtime.userIdentityDID;
     const cacheOpts = {
       runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
-      compilerDid,
     };
 
     // Fast path — warm load BY IDENTITY: if the entry's content identity is
@@ -932,7 +929,7 @@ export class PatternManager {
   private async tryWarmLoadByIdentity(
     entryIdentity: string,
     space: MemorySpace,
-    cacheOpts: { runtimeVersion: string; compilerDid: string },
+    cacheOpts: { runtimeVersion: string },
     program: RuntimeProgram,
   ): Promise<Pattern | undefined> {
     const harness = this.runtime.harness;
@@ -1019,7 +1016,6 @@ export class PatternManager {
     }
     const cacheOpts = {
       runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
-      compilerDid: this.runtime.userIdentityDID,
     };
 
     const readTx = this.runtime.edit();
@@ -1097,7 +1093,7 @@ export class PatternManager {
     entryIdentity: string,
     symbol: string,
     space: MemorySpace,
-    cacheOpts: { runtimeVersion: string; compilerDid: string },
+    cacheOpts: { runtimeVersion: string },
   ): Promise<Pattern | undefined> {
     const harness = this.runtime.harness;
     const readTx = this.runtime.edit();
@@ -1365,7 +1361,7 @@ export class PatternManager {
     space: MemorySpace,
     modules: CacheableModule[],
     entryIdentity: string,
-    opts: { runtimeVersion: string; compilerDid: string },
+    opts: { runtimeVersion: string },
   ): Promise<void> {
     const writebackStart = performance.now();
     const { error } = await this.runtime.editWithRetry((tx) => {

@@ -1,4 +1,7 @@
-import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import {
+  CFC_ATOM_TYPE,
+  CFC_COMPILED_BY_ATOM_PREFIX,
+} from "@commonfabric/api/cfc";
 import {
   internSchema,
   internSchemaAsTaggedHashString,
@@ -2533,8 +2536,13 @@ const RUNTIME_MINTED_INTEGRITY_ATOM_TYPES = new Set<string>([
 ]);
 
 const isRuntimeMintedIntegrityAtom = (atom: unknown): boolean =>
-  isRecord(atom) && typeof atom.type === "string" &&
-  RUNTIME_MINTED_INTEGRITY_ATOM_TYPES.has(atom.type);
+  (isRecord(atom) && typeof atom.type === "string" &&
+    RUNTIME_MINTED_INTEGRITY_ATOM_TYPES.has(atom.type)) ||
+  // Compile-cache attestation (string-shaped, see CFC_COMPILED_BY_ATOM):
+  // marks a stored doc as system-compiler output, which the cache loader
+  // then evaluates as trusted bodies — forging it from a pattern-authored
+  // schema would be cross-user code injection.
+  (typeof atom === "string" && atom.startsWith(CFC_COMPILED_BY_ATOM_PREFIX));
 
 /**
  * Drops runtime-minted evidence atoms from a persisted label's integrity unless

@@ -215,10 +215,8 @@ describe("ESM compile cache — Pattern.inSpace A → B routing", () => {
       storageManager,
     });
     const tx = runtime.edit();
-    const compilerDid = runtime.userIdentityDID;
     const cacheOpts = {
       runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
-      compilerDid,
     };
     try {
       // The entry identity is loader-internal; recover it via a no-cache compile.
