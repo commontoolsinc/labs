@@ -89,7 +89,7 @@ type StaleSchedulerInternals = {
   clearDirectDirty: (action: Action) => boolean;
   markDirectDirty: (action: Action) => boolean;
   markDirty: (action: Action) => void;
-  isEffectAction: WeakMap<Action, boolean>;
+  registerEffect: (action: Action) => void;
   setDependencies: (
     action: Action,
     log: ReactivityLog,
@@ -113,7 +113,9 @@ function getStaleSchedulerInternals(
       & Parameters<typeof markDirectDirtyState>[0];
     dirtySchedulingState: Parameters<typeof markSchedulerDirty>[0];
     dependencyUpdateState: Parameters<typeof setSchedulerDependencies>[0];
-    isEffectAction: WeakMap<Action, boolean>;
+    nodes: {
+      register: (action: Action, kind: "effect" | "computation") => unknown;
+    };
     pullDemandState: PullDemandState;
     updateDependents: StaleSchedulerInternals["updateDependents"];
     collectDirtyDependencies: StaleSchedulerInternals[
@@ -136,7 +138,9 @@ function getStaleSchedulerInternals(
       markDirectDirtyState(internal.staleness, action),
     markDirty: (action) =>
       markSchedulerDirty(internal.dirtySchedulingState, action),
-    isEffectAction: internal.isEffectAction,
+    registerEffect: (action) => {
+      internal.nodes.register(action, "effect");
+    },
     setDependencies: (action, log) =>
       setSchedulerDependencies(internal.dependencyUpdateState, action, log),
     updateDependents: (action, log) => internal.updateDependents(action, log),

@@ -2893,3 +2893,56 @@ Verification:
     - `Scheduler persistent state - clean rehydrate 1000 actions`: 8.2 ms.
     - `Scheduler persistent state - targeted dirty rehydrate 1000 actions`:
       7.6 ms.
+
+## 07/3a-kind
+
+- [x] pending — migrated effect/computation kind tracking to
+  `SchedulerNode` records.
+- Deviations:
+  - None.
+- Choices:
+  - `NodeRegistry` owns action kind registration and the sticky historical
+    effect/computation distinction. Re-registering a known action with a
+    different kind is a hard error.
+  - Existing state bundles that only read active effect/computation membership
+    continue to receive read-only `nodes.effects` / `nodes.computations` views,
+    keeping this family behavior-preserving and tightly scoped.
+  - Mutable classification paths (`updateSchedulerActionType`,
+    `clearActionTypeTracking`) now go through `NodeRegistry`.
+  - Historical-kind checks that previously used `isEffectAction` now use
+    `nodes.isKnownEffect(...)`; test internals expose `registerEffect(...)`
+    instead of the old WeakMap.
+- Recordings:
+  - Contract grep: `grep -rn
+    "isEffectAction\|this\.effects\b\|this\.computations\b"
+    packages/runner/src packages/runner/test/scheduler-test-utils.ts
+    packages/runner/test/scheduler-pull.test.ts`: no matches.
+  - `deno fmt packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/subscriptions.ts
+    packages/runner/src/scheduler/demand.ts
+    packages/runner/src/scheduler/action-run.ts
+    packages/runner/src/scheduler/node-record.ts
+    packages/runner/test/scheduler-test-utils.ts
+    packages/runner/test/scheduler-pull.test.ts`: passed (`Checked 7 files`).
+  - `deno lint packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/subscriptions.ts
+    packages/runner/src/scheduler/demand.ts
+    packages/runner/src/scheduler/action-run.ts
+    packages/runner/src/scheduler/node-record.ts
+    packages/runner/test/scheduler-test-utils.ts
+    packages/runner/test/scheduler-pull.test.ts`: passed (`Checked 7 files`).
+  - `deno check packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/subscriptions.ts
+    packages/runner/src/scheduler/demand.ts
+    packages/runner/src/scheduler/action-run.ts
+    packages/runner/src/scheduler/node-record.ts
+    packages/runner/test/scheduler-test-utils.ts
+    packages/runner/test/scheduler-pull.test.ts`: passed.
+  - Focused scheduler gate:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-effects.test.ts test/scheduler-pull.test.ts
+    test/scheduler-ordering.test.ts test/scheduler-v2-cutover.test.ts`:
+    passed, `5 passed (70 steps)`, `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3106 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m7s`.
