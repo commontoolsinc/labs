@@ -1042,6 +1042,18 @@ export interface IStorageTransactionInconsistent extends IStorageError {
 }
 
 /**
+ * A commit-time precondition failed (spec scheduler-v2 §7.6). Unlike
+ * optimistic conflicts, this class is PERMANENT: the client must not
+ * retry. `origin-committed` — the transaction that caused this work
+ * never committed. `receipt-exists` — another handling of the same
+ * event already committed (lost race).
+ */
+export interface IPreconditionFailedError extends Error {
+  name: "PreconditionFailedError";
+  precondition: "origin-committed" | "receipt-exists";
+}
+
+/**
  * Error that indicating that no change could be made to a transaction is it is
  * no longer active.
  */
@@ -1056,6 +1068,7 @@ export type StorageTransactionFailed =
 
 export type StorageTransactionRejected =
   | IConflictError
+  | IPreconditionFailedError
   | IStoreError
   | TransactionError
   | IConnectionError
@@ -1218,6 +1231,7 @@ export type PushError =
   | IStoreError
   | IConnectionError
   | IConflictError
+  | IPreconditionFailedError
   | TransactionError
   | IAuthorizationError;
 
