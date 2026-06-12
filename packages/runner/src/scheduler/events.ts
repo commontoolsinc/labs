@@ -158,6 +158,8 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
       if (args.originTx !== undefined) {
         state.recordLineageEvent(args.originTx, queuedEvent);
       }
+      // Exactly one handler per event (spec scheduler-v2 decision 12).
+      break;
     }
   }
 
@@ -198,6 +200,16 @@ export function addSchedulerEventHandler(state: {
 }): Cancel {
   if (args.populateDependencies) {
     args.handler.populateDependencies = args.populateDependencies;
+  }
+  const existingIndex = state.eventHandlers.findIndex(([existing]) =>
+    areNormalizedLinksSame(existing, args.ref)
+  );
+  if (existingIndex !== -1) {
+    state.eventHandlers.splice(existingIndex, 1);
+    logger.warn("event-handler-replaced", () => [
+      "Replacing existing event handler for link",
+      { linkId: args.ref.id },
+    ]);
   }
   state.eventHandlers.push([args.ref, args.handler]);
   return () => {
