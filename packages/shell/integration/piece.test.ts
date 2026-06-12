@@ -120,17 +120,7 @@ async function waitForSpaceRootPattern(
 }
 
 describe("shell piece tests", () => {
-  const shell = new ShellIntegration({
-    // TODO(shell-console-errors): pre-existing shell noise surfaced by the
-    // fail-on-console-error default — both fire during normal piece-view
-    // navigation in this suite and log an empty serialized error. Fix the
-    // underlying paths (favorites-manager.ts setupSubscription, AppView
-    // refreshSlugTarget), then drop these entries.
-    allowedConsoleErrors: [
-      "[FavoritesManager] Failed to setup favorites subscription",
-      "[AppView] Failed to refresh slug target",
-    ],
-  });
+  const shell = new ShellIntegration();
   shell.bindLifecycle();
 
   it("can view and interact with a piece", async () => {

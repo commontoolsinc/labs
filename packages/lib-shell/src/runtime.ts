@@ -4,12 +4,14 @@ import { NameSchema } from "@commonfabric/runner/schemas";
 import {
   CellHandle,
   FavoritesManager,
+  isRuntimeDisposedError,
   JSONValue,
   PageHandle,
   Program,
   RuntimeClient,
   RuntimeClientEvents,
   RuntimeClientOptions,
+  RuntimeDisposedError,
   RuntimeTelemetryMarkerResult,
 } from "@commonfabric/runtime-client";
 import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
@@ -344,6 +346,7 @@ export class RuntimeInternals extends EventTarget {
       if (!page) return;
       await (trackRecent as any).send({ piece: page.cell() });
     } catch (e) {
+      if (isRuntimeDisposedError(e)) return;
       console.error("[RuntimeInternals] Failed to track recent piece:", e);
     }
   }
@@ -359,6 +362,7 @@ export class RuntimeInternals extends EventTarget {
       await (addPiece as any).send({ piece: cell });
       await spaceRoot.cell().sync();
     } catch (e) {
+      if (isRuntimeDisposedError(e)) return;
       console.error(
         "[RuntimeInternals] Failed to register navigated piece:",
         e,
@@ -425,7 +429,7 @@ export class RuntimeInternals extends EventTarget {
 
   #check() {
     if (this.#disposed) {
-      throw new Error("RuntimeInternals disposed.");
+      throw new RuntimeDisposedError("RuntimeInternals disposed.");
     }
   }
 
