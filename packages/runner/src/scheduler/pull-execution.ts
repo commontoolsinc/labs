@@ -4,14 +4,14 @@ import type { Action, SettleIterationStats } from "./types.ts";
 import { collectMaterializerWritersForLog } from "./materializers.ts";
 import {
   collectPendingDependencyActions,
-  recordEarlyIterationComputations,
+  planBudgetBackoff,
   recordSettleActionRun,
   type SchedulerSettleLoopState,
   type SchedulerSettleResult,
   summarizeSettleIteration,
   summarizeSettleRun,
 } from "./execution.ts";
-import { PASS_RUN_BUDGET } from "./constants.ts";
+import { MAX_ITERS, PASS_RUN_BUDGET } from "./constants.ts";
 import { isInvalidOrNeverRan } from "./pull-scheduling.ts";
 
 const logger = getLogger("scheduler", {
@@ -132,11 +132,12 @@ export async function runPullSchedulerSettleLoop(
   // First iteration processes initial seeds + their dirty deps.
   // Subsequent iterations process new subscriptions and re-collect dirty deps.
   logger.timeStart("scheduler", "execute", "settle");
-  const maxSettleIterations = 10;
-  const EARLY_ITERATION_THRESHOLD = 5;
-  const earlyIterationComputations = new Set<Action>(); // Track computations in first N iterations
+  const maxSettleIterations = MAX_ITERS;
   let lastWorkSet: Set<Action> = new Set();
   let settledEarly = false;
+  let backoffApplied = false;
+  let backoffActionCount = 0;
+  let backoffUntil: number | undefined;
   const collectSettleStats = state.getCollectSettleStats();
   const settleIterStats: SettleIterationStats[] | undefined = collectSettleStats
     ? []
@@ -151,8 +152,6 @@ export async function runPullSchedulerSettleLoop(
       state,
       initialSeeds,
       settleIter,
-      EARLY_ITERATION_THRESHOLD,
-      earlyIterationComputations,
     );
 
     if (iteration.settled) {
@@ -163,6 +162,20 @@ export async function runPullSchedulerSettleLoop(
     lastWorkSet = iteration.workSet;
     const iterationWorkSetSize = iteration.workSet.size;
     const iterActionsRun = await runPullSettleOrder(state, iteration.order);
+    if (didAnyActionHitPassRunBudget(state, iteration.order)) {
+      const budgetBackoff = maybeApplyBudgetBackoff(
+        state,
+        collectCurrentBackoffCandidates(state),
+        "pass-budget",
+        { requirePassRunBudget: false },
+      );
+      if (budgetBackoff.applied) {
+        backoffApplied = true;
+        backoffActionCount += budgetBackoff.actionCount;
+        backoffUntil = minDefined(backoffUntil, budgetBackoff.backoffUntil);
+        break;
+      }
+    }
 
     if (settleIterStats) {
       settleIterStats.push(summarizeSettleIteration({
@@ -174,6 +187,17 @@ export async function runPullSchedulerSettleLoop(
         getActionId: (action) => state.getActionId(action),
       }));
     }
+  }
+
+  if (!settledEarly && !backoffApplied && lastWorkSet.size > 0) {
+    const iterationBackoff = maybeApplyBudgetBackoff(
+      state,
+      lastWorkSet,
+      "iteration-cap",
+    );
+    backoffApplied = iterationBackoff.applied;
+    backoffActionCount += iterationBackoff.actionCount;
+    backoffUntil = minDefined(backoffUntil, iterationBackoff.backoffUntil);
   }
 
   const settleStats = settleIterStats
@@ -189,9 +213,10 @@ export async function runPullSchedulerSettleLoop(
 
   return {
     settledEarly,
-    lastWorkSet,
-    earlyIterationComputations,
     maxSettleIterations,
+    backoffApplied,
+    backoffActionCount,
+    ...(backoffUntil !== undefined ? { backoffUntil } : {}),
     ...(settleStats ? { settleStats } : {}),
   };
 }
@@ -224,8 +249,6 @@ function preparePullSettleIteration(
   state: SchedulerSettleLoopState,
   initialSeeds: ReadonlySet<Action>,
   settleIter: number,
-  earlyIterationThreshold: number,
-  earlyIterationComputations: Set<Action>,
 ): PullSettleIteration {
   const { workSet } = buildAndLogPullIterationWorkSet(
     state,
@@ -236,14 +259,6 @@ function preparePullSettleIteration(
   if (workSet.size === 0) {
     return { settled: true };
   }
-
-  recordEarlyIterationComputations({
-    settleIter,
-    threshold: earlyIterationThreshold,
-    workSet,
-    effects: state.effects,
-    earlyIterationComputations,
-  });
 
   const order = orderPullWorkSet(state, workSet, settleIter);
 
@@ -344,25 +359,73 @@ async function runPullSettleAction(
   }
 
   state.filterStats.executed++;
-  if (!recordSettleActionRun(state, fn)) {
-    clearInvalidSettleAction(state, fn);
-    return 1;
-  }
+  recordSettleActionRun(state, fn);
 
   await state.runAction(fn);
   return 1;
 }
 
-function clearInvalidSettleAction(
+function maybeApplyBudgetBackoff(
   state: SchedulerSettleLoopState,
-  fn: Action,
-): void {
-  const record = state.nodes.get(fn);
-  if (!record) return;
-  if (record.status === "invalid") {
-    record.status = "clean";
+  workSet: ReadonlySet<Action>,
+  reason: "iteration-cap" | "pass-budget",
+  options: { requirePassRunBudget?: boolean } = {},
+): {
+  applied: boolean;
+  actionCount: number;
+  backoffUntil?: number;
+} {
+  const plan = planBudgetBackoff({
+    workSet,
+    nodes: state.nodes,
+    pending: state.pending,
+    isLiveAction: state.isLiveAction,
+    getNextEligibleRunTime: state.getNextEligibleRunTime,
+    isDebouncedComputationWaiting: state.isDebouncedComputationWaiting,
+    reason,
+    requirePassRunBudget: options.requirePassRunBudget,
+  });
+  if (plan.actions.length === 0) {
+    return { applied: false, actionCount: 0 };
   }
-  record.invalidCauses = [];
+
+  logger.debug("schedule-backoff", () => [
+    `[BACKOFF] ${reason}: deferred ${plan.actions.length} action(s)`,
+    ...(plan.backoffUntil !== undefined
+      ? [
+        `wake in ${
+          Math.max(0, Math.round(plan.backoffUntil - performance.now()))
+        }ms`,
+      ]
+      : []),
+  ]);
+
+  return {
+    applied: true,
+    actionCount: plan.actions.length,
+    ...(plan.backoffUntil !== undefined
+      ? { backoffUntil: plan.backoffUntil }
+      : {}),
+  };
+}
+
+function didAnyActionHitPassRunBudget(
+  state: SchedulerSettleLoopState,
+  actions: readonly Action[],
+): boolean {
+  return actions.some((action) =>
+    (state.nodes.get(action)?.passRuns ?? 0) >= PASS_RUN_BUDGET
+  );
+}
+
+function collectCurrentBackoffCandidates(
+  state: SchedulerSettleLoopState,
+): Set<Action> {
+  const candidates = new Set<Action>();
+  for (const record of state.nodes.nodes()) {
+    candidates.add(record.action);
+  }
+  return candidates;
 }
 
 function isPullSettleActionStillRunnable(
@@ -402,5 +465,23 @@ function skipPullDelayedSettleAction(
     return true;
   }
 
+  const nextEligibleAt = state.getNextEligibleRunTime(fn);
+  if (nextEligibleAt !== undefined && nextEligibleAt > performance.now()) {
+    logger.debug("schedule-backoff", () => [
+      `[GATE] Skipping time-gated action: ${state.getActionId(fn)}`,
+    ]);
+    state.filterStats.filtered++;
+    state.pending.delete(fn);
+    return true;
+  }
+
   return false;
+}
+
+function minDefined(
+  current: number | undefined,
+  next: number | undefined,
+): number | undefined {
+  if (next === undefined) return current;
+  return current === undefined ? next : Math.min(current, next);
 }

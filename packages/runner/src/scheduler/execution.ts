@@ -1,15 +1,12 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import { type Frame } from "../builder/types.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import {
-  CYCLE_DEBOUNCE_MIN_RUNS,
-  CYCLE_DEBOUNCE_MULTIPLIER,
-  CYCLE_DEBOUNCE_THRESHOLD_MS,
-  MAX_ITERATIONS_PER_RUN,
+  BACKOFF_BASE_MS,
+  BACKOFF_MAX_MS,
   PASS_RUN_BUDGET,
 } from "./constants.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
-import type { NodeRegistry } from "./node-record.ts";
+import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
 import type {
   Action,
   PopulateDependenciesEntry,
@@ -97,6 +94,27 @@ export function recordExecuteEnd(
   return {
     diagnosisBusyTimeMs: elapsed,
     ...(nonSettlingTelemetry ? { nonSettlingTelemetry } : {}),
+  };
+}
+
+export function markNonSettlingEpisode(
+  tracker: SettlingTracker,
+  now = performance.now(),
+): ExecuteEndUpdate["nonSettlingTelemetry"] | undefined {
+  if (tracker.nonSettlingDetected) return undefined;
+
+  const windowStart = tracker.windowStart || now;
+  const inFlightBusyTime = tracker.isExecuting
+    ? Math.max(0, now - tracker.lastExecuteStart)
+    : 0;
+  const busyTime = tracker.busyTime + inFlightBusyTime;
+  const windowDuration = Math.max(1, now - windowStart);
+  tracker.nonSettlingDetected = true;
+
+  return {
+    busyTime,
+    windowDuration,
+    busyRatio: Math.min(1, busyTime / windowDuration),
   };
 }
 
@@ -268,9 +286,10 @@ export function collectPendingDependencyActions(state: {
 
 export type SchedulerSettleResult = {
   settledEarly: boolean;
-  lastWorkSet: Set<Action>;
-  earlyIterationComputations: Set<Action>;
   maxSettleIterations: number;
+  backoffApplied: boolean;
+  backoffActionCount: number;
+  backoffUntil?: number;
   settleStats?: SettleStats;
 };
 
@@ -288,8 +307,6 @@ export interface SchedulerSettleLoopState {
   readonly nodes: NodeRegistry;
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly filterStats: { filtered: number; executed: number };
-  readonly getLoopCounter: () => WeakMap<Action, number>;
-  readonly runsThisExecute: Map<Action, number>;
   readonly materializerIndex: MaterializerIndexState;
   readonly getSchedulingWrites: (
     action: Action,
@@ -310,58 +327,20 @@ export interface SchedulerSettleLoopState {
   readonly collectPullIterationSeeds: (seeds: Set<Action>) => void;
   readonly getActionId: (action: Action) => string;
   readonly isThrottled: (action: Action) => boolean;
+  readonly getNextEligibleRunTime: (action: Action) => number | undefined;
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
   readonly clearComputationDebounceState: (action: Action) => void;
   readonly isLiveAction: (action: Action) => boolean;
-  readonly handleError: (error: Error, action: Action) => void;
   readonly runAction: (action: Action) => Promise<unknown>;
 }
 
 export function recordSettleActionRun(
   state: SchedulerSettleLoopState,
   fn: Action,
-): boolean {
+): void {
   const record = state.nodes.get(fn);
   if (record) {
     record.passRuns++;
-    if (record.passRuns > PASS_RUN_BUDGET) {
-      return false;
-    }
-  }
-
-  const loopCounter = state.getLoopCounter();
-  loopCounter.set(fn, (loopCounter.get(fn) || 0) + 1);
-  // Track runs for cycle-aware debounce
-  state.runsThisExecute.set(fn, (state.runsThisExecute.get(fn) ?? 0) + 1);
-  if (loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
-    const error = new Error(
-      `Too many iterations: ${loopCounter.get(fn)} ${state.getActionId(fn)}`,
-    );
-    // Attach the last frame from the action so handleError can
-    // extract piece/spell metadata (CT-1316: fixes message:null).
-    const lastFrame = (fn as Action & { lastFrame?: Frame }).lastFrame;
-    if (lastFrame) {
-      (error as Error & { frame?: Frame }).frame = lastFrame;
-    }
-    state.handleError(error, fn);
-    return false;
-  }
-
-  return true;
-}
-
-export function recordEarlyIterationComputations(state: {
-  readonly settleIter: number;
-  readonly threshold: number;
-  readonly workSet: ReadonlySet<Action>;
-  readonly effects: ReadonlySet<Action>;
-  readonly earlyIterationComputations: Set<Action>;
-}): void {
-  if (state.settleIter >= state.threshold) return;
-  for (const action of state.workSet) {
-    if (!state.effects.has(action)) {
-      state.earlyIterationComputations.add(action);
-    }
   }
 }
 
@@ -444,83 +423,82 @@ export function pushBoundedHistory<T>(
   }
 }
 
-export interface CycleBreakPlan {
-  shouldBreak: boolean;
-  computationsToClear: Action[];
-  dirtyEffectsToRun: Action[];
+export interface BudgetBackoffPlan {
+  readonly actions: Action[];
+  readonly backoffUntil?: number;
 }
 
-export function planPullCycleBreak(state: {
-  readonly settledEarly: boolean;
-  readonly lastWorkSet: ReadonlySet<Action>;
-  readonly earlyIterationComputations: ReadonlySet<Action>;
+export function planBudgetBackoff(state: {
+  readonly workSet: ReadonlySet<Action>;
   readonly nodes: NodeRegistry;
-  readonly effects: ReadonlySet<Action>;
-  readonly runsThisExecute: ReadonlyMap<Action, number>;
-  readonly isThrottled: (action: Action) => boolean;
-}): CycleBreakPlan {
-  const shouldBreak = !state.settledEarly && state.lastWorkSet.size > 0;
-  if (!shouldBreak) {
-    return { shouldBreak, computationsToClear: [], dirtyEffectsToRun: [] };
-  }
-
-  const computationsToClear: Action[] = [];
-  for (const computation of state.earlyIterationComputations) {
-    if (
-      state.lastWorkSet.has(computation) &&
-      isInvalidAction(state.nodes, computation) &&
-      !state.isThrottled(computation) &&
-      (state.runsThisExecute.get(computation) ?? 0) > 1
-    ) {
-      computationsToClear.push(computation);
-    }
-  }
-
-  const dirtyEffectsToRun = [...state.effects].filter((effect) =>
-    isInvalidAction(state.nodes, effect) && !state.isThrottled(effect)
-  );
-
-  return { shouldBreak, computationsToClear, dirtyEffectsToRun };
-}
-
-export interface CycleDebounceUpdate {
-  action: Action;
-  runs: number;
-  delayMs: number;
-}
-
-export function planPullAdaptiveCycleDebounce(state: {
-  readonly executeStartTime: number;
-  readonly runsThisExecute: ReadonlyMap<Action, number>;
-  readonly canAutomaticallyDebounce: (action: Action) => boolean;
-  readonly getCurrentDebounce: (action: Action) => number | undefined;
+  readonly pending: ReadonlySet<Action>;
+  readonly isLiveAction: (action: Action) => boolean;
+  readonly getNextEligibleRunTime: (action: Action) => number | undefined;
+  readonly isDebouncedComputationWaiting: (action: Action) => boolean;
+  readonly reason: "iteration-cap" | "pass-budget";
+  readonly requirePassRunBudget?: boolean;
   readonly now?: number;
-}): {
-  elapsedMs: number;
-  updates: CycleDebounceUpdate[];
-} {
+}): BudgetBackoffPlan {
   const now = state.now ?? performance.now();
-  const elapsedMs = now - state.executeStartTime;
-  if (elapsedMs < CYCLE_DEBOUNCE_THRESHOLD_MS) {
-    return { elapsedMs, updates: [] };
-  }
+  const actions: Action[] = [];
+  let backoffUntil: number | undefined;
 
-  const updates: CycleDebounceUpdate[] = [];
-  for (const [action, runs] of state.runsThisExecute) {
-    if (
-      !state.canAutomaticallyDebounce(action) ||
-      runs < CYCLE_DEBOUNCE_MIN_RUNS
-    ) {
+  for (const action of state.workSet) {
+    const record = state.nodes.get(action);
+    if (!record || !isBudgetBackoffCandidate(state, record, now)) {
       continue;
     }
-    const delayMs = Math.round(CYCLE_DEBOUNCE_MULTIPLIER * elapsedMs);
-    const currentDebounce = state.getCurrentDebounce(action) ?? 0;
-    if (delayMs > currentDebounce) {
-      updates.push({ action, runs, delayMs });
-    }
+
+    const delayMs = nextBackoffDelayMs(record);
+    record.backoffFailures++;
+    record.backoffUntil = now + delayMs;
+    actions.push(action);
+    backoffUntil = minDefined(backoffUntil, record.backoffUntil);
   }
 
-  return { elapsedMs, updates };
+  return {
+    actions,
+    ...(backoffUntil !== undefined ? { backoffUntil } : {}),
+  };
+}
+
+function isBudgetBackoffCandidate(
+  state: {
+    readonly pending: ReadonlySet<Action>;
+    readonly isLiveAction: (action: Action) => boolean;
+    readonly getNextEligibleRunTime: (action: Action) => number | undefined;
+    readonly isDebouncedComputationWaiting: (action: Action) => boolean;
+    readonly reason: "iteration-cap" | "pass-budget";
+    readonly requirePassRunBudget?: boolean;
+  },
+  record: SchedulerNode,
+  now: number,
+): boolean {
+  if (!isInvalidActionRecord(record)) return false;
+  if (!state.isLiveAction(record.action) && !state.pending.has(record.action)) {
+    return false;
+  }
+  if (
+    state.reason === "pass-budget" &&
+    state.requirePassRunBudget !== false &&
+    record.passRuns < PASS_RUN_BUDGET
+  ) {
+    return false;
+  }
+  if (state.isDebouncedComputationWaiting(record.action)) return false;
+
+  const nextEligibleAt = state.getNextEligibleRunTime(record.action);
+  if (nextEligibleAt !== undefined && nextEligibleAt > now) {
+    return false;
+  }
+  return true;
+}
+
+function nextBackoffDelayMs(record: SchedulerNode): number {
+  return Math.min(
+    BACKOFF_BASE_MS * 2 ** record.backoffFailures,
+    BACKOFF_MAX_MS,
+  );
 }
 
 export interface ExecuteContinuationPlan {
@@ -592,15 +570,43 @@ export function planPullExecuteContinuation(state: {
   readonly now?: number;
 }): ExecuteContinuationPlan {
   const now = state.now ?? performance.now();
-  const hasPendingPullWork = [...state.pending].some((action) =>
+  let nextDirtyPullRunAt: number | undefined;
+  let nextDirtyPullRunWaitsForIdle = false;
+  const noteFutureEligibility = (action: Action) => {
+    if (state.isDebouncedComputationWaiting(action)) {
+      const nextDebounceAt = state.getNextDebounceRunTime(action);
+      if (nextDebounceAt !== undefined) {
+        nextDirtyPullRunAt = minDefined(
+          nextDirtyPullRunAt,
+          nextDebounceAt,
+        );
+        nextDirtyPullRunWaitsForIdle ||= state.effects.has(action) ||
+          state.materializerIndex.isMaterializer(action);
+        return true;
+      }
+    }
+
+    const nextEligibleAt = state.getNextEligibleRunTime(action);
+    if (nextEligibleAt !== undefined && nextEligibleAt > now) {
+      nextDirtyPullRunAt = minDefined(nextDirtyPullRunAt, nextEligibleAt);
+      nextDirtyPullRunWaitsForIdle ||= state.effects.has(action) ||
+        state.materializerIndex.isMaterializer(action);
+      return true;
+    }
+
+    return false;
+  };
+
+  const pendingPullWork = [...state.pending].filter((action) =>
     state.effects.has(action) ||
     state.materializerIndex.isMaterializer(action) ||
     state.isDemandedPullComputation(action) ||
     state.shouldRunFirstPullComputationInDemandContext(action)
   );
+  const hasPendingPullWork = pendingPullWork.some((action) =>
+    !noteFutureEligibility(action)
+  );
 
-  let nextDirtyPullRunAt: number | undefined;
-  let nextDirtyPullRunWaitsForIdle = false;
   const hasDirtyPullWork = [...state.nodes.nodes()].some((record) => {
     const action = record.action;
     if (!isInvalidAction(state.nodes, action)) {
@@ -614,24 +620,7 @@ export function planPullExecuteContinuation(state: {
       return false;
     }
 
-    if (state.isDebouncedComputationWaiting(action)) {
-      const nextDebounceAt = state.getNextDebounceRunTime(action);
-      if (nextDebounceAt !== undefined) {
-        nextDirtyPullRunAt = minDefined(
-          nextDirtyPullRunAt,
-          nextDebounceAt,
-        );
-        nextDirtyPullRunWaitsForIdle ||= state.effects.has(action) ||
-          state.materializerIndex.isMaterializer(action);
-      }
-      return false;
-    }
-
-    const nextEligibleAt = state.getNextEligibleRunTime(action);
-    if (nextEligibleAt !== undefined && nextEligibleAt > now) {
-      nextDirtyPullRunAt = minDefined(nextDirtyPullRunAt, nextEligibleAt);
-      nextDirtyPullRunWaitsForIdle ||= state.effects.has(action) ||
-        state.materializerIndex.isMaterializer(action);
+    if (noteFutureEligibility(action)) {
       return false;
     }
 
@@ -659,7 +648,11 @@ export function planPullExecuteContinuation(state: {
 
 function isInvalidAction(nodes: NodeRegistry, action: Action): boolean {
   const record = nodes.get(action);
-  return record?.status === "invalid" || record?.status === "never-ran";
+  return record !== undefined && isInvalidActionRecord(record);
+}
+
+function isInvalidActionRecord(record: SchedulerNode): boolean {
+  return record.status === "invalid" || record.status === "never-ran";
 }
 
 function minDefined(

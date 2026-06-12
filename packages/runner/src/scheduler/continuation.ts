@@ -25,7 +25,6 @@ export interface ExecuteContinuationState {
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
   readonly hasPendingLineageHeadEvent: () => boolean;
-  readonly resetLoopCounter: () => void;
   readonly setScheduled: (scheduled: boolean) => void;
   readonly resetSettlingTracker: () => void;
   readonly setPendingQueueTaskTimer: (
@@ -96,7 +95,6 @@ export function queueAnotherExecutionTick(
 }
 
 function markNotScheduled(state: ExecuteContinuationState): void {
-  state.resetLoopCounter();
   state.setScheduled(false);
 }
 

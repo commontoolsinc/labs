@@ -2,7 +2,6 @@
 
 import {
   afterEach,
-  assertSpyCall,
   assertSpyCalls,
   beforeEach,
   createSchedulerTestRuntime,
@@ -24,6 +23,7 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { getDirectTransactionReactivityLog } from "../src/storage/transaction-inspection.ts";
+import { PASS_RUN_BUDGET } from "../src/scheduler/constants.ts";
 
 // Seed stored CFC metadata via an ungated path-[] full-document write (the
 // shape hydration delivers it), reading the current doc first so the value
@@ -712,7 +712,7 @@ describe("scheduler", () => {
   });
 
   it("should stop eventually when encountering infinite loops", async () => {
-    let maxRuns = 120; // More than the limit in scheduler
+    let maxRuns = PASS_RUN_BUDGET + 1;
     const a = runtime.getCell<number>(
       space,
       "should stop eventually when encountering infinite loops 1",
@@ -794,8 +794,8 @@ describe("scheduler", () => {
 
     await e.pull();
 
-    expect(maxRuns).toBeGreaterThanOrEqual(10);
-    assertSpyCall(stopped, 0, undefined);
+    expect(maxRuns).toBe(0);
+    assertSpyCalls(stopped, 0);
   });
 
   it("should not loop on r/w changes on its own output", async () => {

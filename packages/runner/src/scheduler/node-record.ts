@@ -15,6 +15,8 @@ export interface SchedulerNode {
   provisionalDemand: boolean;
   provisionalDemandPass?: number;
   passRuns: number;
+  backoffUntil?: number;
+  backoffFailures: number;
   retries: number;
 }
 
@@ -52,6 +54,7 @@ export class NodeRegistry {
       liveRefs: 0,
       provisionalDemand: false,
       passRuns: 0,
+      backoffFailures: 0,
       retries: 0,
     };
     this.records.set(action, record);
