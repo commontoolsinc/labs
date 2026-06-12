@@ -20,7 +20,7 @@ import { scopedCell } from "./scope-policy.ts";
 /** The shape of fetchData's input cell. */
 type FetchDataInputs = {
   url?: string;
-  mode?: "text" | "json";
+  mode?: "text" | "json" | "dataUrl";
   options?: { body?: any; method?: string; headers?: Record<string, string> };
 };
 
@@ -55,7 +55,8 @@ function snapshotFetchDataInputs(
 ): FetchDataInputs {
   const snapshot = cell.asSchema(fetchDataInputSchema).get() ??
     ({} as FetchDataInputs);
-  const mode = snapshot.mode === "text" || snapshot.mode === "json"
+  const mode = snapshot.mode === "text" || snapshot.mode === "json" ||
+      snapshot.mode === "dataUrl"
     ? snapshot.mode
     : undefined;
   const body = snapshot.options?.body;
@@ -339,7 +340,7 @@ async function startFetch(
   runtime: Runtime,
   inputsCell: Cell<FetchDataInputs>,
   url: string,
-  mode: "text" | "json" | undefined,
+  mode: "text" | "json" | "dataUrl" | undefined,
   options: FetchDataInputs["options"],
   inputHash: string,
   pending: Cell<boolean>,
@@ -352,7 +353,19 @@ async function startFetch(
     if (!r.ok) {
       throw new Error(`HTTP ${r.status}: ${r.statusText}`);
     }
-    return (mode || "json") === "json" ? await r.json() : await r.text();
+    if (mode === "text") return await r.text();
+    if (mode === "dataUrl") {
+      const contentType = r.headers.get("content-type")?.split(";")[0]
+        .trim() || "application/octet-stream";
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      let binary = "";
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+      }
+      return `data:${contentType};base64,${btoa(binary)}`;
+    }
+    return await r.json();
   };
 
   // Body preprocessing (stringify non-string bodies) is handled by the
