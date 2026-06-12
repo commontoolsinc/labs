@@ -102,6 +102,43 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
     }
   });
 
+  it("an empty-label read does not gate a requiredIntegrity write", async () => {
+    // A stored labelMap entry whose label carries NO atoms at all ({} — e.g.
+    // a slot whose declared atoms only apply on one union arm, persisted by a
+    // sync that materializes the entry anyway). A read with label undefined
+    // (no metadata) is already excluded from the gate; a present-but-empty
+    // label is the same trust level and must not gate either — otherwise the
+    // gate's membership depends on whether metadata happened to materialize
+    // (cfc-group-chat-demo multi-runtime: reading adminRegistry/everyoneIsAdmin
+    // with label {} false-rejected the rooms-list admin write).
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      await seedLabeledDoc(runtime, "ri-empty-lookup", "lookup", {});
+
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "ri-empty-lookup", undefined, tx).get();
+      const sink = runtime.getCell(
+        signer.did(),
+        "ri-empty-sink",
+        SINK_SCHEMA,
+        tx,
+      );
+      sink.set({ out: "granted" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("a confidentiality-bearing read still gates requiredIntegrity (prompt-injection soundness)", async () => {
     // The security side: a read that carries confidentiality (like the
     // prompt-injection briefing) and lacks the required atom must STILL fail —

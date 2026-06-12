@@ -2328,6 +2328,11 @@ const verifyInputRequirements = (
     ),
   })).filter((read) =>
     read.label !== undefined &&
+    // A present-but-empty label ({} — no atoms) is the same trust level as an
+    // absent one (excluded above); whether metadata materialized an empty
+    // entry is a persistence/sync artifact and must not decide gate
+    // membership.
+    hasLabelValues(read.label) &&
     // Provenance-only reads (link/origin/current-principal, no confidentiality)
     // are structural plumbing, not endorsable inputs — excluding them stops the
     // transaction-global quantification from false-rejecting unrelated
