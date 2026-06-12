@@ -1,4 +1,5 @@
 import { Immutable, isRecord } from "@commonfabric/utils/types";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   type FabricObject,
@@ -112,6 +113,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     triggerReads: [],
     writePolicyInputs: [],
     writePolicyInputIdentities: new Map(),
+    writeIdentity: { sawWrite: false, multiple: false },
     outbox: [],
     diagnostics: [],
     unprivilegedSystemWrites: [],
@@ -275,6 +277,32 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.cfcState.unprivilegedSystemWrites.push(
       `${address.id}/${address.path.join("/")}`,
     );
+  }
+
+  // Capture the implementation identity active at this write into the per-tx
+  // uniformity summary (§8.9.3 TransformedBy — see `CfcTxState.writeIdentity`).
+  // The flow join is one per-tx label, so derivation provenance is minted only
+  // when every non-privileged write was authored under the same defined
+  // identity: identities are captured at write time, like
+  // `recordCfcWritePolicyInput()` does, so a later run in the same transaction
+  // cannot lend its identity to earlier writes (and an unattributed write
+  // cannot borrow a later one). Privileged persistence writes (label maps,
+  // `cid:` schema docs) are bookkeeping, not authorship, and are skipped —
+  // also keeping the summary stable across prepare/invalidate/re-prepare.
+  private noteWriteIdentity(): void {
+    if (this.#privilegedSystemWriteDepth > 0) return;
+    const summary = this.cfcState.writeIdentity;
+    if (summary.multiple) return;
+    const current = this.cfcState.implementationIdentity;
+    if (!summary.sawWrite) {
+      summary.sawWrite = true;
+      summary.identity = current;
+      return;
+    }
+    if (!deepEqual(summary.identity, current)) {
+      summary.multiple = true;
+      summary.identity = undefined;
+    }
   }
 
   invalidateCfc(reason: string): void {
@@ -637,6 +665,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   ): Result<IAttestation, WriteError | WriterError> {
     this.assertWritable("write()");
     this.noteSystemWrite(address);
+    this.noteWriteIdentity();
     if (this.cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-after-prepare");
     }
@@ -650,6 +679,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   ): void {
     this.assertWritable("writeOrThrow()");
     this.noteSystemWrite(address);
+    this.noteWriteIdentity();
     if (this.cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-after-prepare");
     }
@@ -743,11 +773,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // widened to document-root addresses.
       const noteSystemWrite = (address: IMemorySpaceAddress) =>
         this.noteSystemWrite(address);
+      // Note the write identity per yielded write (not once up front): an
+      // empty batch must not mark the tx as written-to.
+      const noteWriteIdentity = () => this.noteWriteIdentity();
       const result = this.tx.writeBatch(
         (function* () {
           for (const write of writes) {
             const address = toMemorySpaceAddress(write.address);
             noteSystemWrite(address);
+            noteWriteIdentity();
             yield { address, value: write.value };
           }
         })(),
