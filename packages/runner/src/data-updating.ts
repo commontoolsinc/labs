@@ -52,6 +52,7 @@ import {
   allowMutableTransactionRead,
   markReadAsAttemptedWrite,
 } from "./scheduler.ts";
+import { ignoreReadForScheduling } from "./storage/reactivity-log.ts";
 import {
   readStoredCfcMetadata,
   storedCfcMetadataAppliesToPath,
@@ -534,14 +535,25 @@ export function normalizeAndDiff(
     // and leave user edits alone.
     const cellSchema = newValue.schema;
     const seedDefault = isRecord(cellSchema) ? cellSchema.default : undefined;
+    const seedTarget = seedDefault !== undefined
+      ? newValue.getAsNormalizedFullLink()
+      : undefined;
     if (
       seedDefault !== undefined &&
+      // Only root-linked cells: those are the runtime-constructed
+      // `Writable(value)` cells whose doc the default describes in full. A
+      // sub-path cell (e.g. via `.key()`) carries a FIELD default — writing
+      // that over the doc root would clobber the document.
+      seedTarget !== undefined && seedTarget.path.length === 0 &&
       !(isRecord(seedDefault) &&
         (seedDefault as Record<string, unknown>).$stream === true)
     ) {
-      const targetLink = newValue.getAsNormalizedFullLink();
-      const targetRoot: NormalizedFullLink = { ...targetLink, path: [] };
-      if (tx.readValueOrThrow(targetRoot, options) === undefined) {
+      // Don't subscribe the serializing action to the seed doc — mirror
+      // materializeDerivedInternalCells' read for the same check.
+      const absent = tx.readValueOrThrow(seedTarget, {
+        meta: ignoreReadForScheduling,
+      }) === undefined;
+      if (absent) {
         try {
           // The marker is what authorizes this write past an owner-protected
           // schema's `writeAuthorizedBy` (cfc/prepare.ts requires marker AND
@@ -550,20 +562,23 @@ export function normalizeAndDiff(
           tx.recordCfcWritePolicyInput({
             kind: "structural-provenance",
             target: {
-              space: targetRoot.space,
-              id: targetRoot.id,
-              scope: targetRoot.scope,
+              space: seedTarget.space,
+              id: seedTarget.id,
+              scope: seedTarget.scope,
               path: [],
             },
             claim: CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
             sources: [{
-              space: targetRoot.space,
-              id: targetRoot.id,
-              scope: targetRoot.scope,
+              space: seedTarget.space,
+              id: seedTarget.id,
+              scope: seedTarget.scope,
               path: [],
             }],
           });
-          tx.writeValueOrThrow(targetRoot, seedDefault as FabricValue);
+          tx.writeValueOrThrow(
+            seedTarget,
+            fabricFromNativeValue(seedDefault) as FabricValue,
+          );
         } catch (error) {
           // Fail open: a seed-materialization failure must not abort the
           // serialization that references the cell — the link (with its
@@ -572,7 +587,7 @@ export function normalizeAndDiff(
             "diff",
             () => [
               `[BRANCH_CELL] seed materialization failed for`,
-              targetRoot.id,
+              seedTarget.id,
               error,
             ],
           );
