@@ -149,7 +149,6 @@ jobs:
   generated-patterns-integration-test:
     name: "Generated Patterns Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
-    environment: ci
     strategy:
       fail-fast: false
       matrix:
@@ -200,7 +199,6 @@ jobs:
     name: "Package Integration Tests (${{ matrix.suite_name }})"
     runs-on: ubuntu-latest
     needs: ["build-binaries"]
-    environment: ci
     strategy:
       fail-fast: false
       matrix:
@@ -273,7 +271,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.timeout_minutes }}
     needs: ["build-binaries"]
-    environment: ci
     strategy:
       fail-fast: false
       matrix:
@@ -395,7 +392,6 @@ jobs:
     name: "Pattern Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
     needs: ["build-binaries"]
-    environment: ci
     strategy:
       fail-fast: false
       matrix:
@@ -449,7 +445,6 @@ jobs:
     name: "Pattern Reload Integration Tests"
     runs-on: ubuntu-latest
     needs: ["build-binaries"]
-    environment: ci
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
