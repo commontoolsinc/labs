@@ -491,6 +491,25 @@ export async function dispatchQueuedEvent(state: {
   });
   state.eventQueue.shift();
 
+  // Read-your-writes: before the handler body runs, let the client's
+  // in-flight direct cell writes settle (including rebase retries of
+  // rejected commits). Without this, an event consumed between a commit
+  // rejection's rollback and its rebase reads state older than what the
+  // user saw rendered when they triggered the event — e.g. a profile-save
+  // click observing its just-typed draft as empty and no-op'ing cleanly.
+  // Fail open: barrier errors surface as handler read behavior, not as a
+  // dropped event.
+  if (state.runtime.clientWriteBarrier) {
+    try {
+      await state.runtime.clientWriteBarrier();
+    } catch (error) {
+      logger.warn("scheduler", "client write barrier failed; dispatching", {
+        error,
+        handlerId,
+      });
+    }
+  }
+
   // Ensure the handler's input docs are locally available before the body
   // runs (see EventHandler.presyncInputs). Fail open: a presync error should
   // surface as the handler's own read failure, not silently drop the event.

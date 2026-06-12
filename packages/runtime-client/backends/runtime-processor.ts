@@ -129,6 +129,9 @@ import type { VDomOp } from "../protocol/types.ts";
 import type { JSONValue, RuntimeOptions, URI } from "@commonfabric/runner";
 
 const MAX_SERIALIZATION_DEPTH = 5;
+// Mirrors the scheduler's DEFAULT_RETRIES_FOR_EVENTS: direct UI cell writes
+// get the same bounded rebase-and-retry on commit rejection as handler events.
+const CELL_SET_COMMIT_RETRIES = 5;
 const blobUploadEncoding = new JsonEncodingContext();
 
 function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
@@ -294,6 +297,29 @@ export class RuntimeProcessor {
   private _isDisposed = false;
   private disposingPromise: Promise<void> | undefined;
   private subscriptions = new Map<string, Cancel>();
+  // Latest direct write per cell key (see handleCellSet): rejections
+  // reapply this value so a rollback can never leave the local doc staler
+  // than what the user last typed.
+  private cellSetLatest = new Map<
+    string,
+    { seq: number; value: unknown; retriesLeft: number }
+  >();
+  // Read-your-writes for UI events: confirmations (incl. rebase retries) of
+  // direct cell writes still in flight. The scheduler consumes these through
+  // `runtime.clientWriteBarrier` before running a queued event — otherwise a
+  // handler can observe the rollback window of a rejected commit, i.e. state
+  // older than what the user already saw rendered (the second half of the
+  // two-browser wedge: the click consumed against a rolled-back draft no-ops
+  // cleanly).
+  private pendingCellWrites = new Set<Promise<unknown>>();
+
+  private async awaitPendingCellWrites(): Promise<void> {
+    // Re-check after each settle: a rejected write registers its rebase
+    // commit while we wait. Bounded to avoid live-lock under write storms.
+    for (let i = 0; i < 5 && this.pendingCellWrites.size > 0; i++) {
+      await Promise.allSettled([...this.pendingCellWrites]);
+    }
+  }
   private telemetry: RuntimeTelemetry;
   #telemetryEnabled = false;
 
@@ -325,6 +351,10 @@ export class RuntimeProcessor {
     this.identity = identity;
     this.telemetry = telemetry;
     this.telemetry.addEventListener("telemetry", this.#onTelemetry);
+    // Read-your-writes: the scheduler awaits this before running a queued
+    // event, so a handler can never observe the rollback window of a
+    // rejected-and-rebasing direct cell write (see handleCellSet).
+    this.runtime.clientWriteBarrier = () => this.awaitPendingCellWrites();
   }
 
   static async initialize(data: InitializationData): Promise<RuntimeProcessor> {
@@ -660,14 +690,64 @@ export class RuntimeProcessor {
   }
 
   handleCellSet(request: CellSetRequest): void {
-    const tx = this.runtime.edit();
-    const cell = getCell(this.runtime, request.cell);
+    const key = cellRefToKey(request.cell);
     const value = mapCellRefsToSigilLinks(request.value);
-    cell.withTx(tx).set(value);
-    this.runtime.prepareTxForCommit(tx);
-    // Local visibility is established by commit(); the promise tracks remote
-    // confirmation/rollback and must not block cell IPC.
-    tx.commit();
+    // Track the latest value per cell. A rejected commit's rollback can
+    // locally erase even *confirmed* later writes to the same doc (observed:
+    // input emits two sets; the second confirms first; the first's later
+    // rejection rolls the doc back, eating the confirmed value while the
+    // server keeps it — local cache ends up staler than the server with no
+    // resync). So on ANY rejection for this cell, reapply the LATEST value
+    // on fresh state. Reapplying is idempotent when local state already
+    // matches. Budget refreshes on each new user write.
+    const prev = this.cellSetLatest.get(key);
+    const entry = {
+      seq: (prev?.seq ?? 0) + 1,
+      value,
+      retriesLeft: CELL_SET_COMMIT_RETRIES,
+    };
+    this.cellSetLatest.set(key, entry);
+    const apply = (): void => {
+      if (this.isDisposed()) return;
+      const latest = this.cellSetLatest.get(key);
+      if (!latest) return;
+      const applied = latest.value;
+      const tx = this.runtime.edit();
+      const cell = getCell(this.runtime, request.cell);
+      cell.withTx(tx).set(applied);
+      this.runtime.prepareTxForCommit(tx);
+      // Local visibility is established by commit(); the promise tracks
+      // remote confirmation/rollback and must not block cell IPC.
+      const confirmation = tx.commit().then((result) => {
+        if (!result.error) return;
+        const current = this.cellSetLatest.get(key);
+        if (!current) return;
+        if (current.retriesLeft <= 0) {
+          console.error(
+            "[RuntimeProcessor] cell set commit failed after exhausting " +
+              "all retries",
+            result.error,
+          );
+          return;
+        }
+        current.retriesLeft--;
+        console.warn(
+          "[RuntimeProcessor] cell set commit failed; reapplying latest " +
+            `value (${current.retriesLeft} retries left)`,
+          result.error,
+        );
+        apply();
+      });
+      const observed = confirmation.catch((error) => {
+        console.error(
+          "[RuntimeProcessor] cell set confirmation rejected",
+          error,
+        );
+      });
+      this.pendingCellWrites.add(observed);
+      observed.finally(() => this.pendingCellWrites.delete(observed));
+    };
+    apply();
   }
 
   handleCellSend(request: CellSendRequest): void {
@@ -676,8 +756,19 @@ export class RuntimeProcessor {
     cell.withTx(tx).send(mapCellRefsToSigilLinks(request.event));
     this.runtime.prepareTxForCommit(tx);
     // Local visibility is established by commit(); the promise tracks remote
-    // confirmation/rollback and must not block cell IPC.
-    tx.commit();
+    // confirmation/rollback and must not block cell IPC. The event itself is
+    // queued through the scheduler (which has its own bounded retry on
+    // commit rejection and awaits `runtime.clientWriteBarrier` before the
+    // handler runs), so a failed commit here is not retried — re-sending
+    // would double-fire the event — but it must not fail silently either.
+    tx.commit().then((result) => {
+      if (result.error) {
+        console.error(
+          "[RuntimeProcessor] cell send commit failed",
+          result.error,
+        );
+      }
+    });
   }
 
   handleCellSubscribe(request: CellSubscribeRequest): BooleanResponse {
