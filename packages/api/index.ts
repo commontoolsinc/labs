@@ -2373,6 +2373,17 @@ type IsEmptyTuple<T> = T extends readonly unknown[]
 // Nullish-only defaults need a standalone marker because `null & Brand` and
 // `undefined & Brand` collapse to `never`.
 //
+// The brand PAYLOAD carries V — the default VALUE's type — not T (matching
+// DeepDefault<V>). This is load-bearing for schema generation: the alias body
+// never otherwise mentions V, so once the checker resolves the alias away
+// (which it does through every capture/projection/instantiation path), the
+// payload is the ONLY place the default value survives at the type level.
+// Schema generation reads it back from expanded types (see the brand-payload
+// fallback in schema-generator's union formatter); detection everywhere else
+// is payload-agnostic (`{ readonly [DEFAULT_MARKER]: any }`), so the payload
+// choice affects nothing but recoverability. Carrying T instead silently
+// dropped `"default"` from every schema built off a checker type.
+//
 // Empty-tuple special case (CT-1640): for `Default<[]>` we keep ONLY the branded
 // arm and drop the bare `| T` arm. Without this, `Default<[]>` would contribute a
 // bare `[]` (i.e. `never[]`) member; in the documented `T[] | Default<[]>` shape
@@ -2395,10 +2406,10 @@ type IsEmptyTuple<T> = T extends readonly unknown[]
 // field with an empty-ish/seed default and a precise element type should use the
 // two-arg form `Default<string[], []>` (T = the array, not the tuple).
 export type Default<T, V extends T = T> = IsEmptyTuple<T> extends true
-  ? T & DefaultMarker<T>
+  ? T & DefaultMarker<V>
   :
-    | ([T] extends [null | undefined] ? DefaultMarker<T>
-      : T & DefaultMarker<T>)
+    | ([T] extends [null | undefined] ? DefaultMarker<V>
+      : T & DefaultMarker<V>)
     | T;
 
 /**

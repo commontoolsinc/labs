@@ -8,6 +8,7 @@ import type { SchemaGenerator } from "../schema-generator.ts";
 import {
   cloneSchemaDefinition,
   detectWrapperViaNode,
+  extractDefaultBrandPayloadValue,
   getNativeTypeSchema,
   getPropertyNameText,
   resolveWrapperNode,
@@ -129,6 +130,20 @@ export class UnionFormatter implements TypeFormatter {
       return expandedEmptyDefault;
     }
 
+    // General expanded-Default recovery: when Default<T, V> reaches us
+    // already resolved away by the checker (no intact alias node anywhere),
+    // the union is `T | (T & DefaultMarker<V>)` and the brand payload
+    // carries V. Format the unbranded members and attach the extracted
+    // default — no authored AST required.
+    const expandedDefault = this.tryFormatExpandedDefaultViaBrandPayload(
+      members,
+      orderedMemberNodes,
+      context,
+    );
+    if (expandedDefault !== undefined) {
+      return expandedDefault;
+    }
+
     // Detect presence of null
     const hasNull = members.some((m) => (m.flags & ts.TypeFlags.Null) !== 0);
     // nonNull excludes only null; undefined members are kept because undefined is
@@ -235,6 +250,57 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     return { anyOf };
+  }
+
+  /**
+   * Recover `"default"` from the DEFAULT_MARKER brand payload when the union
+   * reaches us with the `Default<>` alias already resolved away — the general
+   * case behind every "defaults dropped from injected schemas" regression:
+   * capture shrinking, path lowering, projection, and generic instantiation
+   * all rebuild types from the checker, where the authored alias node is
+   * gone. The brand payload carries V (see Default<> in packages/api), so no
+   * authored AST is required.
+   *
+   * Authored-node handling stays primary: tryFormatDefaultUnion runs first
+   * and also covers non-literal V forms (e.g. `typeof CONST`) via
+   * declaration reads. This fallback fires only when the alias node is
+   * unavailable, and bails (returning undefined) when the union carries no
+   * brand, more than one brand, or a payload that is not literal-shaped —
+   * preserving prior behavior exactly in those cases.
+   */
+  private tryFormatExpandedDefaultViaBrandPayload(
+    members: readonly ts.Type[],
+    orderedMemberNodes: ReadonlyArray<ts.TypeNode | undefined> | undefined,
+    context: GenerationContext,
+  ): JSONSchemaMutable | undefined {
+    const checker = context.typeChecker;
+    const branded = members.filter(
+      (m) =>
+        this.hasDefaultBrand(m, checker) ||
+        this.isBrandOnlyMarker(m, checker),
+    );
+    if (branded.length !== 1) return undefined;
+
+    const extracted = extractDefaultBrandPayloadValue(branded[0]!, checker);
+    if (!extracted) return undefined;
+
+    const rest = members.filter((m) => m !== branded[0]);
+    if (rest.length === 0) return undefined;
+    const schemas = rest.map((m) => {
+      const memberNode = orderedMemberNodes?.[members.indexOf(m)];
+      const native = detectWrapperViaNode(memberNode, context.typeChecker) ===
+          undefined
+        ? getNativeTypeSchema(m, context.typeChecker)
+        : undefined;
+      if (native !== undefined) {
+        return cloneSchemaDefinition(native) as JSONSchemaMutable;
+      }
+      return this.schemaGenerator.formatChildType(m, context, memberNode);
+    });
+    return this.applySchemaDefault(
+      this.combineUnionSchemas(schemas, context),
+      extracted.value,
+    );
   }
 
   private tryFormatDefaultUnion(
