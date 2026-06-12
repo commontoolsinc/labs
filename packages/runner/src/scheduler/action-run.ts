@@ -243,6 +243,7 @@ export interface SchedulerActionRunState {
   readonly getThrottle: (action: Action) => number | undefined;
   readonly maybeAutoDebounce: (action: Action) => void;
   readonly markActionHasRun: (action: Action) => void;
+  readonly markNodeHasRun: (action: Action) => void;
   readonly handleError: (error: Error, action: Action) => void;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
   readonly markDirectDirty: (action: Action) => void;
@@ -359,6 +360,7 @@ function finalizeSchedulerAction(
   recordActionTime(state.actionTimingState, args.action, elapsed);
   state.maybeAutoDebounce(args.action);
   state.markActionHasRun(args.action);
+  state.markNodeHasRun(args.action);
   state.pullDemandedFirstRunComputations.delete(args.action);
   state.pullDemandedContinuationComputations.delete(args.action);
 

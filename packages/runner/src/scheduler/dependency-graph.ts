@@ -64,6 +64,22 @@ export function notifyNodeLivenessChange(
   }
 }
 
+export function setNodeProvisionalDemand(
+  state: SchedulerLivenessState,
+  node: SchedulerNode,
+  provisionalDemand: boolean,
+  passId?: number,
+): void {
+  const wasLive = isLive(state, node);
+  node.provisionalDemand = provisionalDemand;
+  if (provisionalDemand) {
+    node.provisionalDemandPass = passId;
+  } else {
+    node.provisionalDemandPass = undefined;
+  }
+  notifyNodeLivenessChange(state, node.action, wasLive);
+}
+
 export function groupReadsByEntity(
   reads: readonly IMemorySpaceAddress[],
 ): Map<SpaceScopeAndURI, IMemorySpaceAddress[]> {

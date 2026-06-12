@@ -14,7 +14,11 @@ import {
   readsOverlapWrites,
   type WriterIndexState,
 } from "./scheduling-writes.ts";
-import { type NodeKind, NodeRegistry } from "./node-record.ts";
+import {
+  type NodeKind,
+  NodeRegistry,
+  type SchedulerNode,
+} from "./node-record.ts";
 import { type TriggerSubscriptionState } from "./trigger-index.ts";
 import { entityKey } from "./keys.ts";
 import type {
@@ -79,8 +83,7 @@ export interface SchedulerSubscribeActionState {
     PopulateDependenciesEntry
   >;
   readonly pendingDependencyCollection: Set<Action>;
-  readonly activePullDemandActions: WeakSet<Action>;
-  readonly pullDemandedFirstRunComputations: WeakSet<Action>;
+  readonly markProvisionalDemand: (node: SchedulerNode) => void;
   readonly pending: Set<Action>;
   readonly scheduledFirstTime: Set<Action>;
   readonly effects: ReadonlySet<Action>;

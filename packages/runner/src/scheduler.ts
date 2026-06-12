@@ -54,12 +54,13 @@ import {
   isLive,
   notifyNodeLivenessChange,
   registerDependentsForWriterSurface,
+  setNodeProvisionalDemand,
   updateDependentEdgesForLog,
 } from "./scheduler/dependency-graph.ts";
 import { SchedulerMaterializers } from "./scheduler/materializers.ts";
 import { type DependencyUpdateState } from "./scheduler/dependency-updates.ts";
 import { SchedulerWriteIndex } from "./scheduler/scheduling-writes.ts";
-import { NodeRegistry } from "./scheduler/node-record.ts";
+import { NodeRegistry, type SchedulerNode } from "./scheduler/node-record.ts";
 import {
   SchedulerTriggerIndex,
   SchedulerTriggerSubscriptions,
@@ -294,6 +295,9 @@ export class Scheduler {
   private activePullDemandActions = new WeakSet<Action>();
   private pullDemandedFirstRunComputations = new WeakSet<Action>();
   private pullDemandedContinuationComputations = new WeakSet<Action>();
+  private passCounter = 0;
+  private activePassId: number | undefined;
+  private provisionalDemandThisPass = new Set<SchedulerNode>();
   // In pull mode, `dirty` means direct dirty. `stale` additionally includes
   // actions with dirty upstream computations.
   private staleness = new SchedulerStaleness({
@@ -1390,6 +1394,8 @@ export class Scheduler {
     // Track timing for cycle-aware debounce
     this.executeStartTime = performance.now();
     this.runsThisExecute.clear();
+    this.activePassId = ++this.passCounter;
+    this.provisionalDemandThisPass.clear();
 
     // Non-settling heuristic: record execute() start
     markExecuteStart(this.settlingTracker);
@@ -1479,6 +1485,9 @@ export class Scheduler {
         MAX_SETTLE_STATS_HISTORY,
       );
     }
+
+    this.clearProvisionalDemandAtPassEnd();
+    this.activePassId = undefined;
 
     return settleResult;
   }
@@ -1701,6 +1710,11 @@ export class Scheduler {
       queueExecution: () => this.queueExecution(),
       logDebounce: (message) =>
         logger.debug("schedule-debounce", () => [message]),
+      shouldDebounceFirstRun: (action) => {
+        const record = this.nodes.get(action);
+        return record?.provisionalDemand === true &&
+          record.status === "never-ran";
+      },
     };
   }
 
@@ -1928,8 +1942,7 @@ export class Scheduler {
       pendingDependencyCollectionState: this.pendingDependencyCollectionState,
       populateDependenciesCallbacks: this.populateDependenciesCallbacks,
       pendingDependencyCollection: this.pendingDependencyCollection,
-      activePullDemandActions: this.activePullDemandActions,
-      pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
+      markProvisionalDemand: (record) => this.markProvisionalDemand(record),
       pending: this.pending,
       scheduledFirstTime: this.scheduledFirstTime,
       effects: this.nodes.effects,
@@ -2266,6 +2279,7 @@ export class Scheduler {
         this.delays.markActionHasRun(target);
         this.initialRehydrationTokens.delete(target);
       },
+      markNodeHasRun: (target) => this.markNodeHasRun(target),
       handleError: (error, target) => this.handleError(error, target),
       resubscribe: (target, log) => this.resubscribe(target, log),
       markDirectDirty: (target) => this.staleness.markDirectDirty(target),
@@ -2459,6 +2473,51 @@ export class Scheduler {
       (action as Partial<TelemetryAnnotations>).materializerWriteEnvelopes,
     );
     notifyNodeLivenessChange(this.dependencyGraphState, action, wasLive);
+  }
+
+  private markProvisionalDemand(record: SchedulerNode): void {
+    setNodeProvisionalDemand(
+      this.dependencyGraphState,
+      record,
+      true,
+      this.activePassId,
+    );
+    if (this.activePassId !== undefined) {
+      this.provisionalDemandThisPass.add(record);
+    }
+  }
+
+  private markNodeHasRun(action: Action): void {
+    const record = this.nodes.get(action);
+    if (!record) return;
+
+    if (record.status === "never-ran") {
+      record.status = "clean";
+    }
+
+    if (
+      record.provisionalDemand &&
+      record.provisionalDemandPass !== undefined &&
+      this.passCounter > record.provisionalDemandPass
+    ) {
+      setNodeProvisionalDemand(this.dependencyGraphState, record, false);
+    }
+  }
+
+  private clearProvisionalDemandAtPassEnd(): void {
+    const passId = this.activePassId;
+    if (passId === undefined) return;
+
+    for (const record of this.provisionalDemandThisPass) {
+      if (
+        record.provisionalDemand &&
+        record.provisionalDemandPass === passId &&
+        record.status !== "never-ran"
+      ) {
+        setNodeProvisionalDemand(this.dependencyGraphState, record, false);
+      }
+    }
+    this.provisionalDemandThisPass.clear();
   }
 
   private getNextDebounceRunTime(action: Action): number | undefined {
