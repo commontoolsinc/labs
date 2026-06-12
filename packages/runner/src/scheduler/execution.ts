@@ -112,14 +112,10 @@ export function markNonSettlingEpisode(
 
 export function buildPullInitialSeeds(state: {
   readonly eventBlockingDeps: Iterable<Action>;
-  readonly computationDebounceFlushSeeds: Iterable<Action>;
 }): Set<Action> {
   const initialSeeds = new Set<Action>();
 
   for (const action of state.eventBlockingDeps) {
-    initialSeeds.add(action);
-  }
-  for (const action of state.computationDebounceFlushSeeds) {
     initialSeeds.add(action);
   }
 

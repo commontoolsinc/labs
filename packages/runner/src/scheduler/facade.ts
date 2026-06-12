@@ -105,15 +105,6 @@ import {
 } from "./settle.ts";
 import type { ExecuteContinuationState } from "./continuation.ts";
 import { applyPullExecuteContinuation } from "./pull-continuation.ts";
-import {
-  canAutomaticallyDebounce as canAutomaticallyDebounceState,
-  getNextDebounceRunTime as getNextDebounceRunTimeState,
-  isDebouncedComputationWaiting as isDebouncedComputationWaitingState,
-  maybeAutoDebounce as maybeAutoDebounceState,
-  scheduleComputationDebounce as scheduleComputationDebounceState,
-  type SchedulerDelayControlState,
-  scheduleWithDebounce as scheduleWithDebounceState,
-} from "./delay-control.ts";
 import { SchedulerGates } from "./gates.ts";
 import {
   markInvalid as markInvalidRecord,
@@ -341,8 +332,6 @@ export class Scheduler {
     isDisposed: () => this.disposed,
     queueExecution: () => this.queueExecution(),
   });
-  private delayControlState!: SchedulerDelayControlState;
-
   private writeIndex!: SchedulerWriteIndex;
   private materializers = new SchedulerMaterializers(this.nodes.effects);
   private eventPreflightDependencyState!: EventPreflightDependencyState;
@@ -1362,7 +1351,6 @@ export class Scheduler {
     // Build initial seeds for pull mode (effects + special actions).
     return buildPullInitialSeeds({
       eventBlockingDeps,
-      computationDebounceFlushSeeds: this.gates.computationDebounceFlushSeeds,
     });
   }
 
@@ -1472,7 +1460,6 @@ export class Scheduler {
   private initializeSchedulerState(): void {
     this.diagnosisControlState = this.createDiagnosisControlState();
     this.writeIndex = this.createWriteIndex();
-    this.delayControlState = this.createDelayControlState();
     this.eventPreflightDependencyState = this
       .createEventPreflightDependencyState();
     this.dependencyGraphState = this.createDependencyGraphState();
@@ -1531,24 +1518,6 @@ export class Scheduler {
 
   private createWriteIndex(): SchedulerWriteIndex {
     return new SchedulerWriteIndex();
-  }
-
-  private createDelayControlState(): SchedulerDelayControlState {
-    return {
-      gates: this.gates,
-      computations: this.nodes.computations,
-      effects: this.nodes.effects,
-      isInvalid: (action) => this.isInvalidAction(action),
-      pending: this.pending,
-      queueExecution: () => this.queueExecution(),
-      logDebounce: (message) =>
-        logger.debug("schedule-debounce", () => [message]),
-      shouldDebounceFirstRun: (action) => {
-        const record = this.nodes.get(action);
-        return record?.provisionalDemand === true &&
-          record.status === "never-ran";
-      },
-    };
   }
 
   private createEventPreflightDependencyState(): EventPreflightDependencyState {
@@ -2093,7 +2062,9 @@ export class Scheduler {
   }
 
   private canAutomaticallyDebounce(action: Action): boolean {
-    return canAutomaticallyDebounceState(this.delayControlState, action);
+    return this.gates.canAutomaticallyDebounce(action, {
+      effects: this.nodes.effects,
+    });
   }
 
   private collectPullIterationSeeds(workSet: Set<Action>): void {
@@ -2184,15 +2155,25 @@ export class Scheduler {
   }
 
   private getNextDebounceRunTime(action: Action): number | undefined {
-    return getNextDebounceRunTimeState(this.delayControlState, action);
+    return this.gates.getNextDebounceRunTime(action, {
+      computations: this.nodes.computations,
+      effects: this.nodes.effects,
+      isInvalid: (target) => this.isInvalidAction(target),
+    });
   }
 
   private isDebouncedComputationWaiting(action: Action): boolean {
-    return isDebouncedComputationWaitingState(this.delayControlState, action);
+    return this.gates.isDebouncedComputationWaiting(
+      action,
+      this.createDebouncedComputationContext(),
+    );
   }
 
   private scheduleComputationDebounce(action: Action): void {
-    scheduleComputationDebounceState(this.delayControlState, action);
+    this.gates.scheduleComputationDebounce(
+      action,
+      this.createDebouncedComputationContext(),
+    );
   }
 
   /**
@@ -2201,7 +2182,12 @@ export class Scheduler {
    * Otherwise, it's added immediately.
    */
   private scheduleWithDebounce(action: Action): void {
-    scheduleWithDebounceState(this.delayControlState, action);
+    this.gates.scheduleWithDebounce(action, {
+      pending: this.pending,
+      queueExecution: () => this.queueExecution(),
+      logDebounce: (message) =>
+        logger.debug("schedule-debounce", () => [message]),
+    });
   }
 
   /**
@@ -2210,7 +2196,10 @@ export class Scheduler {
    * Auto-debounce is enabled by default; use noDebounce to opt out.
    */
   private maybeAutoDebounce(action: Action): void {
-    const update = maybeAutoDebounceState(this.delayControlState, action);
+    const update = this.gates.maybeAutoDebounce(action, {
+      canAutomaticallyDebounce: (candidate) =>
+        this.canAutomaticallyDebounce(candidate),
+    });
     if (update) {
       logger.debug("schedule-debounce", () => [
         `[AUTO-DEBOUNCE] Action ${update.actionId} ` +
@@ -2219,5 +2208,22 @@ export class Scheduler {
         }ms >= ${update.thresholdMs}ms)`,
       ]);
     }
+  }
+
+  private createDebouncedComputationContext() {
+    return {
+      computations: this.nodes.computations,
+      effects: this.nodes.effects,
+      isInvalid: (target: Action) => this.isInvalidAction(target),
+      pending: this.pending,
+      queueExecution: () => this.queueExecution(),
+      logDebounce: (message: string) =>
+        logger.debug("schedule-debounce", () => [message]),
+      shouldDebounceFirstRun: (target: Action) => {
+        const record = this.nodes.get(target);
+        return record?.provisionalDemand === true &&
+          record.status === "never-ran";
+      },
+    };
   }
 }
