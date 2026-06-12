@@ -170,6 +170,48 @@ deno task run -- \
   --print-transcript
 ```
 
+Local open-weight model via any OpenAI-compatible server (llama.cpp shown;
+LM Studio, vLLM, and Ollama's `/v1` endpoint work the same way):
+
+```bash
+# Serve the model locally (downloads on first run, ~63GB):
+llama-server -hf ggml-org/gpt-oss-120b-GGUF --ctx-size 0 --jinja --port 8080
+
+cd packages/cf-harness
+deno task run -- \
+  --workspace ../.. \
+  --gateway-base-url http://localhost:8080/ \
+  --gateway-auth-mode none \
+  --model gpt-oss-120b \
+  --prompt "Summarize the cf-harness package structure." \
+  --print-transcript
+```
+
+The gateway can also be selected via environment, which lets callers (loom,
+pattern-factory) switch to a local model without threading new flags:
+
+```bash
+export CF_HARNESS_GATEWAY_BASE_URL=http://localhost:8080/
+export CF_HARNESS_GATEWAY_AUTH_MODE=none
+export CF_HARNESS_MODEL=gpt-oss-120b
+```
+
+CLI flags take precedence over these variables; `CF_HARNESS_MODEL` is ignored
+on `--resume-run` (the resumed run keeps its recorded model unless `--model`
+is passed explicitly).
+
+On hosts without the `runsc-cfc` Docker runtime (or where the installed CFC
+policy does not label the workspace mount, which makes in-sandbox file reads
+fail with SIGSYS), run with the plain `runc` runtime and observe-mode CFC:
+
+```bash
+export CF_HARNESS_SANDBOX_DOCKER_RUNTIME=runc
+export CF_HARNESS_CFC_ENFORCEMENT_MODE=observe
+```
+
+Tool outputs are then exposed raw with policy warnings recorded in the run
+report instead of being denied for missing trusted mediation metadata.
+
 Interactive chat stdio transport:
 
 ```bash
