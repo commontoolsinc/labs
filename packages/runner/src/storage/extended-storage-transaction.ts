@@ -30,7 +30,10 @@ import type {
   WriterError,
 } from "./interface.ts";
 import { createReadOnlyTransactionError, toThrowable } from "./interface.ts";
-import type { SqliteOperation } from "@commonfabric/memory/v2";
+import type {
+  CommitPrecondition,
+  SqliteOperation,
+} from "@commonfabric/memory/v2";
 import {
   getDirectTransactionReactivityLog,
   getTransactionReadActivities,
@@ -98,6 +101,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   >();
   private statusOverride?: StorageTransactionStatus;
   private commitCallbacksDispatched = false;
+  private commitPreconditions = new Map<MemorySpace, CommitPrecondition[]>();
   private outboxIdempotencyKeys = new Set<string>();
   private readOnlySource?: string;
   private narrowestReadScope: CellScope = "space";
@@ -527,6 +531,27 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   getSchedulerObservation(): unknown {
     return this.tx.getSchedulerObservation?.();
+  }
+
+  addCommitPrecondition(
+    space: MemorySpace,
+    precondition: CommitPrecondition,
+  ): void {
+    this.assertWritable("addCommitPrecondition");
+    const preconditions = this.commitPreconditions.get(space);
+    if (preconditions) {
+      preconditions.push(precondition);
+    } else {
+      this.commitPreconditions.set(space, [precondition]);
+    }
+    this.tx.addCommitPrecondition?.(space, precondition);
+  }
+
+  getCommitPreconditions(
+    space: MemorySpace,
+  ): readonly CommitPrecondition[] | undefined {
+    return this.tx.getCommitPreconditions?.(space) ??
+      this.commitPreconditions.get(space);
   }
 
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
@@ -1047,6 +1072,19 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   getSchedulerObservation(): unknown {
     return this.wrapped.getSchedulerObservation?.();
+  }
+
+  addCommitPrecondition(
+    space: MemorySpace,
+    precondition: CommitPrecondition,
+  ): void {
+    this.wrapped.addCommitPrecondition?.(space, precondition);
+  }
+
+  getCommitPreconditions(
+    space: MemorySpace,
+  ): readonly CommitPrecondition[] | undefined {
+    return this.wrapped.getCommitPreconditions?.(space);
   }
 
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {

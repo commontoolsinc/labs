@@ -1,7 +1,11 @@
 import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { unclaimed } from "@commonfabric/memory/fact";
-import type { PatchOp, SqliteOperation } from "@commonfabric/memory/v2";
+import type {
+  CommitPrecondition,
+  PatchOp,
+  SqliteOperation,
+} from "@commonfabric/memory/v2";
 import { encodePointer, pathsOverlap } from "../../../memory/v2/path.ts";
 import { PathKeyMap } from "@commonfabric/utils/path-key-map";
 import type { FabricValue } from "@commonfabric/memory/interface";
@@ -741,6 +745,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   #readActivities: IReadActivity[] = [];
   #reactivityLogCache?: TransactionReactivityLog;
   #schedulerObservation?: unknown;
+  #commitPreconditions = new Map<MemorySpace, CommitPrecondition[]>();
   // Folded SQLite write ops per space, applied in the same commit as cell ops.
   #sqliteOps = new Map<MemorySpace, SqliteOperation[]>();
   #writeSpace?: MemorySpace;
@@ -825,6 +830,29 @@ export class V2StorageTransaction implements IStorageTransaction {
     return this.#schedulerObservation;
   }
 
+  addCommitPrecondition(
+    space: MemorySpace,
+    precondition: CommitPrecondition,
+  ): void {
+    this.assertWritable("addCommitPrecondition()");
+    const ready = this.editable();
+    if (ready.error) {
+      throw ready.error;
+    }
+    const preconditions = this.#commitPreconditions.get(space);
+    if (preconditions) {
+      preconditions.push(precondition);
+    } else {
+      this.#commitPreconditions.set(space, [precondition]);
+    }
+  }
+
+  getCommitPreconditions(
+    space: MemorySpace,
+  ): readonly CommitPrecondition[] | undefined {
+    return this.#commitPreconditions.get(space);
+  }
+
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
     this.assertWritable("recordSqliteWrite()");
     const ready = this.editable();
@@ -850,8 +878,12 @@ export class V2StorageTransaction implements IStorageTransaction {
     const schedulerObservation = this.schedulerObservationForNativeCommit(
       space,
     );
+    const preconditions = this.#commitPreconditions.get(space);
     const sqliteOps = this.#sqliteOps.get(space);
-    if (!branch && schedulerObservation === undefined && !sqliteOps?.length) {
+    if (
+      !branch && schedulerObservation === undefined &&
+      !preconditions?.length && !sqliteOps?.length
+    ) {
       return undefined;
     }
 
@@ -884,6 +916,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     return {
       operations,
       ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
+      ...(preconditions?.length ? { preconditions: [...preconditions] } : {}),
       ...(sqliteOps?.length ? { sqliteOps: [...sqliteOps] } : {}),
     };
   }
@@ -1465,8 +1498,12 @@ export class V2StorageTransaction implements IStorageTransaction {
     );
     const operations = native?.operations ?? [];
     const hasSchedulerObservation = native?.schedulerObservation !== undefined;
+    const hasCommitPreconditions = (native?.preconditions?.length ?? 0) > 0;
     const hasSqliteOps = (native?.sqliteOps?.length ?? 0) > 0;
-    if (operations.length === 0 && !hasSchedulerObservation && !hasSqliteOps) {
+    if (
+      operations.length === 0 && !hasSchedulerObservation &&
+      !hasCommitPreconditions && !hasSqliteOps
+    ) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
       this.#state = { status: "done", result };
       return result;
@@ -1520,10 +1557,12 @@ export class V2StorageTransaction implements IStorageTransaction {
       const operations = native?.operations ?? [];
       const hasSchedulerObservation =
         native?.schedulerObservation !== undefined;
+      const hasCommitPreconditions = (native?.preconditions?.length ?? 0) > 0;
       const hasSqliteOps = (native?.sqliteOps?.length ?? 0) > 0;
       if (
         !native ||
-        (operations.length === 0 && !hasSchedulerObservation && !hasSqliteOps)
+        (operations.length === 0 && !hasSchedulerObservation &&
+          !hasCommitPreconditions && !hasSqliteOps)
       ) {
         continue;
       }

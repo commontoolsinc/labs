@@ -8,7 +8,9 @@ import {
   resetModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import {
+  getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
+  resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
 
@@ -22,6 +24,7 @@ const signer = await Identity.fromPassphrase("test experimental");
 describe("ExperimentalOptions", () => {
   afterEach(() => {
     resetModernCellRepConfig();
+    resetCommitPreconditionsConfig();
     resetPersistentSchedulerStateConfig();
   });
 
@@ -38,6 +41,7 @@ describe("ExperimentalOptions", () => {
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
         persistentSchedulerState: false,
+        commitPreconditions: false,
         schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
@@ -56,6 +60,7 @@ describe("ExperimentalOptions", () => {
       expect(runtime.experimental).toEqual({
         modernCellRep: true,
         persistentSchedulerState: false,
+        commitPreconditions: false,
         schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
@@ -72,6 +77,7 @@ describe("ExperimentalOptions", () => {
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
         persistentSchedulerState: false,
+        commitPreconditions: false,
         schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
@@ -126,6 +132,22 @@ describe("ExperimentalOptions", () => {
       await sm.close();
     });
 
+    it("constructing Runtime with commitPreconditions sets global config", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          commitPreconditions: true,
+        },
+      });
+
+      expect(getCommitPreconditionsConfig()).toBe(true);
+
+      await runtime.dispose();
+      await sm.close();
+    });
+
     it("constructing Runtime with explicit false sets config to false", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
@@ -172,6 +194,7 @@ describe("ExperimentalOptions", () => {
 
       expect(getModernCellRepConfig()).toBe(initial);
       expect(getPersistentSchedulerStateConfig()).toBe(false);
+      expect(getCommitPreconditionsConfig()).toBe(false);
     });
   });
 });

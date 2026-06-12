@@ -1,6 +1,7 @@
 import type { Immutable } from "@commonfabric/utils/types";
 import type { CellScope } from "@commonfabric/api";
 import type {
+  CommitPrecondition,
   EntityDocument,
   PatchOp,
   SchedulerActionSnapshotQuery,
@@ -566,6 +567,19 @@ export interface IStorageTransaction {
   getSchedulerObservation?(): unknown;
 
   /**
+   * Optional commit-time preconditions attached to this transaction's commit in
+   * the given space. Storage backends that support v2 native commits read these
+   * during commit construction.
+   */
+  addCommitPrecondition?(
+    space: MemorySpace,
+    precondition: CommitPrecondition,
+  ): void;
+  getCommitPreconditions?(
+    space: MemorySpace,
+  ): readonly CommitPrecondition[] | undefined;
+
+  /**
    * Optional: record a folded SQLite write onto this transaction so it commits
    * ATOMICALLY with the cell ops targeting `space` (one commit = cell ops + a
    * `sqlite` op; on SQL failure the whole commit aborts). Claims `space` as a
@@ -719,6 +733,19 @@ export interface IExtendedStorageTransaction
    * runner to derive the handler result cell's cause (spec §7.6).
    */
   dispatchedEventId?: string;
+
+  /**
+   * Commit-time preconditions attached to this transaction's commit in
+   * the given space (scheduler-v2 §7.6). Violations surface as
+   * IPreconditionFailedError (permanent — never retried).
+   */
+  addCommitPrecondition?(
+    space: MemorySpace,
+    precondition: { kind: "origin-committed"; originLocalSeq: number },
+  ): void;
+  getCommitPreconditions?(
+    space: MemorySpace,
+  ): readonly CommitPrecondition[] | undefined;
 
   getCfcState(): Readonly<CfcTxState>;
   setCfcEnforcementMode(mode: CfcEnforcementMode): void;
@@ -1289,6 +1316,7 @@ export type NativeStorageCommitOperation =
 export interface NativeStorageCommit {
   operations: readonly NativeStorageCommitOperation[];
   schedulerObservation?: unknown;
+  preconditions?: readonly CommitPrecondition[];
   /**
    * Folded SQLite write ops, applied in the same wire commit as `operations`
    * (appended last). They are NOT entity revisions and stay out of the

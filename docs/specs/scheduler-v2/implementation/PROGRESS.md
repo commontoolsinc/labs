@@ -1211,7 +1211,7 @@ packages/runner/src/storage/rejection.ts:6:export function isPermanentRejection(
 
 ## 03/step-1
 
-- [x] pending — record per-space commit localSeq on source transactions
+- [x] 72ad97869 — record per-space commit localSeq on source transactions
 - Deviations: selected `test/memory-v2-transaction-commit-rejection.test.ts`
   as the storage transaction test from the work-order inventory.
 - Recordings:
@@ -1228,3 +1228,35 @@ packages/runner/src/storage/rejection.ts:6:export function isPermanentRejection(
     --allow-write=/tmp,/var/folders --allow-run=git
     test/memory-v2-transaction-commit-rejection.test.ts`: passed,
     `1 passed`, `0 failed`.
+
+## 03/step-2
+
+- [x] pending — commit precondition plumbing behind `commitPreconditions`
+  flag
+- Deviations: updated the narrow memory/runtime flag tests because the new
+  protocol flag makes their exact object assertions stale. Implemented the
+  source-readable precondition metadata on the native v2 transaction as well as
+  the extended wrapper, matching the existing scheduler-observation handoff
+  path into `commitNative`.
+- Recordings:
+  - `grep -rn "ClientCommit" ../../packages/memory
+    ../../packages/runner/src/storage --include="*.ts" |
+    grep -i "interface\|type\|="` located `ClientCommit` in
+    `packages/memory/v2.ts`.
+  - `deno fmt packages/memory/v2.ts packages/memory/test/v2-test.ts
+    packages/runner/src/runtime.ts packages/runner/src/storage/interface.ts
+    packages/runner/src/storage/extended-storage-transaction.ts
+    packages/runner/src/storage/v2-transaction.ts
+    packages/runner/src/storage/v2.ts
+    packages/runner/test/experimental-options.test.ts`: passed
+    (`Checked 8 files`).
+  - `deno lint` on the same eight files: passed (`Checked 8 files`).
+  - `deno check` on the same eight files: passed.
+  - `cd packages/memory && deno test test/v2-test.ts`: passed,
+    `7 passed (13 steps)`, `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/experimental-options.test.ts`: passed, `1 passed (12 steps)`,
+    `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `588 passed (3075 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m4s`.
