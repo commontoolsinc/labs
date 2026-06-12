@@ -12,7 +12,9 @@ import { slugIdForSpace } from "../../runner/src/slugs.ts";
 import type { Cell } from "../../runner/src/cell.ts";
 import type { URI } from "../../runner/src/sigil-types.ts";
 import { fromURI, toURI } from "../../runner/src/uri-utils.ts";
+import { InMemoryProgram } from "@commonfabric/js-compiler";
 import { pinProgramFabricImports } from "../lib/fabric-deps.ts";
+import { collectLocalProgram } from "../lib/dev.ts";
 import { cf } from "./utils.ts";
 
 const signer = await Identity.fromPassphrase("cli fabric deps test");
@@ -92,6 +94,65 @@ describe("cli fabric deps", () => {
         line: 1,
       },
     ]);
+  });
+
+  it("pins fabric imports across every file of a program", async () => {
+    await writePatternSlug("dep");
+    const result = await pinProgramFabricImports(runtime, space, {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: `import { s } from "./schemas.tsx";\nexport default s;`,
+        },
+        {
+          name: "/schemas.tsx",
+          contents: `import dep from "cf:dep";\nexport const s = dep;`,
+        },
+      ],
+    });
+
+    expect(result.rewrites).toEqual([
+      {
+        file: "/schemas.tsx",
+        specifier: "cf:dep",
+        pinned: `cf:dep@${ENTRY}`,
+        resolvedIdentity: ENTRY,
+        line: 1,
+      },
+    ]);
+    expect(result.program.files[0].contents).toContain("./schemas.tsx");
+    expect(result.program.files[1].contents).toContain(`cf:dep@${ENTRY}`);
+  });
+
+  it("collectLocalProgram walks local files and dispatches on fabric refs", async () => {
+    const resolver = new InMemoryProgram("/main.tsx", {
+      "/main.tsx":
+        `import { s } from "./schemas.tsx";\nexport default s;`,
+      "/schemas.tsx": `import dep from "cf:dep";\nexport const s = dep;`,
+    });
+
+    const program = await collectLocalProgram(resolver, {
+      fabricImports: "allow",
+    });
+    expect(program.files.map((f) => f.name)).toEqual([
+      "/main.tsx",
+      "/schemas.tsx",
+    ]);
+
+    await expect(
+      collectLocalProgram(resolver, { fabricImports: "reject" }),
+    ).rejects.toThrow("fabric imports require a space context");
+  });
+
+  it("collectLocalProgram surfaces malformed fabric specifiers as parse errors", async () => {
+    const resolver = new InMemoryProgram("/main.tsx", {
+      "/main.tsx": `import dep from "cf:module/abc";\nexport default dep;`,
+    });
+
+    await expect(
+      collectLocalProgram(resolver, { fabricImports: "allow" }),
+    ).rejects.toThrow("compiler-internal namespaces");
   });
 
   it("exposes deps update help", async () => {

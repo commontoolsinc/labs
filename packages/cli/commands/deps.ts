@@ -1,5 +1,8 @@
 import { Command } from "@cliffy/command";
+import { dirname, join } from "@std/path";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { loadManager } from "../lib/piece.ts";
+import { collectLocalProgram } from "../lib/dev.ts";
 import { parseSpaceOptions } from "./piece.ts";
 import {
   pinProgramFabricImports,
@@ -40,19 +43,29 @@ export const deps = new Command()
     const config = parseSpaceOptions(options);
     const manager = await loadManager(config);
     const filePath = absPath(file);
-    const contents = await Deno.readTextFile(filePath);
+    // Walk the whole local program (the same walk cf dev/check uses), so pins
+    // in sibling files the entry imports are updated too, not just the entry.
+    const fsRoot = dirname(filePath);
+    const resolver = new FileSystemProgramResolver(filePath);
+    const program = await collectLocalProgram(resolver, {
+      fabricImports: "allow",
+    });
+    const originals = new Map(
+      program.files.map(({ name, contents }) => [name, contents]),
+    );
     const result = await pinProgramFabricImports(
       manager.runtime,
       manager.getSpace(),
-      {
-        main: filePath,
-        files: [{ name: filePath, contents }],
-      },
+      program,
       { importSpecifier: options.import },
     );
 
     for (const rewrite of result.rewrites) {
-      render(`${file}:${rewrite.line} ${renderPinRewrite(rewrite)}`);
+      render(
+        `${join(fsRoot, rewrite.file.slice(1))}:${rewrite.line} ${
+          renderPinRewrite(rewrite)
+        }`,
+      );
     }
 
     if (options.check && result.rewrites.length > 0) {
@@ -61,7 +74,11 @@ export const deps = new Command()
       );
     }
 
-    if (!options.check && result.rewrites.length > 0) {
-      await Deno.writeTextFile(filePath, result.program.files[0].contents);
+    if (!options.check) {
+      for (const { name, contents } of result.program.files) {
+        if (originals.get(name) !== contents) {
+          await Deno.writeTextFile(join(fsRoot, name.slice(1)), contents);
+        }
+      }
     }
   });

@@ -8,9 +8,13 @@ import {
 } from "@commonfabric/js-compiler";
 import { TARGET } from "@commonfabric/js-compiler/typescript";
 import { Identity } from "@commonfabric/identity";
-import { type MemorySpace, Runtime } from "@commonfabric/runner";
+import {
+  type MemorySpace,
+  parseFabricRef,
+  Runtime,
+  type RuntimeProgram,
+} from "@commonfabric/runner";
 import { experimentalOptionsFromEnv } from "./utils.ts";
-import { renderPinRewrite } from "./fabric-deps.ts";
 
 const FABRIC_IMPORTS_REQUIRE_SPACE_MESSAGE =
   "fabric imports require a space context (options.fabricImports)";
@@ -56,9 +60,15 @@ export async function process(
     options.main,
     options.rootPath,
   );
-  const program = options.space
-    ? await resolveLocalProgramAllowingFabric(resolver)
-    : await engine.resolve(await assertNoFabricImportsWithoutSpace(resolver));
+  let program: RuntimeProgram;
+  if (options.space) {
+    program = await collectLocalProgram(resolver, { fabricImports: "allow" });
+  } else {
+    // engine.resolve fails fabric specifiers as generic unresolved modules;
+    // scan first so they get the friendlier requires-a-space message.
+    await collectLocalProgram(resolver, { fabricImports: "reject" });
+    program = await engine.resolve(resolver);
+  }
   if (options.mainExport) {
     program.mainExport = options.mainExport;
   }
@@ -82,15 +92,7 @@ export async function process(
     );
   for (const pin of resolvedPins) {
     console.error(
-      `${
-        renderPinRewrite({
-          file: program.main,
-          line: 0,
-          pinned: `${pin.specifier}@${pin.resolvedIdentity}`,
-          specifier: pin.specifier,
-          resolvedIdentity: pin.resolvedIdentity,
-        })
-      } (not pinned - deploy or run cf deps update)`,
+      `resolved ${pin.specifier} -> @${pin.resolvedIdentity} (not pinned; deploy or run cf deps update to pin)`,
     );
   }
 
@@ -123,36 +125,16 @@ function renderTransformed(program: Program) {
   }
 }
 
-async function assertNoFabricImportsWithoutSpace(
+/**
+ * Walk a local resolver's import graph into a Program, leaving fabric (cf:)
+ * specifiers to the engine's FabricAwareResolver. Malformed cf: specifiers
+ * fail here with their parse error; valid ones either pass through
+ * (`"allow"`) or trigger the requires-a-space error (`"reject"`, for compiles
+ * with no fabric context). Shared by `cf dev`/`cf check` and `cf deps`.
+ */
+export async function collectLocalProgram(
   resolver: ProgramResolver,
-): Promise<ProgramResolver> {
-  const main = await resolver.main();
-  const pending = [main];
-  const seen = new Set<string>();
-
-  while (pending.length > 0) {
-    const source = pending.shift()!;
-    if (seen.has(source.name)) continue;
-    seen.add(source.name);
-
-    for (const specifier of collectImportSpecifiers(source, TARGET)) {
-      if (isFabricImportSpecifier(specifier)) {
-        throw new Error(FABRIC_IMPORTS_REQUIRE_SPACE_MESSAGE);
-      }
-
-      const identifier = resolveImportSpecifier(specifier, source);
-      if (!isFileSystemSourceIdentifier(identifier) || seen.has(identifier)) {
-        continue;
-      }
-      const resolved = await resolver.resolveSource(identifier);
-      if (resolved !== undefined) pending.push(resolved);
-    }
-  }
-  return resolver;
-}
-
-async function resolveLocalProgramAllowingFabric(
-  resolver: ProgramResolver,
+  options: { fabricImports: "allow" | "reject" },
 ): Promise<Program> {
   const main = await resolver.main();
   const pending = [main];
@@ -166,7 +148,13 @@ async function resolveLocalProgramAllowingFabric(
     files.push(source);
 
     for (const specifier of collectImportSpecifiers(source, TARGET)) {
-      if (isFabricImportSpecifier(specifier)) continue;
+      if (specifier.startsWith("cf:")) {
+        parseFabricRef(specifier); // malformed → FabricRefError, here
+        if (options.fabricImports === "reject") {
+          throw new Error(FABRIC_IMPORTS_REQUIRE_SPACE_MESSAGE);
+        }
+        continue;
+      }
 
       const identifier = resolveImportSpecifier(specifier, source);
       if (!isFileSystemSourceIdentifier(identifier) || seen.has(identifier)) {
@@ -178,10 +166,6 @@ async function resolveLocalProgramAllowingFabric(
   }
 
   return { main: main.name, files };
-}
-
-function isFabricImportSpecifier(specifier: string): boolean {
-  return specifier.startsWith("cf:");
 }
 
 function isFileSystemSourceIdentifier(
