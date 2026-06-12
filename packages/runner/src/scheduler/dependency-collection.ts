@@ -6,8 +6,8 @@ import {
   setSchedulerDependencies,
 } from "./dependency-updates.ts";
 import {
-  replaceActionTriggerPaths,
-  setCancelForTriggerEntities,
+  applyActionReadDelta,
+  ensureCancelForActionTriggers,
   type TriggerSubscriptionState,
 } from "./trigger-index.ts";
 import type {
@@ -49,11 +49,12 @@ export function collectDependenciesForAction(
     options,
   );
 
-  const { reads, shallowReads, log: schedulingLog } = setSchedulerDependencies(
-    state.dependencyUpdateState,
-    action,
-    log,
-  );
+  const { previousLog, reads, shallowReads, log: schedulingLog } =
+    setSchedulerDependencies(
+      state.dependencyUpdateState,
+      action,
+      log,
+    );
   if (options.updateDependents ?? true) {
     state.updateDependents(action, schedulingLog);
   }
@@ -62,16 +63,19 @@ export function collectDependenciesForAction(
   const shallowReadsForTriggers = options.useRawReadsForTriggers
     ? log.shallowReads
     : shallowReads;
-  const { entities } = replaceActionTriggerPaths(
+  const nextTriggerLog = {
+    reads: readsForTriggers,
+    shallowReads: shallowReadsForTriggers,
+  };
+  const { entities } = applyActionReadDelta(
     state.triggerSubscriptionState,
     action,
-    readsForTriggers,
-    shallowReadsForTriggers,
+    previousLog,
+    nextTriggerLog,
   );
-  setCancelForTriggerEntities(
+  ensureCancelForActionTriggers(
     state.triggerSubscriptionState,
     action,
-    entities,
   );
 
   return { log, entities };

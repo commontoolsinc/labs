@@ -7,8 +7,8 @@ import { setSchedulerDependencies } from "./dependency-updates.ts";
 import { isLive } from "./dependency-graph.ts";
 import { filterIgnoredAddresses } from "./reactivity.ts";
 import {
-  replaceActionTriggerPaths,
-  setCancelForTriggerEntities,
+  applyActionReadDelta,
+  ensureCancelForActionTriggers,
 } from "./trigger-index.ts";
 import type {
   Action,
@@ -127,25 +127,21 @@ export function subscribePullSchedulerAction(
   // If a ReactivityLog was provided directly, set up dependencies immediately.
   // This ensures writes are tracked right away for reverse dependency graph.
   if (immediateLog) {
-    const { reads, shallowReads, log: schedulingLog } =
-      setSchedulerDependencies(
-        state.dependencyUpdateState,
-        action,
-        immediateLog,
-      );
-    state.updateDependents(action, schedulingLog);
-    const { entities } = replaceActionTriggerPaths(
-      state.triggerSubscriptionState,
+    const { previousLog, log: schedulingLog } = setSchedulerDependencies(
+      state.dependencyUpdateState,
       action,
-      reads,
-      shallowReads,
+      immediateLog,
     );
-
-    // Register the cancel function for the latest trigger set.
-    setCancelForTriggerEntities(
+    state.updateDependents(action, schedulingLog);
+    applyActionReadDelta(
       state.triggerSubscriptionState,
       action,
-      entities,
+      previousLog,
+      schedulingLog,
+    );
+    ensureCancelForActionTriggers(
+      state.triggerSubscriptionState,
+      action,
     );
   } else if (!deferInitialExecution) {
     // Mark action for dependency collection before first run
@@ -196,11 +192,12 @@ export function resubscribePullSchedulerAction(
     options,
   );
 
-  const { reads, shallowReads, log: schedulingLog } = setSchedulerDependencies(
-    state.dependencyUpdateState,
-    action,
-    log,
-  );
+  const { previousLog, reads, shallowReads, log: schedulingLog } =
+    setSchedulerDependencies(
+      state.dependencyUpdateState,
+      action,
+      log,
+    );
 
   // Track action type for pull-based scheduling
   // Once an action is marked as an effect, it stays an effect
@@ -225,11 +222,11 @@ export function resubscribePullSchedulerAction(
     allowExisting: false,
   });
 
-  const { entities, triggerPathsByEntity } = replaceActionTriggerPaths(
+  const { triggerPathsByEntity } = applyActionReadDelta(
     state.triggerSubscriptionState,
     action,
-    reads,
-    shallowReads,
+    previousLog,
+    schedulingLog,
   );
 
   logger.debug("schedule-resubscribe", () => [
@@ -238,10 +235,9 @@ export function resubscribePullSchedulerAction(
     `Reads: ${reads.length}`,
   ]);
 
-  setCancelForTriggerEntities(
+  ensureCancelForActionTriggers(
     state.triggerSubscriptionState,
     action,
-    entities,
   );
 
   markEffectDirtyIfStaleInputs(

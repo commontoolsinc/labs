@@ -4564,3 +4564,54 @@ ineffective or storming, recorded in memory): rehydration-gate
 status-tolerance; markActionInvalid token-keep; sync-fill invalidation
 suppression at processPullStorageNotification; seed-exclusion of pending-
 rehydration actions (race fixed but render sinks 6x -> 235 runs).
+
+## 07/3d-read-delta-application
+
+- [x] pending — migrated trigger subscription maintenance to per-run read deltas
+  and removed clear/readd trigger replacement churn.
+- Fix shape:
+  - `applyActionReadDelta` now computes recursive and non-recursive read deltas
+    per entity, touching only the trigger index entries whose path sets changed.
+  - The scheduler stores the latest run log in the existing dependency map, so
+    `setSchedulerDependencies` now returns the previous normalized log for the
+    delta primitive. This is the current local equivalent of the work-order's
+    `record.reads` wording.
+  - Subscribe-time, resubscribe-time, and dependency-collection trigger updates
+    all use the same delta primitive; dependency collection still honors
+    `useRawReadsForTriggers` by feeding raw trigger reads into the trigger log.
+  - Trigger cancellation now has one stable cancel per action via
+    `ensureCancelForActionTriggers`; the cancel reads the latest entity set at
+    unsubscribe time and lets the registry own entity cleanup.
+  - Scheduler trigger-index tests cover scope-only read changes and stable
+    cancel behavior after a read delta moves an action between entities.
+- Recordings:
+  - Removed-machinery grep returned no matches:
+
+```text
+$ rg -n "replaceActionTriggerPaths|setCancelForTriggerEntities|lastTriggerReadsByState|addressesEqual" packages/runner/src packages/runner/test
+```
+
+  - `deno fmt` on the touched source/test files: passed.
+  - `deno lint` on the touched source/test files: passed (`Checked 5 files`).
+  - `deno check` on the touched source/test files: passed.
+  - Trigger-index regression check:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-trigger-index.test.ts`: passed, `2 passed (4 steps)`,
+    `0 failed`.
+  - 3d scheduler pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-trigger-index.test.ts test/scheduler-pull.test.ts
+    test/scheduler-events.test.ts test/scheduler-cfc-trigger-reads.test.ts
+    test/scheduler-v2-cutover.test.ts`: passed, `9 passed (60 steps)`,
+    `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3100 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m8s`.
+  - `cd packages/runner && deno bench --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler.bench.ts`: passed. Steady-state scheduler ops:
+    bare subscribe `1.6ms`, subscribe 100 actions reading same entity `1.6ms`,
+    resubscribe cycle `1.5ms`. Pull with resubscribe `140.5ms`.
+  - `git diff --check`: passed.
+  - Expected noisy passing logs remain: existing write-surface/wish warnings.
