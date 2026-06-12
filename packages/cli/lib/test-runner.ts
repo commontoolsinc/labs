@@ -216,8 +216,6 @@ export interface TestRunnerOptions {
   statsInclude?: string[];
   /** Number of per-step scheduler action deltas to print. Default 10. */
   statsActionLimit?: number;
-  /** Override scheduler mode for the test runtime. */
-  schedulerMode?: "default" | "push" | "pull";
   /** Override CFC enforcement mode for the test runtime. */
   cfcEnforcementMode?: CfcEnforcementMode;
   /** Print storage-related logger timings and counts after each test file. */
@@ -881,11 +879,6 @@ export async function runTestPattern(
         },
       }),
   );
-  if (options.schedulerMode === "push") {
-    runtime.scheduler.disablePullMode();
-  } else if (options.schedulerMode === "pull") {
-    runtime.scheduler.enablePullMode();
-  }
   runtime.enableIdempotencyCheck();
   if (options.verbose) {
     runtime.scheduler.enableSettleStats();

@@ -267,6 +267,8 @@ Commit: `docs: pull-based-scheduler reflects push-mode removal`
       `pullMode` field (`src/scheduler.ts`, `src/scheduler/graph-snapshot.ts`,
       `src/telemetry.ts`). No `enablePullMode` / `disablePullMode` /
       `isPullModeEnabled` matches.
+- [ ] `git grep -n "enablePullMode\|disablePullMode\|isPullModeEnabled" -- ':!docs'` →
+      no matches.
 - [ ] `schedulerRuntimeFingerprint` still emits `runner:scheduler:pull`
       (grep shows the function unchanged).
 - [ ] Full runner suite green; `scheduler-pull.test.ts` runs with no mode

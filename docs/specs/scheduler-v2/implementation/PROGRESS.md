@@ -944,7 +944,7 @@ that Step 3 declares.
 
 ## 02/step-2
 
-- [x] pending — thread event ids and origin tx through the event queue
+- [x] d62f45991 — thread event ids and origin tx through the event queue
 - Deviations: executed after Step 3 per reviewer verdict. Caller sweep included
   non-test benchmark callers; none forwards events between schedulers.
 - Recordings:
@@ -1030,3 +1030,111 @@ Message: `docs(specs): scheduler-v2 — lint in G3; repo-wide mode-API exit grep
 
 Then `git merge scheduler-v2/01-phase0` into `scheduler-v2/02-e0`
 (merge, never rebase), push both, and continue WO02 step 4.
+
+## REVIEWER RESOLUTION — PR #4087 process amendments
+
+- [x] ecde3d4cb — lint added to G3 and WO01 gains the repo-wide mode-API exit
+  grep.
+- Deviations: none.
+- Recordings:
+  - `00-README.md`: G3 now requires `deno lint <touched files>`.
+  - `01-phase0-remove-push-mode.md`: exit checklist now includes
+    `git grep -n "enablePullMode\|disablePullMode\|isPullModeEnabled" -- ':!docs'`
+    with expected zero matches.
+
+## REVIEWER RESOLUTION — PR #4087 CI fix
+
+- [x] df67f5b5c — phase-0 leftovers outside the runner sweep
+- Deviations: the new repo-wide mode-API closing contract also found the
+  runtime-client `setPullMode` protocol surface. Removed it end-to-end because
+  it was the same obsolete mode-control API and was required for the closing
+  grep to reach zero.
+- Recordings:
+  - Runner inventory:
+
+```text
+$ grep -rn "internalVerifierRead\|schedulerRehydration\|handleJavaScriptHandlerResult" packages/runner/src/runner.ts
+packages/runner/src/runner.ts:69:import { internalVerifierRead } from "./storage/reactivity-log.ts";
+packages/runner/src/runner.ts:505:  schedulerRehydration: SchedulerRehydrationSubscriptionOptions;
+packages/runner/src/runner.ts:1159:      const schedulerRehydration = options.rehydrateSchedulerFromStorage ===
+packages/runner/src/runner.ts:1162:        : this.schedulerRehydrationOptions(
+packages/runner/src/runner.ts:1177:            schedulerRehydration,
+packages/runner/src/runner.ts:1743:  private schedulerRehydrationOptions(
+packages/runner/src/runner.ts:1871:    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
+packages/runner/src/runner.ts:1893:            schedulerRehydration,
+packages/runner/src/runner.ts:1908:            schedulerRehydration,
+packages/runner/src/runner.ts:1921:            schedulerRehydration,
+packages/runner/src/runner.ts:1945:            schedulerRehydration,
+packages/runner/src/runner.ts:2491:  private handleJavaScriptHandlerResult(
+packages/runner/src/runner.ts:2499:    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
+packages/runner/src/runner.ts:2830:      schedulerRehydration,
+packages/runner/src/runner.ts:2940:            return this.handleJavaScriptHandlerResult(
+packages/runner/src/runner.ts:2948:              schedulerRehydration,
+packages/runner/src/runner.ts:3106:      schedulerRehydration,
+packages/runner/src/runner.ts:3372:        ...schedulerRehydration,
+packages/runner/src/runner.ts:3386:    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
+packages/runner/src/runner.ts:3405:      schedulerRehydration,
+packages/runner/src/runner.ts:3582:    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
+packages/runner/src/runner.ts:3723:          ...(schedulerRehydration.rehydrateFromStorage?.awaitSync
+packages/runner/src/runner.ts:3862:        ...schedulerRehydration,
+packages/runner/src/runner.ts:3910:    schedulerRehydration: SchedulerRehydrationSubscriptionOptions = {},
+packages/runner/src/runner.ts:4048:      awaitSyncBeforeInitialRun: schedulerRehydration.rehydrateFromStorage
+```
+
+  - CLI scheduler-mode inventory:
+
+```text
+$ grep -rn "schedulerMode\|scheduler-mode" packages/cli
+packages/cli/lib/test-runner.ts:220:  schedulerMode?: "default" | "push" | "pull";
+packages/cli/lib/test-runner.ts:884:  if (options.schedulerMode === "push") {
+packages/cli/lib/test-runner.ts:886:  } else if (options.schedulerMode === "pull") {
+packages/cli/commands/test.ts:7:const schedulerModes = ["default", "push", "pull"] as const;
+packages/cli/commands/test.ts:62:    "--scheduler-mode <mode:string>",
+packages/cli/commands/test.ts:139:    const schedulerMode = schedulerModes.find((mode) =>
+packages/cli/commands/test.ts:140:      mode === options.schedulerMode
+packages/cli/commands/test.ts:142:    if (!schedulerMode) {
+packages/cli/commands/test.ts:144:        "Error: --scheduler-mode must be one of: default, push, pull",
+packages/cli/commands/test.ts:157:      schedulerMode,
+```
+
+  - Runtime-client mode-control inventory from the repo-wide closing grep:
+
+```text
+$ grep -rn "SetPullMode\|setPullMode\|pullMode" packages/runtime-client --include="*.ts"
+packages/runtime-client/backends/runtime-processor.ts:89:  type SetPullModeRequest,
+packages/runtime-client/backends/runtime-processor.ts:911:  setPullMode(request: SetPullModeRequest): void {
+packages/runtime-client/backends/runtime-processor.ts:912:    if (request.pullMode) {
+packages/runtime-client/backends/runtime-processor.ts:1208:      case RequestType.SetPullMode:
+packages/runtime-client/backends/runtime-processor.ts:1209:        return this.setPullMode(request);
+packages/runtime-client/protocol/types.ts:55:  SetPullMode = "runtime:setPullMode",
+packages/runtime-client/protocol/types.ts:255:export interface SetPullModeRequest extends BaseRequest {
+packages/runtime-client/protocol/types.ts:256:  type: RequestType.SetPullMode;
+packages/runtime-client/protocol/types.ts:257:  pullMode: boolean;
+packages/runtime-client/protocol/types.ts:623:  | SetPullModeRequest
+packages/runtime-client/protocol/types.ts:835:  [RequestType.SetPullMode]: {
+packages/runtime-client/protocol/types.ts:836:    request: SetPullModeRequest;
+packages/runtime-client/runtime-client.ts:319:  async setPullMode(pullMode: boolean): Promise<void> {
+packages/runtime-client/runtime-client.ts:320:    await this.#conn.request<RequestType.SetPullMode>({
+packages/runtime-client/runtime-client.ts:321:      type: RequestType.SetPullMode,
+packages/runtime-client/runtime-client.ts:322:      pullMode,
+```
+
+  - `deno fmt packages/runner/src/runner.ts
+    packages/piece/test/pull-materialization.test.ts
+    packages/cli/lib/test-runner.ts packages/cli/commands/test.ts
+    packages/runtime-client/backends/runtime-processor.ts
+    packages/runtime-client/protocol/types.ts
+    packages/runtime-client/runtime-client.ts`: passed (`Checked 7 files`).
+  - `deno lint` on the same seven files: passed (`Checked 7 files`).
+  - `deno check` on the same seven files: passed.
+  - `grep -rn "schedulerMode\|scheduler-mode" packages/cli`: no matches.
+  - `grep -rn "SetPullMode\|setPullMode\|pullMode" packages/runtime-client --include="*.ts"`:
+    no matches.
+  - `git grep -n "enablePullMode\|disablePullMode\|isPullModeEnabled" -- ':!docs'`:
+    no matches.
+  - `cd packages/piece && deno task test`: passed, `10 passed (46 steps)`,
+    `0 failed`, `3s`.
+  - `cd packages/cli && deno task test`: passed, `44 passed (195 steps)`,
+    `0 failed`, `1 ignored`, `18s`.
+  - `cd packages/runtime-client && deno task test`: passed,
+    `15 passed (61 steps)`, `0 failed`, `628ms`.

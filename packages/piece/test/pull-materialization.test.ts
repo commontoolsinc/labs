@@ -135,7 +135,6 @@ describe("piece pull materialization", () => {
       apiUrl: new URL("http://localhost:9999"),
       storageManager,
     });
-    runtime.scheduler.enablePullMode();
 
     const session = await createSession({
       identity: signer,
