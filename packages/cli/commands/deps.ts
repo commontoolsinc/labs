@@ -12,7 +12,10 @@ import { absPath } from "../lib/utils.ts";
 import { render } from "../lib/render.ts";
 import { cliText } from "../lib/cli-name.ts";
 
-export const deps = new Command()
+// Typed as Command<any> because cliffy's accumulated option generics don't
+// survive registration in main.ts (same idiom as createDevCommand).
+// deno-lint-ignore no-explicit-any
+export const deps: Command<any> = new Command()
   .name("deps")
   .description("Manage fabric import dependencies.")
   .default("help")
