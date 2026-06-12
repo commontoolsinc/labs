@@ -18,6 +18,7 @@ import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
   detectWrapperViaNode,
+  extractDefaultBrandPayloadValue,
   getArrayElementInfo,
   getPropertyNameText,
   resolveWrapperNode,
@@ -251,7 +252,7 @@ export class CommonFabricFormatter implements TypeFormatter {
         : resolvedWrapper.node; // Direct reference or fallback
 
       if (nodeForDefault && ts.isTypeReferenceNode(nodeForDefault)) {
-        return this.formatDefaultType(nodeForDefault, context);
+        return this.formatDefaultType(nodeForDefault, context, type);
       }
     }
 
@@ -950,6 +951,7 @@ export class CommonFabricFormatter implements TypeFormatter {
   private formatDefaultType(
     typeRefNode: ts.TypeReferenceNode,
     context: GenerationContext,
+    pairedType?: ts.Type,
   ): JSONSchemaMutable {
     const typeArgs = typeRefNode.typeArguments;
     if (!typeArgs || typeArgs.length < 1 || typeArgs.length > 2) {
@@ -979,10 +981,22 @@ export class CommonFabricFormatter implements TypeFormatter {
     );
 
     // Extract default value from the default type node (this can handle complex literals)
-    const defaultValue = this.extractDefaultValueFromNode(
+    let defaultValue = this.extractDefaultValueFromNode(
       defaultTypeNode,
       context,
     );
+
+    // Node-based extraction fails when V is not spelled literally at this
+    // declaration — e.g. a generic-substituted V (`Default<string, P>` inside
+    // an instantiated `Tagged<"x">`). The instantiated TYPE's brand payload
+    // carries the substituted V (see Default<> in packages/api), so read it
+    // back from there.
+    if (defaultValue === undefined && pairedType) {
+      defaultValue = extractDefaultBrandPayloadValue(
+        pairedType,
+        context.typeChecker,
+      )?.value;
+    }
 
     if (defaultValue !== undefined) {
       // JSON Schema Draft 2020-12 allows default as a sibling of $ref

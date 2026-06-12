@@ -74,7 +74,8 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
                     type: "array",
                     items: {
                         $ref: "#/$defs/Item"
-                    }
+                    },
+                    "default": []
                 }
             },
             required: ["items"]
