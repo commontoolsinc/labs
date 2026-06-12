@@ -14,7 +14,6 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   IStorageSubscription,
-  IStorageTransaction,
   MemorySpace,
   StorageNotification,
 } from "./storage/interface.ts";
@@ -76,7 +75,6 @@ import {
   snapshotDirtyDependencyTraceContext,
 } from "./scheduler/dirty-dependencies.ts";
 import {
-  type InFlightSourceState,
   runSchedulerAction,
   type SchedulerActionRunState,
   schedulerImplementationFingerprint,
@@ -365,9 +363,6 @@ export class Scheduler {
     getActionId: (action) => this.getActionId(action),
   });
   private delayControlState!: SchedulerDelayControlState;
-  private inFlightSourceState: InFlightSourceState = {
-    inFlightSources: new WeakMap<Action, Set<IStorageTransaction>>(),
-  };
 
   private writeIndex!: SchedulerWriteIndex;
   private materializers = new SchedulerMaterializers(this.effects);
@@ -1789,7 +1784,6 @@ export class Scheduler {
       effects: this.effects,
       pending: this.pending,
       dirty: this.staleness.dirty,
-      inFlightSources: this.inFlightSourceState.inFlightSources,
       conditionallyScheduledEffects: this.conditionallyScheduledEffects,
       getActionId: (target) => this.getActionId(target),
       recordCellUpdate: (change) =>
@@ -2231,7 +2225,6 @@ export class Scheduler {
         }
       },
       actionChangeGroups: this.actionChangeGroups,
-      inFlightSourceState: this.inFlightSourceState,
       actionTimingState: this.actionTimingState,
       pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
       pullDemandedContinuationComputations: this

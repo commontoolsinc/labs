@@ -99,7 +99,7 @@ export function processPullStorageNotification(
       const dirtyBefore = state.dirty.has(action);
       const isOwnCommitSource = notification.type === "commit" &&
         notification.source !== undefined &&
-        state.inFlightSources.get(action)?.has(notification.source) === true;
+        notification.source.sourceAction === action;
       const plan = planPullTriggeredAction({
         isEffect: actionIsEffect,
         dirtyBefore,
