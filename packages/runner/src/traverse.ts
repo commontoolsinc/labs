@@ -4252,10 +4252,11 @@ function appendPartsToPath(path: ValuePath, parts: string[]): ValuePath {
 
 function schemaWithDefs(parent: JSONSchemaObj, option: JSONSchema): JSONSchema {
   // We need to preserve any parent $defs in the branch
-  return typeof option === "object"
-    ? {
-      ...option,
-      ...(parent.$defs && { "$defs": parent.$defs }),
-    }
-    : option;
+  if (!parent.$defs || !isRecord(option)) {
+    return option;
+  }
+  return {
+    ...option,
+    $defs: parent.$defs,
+  };
 }
