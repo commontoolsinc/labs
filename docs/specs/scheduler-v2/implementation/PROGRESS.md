@@ -4661,3 +4661,268 @@ packages/runner/test/scheduler-bench-helpers.ts:62:  ["event/populate", "schedul
   - Expected noisy passing logs remain: scheduler write-surface warnings,
     deliberate event/retry/preflight error logs, createRef no-cause warnings,
     traversal warnings, and the reload-rehydration transient `TypeError`.
+
+## 08/5.1-gate-state
+
+- [x] pending — introduced scheduler gate state on node records and moved
+  debounce/throttle/backoff ownership behind `SchedulerGates`.
+- Reviewer poll:
+  - No new reviewer verdict was present after the latest Phase 4 poll markers
+    at the start of this heartbeat.
+- Shape:
+  - Added `scheduler/gates.ts` with per-node gate fields for
+    `debounceMs`, `noAutoDebounce`, `throttleMs`, `debounceReadyAt`,
+    `throttleReadyAt`, `backoffUntil`, and `backoffStreak`.
+  - Public `setDebounce`/`setThrottle` before registration is preserved by
+    staging gate config for unregistered action functions and adopting it when
+    registration creates/activates the node record.
+  - Moved pass-budget backoff storage from top-level `SchedulerNode` fields
+    into `record.gate`.
+  - Left the separate debounce timers, computation debounce flush seed set,
+    and event wake timer intact for the later Phase 5.2/5.3 deletion steps.
+- Recordings:
+  - `deno fmt` on the touched scheduler source files: passed (`Checked 6
+    files`).
+  - `deno lint` on the touched scheduler source files: passed (`Checked 6
+    files`).
+  - `deno check` on the touched scheduler source files: passed.
+  - Phase 5 contract debounce file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-timing.test.ts`: passed, `1 passed (14 steps)`,
+    `0 failed`, `977ms`.
+  - Phase 5 contract throttle file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-throttle.test.ts`: passed, `1 passed (10 steps)`,
+    `0 failed`, `2s`.
+  - Event parking focused file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-events.test.ts`: passed, `1 passed (15 steps)`,
+    `0 failed`, `291ms`.
+  - Backoff focused file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-convergence.test.ts`: passed, `1 passed (15 steps)`,
+    `0 failed`, `1s`.
+  - Expected noisy passing logs remain: scheduler event/retry/error-path logs.
+
+## 08/5.2-single-wake
+
+- [x] pending — merged event parking and debounce wake scheduling behind the
+  gate-owned single wake timer.
+- Shape:
+  - `SchedulerGates` now owns one `wakeTimer`/`wakeAt` pair with
+    `scheduleWake(at)`, `cancelWake()`, and `hasWakeTimer()`.
+  - Manual effect debounce and computation debounce set `debounceReadyAt` and
+    schedule the shared wake; expiry reopens a normal pass instead of a
+    per-action timer callback adding pending work.
+  - Event preflight parking calls the same gate wake. The old
+    `EventQueueWakeState` and event wake helpers are gone from `events.ts`.
+  - `idle()` and pass-end continuation now reference the shared gate wake.
+- Exit greps:
+  - Deleted event wake names returned no matches:
+
+```text
+$ rg -n "EventQueueWakeState|scheduleEventQueueWake|cancelEventQueueWake|hasEventQueueWakeTimer|eventQueueWakeState" packages/runner/src/scheduler
+```
+
+  - Active scheduler timer ownership:
+
+```text
+$ rg -n "setTimeout\\(" packages/runner/src/scheduler/gates.ts packages/runner/src/scheduler/events.ts packages/runner/src/scheduler/delays.ts packages/runner/src/scheduler/facade.ts packages/runner/src/scheduler/continuation.ts
+packages/runner/src/scheduler/gates.ts:326:    this.wakeTimer = setTimeout(() => {
+packages/runner/src/scheduler/delays.ts:198:    const timer = setTimeout(() => {
+packages/runner/src/scheduler/delays.ts:242:    const timer = setTimeout(() => {
+packages/runner/src/scheduler/facade.ts:782:      timeoutId = setTimeout(resolve, ms);
+packages/runner/src/scheduler/facade.ts:806:      timeoutId = setTimeout(() => resolve("timeout"), timeoutMs);
+```
+
+  `delays.ts` remains unused pending the Phase 5.3 deletion step; the
+  facade hits are unrelated storage-rehydration timeouts.
+- Recordings:
+  - `deno fmt` on the touched scheduler source files: passed (`Checked 5
+    files`).
+  - `deno lint` on the touched scheduler source files: passed (`Checked 9
+    files`).
+  - `deno check` on the touched scheduler source files: passed.
+  - `git diff --check`: passed.
+  - Phase 5 contract debounce file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-timing.test.ts`: passed, `1 passed (14 steps)`,
+    `0 failed`, `917ms`.
+  - Phase 5 contract throttle file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-throttle.test.ts`: passed, `1 passed (10 steps)`,
+    `0 failed`, `2s`.
+  - Event parking focused file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-events.test.ts`: passed, `1 passed (15 steps)`,
+    `0 failed`, `299ms`.
+  - Backoff focused file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-convergence.test.ts`: passed, `1 passed (15 steps)`,
+    `0 failed`, `1s`.
+  - Handler wake regression:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull-handlers.test.ts`: passed, `1 passed (11 steps)`,
+    `0 failed`, `654ms`.
+  - Expected noisy passing logs remain: scheduler event/preflight/retry/error
+    logs.
+
+## 08/5.3-delete-delay-wrappers
+
+- [x] pending — deleted `delays.ts` and `delay-control.ts`, and removed the
+  computation debounce flush seed path.
+- Shape:
+  - Removed `SchedulerDelayControlState`; the facade now calls
+    `SchedulerGates` directly for debounce waiting, debounce scheduling, and
+    auto-debounce policy.
+  - `buildPullInitialSeeds` now seeds only event-blocking dependencies. A
+    debounce expiry schedules the shared wake and normal invalid/live/eligible
+    seed collection picks the node up.
+  - Deleted `scheduler/delays.ts` and `scheduler/delay-control.ts`.
+- Exit greps:
+  - Deleted delay and event-wake names returned no matches:
+
+```text
+$ rg -n "delay-control|SchedulerDelayControlState|SchedulerDelays|delays\\.ts|computationDebounceFlushSeeds|EventQueueWakeState|scheduleEventQueueWake|cancelEventQueueWake|hasEventQueueWakeTimer|eventQueueWakeState" packages/runner/src packages/runner/test
+```
+
+  - Scheduler `setTimeout` sites after the deletion:
+
+```text
+$ rg -n "setTimeout\\(" packages/runner/src/scheduler
+packages/runner/src/scheduler/facade.ts:771:      timeoutId = setTimeout(resolve, ms);
+packages/runner/src/scheduler/facade.ts:795:      timeoutId = setTimeout(() => resolve("timeout"), timeoutMs);
+packages/runner/src/scheduler/gates.ts:324:    this.wakeTimer = setTimeout(() => {
+packages/runner/src/scheduler/diagnosis.ts:411:    setTimeout(() => {
+packages/runner/src/scheduler/diagnostics.ts:253:  return setTimeout(fn, 0);
+```
+
+  The gate wake is the only time-gate wake; the other hits are rehydration
+  timeouts, diagnosis timeout, and the scheduler queue-task shim.
+- Recordings:
+  - `deno fmt` on the touched scheduler source files: passed (`Checked 6
+    files`).
+  - `deno lint` on the touched scheduler source files: passed (`Checked 8
+    files`).
+  - `deno check` on the touched scheduler source files: passed.
+  - `git diff --check`: passed.
+  - Phase 5 contract debounce file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-timing.test.ts`: passed, `1 passed (14 steps)`,
+    `0 failed`, `900ms`.
+  - Phase 5 contract throttle file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-throttle.test.ts`: passed, `1 passed (10 steps)`,
+    `0 failed`, `2s`.
+  - Event parking focused file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-events.test.ts`: passed, `1 passed (15 steps)`,
+    `0 failed`, `293ms`.
+  - Backoff focused file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-convergence.test.ts`: passed, `1 passed (15 steps)`,
+    `0 failed`, `1s`.
+  - Handler wake regression:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull-handlers.test.ts`: passed, `1 passed (11 steps)`,
+    `0 failed`, `607ms`.
+  - Expected noisy passing logs remain: scheduler event/preflight/retry/error
+    logs.
+
+## 08/5.4-persistence-accessors
+
+- [x] pending — verified persisted scheduler action options still flow from
+  gate config into observations.
+- Shape:
+  - No behavioral code change was needed in this step. The observation
+    accessor source had already moved to `SchedulerGates` in 5.1, and
+    `schedulerActionOptions` in `run.ts` still receives
+    `debounceMs`/`noDebounce`/`throttleMs` through the action-run state.
+- Recordings:
+  - Accessor/path inventory:
+
+```text
+$ rg -n "schedulerActionOptions|getDebounce|getNoDebounce|getThrottle|debounceMs|noDebounce|throttleMs|actionOptions" packages/runner/src/scheduler packages/runner/test/scheduler-observations.test.ts
+packages/runner/test/scheduler-observations.test.ts:163:      actionOptions: {
+packages/runner/test/scheduler-observations.test.ts:164:        debounceMs: 25,
+packages/runner/test/scheduler-observations.test.ts:180:        actionOptions: { debounceMs: 25 },
+packages/runner/src/scheduler/facade.ts:578:    const { actionOptions } = observation;
+packages/runner/src/scheduler/facade.ts:579:    if (actionOptions?.debounceMs !== undefined) {
+packages/runner/src/scheduler/facade.ts:580:      this.gates.setDebounce(action, actionOptions.debounceMs);
+packages/runner/src/scheduler/facade.ts:582:    if (actionOptions?.noDebounce !== undefined) {
+packages/runner/src/scheduler/facade.ts:583:      this.gates.setNoDebounce(action, actionOptions.noDebounce);
+packages/runner/src/scheduler/facade.ts:585:    if (actionOptions?.throttleMs !== undefined) {
+packages/runner/src/scheduler/facade.ts:586:      this.gates.setThrottle(action, actionOptions.throttleMs);
+packages/runner/src/scheduler/facade.ts:1900:      getDebounce: (target) => this.gates.getDebounce(target),
+packages/runner/src/scheduler/facade.ts:1901:      getNoDebounce: (target) => this.gates.getNoDebounce(target),
+packages/runner/src/scheduler/facade.ts:1902:      getThrottle: (target) => this.gates.getThrottle(target),
+packages/runner/src/scheduler/run.ts:552:  const actionOptions = schedulerActionOptions(state, args.action);
+packages/runner/src/scheduler/run.ts:649:function schedulerActionOptions(
+packages/runner/src/scheduler/run.ts:653:  const debounceMs = state.getDebounce(action);
+packages/runner/src/scheduler/run.ts:654:  const noDebounce = state.getNoDebounce(action);
+packages/runner/src/scheduler/run.ts:655:  const throttleMs = state.getThrottle(action);
+```
+
+  - Observation compatibility:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-observations.test.ts`: passed, `1 passed (22 steps)`,
+    `0 failed`, `242ms`.
+  - Expected noisy passing logs remain: experimental flag override messages
+    and the rehydration timeout warning in the timeout fallback fixture.
+
+## 08/5.5-gate-validation
+
+- [x] pending — added the single-wake dispose regression, fixed the
+  demand-bound debounce idle gap exposed by the full runner suite, and
+  completed the Phase 5 gate validation pass.
+- Shape:
+  - Added `scheduler-timing.test.ts` coverage that subscribes a debounced
+    effect, disposes the scheduler before the wake opens, waits past the
+    debounce window, and verifies the action never runs.
+  - The first full runner package pass exposed
+    `scheduler-v2-cutover.test.ts`'s provisional debounced child fixture
+    returning from `idle()` before the 200ms gate opened. Fixed the shared-wake
+    continuation/idle path so first-run provisional computations remain
+    idle-blocking while their gate is pending, without making ordinary
+    non-demanded computations block `idle()`.
+- Recordings:
+  - `deno fmt` on the touched scheduler source and timing test files: passed
+    (`Checked 4 files`).
+  - `deno lint` on the touched scheduler source and timing test files: passed
+    (`Checked 4 files`).
+  - `deno check` on the touched scheduler source and timing test files:
+    passed.
+  - `git diff --check`: passed.
+  - Cutover regression:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts`: passed, `1 passed (11 steps)`,
+    `0 failed`, `450ms`; the provisional debounced child fixture waited
+    `214ms` in the focused run.
+  - Phase 5 focused gate files:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-timing.test.ts test/scheduler-throttle.test.ts
+    test/scheduler-events.test.ts test/scheduler-convergence.test.ts
+    test/scheduler-pull-handlers.test.ts test/scheduler-v2-cutover.test.ts`:
+    passed, `6 passed (77 steps)`, `0 failed`, `7s`.
+  - Full runner package suite:
+    `cd packages/runner && deno task test`: passed,
+    `595 passed (3104 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m7s`.
+  - Expected noisy passing logs remain: scheduler event/preflight/retry/error
+    logs and write-surface warnings in wish fixtures.

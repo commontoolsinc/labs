@@ -112,14 +112,10 @@ export function markNonSettlingEpisode(
 
 export function buildPullInitialSeeds(state: {
   readonly eventBlockingDeps: Iterable<Action>;
-  readonly computationDebounceFlushSeeds: Iterable<Action>;
 }): Set<Action> {
   const initialSeeds = new Set<Action>();
 
   for (const action of state.eventBlockingDeps) {
-    initialSeeds.add(action);
-  }
-  for (const action of state.computationDebounceFlushSeeds) {
     initialSeeds.add(action);
   }
 
@@ -278,10 +274,10 @@ export function planBudgetBackoff(state: {
     }
 
     const delayMs = nextBackoffDelayMs(record);
-    record.backoffFailures++;
-    record.backoffUntil = now + delayMs;
+    record.gate.backoffStreak++;
+    record.gate.backoffUntil = now + delayMs;
     actions.push(action);
-    backoffUntil = minDefined(backoffUntil, record.backoffUntil);
+    backoffUntil = minDefined(backoffUntil, record.gate.backoffUntil);
   }
 
   return {
@@ -324,7 +320,7 @@ function isBudgetBackoffCandidate(
 
 function nextBackoffDelayMs(record: SchedulerNode): number {
   return Math.min(
-    BACKOFF_BASE_MS * 2 ** record.backoffFailures,
+    BACKOFF_BASE_MS * 2 ** record.gate.backoffStreak,
     BACKOFF_MAX_MS,
   );
 }
@@ -400,6 +396,11 @@ export function planPullExecuteContinuation(state: {
   const now = state.now ?? performance.now();
   let nextDirtyPullRunAt: number | undefined;
   let nextDirtyPullRunWaitsForIdle = false;
+  const waitsForIdle = (action: Action) =>
+    state.effects.has(action) ||
+    state.materializerIndex.isMaterializer(action) ||
+    state.shouldRunFirstPullComputationInDemandContext(action);
+
   const noteFutureEligibility = (action: Action) => {
     if (state.isDebouncedComputationWaiting(action)) {
       const nextDebounceAt = state.getNextDebounceRunTime(action);
@@ -408,8 +409,7 @@ export function planPullExecuteContinuation(state: {
           nextDirtyPullRunAt,
           nextDebounceAt,
         );
-        nextDirtyPullRunWaitsForIdle ||= state.effects.has(action) ||
-          state.materializerIndex.isMaterializer(action);
+        nextDirtyPullRunWaitsForIdle ||= waitsForIdle(action);
         return true;
       }
     }
@@ -417,8 +417,7 @@ export function planPullExecuteContinuation(state: {
     const nextEligibleAt = state.getNextEligibleRunTime(action);
     if (nextEligibleAt !== undefined && nextEligibleAt > now) {
       nextDirtyPullRunAt = minDefined(nextDirtyPullRunAt, nextEligibleAt);
-      nextDirtyPullRunWaitsForIdle ||= state.effects.has(action) ||
-        state.materializerIndex.isMaterializer(action);
+      nextDirtyPullRunWaitsForIdle ||= waitsForIdle(action);
       return true;
     }
 

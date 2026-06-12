@@ -1,9 +1,4 @@
 import { queueTask } from "./diagnostics.ts";
-import {
-  type EventQueueWakeState,
-  hasEventQueueWakeTimer,
-  scheduleEventQueueWake,
-} from "./events.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
 import type { NodeRegistry } from "./node-record.ts";
 import type { Action, QueuedEvent } from "./types.ts";
@@ -13,7 +8,6 @@ export interface ExecuteContinuationState {
   readonly nodes: NodeRegistry;
   readonly effects: ReadonlySet<Action>;
   readonly eventQueue: readonly QueuedEvent[];
-  readonly eventQueueWakeState: EventQueueWakeState;
   readonly idlePromises: (() => void)[];
   readonly consumeRerunAfterCurrentExecute: () => boolean;
   readonly isDemandedPullComputation: (action: Action) => boolean;
@@ -25,6 +19,8 @@ export interface ExecuteContinuationState {
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
   readonly hasPendingLineageHeadEvent: () => boolean;
+  readonly scheduleWake: (at: number) => void;
+  readonly hasWakeTimer: () => boolean;
   readonly setScheduled: (scheduled: boolean) => void;
   readonly resetSettlingTracker: () => void;
   readonly setPendingQueueTaskTimer: (
@@ -44,10 +40,7 @@ export function applyQuiescentContinuation(
   continuation: QuiescentContinuation,
 ): void {
   if (continuation.nextDirtyPullRunAt !== undefined) {
-    scheduleEventQueueWake(
-      state.eventQueueWakeState,
-      continuation.nextDirtyPullRunAt,
-    );
+    state.scheduleWake(continuation.nextDirtyPullRunAt);
     if (
       !continuation.hasParkedHeadEvent &&
       !continuation.nextDirtyPullRunWaitsForIdle
@@ -58,7 +51,7 @@ export function applyQuiescentContinuation(
     return;
   }
 
-  if (hasEventQueueWakeTimer(state.eventQueueWakeState)) {
+  if (state.hasWakeTimer()) {
     markNotScheduled(state);
 
     // Waiting on a future wake is quiescent from the scheduler's perspective,

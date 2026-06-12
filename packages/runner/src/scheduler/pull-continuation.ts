@@ -13,11 +13,10 @@ export function applyPullExecuteContinuation(
   // effect-demanded computations to execute.
   const hasPendingLineageHeadEvent = state.hasPendingLineageHeadEvent();
   const hasQueuedEventReadyNow = state.eventQueue.length > 0 &&
-    !isHeadEventParked(state.eventQueueWakeState) &&
+    !isHeadEventParked(state) &&
     !hasPendingLineageHeadEvent;
   const hasParkedHeadEvent = state.eventQueue.length > 0 &&
-    (isHeadEventParked(state.eventQueueWakeState) ||
-      hasPendingLineageHeadEvent);
+    (isHeadEventParked(state) || hasPendingLineageHeadEvent);
   const shouldRerunAfterCurrentExecute = state
     .consumeRerunAfterCurrentExecute();
 
