@@ -58,6 +58,7 @@ describe("scheduler event identity", () => {
       backgroundTasks: new Set(),
       queueExecution: () => {},
       queueEvent: () => {},
+      recordLineageEvent: () => {},
     }, {
       eventLink,
       event: { value: 1 },

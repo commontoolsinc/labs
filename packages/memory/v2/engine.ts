@@ -676,6 +676,19 @@ export class ConflictError extends Error {
   }
 }
 
+export class PreconditionFailedError extends Error {
+  readonly precondition: "origin-committed" | "receipt-exists";
+
+  constructor(
+    precondition: PreconditionFailedError["precondition"],
+    message: string,
+  ) {
+    super(message);
+    this.name = "PreconditionFailedError";
+    this.precondition = precondition;
+  }
+}
+
 export class ProtocolError extends Error {
   constructor(message: string) {
     super(message);
@@ -3100,15 +3113,21 @@ const applyCommitTransaction = (
       "memory v2 schedulerObservationBatch commits must not include semantic operations",
     );
   }
+  const hasPreconditions = (commit.preconditions?.length ?? 0) > 0;
   if (
     commit.operations.length === 0 && !schedulerObservation &&
-    !hasSchedulerObservationBatch
+    !hasSchedulerObservationBatch && !hasPreconditions
   ) {
     throw new Error("memory v2 commit requires at least one operation");
   }
 
   const branch = commit.branch ?? DEFAULT_BRANCH;
   ensureActiveBranch(engine, branch);
+
+  // Preconditions gate every commit shape, including the observation-only
+  // fast paths below — a descendant of an uncommitted origin must not
+  // persist anything, observations included.
+  validateCommitPreconditions(engine, sessionKey, commit);
 
   if (commit.operations.length === 0 && hasSchedulerObservationBatch) {
     return applySchedulerObservationBatchCommit(engine, {
@@ -3390,6 +3409,48 @@ const writeOperation = (
         commitSeq: seq,
         op: "delete",
       };
+    }
+  }
+};
+
+const validateCommitPreconditions = (
+  engine: Engine,
+  sessionKey: string,
+  commit: ClientCommit,
+): void => {
+  for (const precondition of commit.preconditions ?? []) {
+    // Wire input: validate the shape deterministically so malformed entries
+    // surface as ProtocolError instead of a TypeError-turned-TransactionError.
+    if (
+      precondition === null || typeof precondition !== "object" ||
+      Array.isArray(precondition)
+    ) {
+      throw new ProtocolError("malformed commit precondition: not an object");
+    }
+    if (precondition.kind !== "origin-committed") {
+      throw new ProtocolError(
+        `unsupported commit precondition: ${
+          String((precondition as { kind?: unknown }).kind)
+        }`,
+      );
+    }
+    if (!Number.isInteger(precondition.originLocalSeq)) {
+      throw new ProtocolError(
+        "malformed origin-committed precondition: originLocalSeq must be an integer",
+      );
+    }
+
+    // Same-session commits are applied in order, so the origin's fate is
+    // decided when the follow-up arrives; an absent origin means rejection.
+    const row = engine.statements.selectPendingResolution.get({
+      session_id: sessionKey,
+      local_seq: precondition.originLocalSeq,
+    }) as { seq: number } | undefined;
+    if (!row) {
+      throw new PreconditionFailedError(
+        "origin-committed",
+        `origin commit not committed: localSeq ${precondition.originLocalSeq}`,
+      );
     }
   }
 };

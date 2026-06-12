@@ -2607,6 +2607,16 @@ export class Runner {
 
     addCancel(() => this.stop(resultCell));
 
+    if (!deferForNavigate) {
+      // Spec scheduler-v2 §7.6 rule 2: the launch is speculative; if this
+      // handler's transaction ultimately fails, stop the piece (data writes
+      // roll back with the transaction; registrations do not).
+      this.runtime.scheduler.lineage.recordPieceStop(
+        tx,
+        () => this.stop(resultCell),
+      );
+    }
+
     return result;
   }
 

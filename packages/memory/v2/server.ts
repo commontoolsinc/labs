@@ -1532,16 +1532,25 @@ export class Server {
         this.stageConflictRefreshDirtyIds(message.space, message.commit);
         await this.flushSessions([message.space]);
       }
+      const messageText = error instanceof Error
+        ? error.message
+        : String(error);
       return respondTypedError<Engine.AppliedCommit>(
         message.requestId,
-        toError(
-          error instanceof Engine.ConflictError
-            ? "ConflictError"
-            : error instanceof Engine.ProtocolError
-            ? "ProtocolError"
-            : "TransactionError",
-          error instanceof Error ? error.message : String(error),
-        ),
+        error instanceof Engine.PreconditionFailedError
+          ? {
+            name: "PreconditionFailedError",
+            message: messageText,
+            precondition: error.precondition,
+          }
+          : toError(
+            error instanceof Engine.ConflictError
+              ? "ConflictError"
+              : error instanceof Engine.ProtocolError
+              ? "ProtocolError"
+              : "TransactionError",
+            messageText,
+          ),
       );
     }
   }

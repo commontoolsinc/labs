@@ -10,6 +10,7 @@ import type { Runtime } from "../runtime.ts";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
+  MemorySpace,
 } from "../storage/interface.ts";
 import { isPermanentRejection } from "../storage/rejection.ts";
 import type {
@@ -19,6 +20,7 @@ import type {
 import { createDirtyDependencyTraceContext } from "./diagnostics.ts";
 import { mintEventId } from "./event-identity.ts";
 import { planEventDirtyDependencyScheduling } from "./execution.ts";
+import type { OriginStatus } from "./lineage.ts";
 import { RetryImmediately } from "./retry-immediately.ts";
 import {
   hasAnnotatedWrites,
@@ -120,6 +122,10 @@ export interface SchedulerEventQueueState {
     doNotLoadPieceIfNotRunning: boolean,
     opts?: { eventId?: string; originTx?: IExtendedStorageTransaction },
   ) => void;
+  readonly recordLineageEvent: (
+    originTx: IExtendedStorageTransaction,
+    event: QueuedEvent,
+  ) => void;
 }
 
 export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
@@ -138,7 +144,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
     if (areNormalizedLinksSame(link, args.eventLink)) {
       handlerFound = true;
       state.queueExecution();
-      state.eventQueue.push({
+      const queuedEvent: QueuedEvent = {
         id,
         originTx: args.originTx,
         eventLink: args.eventLink,
@@ -147,7 +153,11 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
         event: args.event,
         retriesLeft: args.retries,
         onCommit: args.onCommit,
-      });
+      };
+      state.eventQueue.push(queuedEvent);
+      if (args.originTx !== undefined) {
+        state.recordLineageEvent(args.originTx, queuedEvent);
+      }
     }
   }
 
@@ -226,6 +236,21 @@ export interface SchedulerEventExecutionState {
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
   readonly scheduleEventQueueWake: (notBefore: number) => void;
+  readonly lineageStatus: (
+    originTx: IExtendedStorageTransaction,
+  ) => OriginStatus;
+  readonly releaseLineageEvent: (
+    originTx: IExtendedStorageTransaction,
+    event: QueuedEvent,
+  ) => void;
+  readonly recordLineageEvent: (
+    originTx: IExtendedStorageTransaction,
+    event: QueuedEvent,
+  ) => void;
+  readonly getOriginLocalSeq: (
+    originTx: IExtendedStorageTransaction,
+    space: MemorySpace,
+  ) => number | undefined;
   readonly snapshotDirtyDependencyTraceContext: (
     trace: DirtyDependencyTraceContext,
   ) => SchedulerEventPreflightStats;
@@ -422,6 +447,21 @@ export async function dispatchQueuedEvent(state: {
   ) => SchedulerActionInfo | undefined;
   readonly handleError: (error: Error, action: Action) => void;
   readonly queueExecution: () => void;
+  readonly lineageStatus: (
+    originTx: IExtendedStorageTransaction,
+  ) => OriginStatus;
+  readonly releaseLineageEvent: (
+    originTx: IExtendedStorageTransaction,
+    event: QueuedEvent,
+  ) => void;
+  readonly recordLineageEvent: (
+    originTx: IExtendedStorageTransaction,
+    event: QueuedEvent,
+  ) => void;
+  readonly getOriginLocalSeq: (
+    originTx: IExtendedStorageTransaction,
+    space: MemorySpace,
+  ) => number | undefined;
   readonly onEventCommitWrites?: (
     sourceAction: Action,
     writes: readonly IMemorySpaceAddress[],
@@ -456,7 +496,48 @@ export async function dispatchQueuedEvent(state: {
   const tx = state.runtime.edit();
   tx.dispatchedEventId = queuedEvent.id;
   tx.tx.immediate = true;
+  if (queuedEvent.originTx !== undefined) {
+    const originLocalSeq = state.getOriginLocalSeq(
+      queuedEvent.originTx,
+      queuedEvent.eventLink.space,
+    );
+    if (
+      originLocalSeq !== undefined &&
+      state.lineageStatus(queuedEvent.originTx) === "pending" &&
+      state.runtime.experimental.commitPreconditions === true
+    ) {
+      tx.addCommitPrecondition?.(queuedEvent.eventLink.space, {
+        kind: "origin-committed",
+        originLocalSeq,
+      });
+    }
+    state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
+  }
   const actionId = state.getActionId(action);
+
+  // Requeue a retry of this event. Dispatch released the lineage
+  // registration above, so the fresh QueuedEvent object must be re-recorded:
+  // otherwise an origin that fails while the retry is queued cannot remove
+  // it, and the post-settlement originStatus() fallback ("confirmed") would
+  // let a descendant of a failed origin run.
+  const requeueForRetry = () => {
+    const retry: QueuedEvent = {
+      id: queuedEvent.id,
+      originTx: queuedEvent.originTx,
+      action,
+      eventLink: queuedEvent.eventLink,
+      handler,
+      event: eventValue,
+      retriesLeft: retriesLeft - 1,
+      onCommit,
+    };
+    state.eventQueue.unshift(retry);
+    if (retry.originTx !== undefined) {
+      state.recordLineageEvent(retry.originTx, retry);
+    }
+    state.queueExecution();
+  };
+
   const runFinalCommitCallback = () => {
     if (!onCommit) {
       return;
@@ -482,17 +563,7 @@ export async function dispatchQueuedEvent(state: {
         tx.abort(error);
       }
       if (retriesLeft > 0) {
-        state.eventQueue.unshift({
-          id: queuedEvent.id,
-          originTx: queuedEvent.originTx,
-          action,
-          eventLink: queuedEvent.eventLink,
-          handler,
-          event: eventValue,
-          retriesLeft: retriesLeft - 1,
-          onCommit,
-        });
-        state.queueExecution();
+        requeueForRetry();
       } else {
         logger.error(
           "scheduler",
@@ -554,17 +625,7 @@ export async function dispatchQueuedEvent(state: {
           `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
           { error: result.error, handlerId },
         );
-        state.eventQueue.unshift({
-          id: queuedEvent.id,
-          originTx: queuedEvent.originTx,
-          action,
-          eventLink: queuedEvent.eventLink,
-          handler,
-          event: eventValue,
-          retriesLeft: retriesLeft - 1,
-          onCommit,
-        });
-        state.queueExecution();
+        requeueForRetry();
         return;
       }
       runFinalCommitCallback();

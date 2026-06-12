@@ -1,9 +1,15 @@
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   dispatchQueuedEvent,
   preflightQueuedEventDependencies,
   type SchedulerEventExecutionState,
 } from "./events.ts";
 import type { Action } from "./types.ts";
+
+const logger = getLogger("scheduler", {
+  enabled: true,
+  level: "warn",
+});
 
 export async function processPullQueuedEventDuringExecute(
   state: SchedulerEventExecutionState,
@@ -12,6 +18,26 @@ export async function processPullQueuedEventDuringExecute(
   // Process next event from the event queue.
   const queuedEvent = state.eventQueue[0];
   if (!queuedEvent) return;
+
+  if (queuedEvent.originTx !== undefined) {
+    const originStatus = state.lineageStatus(queuedEvent.originTx);
+    const sameSpace = state.getOriginLocalSeq(
+      queuedEvent.originTx,
+      queuedEvent.eventLink.space,
+    ) !== undefined;
+    if (originStatus === "failed") {
+      state.eventQueue.shift();
+      state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
+      logger.debug("scheduler-lineage", () => [
+        "Dropping event from failed lineage origin",
+        { eventId: queuedEvent.id },
+      ]);
+      return;
+    }
+    if (!sameSpace && originStatus === "pending") {
+      return;
+    }
+  }
 
   if (
     queuedEvent.notBefore !== undefined &&
@@ -91,6 +117,13 @@ export async function processPullQueuedEventDuringExecute(
     getActionTelemetryInfo: (target) => state.getActionTelemetryInfo(target),
     handleError: (error, target) => state.handleError(error, target),
     queueExecution: () => state.queueExecution(),
+    lineageStatus: (originTx) => state.lineageStatus(originTx),
+    releaseLineageEvent: (originTx, event) =>
+      state.releaseLineageEvent(originTx, event),
+    recordLineageEvent: (originTx, event) =>
+      state.recordLineageEvent(originTx, event),
+    getOriginLocalSeq: (originTx, space) =>
+      state.getOriginLocalSeq(originTx, space),
     onEventCommitWrites: (sourceAction, writes) =>
       state.onEventCommitWrites?.(sourceAction, writes),
   }, queuedEvent);

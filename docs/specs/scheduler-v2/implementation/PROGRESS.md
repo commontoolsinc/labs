@@ -1208,3 +1208,485 @@ packages/runner/src/storage/rejection.ts:6:export function isPermanentRejection(
     `packages/runner/test/scheduler-event-identity.test.ts`,
     `packages/runner/test/scheduler-rejection-taxonomy.test.ts`,
     `packages/runner/src/storage/rejection.ts`.
+
+## 03/step-1
+
+- [x] 72ad97869 — record per-space commit localSeq on source transactions
+- Deviations: selected `test/memory-v2-transaction-commit-rejection.test.ts`
+  as the storage transaction test from the work-order inventory.
+- Recordings:
+  - `deno fmt packages/runner/src/storage/commit-identity.ts
+    packages/runner/src/storage/v2.ts`: passed (`Checked 2 files`).
+  - `deno lint packages/runner/src/storage/commit-identity.ts
+    packages/runner/src/storage/v2.ts`: passed (`Checked 2 files`).
+  - `deno check src/storage/v2.ts`: passed.
+  - `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-retries.test.ts`: passed, `1 passed (2 steps)`,
+    `0 failed`.
+  - `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/memory-v2-transaction-commit-rejection.test.ts`: passed,
+    `1 passed`, `0 failed`.
+
+## 03/step-2
+
+- [x] fa9711c19 — commit precondition plumbing behind `commitPreconditions`
+  flag
+- Deviations: updated the narrow memory/runtime flag tests because the new
+  protocol flag makes their exact object assertions stale. Implemented the
+  source-readable precondition metadata on the native v2 transaction as well as
+  the extended wrapper, matching the existing scheduler-observation handoff
+  path into `commitNative`.
+- Recordings:
+  - `grep -rn "ClientCommit" ../../packages/memory
+    ../../packages/runner/src/storage --include="*.ts" |
+    grep -i "interface\|type\|="` located `ClientCommit` in
+    `packages/memory/v2.ts`.
+  - `deno fmt packages/memory/v2.ts packages/memory/test/v2-test.ts
+    packages/runner/src/runtime.ts packages/runner/src/storage/interface.ts
+    packages/runner/src/storage/extended-storage-transaction.ts
+    packages/runner/src/storage/v2-transaction.ts
+    packages/runner/src/storage/v2.ts
+    packages/runner/test/experimental-options.test.ts`: passed
+    (`Checked 8 files`).
+  - `deno lint` on the same eight files: passed (`Checked 8 files`).
+  - `deno check` on the same eight files: passed.
+  - `cd packages/memory && deno test test/v2-test.ts`: passed,
+    `7 passed (13 steps)`, `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/experimental-options.test.ts`: passed, `1 passed (12 steps)`,
+    `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `588 passed (3075 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m4s`.
+
+## IMPLEMENTER STOP — 03/step-3 precondition error wire route
+
+Step 3 requires a precondition rejection whose wire shape reaches the client as
+`{ name: "PreconditionFailedError", precondition: "origin-committed",
+message: ... }`, and explicitly says to STOP if the existing route normalizes
+error names.
+
+Findings:
+
+- `packages/memory/v2/engine.ts` `applyCommitTransaction` has the same-session
+  identity needed for the check: it computes `sessionKey =
+  resolveCommitSessionKey(sessionId, principal)` before read validation.
+- Existing stale-read conflict rejection throws `Engine.ConflictError` from
+  `validateConfirmedReads` / `resolvePendingReads`.
+- `packages/memory/v2/server.ts` `MemoryServer.transact` catches engine errors
+  and normalizes names through `toError(...)`:
+  `Engine.ConflictError` → `"ConflictError"`, `Engine.ProtocolError` →
+  `"ProtocolError"`, all other errors → `"TransactionError"`.
+- `packages/memory/v2.ts` `V2Error` currently has only `{ name, message }`.
+  There is no `precondition` field on the wire error type.
+- `packages/memory/v2/client.ts` `Client.request` reconstructs an `Error` from
+  `response.error.message` and `response.error.name` only.
+
+Therefore, adding an engine-side `PreconditionFailedError` now would reach the
+runner as `TransactionError`, and its `precondition: "origin-committed"`
+metadata would be dropped. No Step 3 implementation or test edits were applied.
+Need reviewer direction: extend the v2 wire error surface and server/client
+mapping for `PreconditionFailedError`, or encode the precondition failure
+through an existing normalized route.
+
+## REVIEWER VERDICT — 03/step-3 precondition error wire route
+
+Excellent trace; the route is exactly the normalize-and-drop case the
+step anticipated. Ruling: EXTEND THE WIRE SURFACE — the taxonomy is a
+real new error class (E0's whole point, and E2 receipts need the same
+route). Do NOT encode through ConflictError or TransactionError: name
+is what `isPermanentRejection` keys on, and ConflictError means
+retryable — overloading either poisons the taxonomy.
+
+Concrete route, end to end:
+
+1. Engine (`packages/memory/v2/engine.ts` or wherever
+   `Engine.ConflictError` is defined — same module): add a sibling
+   error class `PreconditionFailedError` with
+   `name = "PreconditionFailedError"` and a
+   `precondition: "origin-committed" | "receipt-exists"` field. Throw
+   it from the `applyCommitTransaction` origin-committed check (using
+   the `sessionKey` you located).
+2. Server (`packages/memory/v2/server.ts` `toError`): add the branch
+   mapping `Engine.PreconditionFailedError` →
+   `{ name: "PreconditionFailedError", message, precondition }` —
+   BEFORE the catch-all TransactionError arm.
+3. Wire type (`packages/memory/v2.ts` `V2Error`): add optional
+   `precondition?: string`. JSON-additive; old peers ignore it.
+4. Client (`packages/memory/v2/client.ts` `Client.request`): when
+   reconstructing the Error, copy `response.error.precondition` onto
+   the object as a plain property when present. Name/message handling
+   otherwise unchanged.
+5. Runner: NO changes — `IPreconditionFailedError` and
+   `isPermanentRejection` (name-keyed) already match this shape.
+6. Compat: no flag gating on the ERROR path. Safety comes from the
+   ATTACH side already being gated on the negotiated
+   `commitPreconditions` flag — an old client never attaches
+   preconditions, so it can never receive this error.
+7. Tests: in `v2-commit-preconditions.test.ts`, assert the
+   CLIENT-VISIBLE shape (name + precondition survive the full
+   server→client round trip) if the harness runs through server+client;
+   if the existing engine tests hit the engine directly, add one
+   focused `toError` mapping test for the server instead, plus keep the
+   engine-level assertions.
+8. Amend WO03 step 3 in-branch with this route — own docs commit first:
+   `docs(specs): scheduler-v2 WO03 — precondition error wire route`.
+
+Then continue step 3 as written.
+
+## REVIEWER RESOLUTION — 03/step-3 precondition error wire route docs
+
+- [x] 5f180b852 — documented the reviewer-approved
+  `PreconditionFailedError` wire route in WO03 Step 3 before implementation.
+- Deviations: none.
+
+## 03/step-3
+
+- [x] 8406bda91 — origin-committed commit precondition
+- Deviations: implemented the reviewer verdict by adding the
+  `PreconditionFailedError` route through the memory server/client wire path;
+  no runner changes were needed. The new test file uses the memory
+  server/client path, so its direct test run needs the same env/read/write/ffi
+  permissions as other server-backed memory tests.
+- Recordings:
+  - `deno fmt packages/memory/v2/engine.ts packages/memory/v2/server.ts
+    packages/memory/v2/client.ts packages/memory/v2.ts
+    packages/memory/test/v2-commit-preconditions.test.ts`: passed
+    (`Checked 5 files`).
+  - `deno lint` on the same five files: passed (`Checked 5 files`).
+  - `deno check` on the same five files: passed.
+  - `cd packages/memory && deno test test/v2-commit-preconditions.test.ts`:
+    failed before execution because importing the server/client path requires
+    env access for `TSC_WATCHFILE`.
+  - `cd packages/memory && deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders test/v2-commit-preconditions.test.ts`:
+    passed, `4 passed`, `0 failed`, `26ms`.
+
+## 03/step-4
+
+- [x] 7891f157 — speculation lineage registry
+- Deviations: none. Verified the work-order caveat in
+  `extended-storage-transaction.ts`: `commit()` always attaches the storage
+  commit promise to `runCommitCallbacks(result)`, including read-only/no-op
+  commits that still call `this.tx.commit()`, and `rejectCommitBeforeStorage`
+  also invokes `runCommitCallbacks(result)` for pre-storage CFC rejection.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler/lineage.ts
+    packages/runner/test/scheduler-lineage.test.ts`: passed (`Checked 2
+    files`).
+  - `deno lint` on the same two files: passed (`Checked 2 files`).
+  - `deno check packages/runner/src/scheduler/lineage.ts
+    packages/runner/test/scheduler-lineage.test.ts`: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-lineage.test.ts`: passed, `1 passed (6 steps)`,
+    `0 failed`.
+
+## 03/step-5
+
+- [x] b443cef48 — lineage gating for handler-sent events
+- Deviations: no shared conflict-forcing helper exists in
+  `test/scheduler-retries.test.ts`; existing scheduler retry fixtures force
+  aborts directly. For the same-space red fixture, patched the emulated memory
+  server's next `transact()` after setup to return `ConflictError`, which
+  rejects after the client has built the origin commit/localSeq. The event
+  fixture calls `scheduler.queueEvent(..., { originTx })` at the same scheduler
+  boundary used by stream `Cell.set()` so the test stays focused on lineage
+  behavior. The handler-result piece-stop assertion is left for 03/step-6,
+  where the work order wires `runner.ts`.
+- Red-first recordings:
+  - Initial `cd packages/runner && ENV=test deno test --allow-ffi
+    --allow-env --allow-read --allow-write=/tmp,/var/folders
+    --allow-run=git test/scheduler-event-lineage.test.ts`: failed as
+    expected:
+    - same-space retry expected one committed descendant, actual `2`;
+    - permanent origin failure expected `[]`, actual two committed
+      descendants;
+    - both cross-space tests expected `idle()` to remain `pending`, actual
+      `resolved`.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/events.ts
+    packages/runner/src/scheduler/pull-events.ts
+    packages/runner/src/scheduler/continuation.ts
+    packages/runner/src/scheduler/pull-continuation.ts
+    packages/runner/test/scheduler-event-lineage.test.ts
+    packages/runner/test/scheduler-event-identity.test.ts`: passed
+    (`Checked 7 files`).
+  - `deno lint` on the same seven files: passed (`Checked 7 files`).
+  - `deno check` on the same seven files: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-event-lineage.test.ts`: passed, `1 passed (4 steps)`,
+    `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-event-identity.test.ts`: passed, `1 passed (4 steps)`,
+    `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-events.test.ts`: passed, `1 passed (14 steps)`,
+    `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull-handlers.test.ts`: passed, `1 passed (11 steps)`,
+    `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-lineage.test.ts`: passed, `1 passed (6 steps)`,
+    `0 failed`.
+
+## IMPLEMENTER STOP — 03/step-6 full runner suite blocked by stale-origin lineage
+
+Step 6's focused implementation was applied locally but NOT committed. The
+piece-stop fixture was red/green as required:
+
+- Red before implementation:
+  `runtime.runner.cancels.size` expected the pre-send baseline `1`, actual
+  `13`, after the handler exhausted retries.
+- Green after adding the non-deferred `recordPieceStop(...)` hook and the two
+  action-run WATCH comments:
+  `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+  --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+  test/scheduler-event-lineage.test.ts` passed, `1 passed (5 steps)`,
+  `0 failed`.
+- File verification passed:
+  `deno fmt`, `deno lint`, and `deno check` on
+  `packages/runner/src/runner.ts`,
+  `packages/runner/src/scheduler/action-run.ts`, and
+  `packages/runner/test/scheduler-event-lineage.test.ts`.
+
+Full runner suite then failed twice despite all visible tests passing:
+
+```text
+$ cd packages/runner && deno task test
+ok | 586 passed (3063 steps) | 0 failed | 0 ignored (10 steps) (2m19s)
+error: Promise resolution is still pending but the event loop has already resolved
+```
+
+Isolated failing tests:
+
+```text
+$ cd packages/runner && ENV=test deno test --allow-ffi --allow-env --allow-read \
+  --allow-write=/tmp,/var/folders --allow-run=git test/llm-dialog-outbox.test.ts
+running 1 test from ./test/llm-dialog-outbox.test.ts
+llmDialog outbox mechanism ...
+  enqueues llmDialog work behind the post-commit outbox ...
+ok | 0 passed | 0 failed (5s)
+error: Promise resolution is still pending but the event loop has already resolved
+
+$ cd packages/runner && ENV=test deno test --allow-ffi --allow-env --allow-read \
+  --allow-write=/tmp,/var/folders --allow-run=git test/llm-dialog.test.ts
+running 1 test from ./test/llm-dialog.test.ts
+llmDialog ...
+  should support a multi-turn conversation via addMessage ...
+ok | 0 passed | 0 failed (5s)
+error: Promise resolution is still pending but the event loop has already resolved
+```
+
+The same isolated failures reproduce at Step 5's committed SHA `b443cef48`
+in a detached comparison worktree, so this is not caused by the Step 6
+`runner.ts` compensation hook.
+
+Temporary diagnostics (reverted; not left in the worktree) showed the
+`llm-dialog-outbox` test reaches `addMessage.send(...)`, and the scheduler
+queue contains a head event with `originTx !== undefined` for the already
+committed setup transaction. Inference: Step 5's
+`queueSchedulerEvent -> recordLineageEvent` can create a fresh pending lineage
+record after the origin transaction has already committed, so the commit
+callback that would confirm/release the origin will never fire and the head
+event parks forever.
+
+Need reviewer direction: allow a follow-up/fixup touching
+`packages/runner/src/scheduler/lineage.ts` (and likely a narrow regression
+fixture) so already-settled origins are treated as confirmed/failed instead of
+registered as pending, or provide a different ruling.
+
+## REVIEWER VERDICT — 03/step-6 stale-origin lineage hang
+
+Your inference is confirmed as the root cause, and it is a bug in MY
+reference implementation: `recordFor()` assumes the origin is in flight.
+An event sent with an ALREADY-SETTLED origin tx (normal for sends from
+test/framework code whose cells are bound to committed transactions)
+creates a record frozen at "pending" — `addCommitCallback` never fires
+for settled transactions — so the head gate parks forever. An
+already-settled successful origin is semantically NO speculation: it
+must behave as confirmed on arrival.
+
+Authorized fixup, on the 03 branch:
+
+1. `src/scheduler/lineage.ts` — in `recordFor(origin)`, before creating
+   the record, inspect `origin.status()`. Use the transaction's actual
+   status vocabulary (read the `IStorageTransactionStatus` type and the
+   existing `status().status === "ready"` checks for the open-state
+   name):
+   - settled successfully → create the record with status "confirmed"
+     and DO NOT register a commit callback;
+   - settled failed/aborted → status "failed", no callback (and no
+     cancellation sweep — there is nothing speculative to cancel from a
+     pre-settled failure; the head gate handles the queued event);
+   - open/in-flight → register the callback exactly as today.
+2. Head gate: the "failed origin at head" branch I marked unreachable
+   is now reachable (failed-before-record origins are never removed by
+   a callback). Replace the assert with: shift + drop the event +
+   `release()` + log debug. A FAILED settled origin must not dispatch
+   its event (I10).
+3. Red-first regression fixtures:
+   - unit (`scheduler-lineage.test.ts`): `recordFor` on a
+     committed-settled tx → originStatus "confirmed", no callback
+     registered; on an aborted tx → "failed".
+   - integration (`scheduler-event-lineage.test.ts`): send to a stream
+     via a cell bound to an ALREADY-COMMITTED tx → event dispatches,
+     `idle()` resolves; same with an aborted tx → event dropped,
+     `idle()` resolves. Paste the red (hang→timeout or assertion) for
+     the committed case from the pre-fix tree.
+   - the two llm-dialog tests are the integration witnesses: both must
+     pass untouched.
+4. Commit: `fix(runner): lineage treats already-settled origins as settled (scheduler-v2 E1)`
+   — separate from the step-6 commit; land it FIRST, then re-run and
+   commit step 6 as planned.
+5. Amend WO03's reference code block + unit-test list in-branch to
+   match — docs commit before the fix commit:
+   `docs(specs): scheduler-v2 WO03 — settled-origin lineage records`.
+6. Note for phase-end: this case also justifies a one-line addition to
+   the step-4 "caveat to verify" — record in PROGRESS that
+   `addCommitCallback` does NOT fire for already-settled transactions
+   (you have now verified it empirically).
+
+Your red/green discipline and the detached-worktree bisect were exactly
+right; the step-6 runner.ts hook itself is approved as-is once the suite
+is green on top of the fix.
+
+## REVIEWER RESOLUTION — 03/step-6 stale-origin lineage docs
+
+- [x] 024dfb38f — documented the reviewer-approved settled-origin lineage
+  record behavior in WO03 before implementation.
+- Deviations: none.
+
+## REVIEWER RESOLUTION — 03/step-6 stale-origin lineage fix
+
+- [x] e9a27d0a4 — lineage now initializes records from already-settled origin
+  transaction status before registering commit callbacks.
+- Deviations: none. Verified the missing caveat from 03/step-4 empirically:
+  `addCommitCallback` does not fire retroactively for already-settled
+  transactions, so record creation must inspect `origin.status()`.
+- Red-first recordings:
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-lineage.test.ts`: failed as expected before the fix:
+    already-committed origin actual `pending`, expected `confirmed`; already
+    failed origin actual `pending`, expected `failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-event-lineage.test.ts`: failed as expected before the fix
+    on the already-committed origin fixture:
+    `error: Promise resolution is still pending but the event loop has already resolved`.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler/lineage.ts
+    packages/runner/src/scheduler/pull-events.ts
+    packages/runner/test/scheduler-lineage.test.ts
+    packages/runner/test/scheduler-event-lineage.test.ts`: passed
+    (`Checked 4 files`).
+  - `deno lint` on the same four files: passed (`Checked 4 files`).
+  - `deno check` on the same four files: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-lineage.test.ts`: passed, `1 passed (8 steps)`,
+    `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-event-lineage.test.ts`: passed, `1 passed (6 steps)`,
+    `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/llm-dialog-outbox.test.ts`: passed, `1 passed (1 step)`,
+    `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/llm-dialog.test.ts`: passed, `1 passed (17 steps)`, `0 failed`.
+
+## 03/step-6
+
+- [x] 7a50fba4b — handler-launched piece registrations are stopped when the
+  launching handler transaction fails permanently.
+- Deviations: restored the reviewer-approved Step 6 work after the
+  settled-origin fixup; stash conflict resolution in
+  `scheduler-event-lineage.test.ts` kept both settled-origin fixtures and the
+  Step 6 piece-stop fixture.
+- Red-first recordings:
+  - Before the Step 6 hook, `runtime.runner.cancels.size` expected the pre-send
+    baseline `1`, actual `13`, after the handler exhausted retries.
+- Recordings:
+  - `deno fmt packages/runner/src/runner.ts
+    packages/runner/src/scheduler/action-run.ts
+    packages/runner/test/scheduler-event-lineage.test.ts`: passed
+    (`Checked 3 files`).
+  - `deno lint` on the same three files: passed (`Checked 3 files`).
+  - `deno check` on the same three files: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-event-lineage.test.ts`: passed, `1 passed (7 steps)`,
+    `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `590 passed (3090 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m4s`.
+
+## 03/phase-end
+
+- [x] pending — WO03 exit checklist self-check complete.
+- Benchmarks: none listed in WO03.
+- Recordings:
+  - `cd packages/runner && deno task test`: passed,
+    `590 passed (3090 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m4s`.
+  - `cd packages/memory && deno task test`: passed, `211 passed
+    (95 steps)`, `0 failed`.
+- Exit checklist:
+  - All event-lineage fixtures green:
+    `test/scheduler-event-lineage.test.ts` passed, `1 passed (7 steps)`,
+    `0 failed`; duplication fixture red-first output is recorded under
+    03/step-5.
+  - Preconditions inspection passed: `dispatchQueuedEvent` attaches
+    `origin-committed` only when `originLocalSeq !== undefined`, lineage
+    status is `"pending"`, and
+    `runtime.experimental.commitPreconditions === true`.
+  - Cross-space park inspection passed: `pull-events.ts` only examines the
+    head event, parks by returning before preflight, `idle()` waits on
+    `hasPendingLineageHeadEvent()`, and `continuation.ts` documents that the
+    wake source is the lineage commit callback rather than a timer.
+  - Renderer/ingress events inspection passed: `queueSchedulerEvent` takes no
+    lineage branch unless `args.originTx !== undefined`.
+  - Engine tests green; flag PR for memory-owner review because WO03 touches
+    `packages/memory`.
+  - FIFO inspection passed: surviving events are appended with
+    `eventQueue.push`, processing remains head-only, retry uses the existing
+    `unshift` path for the same event id, and lineage failure only removes
+    failed descendants or shifts a failed head without reordering survivors.
+
+## REVIEWER RESOLUTION — PR #4090 review findings
+
+- [x] pending — engine precondition reachability + lineage retry
+  re-registration + fail-closed precondition plumbing.
+- Findings addressed (Codex/cubic review on PR #4090), red-first fixtures
+  recorded for each:
+  1. Engine empty-commit guard rejected precondition-only commits
+     (`operations: []` from a descendant with only no-op writes) before
+     `validateCommitPreconditions` could run, and the observation-only
+     fast paths returned before validation. Preconditions now make a
+     commit non-empty and validate ahead of every commit shape; malformed
+     entries surface as deterministic `ProtocolError`
+     (`packages/memory/test/v2-commit-preconditions.test.ts`).
+  2. Retry requeues (`RetryImmediately`, non-permanent commit failure)
+     created fresh `QueuedEvent` objects the lineage registry never saw, so
+     an origin failing while the retry was queued could not remove it and
+     the post-settlement `originStatus()` fallback let it run. Requeues now
+     re-record with the registry
+     (`test/scheduler-event-lineage.test.ts` "keeps retried same-space
+     follow-ups lineage-gated").
+  3. `V2StorageTransaction.addCommitPrecondition` did not claim a write
+     space, so a precondition-only transaction resolved ok without sending
+     a commit; it now claims the space like `recordSqliteWrite`. Both
+     transaction wrappers now throw instead of silently dropping
+     preconditions on storage that cannot enforce them
+     (`test/storage-commit-preconditions.test.ts`).
+- Deviations: none.

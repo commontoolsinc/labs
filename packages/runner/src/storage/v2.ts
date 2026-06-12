@@ -19,8 +19,10 @@ import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
   type CellScope,
   type ClientCommit,
+  type CommitPrecondition,
   type DocumentPath,
   type EntityDocument,
+  getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   type PatchOp,
   type SchedulerActionSnapshotQuery,
@@ -50,6 +52,7 @@ import {
   parseLinkPrimitive,
 } from "../link-types.ts";
 import type { Cancel } from "../cancel.ts";
+import { recordCommitLocalSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import type {
   IMemoryAddress,
@@ -1363,6 +1366,9 @@ class SpaceReplica implements ISpaceReplica {
     const schedulerObservation = getPersistentSchedulerStateConfig()
       ? transaction.schedulerObservation
       : undefined;
+    const preconditions = getCommitPreconditionsConfig()
+      ? transaction.preconditions
+      : undefined;
     const operations = withCommitTiming(
       ["commitNative", "normalize"],
       () =>
@@ -1396,6 +1402,7 @@ class SpaceReplica implements ISpaceReplica {
 
     if (
       operations.length === 0 && schedulerObservation === undefined &&
+      !preconditions?.length &&
       sqliteOps.length === 0
     ) {
       return { ok: {} };
@@ -1408,6 +1415,7 @@ class SpaceReplica implements ISpaceReplica {
           operations,
           source,
           schedulerObservation,
+          preconditions,
           sqliteOps,
         ),
     );
@@ -1644,9 +1652,16 @@ class SpaceReplica implements ISpaceReplica {
     operations: NativeCommitOperation[],
     source?: IStorageTransaction,
     schedulerObservation?: unknown,
+    preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    if (operations.length === 0 && sqliteOps.length === 0) {
+    const activePreconditions = getCommitPreconditionsConfig()
+      ? (preconditions ?? [])
+      : [];
+    if (
+      operations.length === 0 && sqliteOps.length === 0 &&
+      activePreconditions.length === 0
+    ) {
       if (schedulerObservation === undefined) {
         return { ok: {} };
       }
@@ -1657,6 +1672,9 @@ class SpaceReplica implements ISpaceReplica {
     }
 
     const localSeq = this.#nextLocalSeq++;
+    if (source !== undefined) {
+      recordCommitLocalSeq(source, this.#space, localSeq);
+    }
     const commit = withCommitTiming(
       ["commitOperations", "buildCommit"],
       (): ClientCommit => ({
@@ -1688,6 +1706,9 @@ class SpaceReplica implements ISpaceReplica {
           ...sqliteOps,
         ],
         ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
+        ...(activePreconditions.length > 0
+          ? { preconditions: [...activePreconditions] }
+          : {}),
       }),
     );
     const touched = operations.map((operation) => ({
