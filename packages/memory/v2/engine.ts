@@ -3320,6 +3320,21 @@ const writeOperation = (
           "memory v2 set operations require explicit document objects",
         );
       }
+      if (operation.createOnly) {
+        const existingHead = engine.statements.selectHead.get({
+          branch,
+          id: operation.id,
+          scope_key: scopeKey,
+        }) as HeadRow | undefined;
+        // The head table keeps the latest set or delete revision; either means
+        // this entity id has already been claimed for create-only receipts.
+        if (existingHead !== undefined) {
+          throw new PreconditionFailedError(
+            "receipt-exists",
+            `create-only set target already exists: ${operation.id}`,
+          );
+        }
+      }
       engine.statements.insertRevision.run({
         branch,
         id: operation.id,

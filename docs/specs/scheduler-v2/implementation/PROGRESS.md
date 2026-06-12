@@ -1689,7 +1689,7 @@ is green on top of the fix.
 
 ## 04/step-2
 
-- [x] pending — handler-frame causes derive from the durable event id, falling
+- [x] 729618409 — handler-frame causes derive from the durable event id, falling
   back to `crypto.randomUUID()` only for non-dispatch invocations.
 - Deviations: none.
 - Recordings:
@@ -1701,3 +1701,28 @@ is green on top of the fix.
     `590 passed (3091 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m5s`.
   - `cd packages/patterns && deno task test`: passed; package test task is
     currently a stub (`No tests defined.`).
+
+## 04/step-3
+
+- [x] pending — memory v2 create-only `set` operations reject when the target
+  entity head already exists.
+- Deviations: added an extra deleted-head fixture because the engine `head`
+  table is upserted by `delete`; tombstoned heads therefore count as existing
+  under the same head-exists semantics used here.
+- Red-first recordings:
+  - `cd packages/memory && deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders test/v2-commit-preconditions.test.ts`:
+    failed as expected before the engine check, `6 passed`, `2 failed`;
+    duplicate create-only and deleted-head create-only fixtures both failed
+    with `AssertionError: Expected function to throw.`
+- Recordings:
+  - `deno fmt packages/memory/v2.ts packages/memory/v2/engine.ts
+    packages/memory/test/v2-commit-preconditions.test.ts`: passed
+    (`Checked 3 files`).
+  - `deno lint` on the same three files: passed (`Checked 3 files`).
+  - `deno check` on the same three files: passed.
+  - `cd packages/memory && deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders test/v2-commit-preconditions.test.ts`:
+    passed, `8 passed`, `0 failed`.
+  - `cd packages/memory && deno task test`: passed, `211 passed
+    (95 steps)`, `0 failed`.
