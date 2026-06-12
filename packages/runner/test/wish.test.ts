@@ -8,7 +8,11 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { ALL_PIECES_ID } from "../src/builtins/well-known.ts";
 import { NAME, UI } from "../src/builder/types.ts";
-import { parseWishTarget, tagMatchesHashtag } from "../src/builtins/wish.ts";
+import {
+  createSidecarPatternCache,
+  parseWishTarget,
+  tagMatchesHashtag,
+} from "../src/builtins/wish.ts";
 import {
   getPatternEnvironment,
   setPatternEnvironment,
@@ -3208,5 +3212,59 @@ describe("tagMatchesHashtag", () => {
     // The hashtag #todo_list is parsed as #todo (underscore ends the hashtag)
     expect(tagMatchesHashtag("#todo_list", "todo")).toBe(true);
     expect(tagMatchesHashtag("#todo_list", "todo_list")).toBe(false);
+  });
+});
+
+describe("createSidecarPatternCache", () => {
+  it("resolves a superseded fetch to undefined and keeps the newer fetch's pattern", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEnvironment = getPatternEnvironment();
+
+    // The fetch for env-a.test stays pending until released, so the fetch for
+    // env-b.test supersedes it and settles first.
+    let releaseFirstFetch = () => {};
+    const firstFetchGate = new Promise<void>((resolve) => {
+      releaseFirstFetch = resolve;
+    });
+    globalThis.fetch = (async (input: Request | URL | string) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.host === "env-a.test") await firstFetchGate;
+      return new Response(`source from ${url.host}`, { status: 200 });
+    }) as typeof fetch;
+
+    const fakeRuntime = {
+      harness: {
+        resolve: (resolver: { main(): Promise<{ contents: string }> }) =>
+          resolver.main(),
+      },
+      patternManager: {
+        compilePattern: (program: { contents: string }) =>
+          Promise.resolve({ source: program.contents }),
+      },
+      userIdentityDID: "did:key:sidecar-cache-test",
+    } as unknown as Runtime;
+
+    try {
+      const cache = createSidecarPatternCache({
+        name: "profile-create.tsx",
+        retryOnFailure: true,
+      });
+
+      setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
+      const firstFetch = cache.fetch(fakeRuntime);
+
+      setPatternEnvironment({ apiUrl: new URL("https://env-b.test/") });
+      const secondFetch = cache.fetch(fakeRuntime);
+
+      expect(await secondFetch).toEqual({ source: "source from env-b.test" });
+      expect(cache.cached()).toEqual({ source: "source from env-b.test" });
+
+      releaseFirstFetch();
+      expect(await firstFetch).toBeUndefined();
+      expect(cache.cached()).toEqual({ source: "source from env-b.test" });
+    } finally {
+      globalThis.fetch = originalFetch;
+      setPatternEnvironment(originalEnvironment);
+    }
   });
 });
