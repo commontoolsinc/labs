@@ -804,9 +804,16 @@ export class PatternManager {
       this.esmCacheStats.hits++;
     } else {
       this.esmCacheStats.misses++;
-      // Cold/partial: persist the freshly compiled module set for next time.
-      // Fire-and-forget — the pattern is already returned below, so cache
-      // persistence never blocks the load. Tracked for flush/shutdown.
+      // Cold/partial: persist the freshly compiled module set. AWAITED
+      // (identity E4): refs-only pattern JSON makes artifact persistence part
+      // of the compilation contract — a cell can only carry a `$patternRef`
+      // after compilePattern returned, so completing the write here
+      // guarantees every persisted ref has a durable closure behind it (no
+      // race against session end). Cold compiles only; a warm hit means the
+      // closure was just READ from storage, i.e. it is already durable. A
+      // failed cache write logs and does not fail the compile: the pattern
+      // works in-session regardless, and the next cold compile of the same
+      // content retries the write.
       const writeBack = this.writeBackCompileCache(
         space,
         modules,
@@ -815,10 +822,17 @@ export class PatternManager {
       );
       this.compileCacheWrites.add(writeBack);
       this.pendingCacheWriteBacks.add(writeBack);
-      writeBack.finally(() => {
+      try {
+        await writeBack;
+      } catch (error) {
+        logger.warn("compile-cache-write-back-failed", () => [
+          `entry=${entryIdentity}`,
+          String(error),
+        ]);
+      } finally {
         this.compileCacheWrites.delete(writeBack);
         this.pendingCacheWriteBacks.delete(writeBack);
-      });
+      }
     }
 
     return this.patternFromEvaluation(result, program, entryIdentity);

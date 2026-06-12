@@ -82,4 +82,19 @@ describe("artifact index pinning (session-lifetime)", () => {
     const op = pm.artifactFromIdentitySync(firstRef!.identity, "__cfPattern_1");
     expect(op).toBeDefined();
   });
+
+  it("a cold compile persists the closure before the pattern exists", async () => {
+    // The refs-only boundary contract: artifact persistence is PART OF the
+    // compilation step, not a best-effort write racing session end. A cell
+    // write can only contain a $patternRef after compilePattern returned, so
+    // awaiting the cold write-back inside compilePattern guarantees every
+    // persisted ref has a durable closure behind it.
+    const pm = runtime.patternManager;
+    const tx = runtime.edit();
+    await pm.compilePattern(program(7), { space: signer.did(), tx });
+    await tx.commit();
+    const pending = (pm as unknown as { pendingCacheWriteBacks: Set<unknown> })
+      .pendingCacheWriteBacks;
+    expect(pending.size).toBe(0);
+  });
 });

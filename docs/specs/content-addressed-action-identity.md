@@ -405,8 +405,10 @@ tolerate a miss. E4 (same day) removed that blocker and completed the flip:
   sentinel vintages are still read tolerantly.
 - llm-dialog follows the sync resolution with the async storage-backed
   `loadPatternByIdentity` (`resolveStoredPatternAsync`) — compiled artifacts
-  persist in-space as an expected part of compilation, so a tool invoked
-  cold after a reload rehydrates source-free.
+  persist in-space as part of the compilation step (the cold write-back is
+  AWAITED inside `compilePattern`, so a persisted ref always has a durable
+  closure behind it), and a tool invoked cold after a reload rehydrates
+  source-free.
 - The write-path audit (E3) found graphs persisted at exactly three
   cell-write sites and on no wire/IPC surface; stored graph vintages
   (pre-E3 bare graph, E3 ref+graph) keep loading and executing — pinned by

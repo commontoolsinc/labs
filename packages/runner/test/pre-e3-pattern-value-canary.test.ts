@@ -167,7 +167,9 @@ describe("pre-E3 stored pattern-value canary", () => {
         tx: tx1,
       });
       await tx1.commit();
-      await rt1.patternManager.flushCompileCacheWrites();
+      // No flushCompileCacheWrites: the cold write-back is awaited INSIDE
+      // compilePattern (the E4 persistence contract) — deliberately not
+      // flushed here to pin that.
       await rt1.storageManager.synced();
 
       // Session 2 never evaluates the module; the stored refs-only value's

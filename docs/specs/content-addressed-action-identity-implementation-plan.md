@@ -515,9 +515,16 @@ What landed:
    therefore keeps printing graphs) fall back to the full graph
    (`test/pattern-ref-boundary.test.ts`).
 4. **llm-dialog async net** — `resolveStoredPatternAsync` follows the sync
-   probe with the storage-backed `loadPatternByIdentity`. INVARIANT assumed
-   (per decision): compilation persists compiled artifacts in-space, so a
-   refs-only stored value is rehydratable wherever it was written.
+   probe with the storage-backed `loadPatternByIdentity`. INVARIANT (per
+   decision), now ENFORCED rather than assumed (both review bots flagged the
+   fire-and-forget race): `compileViaCellCache` AWAITS the cold closure
+   write-back, so a cell can only carry a `$patternRef` after its artifact
+   write completed — the factory does not exist until `compilePattern`
+   returns. Warm hits just read the closure from storage (already durable);
+   a failed write logs without failing the compile (in-session unaffected;
+   the next cold compile of the same content retries). Space-less compiles
+   (no `cacheCtx`) persist nothing — dev/test paths whose values resolve
+   in-session via the pinned index.
 5. **Canary** — the fixture grows a `refsOnly` vintage; pins both resolution
    paths (sync live-canonical after in-session eval; source-free async load
    in a runtime that never evaluated the module) plus the older graph
