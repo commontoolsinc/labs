@@ -137,10 +137,11 @@ const markerDragHandler = handler<
 >(({ detail: { index, position } }, { stops }) => {
   const currentStops = stops.get();
   if (index >= 0 && index < currentStops.length) {
-    const updated = currentStops.map((stop, i) =>
-      i === index ? { ...stop, position } : stop
-    );
-    stops.set(updated);
+    // Write through the element's cell — rebuilding the array with a fresh
+    // object literal for the dragged stop would re-mint its entity identity
+    // and orphan previously-held references (see
+    // packages/patterns/primitives/editable-list.tsx).
+    stops.key(index).key("position").set(position);
   }
 });
 

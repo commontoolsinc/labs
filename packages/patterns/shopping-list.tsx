@@ -251,7 +251,8 @@ const openStoreMapper = handler<unknown, Record<string, never>>(
 );
 
 // Handler for removing an item
-const removeItem = handler<
+// Exported for tests.
+export const removeItem = handler<
   unknown,
   { items: Writable<ShoppingItem[]>; item: ShoppingItem }
 >((_event, { items, item }) => {
@@ -289,7 +290,11 @@ const closeCorrection = handler<
 });
 
 // Handler for selecting an aisle correction
-const selectAisle = handler<
+// Exported for tests. Writes through the element's cell (`.key(idx)`) —
+// rebuilding the array with a fresh object literal for the corrected item
+// would re-mint its entity identity and orphan previously-held references
+// (see packages/patterns/primitives/editable-list.tsx).
+export const selectAisle = handler<
   unknown,
   {
     items: Writable<ShoppingItem[]>;
@@ -302,15 +307,8 @@ const selectAisle = handler<
     const itemsList = items.get();
     const item = itemsList[idx];
     if (item) {
-      const updated = itemsList.map((i, index) =>
-        index === idx
-          ? {
-            ...i,
-            aisleOverride: selectedAisle, // Store user's selection
-          }
-          : i
-      );
-      items.set(updated);
+      // Store user's selection
+      items.key(idx).key("aisleOverride").set(selectedAisle);
     }
   }
   correctionIndex.set(-1);

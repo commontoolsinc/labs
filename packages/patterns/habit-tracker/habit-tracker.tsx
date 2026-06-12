@@ -53,10 +53,13 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
         (log) => log.habitName === habitName && log.date === todayDate,
       );
       if (existingIdx >= 0) {
-        const updated = currentLogs.map((log, i) =>
-          i === existingIdx ? { ...log, completed: !log.completed } : log
+        // Write through the element's cell — replacing the array slot with a
+        // fresh object literal would re-mint the log's entity identity and
+        // orphan previously-held references (see
+        // packages/patterns/primitives/editable-list.tsx).
+        logs.key(existingIdx).key("completed").set(
+          !currentLogs[existingIdx].completed,
         );
-        logs.set(updated);
       } else {
         logs.push({ habitName, date: todayDate, completed: true });
       }
