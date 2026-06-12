@@ -72,27 +72,32 @@ determinism: STOP.
 
 Commit: `feat(runner): handler frame causes derive from the event id (scheduler-v2 E2)`
 
-## Step 3 — Engine: create-only entity precondition
+## Step 3 — Engine: entity-absent receipt precondition
 
 Files: `packages/memory/v2/engine.ts` plus the commit-operation type
 located in work order 03 step 2.1.
 
-1. Extend the `set` commit operation type with optional
-   `createOnly?: true` (wire-compatible optional field).
-2. In `applyCommitTransaction`, where `set` operations are applied: if
-   `createOnly` and a head revision already exists for that
-   (id, scope, branch), reject the whole commit via the same route as the
-   origin-committed rejection (work order 03 step 3), with
-   `{ name: "PreconditionFailedError", precondition: "receipt-exists" }`.
-   "Head exists" must use the same existence notion the engine uses for
-   conflict detection — locate the head lookup used by `findConflictSeq`
-   and reuse it; if ambiguous (tombstones/deletes), STOP and ask the
-   memory owner whether a deleted head counts as existing (record the
-   answer in PROGRESS.md and as a code comment).
-3. Engine tests (extend `v2-commit-preconditions.test.ts` from work order
-   03): create-only on a fresh entity applies; second create-only commit
-   for the same entity rejects with `receipt-exists`; a normal `set`
-   without the flag still overwrites.
+1. Extend the commit precondition type with
+   `{ kind: "entity-absent", id, scope? }` (wire-compatible optional
+   precondition kind). Do not use an operation-level `createOnly` flag;
+   receipts are commit-level preconditions independent of surviving writes.
+2. In `validateCommitPreconditions`: if `entity-absent` and a head revision
+   already exists for that (id, scope, branch), reject the whole commit via
+   the same route as the origin-committed rejection (work order 03 step 3),
+   with `{ name: "PreconditionFailedError", precondition: "receipt-exists" }`.
+   "Head exists" includes deleted/tombstoned heads and must use the same
+   scope-key resolution and delete-aware existence semantics as the engine's
+   set/delete conflict checks.
+3. Allow commits with no operations when preconditions are present, and write
+   the commit row for localSeq continuity. This is required so a duplicate
+   handling whose writes are fully elided still reaches the engine and fails
+   the receipt precondition instead of succeeding locally as a no-op.
+4. Engine tests (extend `v2-commit-preconditions.test.ts` from work order
+   03): entity-absent on a fresh entity applies; second entity-absent commit
+   for the same entity rejects with `receipt-exists`; normal `set` without the
+   precondition still overwrites; create → delete → entity-absent for the same
+   entity rejects with `receipt-exists`; precondition-only commits pass/fail
+   correctly for absent/present entities.
 
 Commit: `feat(memory): create-only set precondition for event receipts (scheduler-v2 E2)`
 
@@ -113,10 +118,12 @@ handlers that launch nothing.
    ```
 
    Store marked (space, scope, id) tuples; in `storage/v2.ts`
-   `commitOperations`, set `createOnly: true` on the matching `set`
-   operations (match on id + normalized scope). Only when the
-   `commitPreconditions` flag is on (same gate as work order 03; when the
-   flag is off the mark is recorded but not emitted).
+   `commitOperations`, emit a matching
+   `{ kind: "entity-absent", id, scope }` commit precondition for each mark.
+   This must happen even when no semantic operations survive elision. Only
+   emit these preconditions when the `commitPreconditions` flag is on (same
+   gate as work order 03; when the flag is off the mark is recorded but not
+   emitted).
 2. `src/runner.ts` `handleJavaScriptHandlerResult`: this function must now
    ALWAYS materialize the result cell. Restructure the head of the
    function:
