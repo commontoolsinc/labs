@@ -60,6 +60,20 @@ longer emits `__cfHelpers.derive(...)`, so the question they answered is closed.
 Recover them from git history if a similar capture audit is needed for the
 lift-applied form.)
 
+### `probe-array-method-owner-names.ts`
+
+Runs the full pipeline on every fixture input with temporary instrumentation in
+call-kind's `isMethodDeclarationOwnedBy` (see the probe header for the patch)
+and records every array-method-named owner check: which owner name the
+declaration resolved to, against which owner set, and whether it matched.
+
+Used to retire `OPAQUE_REF_OWNER_NAMES` (the OpaqueRefMethods/OpaqueRef
+method-owner set from the pre-#3153 api shape): across 347 fixtures it never
+matched. The same run showed 29 `.map` checks resolving to owner `IDerivable` —
+in neither owner set — yet classified correctly via other paths; adding
+`IDerivable` to the owner set changed no golden, confirming the owner check is
+redundant for branded receivers, not silently load-bearing.
+
 ## When to add a new probe
 
 Good candidates:

@@ -32,7 +32,6 @@ const CELL_LIKE_WRAPPER_NAMES = spellingsWhere({
   SqliteDb: false, // handled separately at each call site
   OpaqueRef: false,
   Reactive: false,
-  OpaqueRefMethods: false,
   CellTypeConstructor: false,
   ScopedCellTypeConstructor: false,
 });
@@ -47,7 +46,6 @@ const OPAQUE_WRAPPER_NAMES = spellingsWhere({
   SqliteDb: false,
   OpaqueRef: false,
   Reactive: false,
-  OpaqueRefMethods: false,
   CellTypeConstructor: false,
   ScopedCellTypeConstructor: false,
 });
@@ -73,7 +71,6 @@ const NODE_WRAPPER_SPELLINGS: Readonly<Record<WrapperSpelling, boolean>> = {
   SqliteDb: true,
   OpaqueRef: false,
   Reactive: false,
-  OpaqueRefMethods: false,
   CellTypeConstructor: false,
   ScopedCellTypeConstructor: false,
 };

@@ -28,7 +28,6 @@ export type WrapperSpelling =
   | "SqliteDb"
   | "OpaqueRef"
   | "Reactive"
-  | "OpaqueRefMethods"
   | "CellTypeConstructor"
   | "ScopedCellTypeConstructor";
 
@@ -52,8 +51,6 @@ export const WRAPPER_SPELLING_TO_KIND = {
   // Successor spelling for OpaqueRef (api will alias OpaqueRef = Reactive);
   // classified identically everywhere until OpaqueRef is removed.
   Reactive: "OpaqueRef",
-  // Internal methods-owner interface behind OpaqueRef, not a type reference.
-  OpaqueRefMethods: undefined,
   // The interface typing the `Cell` constructor/namespace value (api/index.ts).
   CellTypeConstructor: undefined,
   // The interface typing the scoped-cell factory value (api/index.ts).

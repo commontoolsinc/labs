@@ -8,7 +8,7 @@ import {
 } from "./utils.ts";
 import { isFunctionLikeExpression } from "./function-predicates.ts";
 import { symbolDeclaresCommonFabricDefault } from "../core/common-fabric-symbols.ts";
-import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
+import { isBrandedCellType } from "../transformers/opaque-ref/opaque-ref.ts";
 import { isSafeIdentifierText } from "../utils/identifiers.ts";
 import {
   detectCallKind,
@@ -764,7 +764,7 @@ export function createDataFlowAnalyzer(
 
       const type = tryGetType(expression);
       if (
-        (type && isOpaqueRefType(type, checker)) ||
+        (type && isBrandedCellType(type, checker)) ||
         isReactiveValueExpression(expression, checker)
       ) {
         recordDataFlow(expression, scope, null, true); // Explicit: direct OpaqueRef
@@ -872,7 +872,7 @@ export function createDataFlowAnalyzer(
       }
       const propertyType = tryGetType(expression);
 
-      if (propertyType && isOpaqueRefType(propertyType, checker)) {
+      if (propertyType && isBrandedCellType(propertyType, checker)) {
         if (originatesFromIgnored(expression.expression)) {
           return emptyAnalysis();
         }

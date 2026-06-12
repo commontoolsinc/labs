@@ -9,7 +9,7 @@ import {
  * Check if a type is a cell type by looking for the CELL_BRAND property.
  * This includes OpaqueCell, Cell, Stream, and other cell variants.
  */
-export function isOpaqueRefType(
+export function isBrandedCellType(
   type: ts.Type,
   checker: ts.TypeChecker,
 ): boolean {
@@ -18,12 +18,12 @@ export function isOpaqueRefType(
   }
   if (type.flags & ts.TypeFlags.Union) {
     return (type as ts.UnionType).types.some((t) =>
-      isOpaqueRefType(t, checker)
+      isBrandedCellType(t, checker)
     );
   }
   if (type.flags & ts.TypeFlags.Intersection) {
     return (type as ts.IntersectionType).types.some((t) =>
-      isOpaqueRefType(t, checker)
+      isBrandedCellType(t, checker)
     );
   }
 
@@ -67,7 +67,7 @@ export function isSimpleOpaqueRefAccess(
     ts.isIdentifier(expression) || ts.isPropertyAccessExpression(expression)
   ) {
     const type = checker.getTypeAtLocation(expression);
-    return isOpaqueRefType(type, checker);
+    return isBrandedCellType(type, checker);
   }
   return false;
 }

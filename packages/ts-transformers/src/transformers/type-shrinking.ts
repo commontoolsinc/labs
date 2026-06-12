@@ -706,7 +706,6 @@ const CELL_LIKE_TYPE_NODE_NAMES = spellingsWhere({
   // SqliteDb references are not rewritten by shrinking; the brand survives
   // capability shrinking via its own path (#3860).
   SqliteDb: false,
-  OpaqueRefMethods: false,
   CellTypeConstructor: false,
   ScopedCellTypeConstructor: false,
 });
