@@ -50,6 +50,7 @@ import {
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
+  toMemorySpaceAddress,
 } from "./link-utils.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { sendValueToBinding } from "./pattern-binding.ts";
@@ -3757,6 +3758,12 @@ export class Runner {
     const builtinThrottle = isRawBuiltinResult(builtinResult)
       ? builtinResult.throttle
       : undefined;
+    const builtinDependencies = isRawBuiltinResult(builtinResult)
+      ? builtinResult.dependencies
+      : undefined;
+    const useDeclaredReadsAsDependencies = isRawBuiltinResult(builtinResult)
+      ? builtinResult.useDeclaredReadsAsDependencies
+      : false;
 
     // Name the raw action for debugging - use implementation name or fallback to "raw"
     const impl = module.implementation as ((...args: unknown[]) => Action) & {
@@ -3824,14 +3831,30 @@ export class Runner {
     const noDebounce = module.noDebounce ?? builtinNoDebounce;
     const throttle = module.throttle ?? builtinThrottle;
 
+    const schedulerDependencies = builtinDependencies ??
+      (useDeclaredReadsAsDependencies
+        ? {
+          reads: inputCells.map(toMemorySpaceAddress),
+          shallowReads: [],
+          writes: [],
+        }
+        : undefined);
+    const schedulerOptions = {
+      isEffect,
+      debounce,
+      noDebounce,
+      throttle,
+      ...schedulerRehydration,
+    };
+
     addCancel(
-      this.runtime.scheduler.subscribe(action, {
-        isEffect,
-        debounce,
-        noDebounce,
-        throttle,
-        ...schedulerRehydration,
-      }),
+      schedulerDependencies
+        ? this.runtime.scheduler.subscribe(
+          action,
+          schedulerDependencies,
+          schedulerOptions,
+        )
+        : this.runtime.scheduler.subscribe(action, schedulerOptions),
     );
   }
 

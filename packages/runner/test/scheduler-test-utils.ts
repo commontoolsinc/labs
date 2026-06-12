@@ -101,7 +101,6 @@ async function expectSemanticCommitNotifiesSynchronously(
 
 type StaleSchedulerInternals = {
   pending: Set<Action>;
-  pendingDependencyCollection: Set<Action>;
   isInvalid: (action: Action) => boolean;
   isDemandedPullComputation: (action: Action) => boolean;
   clearInvalid: (action: Action) => void;
@@ -119,7 +118,6 @@ function getStaleSchedulerInternals(
 ): StaleSchedulerInternals {
   const internal = scheduler as unknown as {
     pending: Set<Action>;
-    pendingDependencyCollection: Set<Action>;
     dependencyUpdateState: Parameters<typeof setSchedulerDependencies>[0];
     nodes: {
       register: (action: Action, kind: "effect" | "computation") => unknown;
@@ -139,7 +137,6 @@ function getStaleSchedulerInternals(
 
   return {
     pending: internal.pending,
-    pendingDependencyCollection: internal.pendingDependencyCollection,
     isInvalid: (action) => {
       const record = internal.nodes.get(action);
       return record?.status === "invalid" || record?.status === "never-ran";
