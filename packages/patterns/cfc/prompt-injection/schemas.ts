@@ -1,5 +1,5 @@
 import type { JSONSchema } from "commonfabric";
-import type { CfcAtom } from "../api-cfc.ts";
+import type { CfcAtom } from "../cfc-atom-kinds.ts";
 
 export const EMPTY_TOOL_INPUT_SCHEMA = {
   type: "object",
