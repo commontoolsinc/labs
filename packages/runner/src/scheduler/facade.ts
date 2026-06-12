@@ -138,12 +138,8 @@ import {
 import { getCommitLocalSeq } from "../storage/commit-identity.ts";
 import {
   addSchedulerEventHandler,
-  cancelEventQueueWake as cancelEventQueueWakeState,
-  type EventQueueWakeState,
-  hasEventQueueWakeTimer,
   isHeadEventParked as isHeadEventParkedState,
   queueSchedulerEvent,
-  scheduleEventQueueWake as scheduleEventQueueWakeState,
   type SchedulerEventExecutionState,
   type SchedulerEventQueueState,
 } from "./events.ts";
@@ -336,13 +332,14 @@ export class Scheduler {
 
   // Debounce infrastructure for throttling slow actions
   private pendingQueueTaskTimer: ReturnType<typeof setTimeout> | null = null;
-  private eventQueueWakeState!: EventQueueWakeState;
   private eventQueueState!: SchedulerEventQueueState;
   private eventExecutionState!: SchedulerEventExecutionState;
   private gates = new SchedulerGates({
     nodes: this.nodes,
     actionStats: this.actionStats,
     getActionId: (action) => this.getActionId(action),
+    isDisposed: () => this.disposed,
+    queueExecution: () => this.queueExecution(),
   });
   private delayControlState!: SchedulerDelayControlState;
 
@@ -887,9 +884,9 @@ export class Scheduler {
           this.idle().then(resolve)
         );
       } else if (
-        hasEventQueueWakeTimer(this.eventQueueWakeState) &&
+        this.gates.hasWakeTimer() &&
         ((this.eventQueue.length > 0 &&
-          isHeadEventParkedState(this.eventQueueWakeState)) ||
+          isHeadEventParkedState({ eventQueue: this.eventQueue })) ||
           this.hasDeferredDirtyEffectWork())
       ) {
         // A queued event is parked behind a throttled dependency. Wait for the
@@ -1292,14 +1289,12 @@ export class Scheduler {
    */
   dispose(): void {
     this.disposed = true;
-    // Clear all active debounce timers
-    this.gates.clearActiveDebounceTimers();
+    this.gates.cancelWake();
     if (this.pendingQueueTaskTimer !== null) {
       clearTimeout(this.pendingQueueTaskTimer);
       this.pendingQueueTaskTimer = null;
     }
     this.triggerIndex.clear();
-    cancelEventQueueWakeState(this.eventQueueWakeState);
     // Clean up diagnosis state
     if (this.diagnosisTimeout) {
       clearTimeout(this.diagnosisTimeout);
@@ -1483,7 +1478,6 @@ export class Scheduler {
   // read like one large object graph.
   private initializeSchedulerState(): void {
     this.diagnosisControlState = this.createDiagnosisControlState();
-    this.eventQueueWakeState = this.createEventQueueWakeState();
     this.writeIndex = this.createWriteIndex();
     this.delayControlState = this.createDelayControlState();
     this.eventPreflightDependencyState = this
@@ -1539,16 +1533,6 @@ export class Scheduler {
         this.idempotencyCheckMode = enabled;
       },
       runAction: (action) => this.run(action),
-    };
-  }
-
-  private createEventQueueWakeState(): EventQueueWakeState {
-    return {
-      timer: null,
-      wakeAt: null,
-      eventQueue: this.eventQueue,
-      isDisposed: () => this.disposed,
-      queueExecution: () => this.queueExecution(),
     };
   }
 
@@ -1823,7 +1807,6 @@ export class Scheduler {
       nodes: this.nodes,
       effects: this.nodes.effects,
       eventQueue: this.eventQueue,
-      eventQueueWakeState: this.eventQueueWakeState,
       idlePromises: this.idlePromises,
       consumeRerunAfterCurrentExecute: () => {
         const shouldRerun = this.rerunAfterCurrentExecute;
@@ -1840,6 +1823,8 @@ export class Scheduler {
       getNextDebounceRunTime: (action) => this.getNextDebounceRunTime(action),
       getNextEligibleRunTime: (action) => this.getNextEligibleRunTime(action),
       hasPendingLineageHeadEvent: () => this.hasPendingLineageHeadEvent(),
+      scheduleWake: (at) => this.gates.scheduleWake(at),
+      hasWakeTimer: () => this.gates.hasWakeTimer(),
       setScheduled: (scheduled) => {
         this.scheduled = scheduled;
       },
@@ -1913,8 +1898,7 @@ export class Scheduler {
         this.isDebouncedComputationWaiting(target),
       getNextDebounceRunTime: (target) => this.getNextDebounceRunTime(target),
       getNextEligibleRunTime: (target) => this.getNextEligibleRunTime(target),
-      scheduleEventQueueWake: (notBefore) =>
-        scheduleEventQueueWakeState(this.eventQueueWakeState, notBefore),
+      scheduleWake: (notBefore) => this.gates.scheduleWake(notBefore),
       lineageStatus: (originTx) => this.lineage.originStatus(originTx),
       releaseLineageEvent: (originTx, queuedEvent) => {
         this.lineage.release(originTx, queuedEvent);

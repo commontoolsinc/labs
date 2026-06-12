@@ -23,21 +23,17 @@ interface DebouncedComputationContext {
 
 export class SchedulerGates {
   private readonly stagedGates = new WeakMap<Action, SchedulerGateState>();
-  private readonly computationDebounceReady = new WeakSet<Action>();
   readonly computationDebounceFlushSeeds = new Set<Action>();
-  private readonly debounceTimers = new WeakMap<
-    Action,
-    ReturnType<typeof setTimeout>
-  >();
-  private readonly activeDebounceTimers = new Set<
-    ReturnType<typeof setTimeout>
-  >();
+  private wakeTimer: ReturnType<typeof setTimeout> | null = null;
+  private wakeAt: number | null = null;
 
   constructor(
     private readonly state: {
       readonly nodes: NodeRegistry;
       readonly actionStats: ReadonlyMap<string, ActionStats>;
       readonly getActionId: (action: Action) => string;
+      readonly isDisposed: () => boolean;
+      readonly queueExecution: () => void;
     },
   ) {}
 
@@ -127,6 +123,8 @@ export class SchedulerGates {
   }
 
   markActionHasRun(action: Action): void {
+    const gate = this.gate(action);
+    if (gate) delete gate.debounceReadyAt;
     this.armThrottleFromStats(action);
   }
 
@@ -164,7 +162,6 @@ export class SchedulerGates {
     options: { cancelTimer?: boolean } = {},
   ): void {
     const gate = this.gate(action);
-    this.computationDebounceReady.delete(action);
     if (gate) delete gate.debounceReadyAt;
     this.computationDebounceFlushSeeds.delete(action);
     if (options.cancelTimer ?? true) {
@@ -173,12 +170,8 @@ export class SchedulerGates {
   }
 
   cancelDebounceTimer(action: Action): void {
-    const timer = this.debounceTimers.get(action);
-    if (timer) {
-      clearTimeout(timer);
-      this.debounceTimers.delete(action);
-      this.activeDebounceTimers.delete(timer);
-    }
+    const gate = this.gate(action);
+    if (gate) delete gate.debounceReadyAt;
   }
 
   getNextDebounceRunTime(
@@ -193,8 +186,10 @@ export class SchedulerGates {
       return undefined;
     }
     if (!context.isInvalid(action)) return undefined;
-    if (this.computationDebounceReady.has(action)) return undefined;
-    return this.gate(action)?.debounceReadyAt;
+    const readyAt = this.gate(action)?.debounceReadyAt;
+    return readyAt !== undefined && readyAt > performance.now()
+      ? readyAt
+      : undefined;
   }
 
   isDebouncedComputationWaiting(
@@ -204,7 +199,6 @@ export class SchedulerGates {
     if (
       this.shouldDebouncePullComputation(action, context) &&
       context.isInvalid(action) &&
-      !this.computationDebounceReady.has(action) &&
       this.gate(action)?.debounceReadyAt === undefined
     ) {
       this.scheduleComputationDebounce(action, context);
@@ -243,16 +237,8 @@ export class SchedulerGates {
     const gate = this.mutableGate(action);
     const readyAt = performance.now() + debounceMs;
     gate.debounceReadyAt = readyAt;
-    const timer = setTimeout(() => {
-      this.debounceTimers.delete(action);
-      this.activeDebounceTimers.delete(timer);
-      delete this.gate(action)?.debounceReadyAt;
-      context.pending.add(action);
-      context.queueExecution();
-    }, debounceMs);
+    this.scheduleWake(readyAt);
 
-    this.debounceTimers.set(action, timer);
-    this.activeDebounceTimers.add(timer);
     context.logDebounce(
       `[DEBOUNCE] Action ${this.state.getActionId(action)} ` +
         `debounced for ${debounceMs}ms`,
@@ -323,14 +309,37 @@ export class SchedulerGates {
   }
 
   hasActiveDebounceTimer(action: Action): boolean {
-    return this.debounceTimers.has(action);
+    const readyAt = this.gate(action)?.debounceReadyAt;
+    return readyAt !== undefined && readyAt > performance.now();
   }
 
-  clearActiveDebounceTimers(): void {
-    for (const timer of this.activeDebounceTimers) {
-      clearTimeout(timer);
+  scheduleWake(at: number): void {
+    if (this.state.isDisposed()) return;
+    if (this.wakeAt !== null && this.wakeAt <= at && this.wakeTimer !== null) {
+      return;
     }
-    this.activeDebounceTimers.clear();
+
+    this.cancelWake();
+
+    const delay = Math.max(0, at - performance.now());
+    this.wakeAt = at;
+    this.wakeTimer = setTimeout(() => {
+      this.wakeTimer = null;
+      this.wakeAt = null;
+      this.state.queueExecution();
+    }, delay);
+  }
+
+  cancelWake(): void {
+    if (this.wakeTimer !== null) {
+      clearTimeout(this.wakeTimer);
+      this.wakeTimer = null;
+    }
+    this.wakeAt = null;
+  }
+
+  hasWakeTimer(): boolean {
+    return this.wakeTimer !== null;
   }
 
   clearBackoff(node: SchedulerNode): void {
@@ -346,29 +355,13 @@ export class SchedulerGates {
     const debounceMs = this.gate(action)?.debounceMs;
     if (!debounceMs || debounceMs <= 0) return;
 
-    this.computationDebounceReady.delete(action);
     this.cancelDebounceTimer(action);
 
     const gate = this.mutableGate(action);
     const readyAt = now + debounceMs;
     gate.debounceReadyAt = readyAt;
-    const timer = setTimeout(() => {
-      this.debounceTimers.delete(action);
-      this.activeDebounceTimers.delete(timer);
-      delete this.gate(action)?.debounceReadyAt;
+    this.scheduleWake(readyAt);
 
-      if (!context.computations.has(action) || !context.isInvalid(action)) {
-        return;
-      }
-
-      this.computationDebounceReady.add(action);
-      this.computationDebounceFlushSeeds.add(action);
-      context.pending.add(action);
-      context.queueExecution();
-    }, debounceMs);
-
-    this.debounceTimers.set(action, timer);
-    this.activeDebounceTimers.add(timer);
     context.logDebounce(
       `[DEBOUNCE] Computation ${this.state.getActionId(action)} ` +
         `trailing flush scheduled for ${debounceMs}ms`,

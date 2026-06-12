@@ -42,51 +42,8 @@ const logger = getLogger("scheduler", {
 });
 const EVENT_COMMIT_TELEMETRY_WRITE_LIMIT = 25;
 
-export interface EventQueueWakeState {
-  timer: ReturnType<typeof setTimeout> | null;
-  wakeAt: number | null;
-  readonly eventQueue: readonly QueuedEvent[];
-  readonly isDisposed: () => boolean;
-  readonly queueExecution: () => void;
-}
-
-export function scheduleEventQueueWake(
-  state: EventQueueWakeState,
-  notBefore: number,
-): void {
-  if (state.isDisposed()) return;
-  if (
-    state.wakeAt !== null && state.wakeAt <= notBefore &&
-    state.timer !== null
-  ) {
-    return;
-  }
-
-  cancelEventQueueWake(state);
-
-  const delay = Math.max(0, notBefore - performance.now());
-  state.wakeAt = notBefore;
-  state.timer = setTimeout(() => {
-    state.timer = null;
-    state.wakeAt = null;
-    state.queueExecution();
-  }, delay);
-}
-
-export function cancelEventQueueWake(state: EventQueueWakeState): void {
-  if (state.timer !== null) {
-    clearTimeout(state.timer);
-    state.timer = null;
-  }
-  state.wakeAt = null;
-}
-
-export function hasEventQueueWakeTimer(state: EventQueueWakeState): boolean {
-  return state.timer !== null;
-}
-
 export function isHeadEventParked(
-  state: Pick<EventQueueWakeState, "eventQueue">,
+  state: { readonly eventQueue: readonly QueuedEvent[] },
   now: number = performance.now(),
 ): boolean {
   const headEvent = state.eventQueue[0];
@@ -246,7 +203,7 @@ export interface SchedulerEventExecutionState {
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
-  readonly scheduleEventQueueWake: (notBefore: number) => void;
+  readonly scheduleWake: (notBefore: number) => void;
   readonly lineageStatus: (
     originTx: IExtendedStorageTransaction,
   ) => OriginStatus;
@@ -285,7 +242,7 @@ export function preflightQueuedEventDependencies(state: {
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
-  readonly scheduleEventQueueWake: (notBefore: number) => void;
+  readonly scheduleWake: (notBefore: number) => void;
 }, queuedEvent: QueuedEvent): EventDependencyPreflightResult {
   const { handler, event: eventValue } = queuedEvent;
   const preflightStats = createEventPreflightTraceContext();
@@ -411,7 +368,7 @@ export function preflightQueuedEventDependencies(state: {
         shouldSkipEvent = true;
       } else if (eventDirtyPlan.nextEligibleAt !== undefined) {
         queuedEvent.notBefore = eventDirtyPlan.nextEligibleAt;
-        state.scheduleEventQueueWake(eventDirtyPlan.nextEligibleAt);
+        state.scheduleWake(eventDirtyPlan.nextEligibleAt);
         shouldSkipEvent = true;
       }
     } finally {
@@ -482,7 +439,7 @@ export async function processPullQueuedEventDuringExecute(
     queuedEvent.notBefore !== undefined &&
     queuedEvent.notBefore > performance.now()
   ) {
-    state.scheduleEventQueueWake(queuedEvent.notBefore);
+    state.scheduleWake(queuedEvent.notBefore);
     return;
   }
 
@@ -513,8 +470,7 @@ export async function processPullQueuedEventDuringExecute(
         state.isDebouncedComputationWaiting(dep),
       getNextDebounceRunTime: (dep) => state.getNextDebounceRunTime(dep),
       getNextEligibleRunTime: (dep) => state.getNextEligibleRunTime(dep),
-      scheduleEventQueueWake: (notBefore) =>
-        state.scheduleEventQueueWake(notBefore),
+      scheduleWake: (notBefore) => state.scheduleWake(notBefore),
     }, queuedEvent);
     shouldSkipEvent = preflight.shouldSkipEvent;
 
