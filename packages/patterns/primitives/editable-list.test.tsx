@@ -11,14 +11,24 @@
  *   identity, not content, so two items with the SAME label stay addressable
  * - clearDone
  * - no-op safety: a detached object literal matches nothing
+ * - held-reference survival: a reference stashed in a cell BEFORE an
+ *   update/toggle (a selection cell, a MasterDetail holder, ...) must still
+ *   `equals()`-match and still drive toggle/remove AFTER the item is patched.
+ *   This guards the update-in-place contract: update/toggle write through the
+ *   element's cells; replacing the array slot with a fresh object literal
+ *   would re-mint entity identity and orphan every held reference.
  *
  * Run: deno task cf test packages/patterns/primitives/editable-list.test.tsx --verbose
  */
-import { action, computed, pattern } from "commonfabric";
+import { action, computed, equals, pattern, Writable } from "commonfabric";
 import EditableList, { type EditableListItem } from "./editable-list.tsx";
 
 export default pattern(() => {
   const list = EditableList({});
+
+  // Simulates an external holder (selection cell / MasterDetail) that read an
+  // item once and keeps the reference across later mutations.
+  const held = new Writable<EditableListItem | null>(null);
 
   // ==========================================================================
   // Actions
@@ -104,6 +114,31 @@ export default pattern(() => {
     list.toggleItem.send({ item: { label: "DupChanged", done: true } });
   });
 
+  // Held-reference survival. Add a fresh target, STASH a reference to it in
+  // the `held` cell, then patch the item via updateItem. If update replaced
+  // the array slot with a fresh literal, the entity would be re-minted and
+  // the held reference orphaned: equals() would stop matching and the
+  // toggle/remove sent with the stale-but-once-valid reference would no-op.
+  const add_held_target = action(() => {
+    list.addItem.send({ label: "Held" });
+  });
+  const stash_held = action(() => {
+    const item = list.items[2];
+    if (item) held.set(item);
+  });
+  const update_held_target = action(() => {
+    const item = list.items[2];
+    if (item) list.updateItem.send({ item, changes: { label: "HeldRenamed" } });
+  });
+  const toggle_via_held = action(() => {
+    const h = held.get();
+    if (h) list.toggleItem.send({ item: h, done: true });
+  });
+  const remove_via_held = action(() => {
+    const h = held.get();
+    if (h) list.removeItem.send({ item: h });
+  });
+
   // ==========================================================================
   // Assertions
   // ==========================================================================
@@ -183,6 +218,29 @@ export default pattern(() => {
     list.items[0]?.done === false && list.items[1]?.done === true
   );
 
+  // Held-reference survival assertions.
+  const assert_three_after_held_add = computed(() => list.total === 3);
+  const assert_held_stashed = computed(() => {
+    const h = held.get();
+    return h !== null && equals(list.items[2], h);
+  });
+  const assert_held_renamed = computed(() =>
+    list.items[2]?.label === "HeldRenamed"
+  );
+  // KEY: the stale-but-once-valid reference still equals()-matches the item
+  // AFTER updateItem patched it.
+  const assert_held_survives_update = computed(() => {
+    const h = held.get();
+    return h !== null && equals(list.items[2], h);
+  });
+  // KEY: the held reference still DRIVES mutations after the update.
+  const assert_toggled_via_held = computed(() => list.items[2]?.done === true);
+  const assert_removed_via_held = computed(() =>
+    list.total === 2 &&
+    list.items.find((i: EditableListItem) => i.label === "HeldRenamed") ===
+      undefined
+  );
+
   // ==========================================================================
   // Test Sequence
   // ==========================================================================
@@ -255,6 +313,20 @@ export default pattern(() => {
       { assertion: assert_noop_count },
       { assertion: assert_noop_labels },
       { assertion: assert_noop_done_flags },
+
+      // Held-reference survival: stash → update → the old reference still
+      // matches and still drives toggle/remove.
+      { action: add_held_target },
+      { assertion: assert_three_after_held_add },
+      { action: stash_held },
+      { assertion: assert_held_stashed },
+      { action: update_held_target },
+      { assertion: assert_held_renamed },
+      { assertion: assert_held_survives_update },
+      { action: toggle_via_held },
+      { assertion: assert_toggled_via_held },
+      { action: remove_via_held },
+      { assertion: assert_removed_via_held },
     ],
     list,
   };

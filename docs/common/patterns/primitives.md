@@ -70,6 +70,17 @@ entity identity that survives reorder and field mutation, and `equals()` /
 `remove()` compare by that identity — a row rendered from `items.map(...)`
 already holds the reference it needs to send.
 
+Updates must also **preserve** that identity: patch fields through the
+element's cells (`items.key(i).key(field).set(value)` — the same route the
+default row's `$checked` / `$value` two-way binding writes through), never by
+replacing the array slot with a fresh object literal
+(`items.set(current.toSpliced(i, 1, { ...old, ...changes }))`). A fresh
+literal re-mints the entity identity, so every previously-held reference to
+that item — a selection cell, a MasterDetail holder, any caller that read it
+before the update — stops `equals()`-matching and later mutations sent with it
+silently no-op. Structural mutations (remove, clear-completed) genuinely drop
+entries, so rebuilding the array there is correct.
+
 Two things are explicitly **not** the identity model:
 
 - **Array indices.** Index-based selection/mutation breaks under reordering and
@@ -146,7 +157,9 @@ rendering without that machinery.
 - Item type carries whatever the model needs — **no `id` field**; an index
   signature lets callers extend it.
 - Core handlers address items by live reference (`equals()` /
-  `cell.remove(item)`), bound to the caller's `Writable<T[]>`.
+  `cell.remove(item)`), bound to the caller's `Writable<T[]>`; updates patch
+  fields through element cells (`items.key(i).key(field).set(...)`), never by
+  replacing the slot with a fresh literal.
 - Counts / derived values are **named `computed` cells** (so they resolve
   through `runSynced` + `.get()` in tests).
 - `[UI]` is a static `VNode`; gate empty/non-empty with `ifElse` as a *child* of

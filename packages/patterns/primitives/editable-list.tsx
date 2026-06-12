@@ -40,6 +40,16 @@
  * docs/common/concepts/identity.md and
  * docs/development/debugging/gotchas/custom-id-property-pitfall.md.
  *
+ * Updates must also PRESERVE that identity: `updateItem`/`toggleItem` write
+ * through the element's cells (`items.key(i).key(field).set(...)` — the same
+ * route as the default row's `$checked={item.done}` binding). Replacing an
+ * array slot with a fresh object literal (`toSpliced(i, 1, { ...old, ...new })`)
+ * re-mints the entity identity and orphans every previously-held reference —
+ * a selection cell or any caller that read the item earlier stops
+ * `equals()`-matching it, and later mutations sent with that reference
+ * silently no-op. Structural ops (remove, clearDone) genuinely drop entries,
+ * so rebuilding the array there is correct.
+ *
  * ### Agents address items the same way: pass the item
  *
  * There is deliberately NO text-addressed ("ByText") or string-token layer.
@@ -209,7 +219,18 @@ const updateItemHandler = handler<
 >(({ item, changes }, { items }) => {
   const current = items.get() ?? [];
   const i = current.findIndex((x) => equals(x, item));
-  if (i >= 0) items.set(current.toSpliced(i, 1, { ...current[i], ...changes }));
+  if (i < 0) return;
+  // Write THROUGH the element's cells (`items.key(i)` resolves through the
+  // slot's link into the entity doc) — never replace the slot with a fresh
+  // object literal: a fresh literal re-mints entity identity, so every
+  // previously-held reference to the item (a selection cell, a caller that
+  // read it earlier) stops equals()-matching and later mutations with it
+  // silently no-op. Same mechanism the default row's `$checked={item.done}`
+  // two-way binding uses.
+  const element = items.key(i);
+  for (const k of Object.keys(changes)) {
+    element.key(k).set(changes[k]);
+  }
 });
 
 const toggleItemHandler = handler<
@@ -218,14 +239,9 @@ const toggleItemHandler = handler<
 >(({ item, done }, { items }) => {
   const current = items.get() ?? [];
   const i = current.findIndex((x) => equals(x, item));
-  if (i >= 0) {
-    items.set(
-      current.toSpliced(i, 1, {
-        ...current[i],
-        done: done ?? !current[i].done,
-      }),
-    );
-  }
+  // Per-field write through the element cell — see updateItemHandler for why
+  // slot replacement (toSpliced with a fresh literal) is forbidden here.
+  if (i >= 0) items.key(i).key("done").set(done ?? !current[i].done);
 });
 
 const clearDoneHandler = handler<
