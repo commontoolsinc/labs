@@ -201,6 +201,48 @@ type SchedulerStorageRehydrationOptions =
     awaitSync?: boolean;
   };
 
+type SchedulerRegistrationInput = PopulateDependencies | ReactivityLog;
+type SchedulerRegisterOptions = {
+  isEffect?: boolean;
+  debounce?: number;
+  noDebounce?: boolean;
+  throttle?: number;
+  changeGroup?: ChangeGroup;
+  rehydrateFromStorage?: SchedulerStorageRehydrationOptions;
+};
+
+function isReactivityLog(value: unknown): value is ReactivityLog {
+  const candidate = value as Partial<ReactivityLog> | null;
+  return candidate !== null &&
+    typeof candidate === "object" &&
+    Array.isArray(candidate.reads) &&
+    Array.isArray(candidate.shallowReads) &&
+    Array.isArray(candidate.writes);
+}
+
+function normalizeRegistrationArgs(
+  dependenciesOrOptions?: SchedulerRegistrationInput | SchedulerRegisterOptions,
+  options: SchedulerRegisterOptions = {},
+): {
+  dependencies?: SchedulerRegistrationInput;
+  options: SchedulerRegisterOptions;
+} {
+  if (
+    dependenciesOrOptions === undefined ||
+    (typeof dependenciesOrOptions !== "function" &&
+      !isReactivityLog(dependenciesOrOptions))
+  ) {
+    return {
+      options: dependenciesOrOptions ?? options,
+    };
+  }
+
+  return {
+    dependencies: dependenciesOrOptions,
+    options,
+  };
+}
+
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
 export type {
@@ -446,29 +488,27 @@ export class Scheduler {
   /**
    * Subscribes an action to run when its dependencies change.
    *
-   * The action will be scheduled to run immediately. Before running, the
-   * populateDependencies callback will be called to discover what cells the
-   * action will read. After running, the scheduler automatically re-subscribes
-   * using the reactivity log from the run.
+   * The action will be scheduled to run immediately. After running, the
+   * scheduler automatically re-subscribes using the reactivity log from the
+   * run.
    *
    * @param action The action to subscribe
-   * @param populateDependencies Callback to discover the action's read dependencies,
-   *   or a ReactivityLog for backwards compatibility (deprecated)
+   * @param dependencies Optional callback or immediate ReactivityLog for
+   *   backwards compatibility
    * @param options Configuration options for the subscription
    * @returns A cancel function to unsubscribe
    */
   register(
     action: Action,
-    populateDependencies: PopulateDependencies | ReactivityLog,
-    options: {
-      isEffect?: boolean;
-      debounce?: number;
-      noDebounce?: boolean;
-      throttle?: number;
-      changeGroup?: ChangeGroup;
-      rehydrateFromStorage?: SchedulerStorageRehydrationOptions;
-    } = {},
+    dependenciesOrOptions?:
+      | SchedulerRegistrationInput
+      | SchedulerRegisterOptions,
+    maybeOptions: SchedulerRegisterOptions = {},
   ): Cancel {
+    const { dependencies, options } = normalizeRegistrationArgs(
+      dependenciesOrOptions,
+      maybeOptions,
+    );
     const { rehydrateFromStorage } = options;
     if (rehydrateFromStorage) {
       this.setActionObservationIdentity(action, rehydrateFromStorage);
@@ -485,7 +525,7 @@ export class Scheduler {
     const cancel = subscribePullSchedulerAction(
       this.subscribeActionState,
       action,
-      populateDependencies,
+      dependencies,
       subscribeOptions,
     );
     if (rehydrateFromStorage) {
@@ -500,17 +540,12 @@ export class Scheduler {
    */
   subscribe(
     action: Action,
-    populateDependencies: PopulateDependencies | ReactivityLog,
-    options: {
-      isEffect?: boolean;
-      debounce?: number;
-      noDebounce?: boolean;
-      throttle?: number;
-      changeGroup?: ChangeGroup;
-      rehydrateFromStorage?: SchedulerStorageRehydrationOptions;
-    } = {},
+    dependenciesOrOptions?:
+      | SchedulerRegistrationInput
+      | SchedulerRegisterOptions,
+    maybeOptions: SchedulerRegisterOptions = {},
   ): Cancel {
-    return this.register(action, populateDependencies, options);
+    return this.register(action, dependenciesOrOptions, maybeOptions);
   }
 
   /**

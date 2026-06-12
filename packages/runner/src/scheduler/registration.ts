@@ -135,14 +135,14 @@ export interface SchedulerSubscribeActionState {
 export function subscribePullSchedulerAction(
   state: SchedulerSubscribeActionState,
   action: Action,
-  populateDependencies: PopulateDependencies | ReactivityLog,
+  populateDependencies: PopulateDependencies | ReactivityLog | undefined,
   options: SchedulerSubscribeOptions = {},
 ): Cancel {
-  let populateDependenciesEntry: PopulateDependenciesEntry;
+  let populateDependenciesEntry: PopulateDependenciesEntry | undefined;
   let immediateLog: ReactivityLog | undefined;
   if (typeof populateDependencies === "function") {
     populateDependenciesEntry = populateDependencies;
-  } else {
+  } else if (populateDependencies !== undefined) {
     immediateLog = populateDependencies;
     populateDependenciesEntry = immediateLog;
   }
@@ -182,6 +182,9 @@ export function subscribePullSchedulerAction(
 
   registerParentChildAction(state.subscriptionState, action);
   const record = state.subscriptionState.nodes.get(action);
+  if (record) {
+    record.declaredReads = resolveDeclaredReads(action);
+  }
   const parentRecord = state.subscriptionState.nodes.parentOf(action);
   if (
     !actionIsEffect &&
@@ -204,7 +207,9 @@ export function subscribePullSchedulerAction(
     ],
   );
 
-  state.populateDependenciesCallbacks.set(action, populateDependenciesEntry);
+  if (populateDependenciesEntry !== undefined) {
+    state.populateDependenciesCallbacks.set(action, populateDependenciesEntry);
+  }
 
   const surface = resolveRegistrationSurface(action, immediateLog);
   if (!actionIsEffect && surface.length > 0) {
@@ -258,6 +263,13 @@ export function resolveRegistrationSurface(
     : (immediateLog?.writes ?? []);
   return sortAndCompactPaths(
     filterIgnoredAddresses(surface, annotated.ignoredSchedulingWrites ?? []),
+  );
+}
+
+export function resolveDeclaredReads(action: Action): IMemorySpaceAddress[] {
+  const annotated = action as Partial<TelemetryAnnotations>;
+  return sortAndCompactPaths(
+    (annotated.reads ?? []).map(toMemorySpaceAddress),
   );
 }
 
