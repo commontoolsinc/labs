@@ -43,9 +43,6 @@ describe("default-app notebook reload integration test", () => {
       identity,
     });
 
-    await waitFor(async () => {
-      return await setSchedulerPullMode(page, true);
-    });
     await waitFor(async () => !!(await clickButtonWithText(page, "Notes")));
     await waitFor(async () =>
       !!(await clickButtonWithText(page, "New Notebook"))
@@ -215,22 +212,6 @@ async function collectBrowserLoadMetrics(page: Page): Promise<{
       postRenderStableMs: round(postRenderStableMs)!,
     };
   });
-}
-
-async function setSchedulerPullMode(
-  page: Page,
-  pullMode: boolean,
-): Promise<boolean> {
-  return await page.evaluate<Promise<boolean>, [boolean]>(
-    async (pullMode) => {
-      const rt = globalThis.commonfabric?.rt;
-      if (!rt?.setPullMode || !rt?.idle) return false;
-      await rt.setPullMode(pullMode);
-      await rt.idle();
-      return true;
-    },
-    { args: [pullMode] },
-  );
 }
 
 async function resetEventInvocationTrace(page: Page): Promise<boolean> {

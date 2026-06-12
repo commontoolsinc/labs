@@ -3,7 +3,10 @@ import {
   type FabricValue,
   nativeFromFabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
+import {
+  getPersistentSchedulerStateConfig,
+  type SchedulerActionSnapshotCursor,
+} from "@commonfabric/memory/v2";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   toCompactDebugString,
@@ -33,6 +36,10 @@ import {
 } from "./builder/pattern.ts";
 import { type Cell, createCell, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
+import {
+  isSchedulerActionObservation,
+  type PersistedSchedulerObservationSnapshot,
+} from "./scheduler/persistent-observation.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import {
   findAllWriteRedirectCells,
@@ -511,16 +518,16 @@ type SchedulerRehydrationSubscriptionOptions = {
     space: MemorySpace;
     pieceId: string;
     processGeneration: number;
-    awaitSync?: boolean;
+    snapshotsByActionId?: ReadonlyMap<
+      string,
+      PersistedSchedulerObservationSnapshot
+    >;
   };
 };
 
 // Options shared by run()/startWithTx()/startAfterSuccessfulCommit().
 type RunnerRunOptions = {
   doNotUpdateOnPatternChange?: boolean;
-  // Resumed-from-synced-state: hold each action's initial rehydration/run until
-  // the space has finished syncing, so consumers don't race the data.
-  awaitSyncBeforeInitialRun?: boolean;
 };
 
 function dedupeNormalizedLinks(
@@ -1115,9 +1122,7 @@ export class Runner {
       givenPattern?: Pattern;
       doNotUpdateOnPatternChange?: boolean;
       rehydrateSchedulerFromStorage?: boolean;
-      // Resumed-from-synced-state: hold each action's initial rehydration/run
-      // until the space has finished syncing, so consumers don't race the data.
-      awaitSyncBeforeInitialRun?: boolean;
+      schedulerRehydration?: SchedulerRehydrationSubscriptionOptions;
     } = {},
   ): void {
     const { tx, givenPattern, doNotUpdateOnPatternChange } = options;
@@ -1153,13 +1158,12 @@ export class Runner {
       // Instantiate nodes
       const actualTx = useTx ?? this.runtime.edit();
       const shouldCommit = !useTx;
-      const schedulerRehydration = options.rehydrateSchedulerFromStorage ===
-          false
-        ? {}
-        : this.schedulerRehydrationOptions(
-          resultCell,
-          options.awaitSyncBeforeInitialRun,
-        );
+      const schedulerRehydration = options.schedulerRehydration ??
+        (options.rehydrateSchedulerFromStorage === false
+          ? {}
+          : this.schedulerRehydrationOptions(
+            resultCell,
+          ));
       try {
         for (const node of pattern.nodes) {
           const baseCell = resultCell.withTx(actualTx);
@@ -1409,7 +1413,8 @@ export class Runner {
     // scheduler back up in a fresh runtime. Without this, resumed pieces can
     // observe the last persisted result but miss subsequent input updates.
     return this.syncCellsForRunningPattern(rootCell, resolvedPattern)
-      .then(() => {
+      .then(() => this.loadSchedulerRehydrationSnapshots(rootCell))
+      .then((snapshotsByActionId) => {
         // we may already be in the midst of starting this, so don't start again
         if (this.cancels.has(this.getDocKey(rootCell))) {
           return true;
@@ -1418,11 +1423,10 @@ export class Runner {
         try {
           this.startCore(rootCell, {
             givenPattern: resolvedPattern,
-            // This pattern is resumed from a synced state (it just awaited
-            // syncCellsForRunningPattern): hold each action's initial run until
-            // the space finishes syncing so we don't race the data (e.g. maps
-            // reconciling an empty array, then re-running once it streams in).
-            awaitSyncBeforeInitialRun: true,
+            schedulerRehydration: this.schedulerRehydrationOptions(
+              rootCell,
+              snapshotsByActionId,
+            ),
           });
         } catch (err) {
           return Promise.reject(err);
@@ -1445,7 +1449,6 @@ export class Runner {
       tx,
       givenPattern,
       doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
-      awaitSyncBeforeInitialRun: options.awaitSyncBeforeInitialRun,
     });
   }
 
@@ -1751,7 +1754,10 @@ export class Runner {
 
   private schedulerRehydrationOptions(
     resultCell: Cell<any>,
-    awaitSync?: boolean,
+    snapshotsByActionId?: ReadonlyMap<
+      string,
+      PersistedSchedulerObservationSnapshot
+    >,
   ): SchedulerRehydrationSubscriptionOptions {
     if (!getPersistentSchedulerStateConfig()) {
       return {};
@@ -1762,9 +1768,59 @@ export class Runner {
         space,
         pieceId: `${scope}:${id}`,
         processGeneration: 0,
-        ...(awaitSync ? { awaitSync: true } : {}),
+        ...(snapshotsByActionId !== undefined ? { snapshotsByActionId } : {}),
       },
     };
+  }
+
+  private async loadSchedulerRehydrationSnapshots(
+    resultCell: Cell<any>,
+  ): Promise<
+    | ReadonlyMap<string, PersistedSchedulerObservationSnapshot>
+    | undefined
+  > {
+    if (!getPersistentSchedulerStateConfig()) {
+      return undefined;
+    }
+
+    const { space, id, scope } = resultCell.getAsNormalizedFullLink();
+    const provider = this.runtime.storageManager.open(space);
+    const listSnapshots = provider.listSchedulerActionSnapshots;
+    if (!listSnapshots) {
+      return undefined;
+    }
+
+    const snapshotsByActionId = new Map<
+      string,
+      PersistedSchedulerObservationSnapshot
+    >();
+    let cursor: SchedulerActionSnapshotCursor | undefined;
+    do {
+      const page = await listSnapshots.call(provider, {
+        ownerSpace: space,
+        pieceId: `${scope}:${id}`,
+        processGeneration: 0,
+        ...(cursor ? { cursor } : {}),
+      });
+      for (const snapshot of page.snapshots) {
+        if (!isSchedulerActionObservation(snapshot.observation)) continue;
+        snapshotsByActionId.set(snapshot.observation.actionId, {
+          observation: snapshot.observation,
+          ...(snapshot.directDirtySeq !== undefined
+            ? { directDirtySeq: snapshot.directDirtySeq }
+            : {}),
+          ...(snapshot.staleSeq !== undefined
+            ? { staleSeq: snapshot.staleSeq }
+            : {}),
+          ...(snapshot.unknownReason !== undefined
+            ? { unknownReason: snapshot.unknownReason }
+            : {}),
+        });
+      }
+      cursor = page.nextCursor;
+    } while (cursor !== undefined);
+
+    return snapshotsByActionId;
   }
 
   private async syncCellsForRunningPattern(
@@ -1951,7 +2007,6 @@ export class Runner {
             resultCell,
             addCancel,
             pattern,
-            schedulerRehydration,
           );
           break;
         default:
@@ -3727,12 +3782,6 @@ export class Runner {
               },
             }
             : {}),
-          // Propagate the resumed-from-synced-state flag so container-minting
-          // builtins (map/filter/flatmap) defer their per-element sub-pattern
-          // runs until sync completes too.
-          ...(schedulerRehydration.rehydrateFromStorage?.awaitSync
-            ? { awaitSync: true }
-            : {}),
         },
         processCell,
         this.runtime,
@@ -3901,7 +3950,6 @@ export class Runner {
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
-    schedulerRehydration: SchedulerRehydrationSubscriptionOptions = {},
   ) {
     const parentResultCell = resultCell;
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
@@ -4038,10 +4086,7 @@ export class Runner {
         parentResultCell.space,
       );
     }
-    this.run(tx, patternImpl, inputs, childResultCell, {
-      awaitSyncBeforeInitialRun: schedulerRehydration.rehydrateFromStorage
-        ?.awaitSync,
-    });
+    this.run(tx, patternImpl, inputs, childResultCell);
 
     if (sendToBindings) {
       sendValueToBinding(

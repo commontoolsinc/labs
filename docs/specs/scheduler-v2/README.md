@@ -114,12 +114,14 @@ document (its internal/result cell, per the per-internal-cell model of #3911 —
 the pattern builder structurally allows only one output redirect, so this
 needs no enforcement); statically-resolvable side-write targets (a passed-in
 cell bound to a fixed link — just additional output documents); and declared
-materializer envelopes for dynamic side-writes (§4.3). What disappears is not
-side-writing — it is *write-set discovery*: nothing about what a node can
-write is learned from runs, so current-known/historical write tracking
-disappears and the writer index is a static map. The price of side-writing is
-the idempotency contract (§4.2), which the idempotency validator enforces in
-tests.
+materializer envelopes for dynamic side-writes (§4.3). A registration-time
+immediate `ReactivityLog` is also a declaration channel: when action
+annotations do not supply a write surface, the log's writes seed the same
+static surface, and later run logs never broaden it. What disappears is not
+side-writing — it is *write-set discovery*: nothing about what a node can write
+is learned from runs, so current-known/historical write tracking disappears
+and the writer index is a static map. The price of side-writing is the
+idempotency contract (§4.2), which the idempotency validator enforces in tests.
 
 **P5 — Self-identification through the transaction.** Every run's transaction
 carries a reference to its originating node (object identity, not an id
@@ -306,7 +308,7 @@ were entangled with.
 ```typescript
 register(node: NodeSpec, opts: {
   mode: "fresh" | "resume";       // §9.2
-  gate?: { debounce?: ms; noAutoDebounce?: boolean; throttle?: ms };
+  gate?: { debounce?: ms; noDebounce?: boolean; throttle?: ms };
 }): Cancel
 ```
 
@@ -658,6 +660,11 @@ correctness comes from cancellation, not staging:
      (Future server-routed/cross-runtime event delivery would reopen this
      with an origin-attestation design; deferred until such a path
      exists.)
+   If the send observes that its origin transaction is already settled, it
+   does not create pending lineage: an already-committed origin is treated as
+   confirmed immediately, and an already-failed origin is treated as failed
+   immediately so descendants cancel or drop instead of waiting for a callback
+   that will never arrive.
 2. Client-side, the runtime keeps a lineage registry: origin tx →
    {queued events, started pieces}. When an origin's failure becomes known
    locally, undispatched descendant events (parked or queued) are cancelled
@@ -787,9 +794,11 @@ eligible(N) = now ≥ eligibleAt(N)
 
 - **Manual debounce / throttle** — per node, via registration options or the
   control API; persisted as part of the observation (§9.3).
-- **Auto-debounce** — effects (never computations, never `cell.pull` roots)
-  averaging above a threshold after K runs get a default debounce unless
-  opted out. Pure policy: adjusts `gate.debounce`.
+- **Auto-debounce** — effects (never computations) averaging above a threshold
+  after K runs get a default debounce unless `noDebounce` is set.
+  `cell.pull()` sets `noDebounce: true` on its ephemeral effect, so pull roots
+  opt out explicitly rather than through a write-surface proxy. Pure policy:
+  adjusts `gate.debounce`.
 - **Cycle backoff** — replaces v1's cycle-aware debounce *and* cycle breaker
   with the §7.7 escalating gate.
 

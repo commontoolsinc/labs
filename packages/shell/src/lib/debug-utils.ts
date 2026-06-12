@@ -79,12 +79,10 @@ export interface TriggerTraceChangeSummary {
   pathLength: number;
   entryCount: number;
   directSchedules: number;
-  downstreamSchedules: number;
   beforeKinds: string[];
   afterKinds: string[];
   writers: string[];
   topDirectActions: [string, number][];
-  topDownstreamEffects: [string, number][];
 }
 
 export interface ExplainedTriggerTraceChange extends TriggerTraceChangeSummary {
@@ -248,7 +246,6 @@ export function summarizeTriggerTraceEntries(
     beforeKinds: Set<string>;
     afterKinds: Set<string>;
     actions: Map<string, number>;
-    downstreamEffects: Map<string, number>;
   }>();
 
   for (const entry of filtered) {
@@ -273,18 +270,15 @@ export function summarizeTriggerTraceEntries(
           pathLength: entry.path.length,
           entryCount: 0,
           directSchedules: 0,
-          downstreamSchedules: 0,
           beforeKinds: [],
           afterKinds: [],
           writers: [],
           topDirectActions: [],
-          topDownstreamEffects: [],
         },
         writers: new Set(),
         beforeKinds: new Set(),
         afterKinds: new Set(),
         actions: new Map(),
-        downstreamEffects: new Map(),
       };
       grouped.set(changeKey, group);
     }
@@ -300,13 +294,6 @@ export function summarizeTriggerTraceEntries(
         action.actionId,
         (group.actions.get(action.actionId) ?? 0) + 1,
       );
-      for (const effect of action.scheduledEffects) {
-        group.summary.downstreamSchedules++;
-        group.downstreamEffects.set(
-          effect.actionId,
-          (group.downstreamEffects.get(effect.actionId) ?? 0) + 1,
-        );
-      }
     }
   }
 
@@ -319,14 +306,8 @@ export function summarizeTriggerTraceEntries(
       topDirectActions: [...group.actions.entries()]
         .sort((a, b) => b[1] - a[1])
         .slice(0, 8),
-      topDownstreamEffects: [...group.downstreamEffects.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 8),
     }))
-    .sort((a, b) =>
-      (b.directSchedules + b.downstreamSchedules) -
-      (a.directSchedules + a.downstreamSchedules)
-    )
+    .sort((a, b) => b.directSchedules - a.directSchedules)
     .slice(0, limit);
 
   return {

@@ -4926,3 +4926,349 @@ packages/runner/src/scheduler/run.ts:655:  const throttleMs = state.getThrottle(
     `595 passed (3104 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m7s`.
   - Expected noisy passing logs remain: scheduler event/preflight/retry/error
     logs and write-surface warnings in wish fixtures.
+
+## 08/7.1-piece-level-resume
+
+- [x] pending — resumed pieces now preload scheduler snapshots with one
+  piece-scoped query and apply them synchronously during node registration.
+- Reviewer poll:
+  - No new reviewer verdict was present after the latest Phase 5 progress
+    markers at the start of this heartbeat.
+- Shape:
+  - `@commonfabric/memory/v2` already accepts
+    `listSchedulerActionSnapshots({ pieceId, processGeneration })` without an
+    `actionId`, so no memory API extension was needed for this step.
+  - The resumed `runtime.start(...)` path now awaits the existing
+    `syncCellsForRunningPattern(...)` call, loads all persisted scheduler
+    snapshots for the piece, and passes them into `startCore(...)` as a map by
+    `actionId`.
+  - Scheduler registration applies a matching preloaded observation
+    synchronously. Missing, invalid, or fingerprint-mismatched entries fall
+    back to the normal initial run.
+  - The older async per-action rehydration path remains for non-resume
+    registration paths and will be deleted in Phase 7.2.
+  - `reload-rehydration.test.ts` now restarts runtime B via
+    `runtime.start(resultCell)` and asserts exactly one snapshot query shaped
+    as `{ ownerSpace, pieceId, processGeneration }`, with no `actionId`.
+  - `scheduler-observations.test.ts` adds a unit guard proving preloaded
+    snapshots do not call the storage provider again during registration.
+- Recordings:
+  - `deno fmt` on the touched runner source/test files: passed (`Checked 4
+    files`).
+  - `deno lint` on the touched runner source/test files: passed (`Checked 4
+    files`).
+  - `deno check` on the touched runner source/test files: passed.
+  - `git diff --check`: passed.
+  - Phase 7.1 focused persistence pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts test/scheduler-observations.test.ts`:
+    passed, `2 passed (23 steps)`, `0 failed`, `912ms`.
+  - Expected noisy passing logs remain: experimental flag override messages,
+    the reload fixture's transient `TypeError: Cannot read properties of
+    undefined (reading 'length')` log while passing, and the intentional
+    rehydration timeout warning in the timeout fallback fixture.
+
+## 08/7.2-delete-rehydration-race
+
+- [x] pending — deleted per-action async initial rehydration and made
+  preloaded batch observations the only resume rehydration path.
+- Shape:
+  - Removed the scheduler race apparatus:
+    `queueInitialActionRehydration`, `initialRehydrationTokens`,
+    `canApplyInitialActionRehydration`, `awaitSpaceSyncedWithTimeout`,
+    `runInitialActionRehydrationWithTimeout`,
+    `DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS`, `deferInitialExecution`,
+    `scheduleInitialActionRun`, and `rehydrateActionFromStorage`.
+  - Scheduler registration now always registers fresh work first; a matching
+    preloaded snapshot synchronously overwrites that fresh state with clean or
+    dirty persisted state. Missing or mismatched preloaded entries simply leave
+    the fresh initial run in place.
+  - Removed `awaitSyncBeforeInitialRun` / `awaitSync` propagation from runner
+    start options, nested pattern runs, and raw `map`/`filter`/`flatMap`
+    per-element runs. The resumed piece has already awaited sync before the
+    batch snapshot load.
+  - Rewrote `scheduler-observations.test.ts` around the new contract:
+    deleted the old storage-unavailable, per-action auto-query, pending
+    rehydration, timeout fallback, unsubscribe-token, and dirty-token tests;
+    changed mismatch/miss cases to use preloaded snapshot maps; and changed
+    the direct resubscribe dirty-only fixture to preload the persisted consumer
+    snapshot batch.
+- Exit grep:
+
+```text
+$ rg -n "queueInitialActionRehydration|initialRehydrationTokens|canApplyInitialActionRehydration|awaitSpaceSyncedWithTimeout|runInitialActionRehydrationWithTimeout|DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS|deferInitialExecution|awaitSync|awaitSyncBeforeInitialRun|rehydrateActionFromStorage|scheduleInitialActionRun" packages/runner/src packages/runner/test/scheduler-observations.test.ts packages/runner/test/reload-rehydration.test.ts -g '*.ts'
+```
+
+  No matches.
+- Recordings:
+  - `deno fmt` on the touched runner source/test files: passed (`Checked 7
+    files`).
+  - `deno lint` on the touched runner source/test files: passed (`Checked 7
+    files`).
+  - `deno check` on the touched runner source/test files: passed.
+  - `git diff --check`: passed.
+  - Phase 7.2 focused persistence pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts test/scheduler-observations.test.ts`:
+    passed, `2 passed (17 steps)`, `0 failed`, `968ms`.
+  - Raw list builtin regression pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/patterns-dynamic.test.ts test/map-op-by-identity.test.ts
+    test/pattern-scope.test.ts`: passed, `42 passed (29 steps)`,
+    `0 failed`, `2s`.
+  - Expected noisy passing logs remain: the reload fixture's transient
+    `TypeError: Cannot read properties of undefined (reading 'length')` log
+    while passing, experimental flag override messages, and known
+    write-surface warnings in pattern/builtin fixtures.
+
+## 08/7.3-slim-observation-payload
+
+- [x] pending — scheduler observations now write payload version 2 without
+  persisted current/declared write surfaces.
+- Reviewer poll:
+  - No new reviewer verdict marker was present after the latest Phase 7 progress
+    entries at the start of this heartbeat.
+- Shape:
+  - `buildSchedulerActionObservation(...)` now emits `version: 2` and omits
+    `currentKnownWrites` / `declaredWrites` from new observations.
+  - Runner and memory readers accept both v1 and v2 observation rows. V1 rows
+    still require the old fields; v2 rows do not. Memory normalization and write
+    indexing preserve old fields only when present.
+  - Runtime fingerprint is now `runner:scheduler:v2`; old
+    `runner:scheduler:pull` rows become fingerprint misses and cost one fresh
+    node run on resume.
+  - Rehydration restores the write surface from the live action annotation, not
+    from persisted observation fields.
+  - Added memory coverage that slim v2 observations store and reload without
+    the old fields.
+- Recordings:
+  - `deno fmt` on the touched runner and memory source/test files: passed
+    (`Checked 8 files`).
+  - `deno lint` on the touched runner and memory source/test files: passed
+    (`Checked 8 files`).
+  - `deno check` on the touched runner and memory source/test files: passed.
+  - Phase 7.3 focused persistence pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts test/scheduler-observations.test.ts`:
+    passed, `2 passed (17 steps)`, `0 failed`, `999ms`.
+  - Memory v2 scheduler state pack:
+    `cd packages/memory && deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/v2-scheduler-state-test.ts`: passed, `20 passed`, `0 failed`,
+    `174ms`.
+  - Memory v2 stacked commit regression:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/memory-v2-stacked-commit.test.ts`: passed, `47 passed`, `0 failed`,
+    `1s`.
+  - Scheduler persistent-state bench on Apple M3 Max / Deno 2.8.1:
+    `cd packages/runner && deno bench --no-check --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-persistent-state.bench.ts`:
+    clean 100 actions `3.0 ms`; targeted dirty 100 actions `2.9 ms`; clean
+    1000 actions `15.3 ms`; targeted dirty 1000 actions `8.1 ms`.
+  - Expected noisy passing logs remain: the reload fixture's transient
+    `TypeError: Cannot read properties of undefined (reading 'length')` log
+    while passing and experimental flag override messages.
+
+## 08/7.4-persistence-gates
+
+- [x] pending — completed the Phase 7 persistence gates and added the I2/I7
+  clean-resume witness.
+- Shape:
+  - Extended `scheduler-observations.test.ts` so a clean piece is created in
+    one runtime, resumed in a second runtime from the same emulated storage,
+    and verified to perform zero additional action runs.
+  - The same fixture patches the emulated memory server's `evaluateWatchSet`
+    during resume and asserts zero graph/watch cell-data fetches. Scheduler
+    snapshot queries use `listSchedulerActionSnapshots` and are intentionally
+    not counted as cell-data reads.
+  - Updated `reload-sibling-overdirty.test.ts` to resume the existing piece
+    with `runtime.start(resultCell)` instead of calling `runtime.run(...)` on
+    reload. Under the Phase 7 contract, `run(...)` creates a fresh local run
+    and no longer exercises persisted resume rehydration.
+- Recordings:
+  - `deno fmt` on the touched runner test files: passed (`Checked 2 files`).
+  - `deno lint` on the touched runner test files: passed (`Checked 2 files`).
+  - `deno check` on the touched runner test files: passed.
+  - Initial I2/I7 witness run:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-observations.test.ts`: passed, `1 passed (17 steps)`,
+    `0 failed`, `230ms`.
+  - Sibling reload focused regression after the contract update:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-sibling-overdirty.test.ts`: passed, `1 passed`, `0 failed`,
+    `350ms`.
+  - Phase 7 persistence pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts test/reload-sibling-overdirty.test.ts
+    test/scheduler-observations.test.ts`: passed, `3 passed (17 steps)`,
+    `0 failed`, `1s`.
+  - Full runner suite first attempt:
+    `cd packages/runner && deno task test`: failed, `594 passed (3099
+    steps)`, `1 failed`, `0 ignored (10 steps)`, `2m4s`. Failure was
+    `reload-sibling-overdirty.test.ts` expecting `rehydrate/ok > 0`; the
+    reload fixture still used `runtime.run(...)`, so it created a fresh local
+    run and saw no resume rehydration logs.
+  - Full runner suite after updating the sibling reload fixture:
+    `cd packages/runner && deno task test`: passed, `595 passed (3099 steps)`,
+    `0 failed`, `0 ignored (10 steps)`, `2m7s`.
+  - Scheduler persistent-state bench on Apple M3 Max / Deno 2.8.1:
+    `cd packages/runner && deno bench --no-check --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-persistent-state.bench.ts`:
+    clean 100 actions `2.5 ms`; targeted dirty 100 actions `2.3 ms`; clean
+    1000 actions `11.8 ms`; targeted dirty 1000 actions `6.9 ms`.
+  - Expected noisy passing logs remain: scheduler preflight/retry/error logs,
+    write-surface warnings in wish/raw map fixtures, and the reload fixture's
+    transient `TypeError: Cannot read properties of undefined (reading
+    'length')` log while passing.
+
+## 08/final-cleanup
+
+- [x] pending — completed the post-phase-7 cleanup checklist.
+- Shape:
+  - Replaced `docs/specs/pull-based-scheduler/README.md` with a pointer to
+    `docs/specs/scheduler-v2/README.md`.
+  - Marked the inventory dispositions as DONE with the scheduler-v2 commits
+    that realized each row. Added a mode-plumbing status note that the frozen
+    scheduler graph-snapshot `pullMode: true` diagnostic remains by phase-0
+    reviewer verdict, while mode-control APIs are gone.
+  - Verified and updated the migration-plan flag end-state table.
+  - Updated `docs/specs/persistent-scheduler-state.md` status for piece-level
+    resume, payload v2, v1/v2 row compatibility, and the separate default-on
+    rollout decision.
+  - Final flag verification found stale shell/pattern integration
+    `setPullMode` callers after the runtime-client API had already been
+    deleted; removed those callers and the debugger graph mode toggle.
+  - Touched-file `deno check` then exposed obsolete trigger-trace
+    `scheduledEffects` diagnostics. Removed that stale diagnostic field usage
+    from the default-app integration diagnostics, shell debug utilities, and
+    runtime-client/shell fixtures. The current trigger trace records direct
+    action decisions only.
+- Recordings:
+  - `deno fmt` on the touched TypeScript files: passed (`Checked 6 files`).
+  - `deno lint` on the touched TypeScript files: passed (`Checked 6 files`).
+  - Initial `deno check` on the touched TypeScript files failed on stale
+    `TriggerTraceActionRecord.scheduledEffects` references in
+    `packages/patterns/integration/default-app.test.ts`. After removing the
+    obsolete diagnostics, `deno check` on the touched TypeScript files passed.
+  - `cd packages/shell && deno test --allow-read --allow-write --allow-run
+    --allow-env test/debug-utils.test.ts`: passed, `1 passed (2 steps)`,
+    `0 failed`, `7ms`.
+  - `cd packages/runtime-client && deno test --allow-env --allow-read
+    --allow-ffi backends/runtime-processor.test.ts`: passed, `11 passed (50
+    steps)`, `0 failed`, `112ms`.
+  - Mode-control / historical-write flag grep:
+    `rg -n "setPullMode|enablePullMode|disablePullMode|isPullModeEnabled|schedulerHistoricalMightWrite|historicalMightWrite" --glob '!docs/**' .`:
+    no matches.
+  - Old-vs-new scheduler flag grep:
+    `rg -n "old-vs-new|schedulerV2|useSchedulerV2|newScheduler|legacyScheduler|v2Scheduler" --glob '!docs/**' packages`:
+    no matches.
+  - `pullMode` residue grep:
+    `rg -n "pullMode" packages/shell packages/runner/src packages/runner/test packages/runtime-client packages/patterns -g '*.ts' -g '*.tsx'`
+    returned only the frozen graph-snapshot diagnostic plumbing and
+    `packages/runner/test/scheduler-bench-helpers.ts`'s ignored compatibility
+    parameter.
+  - Inventory unmarked-row grep:
+    `rg -n "\*\*(Keep|Subsume|Delete)\*\*:" docs/specs/scheduler-v2/current-system-inventory.md`:
+    no matches.
+  - Persistent scheduler flag grep:
+    `rg -n "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE|persistentSchedulerState" packages/runner/src packages/runner/test packages/shell packages/toolshed packages/memory -g '*.ts' -g '*.tsx'`:
+    matches only the expected runtime option, shell/toolshed env plumbing,
+    memory-v2 config/handshake, and tests.
+  - `git diff --check`: passed.
+  - Final full runner suite refresh:
+    `cd packages/runner && deno task test`: passed,
+    `595 passed (3099 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m8s`.
+  - Expected noisy passing logs remain: scheduler preflight/retry/error logs
+    and write-surface warnings in wish/raw map fixtures.
+
+## 08/6-preflight-cache-disposition (review follow-up)
+
+- [x] pending — Phase 6 is closed as skipped, as anticipated by spec decision 3.
+- Shape:
+  - Re-ran `scheduler-event-preflight.bench.ts` after Phase 7 and final cleanup.
+  - The results stayed in the same stress-benchmark shape as the earlier
+    recorded baselines, so the off-by-default preflight closure cache was not
+    implemented. Future cache work should wait for a UI-flow trace showing
+    preflight as a material share of event latency.
+- Recordings:
+  - `deno bench --no-check --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    packages/runner/test/scheduler-event-preflight.bench.ts`: passed on Apple
+    M3 Max / Deno 2.8.1. Clean broad graph `328.3 ms`; transitive invalid
+    writer `26.0 ms`; note-shaped 30x7 clean events `1.1 s`; deep
+    read-populated handler `683.2 ms`.
+
+## REVIEWER RECORD — 2026-06-12 merge-train state + CI-gap discovery
+
+- #4087 (phase 0) and #4088 (E0) squash-merged to main. #4090 (E1) was
+  rebased onto main (force-push; accepted deviation at retarget boundaries —
+  squash-merging the parent orphans the branch history, `rebase --onto` is
+  the clean recovery), then took five fix commits, all reviewed and verified:
+  engine precondition-only commits validate ahead of every commit shape
+  (`3a0503bc4`), retried events re-record with the lineage registry
+  (`9b0c5e913`), preconditions claim their write space and wrappers fail
+  closed (`1b9027347`), and read-only origin transactions are settled lineage
+  origins (`bb01e3280`).
+- `bb01e3280` root cause, for the record: `cell.send()` forwards its tx as
+  the event origin (E0, for id minting); in read contexts that is
+  `runtime.readTx()`, which never settles, so lineage subscribed via
+  `addCommitCallback()` and hit the read-only guard — breaking every
+  pattern-test gesture. Read-only origins are not speculative launches;
+  they map to confirmed.
+- **CI gap (important):** `.github/workflows/deno.yml` runs on
+  `pull_request: branches: [main]` only. Stacked PRs targeting sibling
+  branches (#4096–#4111) have had NO CI; their green/clean status is
+  vacuous. Each PR meets real CI for the first time when it retargets to
+  main after its parent merges. Plan accordingly: expect first-contact
+  failures at each retarget, fix on the child branch.
+- **Cascade protocol when a parent squash-merges:** for each child, in order:
+  `git rebase --onto main <old-parent-tip> scheduler-v2/<child>` (drop the
+  parent's pre-squash commits, keep only the child's own), resolve, run the
+  affected suites locally (runner + patterns sweep for cutover-adjacent
+  phases), force-push. GitHub retargets the base automatically when the
+  parent branch is deleted.
+- Stack-head verification sweep (scratch worktree at
+  `scheduler-v2/08-phase7` + `bb01e3280` cherry-picked): full pattern-unit
+  sweep + cli suite run locally to surface remaining latent breakage in one
+  pass; results recorded in a follow-up entry.
+
+## REVIEWER RECORD — stack-head sweep results + cascade status
+
+- Stack-head pattern sweep (08-phase7 + `bb01e3280`): **59/60 green**, full
+  cli suite green. The one failure (`primitives/editable-list.test.tsx`
+  assertion_10) reproduces identically at fork base `cd1da3d4e` under the
+  v1 scheduler — pre-existing, fixed by #4082 and retired by #4086 on main,
+  moot for the train. Verdict: no remaining latent pattern-visible breakage
+  in the cutover phases.
+- #4090 (E1) MERGED to main (`93217ccf8`); `scheduler-v2/03-e1` deleted;
+  #4096 (E2) auto-retargeted to main and is CONFLICTING as expected — the
+  rebase-onto-main surgery for 04-e2 is in progress in the parallel
+  session's worktree (engine precondition files mid-resolve). Reviewer will
+  verify the entity-absent arm survives the merge with `3a0503bc4`'s
+  validation ordering (preconditions validate ahead of every commit shape,
+  shape checks at the wire boundary) intact.
+
+## REVIEWER RECORD — E2 merged + replay-ordering fixtures
+
+- #4096 (E2) MERGED to main (`368719502`); cascade advanced to 05-phase1 in
+  the parallel session. Rebase integration reviewed and verified: replay
+  detection hoisted ABOVE precondition validation (entity-absent must not
+  re-validate on idempotent same-session resends), per-kind switch with
+  originLocalSeq check scoped to origin-committed, deferred-navigate receipt
+  mark moved onto the creating (handler) transaction (`3d6505f18` — old
+  placement rejected FIRST deliveries as receipt-exists and left
+  redeliveries unguarded).
+- The reviewer ask (replay fixture pinning the hoist) did not land before
+  merge; supplied directly as PR #4127 (test-only): identical resend →
+  stored result; mismatched resend → ProtocolError replay mismatch; both
+  verified red against the inverted ordering.

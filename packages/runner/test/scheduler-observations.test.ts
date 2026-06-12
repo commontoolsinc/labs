@@ -3,7 +3,6 @@ import {
   describe,
   disposeSchedulerTestRuntime,
   expect,
-  getStaleSchedulerInternals,
   it,
   space,
   toMemorySpaceAddress,
@@ -12,6 +11,7 @@ import type { TransactionReactivityLog } from "../src/storage/interface.ts";
 import {
   buildSchedulerActionObservation,
   isSchedulerActionObservation,
+  type PersistedSchedulerObservationSnapshot,
   type SchedulerActionObservation,
 } from "../src/scheduler/persistent-observation.ts";
 import {
@@ -67,13 +67,6 @@ const writeLink = {
   path: writeAddress.path.slice(1),
 };
 
-const declaredWrite = {
-  space: "did:key:space" as const,
-  scope: "space" as const,
-  id: "of:declared" as const,
-  path: ["value"],
-};
-
 const materializerEnvelope = {
   space: "did:key:space" as const,
   scope: "space" as const,
@@ -84,6 +77,10 @@ const materializerEnvelope = {
 type SchedulerSnapshotWithObservation =
   & SchedulerActionSnapshotResult
   & { observation: SchedulerActionObservation };
+
+type WatchSetCounterServer = {
+  evaluateWatchSet: (...args: unknown[]) => unknown;
+};
 
 const resultCellPieceId = (cell: Cell<unknown>): string => {
   const { scope, id } = cell.getAsNormalizedFullLink();
@@ -111,6 +108,27 @@ const hasPersistedDirtyState = (
   snapshot.directDirtySeq !== undefined ||
   snapshot.staleSeq !== undefined ||
   snapshot.unknownReason !== undefined;
+
+const snapshotsByActionId = (
+  snapshots: SchedulerSnapshotWithObservation[],
+): ReadonlyMap<string, PersistedSchedulerObservationSnapshot> =>
+  new Map(
+    snapshots.map((snapshot) => [
+      snapshot.observation.actionId,
+      {
+        observation: snapshot.observation,
+        ...(snapshot.directDirtySeq !== undefined
+          ? { directDirtySeq: snapshot.directDirtySeq }
+          : {}),
+        ...(snapshot.staleSeq !== undefined
+          ? { staleSeq: snapshot.staleSeq }
+          : {}),
+        ...(snapshot.unknownReason !== undefined
+          ? { unknownReason: snapshot.unknownReason }
+          : {}),
+      },
+    ]),
+  );
 
 const sameSchedulerAddress = (
   left: SchedulerActionObservation["reads"][number],
@@ -157,8 +175,6 @@ describe("persistent scheduler observations", () => {
       observedAtSeq: 42,
       transactionKind: "action-run",
       transactionLog,
-      currentKnownWrites: [writeAddress],
-      declaredWrites: [declaredWrite],
       materializerWriteEnvelopes: [materializerEnvelope],
       actionOptions: {
         debounceMs: 25,
@@ -167,20 +183,20 @@ describe("persistent scheduler observations", () => {
 
     expect(observation).toMatchObject(
       {
-        version: 1,
+        version: 2,
         actionId: "pattern.tsx:computed:1",
         actionKind: "computation",
         observedAtSeq: 42,
         reads: [readAddress],
         shallowReads: [shallowReadAddress],
         actualChangedWrites: [writeAddress],
-        currentKnownWrites: [writeAddress],
-        declaredWrites: [declaredWrite],
         materializerWriteEnvelopes: [materializerEnvelope],
         actionOptions: { debounceMs: 25 },
       } satisfies Partial<SchedulerActionObservation>,
     );
     expect("attemptedWrites" in observation).toBe(false);
+    expect("currentKnownWrites" in observation).toBe(false);
+    expect("declaredWrites" in observation).toBe(false);
     expect(isSchedulerActionObservation(observation)).toBe(true);
   });
 
@@ -243,7 +259,6 @@ describe("persistent scheduler observations", () => {
               shallowReads: [],
               writes: [],
             },
-            currentKnownWrites: [writeAddress],
           }),
         });
 
@@ -261,7 +276,7 @@ describe("persistent scheduler observations", () => {
     }
   });
 
-  it("persists the static scheduling surface when an action write path changes", async () => {
+  it("rehydrates static scheduling surface from live annotations", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const { runtime, tx } = testRuntime;
@@ -330,7 +345,8 @@ describe("persistent scheduler observations", () => {
       });
 
       await runtime.scheduler.run(changingWriter);
-      expect(observations.at(-1)?.currentKnownWrites).toEqual(staticSurface);
+      expect(observations.at(-1)?.currentKnownWrites).toBeUndefined();
+      expect(observations.at(-1)?.declaredWrites).toBeUndefined();
 
       const triggerTx = runtime.edit();
       selector.withTx(triggerTx).set(true);
@@ -341,7 +357,8 @@ describe("persistent scheduler observations", () => {
       expect(changedObservation?.actualChangedWrites).toEqual([
         toMemorySpaceAddress(secondTarget.getAsNormalizedFullLink()),
       ]);
-      expect(changedObservation?.currentKnownWrites).toEqual(staticSurface);
+      expect(changedObservation?.currentKnownWrites).toBeUndefined();
+      expect(changedObservation?.declaredWrites).toBeUndefined();
 
       const restoredChangingWriter = Object.assign((() => {}) as Action, {
         writes: [
@@ -391,7 +408,6 @@ describe("persistent scheduler observations", () => {
               shallowReads: [],
               writes: [],
             },
-            currentKnownWrites: [writeAddress],
             status: "failed",
             errorFingerprint: "error:test",
           }),
@@ -434,7 +450,6 @@ describe("persistent scheduler observations", () => {
               shallowReads: [],
               writes: [],
             },
-            currentKnownWrites: [writeAddress],
           }),
         });
 
@@ -448,41 +463,17 @@ describe("persistent scheduler observations", () => {
     }
   });
 
-  it("reports unavailable storage-backed rehydration without mutating", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
-    try {
-      const storageBackedAction = () => {};
-      testRuntime.runtime.scheduler.subscribe(storageBackedAction, {
-        reads: [],
-        shallowReads: [],
-        writes: [],
-      });
-
-      await expect(
-        testRuntime.runtime.scheduler.rehydrateActionFromStorage(
-          storageBackedAction,
-          space,
-        ),
-      ).resolves.toBe(false);
-      expect(testRuntime.runtime.scheduler.isDirty(storageBackedAction)).toBe(
-        true,
-      );
-    } finally {
-      await disposeSchedulerTestRuntime(testRuntime);
-    }
-  });
-
-  it("auto-rehydrates subscribed actions before first execution", async () => {
+  it("auto-rehydrates subscribed actions from preloaded piece snapshots", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       let runs = 0;
-      const autoPersistedAction = Object.assign(
-        function autoPersistedAction() {
+      const preloadedPersistedAction = Object.assign(
+        function preloadedPersistedAction() {
           runs++;
         },
         { writes: [writeLink] },
       );
-      const actionId = "autoPersistedAction";
+      const actionId = "preloadedPersistedAction";
       const provider = testRuntime.runtime.storageManager.open(space) as {
         listSchedulerActionSnapshots?: (
           query?: unknown,
@@ -491,191 +482,59 @@ describe("persistent scheduler observations", () => {
           snapshots: unknown[];
         }>;
       };
-      let querySeen: unknown;
-      provider.listSchedulerActionSnapshots = (query) => {
-        querySeen = query;
-        return Promise.resolve({
-          serverSeq: 5,
-          snapshots: [{
-            observationId: 1,
-            commitSeq: null,
-            observedAtSeq: 5,
-            observation: buildSchedulerActionObservation({
-              actionId,
-              actionKind: "computation",
-              branch: "",
-              pieceId: "space:process",
-              processGeneration: 1,
-              implementationFingerprint: schedulerImplementationFingerprint(
-                autoPersistedAction,
-                actionId,
-                undefined,
-              ),
-              runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
-              observedAtSeq: 5,
-              transactionKind: "action-run",
-              transactionLog: {
-                reads: [readAddress],
-                shallowReads: [],
-                writes: [],
-              },
-              currentKnownWrites: [writeAddress],
-            }),
-          }],
-        });
+      let queryCount = 0;
+      provider.listSchedulerActionSnapshots = () => {
+        queryCount++;
+        return Promise.resolve({ serverSeq: 5, snapshots: [] });
       };
 
-      testRuntime.runtime.scheduler.subscribe(autoPersistedAction, {
+      const observation = buildSchedulerActionObservation({
+        actionId,
+        actionKind: "computation",
+        branch: "",
+        pieceId: "space:preloaded-process",
+        processGeneration: 1,
+        implementationFingerprint: schedulerImplementationFingerprint(
+          preloadedPersistedAction,
+          actionId,
+          undefined,
+        ),
+        runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
+        observedAtSeq: 5,
+        transactionKind: "action-run",
+        transactionLog: {
+          reads: [readAddress],
+          shallowReads: [],
+          writes: [],
+        },
+      });
+
+      testRuntime.runtime.scheduler.subscribe(preloadedPersistedAction, {
         reads: [],
         shallowReads: [],
         writes: [],
       }, {
         rehydrateFromStorage: {
           space,
-          pieceId: "space:process",
+          pieceId: "space:preloaded-process",
           processGeneration: 1,
+          snapshotsByActionId: new Map([[
+            actionId,
+            { observation },
+          ]]),
         },
       });
 
       await testRuntime.runtime.idle();
 
       expect(runs).toBe(0);
-      expect(querySeen).toMatchObject({
-        actionId: "autoPersistedAction",
-        pieceId: "space:process",
-        processGeneration: 1,
-      });
-      expect(testRuntime.runtime.scheduler.isDirty(autoPersistedAction)).toBe(
-        false,
-      );
-      expect(testRuntime.runtime.scheduler.getMightWrite(autoPersistedAction))
+      expect(queryCount).toBe(0);
+      expect(testRuntime.runtime.scheduler.isDirty(preloadedPersistedAction))
+        .toBe(false);
+      expect(
+        testRuntime.runtime.scheduler.getMightWrite(preloadedPersistedAction),
+      )
         .toEqual([writeAddress]);
-    } finally {
-      await disposeSchedulerTestRuntime(testRuntime);
-    }
-  });
-
-  it("does not run while initial rehydration is pending", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
-    try {
-      const { runtime } = testRuntime;
-      const provider = runtime.storageManager.open(space) as {
-        listSchedulerActionSnapshots?: () => Promise<{
-          serverSeq: number;
-          snapshots: unknown[];
-        }>;
-      };
-      let resolveSnapshots:
-        | ((result: { serverSeq: number; snapshots: unknown[] }) => void)
-        | undefined;
-      provider.listSchedulerActionSnapshots = () =>
-        new Promise((resolve) => {
-          resolveSnapshots = resolve;
-        });
-
-      let runs = 0;
-      const rehydratingAction = Object.assign(
-        function rehydratingAction() {
-          runs++;
-        },
-        { writes: [writeLink] },
-      );
-      runtime.scheduler.subscribe(rehydratingAction, {
-        rehydrateFromStorage: {
-          space,
-          pieceId: "space:pending-rehydrate-process",
-          processGeneration: 1,
-        },
-      });
-
-      const wakeEffect = () => {};
-      runtime.scheduler.subscribe(wakeEffect, {
-        reads: [],
-        shallowReads: [],
-        writes: [],
-      }, { isEffect: true });
-
-      await (runtime.scheduler as unknown as { execute(): Promise<void> })
-        .execute();
-      const runsBeforeRehydrate = runs;
-
-      resolveSnapshots?.({
-        serverSeq: 5,
-        snapshots: [{
-          observationId: 1,
-          commitSeq: null,
-          observedAtSeq: 5,
-          observation: buildSchedulerActionObservation({
-            actionId: "rehydratingAction",
-            actionKind: "computation",
-            branch: "",
-            pieceId: "space:pending-rehydrate-process",
-            processGeneration: 1,
-            implementationFingerprint: schedulerImplementationFingerprint(
-              rehydratingAction,
-              "rehydratingAction",
-              undefined,
-            ),
-            runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
-            observedAtSeq: 5,
-            transactionKind: "action-run",
-            transactionLog: {
-              reads: [readAddress],
-              shallowReads: [],
-              writes: [],
-            },
-            currentKnownWrites: [writeAddress],
-          }),
-        }],
-      });
-      await runtime.idle();
-
-      expect(runsBeforeRehydrate).toBe(0);
-      expect(runs).toBe(0);
-      expect(runtime.scheduler.isDirty(rehydratingAction)).toBe(false);
-      expect(runtime.scheduler.getMightWrite(rehydratingAction)).toEqual([
-        writeAddress,
-      ]);
-    } finally {
-      await disposeSchedulerTestRuntime(testRuntime);
-    }
-  });
-
-  it("falls back to an initial run when storage rehydration times out", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
-    try {
-      const { runtime } = testRuntime;
-      const provider = runtime.storageManager.open(space) as {
-        listSchedulerActionSnapshots?: () => Promise<{
-          serverSeq: number;
-          snapshots: unknown[];
-        }>;
-      };
-      provider.listSchedulerActionSnapshots = () => new Promise(() => {});
-
-      let runs = 0;
-      const rehydrateTimeoutAction = () => {
-        runs++;
-      };
-      runtime.scheduler.subscribe(rehydrateTimeoutAction, {
-        reads: [],
-        shallowReads: [],
-        writes: [],
-      }, {
-        isEffect: true,
-        rehydrateFromStorage: {
-          space,
-          pieceId: "space:timeout-rehydrate-process",
-          processGeneration: 1,
-          timeoutMs: 1,
-        },
-      });
-
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      await runtime.idle();
-
-      expect(runs).toBe(1);
-      expect(runtime.scheduler.isDirty(rehydrateTimeoutAction)).toBe(false);
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
     }
@@ -1080,7 +939,9 @@ describe("persistent scheduler observations", () => {
         },
       });
 
-      const subscribeGeneratedReader = () =>
+      const subscribeGeneratedReader = (
+        preloaded?: ReadonlyMap<string, PersistedSchedulerObservationSnapshot>,
+      ) =>
         runtime.scheduler.subscribe(
           readGenerated,
           {
@@ -1096,10 +957,15 @@ describe("persistent scheduler observations", () => {
               space,
               pieceId: consumerPieceId,
               processGeneration: 0,
+              ...(preloaded !== undefined
+                ? { snapshotsByActionId: preloaded }
+                : {}),
             },
           },
         );
-      const subscribeStableReader = () =>
+      const subscribeStableReader = (
+        preloaded?: ReadonlyMap<string, PersistedSchedulerObservationSnapshot>,
+      ) =>
         runtime.scheduler.subscribe(
           readStable,
           {
@@ -1115,6 +981,9 @@ describe("persistent scheduler observations", () => {
               space,
               pieceId: consumerPieceId,
               processGeneration: 0,
+              ...(preloaded !== undefined
+                ? { snapshotsByActionId: preloaded }
+                : {}),
             },
           },
         );
@@ -1143,16 +1012,22 @@ describe("persistent scheduler observations", () => {
       expect(generatedReaderRuns).toBe(1);
       expect(stableReaderRuns).toBe(1);
 
-      const dirtyConsumerSnapshots = (await persistedSchedulerSnapshots(
+      const persistedConsumerSnapshots = await persistedSchedulerSnapshots(
         runtime,
         consumerPieceId,
-      )).filter(hasPersistedDirtyState);
+      );
+      const dirtyConsumerSnapshots = persistedConsumerSnapshots.filter(
+        hasPersistedDirtyState,
+      );
       expect(
         dirtyConsumerSnapshots.map((snapshot) => snapshot.observation.actionId),
       ).toEqual(["readGenerated"]);
 
-      subscribeGeneratedReader();
-      subscribeStableReader();
+      const preloadedConsumerSnapshots = snapshotsByActionId(
+        persistedConsumerSnapshots,
+      );
+      subscribeGeneratedReader(preloadedConsumerSnapshots);
+      subscribeStableReader(preloadedConsumerSnapshots);
       await runtime.idle();
 
       expect(generatedReaderRuns).toBe(2);
@@ -1359,7 +1234,6 @@ describe("persistent scheduler observations", () => {
               shallowReads: [],
               writes: [],
             },
-            currentKnownWrites: [writeAddress],
           }),
         }),
       ).toBe(true);
@@ -1374,195 +1248,29 @@ describe("persistent scheduler observations", () => {
     }
   });
 
-  it("does not reattach an action when async initial rehydration resolves after unsubscribe", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
-    try {
-      const { runtime } = testRuntime;
-      const provider = runtime.storageManager.open(space) as {
-        listSchedulerActionSnapshots?: () => Promise<{
-          serverSeq: number;
-          snapshots: unknown[];
-        }>;
-      };
-      let resolveSnapshots:
-        | ((result: { serverSeq: number; snapshots: unknown[] }) => void)
-        | undefined;
-      provider.listSchedulerActionSnapshots = () =>
-        new Promise((resolve) => {
-          resolveSnapshots = resolve;
-        });
-
-      const canceledBeforeRehydrate = () => {};
-      const cancel = runtime.scheduler.subscribe(canceledBeforeRehydrate, {
-        reads: [],
-        shallowReads: [],
-        writes: [],
-      }, {
-        rehydrateFromStorage: {
-          space,
-          pieceId: "space:canceled-process",
-          processGeneration: 1,
-        },
-      });
-      cancel();
-
-      resolveSnapshots?.({
-        serverSeq: 5,
-        snapshots: [{
-          observationId: 1,
-          commitSeq: null,
-          observedAtSeq: 5,
-          observation: buildSchedulerActionObservation({
-            actionId: "canceledBeforeRehydrate",
-            actionKind: "computation",
-            branch: "",
-            pieceId: "space:canceled-process",
-            processGeneration: 1,
-            implementationFingerprint: schedulerImplementationFingerprint(
-              canceledBeforeRehydrate,
-              "canceledBeforeRehydrate",
-              undefined,
-            ),
-            runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
-            observedAtSeq: 5,
-            transactionKind: "action-run",
-            transactionLog: {
-              reads: [readAddress],
-              shallowReads: [],
-              writes: [],
-            },
-            currentKnownWrites: [writeAddress],
-          }),
-        }],
-      });
-      await runtime.idle();
-
-      expect(runtime.scheduler.getMightWrite(canceledBeforeRehydrate))
-        .toBeUndefined();
-      expect(
-        runtime.scheduler.getGraphSnapshot().nodes.some((node) =>
-          node.id === "canceledBeforeRehydrate"
-        ),
-      ).toBe(false);
-    } finally {
-      await disposeSchedulerTestRuntime(testRuntime);
-    }
-  });
-
-  it("does not apply async initial rehydration after an action becomes dirty", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
-    try {
-      const { runtime } = testRuntime;
-      const provider = runtime.storageManager.open(space) as {
-        listSchedulerActionSnapshots?: () => Promise<{
-          serverSeq: number;
-          snapshots: unknown[];
-        }>;
-      };
-      let resolveSnapshots:
-        | ((result: { serverSeq: number; snapshots: unknown[] }) => void)
-        | undefined;
-      provider.listSchedulerActionSnapshots = () =>
-        new Promise((resolve) => {
-          resolveSnapshots = resolve;
-        });
-
-      const dirtyBeforeRehydrate = () => {};
-      runtime.scheduler.subscribe(dirtyBeforeRehydrate, {
-        reads: [],
-        shallowReads: [],
-        writes: [],
-      }, {
-        rehydrateFromStorage: {
-          space,
-          pieceId: "space:dirty-process",
-          processGeneration: 1,
-        },
-      });
-
-      getStaleSchedulerInternals(runtime.scheduler).markDirty(
-        dirtyBeforeRehydrate,
-      );
-
-      resolveSnapshots?.({
-        serverSeq: 5,
-        snapshots: [{
-          observationId: 1,
-          commitSeq: null,
-          observedAtSeq: 5,
-          observation: buildSchedulerActionObservation({
-            actionId: "dirtyBeforeRehydrate",
-            actionKind: "computation",
-            branch: "",
-            pieceId: "space:dirty-process",
-            processGeneration: 1,
-            implementationFingerprint: schedulerImplementationFingerprint(
-              dirtyBeforeRehydrate,
-              "dirtyBeforeRehydrate",
-              undefined,
-            ),
-            runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
-            observedAtSeq: 5,
-            transactionKind: "action-run",
-            transactionLog: {
-              reads: [readAddress],
-              shallowReads: [],
-              writes: [],
-            },
-            currentKnownWrites: [writeAddress],
-          }),
-        }],
-      });
-      await runtime.idle();
-
-      expect(runtime.scheduler.isDirty(dirtyBeforeRehydrate)).toBe(true);
-      expect(runtime.scheduler.getMightWrite(dirtyBeforeRehydrate))
-        .toBeUndefined();
-    } finally {
-      await disposeSchedulerTestRuntime(testRuntime);
-    }
-  });
-
   it("falls back to the normal first run when fingerprints mismatch", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
-      const provider = testRuntime.runtime.storageManager.open(space) as {
-        listSchedulerActionSnapshots?: () => Promise<{
-          serverSeq: number;
-          snapshots: unknown[];
-        }>;
-      };
-      provider.listSchedulerActionSnapshots = () =>
-        Promise.resolve({
-          serverSeq: 5,
-          snapshots: [{
-            observationId: 1,
-            commitSeq: null,
-            observedAtSeq: 5,
-            observation: buildSchedulerActionObservation({
-              actionId: "stalePersistedAction",
-              actionKind: "effect",
-              branch: "",
-              pieceId: "space:stale-process",
-              processGeneration: 1,
-              implementationFingerprint: "impl:old",
-              runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
-              observedAtSeq: 5,
-              transactionKind: "action-run",
-              transactionLog: {
-                reads: [readAddress],
-                shallowReads: [],
-                writes: [],
-              },
-              currentKnownWrites: [writeAddress],
-            }),
-          }],
-        });
-
       let runs = 0;
       const stalePersistedAction = () => {
         runs++;
       };
+      const observation = buildSchedulerActionObservation({
+        actionId: "stalePersistedAction",
+        actionKind: "effect",
+        branch: "",
+        pieceId: "space:stale-process",
+        processGeneration: 1,
+        implementationFingerprint: "impl:old",
+        runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
+        observedAtSeq: 5,
+        transactionKind: "action-run",
+        transactionLog: {
+          reads: [readAddress],
+          shallowReads: [],
+          writes: [],
+        },
+      });
 
       testRuntime.runtime.scheduler.subscribe(stalePersistedAction, {
         reads: [],
@@ -1574,6 +1282,10 @@ describe("persistent scheduler observations", () => {
           space,
           pieceId: "space:stale-process",
           processGeneration: 1,
+          snapshotsByActionId: new Map([[
+            "stalePersistedAction",
+            { observation },
+          ]]),
         },
       });
 
@@ -1587,21 +1299,9 @@ describe("persistent scheduler observations", () => {
     }
   });
 
-  it("falls back to the normal first run when auto-rehydration misses", async () => {
+  it("falls back to the normal first run when preloaded rehydration misses", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
-      const provider = testRuntime.runtime.storageManager.open(space) as {
-        listSchedulerActionSnapshots?: () => Promise<{
-          serverSeq: number;
-          snapshots: unknown[];
-        }>;
-      };
-      provider.listSchedulerActionSnapshots = () =>
-        Promise.resolve({
-          serverSeq: 5,
-          snapshots: [],
-        });
-
       let runs = 0;
       const missingPersistedAction = () => {
         runs++;
@@ -1617,6 +1317,7 @@ describe("persistent scheduler observations", () => {
           space,
           pieceId: "space:missing-process",
           processGeneration: 1,
+          snapshotsByActionId: new Map(),
         },
       });
 
@@ -1630,11 +1331,13 @@ describe("persistent scheduler observations", () => {
     }
   });
 
-  it("uses persisted observations when a runner restarts a clean piece", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+  it("resumes a clean piece without rerunning or fetching cell data", async () => {
+    const runtimeAEnv = createSchedulerTestRuntime("https://example.test", {});
+    let runtimeBEnv: ReturnType<typeof createSchedulerTestRuntime> | undefined;
+    let restoreEvaluateWatchSet: (() => void) | undefined;
     try {
-      const { runtime, tx } = testRuntime;
-      const { commonfabric } = createTrustedBuilder(runtime);
+      const { runtime: runtimeA, storageManager, tx } = runtimeAEnv;
+      const { commonfabric } = createTrustedBuilder(runtimeA);
       const { lift, pattern } = commonfabric;
       let runs = 0;
       const cleanRestartPattern = pattern<{ value: number }>(
@@ -1647,29 +1350,63 @@ describe("persistent scheduler observations", () => {
         },
       );
 
-      const resultCell = runtime.getCell<{ doubled: number }>(
+      const resultCellA = runtimeA.getCell<{ doubled: number }>(
         space,
         "persistent scheduler clean restart",
         undefined,
         tx,
       );
-      const result = runtime.run(tx, cleanRestartPattern, {
+      const result = runtimeA.run(tx, cleanRestartPattern, {
         value: 5,
-      }, resultCell);
-      runtime.prepareTxForCommit(tx);
+      }, resultCellA);
+      runtimeA.prepareTxForCommit(tx);
       await tx.commit();
 
       expect(await result.pull()).toEqual({ doubled: 10 });
       expect(runs).toBe(1);
+      await runtimeA.storageManager.synced();
+      runtimeA.scheduler.dispose();
 
-      runtime.runner.stop(resultCell);
-      await runtime.start(resultCell);
-      await runtime.idle();
+      const server = (storageManager as unknown as {
+        server(): WatchSetCounterServer;
+      }).server();
+      const evaluateWatchSet = server.evaluateWatchSet.bind(server);
+      let cellDataReads = 0;
+      server.evaluateWatchSet = (...args: unknown[]) => {
+        cellDataReads++;
+        return evaluateWatchSet(...args);
+      };
+      restoreEvaluateWatchSet = () => {
+        server.evaluateWatchSet = evaluateWatchSet;
+      };
 
-      expect(resultCell.get()).toEqual({ doubled: 10 });
+      runtimeBEnv = createSchedulerTestRuntime("https://example.test", {
+        storageManager,
+      });
+      const runtimeB = runtimeBEnv.runtime;
+      runtimeB.unsafeTrustPattern(cleanRestartPattern, {
+        reason: "unit test fixture",
+      });
+      runtimeB.patternManager.registerPattern(cleanRestartPattern);
+      const resultCellB = runtimeB.getCell<{ doubled: number }>(
+        space,
+        "persistent scheduler clean restart",
+        undefined,
+      );
+      await runtimeB.start(resultCellB);
+      await runtimeB.idle();
+
+      expect(resultCellB.get()).toEqual({ doubled: 10 });
       expect(runs).toBe(1);
+      expect(cellDataReads).toBe(0);
     } finally {
-      await disposeSchedulerTestRuntime(testRuntime);
+      restoreEvaluateWatchSet?.();
+      runtimeAEnv.runtime.scheduler.dispose();
+      if (runtimeBEnv) {
+        await disposeSchedulerTestRuntime(runtimeBEnv);
+      } else {
+        await disposeSchedulerTestRuntime(runtimeAEnv);
+      }
     }
   });
 });

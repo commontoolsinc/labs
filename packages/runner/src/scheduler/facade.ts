@@ -1,5 +1,4 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import type { SchedulerActionSnapshotQuery } from "@commonfabric/memory/v2";
 import type { Cancel } from "../cancel.ts";
 import { ConsoleEvent } from "../harness/console.ts";
 import type {
@@ -161,19 +160,16 @@ const logger = getLogger("scheduler", {
   enabled: true,
   level: "warn",
 });
-const DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS = 10_000;
 
 type FilterStatsState = { filtered: number; executed: number };
 type SchedulerStorageRehydrationOptions =
   & SchedulerObservationIdentity
   & {
     space: MemorySpace;
-    timeoutMs?: number;
-    // When the pattern is (re)started from a synced/resumed state, wait for the
-    // space's storage to finish syncing before attempting rehydration / the
-    // initial run. This avoids running consumers (map/filter/computed) against
-    // not-yet-synced data and then re-running once it streams in.
-    awaitSync?: boolean;
+    snapshotsByActionId?: ReadonlyMap<
+      string,
+      PersistedSchedulerObservationSnapshot
+    >;
   };
 
 type SchedulerRegistrationInput = ReactivityLog;
@@ -367,7 +363,6 @@ export class Scheduler {
 
   private idlePromises: (() => void)[] = [];
   private backgroundTasks = new Set<Promise<unknown>>();
-  private initialRehydrationTokens = new WeakMap<Action, symbol>();
   private errorHandlers = new Set<ErrorHandler>();
   private consoleHandler: ConsoleHandler;
   private _running: Promise<unknown> | undefined = undefined;
@@ -481,7 +476,6 @@ export class Scheduler {
       noDebounce: options.noDebounce,
       throttle: options.throttle,
       changeGroup: options.changeGroup,
-      deferInitialExecution: rehydrateFromStorage !== undefined,
     };
     this.updateMaterializerRegistration(action);
     const cancel = subscribePullSchedulerAction(
@@ -490,8 +484,11 @@ export class Scheduler {
       dependencies,
       subscribeOptions,
     );
-    if (rehydrateFromStorage) {
-      this.queueInitialActionRehydration(action, rehydrateFromStorage);
+    if (rehydrateFromStorage?.snapshotsByActionId) {
+      this.applyPreloadedInitialActionRehydration(
+        action,
+        rehydrateFromStorage.snapshotsByActionId,
+      );
     }
     return cancel;
   }
@@ -563,8 +560,7 @@ export class Scheduler {
     this.resubscribe(action, {
       reads: observation.reads,
       shallowReads: observation.shallowReads,
-      // Static dependency setup ignores this in favor of the live annotation.
-      writes: observation.currentKnownWrites,
+      writes: [],
     }, {
       isEffect: observation.actionKind === "effect",
     });
@@ -605,54 +601,25 @@ export class Scheduler {
     return true;
   }
 
-  async rehydrateActionFromStorage(
+  private applyPreloadedInitialActionRehydration(
     action: Action,
-    space: MemorySpace,
-    query: Omit<SchedulerActionSnapshotQuery, "actionId"> = {},
-    options: {
-      shouldApply?: () => boolean;
-    } = {},
-  ): Promise<boolean> {
-    const provider = this.runtime.storageManager.open(space);
-    const listSnapshots = provider.listSchedulerActionSnapshots;
-    if (!listSnapshots) {
-      return false;
+    snapshotsByActionId: ReadonlyMap<
+      string,
+      PersistedSchedulerObservationSnapshot
+    >,
+  ): void {
+    const snapshot = snapshotsByActionId.get(this.getActionId(action));
+    if (
+      snapshot &&
+      isSchedulerActionObservation(snapshot.observation) &&
+      this.observationMatchesCurrentAction(action, snapshot.observation) &&
+      this.rehydrateActionFromObservation(action, snapshot)
+    ) {
+      logger.debug("rehydrate/ok", () => []);
+      return;
     }
 
-    const result = await listSnapshots.call(provider, {
-      ...query,
-      ownerSpace: query.ownerSpace ?? space,
-      actionId: this.getActionId(action),
-    });
-    const snapshot = result.snapshots[0];
-    if (!snapshot || !isSchedulerActionObservation(snapshot.observation)) {
-      // Health counter: no persisted snapshot matched this action's id. On
-      // reload this is the common reason an action re-runs instead of
-      // rehydrating. Counts surface in getLoggerCounts().counts.scheduler.
-      logger.debug("rehydrate/miss/no-snapshot", () => []);
-      return false;
-    }
-    if (!this.observationMatchesCurrentAction(action, snapshot.observation)) {
-      return false;
-    }
-    if (options.shouldApply && !options.shouldApply()) {
-      logger.debug("rehydrate/skip/should-not-apply", () => []);
-      return false;
-    }
-
-    logger.debug("rehydrate/ok", () => []);
-    return this.rehydrateActionFromObservation(action, {
-      observation: snapshot.observation,
-      ...(snapshot.directDirtySeq !== undefined
-        ? { directDirtySeq: snapshot.directDirtySeq }
-        : {}),
-      ...(snapshot.staleSeq !== undefined
-        ? { staleSeq: snapshot.staleSeq }
-        : {}),
-      ...(snapshot.unknownReason !== undefined
-        ? { unknownReason: snapshot.unknownReason }
-        : {}),
-    });
+    logger.debug("rehydrate/fallback-run/no-match", () => []);
   }
 
   private observationMatchesCurrentAction(
@@ -685,161 +652,6 @@ export class Scheduler {
         ? { processGeneration: identity.processGeneration }
         : {}),
     };
-  }
-
-  private queueInitialActionRehydration(
-    action: Action,
-    options: SchedulerStorageRehydrationOptions,
-  ): void {
-    const token = Symbol("scheduler-initial-rehydration");
-    this.initialRehydrationTokens.set(action, token);
-    const task = (async () => {
-      // The sync wait and the rehydration lookup share ONE timeout budget, so a
-      // stuck sync can't double the resumed startup delay: each step is bounded
-      // by the time remaining until this common deadline.
-      const deadline = performance.now() +
-        Math.max(
-          0,
-          options.timeoutMs ?? DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS,
-        );
-      const remainingMs = () => Math.max(0, deadline - performance.now());
-      if (options.awaitSync) {
-        // Resumed from a synced state: hold the initial rehydration/run until
-        // the space has finished syncing so consumers don't race the data.
-        await this.awaitSpaceSyncedWithTimeout(options.space, remainingMs());
-        // The action may have been superseded while we waited for sync.
-        if (!this.canApplyInitialActionRehydration(action, token)) return;
-      }
-      const rehydrated = await this.runInitialActionRehydrationWithTimeout(
-        action,
-        options.awaitSync ? { ...options, timeoutMs: remainingMs() } : options,
-        token,
-      );
-      if (rehydrated === "timeout") {
-        if (this.canApplyInitialActionRehydration(action, token)) {
-          logger.warn("scheduler-rehydrate", () => [
-            "Timed out rehydrating scheduler action; falling back to initial run",
-            this.getActionId(action),
-            options.timeoutMs ?? DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS,
-          ]);
-          this.initialRehydrationTokens.delete(action);
-          logger.debug("rehydrate/fallback-run/timeout", () => []);
-          this.scheduleInitialActionRun(action);
-        }
-        return;
-      }
-      if (!this.canApplyInitialActionRehydration(action, token)) {
-        return;
-      }
-      if (!rehydrated) {
-        logger.debug("rehydrate/fallback-run/no-match", () => []);
-        this.scheduleInitialActionRun(action);
-      }
-    })().catch((error) => {
-      logger.warn("scheduler-rehydrate", () => [
-        "Failed to rehydrate scheduler action; falling back to initial run",
-        this.getActionId(action),
-        error,
-      ]);
-      if (!this.canApplyInitialActionRehydration(action, token)) {
-        return;
-      }
-      this.scheduleInitialActionRun(action);
-    });
-
-    this.backgroundTasks.add(task);
-    task.finally(() => {
-      this.backgroundTasks.delete(task);
-      if (this.initialRehydrationTokens.get(action) === token) {
-        this.initialRehydrationTokens.delete(action);
-      }
-    });
-  }
-
-  // Wait for the space's storage replica to finish syncing, bounded by the
-  // rehydration timeout so a stuck sync can't wedge the initial run forever.
-  private async awaitSpaceSyncedWithTimeout(
-    space: MemorySpace,
-    timeoutMs?: number,
-  ): Promise<void> {
-    const provider = this.runtime.storageManager.open(space);
-    const synced = provider?.synced?.bind(provider);
-    if (!synced) return;
-    const ms = Math.max(0, timeoutMs ?? DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS);
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<void>((resolve) => {
-      timeoutId = setTimeout(resolve, ms);
-    });
-    const syncedPromise = synced();
-    // If the timeout wins the race the sync promise is left pending; swallow a
-    // later rejection so it doesn't surface as an unhandled promise rejection.
-    syncedPromise.catch(() => {});
-    try {
-      await Promise.race([syncedPromise, timeout]);
-    } finally {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
-    }
-  }
-
-  private async runInitialActionRehydrationWithTimeout(
-    action: Action,
-    options: SchedulerStorageRehydrationOptions,
-    token: symbol,
-  ): Promise<boolean | "timeout"> {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timeoutMs = Math.max(
-      0,
-      options.timeoutMs ?? DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS,
-    );
-    const timeout = new Promise<"timeout">((resolve) => {
-      timeoutId = setTimeout(() => resolve("timeout"), timeoutMs);
-    });
-    try {
-      return await Promise.race([
-        this.rehydrateActionFromStorage(
-          action,
-          options.space,
-          {
-            ...(options.branch !== undefined ? { branch: options.branch } : {}),
-            ownerSpace: options.ownerSpace ?? options.space,
-            pieceId: options.pieceId,
-            ...(options.processGeneration !== undefined
-              ? { processGeneration: options.processGeneration }
-              : {}),
-          },
-          {
-            shouldApply: () =>
-              this.canApplyInitialActionRehydration(action, token),
-          },
-        ),
-        timeout,
-      ]);
-    } finally {
-      if (timeoutId !== undefined) {
-        clearTimeout(timeoutId);
-      }
-    }
-  }
-
-  private canApplyInitialActionRehydration(
-    action: Action,
-    token: symbol,
-  ): boolean {
-    const record = this.nodes.get(action);
-    return this.initialRehydrationTokens.get(action) === token &&
-      (this.nodes.effects.has(action) || this.nodes.computations.has(action)) &&
-      !this.pending.has(action) &&
-      record?.status !== "invalid";
-  }
-
-  private scheduleInitialActionRun(action: Action): void {
-    if (
-      !this.nodes.effects.has(action) && !this.nodes.computations.has(action)
-    ) {
-      return;
-    }
-
-    this.markAndScheduleInvalidAction(action);
   }
 
   unsubscribe(
@@ -1901,10 +1713,7 @@ export class Scheduler {
       getNoDebounce: (target) => this.gates.getNoDebounce(target),
       getThrottle: (target) => this.gates.getThrottle(target),
       maybeAutoDebounce: (target) => this.maybeAutoDebounce(target),
-      markActionHasRun: (target) => {
-        this.gates.markActionHasRun(target);
-        this.initialRehydrationTokens.delete(target);
-      },
+      markActionHasRun: (target) => this.gates.markActionHasRun(target),
       markNodeHasRun: (target) => this.markNodeHasRun(target),
       handleError: (error, target) => this.handleError(error, target),
       resubscribe: (target, log) => this.resubscribe(target, log),
@@ -2009,7 +1818,6 @@ export class Scheduler {
     action: Action,
     cause?: IMemorySpaceAddress,
   ): void {
-    this.initialRehydrationTokens.delete(action);
     const record = this.nodes.get(action);
     if (!record) return;
     if (record.status === "clean") {
