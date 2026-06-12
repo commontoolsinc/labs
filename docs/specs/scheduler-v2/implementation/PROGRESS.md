@@ -801,3 +801,25 @@ into work order 02 on `scheduler-v2/02-e0`.
 Implementer resolution: updated the work order's Step 4 text to use the
 escaped `scheduler\.mode\.change` grep and to include exactly the stale shell
 comment line in the Step 4 code-commit scope.
+
+## IMPLEMENTER RESOLUTION — 01/step-4 final
+
+- [x] pending — drop push-mode branches from runner and telemetry
+- Deviations: per reviewer verdict, the Step 4 code commit also deletes the
+  single stale `scheduler.mode.change` commented line in
+  `packages/shell/src/lib/debugger-controller.ts`.
+- Recordings:
+  - `grep -rn "isPullModeEnabled" ../../packages --include="*.ts"`: no
+    matches.
+  - `deno fmt packages/runner/src/telemetry.ts
+    packages/shell/src/lib/debugger-controller.ts`: passed
+    (`Checked 2 files`).
+  - `deno check src/runner.ts src/telemetry.ts`: passed.
+  - `deno check packages/shell/src/lib/debugger-controller.ts`: passed.
+  - `grep -rn "scheduler\.mode\.change" ../../packages --include="*.ts"`: no
+    matches.
+  - Telemetry type import scan found no `packages/html` or `packages/ui`
+    imports requiring additional package checks; only runner and shell telemetry
+    uses matched.
+  - `cd packages/runner && deno task test`: passed,
+    `586 passed (3067 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m3s`.
