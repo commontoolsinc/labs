@@ -1141,7 +1141,7 @@ packages/runtime-client/runtime-client.ts:322:      pullMode,
 
 ## 02/step-4
 
-- [x] pending — permanent-rejection taxonomy; retry paths skip precondition
+- [x] d7ac43b43 — permanent-rejection taxonomy; retry paths skip precondition
   failures
 - Deviations: `deno check` exposed that `PushError` in
   `src/storage/interface.ts` also needed `IPreconditionFailedError`, because
@@ -1170,3 +1170,41 @@ packages/runtime-client/runtime-client.ts:322:      pullMode,
     `1 passed (3 steps)`, `0 failed`.
   - `cd packages/runner && deno task test`: passed,
     `588 passed (3074 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m3s`.
+
+## 02/phase-end self-check
+
+- Full runner suite:
+  `cd packages/runner && deno task test` → `588 passed (3074 steps)`,
+  `0 failed`, `0 ignored (10 steps)`, `2m3s`.
+- Benchmarks: work order 02 lists no phase-specific benchmarks; no benchmark
+  command was run.
+- Exit checklist greps and inspections:
+  - `grep -rn "eventQueue\.push\|eventQueue\.unshift"
+    packages/runner/src/scheduler/events.ts`:
+
+```text
+packages/runner/src/scheduler/events.ts:141:      state.eventQueue.push({
+packages/runner/src/scheduler/events.ts:485:        state.eventQueue.unshift({
+packages/runner/src/scheduler/events.ts:557:        state.eventQueue.unshift({
+```
+
+  - Code inspection of those three sites shows the push includes `id` and
+    `originTx`, and both unshift requeues preserve `id: queuedEvent.id` and
+    `originTx: queuedEvent.originTx`.
+  - `grep -rn "isPermanentRejection" packages/runner/src --include="*.ts"`:
+
+```text
+packages/runner/src/scheduler/action-run.ts:11:import { isPermanentRejection } from "../storage/rejection.ts";
+packages/runner/src/scheduler/action-run.ts:165:        retries < MAX_RETRIES_FOR_REACTIVE && !isPermanentRejection(error)
+packages/runner/src/scheduler/events.ts:14:import { isPermanentRejection } from "../storage/rejection.ts";
+packages/runner/src/scheduler/events.ts:550:        !isPermanentRejection(result.error)
+packages/runner/src/scheduler/events.ts:578:            permanent: isPermanentRejection(result.error),
+packages/runner/src/storage/rejection.ts:6:export function isPermanentRejection(
+```
+
+  - `git diff --name-only scheduler-v2/01-phase0...HEAD -- packages/memory`:
+    no matches.
+  - New test/helper files present:
+    `packages/runner/test/scheduler-event-identity.test.ts`,
+    `packages/runner/test/scheduler-rejection-taxonomy.test.ts`,
+    `packages/runner/src/storage/rejection.ts`.
