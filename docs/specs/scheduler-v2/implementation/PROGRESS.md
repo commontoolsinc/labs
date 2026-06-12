@@ -639,3 +639,78 @@ Implementer resolution: updated the work order to fold exactly the four
 `src/runner.ts` mode-API call-site edits into the steps 2+3 compile-unit
 commit, leaving Step 4's own commit for `scheduler.mode.change` telemetry type
 removal and repo-wide greps.
+
+## IMPLEMENTER STOP — 01/steps-2-3 deleted push module imported by test
+
+Applied the widened compile-unit edits exactly:
+
+- Removed the four `src/runner.ts` `isPullModeEnabled` call sites.
+- `deno fmt packages/runner/src/scheduler.ts packages/runner/src/runner.ts`:
+  passed.
+- `grep -rn "isPullModeEnabled" packages/runner/src packages/runner/test --include="*.ts"`:
+  no matches.
+- Corrected Step 3 grep remains exactly the allowed snapshot match:
+  `packages/runner/src/scheduler.ts:2275:      pullMode: true,`.
+- `deno check src/scheduler.ts src/runner.ts` from `packages/runner`:
+  passed.
+
+The full runner suite then failed during type-check because
+`test/scheduler-cfc-trigger-reads.test.ts` imports the deleted push module:
+
+```text
+$ cd packages/runner && deno task test
+Task test ENV=test deno test --allow-ffi --allow-env --allow-read --allow-write=/tmp,/var/folders --allow-run=git test/*.test.ts
+...
+TS2307 [ERROR]: Cannot find module 'file:///.../packages/runner/src/scheduler/push-notifications.ts'.
+    at file:///.../packages/runner/test/scheduler-cfc-trigger-reads.test.ts:11:48
+
+error: Type checking failed.
+```
+
+Confirmed direct push-module references:
+
+```text
+$ grep -rn "scheduler/push-\|processPush\|PushScheduler\|push-notifications" packages/runner/src packages/runner/test --include="*.ts"
+packages/runner/test/scheduler-cfc-trigger-reads.test.ts:11:import { processPushStorageNotification } from "../src/scheduler/push-notifications.ts";
+packages/runner/test/scheduler-cfc-trigger-reads.test.ts:156:      ["push", processPushStorageNotification],
+```
+
+No test edit was attempted because `scheduler-cfc-trigger-reads.test.ts` was
+not listed in the widened steps-2+3 scope.
+
+## REVIEWER VERDICT — 01/steps-2-3 cfc-trigger-reads push arm
+
+Correct stop. The file escaped the step-1 sweep because it imports the
+push notification processor directly instead of using mode APIs — your
+grep confirms it is the only such file. It is squarely phase-0 scope: a
+push/pull parameterization of CFC trigger-read recording, and the push
+arm is exactly the comparison class rule D.1 deletes. The pull arm is
+real coverage and must survive unchanged.
+
+1. Fold into the steps-2+3 compile-unit commit (same justification as
+   the runner.ts sites — the suite cannot type-check without it) this
+   single test-file edit:
+   - delete the `processPushStorageNotification` import (line 11);
+   - delete the `["push", processPushStorageNotification]` entry from
+     the parameterization (line 156) and any assertions/branches that
+     exist only for the push mode string;
+   - smallest edit wins: keep the loop/parameterization structure even
+     if it now has one entry; do not restructure the test.
+2. Post-edit contract (add to the compile-unit verification):
+   `grep -rn "scheduler/push-\|processPush\|PushScheduler" src/ test/`
+   → zero matches.
+3. Run the file alone first
+   (`... deno test ... test/scheduler-cfc-trigger-reads.test.ts` — G3's
+   known `--no-check` note applies to scheduler-events only, not here),
+   then the full suite. The pull arm's assertions must pass UNCHANGED —
+   if any pull-arm assertion goes red, STOP: that would be a real
+   regression signal, not a porting question.
+4. Amend the work order in-branch as before, own docs commit first:
+   `docs(specs): scheduler-v2 WO01 — cfc-trigger-reads push arm is part of the compile unit`.
+5. Then commit the compile unit and continue (step 4 remainder, step 5,
+   exit checklist).
+
+Implementer resolution: updated the work order to fold the
+`scheduler-cfc-trigger-reads.test.ts` direct push-notification import and push
+parameterization arm into the steps 2+3 compile-unit commit, with a focused
+test run and direct push-module grep in that commit's verification.
