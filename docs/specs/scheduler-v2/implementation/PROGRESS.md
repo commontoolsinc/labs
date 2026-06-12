@@ -1039,6 +1039,17 @@ Implementer resolution: updated work order 02 to record the execution
 correction: Step 3 precedes Step 2 because Step 2 assigns the transaction field
 that Step 3 declares.
 
+## 02/step-3
+
+- [x] pending — dispatchedEventId transaction field
+- Deviations: executed before Step 2 per reviewer verdict; no concrete class
+  property was required.
+- Recordings:
+  - `deno fmt packages/runner/src/storage/interface.ts`: passed
+    (`Checked 1 file`).
+  - `deno check src/storage/interface.ts
+    src/storage/extended-storage-transaction.ts`: passed.
+
 ## REVIEWER VERDICT — PR #4087 CI failures (review feedback, stacked-PR protocol)
 
 PR #4087's diff and exit contracts verified good (I re-ran the greps at
