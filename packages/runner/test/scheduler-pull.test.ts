@@ -7,6 +7,7 @@ import {
   describe,
   disposeSchedulerTestRuntime,
   expect,
+  expectSemanticCommitNotifiesSynchronously,
   getStaleSchedulerInternals,
   it,
   Runtime,
@@ -450,27 +451,24 @@ describe("pull-based scheduling", () => {
     expect(effectResult.get()).toBe(0);
   });
 
-  it("should schedule effects when affected by dirty computations", async () => {
-    // This test verifies that scheduleAffectedEffects correctly finds and
-    // schedules effects that depend on a dirty computation.
-
+  it("should schedule effects when affected by invalid computations", async () => {
     const source = runtime.getCell<number>(
       space,
-      "schedule-effects-source",
+      "invalid-effects-source",
       undefined,
       tx,
     );
     source.set(1);
     const intermediate = runtime.getCell<number>(
       space,
-      "schedule-effects-intermediate",
+      "invalid-effects-intermediate",
       undefined,
       tx,
     );
     intermediate.set(0);
     const effectResult = runtime.getCell<number>(
       space,
-      "schedule-effects-result",
+      "invalid-effects-result",
       undefined,
       tx,
     );
@@ -524,13 +522,15 @@ describe("pull-based scheduling", () => {
     // Track initial effect runs
     const initialEffectRuns = effectRuns;
 
-    // Change source - computation should be marked dirty, effect should be scheduled
+    // Change source - computation should be invalidated, effect should run.
     source.withTx(tx).send(2);
-    await tx.commit();
+    await expectSemanticCommitNotifiesSynchronously(
+      storageManager,
+      () => tx.commit(),
+    );
     tx = runtime.edit();
     await effectResult.pull();
 
-    // Effect should have run (triggered via scheduleAffectedEffects)
     expect(effectRuns).toBeGreaterThan(initialEffectRuns);
   });
 
@@ -833,52 +833,6 @@ describe("pull-based scheduling", () => {
     expect(childRuns).toBe(1);
   });
 
-  it("should clear provisional continuation demand when unsubscribing", async () => {
-    const source = runtime.getCell<number>(
-      space,
-      "pull-continuation-unsubscribe-source",
-      undefined,
-      tx,
-    );
-    source.set(2);
-    const result = runtime.getCell<number>(
-      space,
-      "pull-continuation-unsubscribe-result",
-      undefined,
-      tx,
-    );
-    result.set(0);
-    await tx.commit();
-    tx = runtime.edit();
-
-    let runs = 0;
-    const action: Action = (actionTx) => {
-      runs++;
-      result.withTx(actionTx).send(source.withTx(actionTx).get() ?? 0);
-    };
-    const log = {
-      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
-      shallowReads: [],
-      writes: [toMemorySpaceAddress(result.getAsNormalizedFullLink())],
-    };
-
-    runtime.scheduler.subscribe(action, log);
-    await runtime.scheduler.idle();
-    expect(runs).toBe(0);
-
-    const schedulerInternals = runtime.scheduler as unknown as {
-      markPullDemandContinuation: (action: Action) => void;
-    };
-    schedulerInternals.markPullDemandContinuation(action);
-
-    runtime.scheduler.unsubscribe(action);
-    runtime.scheduler.subscribe(action, log);
-    await runtime.scheduler.idle();
-
-    expect(runs).toBe(0);
-    expect(result.get()).toBe(0);
-  });
-
   it("should first-run child computations created by demand-root effects", async () => {
     const source = runtime.getCell<number>(
       space,
@@ -1055,7 +1009,6 @@ describe("pull-based scheduling", () => {
     };
 
     schedulerInternal.markDirty(computation);
-    schedulerInternal.scheduleAffectedEffects(computation);
 
     const forward = collectWorkSet([leftEffect, rightEffect]);
     const reverse = collectWorkSet([rightEffect, leftEffect]);

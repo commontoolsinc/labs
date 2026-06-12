@@ -17,7 +17,6 @@ export interface SchedulerGraphSnapshotState {
   readonly computations: ReadonlySet<Action>;
   readonly pending: ReadonlySet<Action>;
   readonly dirty: ReadonlySet<Action>;
-  readonly conditionallyScheduledEffects: ReadonlyMap<Action, number>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly nodes: NodeRegistry;
@@ -78,9 +77,6 @@ export function buildSchedulerGraphSnapshot(
       isDemanded: state.isDemandedPullComputation(action),
       isLiveEffect: state.isLiveEffect(action),
       isPullDemandRoot: state.isPullDemandRootEffect(action),
-      isConditionallyScheduled: state.conditionallyScheduledEffects.has(
-        action,
-      ),
       isDebouncedWaiting: nextDebounceRunAt !== undefined &&
         nextDebounceRunAt > now,
       hasActiveDebounceTimer: state.hasActiveDebounceTimer(action),

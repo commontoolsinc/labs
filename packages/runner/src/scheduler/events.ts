@@ -9,7 +9,6 @@ import {
 import type { Runtime } from "../runtime.ts";
 import type {
   IExtendedStorageTransaction,
-  IMemorySpaceAddress,
   IPreconditionFailedError,
   MemorySpace,
 } from "../storage/interface.ts";
@@ -28,7 +27,6 @@ import {
   trustedEventWriteCandidatesFromTransaction,
   txToReactivityLog,
 } from "./reactivity.ts";
-import { collectChangedWritesForTransaction } from "./write-propagation.ts";
 import type {
   Action,
   DirtyDependencyTraceContext,
@@ -263,10 +261,6 @@ export interface SchedulerEventExecutionState {
   readonly snapshotDirtyDependencyTraceContext: (
     trace: DirtyDependencyTraceContext,
   ) => SchedulerEventPreflightStats;
-  readonly onEventCommitWrites?: (
-    sourceAction: Action,
-    writes: readonly IMemorySpaceAddress[],
-  ) => void;
 }
 
 export function preflightQueuedEventDependencies(state: {
@@ -467,10 +461,6 @@ export async function dispatchQueuedEvent(state: {
     originTx: IExtendedStorageTransaction,
     space: MemorySpace,
   ) => number | undefined;
-  readonly onEventCommitWrites?: (
-    sourceAction: Action,
-    writes: readonly IMemorySpaceAddress[],
-  ) => void;
 }, queuedEvent: QueuedEvent): Promise<void> {
   const { action, handler, event: eventValue, retriesLeft, onCommit } =
     queuedEvent;
@@ -580,7 +570,6 @@ export async function dispatchQueuedEvent(state: {
 
     state.runtime.prepareTxForCommit(tx);
     const log = txToReactivityLog(tx);
-    const changedWrites = collectChangedWritesForTransaction(tx, log);
     const telemetryWrites = log.writes
       .slice(0, EVENT_COMMIT_TELEMETRY_WRITE_LIMIT)
       .map(formatEventCommitAddress);
@@ -596,16 +585,13 @@ export async function dispatchQueuedEvent(state: {
         result.error && isPermanentRejection(result.error)
           ? (result.error as IPreconditionFailedError).precondition
           : undefined;
-      if (!result.error && changedWrites.length > 0) {
-        state.onEventCommitWrites?.(action, changedWrites);
-      }
       state.runtime.telemetry.submit({
         type: "scheduler.event.commit",
         handlerId,
         handlerInfo: state.getActionTelemetryInfo(handler),
         readCount: log.reads.length + log.shallowReads.length,
         writeCount: log.writes.length,
-        changedWriteCount: changedWrites.length,
+        changedWriteCount: log.writes.length,
         writes: telemetryWrites,
         ...(log.writes.length > EVENT_COMMIT_TELEMETRY_WRITE_LIMIT
           ? { writesTruncated: true }

@@ -122,7 +122,5 @@ export async function processPullQueuedEventDuringExecute(
       state.releaseLineageEvent(originTx, event),
     getOriginLocalSeq: (originTx, space) =>
       state.getOriginLocalSeq(originTx, space),
-    onEventCommitWrites: (sourceAction, writes) =>
-      state.onEventCommitWrites?.(sourceAction, writes),
   }, queuedEvent);
 }

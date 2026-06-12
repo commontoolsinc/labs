@@ -14,6 +14,7 @@ export interface PullCycleBreakState {
   readonly pending: Set<Action>;
   readonly isThrottled: (action: Action) => boolean;
   readonly clearDirty: (action: Action) => void;
+  readonly clearInvalid: (action: Action) => void;
   readonly unsubscribe: (action: Action) => void;
   readonly recordExecuted: () => void;
   readonly getActionId: (action: Action) => string;
@@ -51,6 +52,7 @@ export async function breakPullCyclesIfNeeded(
       `[CYCLE-BREAK] Clearing cyclic computation: ${state.getActionId(comp)}`,
     ]);
     state.clearDirty(comp);
+    state.clearInvalid(comp);
     state.pending.delete(comp);
   }
 

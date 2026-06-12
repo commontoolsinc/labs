@@ -6,6 +6,7 @@ import {
   CYCLE_DEBOUNCE_MULTIPLIER,
   CYCLE_DEBOUNCE_THRESHOLD_MS,
   MAX_ITERATIONS_PER_RUN,
+  PASS_RUN_BUDGET,
 } from "./constants.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
 import type { NodeRegistry } from "./node-record.ts";
@@ -100,32 +101,11 @@ export function recordExecuteEnd(
 }
 
 export function buildPullInitialSeeds(state: {
-  readonly pending: ReadonlySet<Action>;
-  readonly dirty: ReadonlySet<Action>;
-  readonly effects: ReadonlySet<Action>;
-  readonly newActionsWithoutDependencies: Iterable<Action>;
   readonly eventBlockingDeps: Iterable<Action>;
   readonly computationDebounceFlushSeeds: Iterable<Action>;
 }): Set<Action> {
   const initialSeeds = new Set<Action>();
 
-  // Pending effects are demand roots. Computations stay lazy unless pulled.
-  for (const action of state.pending) {
-    if (state.effects.has(action)) {
-      initialSeeds.add(action);
-    }
-  }
-
-  // Dirty effects may have been skipped by throttling or cycle detection.
-  for (const action of state.dirty) {
-    if (state.effects.has(action)) {
-      initialSeeds.add(action);
-    }
-  }
-
-  for (const action of state.newActionsWithoutDependencies) {
-    initialSeeds.add(action);
-  }
   for (const action of state.eventBlockingDeps) {
     initialSeeds.add(action);
   }
@@ -156,7 +136,6 @@ export interface ExecuteDependencyCollectionState {
     },
   ) => { log: ReactivityLog; entities: Set<SpaceScopeAndURI> };
   readonly getActionId: (action: Action) => string;
-  readonly scheduleAffectedEffects?: (action: Action) => void;
 }
 
 export function collectInitialExecuteDependencies(
@@ -195,7 +174,6 @@ export function collectInitialExecuteDependencies(
             state.getActionId(action)
           }: ${log.reads.length} reads, ${log.writes.length} writes, ${entities.size} entities`,
         ]),
-      scheduleAffectedEffects: state.scheduleAffectedEffects,
     });
   } finally {
     logger.timeEnd("scheduler", "execute", "depCollect");
@@ -204,13 +182,18 @@ export function collectInitialExecuteDependencies(
 
 export function collectPostEventDependencies(
   state: ExecuteDependencyCollectionState,
-): void {
+): {
+  collectedActions: Action[];
+  newActionsWithoutDependencies: Action[];
+} {
   // Process any newly subscribed actions that were added during event handling.
   // This handles cases like event handlers that create sub-patterns whose
   // computations need their dependencies discovered before we build the workSet.
-  if (state.pendingDependencyCollection.size === 0) return;
+  if (state.pendingDependencyCollection.size === 0) {
+    return { collectedActions: [], newActionsWithoutDependencies: [] };
+  }
 
-  collectPendingDependencyActions({
+  return collectPendingDependencyActions({
     pendingDependencyCollection: state.pendingDependencyCollection,
     populateDependenciesCallbacks: state.populateDependenciesCallbacks,
     effects: state.effects,
@@ -248,7 +231,6 @@ export function collectPendingDependencyActions(state: {
     action: Action,
     result: { log: ReactivityLog; entities: Set<SpaceScopeAndURI> },
   ) => void;
-  readonly scheduleAffectedEffects?: (action: Action) => void;
   readonly clearAfterCollect?: boolean;
 }): {
   collectedActions: Action[];
@@ -269,13 +251,6 @@ export function collectPendingDependencyActions(state: {
     );
     state.onCollected?.(action, result);
     collectedActions.push(action);
-  }
-
-  // Now mark downstream nodes as dirty if we introduced new dependencies for them.
-  if (state.scheduleAffectedEffects) {
-    for (const action of collectedActions) {
-      state.scheduleAffectedEffects(action);
-    }
   }
 
   const newActionsWithoutDependencies = [...state.pendingDependencyCollection]
@@ -313,7 +288,6 @@ export interface SchedulerSettleLoopState {
   readonly dependencies: WeakMap<Action, ReactivityLog>;
   readonly nodes: NodeRegistry;
   readonly dependents: WeakMap<Action, Set<Action>>;
-  readonly conditionallyScheduledEffects: Map<Action, number>;
   readonly filterStats: { filtered: number; executed: number };
   readonly getLoopCounter: () => WeakMap<Action, number>;
   readonly runsThisExecute: Map<Action, number>;
@@ -347,11 +321,9 @@ export interface SchedulerSettleLoopState {
   ) => boolean;
   readonly getActionId: (action: Action) => string;
   readonly clearDirty: (action: Action) => void;
-  readonly markDirectDirty: (action: Action) => void;
   readonly isThrottled: (action: Action) => boolean;
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
   readonly clearComputationDebounceState: (action: Action) => void;
-  readonly conditionalEffectHasChangedInputs: (action: Action) => boolean;
   readonly isLiveAction: (action: Action) => boolean;
   readonly handleError: (error: Error, action: Action) => void;
   readonly runAction: (action: Action) => Promise<unknown>;
@@ -361,6 +333,14 @@ export function recordSettleActionRun(
   state: SchedulerSettleLoopState,
   fn: Action,
 ): boolean {
+  const record = state.nodes.get(fn);
+  if (record) {
+    record.passRuns++;
+    if (record.passRuns > PASS_RUN_BUDGET) {
+      return false;
+    }
+  }
+
   const loopCounter = state.getLoopCounter();
   loopCounter.set(fn, (loopCounter.get(fn) || 0) + 1);
   // Track runs for cycle-aware debounce

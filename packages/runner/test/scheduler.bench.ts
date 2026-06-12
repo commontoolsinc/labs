@@ -424,8 +424,8 @@ Deno.bench(
   },
 );
 
-// Benchmark: Repeated dirty propagation (already dirty nodes)
-// Tests that markDirty stops at already-dirty nodes
+// Benchmark: repeated dirty propagation over already-marked nodes.
+// Tests that markDirty stops at already-marked nodes.
 Deno.bench(
   "Scheduler - repeated dirty marking",
   { group: "dirty-propagation" },

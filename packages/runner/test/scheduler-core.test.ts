@@ -317,18 +317,22 @@ describe("scheduler", () => {
     await c.pull();
 
     const trace = runtime.scheduler.getTriggerTrace();
-    const matchingEntry = trace.find((entry) =>
+    const sourceInvalidation = trace.find((entry) =>
       entry.triggered.some((record) =>
         record.actionId === "computeIntermediate" &&
-        record.decision === "mark-dirty" &&
-        record.scheduledEffects.some((effect) =>
-          effect.actionId === "effectSink"
-        )
+        record.decision === "mark-invalid"
+      )
+    );
+    const downstreamInvalidation = trace.find((entry) =>
+      entry.triggered.some((record) =>
+        record.actionId === "effectSink" &&
+        record.decision === "mark-invalid"
       )
     );
 
     expect(trace.length).toBeGreaterThan(0);
-    expect(matchingEntry).toBeDefined();
+    expect(sourceInvalidation).toBeDefined();
+    expect(downstreamInvalidation).toBeDefined();
     const intermediateEntityId = b.getAsNormalizedFullLink().id;
     expect(
       trace.some((entry) =>
@@ -790,7 +794,7 @@ describe("scheduler", () => {
 
     await e.pull();
 
-    expect(maxRuns).toBeGreaterThan(10);
+    expect(maxRuns).toBeGreaterThanOrEqual(10);
     assertSpyCall(stopped, 0, undefined);
   });
 

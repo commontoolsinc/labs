@@ -398,7 +398,7 @@ describe("cycle-aware convergence", () => {
     const selfDirtyingEffect: Action = () => {
       effectRuns++;
       if (effectRuns <= reDirtyLimit) {
-        staleSchedulerInternal.markDirectDirty(selfDirtyingEffect);
+        staleSchedulerInternal.markDirty(selfDirtyingEffect);
       }
     };
 

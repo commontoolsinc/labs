@@ -6,14 +6,10 @@ import {
   createTriggerTraceEntry,
   hasRegisteredTriggers,
   planPullTriggeredAction,
-  recordCfcTriggerRead,
   shouldRecordTriggerTraceEntry,
   type StorageNotificationState,
 } from "./notifications.ts";
-import type {
-  TriggerTraceEntry,
-  TriggerTraceScheduledEffect,
-} from "./types.ts";
+import type { TriggerTraceEntry } from "./types.ts";
 
 export function processPullStorageNotification(
   state: StorageNotificationState,
@@ -96,32 +92,23 @@ export function processPullStorageNotification(
       const actionIsEffect = state.effects.has(action);
       const actionType = actionIsEffect ? "effect" : "computation";
       const pendingBefore = state.pending.has(action);
-      const dirtyBefore = state.dirty.has(action);
+      const dirtyBefore = state.isInvalid(action);
       const isOwnCommitSource = notification.type === "commit" &&
         notification.source !== undefined &&
         notification.source.sourceAction === action;
       const plan = planPullTriggeredAction({
-        isEffect: actionIsEffect,
-        dirtyBefore,
+        invalidBefore: dirtyBefore,
         isOwnCommitSource,
         hasSourceChangeGroup,
         actionChangeGroup,
         sourceChangeGroup,
       });
-      // §8.9.2 trigger reads: only changes that actually dirty or schedule
-      // the action become trigger reads. Skipped notifications (own commit
-      // source, same change group) did not cause the next run, so their
-      // labels must not taint it.
-      if (plan.operation !== "none") {
-        recordCfcTriggerRead(state, action, space, change);
-      }
-      const scheduledEffects: TriggerTraceScheduledEffect[] =
-        applyPullTriggeredActionPlan(
-          state,
-          action,
-          actionIsEffect,
-          plan,
-        );
+      applyPullTriggeredActionPlan(
+        state,
+        action,
+        plan,
+        { ...change.address, space },
+      );
 
       triggerTraceEntry?.triggered.push(
         createTriggerTraceActionRecord({
@@ -132,8 +119,7 @@ export function processPullStorageNotification(
           pendingBefore,
           pendingAfter: state.pending.has(action),
           dirtyBefore,
-          dirtyAfter: state.dirty.has(action),
-          scheduledEffects,
+          dirtyAfter: state.isInvalid(action),
         }),
       );
     }

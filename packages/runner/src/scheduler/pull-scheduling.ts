@@ -1,22 +1,10 @@
-import { getLogger } from "@commonfabric/utils/logger";
-import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import {
   isDirtyPullActionRunnable,
   isPendingPullActionRunnable,
 } from "./execution.ts";
-import { readsOverlapWrites } from "./scheduling-writes.ts";
-import { collectTransitiveEffects } from "./topology.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
-import type {
-  Action,
-  ReactivityLog,
-  TriggerTraceScheduledEffect,
-} from "./types.ts";
-
-const logger = getLogger("scheduler", {
-  enabled: true,
-  level: "warn",
-});
+import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
+import type { Action } from "./types.ts";
 
 export type PendingPullRunnableState = Parameters<
   typeof isPendingPullActionRunnable
@@ -28,59 +16,25 @@ export type DirtyPullRunnableStateWithDebounce = DirtyPullRunnableState & {
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
 };
 
-export interface ConditionalEffectState {
-  readonly changedWritesHistory: readonly IMemorySpaceAddress[];
-  readonly conditionallyScheduledEffects: Map<Action, number>;
-  readonly dependencies: WeakMap<Action, ReactivityLog>;
-}
-
-export interface PullSchedulingState extends ConditionalEffectState {
+export interface PullSchedulingState {
+  readonly nodes: NodeRegistry;
+  // `pending` now means an explicit run request that is not derivable from
+  // invalid status alone: event preflight, retry, or an expired debounce flush.
   readonly pending: Set<Action>;
-  readonly dirty: ReadonlySet<Action>;
   readonly effects: ReadonlySet<Action>;
   readonly materializerIndex: MaterializerIndexState;
-  readonly dependents: WeakMap<Action, Set<Action>>;
   readonly pendingPullRunnableState: PendingPullRunnableState;
   readonly dirtyPullRunnableState: DirtyPullRunnableState;
   readonly dirtyPullRunnableStateWithDebounce:
     DirtyPullRunnableStateWithDebounce;
-  readonly getDebounce: (action: Action) => number | undefined;
-  readonly scheduleWithDebounce: (action: Action) => void;
-  readonly getActionId: (action: Action) => string;
-}
-
-export function markEffectConditionallyScheduled(
-  state: ConditionalEffectState,
-  effect: Action,
-): void {
-  if (!state.conditionallyScheduledEffects.has(effect)) {
-    state.conditionallyScheduledEffects.set(
-      effect,
-      state.changedWritesHistory.length,
-    );
-  }
-}
-
-export function conditionalEffectHasChangedInputs(
-  state: ConditionalEffectState,
-  effect: Action,
-): boolean {
-  const changedWritesStart = state.conditionallyScheduledEffects.get(effect);
-  if (changedWritesStart === undefined) return true;
-
-  const changedWrites = state.changedWritesHistory.slice(changedWritesStart);
-  if (changedWrites.length === 0) return false;
-
-  const log = state.dependencies.get(effect);
-  if (!log) return false;
-
-  return readsOverlapWrites(log.reads, log.shallowReads, changedWrites);
+  readonly isLiveAction: (action: Action) => boolean;
+  readonly hasActiveDebounceTimer: (action: Action) => boolean;
 }
 
 /**
- * In pull mode, effects and demanded computations are primary runnable seeds.
- * Materializers are idle work and only become seeds once the primary work set
- * for this iteration is empty.
+ * In pull mode, invalid live nodes are primary runnable seeds. The idle
+ * materializer path remains for explicit materializer flush requests that
+ * survive after primary work is empty.
  *
  * Inline idempotency mode intentionally does not widen this to computations:
  * it rechecks computations that already run due to explicit demand or an
@@ -105,15 +59,19 @@ function collectPrimaryPullIterationSeeds(
   workSet: Set<Action>,
 ): void {
   for (const action of state.pending) {
-    if (isPendingPullActionRunnable(state.pendingPullRunnableState, action)) {
+    const record = state.nodes.get(action);
+    if (
+      record &&
+      isRunnableSchedulingSeed(state, record) &&
+      isPendingPullActionRunnable(state.pendingPullRunnableState, action)
+    ) {
       workSet.add(action);
     }
   }
 
-  for (const action of state.dirty) {
-    if (isDirtyPullActionRunnable(state.dirtyPullRunnableState, action)) {
-      state.pending.add(action);
-      workSet.add(action);
+  for (const record of state.nodes.nodes()) {
+    if (isRunnableSchedulingSeed(state, record)) {
+      workSet.add(record.action);
     }
   }
 }
@@ -123,15 +81,15 @@ function collectIdleMaterializerSeeds(
   workSet: Set<Action>,
 ): void {
   for (const action of state.pending) {
-    if (isIdleMaterializerRunnable(state, action)) {
+    const record = state.nodes.get(action);
+    if (record && isIdleMaterializerRunnable(state, record)) {
       workSet.add(action);
     }
   }
 
-  for (const action of state.dirty) {
-    if (isIdleMaterializerRunnable(state, action)) {
-      state.pending.add(action);
-      workSet.add(action);
+  for (const record of state.nodes.nodes()) {
+    if (isIdleMaterializerRunnable(state, record)) {
+      workSet.add(record.action);
     }
   }
 }
@@ -143,16 +101,22 @@ export function hasRunnablePullWork(state: PullSchedulingState): boolean {
 
 function hasRunnablePrimaryPullWork(state: PullSchedulingState): boolean {
   for (const action of state.pending) {
-    if (isPendingPullActionRunnable(state.pendingPullRunnableState, action)) {
+    const record = state.nodes.get(action);
+    if (
+      record &&
+      isRunnableSchedulingSeed(state, record) &&
+      isPendingPullActionRunnable(state.pendingPullRunnableState, action)
+    ) {
       return true;
     }
   }
 
-  for (const action of state.dirty) {
+  for (const record of state.nodes.nodes()) {
     if (
+      isRunnableSchedulingSeed(state, record) &&
       isDirtyPullActionRunnable(
         state.dirtyPullRunnableStateWithDebounce,
-        action,
+        record.action,
       )
     ) {
       return true;
@@ -166,13 +130,14 @@ function hasRunnableIdleMaterializerWork(
   state: PullSchedulingState,
 ): boolean {
   for (const action of state.pending) {
-    if (isIdleMaterializerRunnable(state, action)) {
+    const record = state.nodes.get(action);
+    if (record && isIdleMaterializerRunnable(state, record)) {
       return true;
     }
   }
 
-  for (const action of state.dirty) {
-    if (isIdleMaterializerRunnable(state, action)) {
+  for (const record of state.nodes.nodes()) {
+    if (isIdleMaterializerRunnable(state, record)) {
       return true;
     }
   }
@@ -182,18 +147,12 @@ function hasRunnableIdleMaterializerWork(
 
 function isIdleMaterializerRunnable(
   state: PullSchedulingState,
-  action: Action,
+  record: SchedulerNode,
 ): boolean {
+  const action = record.action;
   return state.materializerIndex.isMaterializer(action) &&
-    isMaterializerRunnable(state, action);
-}
-
-function isMaterializerRunnable(
-  state: PullSchedulingState,
-  action: Action,
-): boolean {
-  return !state.effects.has(action) &&
-    !state.dirtyPullRunnableStateWithDebounce.isThrottled(action) &&
+    isRunnableSchedulingSeed(state, record) &&
+    !state.effects.has(action) &&
     state.dirtyPullRunnableStateWithDebounce
         .isDebouncedComputationWaiting(action) !== true;
 }
@@ -201,48 +160,33 @@ function isMaterializerRunnable(
 export function hasDeferredDirtyEffectWork(
   state: PullSchedulingState,
 ): boolean {
-  for (const action of state.dirty) {
-    if (state.effects.has(action)) return true;
+  for (const record of state.nodes.nodes("effect")) {
+    if (
+      isInvalidOrNeverRan(record) &&
+      (
+        state.hasActiveDebounceTimer(record.action) ||
+        state.dirtyPullRunnableStateWithDebounce.isThrottled(record.action)
+      )
+    ) {
+      return true;
+    }
   }
   return false;
 }
 
-/**
- * Finds and schedules all effects that transitively depend on the given computation.
- */
-export function scheduleAffectedEffects(
+export function isRunnableSchedulingSeed(
   state: PullSchedulingState,
-  computation: Action,
-): TriggerTraceScheduledEffect[] {
-  const start = performance.now();
-  const scheduledEffects: TriggerTraceScheduledEffect[] = [];
+  record: SchedulerNode,
+): boolean {
+  const action = record.action;
+  return isInvalidOrNeverRan(record) &&
+    (state.isLiveAction(action) || state.pending.has(action)) &&
+    !state.dirtyPullRunnableStateWithDebounce.isThrottled(action) &&
+    !state.hasActiveDebounceTimer(action) &&
+    state.dirtyPullRunnableStateWithDebounce
+        .isDebouncedComputationWaiting(action) !== true;
+}
 
-  try {
-    for (
-      const effect of collectTransitiveEffects(
-        { dependents: state.dependents, effects: state.effects },
-        computation,
-      )
-    ) {
-      const pendingBefore = state.pending.has(effect);
-      const dirtyBefore = state.dirty.has(effect);
-      const debounceMs = state.getDebounce(effect);
-      if (
-        !pendingBefore && !dirtyBefore &&
-        !state.conditionallyScheduledEffects.has(effect)
-      ) {
-        markEffectConditionallyScheduled(state, effect);
-      }
-      state.scheduleWithDebounce(effect);
-      scheduledEffects.push({
-        actionId: state.getActionId(effect),
-        pendingBefore,
-        dirtyBefore,
-        debounceMs,
-      });
-    }
-  } finally {
-    logger.time(start, "scheduler", "scheduleAffectedEffects");
-  }
-  return scheduledEffects;
+export function isInvalidOrNeverRan(record: SchedulerNode): boolean {
+  return record.status === "invalid" || record.status === "never-ran";
 }

@@ -106,15 +106,12 @@ import {
 } from "./scheduler/persistent-observation.ts";
 import {
   collectPullIterationSeeds as collectPullIterationSeedsState,
-  conditionalEffectHasChangedInputs as conditionalEffectHasChangedInputsState,
   type DirtyPullRunnableState,
   type DirtyPullRunnableStateWithDebounce,
   hasDeferredDirtyEffectWork as hasDeferredDirtyEffectWorkState,
   hasRunnablePullWork as hasRunnablePullWorkState,
-  markEffectConditionallyScheduled as markEffectConditionallyScheduledState,
   type PendingPullRunnableState,
   type PullSchedulingState,
-  scheduleAffectedEffects as scheduleAffectedEffectsState,
 } from "./scheduler/pull-scheduling.ts";
 import {
   breakPullCyclesIfNeeded,
@@ -133,7 +130,7 @@ import {
 } from "./scheduler/delay-control.ts";
 import { SchedulerDelays } from "./scheduler/delays.ts";
 import {
-  addCfcTriggerRead,
+  markInvalid as markInvalidRecord,
   type StorageNotificationState,
 } from "./scheduler/notifications.ts";
 import { processPullStorageNotification } from "./scheduler/pull-notifications.ts";
@@ -141,7 +138,6 @@ import {
   clearSchedulerDirectDirty,
   clearSchedulerDirty,
   type DirtySchedulingState,
-  markSchedulerDirty,
   SchedulerStaleness,
 } from "./scheduler/staleness.ts";
 import {
@@ -150,12 +146,6 @@ import {
   type SchedulerUnsubscribeActionState,
   unsubscribeSchedulerAction,
 } from "./scheduler/subscriptions.ts";
-import {
-  markReadersDirtyForChangedWrites,
-  recordChangedComputationWrites,
-  recordChangedWritesHistory,
-  type WritePropagationState,
-} from "./scheduler/write-propagation.ts";
 import {
   resolveRegistrationSurface,
   resubscribePullSchedulerAction,
@@ -198,7 +188,6 @@ import type {
   SpaceScopeAndURI,
   TelemetryAnnotations,
   TriggerTraceEntry,
-  TriggerTraceScheduledEffect,
 } from "./scheduler/types.ts";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
 
@@ -244,7 +233,6 @@ export type {
   TelemetryAnnotations,
   TriggerTraceActionRecord,
   TriggerTraceEntry,
-  TriggerTraceScheduledEffect,
   TriggerTraceValueKind,
   TriggerTraceValueSummary,
 } from "./scheduler/types.ts";
@@ -272,12 +260,6 @@ export class Scheduler {
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel>();
   private triggerIndex = new SchedulerTriggerIndex();
-  // Pending CFC trigger reads per dirtied action (§8.9.2): addresses whose
-  // invalidating writes scheduled it, consumed by the action's next run.
-  private cfcTriggerReads = new WeakMap<
-    Action,
-    { addresses: IMemorySpaceAddress[]; keys: Set<string> }
-  >();
   private actionChangeGroups = new WeakMap<Action, ChangeGroup>();
   private retries = new WeakMap<Action, number>();
 
@@ -361,8 +343,6 @@ export class Scheduler {
   private writeIndex!: SchedulerWriteIndex;
   private materializers = new SchedulerMaterializers(this.nodes.effects);
   private dirtyDependencyCollectionState!: DirtyDependencyCollectionState;
-  // Track actions scheduled for first time (bypass filter)
-  private scheduledFirstTime = new Set<Action>();
   // Filter stats for diagnostics
   private filterStats: FilterStatsState = { filtered: 0, executed: 0 };
 
@@ -375,8 +355,6 @@ export class Scheduler {
   private collectTriggerTrace = false;
   private triggerTrace: TriggerTraceEntry[] = [];
   private eventPreflightTelemetryEnabled = false;
-  private changedWritesHistory: IMemorySpaceAddress[] = [];
-  private conditionallyScheduledEffects = new Map<Action, number>();
   private storageNotificationState!: StorageNotificationState;
 
   // Parent-child action tracking for proper execution ordering
@@ -392,7 +370,6 @@ export class Scheduler {
   private dirtyPullRunnableStateWithDebounce!:
     DirtyPullRunnableStateWithDebounce;
   private pullSchedulingState!: PullSchedulingState;
-  private writePropagationState!: WritePropagationState;
   private subscriptionState!: SchedulerSubscriptionState;
 
   // Dependency population callbacks for first-time subscriptions
@@ -625,17 +602,19 @@ export class Scheduler {
       snapshot.staleSeq !== undefined ||
       snapshot.unknownReason !== undefined
     ) {
-      this.staleness.markDirectDirty(action);
-      this.pending.add(action);
-      this.queueExecution();
+      this.markAndScheduleInvalidAction(action);
       return true;
     }
 
+    const record = this.nodes.get(action);
+    if (record) {
+      record.status = "clean";
+      record.invalidCauses = [];
+    }
     clearSchedulerDirectDirty(this.dirtySchedulingState, action);
     this.staleness.forceClearStale(action);
     this.pending.delete(action);
     this.pendingDependencyCollection.delete(action);
-    this.scheduledFirstTime.delete(action);
     return true;
   }
 
@@ -859,10 +838,12 @@ export class Scheduler {
     action: Action,
     token: symbol,
   ): boolean {
+    const record = this.nodes.get(action);
     return this.initialRehydrationTokens.get(action) === token &&
       (this.nodes.effects.has(action) || this.nodes.computations.has(action)) &&
       !this.pending.has(action) &&
-      !this.staleness.dirty.has(action);
+      !this.staleness.dirty.has(action) &&
+      record?.status !== "invalid";
   }
 
   private scheduleInitialActionRun(action: Action): void {
@@ -873,18 +854,7 @@ export class Scheduler {
     }
 
     this.pendingDependencyCollection.add(action);
-    this.staleness.markDirectDirty(action);
-    this.pending.add(action);
-    this.scheduledFirstTime.add(action);
-
-    if (
-      !this.nodes.isKnownEffect(action) &&
-      this.writeIndex.getSchedulingWrites(action)?.length
-    ) {
-      this.scheduleAffectedEffects(action);
-    }
-
-    this.queueExecution();
+    this.markAndScheduleInvalidAction(action);
   }
 
   unsubscribe(
@@ -1355,14 +1325,17 @@ export class Scheduler {
     if (this.runningPromise) await this.runningPromise;
 
     this.beginExecuteCycle();
-    const { newActionsWithoutDependencies } = this
+    const initialDependencyCollection = this
       .collectInitialExecuteDependencies();
-    const eventBlockingDeps = await this.processExecuteEventPhase();
-    this.collectPostEventDependencies();
-    const initialSeeds = this.buildInitialExecuteSeeds(
-      newActionsWithoutDependencies,
-      eventBlockingDeps,
+    this.markFirstRunNoOutputComputationsDemanded(
+      initialDependencyCollection.newActionsWithoutDependencies,
     );
+    const eventBlockingDeps = await this.processExecuteEventPhase();
+    const postEventDependencyCollection = this.collectPostEventDependencies();
+    this.markFirstRunNoOutputComputationsDemanded(
+      postEventDependencyCollection.newActionsWithoutDependencies,
+    );
+    const initialSeeds = this.buildInitialExecuteSeeds(eventBlockingDeps);
 
     const settleResult = await this.runSettleLoop(initialSeeds);
     await breakPullCyclesIfNeeded(this.cycleBreakState, settleResult);
@@ -1378,6 +1351,9 @@ export class Scheduler {
     this.runsThisExecute.clear();
     this.activePassId = ++this.passCounter;
     this.provisionalDemandThisPass.clear();
+    for (const record of this.nodes.nodes()) {
+      record.passRuns = 0;
+    }
 
     // Non-settling heuristic: record execute() start
     markExecuteStart(this.settlingTracker);
@@ -1399,7 +1375,6 @@ export class Scheduler {
           options,
         ),
       getActionId: (action) => this.getActionId(action),
-      scheduleAffectedEffects: (action) => this.scheduleAffectedEffects(action),
     });
   }
 
@@ -1419,8 +1394,10 @@ export class Scheduler {
     }
   }
 
-  private collectPostEventDependencies(): void {
-    collectPostEventDependenciesState({
+  private collectPostEventDependencies(): {
+    newActionsWithoutDependencies: Action[];
+  } {
+    return collectPostEventDependenciesState({
       pendingDependencyCollection: this.pendingDependencyCollection,
       populateDependenciesCallbacks: this.populateDependenciesCallbacks,
       effects: this.nodes.effects,
@@ -1437,18 +1414,22 @@ export class Scheduler {
   }
 
   private buildInitialExecuteSeeds(
-    newActionsWithoutDependencies: Iterable<Action>,
     eventBlockingDeps: Iterable<Action>,
   ): Set<Action> {
     // Build initial seeds for pull mode (effects + special actions).
     return buildPullInitialSeeds({
-      pending: this.pending,
-      dirty: this.staleness.dirty,
-      effects: this.nodes.effects,
-      newActionsWithoutDependencies,
       eventBlockingDeps,
       computationDebounceFlushSeeds: this.delays.computationDebounceFlushSeeds,
     });
+  }
+
+  private markFirstRunNoOutputComputationsDemanded(actions: readonly Action[]) {
+    for (const action of actions) {
+      const record = this.nodes.get(action);
+      if (record?.kind === "computation" && record.status === "never-ran") {
+        this.markProvisionalDemand(record);
+      }
+    }
   }
 
   private async runSettleLoop(
@@ -1601,7 +1582,6 @@ export class Scheduler {
     this.dirtyPullRunnableStateWithDebounce = this
       .createDirtyPullRunnableStateWithDebounce();
     this.pullSchedulingState = this.createPullSchedulingState();
-    this.writePropagationState = this.createWritePropagationState();
     this.subscriptionState = this.createSubscriptionState();
     this.pendingDependencyCollectionState = this
       .createPendingDependencyCollectionState();
@@ -1757,7 +1737,7 @@ export class Scheduler {
   private createStorageNotificationState(): StorageNotificationState {
     return {
       triggerIndex: this.triggerIndex,
-      cfcTriggerReads: this.cfcTriggerReads,
+      nodes: this.nodes,
       getDiagnosisEnabled: () => this.diagnosisEnabled,
       getCollectTriggerTrace: () => this.collectTriggerTrace,
       changeGroupToActionId: this.changeGroupToActionId,
@@ -1767,8 +1747,6 @@ export class Scheduler {
       actionChangeGroups: this.actionChangeGroups,
       effects: this.nodes.effects,
       pending: this.pending,
-      dirty: this.staleness.dirty,
-      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
       getActionId: (target) => this.getActionId(target),
       recordCellUpdate: (change) =>
         this.runtime.telemetry.submit({
@@ -1778,11 +1756,11 @@ export class Scheduler {
       recordTriggerTrace: (entry) =>
         recordTriggerTraceState({ triggerTrace: this.triggerTrace }, entry),
       scheduleWithDebounce: (target) => this.scheduleWithDebounce(target),
-      markDirty: (target) =>
-        markSchedulerDirty(this.dirtySchedulingState, target),
+      markInvalid: (target, cause) =>
+        this.markAndScheduleInvalidAction(target, cause),
+      isInvalid: (target) => this.isInvalidAction(target),
       materializerIndex: this.materializers,
       queueExecution: () => this.queueExecution(),
-      scheduleAffectedEffects: (target) => this.scheduleAffectedEffects(target),
     };
   }
 
@@ -1831,43 +1809,17 @@ export class Scheduler {
 
   private createPullSchedulingState(): PullSchedulingState {
     return {
-      changedWritesHistory: this.changedWritesHistory,
-      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
-      dependencies: this.dependencies,
+      nodes: this.nodes,
       pending: this.pending,
-      dirty: this.staleness.dirty,
       effects: this.nodes.effects,
       materializerIndex: this.materializers,
-      dependents: this.dependents,
       pendingPullRunnableState: this.pendingPullRunnableState,
       dirtyPullRunnableState: this.dirtyPullRunnableState,
       dirtyPullRunnableStateWithDebounce: this
         .dirtyPullRunnableStateWithDebounce,
-      getDebounce: (action) => this.delays.getDebounce(action),
-      scheduleWithDebounce: (action) => this.scheduleWithDebounce(action),
-      getActionId: (action) => this.getActionId(action),
-    };
-  }
-
-  private createWritePropagationState(): WritePropagationState {
-    return {
-      triggerIndex: this.triggerIndex,
-      changedWritesHistory: this.changedWritesHistory,
-      effects: this.nodes.effects,
-      computations: this.nodes.computations,
-      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
-      nodes: this.nodes,
-      pending: this.pending,
-      markPullDemandContinuation: (action) =>
-        this.markPullDemandContinuation(action),
-      scheduleWithDebounce: (action) => this.scheduleWithDebounce(action),
-      markDirty: (action) =>
-        markSchedulerDirty(this.dirtySchedulingState, action),
-      materializerIndex: this.materializers,
-      scheduleAffectedEffects: (action) => {
-        this.scheduleAffectedEffects(action);
-      },
-      queueExecution: () => this.queueExecution(),
+      isLiveAction: (action) => this.isLiveAction(action),
+      hasActiveDebounceTimer: (action) =>
+        this.delays.hasActiveDebounceTimer(action),
     };
   }
 
@@ -1906,7 +1858,6 @@ export class Scheduler {
       pendingDependencyCollection: this.pendingDependencyCollection,
       markProvisionalDemand: (record) => this.markProvisionalDemand(record),
       pending: this.pending,
-      scheduledFirstTime: this.scheduledFirstTime,
       effects: this.nodes.effects,
       dirty: this.staleness.dirty,
       stale: this.staleness.stale,
@@ -1917,12 +1868,10 @@ export class Scheduler {
       getSchedulingWrites: (action) =>
         this.writeIndex.getSchedulingWrites(action),
       isThrottled: (action) => this.delays.isThrottled(action),
+      isDebouncedComputationWaiting: (action) =>
+        this.isDebouncedComputationWaiting(action),
       isStale: (action) => this.staleness.isStale(action),
-      markDirectDirty: (action) => {
-        this.staleness.markDirectDirty(action);
-      },
-      markEffectConditionallyScheduled: (action) =>
-        this.markEffectConditionallyScheduled(action),
+      markInvalid: (action) => this.markAndScheduleInvalidAction(action),
       updateDependents: (action, log) => this.updateDependents(action, log),
       registerWriterDependents: (action, writes) =>
         registerDependentsForWriterSurface(
@@ -1930,7 +1879,6 @@ export class Scheduler {
           action,
           writes,
         ),
-      scheduleAffectedEffects: (action) => this.scheduleAffectedEffects(action),
       queueExecution: () => this.queueExecution(),
       getActionId: (action) => this.getActionId(action),
       unsubscribe: (action) => this.unsubscribe(action),
@@ -1944,11 +1892,9 @@ export class Scheduler {
     return {
       cancels: this.cancels,
       dependencies: this.dependencies,
-      cfcTriggerReads: this.cfcTriggerReads,
       actionChangeGroups: this.actionChangeGroups,
       changeGroupToActionId: this.changeGroupToActionId,
       pending: this.pending,
-      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
       reverseDependencies: this.reverseDependencies,
       dependents: this.dependents,
       dependencyGraphState: this.dependencyGraphState,
@@ -1975,6 +1921,14 @@ export class Scheduler {
       isThrottled: (action) => this.delays.isThrottled(action),
       clearDirty: (action) =>
         clearSchedulerDirty(this.dirtySchedulingState, action),
+      clearInvalid: (action) => {
+        const record = this.nodes.get(action);
+        if (!record) return;
+        if (record.status === "invalid") {
+          record.status = "clean";
+        }
+        record.invalidCauses = [];
+      },
       unsubscribe: (action) => this.unsubscribe(action),
       recordExecuted: () => {
         this.filterStats.executed++;
@@ -1996,7 +1950,6 @@ export class Scheduler {
       dependencies: this.dependencies,
       nodes: this.nodes,
       dependents: this.dependents,
-      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
       filterStats: this.filterStats,
       getLoopCounter: () => this.loopCounter,
       runsThisExecute: this.runsThisExecute,
@@ -2027,14 +1980,11 @@ export class Scheduler {
       getActionId: (action) => this.getActionId(action),
       clearDirty: (action) =>
         clearSchedulerDirty(this.dirtySchedulingState, action),
-      markDirectDirty: (action) => this.staleness.markDirectDirty(action),
       isThrottled: (action) => this.delays.isThrottled(action),
       isDebouncedComputationWaiting: (action) =>
         this.isDebouncedComputationWaiting(action),
       clearComputationDebounceState: (action) =>
         this.delays.clearComputationDebounceState(action),
-      conditionalEffectHasChangedInputs: (action) =>
-        this.conditionalEffectHasChangedInputs(action),
       isLiveAction: (action) => this.isLiveAction(action),
       handleError: (error, action) => this.handleError(error, action),
       runAction: (action) => this.run(action),
@@ -2049,9 +1999,6 @@ export class Scheduler {
       eventQueue: this.eventQueue,
       eventQueueWakeState: this.eventQueueWakeState,
       idlePromises: this.idlePromises,
-      scheduledFirstTime: this.scheduledFirstTime,
-      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
-      changedWritesHistory: this.changedWritesHistory,
       consumeRerunAfterCurrentExecute: () => {
         const shouldRerun = this.rerunAfterCurrentExecute;
         this.rerunAfterCurrentExecute = false;
@@ -2159,14 +2106,6 @@ export class Scheduler {
           this.dirtyDependencyCollectionState,
           trace,
         ),
-      onEventCommitWrites: (sourceAction, writes) => {
-        recordChangedWritesHistory(this.writePropagationState, writes);
-        markReadersDirtyForChangedWrites(
-          this.writePropagationState,
-          sourceAction,
-          writes,
-        );
-      },
     };
   }
 
@@ -2182,23 +2121,6 @@ export class Scheduler {
   private createActionRunState(): SchedulerActionRunState {
     return {
       runtime: this.runtime,
-      takeCfcTriggerReads: (target) => {
-        const pending = this.cfcTriggerReads.get(target);
-        if (pending === undefined) {
-          return undefined;
-        }
-        this.cfcTriggerReads.delete(target);
-        return pending.addresses;
-      },
-      restoreCfcTriggerReads: (target, addresses) => {
-        for (const address of addresses) {
-          addCfcTriggerRead(
-            { cfcTriggerReads: this.cfcTriggerReads },
-            target,
-            address,
-          );
-        }
-      },
       actionChangeGroups: this.actionChangeGroups,
       actionTimingState: this.actionTimingState,
       retries: this.retries,
@@ -2234,24 +2156,9 @@ export class Scheduler {
       markNodeHasRun: (target) => this.markNodeHasRun(target),
       handleError: (error, target) => this.handleError(error, target),
       resubscribe: (target, log) => this.resubscribe(target, log),
-      markDirectDirty: (target) => this.staleness.markDirectDirty(target),
-      recordChangedComputationWrites: (target, tx, log) => {
-        return recordChangedComputationWrites(
-          this.writePropagationState,
-          target,
-          tx,
-          log,
-        );
-      },
-      markReadersDirtyForChangedWrites: (target, changedWrites) => {
-        if (!this.nodes.computations.has(target)) return;
-        clearSchedulerDirectDirty(this.dirtySchedulingState, target);
-        markReadersDirtyForChangedWrites(
-          this.writePropagationState,
-          target,
-          changedWrites,
-        );
-      },
+      clearDirty: (target) =>
+        clearSchedulerDirty(this.dirtySchedulingState, target),
+      markInvalid: (target) => this.markActionInvalid(target),
       queueExecution: () => this.queueExecution(),
       setExecutingAction: (target, targetActionId) => {
         this.executingAction = target;
@@ -2271,7 +2178,6 @@ export class Scheduler {
       computations: this.nodes.computations,
       pending: this.pending,
       dirty: this.staleness.dirty,
-      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
       dependencies: this.dependencies,
       dependents: this.dependents,
       nodes: this.nodes,
@@ -2342,6 +2248,43 @@ export class Scheduler {
       (this.writeIndex.getSchedulingWrites(action)?.length ?? 0) === 0;
   }
 
+  private isInvalidAction(action: Action): boolean {
+    const record = this.nodes.get(action);
+    return record?.status === "invalid" || record?.status === "never-ran";
+  }
+
+  private markActionInvalid(
+    action: Action,
+    cause?: IMemorySpaceAddress,
+  ): void {
+    const record = this.nodes.get(action);
+    if (!record) return;
+    markInvalidRecord(record, cause);
+    this.staleness.markDirectDirty(action);
+  }
+
+  private markAndScheduleInvalidAction(
+    action: Action,
+    cause?: IMemorySpaceAddress,
+  ): void {
+    this.markActionInvalid(action, cause);
+
+    if (this.nodes.computations.has(action)) {
+      this.scheduleComputationDebounce(action);
+    }
+    if (this.nodes.effects.has(action) && this.delays.getDebounce(action)) {
+      this.scheduleWithDebounce(action);
+      return;
+    }
+    if (
+      this.isLiveAction(action) ||
+      this.materializers.isMaterializer(action) ||
+      this.pending.has(action)
+    ) {
+      this.queueExecution();
+    }
+  }
+
   /**
    * Collects computations that must run before `action` can observe up-to-date
    * values. This includes explicitly dirty computations and clean intermediates
@@ -2393,17 +2336,6 @@ export class Scheduler {
     return canAutomaticallyDebounceState(this.delayControlState, action);
   }
 
-  private markEffectConditionallyScheduled(effect: Action): void {
-    markEffectConditionallyScheduledState(this.pullSchedulingState, effect);
-  }
-
-  private conditionalEffectHasChangedInputs(effect: Action): boolean {
-    return conditionalEffectHasChangedInputsState(
-      this.pullSchedulingState,
-      effect,
-    );
-  }
-
   private collectPullIterationSeeds(workSet: Set<Action>): void {
     collectPullIterationSeedsState(this.pullSchedulingState, workSet);
   }
@@ -2422,12 +2354,6 @@ export class Scheduler {
     if (this.lineage.originStatus(head.originTx) !== "pending") return false;
     return getCommitLocalSeq(head.originTx.tx, head.eventLink.space) ===
       undefined;
-  }
-
-  private scheduleAffectedEffects(
-    computation: Action,
-  ): TriggerTraceScheduledEffect[] {
-    return scheduleAffectedEffectsState(this.pullSchedulingState, computation);
   }
 
   private updateMaterializerRegistration(action: Action): void {
@@ -2450,12 +2376,6 @@ export class Scheduler {
     if (this.activePassId !== undefined) {
       this.provisionalDemandThisPass.add(record);
     }
-  }
-
-  private markPullDemandContinuation(action: Action): void {
-    const record = this.nodes.get(action);
-    if (!record) return;
-    setNodeProvisionalDemand(this.dependencyGraphState, record, true);
   }
 
   private markNodeHasRun(action: Action): void {
