@@ -972,3 +972,12 @@ packages/runtime-client/runtime-client.ts:322:      pullMode,
     `0 failed`, `1 ignored`, `18s`.
   - `cd packages/runtime-client && deno task test`: passed,
     `15 passed (61 steps)`, `0 failed`, `628ms`.
+
+## 02/step-1
+
+- [x] pending — event-id minting helper
+- Deviations: none.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler/event-identity.ts`: passed
+    (`Checked 1 file`).
+  - `deno check src/scheduler/event-identity.ts`: passed.
