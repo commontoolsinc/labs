@@ -2282,14 +2282,46 @@ export function combineSchema(
   return internSet(_combineSchemaCache, key, result);
 }
 
+function combineSchemaDefs(
+  parentSchema: JSONSchema,
+  linkSchema: JSONSchema,
+): Record<string, JSONSchema> | undefined {
+  const parentDefs = isRecord(parentSchema) ? parentSchema.$defs : undefined;
+  const linkDefs = isRecord(linkSchema) ? linkSchema.$defs : undefined;
+  const mergedDefs = { ...linkDefs, ...parentDefs };
+  return Object.keys(mergedDefs).length > 0 ? mergedDefs : undefined;
+}
+
+function schemaWithCombinedDefs(
+  schema: JSONSchema,
+  parentSchema: JSONSchema,
+  linkSchema: JSONSchema,
+): JSONSchema {
+  if (!isRecord(schema)) return schema;
+  const mergedDefs = combineSchemaDefs(parentSchema, linkSchema);
+  if (mergedDefs === undefined) return schema;
+  return {
+    ...schema,
+    $defs: { ...mergedDefs, ...schema.$defs },
+  };
+}
+
 function _combineSchemaUncached(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
 ): JSONSchema {
   if (ContextualFlowControl.isTrueSchema(parentSchema)) {
-    return mergeSchemaFlags(parentSchema, linkSchema);
+    return schemaWithCombinedDefs(
+      mergeSchemaFlags(parentSchema, linkSchema),
+      parentSchema,
+      linkSchema,
+    );
   } else if (ContextualFlowControl.isTrueSchema(linkSchema)) {
-    return mergeSchemaFlags(linkSchema, parentSchema);
+    return schemaWithCombinedDefs(
+      mergeSchemaFlags(linkSchema, parentSchema),
+      parentSchema,
+      linkSchema,
+    );
   } else if (isRecord(linkSchema) && isRecord(parentSchema)) {
     if (linkSchema.type === "object" && parentSchema.type === "object") {
       // If both schemas have required properties, only include those that are
@@ -2407,9 +2439,9 @@ function _combineSchemaUncached(
     } else if (linkSchema.type === "array" && parentSchema.type === "array") {
       // TODO(@ubik2): We should handle prefixItems
       if (parentSchema.items === undefined) {
-        return linkSchema;
+        return schemaWithCombinedDefs(linkSchema, parentSchema, linkSchema);
       } else if (linkSchema.items === undefined) {
-        return parentSchema;
+        return schemaWithCombinedDefs(parentSchema, parentSchema, linkSchema);
       }
       const mergedDefs = { ...linkSchema.$defs, ...parentSchema.$defs };
       const mergedSchemaItems = combineSchema(
@@ -2435,7 +2467,7 @@ function _combineSchemaUncached(
       });
     }
   }
-  return linkSchema;
+  return schemaWithCombinedDefs(linkSchema, parentSchema, linkSchema);
 }
 
 // docPath is where we found the pointer and are doing this work. It should

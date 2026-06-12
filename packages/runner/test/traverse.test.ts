@@ -13,6 +13,7 @@ import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import {
   canBranchMatch,
+  combineSchema,
   CompoundCycleTracker,
   createDefaultTraversalContext,
   createTraversalContext,
@@ -1308,6 +1309,114 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
     // undefined, so the boolean item cannot be silently replaced and the array
     // traversal fails instead of returning ["hello", undefined].
     expect(error).toBeDefined();
+  });
+
+  it("preserves root $defs when combining a parent schema with a bare local $ref", () => {
+    const parentSchema = {
+      type: "object",
+      $defs: {
+        UIRenderable: {
+          type: "object",
+          properties: {
+            $UI: { type: "object" },
+          },
+          required: ["$UI"],
+        },
+      },
+    } as const satisfies JSONSchema;
+    const linkSchema = {
+      $ref: "#/$defs/UIRenderable",
+    } as const satisfies JSONSchema;
+
+    const combined = combineSchema(parentSchema, linkSchema);
+    expect(typeof combined).toBe("object");
+    if (typeof combined !== "object") {
+      throw new Error("Expected object schema");
+    }
+    expect(combined.$defs?.UIRenderable).toBeDefined();
+
+    const resolved = ContextualFlowControl.resolveSchemaRefs({
+      $ref: "#/$defs/UIRenderable",
+      $defs: combined.$defs,
+    });
+    expect(typeof resolved).toBe("object");
+    if (typeof resolved !== "object" || resolved === null) {
+      throw new Error("Expected resolved object schema");
+    }
+    expect(resolved.type).toBe("object");
+    expect(resolved.required).toEqual(["$UI"]);
+  });
+
+  it("preserves $defs from a true-like parent schema when combining with a bare local $ref", () => {
+    const parentSchema = {
+      $defs: {
+        UIRenderable: {
+          type: "object",
+          properties: {
+            $UI: { type: "object" },
+          },
+          required: ["$UI"],
+        },
+      },
+    } as const satisfies JSONSchema;
+    const linkSchema = {
+      $ref: "#/$defs/UIRenderable",
+    } as const satisfies JSONSchema;
+
+    const combined = combineSchema(parentSchema, linkSchema);
+    expect(typeof combined).toBe("object");
+    if (typeof combined !== "object") {
+      throw new Error("Expected object schema");
+    }
+
+    const resolved = ContextualFlowControl.resolveSchemaRefs({
+      $ref: "#/$defs/UIRenderable",
+      $defs: combined.$defs,
+    });
+    expect(typeof resolved).toBe("object");
+    if (typeof resolved !== "object" || resolved === null) {
+      throw new Error("Expected resolved object schema");
+    }
+    expect(resolved.required).toEqual(["$UI"]);
+  });
+
+  it("preserves link-local $defs when returning the link array schema directly", () => {
+    const parentSchema = {
+      type: "array",
+      $defs: {
+        UIRenderable: {
+          type: "object",
+          required: ["parent"],
+        },
+      },
+    } as const satisfies JSONSchema;
+    const linkSchema = {
+      type: "array",
+      items: { $ref: "#/$defs/UIRenderable" },
+      $defs: {
+        UIRenderable: {
+          type: "object",
+          required: ["link"],
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    const combined = combineSchema(parentSchema, linkSchema);
+    expect(typeof combined).toBe("object");
+    if (typeof combined !== "object") {
+      throw new Error("Expected object schema");
+    }
+    expect(combined.items).toEqual({ $ref: "#/$defs/UIRenderable" });
+
+    const resolved = ContextualFlowControl.resolveSchemaRefs({
+      $ref: "#/$defs/UIRenderable",
+      $defs: combined.$defs,
+    });
+    expect(typeof resolved).toBe("object");
+    if (typeof resolved !== "object" || resolved === null) {
+      throw new Error("Expected resolved object schema");
+    }
+    expect(resolved.required).toEqual(["link"]);
   });
 });
 
