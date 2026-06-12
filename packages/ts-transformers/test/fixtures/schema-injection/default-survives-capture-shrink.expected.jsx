@@ -25,8 +25,19 @@ interface Item {
     // Renamed import: detection is symbol-verified, not name-gated.
     rank: RenamedDefault<number, 7>;
 }
+// GENERIC reference: a capture through `Tagged<number>[]` can never be
+// projected node-driven — recovering the declared type of a generic by
+// symbol would leak unsubstituted type parameters — so this leaf is always
+// served by the type-driven shrink, and only the graft can restore its
+// `"default"`. Pins the graft path even once node-driven shrinking projects
+// through non-generic named references again.
+interface Tagged<T> {
+    value: T;
+    note: Default<string, "n/a">;
+}
 interface Input {
     items: Item[];
+    boxes: Tagged<number>[];
 }
 const __cfLift_1 = __cfHelpers.lift<{
     items: {
@@ -103,12 +114,39 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_4 = __cfHelpers.lift<{
+    boxes: {
+        note: __cfHelpers.Default<string | (string & { readonly [DEFAULT_MARKER]: string; }), "n/a">;
+    }[];
+}, boolean>(({ boxes }) => boxes[0]?.note === "n/a", {
+    type: "object",
+    properties: {
+        boxes: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    note: {
+                        type: "string",
+                        "default": "n/a"
+                    }
+                },
+                required: ["note"]
+            }
+        }
+    },
+    required: ["boxes"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
+    const boxes = __cf_pattern_input.key("boxes");
     const firstDone = __cfLift_1({ items: items }).for("firstDone", true);
     const firstLabelEmpty = __cfLift_2({ items: items }).for("firstLabelEmpty", true);
     const firstRank = __cfLift_3({ items: items }).for("firstRank", true);
-    return { firstDone, firstLabelEmpty, firstRank };
+    const firstBoxNote = __cfLift_4({ boxes: boxes }).for("firstBoxNote", true);
+    return { firstDone, firstLabelEmpty, firstRank, firstBoxNote };
 }, {
     type: "object",
     properties: {
@@ -117,9 +155,25 @@ export default pattern((__cf_pattern_input) => {
             items: {
                 $ref: "#/$defs/Item"
             }
+        },
+        boxes: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    value: {
+                        type: "number"
+                    },
+                    note: {
+                        type: "string",
+                        "default": "n/a"
+                    }
+                },
+                required: ["value", "note"]
+            }
         }
     },
-    required: ["items"],
+    required: ["items", "boxes"],
     $defs: {
         Item: {
             type: "object",
@@ -150,9 +204,12 @@ export default pattern((__cf_pattern_input) => {
         },
         firstRank: {
             type: "boolean"
+        },
+        firstBoxNote: {
+            type: "boolean"
         }
     },
-    required: ["firstDone", "firstLabelEmpty", "firstRank"]
+    required: ["firstDone", "firstLabelEmpty", "firstRank", "firstBoxNote"]
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
@@ -160,5 +217,6 @@ __cfHardenFn(h);
 __cfReg({
     __cfLift_1,
     __cfLift_2,
-    __cfLift_3
+    __cfLift_3,
+    __cfLift_4
 });

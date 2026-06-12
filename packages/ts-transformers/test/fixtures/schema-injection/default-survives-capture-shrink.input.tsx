@@ -20,13 +20,26 @@ interface Item {
   rank: RenamedDefault<number, 7>;
 }
 
-interface Input {
-  items: Item[];
+// GENERIC reference: a capture through `Tagged<number>[]` can never be
+// projected node-driven — recovering the declared type of a generic by
+// symbol would leak unsubstituted type parameters — so this leaf is always
+// served by the type-driven shrink, and only the graft can restore its
+// `"default"`. Pins the graft path even once node-driven shrinking projects
+// through non-generic named references again.
+interface Tagged<T> {
+  value: T;
+  note: Default<string, "n/a">;
 }
 
-export default pattern<Input>(({ items }) => {
+interface Input {
+  items: Item[];
+  boxes: Tagged<number>[];
+}
+
+export default pattern<Input>(({ items, boxes }) => {
   const firstDone = computed(() => items[0]?.done === true);
   const firstLabelEmpty = computed(() => items[0]?.label === "");
   const firstRank = computed(() => items[0]?.rank === 7);
-  return { firstDone, firstLabelEmpty, firstRank };
+  const firstBoxNote = computed(() => boxes[0]?.note === "n/a");
+  return { firstDone, firstLabelEmpty, firstRank, firstBoxNote };
 });
