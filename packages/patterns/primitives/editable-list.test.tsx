@@ -3,11 +3,12 @@
  *
  * Exercises the composition contract via runSynced:
  * - empty → nonempty (counts, empty branch)
- * - add by text (convenience) + add by core stream
+ * - add by core stream (label-only and item forms)
  * - toggle done by live item reference (equals() identity), counts react
  * - update by live item reference (identity patch)
  * - remove by live item reference (items.remove(item))
- * - text-addressed convenience: updateItemByText / removeItemByText
+ * - duplicate labels distinguished by reference — equals() compares entity
+ *   identity, not content, so two items with the SAME label stay addressable
  * - clearDone
  * - no-op safety: a detached object literal matches nothing
  *
@@ -24,10 +25,9 @@ export default pattern(() => {
   // ==========================================================================
 
   const add_alpha = action(() => {
-    list.addItemByText.send({ text: "Alpha" });
+    list.addItem.send({ label: "Alpha" });
   });
   const add_beta = action(() => {
-    // core stream, label-only convenience form
     list.addItem.send({ label: "Beta" });
   });
   const add_gamma_with_extra = action(() => {
@@ -37,7 +37,7 @@ export default pattern(() => {
 
   // Reference-addressed: read the live item from the list, then send it.
   // The item arrives in the handler as a link; equals() resolves it back to
-  // the same entity — no user-land id involved.
+  // the same entity — no user-land id, no text matching.
   const toggle_first_done = action(() => {
     const item = list.items[0];
     if (item) list.toggleItem.send({ item });
@@ -51,53 +51,57 @@ export default pattern(() => {
     if (item) list.removeItem.send({ item });
   });
 
-  // Text-addressed convenience (fuzzy).
-  const rename_beta_by_text = action(() => {
-    list.updateItemByText.send({ text: "Beta", newText: "Beta2" });
+  // After remove_first the list is [Beta, Gamma]; keep driving by reference.
+  const rename_beta_by_ref = action(() => {
+    const item = list.items[0];
+    if (item) list.updateItem.send({ item, changes: { label: "Beta2" } });
   });
-  const done_beta_by_text = action(() => {
-    list.updateItemByText.send({ text: "Beta2", done: true });
+  const done_beta_by_ref = action(() => {
+    const item = list.items[0];
+    if (item) list.toggleItem.send({ item, done: true });
   });
-  const remove_gamma_by_text = action(() => {
-    list.removeItemByText.send({ text: "Gamma" });
+  const remove_gamma_by_ref = action(() => {
+    const item = list.items[1];
+    if (item) list.removeItem.send({ item });
   });
 
   const clear_done = action(() => {
     list.clearDone.send({});
   });
 
-  // Whitespace add should be ignored.
+  // Whitespace-only label with no item payload should be ignored.
   const add_blank = action(() => {
-    list.addItemByText.send({ text: "   " });
+    list.addItem.send({ label: "   " });
   });
 
-  // Duplicate-label fuzzy semantics: updateItemByText touches the FIRST match.
-  // The two dups are distinguished by the declared `done` field (NOT an extra —
-  // extras don't survive a full-array set, see the EditableListItem doc).
+  // Identical labels, distinguished ONLY by entity identity: update the SECOND
+  // "Dup" by reference and prove the first is untouched. (A text-matching
+  // layer could never express this — equals() is the point.)
   const add_dup_a = action(() => {
     list.addItem.send({ item: { label: "Dup", done: false } });
   });
   const add_dup_b = action(() => {
     list.addItem.send({ item: { label: "Dup", done: true } });
   });
-  const update_dup_by_text = action(() => {
-    list.updateItemByText.send({ text: "Dup", newText: "DupChanged" });
+  const update_second_dup_by_ref = action(() => {
+    const item = list.items[1];
+    if (item) list.updateItem.send({ item, changes: { label: "DupChanged" } });
   });
 
   // No-op safety: a detached object literal has no entity identity in the
   // list, so equals()/remove() match nothing and the list is untouched —
   // even when its fields structurally mirror a real item.
   const remove_absent_item = action(() => {
-    list.removeItem.send({ item: { label: "DupChanged", done: false } });
+    list.removeItem.send({ item: { label: "DupChanged", done: true } });
   });
   const update_absent_item = action(() => {
     list.updateItem.send({
-      item: { label: "Dup", done: true },
+      item: { label: "Dup", done: false },
       changes: { label: "ghost" },
     });
   });
   const toggle_absent_item = action(() => {
-    list.toggleItem.send({ item: { label: "DupChanged", done: false } });
+    list.toggleItem.send({ item: { label: "DupChanged", done: true } });
   });
 
   // ==========================================================================
@@ -139,38 +143,33 @@ export default pattern(() => {
     list.items.find((i: EditableListItem) => i.label === "Alpha!") === undefined
   );
 
-  const assert_beta_renamed = computed(() =>
-    list.items.find((i: EditableListItem) => i.label === "Beta2") !== undefined
-  );
+  const assert_beta_renamed = computed(() => list.items[0]?.label === "Beta2");
   const assert_beta_done = computed(() =>
-    // After removing Alpha, the list is [Beta2, Gamma]; Beta2 is index 0.
     list.items[0]?.label === "Beta2" && list.items[0]?.done === true
   );
 
   const assert_gamma_removed = computed(() =>
     list.items.find((i: EditableListItem) => i.label === "Gamma") === undefined
   );
-  const assert_one_after_text_remove = computed(() => list.total === 1);
+  const assert_one_after_ref_remove = computed(() => list.total === 1);
 
   const assert_blank_ignored = computed(() => list.total === 1);
 
   const assert_empty_after_clear = computed(() => list.total === 0);
 
-  // Duplicate-label first-match assertions. After clearDone the list is empty;
-  // we add two items both labelled "Dup" (the first not-done, the second done).
+  // Duplicate-label identity assertions. After clearDone the list is empty;
+  // we add two items both labelled "Dup" (first not-done, second done), then
+  // update the SECOND by reference.
   const assert_two_dups = computed(() => list.total === 2);
-  // updateItemByText("Dup") must change ONLY the first match (the not-done one):
-  // exactly one item now reads "DupChanged" and it is the not-done one; the
-  // done one still reads "Dup".
-  const assert_first_dup_changed = computed(() => {
+  const assert_second_dup_changed = computed(() => {
     const changed = list.items.filter((i: EditableListItem) =>
       i.label === "DupChanged"
     );
-    return changed.length === 1 && changed[0]?.done === false;
+    return changed.length === 1 && changed[0]?.done === true;
   });
-  const assert_second_dup_unchanged = computed(() => {
+  const assert_first_dup_unchanged = computed(() => {
     const still = list.items.filter((i: EditableListItem) => i.label === "Dup");
-    return still.length === 1 && still[0]?.done === true;
+    return still.length === 1 && still[0]?.done === false;
   });
 
   // No-op: detached-literal remove/update/toggle leaves the list untouched.
@@ -193,13 +192,12 @@ export default pattern(() => {
       { assertion: assert_initial_empty },
       { assertion: assert_initial_active },
 
-      // Add by text (convenience)
+      // Add via core stream (label-only form)
       { action: add_alpha },
       { assertion: assert_one },
       { assertion: assert_first_label_alpha },
       { assertion: assert_first_not_done },
 
-      // Add by core stream
       { action: add_beta },
       { assertion: assert_two },
 
@@ -225,14 +223,14 @@ export default pattern(() => {
       { assertion: assert_after_remove_two },
       { assertion: assert_alpha_gone },
 
-      // Text-addressed convenience
-      { action: rename_beta_by_text },
+      // Continue driving by reference after the list has shifted
+      { action: rename_beta_by_ref },
       { assertion: assert_beta_renamed },
-      { action: done_beta_by_text },
+      { action: done_beta_by_ref },
       { assertion: assert_beta_done },
-      { action: remove_gamma_by_text },
+      { action: remove_gamma_by_ref },
       { assertion: assert_gamma_removed },
-      { assertion: assert_one_after_text_remove },
+      { assertion: assert_one_after_ref_remove },
 
       // Whitespace ignored
       { action: add_blank },
@@ -242,13 +240,13 @@ export default pattern(() => {
       { action: clear_done },
       { assertion: assert_empty_after_clear },
 
-      // Duplicate-label fuzzy semantics: updateItemByText hits the first match.
+      // Identical labels distinguished by entity identity, not content
       { action: add_dup_a },
       { action: add_dup_b },
       { assertion: assert_two_dups },
-      { action: update_dup_by_text },
-      { assertion: assert_first_dup_changed },
-      { assertion: assert_second_dup_unchanged },
+      { action: update_second_dup_by_ref },
+      { assertion: assert_second_dup_changed },
+      { assertion: assert_first_dup_unchanged },
 
       // No-op safety: detached literals match nothing.
       { action: remove_absent_item },

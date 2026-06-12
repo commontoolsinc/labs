@@ -9,10 +9,9 @@
  *
  * ## The composition contract this establishes
  *
- * A primitive exposes three things, in priority order:
+ * A primitive exposes two things, in priority order:
  *   1. **Cells + Streams** pre-bound to the caller's data — the real product.
- *   2. A **convenience layer** of fuzzy, text-addressed Streams for agents.
- *   3. An **optional default `[UI]`** so a caller who just wants a list gets
+ *   2. An **optional default `[UI]`** so a caller who just wants a list gets
  *      one for free, without wiring any rows.
  *
  * ### Headless vs default UI
@@ -41,13 +40,16 @@
  * docs/common/concepts/identity.md and
  * docs/development/debugging/gotchas/custom-id-property-pitfall.md.
  *
- * ### Title/text addressing is a SEPARATE convenience layer
+ * ### Agents address items the same way: pass the item
  *
- * `addItemByText` / `updateItemByText` / `removeItemByText` are fuzzy
- * (case-insensitive `label` match), provided so an LLM can drive the list with
- * the words it already has. They are explicitly NOT the identity model: on
- * duplicate labels they touch the first match. Prefer the reference-addressed
- * streams in code; reach for the text streams only from agent tool-calls.
+ * There is deliberately NO text-addressed ("ByText") or string-token layer.
+ * LLM tool-calls do not need one: the serialization layer round-trips item
+ * references through tool arguments (cells/items serialize to `@link`
+ * references and re-cellify on the way back — see `traverseAndSerialize` /
+ * `traverseAndCellify`), so an agent that has read the list can send the
+ * item itself, exactly like JSX callers do. Grounding a natural-language
+ * phrase ("the milk one") against the list is the AGENT's job — read, match,
+ * send the reference — not a mutation API this primitive should ship.
  *
  * ### What the DEFAULT UI assumes about item shape (headless does not)
  *
@@ -121,6 +123,22 @@ export interface EditableListItem {
   [extra: string]: any;
 }
 
+/**
+ * Plain change-set / item-payload shape for stream events.
+ *
+ * Deliberately NOT `Partial<EditableListItem>`: the interface's `Default<>`
+ * annotations would make the event schema fill absent fields with their
+ * defaults (`done: false`), and a default-filled `done` clobbers the
+ * `{ ...current, ...changes }` merge in update handlers. Plain optionals
+ * stay absent when not sent.
+ */
+export interface EditableListItemPatch {
+  label?: string;
+  done?: boolean;
+  // deno-lint-ignore no-explicit-any
+  [extra: string]: any;
+}
+
 // ===== Input / Output =====
 
 export interface EditableListInput {
@@ -145,34 +163,24 @@ export interface EditableListOutput {
   // ----- CORE: reference-addressed streams -----
   /** Append an item. You may pass extra fields via `item`. */
   addItem: OpaqueRef<
-    Stream<{ label?: string; item?: Partial<EditableListItem> }>
+    Stream<{ label?: string; item?: EditableListItemPatch }>
   >;
   /** Remove this item (matched by `equals()` identity). No-op if absent. */
   removeItem: OpaqueRef<Stream<{ item: EditableListItem }>>;
   /** Patch this item (matched by `equals()`). Only provided fields change. */
   updateItem: OpaqueRef<
-    Stream<{ item: EditableListItem; changes: Partial<EditableListItem> }>
+    Stream<{ item: EditableListItem; changes: EditableListItemPatch }>
   >;
   /** Flip (or set) `done` on this item (matched by `equals()`). */
   toggleItem: OpaqueRef<Stream<{ item: EditableListItem; done?: boolean }>>;
   /** Drop every item whose `done` is true. */
   clearDone: OpaqueRef<Stream<unknown>>;
-
-  // ----- CONVENIENCE: fuzzy text-addressed streams (agent layer) -----
-  /** Add by text. Convenience alias for addItem with a label. */
-  addItemByText: OpaqueRef<Stream<{ text: string }>>;
-  /** Update the first item whose label matches (case-insensitive). */
-  updateItemByText: OpaqueRef<
-    Stream<{ text: string; newText?: string; done?: boolean }>
-  >;
-  /** Remove the first item whose label matches (case-insensitive). */
-  removeItemByText: OpaqueRef<Stream<{ text: string }>>;
 }
 
 // ===== CORE handlers (reference-addressed) =====
 
 const addItemHandler = handler<
-  { label?: string; item?: Partial<EditableListItem> },
+  { label?: string; item?: EditableListItemPatch },
   { items: Writable<EditableListItem[]> }
 >(({ label, item }, { items }) => {
   const provided = item ?? {};
@@ -196,7 +204,7 @@ const removeItemHandler = handler<
 });
 
 const updateItemHandler = handler<
-  { item: EditableListItem; changes: Partial<EditableListItem> },
+  { item: EditableListItem; changes: EditableListItemPatch },
   { items: Writable<EditableListItem[]> }
 >(({ item, changes }, { items }) => {
   const current = items.get() ?? [];
@@ -229,49 +237,6 @@ const clearDoneHandler = handler<
   if (next.length !== current.length) items.set(next);
 });
 
-// ===== CONVENIENCE handlers (fuzzy text matching) =====
-
-const addItemByTextHandler = handler<
-  { text: string },
-  { items: Writable<EditableListItem[]> }
->(({ text }, { items }) => {
-  const trimmed = (text ?? "").trim();
-  if (!trimmed) return;
-  items.push({ label: trimmed, done: false });
-});
-
-const updateItemByTextHandler = handler<
-  { text: string; newText?: string; done?: boolean },
-  { items: Writable<EditableListItem[]> }
->(({ text, newText, done }, { items }) => {
-  const current = items.get() ?? [];
-  const needle = (text ?? "").toLowerCase();
-  const idx = current.findIndex((i) =>
-    (i.label ?? "").toLowerCase() === needle
-  );
-  if (idx === -1) return;
-  const next = [...current];
-  next[idx] = {
-    ...next[idx],
-    ...(newText !== undefined ? { label: newText } : {}),
-    ...(done !== undefined ? { done } : {}),
-  };
-  items.set(next);
-});
-
-const removeItemByTextHandler = handler<
-  { text: string },
-  { items: Writable<EditableListItem[]> }
->(({ text }, { items }) => {
-  const current = items.get() ?? [];
-  const needle = (text ?? "").toLowerCase();
-  const idx = current.findIndex((i) =>
-    (i.label ?? "").toLowerCase() === needle
-  );
-  if (idx === -1) return;
-  items.set(current.toSpliced(idx, 1));
-});
-
 // ===== The primitive =====
 
 export const EditableList = pattern<EditableListInput, EditableListOutput>(
@@ -293,11 +258,6 @@ export const EditableList = pattern<EditableListInput, EditableListOutput>(
     const updateItem = updateItemHandler({ items });
     const toggleItem = toggleItemHandler({ items });
     const clearDone = clearDoneHandler({ items });
-
-    // Bind convenience streams.
-    const addItemByText = addItemByTextHandler({ items });
-    const updateItemByText = updateItemByTextHandler({ items });
-    const removeItemByText = removeItemByTextHandler({ items });
 
     // Default rows. Checkbox + text use $checked/$value two-way binding
     // (no setter handler — that would just write the same value back). Delete
@@ -353,9 +313,6 @@ export const EditableList = pattern<EditableListInput, EditableListOutput>(
       updateItem,
       toggleItem,
       clearDone,
-      addItemByText,
-      updateItemByText,
-      removeItemByText,
     };
   },
 );

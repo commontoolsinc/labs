@@ -19,12 +19,17 @@ In priority order:
    product. The caller passes a `Writable<T>` it owns; the primitive binds its
    handlers to that cell and returns the bound `Stream<>`s. The caller wires
    nothing by hand — passing the cell *is* the wiring.
-2. **A convenience layer** of fuzzy / agent-friendly Streams (e.g.
-   text-addressed `*ByText`). Optional, additive, clearly labelled as
-   convenience — never the core model.
-3. **An optional default `[UI]`.** A static `VNode` giving a caller who just
+2. **An optional default `[UI]`.** A static `VNode` giving a caller who just
    wants the thing a working experience for free. A caller who wants custom
    rendering simply does not render it.
+
+That's the whole surface. In particular, do **not** add string-addressed
+("ByText"/"ByTitle") mutation layers "for agents": LLM tool-calls round-trip
+item references through the serialization layer (cells/items serialize to
+`@link` references and re-cellify on the way back), so an agent that has read
+the data sends the item itself — the same call a JSX handler makes. Grounding
+a natural-language phrase against the data is the agent's job, not extra API
+surface on the primitive.
 
 ## The crux: a sub-pattern CAN mutate a parent-owned cell
 
@@ -79,11 +84,14 @@ Two things are explicitly **not** the identity model:
 Primitives with no collection (e.g. `ConfirmAction`, a single-gate primitive)
 have nothing to address and this section does not apply to them.
 
-Title/text addressing, where offered, is a **separate, explicit convenience
-layer** (e.g. `removeItemByText`) — the agent-facing string-addressing story for
-LLMs that only have words. It is fuzzy (case-insensitive, first-match) and
-documented as such. It sits *on top of* the reference-addressed core; it is not
-the identity model.
+**Agents are not an exception.** It is tempting to add a third addressing mode
+— title/text matching or a serializable token — "because an LLM can't hold a
+live reference." It can: tool-call arguments pass through the serialization
+layer, which carries item references as `@link`s and re-cellifies them on
+receipt. Reference addressing is the one identity story for code *and* agents.
+(Per-caller natural-language conveniences like do-list's title-addressed
+handlers are a caller's own agent API, justified by that caller's usage — they
+are not part of the primitive contract.)
 
 ## Headless vs default rendering
 
@@ -145,7 +153,8 @@ rendering without that machinery.
   a static wrapper, never by wrapping `[UI]` in `computed()`.
 - Default rows use `$checked` / `$value` two-way binding — do not add setter
   handlers that just write the same value back.
-- Optional convenience (`*ByText`) streams are additive and documented as fuzzy.
+- No string-addressed mutation layers: agents pass item references through
+  tool-calls like any other caller.
 
 ## See also
 

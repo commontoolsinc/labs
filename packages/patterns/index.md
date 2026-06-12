@@ -127,9 +127,10 @@ render its `[UI]` for a default row experience (checkbox + editable text +
 delete, a cf-message-input adder, cf-empty-state when empty), or ignore the
 `[UI]` and `.map()` your own rows while driving the exposed streams/cells.
 Mutations are addressed by live item reference via `equals()` /
-`items.remove(item)` — never array index, never a user-land `id` field; a
-separate fuzzy text-addressed layer (`*ByText`) exists for agent-driveability.
-See `docs/common/patterns/primitives.md` for the full composition contract.
+`items.remove(item)` — never array index, never a user-land `id` field, and no
+text-addressed layer: agents pass item references through tool-calls like any
+other caller (the serialization layer round-trips them as `@link`s). See
+`docs/common/patterns/primitives.md` for the full composition contract.
 
 **Keywords:** primitive, composable, list, editable, headless, identity, stream,
 embed, sub-pattern
@@ -169,10 +170,6 @@ interface EditableListOutput {
   >;
   toggleItem: Stream<{ item: EditableListItem; done?: boolean }>;
   clearDone: Stream<unknown>;
-  // CONVENIENCE: fuzzy text-addressed (agent layer)
-  addItemByText: Stream<{ text: string }>;
-  updateItemByText: Stream<{ text: string; newText?: string; done?: boolean }>;
-  removeItemByText: Stream<{ text: string }>;
 }
 ```
 
