@@ -3434,19 +3434,6 @@ export class SchemaObjectTraverser<V extends FabricValue>
         schema: itemSchema,
       };
       this.tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
-      // TODO(danfuzz): Sparse array holes should be preserved by the data
-      // model, but they currently come back as `null` from the storage
-      // boundary — that's a bug. As a stopgap, when the item schema expects
-      // cells/streams, or the schema rejects both `null` and `undefined`, treat
-      // that committed `null` as a missing slot so array consumers still see
-      // hole semantics. Fix the hole densification at its source and remove
-      // this.
-      if (
-        item === null &&
-        this.shouldTreatNullArrayEntryAsHole(curSelector.schema)
-      ) {
-        return true;
-      }
       // We follow the first link in array elements so we don't have
       // strangeness with setting item at 0 to item at 1. If the element on
       // the array is a link, we follow that link so the returned object is
@@ -3590,25 +3577,6 @@ export class SchemaObjectTraverser<V extends FabricValue>
       return true;
     });
     return valid ? arrayObj : undefined;
-  }
-
-  private shouldTreatNullArrayEntryAsHole(
-    schema: JSONSchema | undefined,
-  ): boolean {
-    if (
-      schema === undefined ||
-      ContextualFlowControl.isTrueSchema(schema) ||
-      ContextualFlowControl.isFalseSchema(schema)
-    ) {
-      return false;
-    }
-
-    if (SchemaObjectTraverser.hasAsCell(schema)) {
-      return true;
-    }
-
-    return this.isValidType(schema, "null") === TypeValidity.False &&
-      this.isValidType(schema, "undefined") === TypeValidity.False;
   }
 
   /**
