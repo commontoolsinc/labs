@@ -76,9 +76,5 @@ export default pattern(() => {
       { action: action_remove_with_empty_event },
       { assertion: assert_removed_element },
     ],
-    // TODO(profile-home): the CFC schema-ref resolver warns about an
-    // unsupported/unresolved $ref in one of this pattern's schemas (logger
-    // "cfc", fail-closed). Fix the schema, then drop this opt-out.
-    allowConsoleWarnings: true,
   };
 });
