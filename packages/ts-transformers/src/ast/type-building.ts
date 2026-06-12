@@ -442,7 +442,14 @@ export function expressionToTypeNode(
   );
   if (declaredTypeNode) {
     const type = context.checker.getTypeFromTypeNode(declaredTypeNode);
-    const clonedTypeNode = cloneTypeNode(declaredTypeNode);
+    // Deep position-stripped clone: the declaration may live in another
+    // source file, and a shallow clone keeps child positions — the printer
+    // would slice the EMIT file's text at those offsets, corrupting literal
+    // type arguments (`Default<string, .ts";`).
+    const clonedTypeNode = cloneTypeNodeDeepForEmission(
+      declaredTypeNode,
+      context.options.state?.typeRegistry,
+    );
     context.options.state?.typeRegistry?.set(clonedTypeNode, type);
     return clonedTypeNode;
   }
@@ -587,6 +594,60 @@ export function cloneTypeNode<T extends ts.TypeNode>(typeNode: T): T {
   return (ts.factory as typeof ts.factory & {
     cloneNode<TNode extends ts.Node>(node: TNode): TNode;
   }).cloneNode(typeNode);
+}
+
+/**
+ * Deep-clones a TypeNode for emission, stripping source positions throughout.
+ *
+ * An authored declaration's type node may live in a different source file
+ * than the one being emitted (e.g. a pattern destructuring an interface
+ * imported from a sibling module). The printer extracts literal text (the
+ * `"n/a"` in `Default<string, "n/a">`) by source position from the file it
+ * is currently printing, so reusing such nodes verbatim emits garbage tokens
+ * sliced from the wrong file. A position-free deep clone makes every node
+ * synthetic, forcing the printer to print structurally (literals fall back
+ * to their `.text`).
+ *
+ * Pass `typeRegistry` to carry each node's registered Type onto its clone.
+ *
+ * (Mirrors the helper of the same name on the lift-capture-shrink branch,
+ * #4078 — whichever lands second keeps one copy.)
+ */
+export function cloneTypeNodeDeepForEmission<T extends ts.TypeNode>(
+  typeNode: T,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): T {
+  const nullContext = (ts as typeof ts & {
+    nullTransformationContext?: ts.TransformationContext;
+  }).nullTransformationContext;
+  if (!nullContext) return typeNode;
+  const cloneShallow = (ts.factory as typeof ts.factory & {
+    cloneNode<TNode extends ts.Node>(node: TNode): TNode;
+  }).cloneNode;
+
+  const visit = <N extends ts.Node>(node: N): N => {
+    // Post-order: children first, so leaf nodes (identifiers, literals,
+    // keywords) get cloned explicitly while composite nodes are recreated by
+    // visitEachChild's update calls when any child changed.
+    let result = ts.visitEachChild(
+      node,
+      (child) => visit(child),
+      nullContext,
+    ) as N;
+    if (result === node) {
+      result = cloneShallow(node);
+    }
+    // update* calls copy the original's text range for source maps; strip it
+    // so the printer treats the node as synthesized everywhere.
+    ts.setTextRange(result, { pos: -1, end: -1 });
+    const registered = typeRegistry?.get(node);
+    if (registered) {
+      typeRegistry!.set(result, registered);
+    }
+    return result;
+  };
+
+  return visit(typeNode);
 }
 
 /**
