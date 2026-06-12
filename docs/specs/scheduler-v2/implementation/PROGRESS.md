@@ -1662,3 +1662,31 @@ is green on top of the fix.
     `eventQueue.push`, processing remains head-only, retry uses the existing
     `unshift` path for the same event id, and lineage failure only removes
     failed descendants or shifts a failed head without reordering survivors.
+
+## REVIEWER RESOLUTION — PR #4090 review findings
+
+- [x] pending — engine precondition reachability + lineage retry
+  re-registration + fail-closed precondition plumbing.
+- Findings addressed (Codex/cubic review on PR #4090), red-first fixtures
+  recorded for each:
+  1. Engine empty-commit guard rejected precondition-only commits
+     (`operations: []` from a descendant with only no-op writes) before
+     `validateCommitPreconditions` could run, and the observation-only
+     fast paths returned before validation. Preconditions now make a
+     commit non-empty and validate ahead of every commit shape; malformed
+     entries surface as deterministic `ProtocolError`
+     (`packages/memory/test/v2-commit-preconditions.test.ts`).
+  2. Retry requeues (`RetryImmediately`, non-permanent commit failure)
+     created fresh `QueuedEvent` objects the lineage registry never saw, so
+     an origin failing while the retry was queued could not remove it and
+     the post-settlement `originStatus()` fallback let it run. Requeues now
+     re-record with the registry
+     (`test/scheduler-event-lineage.test.ts` "keeps retried same-space
+     follow-ups lineage-gated").
+  3. `V2StorageTransaction.addCommitPrecondition` did not claim a write
+     space, so a precondition-only transaction resolved ok without sending
+     a commit; it now claims the space like `recordSqliteWrite`. Both
+     transaction wrappers now throw instead of silently dropping
+     preconditions on storage that cannot enforce them
+     (`test/storage-commit-preconditions.test.ts`).
+- Deviations: none.
