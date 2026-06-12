@@ -5487,3 +5487,20 @@ $ rg -n "queueInitialActionRehydration|initialRehydrationTokens|canApplyInitialA
     `595 passed (3099 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m8s`.
   - Expected noisy passing logs remain: scheduler preflight/retry/error logs
     and write-surface warnings in wish/raw map fixtures.
+
+## 08/6-preflight-cache-disposition (review follow-up)
+
+- [x] pending — Phase 6 is closed as skipped, as anticipated by spec decision 3.
+- Shape:
+  - Re-ran `scheduler-event-preflight.bench.ts` after Phase 7 and final cleanup.
+  - The results stayed in the same stress-benchmark shape as the earlier
+    recorded baselines, so the off-by-default preflight closure cache was not
+    implemented. Future cache work should wait for a UI-flow trace showing
+    preflight as a material share of event latency.
+- Recordings:
+  - `deno bench --no-check --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    packages/runner/test/scheduler-event-preflight.bench.ts`: passed on Apple
+    M3 Max / Deno 2.8.1. Clean broad graph `328.3 ms`; transitive invalid
+    writer `26.0 ms`; note-shaped 30x7 clean events `1.1 s`; deep
+    read-populated handler `683.2 ms`.
