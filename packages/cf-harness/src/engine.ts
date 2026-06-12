@@ -319,9 +319,10 @@ export class CfHarnessEngine {
         cfcInvocationContextDir: options.cfcInvocationContextDir,
       })
       : this.config.sandbox;
-    // Capture the engine-owned docker-runsc config so we can refuse to *run* an
-    // enforce-mode tool whose sandbox lacks the CFC sidecar transports (the
-    // check fires at run start, not construction — see #assertCfcTransportReady).
+    // Capture the engine-owned docker-runsc config so we can refuse to *run*
+    // enforce-mode sandbox work — capability probes or tools — whose sandbox
+    // lacks the CFC sidecar transports (the check fires at run start, not
+    // construction — see #assertCfcTransportReady).
     // Only when the engine constructs the runtime itself: an injected
     // sandboxRuntime is the thing that actually executes and carries its own
     // enforcement guarantees, while `sandboxConfig` in that branch is the
@@ -729,11 +730,12 @@ export class CfHarnessEngine {
     return policyTracePath;
   }
 
-  // Fail fast before any tool runs under enforcement on a sandbox that lacks the
-  // CFC sidecar transports. Checked at run start rather than construction so an
-  // engine can be built and inspected (config threading, capability probes)
-  // without a live CFC wiring; the floor only applies once tools actually
-  // execute. Idempotent so the cost is paid once per run.
+  // Fail fast before any sandbox execution under enforcement on a sandbox that
+  // lacks the CFC sidecar transports — capability probes included, since they
+  // run scripts inside the same sandbox (not just builtin tools). Checked at
+  // run start rather than construction so an engine can be built and inspected
+  // (config threading, --describe-capabilities) without a live CFC wiring.
+  // Idempotent so the cost is paid once per run.
   #assertCfcTransportReady(): void {
     if (this.#cfcTransportChecked || this.#ownedRunscConfig === undefined) {
       return;
@@ -746,6 +748,10 @@ export class CfHarnessEngine {
   }
 
   async ensureDiagnosticsInitialized(): Promise<HarnessRunState> {
+    // The capability probes below execute scripts inside the sandbox, so the
+    // enforce-mode transport floor applies here too — and must throw before
+    // the try block below, which records probe errors instead of propagating.
+    this.#assertCfcTransportReady();
     if (this.#runState.capabilitySnapshot !== undefined) {
       return this.getRunState();
     }

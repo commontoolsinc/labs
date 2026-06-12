@@ -129,7 +129,8 @@ Deno.test("CfHarnessEngine accepts a default sandbox image override", () => {
 
 Deno.test("CfHarnessEngine constructs in enforce mode without CFC transports", () => {
   // Construction must stay cheap and inspectable; the transport floor is only
-  // enforced once a tool actually runs (see the run-start test below).
+  // enforced once the run starts — at diagnostics init (capability probes) or
+  // the first tool call, whichever comes first (see the run-start tests below).
   const engine = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
     cfcEnforcementMode: "enforce-strict",
@@ -148,6 +149,29 @@ Deno.test("CfHarnessEngine refuses to run a tool in enforce mode without CFC tra
     Error,
     "requires the runsc sandbox to wire",
   );
+});
+
+Deno.test("CfHarnessEngine refuses to run capability probes in enforce mode without CFC transports", async () => {
+  // The prompt loop initializes diagnostics before the first model turn, and
+  // the capability probes execute scripts inside the sandbox — so the
+  // transport floor must fire before any sandbox execution, not only at the
+  // first builtin tool call. The probe error swallowing inside diagnostics
+  // init must not absorb the floor violation into a failure record.
+  const runner = new FakeProcessRunner();
+  const engine = new CfHarnessEngine({
+    runId: "run-1",
+    workspaceHostPath: "/host/project",
+    cfcEnforcementMode: "enforce-explicit",
+    processRunner: runner,
+  });
+  await assertRejects(
+    () => engine.ensureDiagnosticsInitialized(),
+    Error,
+    "requires the runsc sandbox to wire",
+  );
+  // Nothing reached the docker lifecycle: the run failed closed before any
+  // sandbox execution.
+  assertEquals(runner.calls.length, 0);
 });
 
 Deno.test("CfHarnessEngine runs a tool in enforce mode when CFC transports are wired", async () => {
