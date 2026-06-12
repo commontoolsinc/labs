@@ -126,16 +126,29 @@ Deno.test("reload: resumed pattern rehydrates persisted observations", async () 
   // RELOAD (runtime B, same storage).
   const runtimeB = newRuntime(storageManager);
   try {
-    const compiledB = await runtimeB.patternManager.compilePattern(PROGRAM);
-    const tx = runtimeB.edit();
-    const resultCellB = runtimeB.getCell(space, "rg-result", undefined, tx);
-    const handleB = runtimeB.run(tx, compiledB, {}, resultCellB);
-    await tx.commit();
-    for (let k = 0; k < 6; k++) {
-      await handleB.pull();
-      await runtimeB.idle();
-    }
+    await runtimeB.patternManager.compilePattern(PROGRAM);
+    const resultCellB = runtimeB.getCell(space, "rg-result", undefined);
+    const provider = runtimeB.storageManager.open(space);
+    const listSnapshots = provider.listSchedulerActionSnapshots?.bind(
+      provider,
+    );
+    expect(listSnapshots).toBeDefined();
+    const snapshotQueries: unknown[] = [];
+    provider.listSchedulerActionSnapshots = (query) => {
+      snapshotQueries.push(query);
+      return listSnapshots!(query);
+    };
+
+    await runtimeB.start(resultCellB);
+    await runtimeB.idle();
+
     expect(resultCellB.key("count").getAsQueryResult()).toBe(COUNT);
+    const { scope, id } = resultCellB.getAsNormalizedFullLink();
+    expect(snapshotQueries).toEqual([{
+      ownerSpace: space,
+      pieceId: `${scope}:${id}`,
+      processGeneration: 0,
+    }]);
   } finally {
     await runtimeB.dispose();
   }
