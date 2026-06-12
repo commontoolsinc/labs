@@ -327,6 +327,135 @@ Deno.test("parseCfHarnessCliArgs supports gateway auth mode override", async () 
   assertEquals(parsed.gatewayAuthMode, "none");
 });
 
+Deno.test("parseCfHarnessCliArgs resolves sandbox docker runtime from flag and environment", async () => {
+  const fromFlag = await parseCfHarnessCliArgs(
+    ["--prompt", "hi", "--sandbox-docker-runtime", "runc"],
+    {
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_SANDBOX_DOCKER_RUNTIME: "runsc-cfc" },
+    },
+  );
+  if ("help" in fromFlag) {
+    throw new Error("expected config result");
+  }
+  assertEquals(fromFlag.sandboxDockerRuntime, "runc");
+
+  const fromEnv = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_SANDBOX_DOCKER_RUNTIME: "runc" },
+    },
+  );
+  if ("help" in fromEnv) {
+    throw new Error("expected config result");
+  }
+  assertEquals(fromEnv.sandboxDockerRuntime, "runc");
+
+  const unset = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    { cwd: "/tmp/project", env: {} },
+  );
+  if ("help" in unset) {
+    throw new Error("expected config result");
+  }
+  assertEquals(unset.sandboxDockerRuntime, undefined);
+
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--sandbox-docker-runtime", "  "],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--sandbox-docker-runtime requires a non-empty runtime name",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs resolves gateway config from environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: {
+        CF_HARNESS_GATEWAY_BASE_URL: "http://localhost:8080/",
+        CF_HARNESS_GATEWAY_AUTH_MODE: "none",
+        CF_HARNESS_MODEL: "gpt-oss-120b",
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.gatewayBaseUrl, "http://localhost:8080/");
+  assertEquals(parsed.gatewayAuthMode, "none");
+  assertEquals(parsed.model, "gpt-oss-120b");
+});
+
+Deno.test("parseCfHarnessCliArgs prefers gateway flags over environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--gateway-base-url",
+      "https://llm.example.test/",
+      "--gateway-auth-mode",
+      "bearer",
+      "--model",
+      "gpt-5.5",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: {
+        CF_HARNESS_GATEWAY_BASE_URL: "http://localhost:8080/",
+        CF_HARNESS_GATEWAY_AUTH_MODE: "none",
+        CF_HARNESS_MODEL: "gpt-oss-120b",
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.gatewayBaseUrl, "https://llm.example.test/");
+  assertEquals(parsed.gatewayAuthMode, "bearer");
+  assertEquals(parsed.model, "gpt-5.5");
+});
+
+Deno.test("parseCfHarnessCliArgs rejects invalid gateway auth mode from environment", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(["--prompt", "hi"], {
+        cwd: "/tmp/project",
+        env: { CF_HARNESS_GATEWAY_AUTH_MODE: "token" },
+      }),
+    Error,
+    "gateway auth mode must be one of bearer, none",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs ignores blank gateway environment values", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: {
+        CF_HARNESS_GATEWAY_BASE_URL: "  ",
+        CF_HARNESS_GATEWAY_AUTH_MODE: "",
+        CF_HARNESS_MODEL: " ",
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.gatewayBaseUrl, "https://llm.stage.commontools.dev/");
+  assertEquals(parsed.gatewayAuthMode, "bearer");
+  assertEquals(parsed.model, "gpt-5.5");
+});
+
 Deno.test("parseCfHarnessCliArgs supports batch output mode override", async () => {
   const parsed = await parseCfHarnessCliArgs(
     ["--prompt", "hi", "--output-mode", "batch"],

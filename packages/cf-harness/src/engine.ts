@@ -167,6 +167,7 @@ export interface CreateHarnessEngineOptions
   runState?: HarnessRunState;
   workspaceHostPath?: string;
   sandboxImage?: string;
+  sandboxDockerRuntime?: string;
   additionalMounts?: readonly DockerRunscAdditionalMountConfig[];
   sandboxRuntime?: SandboxRuntime;
   artifactStore?: HarnessArtifactStore;
@@ -193,6 +194,7 @@ const resolveSandboxConfig = (
   workspaceHostPath?: string,
   sandboxImage?: string,
   additionalMounts?: readonly DockerRunscAdditionalMountConfig[],
+  sandboxDockerRuntime?: string,
 ): HarnessSandboxConfig => {
   if (config.sandbox !== undefined) {
     return config.sandbox;
@@ -205,6 +207,9 @@ const resolveSandboxConfig = (
   return resolveDockerRunscSandboxConfig({
     workspaceHostPath,
     ...(sandboxImage !== undefined ? { image: sandboxImage } : {}),
+    ...(sandboxDockerRuntime !== undefined
+      ? { runtimeName: sandboxDockerRuntime }
+      : {}),
     ...(additionalMounts !== undefined && additionalMounts.length > 0
       ? { additionalMounts }
       : {}),
@@ -295,6 +300,7 @@ export class CfHarnessEngine {
         options.workspaceHostPath,
         options.sandboxImage,
         options.additionalMounts,
+        options.sandboxDockerRuntime,
       )
       : this.config.sandbox;
     this.hostProcessRunner = options.processRunner ?? new DenoProcessRunner();
