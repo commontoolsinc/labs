@@ -343,6 +343,14 @@ export function diffAndUpdate(
 export type ChangeSet = {
   location: NormalizedFullLink;
   value: FabricValue;
+  /**
+   * When true, the change removes the slot at `location` (object key
+   * removal or array hole) instead of writing a value; `value` is
+   * `undefined`. Without this flag, a change whose `value` is `undefined`
+   * stores `undefined` as a real value — present-but-undefined is distinct
+   * from absent.
+   */
+  delete?: boolean;
 }[];
 
 /**
@@ -931,7 +939,8 @@ export function normalizeAndDiff(
       if (!inNew && !inCur) continue; // hole→hole: no change
 
       if (!inNew && inCur) {
-        // value→hole: emit delete (set to undefined)
+        // value→hole: emit an explicit delete (a plain `undefined` write
+        // would store `undefined` rather than punching a hole)
         changes.push({
           location: {
             ...link,
@@ -939,6 +948,7 @@ export function normalizeAndDiff(
             schema: runtime.cfc.getSchemaAtPath(link.schema, [i.toString()]),
           },
           value: undefined,
+          delete: true,
         });
         continue;
       }
@@ -947,6 +957,22 @@ export function normalizeAndDiff(
       const childSchema = runtime.cfc.getSchemaAtPath(link.schema, [
         i.toString(),
       ]);
+
+      // hole→explicit-undefined: a real change (the slot becomes
+      // present-but-undefined) that the value diff below can't see, since
+      // both sides read as `undefined`. Emit the write directly.
+      if (newValue[i] === undefined && !inCur) {
+        changes.push({
+          location: {
+            ...link,
+            path: [...link.path, i.toString()],
+            schema: childSchema,
+          },
+          value: undefined,
+        });
+        continue;
+      }
+
       const nestedChanges = normalizeAndDiff(
         runtime,
         tx,
@@ -1073,6 +1099,19 @@ export function normalizeAndDiff(
       });
 
       const childSchema = runtime.cfc.getSchemaAtPath(link.schema, [key]);
+
+      // An explicit `undefined` for a key the current object doesn't have is
+      // a real change — the slot becomes present-but-undefined — but the
+      // value diff below sees `undefined === undefined` and would emit
+      // nothing. `undefined` is a leaf, so emit the write directly.
+      if (newValue[key] === undefined && !(key in currentRecord)) {
+        changes.push({
+          location: { ...link, path: [...link.path, key], schema: childSchema },
+          value: undefined,
+        });
+        continue;
+      }
+
       const nestedChanges = normalizeAndDiff(
         runtime,
         tx,
@@ -1141,12 +1180,14 @@ export function normalizeAndDiff(
       }
     }
 
-    // Handle removed keys
+    // Handle removed keys: explicit deletes, so a key the new value omits is
+    // removed rather than left behind as present-but-undefined.
     for (const key in currentRecord) {
       if (!(key in newValue) && !eagerScopedKeys.has(key)) {
         changes.push({
           location: { ...link, path: [...link.path, key] },
           value: undefined,
+          delete: true,
         });
       }
     }
@@ -1172,12 +1213,15 @@ export function normalizeAndDiff(
           i < Math.max(currentLength, newLength);
           i++
         ) {
+          // Slots beyond the shorter length are removed (or, on growth,
+          // were never present): explicit deletes, not `undefined` values.
           changes.push({
             location: {
               ...link,
               path: [...link.path.slice(0, -1), i.toString()],
             },
             value: undefined,
+            delete: true,
           });
         }
         return changes;
@@ -1232,7 +1276,8 @@ function hasPath(value: unknown, path: readonly string[]): boolean {
  *
  * Key rules:
  * - Empty objects `{}` or arrays `[]` do NOT subsume children (children populate them)
- * - Parent deletions (`value: undefined`) DO subsume child changes
+ * - Parent deletions (`delete: true`) and parent writes of `undefined` DO
+ *   subsume child changes (either way the subtree at the parent is gone)
  * - Parent must actually CONTAIN the child's path for subsumption to occur
  *
  * @param changes - The original change set
@@ -1261,8 +1306,9 @@ export function compactChangeSet(changes: ChangeSet): ChangeSet {
 
     // Track parent paths that can subsume children
     // Empty {} or [] don't subsume - children populate them!
-    const subsumingPaths: Array<{ path: readonly string[]; value: unknown }> =
-      [];
+    const subsumingPaths: Array<
+      { path: readonly string[]; value: unknown; delete?: boolean }
+    > = [];
 
     for (const change of sorted) {
       const path = change.location.path;
@@ -1284,17 +1330,22 @@ export function compactChangeSet(changes: ChangeSet): ChangeSet {
         return hasPath(parentVal, relativePath);
       });
 
-      // Also check: is this child subsumed by a DELETION of parent?
+      // Also check: is this child subsumed by a parent whose subtree is gone
+      // (explicit delete, or overwritten with `undefined`)?
       const isDeletedByParent = subsumingPaths.some((parent) => {
         if (parent.path.length >= path.length) return false;
         if (!parent.path.every((seg, i) => seg === path[i])) return false;
-        return parent.value === undefined; // Parent deletion subsumes child
+        return parent.delete === true || parent.value === undefined;
       });
 
       if (!isSubsumed && !isDeletedByParent) {
         result.push(change);
         // Track this path for potential child subsumption
-        subsumingPaths.push({ path, value: change.value });
+        subsumingPaths.push({
+          path,
+          value: change.value,
+          delete: change.delete,
+        });
       }
     }
   }
@@ -1326,6 +1377,7 @@ export function applyChangeSet(
       changes.map((change) => ({
         address: change.location,
         value: change.value,
+        delete: change.delete,
       })),
     );
     return;
@@ -1333,7 +1385,11 @@ export function applyChangeSet(
   for (const change of changes) {
     // `diffAndUpdate()` establishes attempted-target coverage before we get
     // here, so these direct writes preserve the phase-1 `attemptedWrites` view.
-    tx.writeValueOrThrow(change.location, change.value);
+    tx.writeValueOrThrow(
+      change.location,
+      change.value,
+      change.delete ? { delete: true } : undefined,
+    );
   }
 }
 

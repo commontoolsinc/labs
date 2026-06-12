@@ -25,6 +25,7 @@ import type {
   ITransactionReader,
   ITransactionWriter,
   ITransactionWriteRequest,
+  IWriteOptions,
   MediaType,
   MemorySpace,
   NativeStorageCommit,
@@ -65,7 +66,7 @@ import {
   isReadIgnoredForScheduling,
   isReadMarkedAsAttemptedWrite,
 } from "./reactivity-log.ts";
-import { readValueAtPath } from "./v2-path.ts";
+import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type { CellScope } from "../builder/types.ts";
@@ -340,9 +341,11 @@ const schedulerObservationCommitSpace = (
 const findMaterializedParentPath = (
   currentRoot: FabricValue | undefined,
   path: readonly string[],
-  value: FabricValue | undefined,
+  isDelete: boolean,
 ): readonly string[] | undefined => {
-  if (value === undefined) {
+  // Deletes never materialize intermediates; value writes (including
+  // explicit `undefined`) do.
+  if (isDelete) {
     return undefined;
   }
 
@@ -434,24 +437,38 @@ const findDeepestArrayPath = (
     : path.slice(0, firstArrayLikeSegment);
 };
 
+/**
+ * Builds a patch op from before/after state at `path`. Presence (slot
+ * exists) is distinct from value: a slot holding `undefined` is present,
+ * so add/remove are chosen from presence transitions, and a stored
+ * `undefined` travels as a `replace`/`add` whose value is `undefined`.
+ * When presence flags are omitted they are inferred from value
+ * definedness (legacy callers in the array fast-path, where presence
+ * parity was already established via `in` checks).
+ */
 const buildValuePatchCandidate = (
   path: readonly string[],
   value: FabricValue | undefined,
   previousValue: FabricValue | undefined,
+  valuePresent: boolean = value !== undefined,
+  previousPresent: boolean = previousValue !== undefined,
 ): PatchDraftCandidate | null => {
-  if (deepEqual(value, previousValue)) {
+  if (valuePresent === previousPresent && deepEqual(value, previousValue)) {
     return null;
   }
 
   const pointer = encodePointer(path);
-  if (value === undefined) {
+  if (!valuePresent) {
+    if (!previousPresent) {
+      return null;
+    }
     return {
       patch: { op: "remove", path: pointer },
       path,
       coversDescendants: true,
     };
   }
-  if (previousValue === undefined) {
+  if (!previousPresent) {
     return {
       patch: { op: "add", path: pointer, value },
       path,
@@ -481,26 +498,42 @@ const buildArrayPatchCandidates = (
   path: readonly string[],
   before: FabricValue | undefined,
   after: FabricValue | undefined,
+  beforePresent: boolean = before !== undefined,
+  afterPresent: boolean = after !== undefined,
 ): PatchDraftCandidate[] => {
-  if (deepEqual(before, after)) {
+  if (beforePresent === afterPresent && deepEqual(before, after)) {
     return [];
   }
 
   if (!Array.isArray(before) || !Array.isArray(after)) {
-    const candidate = buildValuePatchCandidate(path, after, before);
+    const candidate = buildValuePatchCandidate(
+      path,
+      after,
+      before,
+      afterPresent,
+      beforePresent,
+    );
     return candidate ? [candidate] : [];
   }
 
+  // Both sides are arrays from here on, so the array slot itself is present
+  // in both states; fallbacks below replace the whole array.
   const overlappingLength = Math.min(before.length, after.length);
   for (let index = 0; index < overlappingLength; index += 1) {
     if ((index in before) !== (index in after)) {
-      const fallback = buildValuePatchCandidate(path, after, before);
+      const fallback = buildValuePatchCandidate(
+        path,
+        after,
+        before,
+        true,
+        true,
+      );
       return fallback ? [fallback] : [];
     }
   }
 
   if (after.length > before.length && !arrayTailIsDense(after, before.length)) {
-    const fallback = buildValuePatchCandidate(path, after, before);
+    const fallback = buildValuePatchCandidate(path, after, before, true, true);
     return fallback ? [fallback] : [];
   }
 
@@ -556,7 +589,7 @@ const buildArrayPatchCandidates = (
   }
 
   if (candidates.length === 0) {
-    const fallback = buildValuePatchCandidate(path, after, before);
+    const fallback = buildValuePatchCandidate(path, after, before, true, true);
     return fallback ? [fallback] : [];
   }
 
@@ -725,8 +758,9 @@ class V2Writer extends V2Reader implements ITransactionWriter {
   write(
     address: IMemoryAddress,
     value?: FabricValue,
+    options?: IWriteOptions,
   ): Result<IAttestation, WriteError> {
-    return this.tx.writeWithinSpace(this.did(), address, value);
+    return this.tx.writeWithinSpace(this.did(), address, value, options);
   }
 }
 
@@ -1058,12 +1092,19 @@ export class V2StorageTransaction implements IStorageTransaction {
   write(
     address: IMemorySpaceAddress,
     value?: FabricValue,
+    options?: IWriteOptions,
   ): Result<IAttestation, WriterError | WriteError> {
     const ready = this.prepareWriteSpace(address.space);
     if (ready.error) {
       return { error: ready.error };
     }
-    return this.writeWithinBranch(ready.ok, address.space, address, value);
+    return this.writeWithinBranch(
+      ready.ok,
+      address.space,
+      address,
+      value,
+      options,
+    );
   }
 
   writeBatch(
@@ -1116,9 +1157,16 @@ export class V2StorageTransaction implements IStorageTransaction {
     space: MemorySpace,
     address: IMemoryAddress,
     value?: FabricValue,
+    options?: IWriteOptions,
   ): Result<IAttestation, WriteError> {
     this.assertWritable("write()");
-    return this.writeWithinBranch(this.branch(space), space, address, value);
+    return this.writeWithinBranch(
+      this.branch(space),
+      space,
+      address,
+      value,
+      options,
+    );
   }
 
   /**
@@ -1129,34 +1177,44 @@ export class V2StorageTransaction implements IStorageTransaction {
    * subtrees stay deep-frozen and structurally shared with the prior
    * `doc.current.value`.
    *
-   * No-op short-circuits:
-   *   - If the leaf is already deep-equal to `value`, return the unchanged
-   *     attestation.
-   *   - If `value === undefined` and the leaf doesn't exist (path not
-   *     found), return the unchanged attestation -- don't allocate
-   *     intermediate containers just to delete a slot that wasn't there.
+   * No-op short-circuits (presence-aware: a stored `undefined` is a real
+   * state, distinct from an absent slot):
+   *   - For a value write, if the leaf exists and is already deep-equal to
+   *     `value`, return the unchanged attestation. A write of `undefined`
+   *     to an absent leaf is NOT a no-op — it stores `undefined`,
+   *     materializing intermediates if needed.
+   *   - For a delete (`options.delete`), if the leaf doesn't exist —
+   *     whether the leaf slot is absent or an intermediate is missing —
+   *     return the unchanged attestation; don't allocate intermediate
+   *     containers just to delete a slot that wasn't there.
    */
   private writeWithinBranch(
     branch: SpaceBranch,
     space: MemorySpace,
     address: IMemoryAddress,
     value?: FabricValue,
+    options?: IWriteOptions,
   ): Result<IAttestation, WriteError> {
     if (address.id.startsWith("data:")) {
       return { error: ReadOnlyAddressError(address).from(space) };
     }
+    const isDelete = options?.delete === true;
 
     const { doc: readDoc } = this.document(branch, address);
     const doc = ensureWritableDocument(readDoc);
     const current = doc.current;
     const previous = inspectPath(current.value, address.path);
-    if (previous.kind === "ok" && deepEqual(previous.value, value)) {
-      return { ok: current };
+    if (previous.kind === "ok") {
+      const present = hasValueAtPath(current.value, address.path, {
+        allowArrayLength: true,
+      });
+      if (
+        isDelete ? !present : (present && deepEqual(previous.value, value))
+      ) {
+        return { ok: current };
+      }
     }
-    // Delete-of-nonexistent: don't create intermediate containers just to
-    // express "remove a slot that wasn't there." This preserves the
-    // previous `writeWithinSpaceCreatingParents` short-circuit.
-    if (previous.kind === "notFound" && value === undefined) {
+    if (previous.kind === "notFound" && isDelete) {
       return { ok: current };
     }
 
@@ -1179,7 +1237,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     const activityPath = findMaterializedParentPath(
       current.value,
       address.path,
-      isolatedValue,
+      isDelete,
     ) ?? address.path;
     const previousActivityValue = cloneIfNecessary(
       readValueAtPath(current.value, activityPath, {
@@ -1191,6 +1249,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       current.value,
       address,
       isolatedValue,
+      isDelete ? { delete: true } : undefined,
     );
     if (result.error) {
       return { error: result.error.from(space) };
@@ -1240,8 +1299,13 @@ export class V2StorageTransaction implements IStorageTransaction {
       // Singleton-batch / data:URI fallback: route each write through the
       // unified single-write entry, which itself handles
       // create-missing-intermediates.
-      for (const { address, value } of writes) {
-        const result = this.writeWithinSpace(space, address, value);
+      for (const { address, value, delete: isDelete } of writes) {
+        const result = this.writeWithinSpace(
+          space,
+          address,
+          value,
+          isDelete ? { delete: true } : undefined,
+        );
         if (result.error) {
           return { error: result.error };
         }
@@ -1271,27 +1335,42 @@ export class V2StorageTransaction implements IStorageTransaction {
     // reading it AFTER the call would observe the post-write state.
     // (See `writeWithinBranch` for the same invariant and a regression
     // test.)
-    for (const { address, value } of writes) {
+    for (const { address, value, delete: isDelete } of writes) {
       const isolatedValue = value === undefined
         ? undefined
         : cloneIfNecessary(value) as FabricValue;
       const previousValue = readValueAtPath(nextRoot, address.path, {
         allowArrayLength: true,
       });
-      if (deepEqual(previousValue, isolatedValue)) {
+      // Presence-aware no-op detection (also keeps no-op deletes from
+      // reaching `applyMutablePathWrite`, which would materialize
+      // intermediates into `nextRoot` before the changed check).
+      const present = hasValueAtPath(nextRoot, address.path, {
+        allowArrayLength: true,
+      });
+      if (
+        isDelete
+          ? !present
+          : (present && deepEqual(previousValue, isolatedValue))
+      ) {
         continue;
       }
       const activityPath = findMaterializedParentPath(
         nextRoot,
         address.path,
-        isolatedValue,
+        isDelete === true,
       ) ?? address.path;
       const previousActivityValue = cloneIfNecessary(
         readValueAtPath(nextRoot, activityPath, {
           allowArrayLength: true,
         }) as FabricValue,
       ) as FabricValue | undefined;
-      const result = applyMutablePathWrite(nextRoot, address, isolatedValue);
+      const result = applyMutablePathWrite(
+        nextRoot,
+        address,
+        isolatedValue,
+        isDelete ? { delete: true } : undefined,
+      );
       if (result.error) {
         if (changed) {
           doc.current = {
@@ -1915,6 +1994,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       path: readonly string[];
       value: FabricValue | undefined;
       previousValue: FabricValue | undefined;
+      valuePresent: boolean;
+      previousPresent: boolean;
     }>();
     const arrayGroups = new Map<string, readonly string[]>();
     for (const detail of details) {
@@ -1928,7 +2009,22 @@ export class V2StorageTransaction implements IStorageTransaction {
         detail.address.path,
         { allowArrayLength: true },
       );
-      if (deepEqual(value, previousValue)) {
+      // Presence-aware change detection: present-but-undefined and absent
+      // both read as `undefined`, but transitions between them are real
+      // changes (add/remove of an `undefined`-valued slot).
+      const valuePresent = hasValueAtPath(
+        doc.current.value,
+        detail.address.path,
+        { allowArrayLength: true },
+      );
+      const previousPresent = hasValueAtPath(
+        doc.initial.value,
+        detail.address.path,
+        { allowArrayLength: true },
+      );
+      if (
+        valuePresent === previousPresent && deepEqual(value, previousValue)
+      ) {
         continue;
       }
 
@@ -1946,6 +2042,8 @@ export class V2StorageTransaction implements IStorageTransaction {
         path: detail.address.path,
         value,
         previousValue,
+        valuePresent,
+        previousPresent,
       });
     }
 
@@ -1955,6 +2053,8 @@ export class V2StorageTransaction implements IStorageTransaction {
         detail.path,
         detail.value,
         detail.previousValue,
+        detail.valuePresent,
+        detail.previousPresent,
       );
       if (candidate) {
         fullCoverCandidates.push(candidate);
@@ -1974,6 +2074,12 @@ export class V2StorageTransaction implements IStorageTransaction {
           arrayPath,
           beforeValue,
           afterValue,
+          hasValueAtPath(doc.initial.value, arrayPath, {
+            allowArrayLength: true,
+          }),
+          hasValueAtPath(doc.current.value, arrayPath, {
+            allowArrayLength: true,
+          }),
         )
       ) {
         if (candidate.coversDescendants) {

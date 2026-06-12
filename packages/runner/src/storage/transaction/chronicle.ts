@@ -13,6 +13,7 @@ import type {
   ITransaction,
   ITypeMismatchError,
   IUnsupportedMediaTypeError,
+  IWriteOptions,
   MemorySpace,
   Result,
   State,
@@ -57,16 +58,18 @@ const applyWriteToAttestation = (
   source: IAttestation,
   address: IMemoryAddress,
   value: FabricValue | undefined,
+  options?: IWriteOptions,
 ): Result<IAttestation, INotFoundError | ITypeMismatchError> => {
   const relativePath = address.path.slice(source.address.path.length);
 
   // Root write: pure replacement; bypass `applyMutablePathWrite` to
   // avoid forcing a deep-equal comparison (we know nothing here is
   // structurally equal to the new root unless it's literally the
-  // same reference).
+  // same reference). A root delete retracts (root becomes undefined).
   if (relativePath.length === 0) {
-    if (source.value === value) return { ok: source };
-    return { ok: { ...source, value } };
+    const nextValue = options?.delete === true ? undefined : value;
+    if (source.value === nextValue) return { ok: source };
+    return { ok: { ...source, value: nextValue } };
   }
 
   if (source.value === undefined) {
@@ -76,7 +79,12 @@ const applyWriteToAttestation = (
   }
 
   const relativeAddress = { ...address, path: relativePath };
-  const result = applyMutablePathWrite(source.value, relativeAddress, value);
+  const result = applyMutablePathWrite(
+    source.value,
+    relativeAddress,
+    value,
+    options,
+  );
   if (result.error) {
     return { error: result.error };
   }
@@ -198,6 +206,7 @@ export class Chronicle {
   write(
     address: IMemoryAddress,
     value?: FabricValue,
+    options?: IWriteOptions,
   ): Result<
     IAttestation,
     | IStorageTransactionInconsistent
@@ -239,7 +248,7 @@ export class Chronicle {
     }
 
     // Apply the write directly to the working copy - O(1) instead of O(N)
-    return changes.applyWrite(address, value);
+    return changes.applyWrite(address, value, options);
   }
 
   read(
@@ -564,6 +573,7 @@ class Changes {
   applyWrite(
     address: IMemoryAddress,
     value: FabricValue,
+    options?: IWriteOptions,
   ): Result<
     IAttestation,
     IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
@@ -590,12 +600,17 @@ class Changes {
       this.#workingCopy,
       address,
       value,
+      options,
     );
     if (result.ok) {
       this.#workingCopy = result.ok;
-      // Store individual path attestation for novelty() iterator
+      // Store individual path attestation for novelty() iterator. A delete
+      // records `undefined` at the path, matching the post-write state.
       const pathKey = JSON.stringify(address.path);
-      this.#pathAttestations.set(pathKey, { address, value });
+      this.#pathAttestations.set(pathKey, {
+        address,
+        value: options?.delete === true ? undefined : value,
+      });
     }
     return result;
   }

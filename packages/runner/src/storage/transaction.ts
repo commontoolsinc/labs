@@ -14,6 +14,7 @@ import type {
   IStorageTransactionWriteIsolationError,
   ITransactionReader,
   ITransactionWriter,
+  IWriteOptions,
   MemorySpace,
   ReaderError,
   Result,
@@ -122,8 +123,12 @@ class StorageTransaction implements IStorageTransaction {
     return read(this, address, options);
   }
 
-  write(address: IMemorySpaceAddress, value?: FabricValue) {
-    return write(this, address, value);
+  write(
+    address: IMemorySpaceAddress,
+    value?: FabricValue,
+    options?: IWriteOptions,
+  ) {
+    return write(this, address, value, options);
   }
 
   abort(reason?: unknown): Result<Unit, InactiveTransactionError> {
@@ -267,13 +272,14 @@ export const write = (
   transaction: StorageTransaction,
   address: IMemorySpaceAddress,
   value?: FabricValue,
+  options?: IWriteOptions,
 ): Result<IAttestation, WriterError | WriteError> => {
   const { ok: space, error } = writer(transaction, address.space);
   if (error) {
     return { error };
   } else {
     const { space: _, ...memoryAddress } = address;
-    const result = space.write(memoryAddress, value);
+    const result = space.write(memoryAddress, value, options);
     if (!result.error) {
       recordWriteStackTrace(address, value, {
         scopeId:
