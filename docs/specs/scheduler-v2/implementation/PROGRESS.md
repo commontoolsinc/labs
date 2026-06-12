@@ -1757,7 +1757,7 @@ is green on top of the fix.
 
 ## 04/step-4
 
-- [x] pending — every event handling result cell is marked as a create-only
+- [x] ee9b3c89e — every event handling result cell is marked as a create-only
   receipt when the commit-preconditions protocol flag is enabled.
 - Deviations: none. Preserved existing cross-space handler-result
   materialization: launched result cells still live in the resolved result
@@ -1818,3 +1818,151 @@ packages/runner/src/storage/v2-transaction.ts:865:    this.assertWritable("markC
     `scheduler-test-utils.ts` default of `commitPreconditions: true`: passed,
     `590 passed (3091 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m5s`.
     The helper toggle was reverted before commit.
+
+## MEMORY-OWNER REVIEW — PR #4090 engine changes: APPROVED + two E2 rulings
+
+Engine review of the origin-committed precondition (acting memory
+owner):
+
+- APPROVED. Check placement is inside the engine's SQLite transaction,
+  before read validation; `SELECT_PENDING_RESOLUTION` row-presence is
+  valid committed-evidence because rejected commits throw BEFORE the
+  commit-row insert (rolled back), and it is the exact statement/
+  semantics pending-read resolution already trusts — the precondition
+  inherits the session/localSeq continuity the system already depends
+  on, so no new reconnect failure mode. ProtocolError on unknown kinds
+  is the right strict posture. Client round-trip test shape verified.
+
+Two rulings WO04 (E2) must apply — do not stop for these:
+
+1. **Tombstones count as existing.** For the create-only receipt
+   precondition, "head exists" includes DELETED/tombstoned heads: a
+   receipt that was created and later deleted still witnesses that the
+   event was handled (I11 is exactly-once EVER, not exactly-once-while-
+   retained). Use the same head/delete-aware existence notion the
+   set/delete conflict detection uses (`selectSetDeleteConflict`
+   neighborhood), and add an engine test: create → delete → create-only
+   commit for the same entity → `PreconditionFailedError`
+   ("receipt-exists"). Retention/GC interplay is spec open question 2 —
+   out of scope.
+2. **Version the precondition capability.** The engine throws
+   ProtocolError on unknown precondition kinds, so an E2 client sending
+   `receipt-exists` to an E1-only server that advertises
+   `commitPreconditions` would loop on a retryable error. In WO04:
+   change the handshake flag to a LEVEL — servers advertise
+   `commitPreconditions: 2` once receipt-exists ships (E1-only code
+   advertises 1, or keep boolean=origin-committed-only); the client
+   attaches `origin-committed` at level ≥1 and `receipt-exists` /
+   `createOnly` ops at level ≥2. Since E1 has not deployed anywhere
+   yet, you may instead simply ship E1+E2 with the boolean flag meaning
+   BOTH — but then the E1 commit range must never be deployed alone:
+   record whichever you implement; the level scheme is preferred.
+
+## IMPLEMENTER STOP — 04/step-5 receipt fixtures expose runner receipt gap
+
+Step 5 fixture work is uncommitted in
+`packages/runner/test/scheduler-event-receipts.test.ts`. The focused fixture
+currently demonstrates that the Step 4 runner implementation does not yet
+enforce receipt exactly-once for handler frames with opaque refs or already
+materialized launched results:
+
+```text
+$ cd packages/runner && ENV=test deno test --allow-ffi --allow-env --allow-read \
+  --allow-write=/tmp,/var/folders --allow-run=git \
+  test/scheduler-event-receipts.test.ts
+Check test/scheduler-event-receipts.test.ts
+running 1 test from ./test/scheduler-event-receipts.test.ts
+scheduler event receipts ...
+  deduplicates redelivered events by create-only receipt ... FAILED
+  deduplicates redelivered pattern launches by receipt ... FAILED
+  retries transient conflicts with the same receipt id ... FAILED
+  creates a receipt document for handlers that launch nothing ... ok
+  allows redelivered events to commit twice while receipts are disabled ... FAILED
+FAILED | 0 passed (1 step) | 1 failed (4 steps)
+```
+
+Key failure excerpts:
+
+```text
+deduplicates redelivered events by create-only receipt:
+expected effectsTotal 1, actual 2
+
+deduplicates redelivered pattern launches by receipt:
+expected a scheduler.event.commit marker with permanentRejection
+"receipt-exists", actual false
+```
+
+Inference: the no-props/no-launch receipt-only path is green because it writes
+`{}` directly, but stateful handlers and duplicate pattern launches go through
+the launching/materialization branch. In duplicate cases that branch can avoid a
+fresh `set` on the existing result cell, so `markCreateOnly` has no matching
+commit operation to tag and no `receipt-exists` precondition reaches memory.
+
+Fixing this appears to require touching `packages/runner/src/runner.ts` or the
+runner storage receipt-marking path to force a create-only receipt operation for
+already-materialized result cells. Work order 04 step 5 names only
+`test/scheduler-event-receipts.test.ts`, so per 00-README G4 I am stopping for
+reviewer direction rather than widening the step.
+
+Additional memory-owner rulings above are acknowledged: tombstones already
+count as existing in 04/step-3, and the current implementation records the
+transitional boolean `commitPreconditions` flag as E1+E2 together rather than
+introducing a numeric level in this unmerged stack.
+
+## REVIEWER RESOLUTION — 04/step-5 entity-absent docs amendment
+
+- [x] pending — documented the reviewer-approved replacement of op-level
+  `createOnly` receipts with commit-level `entity-absent` preconditions.
+- Deviations: none. Progress also backfills 04/step-4 to `ee9b3c89e`.
+
+## REVIEWER + MEMORY-OWNER VERDICT — 04/step-5 receipt gap (design correction)
+
+Your inference is right and the flaw is in MY step-4 design: tagging
+`createOnly` on a SET OPERATION makes the witness disappear whenever the
+duplicate handling's writes are elided as no-ops — and in the limit a
+fully-elided transaction short-circuits client-side without reaching the
+engine at all. The receipt must be a COMMIT-LEVEL precondition,
+independent of operations. Authorized redesign (touches runner storage +
+memory engine; G4 scope granted):
+
+1. **New precondition kind** alongside origin-committed:
+   `{ kind: "entity-absent", id, scope? }` — evaluated in
+   `validateCommitPreconditions`, scope resolved exactly as head lookups
+   resolve it; "exists" INCLUDES tombstoned heads (standing ruling — use
+   the `selectSetDeleteConflict`-style delete-aware lookup); violation →
+   `PreconditionFailedError("receipt-exists", ...)`.
+2. **Drop the op-level `createOnly` flag** (revert that part of
+   1b0395f1b's surface) — one mechanism, not two. Engine tests retarget
+   to the precondition, keeping the tombstone case
+   (create → delete → entity-absent commit → receipt-exists).
+3. **Client plumbing** (`markCreateOnly` keeps its name/signature):
+   marked entities emit an `entity-absent` precondition for their space
+   in `commitOperations`, regardless of what operations survive
+   elision.
+4. **Kill the zero-op escape**: a transaction carrying preconditions
+   must NOT take the no-op short-circuit — locate the early-return in
+   `commitOperations` (the path that returns ok without calling the
+   engine when no semantic ops exist) and exempt precondition-bearing
+   commits. Engine side: accept ops-empty commits when
+   `preconditions` is non-empty (mirror how observation-only commits
+   relaxed the zero-op rule), writing the commit row for localSeq
+   continuity. Engine test: precondition-only commit, both pass and
+   receipt-exists outcomes.
+5. **Fixture to add** (the corner that motivates 4): an IDEMPOTENT
+   handler (all writes elided on redelivery) — duplicate delivery must
+   still be rejected receipt-exists, not silently "succeed" locally.
+6. Sequence: docs amendment to WO04 step 3/4 describing the
+   entity-absent design
+   (`docs(specs): scheduler-v2 WO04 — receipt is a commit-level entity-absent precondition`),
+   then `feat(memory): entity-absent commit precondition replaces op-level createOnly`,
+   then the runner plumbing commit, then step 5's fixtures (all green)
+   as planned.
+
+Flag acknowledgment ACCEPTED: transitional boolean = E1+E2 ship
+together; constraint recorded — `commitPreconditions` stays default-off
+until the 04 PR merges (already true; experimental flags default off).
+
+Memory-owner note for the engine commit: keep the entity-absent lookup
+inside the same transaction scope as the other validations, and reuse
+the existing scope-key resolution helpers rather than re-deriving scope
+semantics.
