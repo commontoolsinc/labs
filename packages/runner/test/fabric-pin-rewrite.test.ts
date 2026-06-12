@@ -17,13 +17,18 @@ describe("rewriteFabricPins", () => {
       'const literal = "cf:not-an-import";',
     ].join("\n");
 
-    const result = await rewriteFabricPins(source, async (_ref, specifier) =>
-      ({
-        "cf:dep": ENTRY_A,
-        "cf:other": ENTRY_B,
-        "cf:types": ENTRY_A,
-        "cf:inline": ENTRY_B,
-      })[specifier] ?? null);
+    const result = await rewriteFabricPins(
+      source,
+      (_ref, specifier) =>
+        Promise.resolve(
+          ({
+            "cf:dep": ENTRY_A,
+            "cf:other": ENTRY_B,
+            "cf:types": ENTRY_A,
+            "cf:inline": ENTRY_B,
+          })[specifier] ?? null,
+        ),
+    );
 
     expect(result.rewrites).toEqual([
       {
@@ -65,9 +70,9 @@ describe("rewriteFabricPins", () => {
       `import skipped from "cf:skipped";`,
     ].join("\n");
 
-    const result = await rewriteFabricPins(source, async (_ref, specifier) => {
-      if (specifier === `cf:dep@${ENTRY_A}`) return ENTRY_A;
-      return null;
+    const result = await rewriteFabricPins(source, (_ref, specifier) => {
+      if (specifier === `cf:dep@${ENTRY_A}`) return Promise.resolve(ENTRY_A);
+      return Promise.resolve(null);
     });
 
     expect(result.contents).toBe(source);
