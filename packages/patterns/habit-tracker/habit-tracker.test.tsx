@@ -7,6 +7,12 @@
  * - Toggling habit completion
  * - Deleting habits
  * - Default values
+ * - held-reference survival (CT-1715): a log reference stashed in a cell
+ *   BEFORE a toggle must still `equals()`-match and still drive a
+ *   subsequent equals()-located removal AFTER the toggle. The toggle writes
+ *   through the element's cell; replacing the array slot with a fresh
+ *   object literal would re-mint the log's entity identity and orphan every
+ *   held reference.
  *
  * Run: deno task cf test packages/patterns/habit-tracker/habit-tracker.test.tsx --verbose
  *
@@ -14,15 +20,48 @@
  * a reactivity tracking bug where direct .length access doesn't register
  * dependencies. See packages/patterns/gideon-tests/array-length-repro.test.tsx
  */
-import { action, computed, pattern } from "commonfabric";
+import {
+  action,
+  computed,
+  equals,
+  handler,
+  pattern,
+  Writable,
+} from "commonfabric";
 import HabitTracker from "./habit-tracker.tsx";
 import type { Habit, HabitLog } from "./schemas.tsx";
 
 // Helper to get array length with proper reactivity tracking
 const len = <T,>(arr: T[]): number => arr.filter(() => true).length;
 
+// Test plumbing: remove the log the held reference points at, locating it
+// with equals() — proves a reference held across a toggle still drives
+// operations (it would silently no-op if the toggle had re-minted the log's
+// entity identity).
+const removeHeldLog = handler<
+  void,
+  { logs: Writable<HabitLog[]>; held: Writable<HabitLog> }
+>((_event, { logs, held }) => {
+  const cur = logs.get();
+  const idx = cur.findIndex((l) => equals(held, l));
+  if (idx >= 0) {
+    logs.set(cur.toSpliced(idx, 1));
+  }
+});
+
 export default pattern(() => {
-  const subject = HabitTracker({ habits: [], logs: [] });
+  const logsCell = new Writable<HabitLog[]>([]);
+  const subject = HabitTracker({ habits: [], logs: logsCell });
+
+  // Simulates an external holder (a stats panel / selection cell) that read
+  // a log once and keeps the reference across later mutations. Typed
+  // non-null (placeholder initial value) so the cell can be bound directly
+  // as handler state.
+  const heldLog = new Writable<HabitLog>({
+    habitName: "",
+    date: "",
+    completed: false,
+  });
 
   // === Actions ===
 
@@ -60,6 +99,16 @@ export default pattern(() => {
     subject.deleteHabit.send({
       habit: { name: "NonExistent", icon: "?", color: "#000" },
     });
+  });
+
+  // === Held-reference survival actions (CT-1715) ===
+  const action_stash_held_log = action(() => {
+    const log = logsCell.get()[0];
+    if (log) heldLog.set(log);
+  });
+  const action_remove_via_held = removeHeldLog({
+    logs: logsCell,
+    held: heldLog,
   });
 
   // === Assertions ===
@@ -170,6 +219,30 @@ export default pattern(() => {
     () => len(subject.habits) === 2,
   );
 
+  // === Held-reference survival assertions (CT-1715) ===
+  const assert_held_log_stashed = computed(() => {
+    const h = heldLog.get();
+    return h.habitName === "Exercise" && equals(logsCell.get()[0], h);
+  });
+  const assert_log_completed_again = computed(
+    () => logsCell.get()[0]?.completed === true,
+  );
+  // KEY: the stale-but-once-valid reference still equals()-matches the log
+  // AFTER the toggle updated it.
+  const assert_held_log_survives_toggle = computed(() => {
+    const h = heldLog.get();
+    return equals(logsCell.get()[0], h);
+  });
+  // The held reference also READS the update (it would show the stale,
+  // orphaned entity if the toggle had re-minted identity).
+  const assert_held_log_reads_toggle = computed(
+    () => heldLog.get().completed === true,
+  );
+  // KEY: the held reference still DRIVES an equals()-located removal.
+  const assert_removed_via_held = computed(
+    () => len(subject.logs) === 0,
+  );
+
   return {
     tests: [
       // Initial state
@@ -221,6 +294,18 @@ export default pattern(() => {
       // Delete nonexistent habit
       { action: action_delete_nonexistent },
       { assertion: assert_still_two_habits },
+
+      // Held-reference survival: stash → toggle → the old reference still
+      // matches, reads the update, and still drives removal.
+      // (After the earlier toggles the Exercise log exists, completed=false.)
+      { action: action_stash_held_log },
+      { assertion: assert_held_log_stashed },
+      { action: action_toggle_exercise },
+      { assertion: assert_log_completed_again },
+      { assertion: assert_held_log_survives_toggle },
+      { assertion: assert_held_log_reads_toggle },
+      { action: action_remove_via_held },
+      { assertion: assert_removed_via_held },
     ],
     subject,
   };

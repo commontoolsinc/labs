@@ -122,17 +122,18 @@ const updateItemHandler = handler<
   { items: Writable<DoItem[]> }
 >(({ item, title, done }, { items }) => {
   const currentItems = items.get();
-  const newItems = currentItems.map((i) => {
-    if (!equals(i, item)) return i;
+  const index = currentItems.findIndex((i) => equals(i, item));
+  if (index < 0) return;
 
-    return {
-      ...i,
-      ...(title !== undefined ? { title } : {}),
-      ...(done !== undefined ? { done } : {}),
-    };
-  });
-
-  items.set(newItems);
+  // Write THROUGH the element's cells (`items.key(index)` resolves through the
+  // slot's link into the entity doc) — never replace the slot with a fresh
+  // object literal: a fresh literal re-mints the entity identity, so every
+  // previously-held reference to the item (a selection cell, a caller that
+  // read it earlier) stops equals()-matching and later mutations with it
+  // silently no-op. See packages/patterns/primitives/editable-list.tsx.
+  const element = items.key(index);
+  if (title !== undefined) element.key("title").set(title);
+  if (done !== undefined) element.key("done").set(done);
 });
 
 const addItemsHandler = handler<
@@ -202,20 +203,26 @@ const updateItemByTitleHandler = handler<
   { items: Writable<DoItem[]> }
 >(({ title, newTitle, done, attachments }, { items }) => {
   const currentItems = items.get();
-  const newItems = currentItems.map((i) => {
-    if (i.title?.toLowerCase() !== title.toLowerCase()) return i;
-
-    return {
-      ...i,
-      ...(newTitle !== undefined ? { title: newTitle } : {}),
-      ...(done !== undefined ? { done } : {}),
-      ...(attachments !== undefined
-        ? { attachments: [...(i.attachments ?? []), ...attachments] }
-        : {}),
-    };
-  });
-
-  items.set(newItems);
+  // Title matching stays the addressing mechanism (LLM-friendly API), but the
+  // update itself writes through each matched element's cells instead of
+  // replacing the array slot with a fresh literal — slot replacement re-mints
+  // the entity identity and orphans every previously-held item reference
+  // (see updateItemHandler above). All case-insensitive matches are updated,
+  // matching the original `.map()` semantics.
+  const needle = title.toLowerCase();
+  for (let index = 0; index < currentItems.length; index++) {
+    if (currentItems[index].title?.toLowerCase() !== needle) {
+      continue;
+    }
+    const element = items.key(index);
+    if (newTitle !== undefined) element.key("title").set(newTitle);
+    if (done !== undefined) element.key("done").set(done);
+    if (attachments !== undefined) {
+      for (const attachment of attachments) {
+        element.key("attachments").push(attachment);
+      }
+    }
+  }
 });
 
 const addAttachment = handler<

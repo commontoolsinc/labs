@@ -3,7 +3,7 @@
  *
  * Type definitions used across all budget tracker sub-patterns.
  */
-import { Default } from "commonfabric";
+import { Default, safeDateNow } from "commonfabric";
 
 // ============ CORE TYPES ============
 
@@ -29,6 +29,8 @@ export interface BudgetStatusItem {
 
 // ============ HELPER FUNCTIONS ============
 
+// `new Date()` with no arguments throws in the secure pattern sandbox —
+// derive "today" from safeDateNow() instead.
 export const getTodayDate = (): string => {
-  return new Date().toISOString().split("T")[0];
+  return new Date(safeDateNow()).toISOString().split("T")[0];
 };

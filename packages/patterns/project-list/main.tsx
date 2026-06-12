@@ -28,15 +28,18 @@ export interface ProjectListOutput {
   items: Writable<ProjectItem[]>;
 }
 
-const toggleItem = handler<
+// Exported for tests. Writes through the element's cell (`.key(index)`) —
+// rebuilding the array with a fresh object literal for the toggled item would
+// re-mint its entity identity and orphan previously-held references (see
+// packages/patterns/primitives/editable-list.tsx).
+export const toggleItem = handler<
   void,
   { index: number; items: Writable<ProjectItem[]> }
 >(
   (_, { index, items }) => {
     const list = items.get();
-    items.set(
-      list.map((item, i) => i === index ? { ...item, done: !item.done } : item),
-    );
+    if (index < 0 || index >= list.length) return;
+    items.key(index).key("done").set(!list[index].done);
   },
 );
 
