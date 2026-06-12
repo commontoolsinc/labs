@@ -590,6 +590,36 @@ export function cloneTypeNode<T extends ts.TypeNode>(typeNode: T): T {
 }
 
 /**
+ * Resolve a source-positioned type-reference name to its commonfabric export
+ * name, or undefined when it is not a commonfabric export.
+ *
+ * Import aliases are resolved first, so `import { Default as D }` still
+ * reports `Default`. User-defined aliases over commonfabric types resolve to
+ * a symbol whose parent is the user's module, not commonfabric, and are
+ * deliberately left alone (rewriting them would drop their hidden type
+ * arguments — see qualifyCommonFabricTypeRefs).
+ */
+function commonFabricExportNameAtLocation(
+  name: ts.Identifier,
+  checker: ts.TypeChecker,
+): string | undefined {
+  try {
+    let symbol = checker.getSymbolAtLocation(name);
+    if (!symbol) return undefined;
+    if (symbol.flags & ts.SymbolFlags.Alias) {
+      symbol = checker.getAliasedSymbol(symbol);
+    }
+    const parent = (symbol as unknown as { parent?: ts.Symbol }).parent;
+    const parentName = parent?.name;
+    return parentName === "commonfabric" || parentName === '"commonfabric"'
+      ? symbol.name
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Deep-clones a TypeNode for emission, stripping source positions throughout.
  *
  * Declaration members resolved through a TypeReference may live in a different
@@ -600,10 +630,18 @@ export function cloneTypeNode<T extends ts.TypeNode>(typeNode: T): T {
  * to print structurally (literals fall back to their `.text`).
  *
  * Pass `typeRegistry` to carry each node's registered Type onto its clone.
+ *
+ * Pass `checker` to also qualify commonfabric refs to `__cfHelpers.X` while
+ * the original nodes still carry source positions. The declaration's imports
+ * (e.g. `Default`) are not necessarily in scope in the consumer file, and the
+ * type-level qualification pass cannot recover them afterwards: the checker
+ * normalizes conditional aliases like `Default<T, V>` away, so the paired
+ * type retains no commonfabric aliasSymbol to match on.
  */
 export function cloneTypeNodeDeepForEmission<T extends ts.TypeNode>(
   typeNode: T,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
+  checker?: ts.TypeChecker,
 ): T {
   const nullContext = (ts as typeof ts & {
     nullTransformationContext?: ts.TransformationContext;
@@ -624,6 +662,28 @@ export function cloneTypeNodeDeepForEmission<T extends ts.TypeNode>(
     ) as N;
     if (result === node) {
       result = cloneShallow(node);
+    }
+    // Qualify while the ORIGINAL node still has a position to resolve from;
+    // the cloned type arguments (already position-stripped) carry over.
+    if (
+      checker &&
+      ts.isTypeReferenceNode(node) &&
+      ts.isIdentifier(node.typeName) &&
+      node.typeName.pos >= 0
+    ) {
+      const exportName = commonFabricExportNameAtLocation(
+        node.typeName,
+        checker,
+      );
+      if (exportName) {
+        result = ts.factory.createTypeReferenceNode(
+          ts.factory.createQualifiedName(
+            ts.factory.createIdentifier("__cfHelpers"),
+            ts.factory.createIdentifier(exportName),
+          ),
+          (result as ts.Node as ts.TypeReferenceNode).typeArguments,
+        ) as ts.Node as N;
+      }
     }
     // update* calls copy the original's text range for source maps; strip it
     // so the printer treats the node as synthesized everywhere.

@@ -105,7 +105,7 @@ const List = pattern(() => {
 const __cfLift_2 = __cfHelpers.lift<{
     list: {
         items: {
-            done: boolean | Default<false>;
+            done: boolean | __cfHelpers.Default<false>;
         }[];
     };
 }, boolean>(({ list }) => list.items[0]?.done === true, {
@@ -138,7 +138,7 @@ const __cfLift_2 = __cfHelpers.lift<{
 const __cfLift_3 = __cfHelpers.lift<{
     list: {
         items: {
-            label: Default<string, "">;
+            label: __cfHelpers.Default<string, "">;
         }[];
     };
 }, boolean>(({ list }) => list.items[2]?.label === "Gamma", {
