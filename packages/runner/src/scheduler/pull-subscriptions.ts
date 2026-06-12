@@ -215,8 +215,8 @@ export function resubscribePullSchedulerAction(
   }
   const actionId = state.getActionId(action);
 
-  // Registering a new edge to a live effect can be the moment a stale upstream
-  // computation becomes demanded.
+  // Registering a new edge to a live effect can be the moment an invalid
+  // upstream computation becomes demanded.
   state.updateDependents(action, schedulingLog);
 
   // Track parent-child relationship if action is created during another action's execution

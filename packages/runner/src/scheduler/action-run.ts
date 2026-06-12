@@ -232,7 +232,6 @@ export interface SchedulerActionRunState {
   readonly markNodeHasRun: (action: Action) => void;
   readonly handleError: (error: Error, action: Action) => void;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
-  readonly clearDirty: (action: Action) => void;
   readonly markInvalid: (action: Action) => void;
   readonly queueExecution: () => void;
   readonly setExecutingAction: (action: Action, actionId: string) => void;
@@ -267,7 +266,6 @@ export async function runSchedulerAction(
   if (record) {
     record.status = "clean";
   }
-  state.clearDirty(action);
   // §8.9.2 trigger reads: hand the addresses whose changes scheduled this
   // run to the transaction so flow-label derivation can taint its writes
   // even when this run's branch never re-reads them. Consumed once; if the

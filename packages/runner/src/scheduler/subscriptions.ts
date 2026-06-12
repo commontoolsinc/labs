@@ -86,8 +86,6 @@ export interface SchedulerSubscribeActionState {
   readonly markProvisionalDemand: (node: SchedulerNode) => void;
   readonly pending: Set<Action>;
   readonly effects: ReadonlySet<Action>;
-  readonly dirty: ReadonlySet<Action>;
-  readonly stale: ReadonlySet<Action>;
   readonly writeIndex: WriterIndexState;
   readonly setDebounce: (action: Action, ms: number) => void;
   readonly setNoDebounce: (action: Action, optOut: boolean) => void;
@@ -97,7 +95,7 @@ export interface SchedulerSubscribeActionState {
   ) => readonly IMemorySpaceAddress[] | undefined;
   readonly isThrottled: (action: Action) => boolean;
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
-  readonly isStale: (action: Action) => boolean;
+  readonly isInvalid: (action: Action) => boolean;
   readonly markInvalid: (action: Action) => void;
   readonly updateDependents: (action: Action, log: ReactivityLog) => void;
   readonly registerWriterDependents: (
@@ -123,13 +121,13 @@ export function markEffectDirtyIfStaleInputs(
   reads: readonly IMemorySpaceAddress[],
   shallowReads: readonly IMemorySpaceAddress[],
 ): void {
-  // In pull mode: When an effect resubscribes, check if any non-throttled dirty
+  // In pull mode: When an effect resubscribes, check if any non-throttled invalid
   // computations write to what it reads. If so, mark the effect dirty so it can
   // pull those computations and see fresh data.
   // Skip delayed computations; their own wake path will re-open demand later.
   // Use the returned action kind instead of active effects because
   // unsubscribe() clears active membership before run().
-  if (!actionIsEffect || state.stale.size === 0) {
+  if (!actionIsEffect) {
     return;
   }
 
@@ -139,15 +137,15 @@ export function markEffectDirtyIfStaleInputs(
     reads,
     shallowReads,
   ) ||
-    hasStaleWriterForEffectReads(state, action, reads, shallowReads);
+    hasInvalidWriterForEffectReads(state, action, reads, shallowReads);
 
-  if (shouldMarkDirty && !state.dirty.has(action)) {
+  if (shouldMarkDirty && !state.isInvalid(action)) {
     state.markInvalid(action);
     state.queueExecution();
   }
 }
 
-function hasStaleWriterForEffectReads(
+function hasInvalidWriterForEffectReads(
   state: SchedulerSubscribeActionState,
   action: Action,
   effectReads: readonly IMemorySpaceAddress[],
@@ -168,7 +166,7 @@ function hasStaleWriterForEffectReads(
 
     for (const writer of writers) {
       if (writer === action) continue;
-      if (!state.isStale(writer)) continue;
+      if (!state.isInvalid(writer)) continue;
       if (state.effects.has(writer)) continue; // Only check computations
       if (state.isThrottled(writer)) continue;
       if (state.isDebouncedComputationWaiting(writer)) continue;
@@ -281,8 +279,7 @@ export interface SchedulerUnsubscribeActionState {
   >;
   readonly pendingDependencyCollection: Set<Action>;
   readonly getActionId: (action: Action) => string;
-  readonly clearDirectDirty: (action: Action) => void;
-  readonly forceClearStale: (action: Action) => void;
+  readonly clearInvalid: (action: Action) => void;
   readonly cancelDebounceTimer: (action: Action) => void;
   readonly clearComputationDebounceState: (
     action: Action,
@@ -348,10 +345,7 @@ function clearActionSchedulingState(
   if (record) {
     record.invalidCauses = [];
   }
-  // Clear direct/stale state before removing outgoing edges so downstream
-  // stale counts are decremented through normal propagation.
-  state.clearDirectDirty(action);
-  state.forceClearStale(action);
+  state.clearInvalid(action);
 }
 
 function removeReverseDependencyEdges(

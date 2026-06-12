@@ -428,7 +428,7 @@ describe("cycle-aware convergence", () => {
     expect(runtime.scheduler.isDirty(selfDirtyingEffect)).toBe(true);
   });
 
-  it("should not create infinite loops in collectDirtyDependencies", async () => {
+  it("should not create infinite loops while resubscribing dependencies", async () => {
     // Create a simple dependency structure
     const source = runtime.getCell<number>(
       space,
@@ -489,7 +489,7 @@ describe("cycle-aware convergence", () => {
     expect(result.get()).toBe(18); // 9 * 2
   });
 
-  it("should handle cycles during dependency collection without infinite recursion", async () => {
+  it("should handle cycles during dependency collection without non-convergence", async () => {
     // Create cells that form a cycle
     const cellA = runtime.getCell<number>(
       space,
@@ -567,8 +567,7 @@ describe("cycle-aware convergence", () => {
     );
     await cellC.pull();
 
-    // The cycle should converge (value reaches 3)
-    // This tests that collectDirtyDependencies doesn't infinitely recurse
+    // The cycle should converge (value reaches 3).
     expect(cellC.get()).toBeLessThanOrEqual(3);
   });
 

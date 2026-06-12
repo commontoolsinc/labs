@@ -81,7 +81,7 @@ export type ReactivityLog = {
 
 export type PopulateDependenciesEntry = PopulateDependencies | ReactivityLog;
 
-export type DirtyDependencyTraceContext = SchedulerEventPreflightStats & {
+export type EventPreflightTraceContext = SchedulerEventPreflightStats & {
   depth: number;
   actionSummaries: Map<Action, SchedulerEventPreflightActionSummary>;
   rootDirectWriterActions: Set<Action>;

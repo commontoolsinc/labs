@@ -1,6 +1,7 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { topologicalSort } from "./topology.ts";
 import type { Action, SettleIterationStats } from "./types.ts";
+import { collectMaterializerWritersForLog } from "./materializers.ts";
 import {
   collectPendingDependencyActions,
   recordEarlyIterationComputations,
@@ -26,39 +27,22 @@ type PullSettleIteration = { settled: true } | {
 
 function buildPullIterationWorkSet(state: {
   readonly initialSeeds: ReadonlySet<Action>;
-  readonly settleIter: number;
-  readonly dirty: ReadonlySet<Action>;
   readonly nodes: SchedulerSettleLoopState["nodes"];
+  readonly dependencies: SchedulerSettleLoopState["dependencies"];
+  readonly materializerIndex: SchedulerSettleLoopState["materializerIndex"];
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly isLiveAction: (action: Action) => boolean;
   readonly collectPullIterationSeeds: (iterationSeeds: Set<Action>) => void;
-  readonly collectDirtyDependencies: (
-    seed: Action,
-    workSet: Set<Action>,
-    memo: Map<Action, boolean>,
-  ) => boolean;
-  readonly collectDirtyDependenciesFromTraversalRoot: (
-    seed: Action,
-    workSet: Set<Action>,
-    memo: Map<Action, boolean>,
-  ) => boolean;
 }): {
   workSet: Set<Action>;
   iterationSeeds: Set<Action>;
-  dirtyDependencyCount: number;
+  materializerPromotionCount: number;
 } {
   const workSet = new Set<Action>();
   const iterationSeeds = new Set<Action>();
-  const traversalSeeds = new Set<Action>();
 
   for (const seed of state.initialSeeds) {
-    traversalSeeds.add(seed);
-    // On the first iteration, initial seeds are runnable work. On later
-    // iterations they remain demand roots for newly dirtied dependencies, but
-    // should not be rerun unless normal scheduling also marks them pending.
-    if (state.settleIter === 0) {
-      iterationSeeds.add(seed);
-    }
+    iterationSeeds.add(seed);
   }
 
   // Every iteration needs to consider newly created pending effects.
@@ -68,35 +52,49 @@ function buildPullIterationWorkSet(state: {
 
   for (const seed of iterationSeeds) {
     workSet.add(seed);
-    traversalSeeds.add(seed);
   }
 
-  // Pull in dirty computations that feed the currently runnable seeds.
-  const dirtyDependencyMemo = new Map<Action, boolean>();
-  for (const seed of traversalSeeds) {
-    if (state.settleIter > 0 && state.initialSeeds.has(seed)) {
-      state.collectDirtyDependenciesFromTraversalRoot(
-        seed,
-        workSet,
-        dirtyDependencyMemo,
-      );
-      continue;
-    }
-    state.collectDirtyDependencies(seed, workSet, dirtyDependencyMemo);
-  }
-
-  const dirtyDependencyCount = workSet.size - iterationSeeds.size;
+  const beforePromotions = workSet.size;
+  addInvalidMaterializerPromotions(state, iterationSeeds, workSet);
+  const materializerPromotionCount = workSet.size - beforePromotions;
   addLiveDownstreamClosure(state, workSet);
 
   return {
     workSet,
     iterationSeeds,
-    dirtyDependencyCount,
+    materializerPromotionCount,
   };
 }
 
+function addInvalidMaterializerPromotions(
+  state: {
+    readonly nodes: SchedulerSettleLoopState["nodes"];
+    readonly dependencies: SchedulerSettleLoopState["dependencies"];
+    readonly materializerIndex: SchedulerSettleLoopState["materializerIndex"];
+  },
+  seeds: ReadonlySet<Action>,
+  workSet: Set<Action>,
+): void {
+  for (const seed of seeds) {
+    const log = state.dependencies.get(seed);
+    if (!log) continue;
+
+    for (
+      const materializer of collectMaterializerWritersForLog(
+        state.materializerIndex,
+        log,
+        { exclude: seed },
+      )
+    ) {
+      const record = state.nodes.get(materializer);
+      if (record && isInvalidOrNeverRan(record)) {
+        workSet.add(materializer);
+      }
+    }
+  }
+}
+
 function addLiveDownstreamClosure(state: {
-  readonly dirty: ReadonlySet<Action>;
   readonly nodes: SchedulerSettleLoopState["nodes"];
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly isLiveAction: (action: Action) => boolean;
@@ -202,7 +200,7 @@ function collectPullSettlePreRunDependencies(
   state: SchedulerSettleLoopState,
 ): void {
   // Process any newly subscribed actions from previous iteration.
-  // This sets up their dependencies so collectDirtyDependencies can find them.
+  // This sets up their dependencies before work-set construction.
   if (state.pendingDependencyCollection.size === 0) {
     return;
   }
@@ -259,25 +257,22 @@ function buildAndLogPullIterationWorkSet(
 ): {
   workSet: Set<Action>;
   iterationSeeds: Set<Action>;
-  dirtyDependencyCount: number;
+  materializerPromotionCount: number;
 } {
   const buildPullWorkSetStart = performance.now();
   const result = buildPullIterationWorkSet({
     initialSeeds,
-    settleIter,
-    dirty: state.dirty,
     nodes: state.nodes,
+    dependencies: state.dependencies,
+    materializerIndex: state.materializerIndex,
     dependents: state.dependents,
     isLiveAction: state.isLiveAction,
     collectPullIterationSeeds: state.collectPullIterationSeeds,
-    collectDirtyDependencies: state.collectDirtyDependencies,
-    collectDirtyDependenciesFromTraversalRoot:
-      state.collectDirtyDependenciesFromTraversalRoot,
   });
 
   if (settleIter === 0) {
     logger.debug("schedule-execute-pull", () => [
-      `Pull mode: Seeds: ${result.iterationSeeds.size}, Dirty deps added: ${result.dirtyDependencyCount}`,
+      `Pull mode: Seeds: ${result.iterationSeeds.size}, Materializers promoted: ${result.materializerPromotionCount}`,
     ]);
   }
   logger.time(
@@ -339,7 +334,6 @@ async function runPullSettleAction(
   if (!isStillScheduled) return 0;
 
   if (!isPullSettleActionStillRunnable(state, fn)) return 0;
-  if (deferEffectForLateMaterializerDependency(state, fn)) return 0;
   if (skipPullDelayedSettleAction(state, fn)) return 0;
 
   // Clean up explicit scheduling state before running. The node status is
@@ -348,7 +342,6 @@ async function runPullSettleAction(
   if (state.computations.has(fn)) {
     state.clearComputationDebounceState(fn);
   }
-  state.clearDirty(fn);
 
   state.filterStats.executed++;
   if (!recordSettleActionRun(state, fn)) {
@@ -381,26 +374,6 @@ function isPullSettleActionStillRunnable(
     isInvalidOrNeverRan(record) &&
     (state.isLiveAction(fn) || state.pending.has(fn)) &&
     record.passRuns < PASS_RUN_BUDGET;
-}
-
-function deferEffectForLateMaterializerDependency(
-  state: SchedulerSettleLoopState,
-  fn: Action,
-): boolean {
-  if (!state.effects.has(fn)) return false;
-
-  const dirtyDeps = new Set<Action>();
-  state.collectDirtyDependencies(fn, dirtyDeps, new Map());
-  const materializers = [...dirtyDeps].filter((dep) =>
-    state.materializerIndex.isMaterializer(dep) && state.dirty.has(dep)
-  );
-  if (materializers.length === 0) return false;
-
-  for (const materializer of materializers) {
-    state.pending.add(materializer);
-  }
-  state.pending.add(fn);
-  return true;
 }
 
 function skipPullDelayedSettleAction(

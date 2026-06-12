@@ -5,11 +5,12 @@ import {
   scheduleEventQueueWake,
 } from "./events.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
+import type { NodeRegistry } from "./node-record.ts";
 import type { Action, QueuedEvent } from "./types.ts";
 
 export interface ExecuteContinuationState {
   readonly pending: ReadonlySet<Action>;
-  readonly dirty: ReadonlySet<Action>;
+  readonly nodes: NodeRegistry;
   readonly effects: ReadonlySet<Action>;
   readonly eventQueue: readonly QueuedEvent[];
   readonly eventQueueWakeState: EventQueueWakeState;

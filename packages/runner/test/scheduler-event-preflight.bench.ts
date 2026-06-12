@@ -45,7 +45,7 @@ async function setupBroadGraph(
   prefix: string,
   fanout = BROAD_FANOUT,
 ): Promise<BroadGraph> {
-  const env = createSchedulerBenchEnv(true);
+  const env = createSchedulerBenchEnv();
   const { runtime } = env;
   const tx = runtime.edit();
 
@@ -195,13 +195,13 @@ Deno.bench(
 );
 
 Deno.bench(
-  "Scheduler event preflight - event waits on transitive stale writer",
+  "Scheduler event preflight - event waits on transitive invalid writer",
   benchOptions("scheduler-event-preflight"),
   async () => {
     await runWithSchedulerTiming(
-      "event preflight: waits on transitive stale writer",
+      "event preflight: waits on transitive invalid writer",
       async (resetMeasuredTiming) => {
-        const graph = await setupBroadGraph("preflight-stale", 1);
+        const graph = await setupBroadGraph("preflight-invalid", 1);
         addTargetReadingHandler(graph);
 
         const updateTx = graph.env.runtime.edit();
@@ -293,7 +293,7 @@ Deno.bench(
     await runWithSchedulerTiming(
       "event preflight: deep read-populated handler",
       async (resetMeasuredTiming) => {
-        const env = createSchedulerBenchEnv(true);
+        const env = createSchedulerBenchEnv();
         const { runtime } = env;
         const tx = runtime.edit();
         const shared = runtime.getCell<number>(

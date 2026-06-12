@@ -284,7 +284,6 @@ export interface SchedulerSettleLoopState {
   readonly effects: ReadonlySet<Action>;
   readonly computations: ReadonlySet<Action>;
   readonly pending: Set<Action>;
-  readonly dirty: ReadonlySet<Action>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
   readonly nodes: NodeRegistry;
   readonly dependents: WeakMap<Action, Set<Action>>;
@@ -309,18 +308,7 @@ export interface SchedulerSettleLoopState {
     },
   ) => { log: ReactivityLog; entities: Set<SpaceScopeAndURI> };
   readonly collectPullIterationSeeds: (seeds: Set<Action>) => void;
-  readonly collectDirtyDependencies: (
-    seed: Action,
-    targetWorkSet: Set<Action>,
-    memo: Map<Action, boolean>,
-  ) => boolean;
-  readonly collectDirtyDependenciesFromTraversalRoot: (
-    seed: Action,
-    targetWorkSet: Set<Action>,
-    memo: Map<Action, boolean>,
-  ) => boolean;
   readonly getActionId: (action: Action) => string;
-  readonly clearDirty: (action: Action) => void;
   readonly isThrottled: (action: Action) => boolean;
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
   readonly clearComputationDebounceState: (action: Action) => void;
@@ -466,7 +454,7 @@ export function planPullCycleBreak(state: {
   readonly settledEarly: boolean;
   readonly lastWorkSet: ReadonlySet<Action>;
   readonly earlyIterationComputations: ReadonlySet<Action>;
-  readonly dirty: ReadonlySet<Action>;
+  readonly nodes: NodeRegistry;
   readonly effects: ReadonlySet<Action>;
   readonly runsThisExecute: ReadonlyMap<Action, number>;
   readonly isThrottled: (action: Action) => boolean;
@@ -480,7 +468,7 @@ export function planPullCycleBreak(state: {
   for (const computation of state.earlyIterationComputations) {
     if (
       state.lastWorkSet.has(computation) &&
-      state.dirty.has(computation) &&
+      isInvalidAction(state.nodes, computation) &&
       !state.isThrottled(computation) &&
       (state.runsThisExecute.get(computation) ?? 0) > 1
     ) {
@@ -489,7 +477,7 @@ export function planPullCycleBreak(state: {
   }
 
   const dirtyEffectsToRun = [...state.effects].filter((effect) =>
-    state.dirty.has(effect) && !state.isThrottled(effect)
+    isInvalidAction(state.nodes, effect) && !state.isThrottled(effect)
   );
 
   return { shouldBreak, computationsToClear, dirtyEffectsToRun };
@@ -546,8 +534,8 @@ export interface ExecuteContinuationPlan {
   shouldQueueAnotherTick: boolean;
 }
 
-export function planEventDirtyDependencyScheduling(state: {
-  readonly dirtyDeps: Iterable<Action>;
+export function planEventInvalidDependencyScheduling(state: {
+  readonly invalidDeps: Iterable<Action>;
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
@@ -559,7 +547,7 @@ export function planEventDirtyDependencyScheduling(state: {
   let nextEligibleAt: number | undefined;
   const runnableDeps: Action[] = [];
 
-  for (const dep of state.dirtyDeps) {
+  for (const dep of state.invalidDeps) {
     if (state.isDebouncedComputationWaiting(dep)) {
       const depNextDebounceAt = state.getNextDebounceRunTime(dep);
       if (depNextDebounceAt !== undefined) {
@@ -588,7 +576,7 @@ export function planEventDirtyDependencyScheduling(state: {
 
 export function planPullExecuteContinuation(state: {
   readonly pending: ReadonlySet<Action>;
-  readonly dirty: ReadonlySet<Action>;
+  readonly nodes: NodeRegistry;
   readonly effects: ReadonlySet<Action>;
   readonly materializerIndex: MaterializerIndexState;
   readonly shouldRerunAfterCurrentExecute: boolean;
@@ -613,7 +601,11 @@ export function planPullExecuteContinuation(state: {
 
   let nextDirtyPullRunAt: number | undefined;
   let nextDirtyPullRunWaitsForIdle = false;
-  const hasDirtyPullWork = [...state.dirty].some((action) => {
+  const hasDirtyPullWork = [...state.nodes.nodes()].some((record) => {
+    const action = record.action;
+    if (!isInvalidAction(state.nodes, action)) {
+      return false;
+    }
     if (
       !state.effects.has(action) &&
       !state.isDemandedPullComputation(action) &&
@@ -663,6 +655,11 @@ export function planPullExecuteContinuation(state: {
     nextDirtyPullRunWaitsForIdle,
     shouldQueueAnotherTick,
   };
+}
+
+function isInvalidAction(nodes: NodeRegistry, action: Action): boolean {
+  const record = nodes.get(action);
+  return record?.status === "invalid" || record?.status === "never-ran";
 }
 
 function minDefined(
