@@ -11,6 +11,7 @@ import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessRunState } from "../src/run-state.ts";
 import { RESERVED_ARTIFACT_PATH_DETAIL } from "../src/tools/reserved-artifacts.ts";
+import { resolveDockerRunscSandboxConfig } from "../src/sandbox/docker-runsc.ts";
 import type {
   ProcessRunner,
   ProcessRunRequest,
@@ -124,6 +125,99 @@ Deno.test("CfHarnessEngine accepts a default sandbox image override", () => {
     engine.sandbox.describe?.()?.cfc?.image,
     "registry.example/cf:deno2",
   );
+});
+
+Deno.test("CfHarnessEngine constructs in enforce mode without CFC transports", () => {
+  // Construction must stay cheap and inspectable; the transport floor is only
+  // enforced once the run starts — at diagnostics init (capability probes) or
+  // the first tool call, whichever comes first (see the run-start tests below).
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    cfcEnforcementMode: "enforce-strict",
+  });
+  assertEquals(engine.getRunState().cfcEnforcementMode, "enforce-strict");
+});
+
+Deno.test("CfHarnessEngine refuses to run a tool in enforce mode without CFC transports", async () => {
+  const engine = new CfHarnessEngine({
+    runId: "run-1",
+    workspaceHostPath: "/host/project",
+    cfcEnforcementMode: "enforce-explicit",
+  });
+  await assertRejects(
+    () => engine.invokeBuiltinTool("bash", { command: "echo hi" }),
+    Error,
+    "requires the runsc sandbox to wire",
+  );
+});
+
+Deno.test("CfHarnessEngine refuses to run capability probes in enforce mode without CFC transports", async () => {
+  // The prompt loop initializes diagnostics before the first model turn, and
+  // the capability probes execute scripts inside the sandbox — so the
+  // transport floor must fire before any sandbox execution, not only at the
+  // first builtin tool call. The probe error swallowing inside diagnostics
+  // init must not absorb the floor violation into a failure record.
+  const runner = new FakeProcessRunner();
+  const engine = new CfHarnessEngine({
+    runId: "run-1",
+    workspaceHostPath: "/host/project",
+    cfcEnforcementMode: "enforce-explicit",
+    processRunner: runner,
+  });
+  await assertRejects(
+    () => engine.ensureDiagnosticsInitialized(),
+    Error,
+    "requires the runsc sandbox to wire",
+  );
+  // Nothing reached the docker lifecycle: the run failed closed before any
+  // sandbox execution.
+  assertEquals(runner.calls.length, 0);
+});
+
+Deno.test("CfHarnessEngine runs a tool in enforce mode when CFC transports are wired", async () => {
+  const cfcResultDir = await Deno.makeTempDir({ prefix: "cf-harness-result-" });
+  const cfcInvocationContextDir = await Deno.makeTempDir({
+    prefix: "cf-harness-ctx-",
+  });
+  const runner = new FakeProcessRunner([
+    { stdout: "container-1\n", stderr: "", exitCode: 0 },
+    { stdout: "hi\n", stderr: "", exitCode: 0 },
+    { stdout: "0\n", stderr: "", exitCode: 0 },
+    { stdout: "", stderr: "", exitCode: 0 },
+  ]);
+  const engine = new CfHarnessEngine({
+    runId: "run-1",
+    workspaceHostPath: "/host/project",
+    cfcEnforcementMode: "enforce-explicit",
+    cfcResultDir,
+    cfcInvocationContextDir,
+    processRunner: runner,
+  });
+  // The guard does not fire; execution reaches the (faked) docker lifecycle
+  // (the exact mediated output is covered elsewhere — here we only assert the
+  // transport floor lets the run proceed and an outputId is produced).
+  const result = await engine.invokeBuiltinTool("bash", { command: "echo hi" });
+  assertEquals(typeof result.output.outputId, "string");
+});
+
+Deno.test("CfHarnessEngine does not apply the CFC transport floor to an injected sandbox runtime", async () => {
+  // An injected sandboxRuntime is the thing that actually executes and carries
+  // its own enforcement guarantees. The engine must not validate the *resolved
+  // config's* transports against it: that config is unused here and may describe
+  // a different sandbox, so doing so would falsely reject an otherwise valid
+  // enforce-mode run. (Regression for the run-start transport floor.)
+  const engine = new CfHarnessEngine({
+    runId: "run-1",
+    workspaceHostPath: "/host/project",
+    cfcEnforcementMode: "enforce-strict",
+    // A docker-runsc-cfc config with no CFC sidecar transports wired.
+    sandbox: resolveDockerRunscSandboxConfig({
+      workspaceHostPath: "/host/project",
+    }),
+    sandboxRuntime: new FakeSandboxRuntime(),
+  });
+  const result = await engine.invokeBuiltinTool("bash", { command: "echo hi" });
+  assertEquals(typeof result.output.outputId, "string");
 });
 
 Deno.test("CfHarnessEngine lets bash-no-sandbox host commands handle missing workspace paths", async () => {

@@ -23,10 +23,15 @@ import type {
   SandboxShellRequest,
 } from "./types.ts";
 import type {
+  CfcEnforcementMode,
   CfcSandboxJsonValue,
   CfcSandboxResult,
   CfcStreamChannel,
   IFCLabel,
+} from "@commonfabric/runner/cfc";
+import {
+  CFC_ENFORCING_STRICTNESS,
+  cfcEnforcementStrictness,
 } from "@commonfabric/runner/cfc";
 
 export const DEFAULT_DOCKER_RUNSC_IMAGE =
@@ -281,6 +286,56 @@ export const resolveDockerRunscSandboxConfig = (
       ? { cfcInvocationContextTransport }
       : {}),
   };
+};
+
+/**
+ * In `enforce-*` modes the runtime depends on two trusted sidecar transports:
+ *
+ *  - `cfcInvocationContextTransport` — the harness writes the initial-taint
+ *    invocation context the sandbox reads in. Without it the sandbox starts
+ *    untainted, so input labels (prompt-slot influence, prior observed labels)
+ *    are silently dropped.
+ *  - `cfcResultDir` — runsc writes the final-taint result the harness reads
+ *    back to mediate output. Without it every command's CFC result is absent
+ *    and enforce-mode mediation fail-closes every observation.
+ *
+ * Both come from `CF_HARNESS_RUNSC_CFC_*` env vars or explicit config and are
+ * easy to omit. A run can then claim to enforce while the dangerous half
+ * (missing input taint) degrades with no operator-visible signal. The engine
+ * calls this at run start (before the first tool executes) so a mis-wired
+ * enforce run aborts loudly rather than emitting silent denials mid-run.
+ * `disabled`/`observe` impose no such floor.
+ */
+export const assertDockerRunscCfcTransportForMode = (
+  mode: CfcEnforcementMode,
+  config: Pick<
+    DockerRunscSandboxConfig,
+    "cfcResultDir" | "cfcInvocationContextTransport"
+  >,
+): void => {
+  // `disabled` and `observe` do not mediate or deny tool output, so a missing
+  // transport cannot silently weaken them; only the enforcing floor requires it.
+  if (cfcEnforcementStrictness(mode) < CFC_ENFORCING_STRICTNESS) {
+    return;
+  }
+  const missing: string[] = [];
+  if (config.cfcInvocationContextTransport === undefined) {
+    missing.push(
+      `CFC invocation-context transport (set --cfc-invocation-context-dir or ${CFC_INVOCATION_CONTEXT_DIR_ENV})`,
+    );
+  }
+  if (config.cfcResultDir === undefined) {
+    missing.push(
+      `CFC result transport (set --cfc-result-dir or ${CFC_RESULT_DIR_ENV})`,
+    );
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `cfc enforcement mode '${mode}' requires the runsc sandbox to wire ${
+        missing.join(" and ")
+      }; refusing to start a run that would silently degrade enforcement`,
+    );
+  }
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

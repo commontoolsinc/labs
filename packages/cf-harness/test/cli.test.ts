@@ -2626,6 +2626,11 @@ Deno.test({
           "agent-browser:scripts/capture-workflow.sh",
           "--skill-script-execution-target",
           "host",
+          // Host skill-script execution is outside CFC mediation; this test
+          // exercises target threading, not enforcement, so run with CFC off
+          // rather than wiring sidecar transports it would never use.
+          "--cfc-enforcement-mode",
+          "disabled",
           "--browser-access-lease-id",
           "lease-1",
           "--browser-access-cdp-url",

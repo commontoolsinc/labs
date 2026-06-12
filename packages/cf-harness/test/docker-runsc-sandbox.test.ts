@@ -1,5 +1,6 @@
 import { assertEquals, assertMatch, assertThrows } from "@std/assert";
 import {
+  assertDockerRunscCfcTransportForMode,
   DEFAULT_DOCKER_RUNSC_IMAGE,
   DockerRunscSandboxRuntime,
   resolveDefaultContainerUser,
@@ -708,4 +709,44 @@ Deno.test("DockerRunscSandboxRuntime mounts host bind roots with read/write mode
     "sandbox:latest",
     "/bin/pwd",
   ]);
+});
+
+Deno.test("assertDockerRunscCfcTransportForMode allows non-enforce modes without transports", () => {
+  assertDockerRunscCfcTransportForMode("disabled", {});
+  assertDockerRunscCfcTransportForMode("observe", {});
+});
+
+Deno.test("assertDockerRunscCfcTransportForMode rejects enforce modes without transports", () => {
+  for (const mode of ["enforce-explicit", "enforce-strict"] as const) {
+    assertThrows(
+      () => assertDockerRunscCfcTransportForMode(mode, {}),
+      Error,
+      "invocation-context transport",
+    );
+    assertThrows(
+      () =>
+        assertDockerRunscCfcTransportForMode(mode, {
+          cfcInvocationContextTransport: { kind: "sidecar", dir: "/host/ctx" },
+        }),
+      Error,
+      "result transport",
+    );
+    assertThrows(
+      () =>
+        assertDockerRunscCfcTransportForMode(mode, {
+          cfcResultDir: "/host/results",
+        }),
+      Error,
+      "invocation-context transport",
+    );
+  }
+});
+
+Deno.test("assertDockerRunscCfcTransportForMode allows enforce modes with both transports", () => {
+  for (const mode of ["enforce-explicit", "enforce-strict"] as const) {
+    assertDockerRunscCfcTransportForMode(mode, {
+      cfcResultDir: "/host/results",
+      cfcInvocationContextTransport: { kind: "sidecar", dir: "/host/ctx" },
+    });
+  }
 });
