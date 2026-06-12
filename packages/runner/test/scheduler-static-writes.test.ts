@@ -1,4 +1,8 @@
 import {
+  getLogger,
+  getLoggerCountsBreakdown,
+} from "@commonfabric/utils/logger";
+import {
   afterEach,
   beforeEach,
   createSchedulerTestRuntime,
@@ -136,6 +140,74 @@ describe("static write surface demand", () => {
       expect(output.get()).toBe(30);
     } finally {
       cancel();
+    }
+  });
+
+  it("warns when a computation writes outside its declared surface", async () => {
+    getLogger("scheduler").resetCounts();
+    const source = runtime.getCell<number>(
+      space,
+      "static-writes-violation-source",
+      undefined,
+      tx,
+    );
+    const declared = runtime.getCell<number>(
+      space,
+      "static-writes-violation-declared",
+      undefined,
+      tx,
+    );
+    const undeclared = runtime.getCell<number>(
+      space,
+      "static-writes-violation-undeclared",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    declared.set(0);
+    undeclared.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runs = 0;
+    const declaredLink = declared.getAsNormalizedFullLink();
+    const writer = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        runs++;
+        const value = source.withTx(actionTx).get();
+        undeclared.withTx(actionTx).send(value);
+      }) as Action,
+      {
+        writes: [declaredLink],
+      },
+    );
+
+    runtime.scheduler.subscribe(
+      writer,
+      {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(declaredLink)],
+      },
+      {},
+    );
+
+    const cancel = declared.withTx(tx).sink(() => {});
+    try {
+      source.withTx(tx).send(2);
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.scheduler.idle();
+
+      expect(runs).toBe(1);
+      expect(undeclared.get()).toBe(2);
+      expect(
+        getLoggerCountsBreakdown().scheduler?.["write-surface-violation"]
+          ?.warn,
+      ).toBe(1);
+    } finally {
+      cancel();
+      getLogger("scheduler").resetCounts();
     }
   });
 });
