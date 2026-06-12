@@ -60,7 +60,6 @@ import {
   createModuleCompartmentGlobals,
   createSafeConsoleGlobal,
 } from "../sandbox/compartment-globals.ts";
-import { setVerifiedFunctionRegistrar } from "../sandbox/function-hardening.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 import { ExecutableRegistry } from "./executable-registry.ts";
 import { isTrustedBuilderArtifact } from "../builder/pattern-metadata.ts";
@@ -654,17 +653,6 @@ export class Engine extends EventTarget implements Harness {
         if (moduleMap) this.getSESRuntime().loadSourceMap(sourceUrl, moduleMap);
       }
 
-      // Register functions minted during this evaluation into the global
-      // executable index — the retained legacy read path: a pre-flip stored
-      // graph (`implementationRef`, body omitted) resolves once its module
-      // re-evaluates and the builder re-mints the same content-derived refs.
-      const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
-        (implementationRef, implementation) =>
-          this.executableRegistry.registerVerifiedFunction(
-            implementationRef,
-            implementation as HarnessedFunction,
-          ),
-      );
       const frame = pushFrame({
         runtime: this.ctRuntime,
         sourceLocationContext: {
@@ -689,7 +677,6 @@ export class Engine extends EventTarget implements Harness {
         throw this.getSESRuntime().mapThrownError(error);
       } finally {
         popFrame(frame);
-        restoreVerifiedFunctionRegistrar();
       }
 
       const main = loaded.namespace as Exports;
@@ -940,33 +927,11 @@ export class Engine extends EventTarget implements Harness {
     return this.getSESRuntime().evaluateCallback(source) as HarnessedFunction;
   }
 
-  getVerifiedFunction(
-    implementationRef: string,
-  ): HarnessedFunction | undefined {
-    return this.executableRegistry.getVerifiedFunction(implementationRef);
-  }
-
-  getExecutableFunction(
-    implementationRef: string,
-  ): HarnessedFunction | undefined {
-    return this.executableRegistry.getExecutableFunction(implementationRef);
-  }
-
   getVerifiedImplementation(
     identity: string,
     symbol: string,
   ): HarnessedFunction | undefined {
     return this.executableRegistry.getVerifiedImplementation(identity, symbol);
-  }
-
-  registerDynamicVerifiedFunction(
-    implementationRef: string,
-    implementation: HarnessedFunction,
-  ): void {
-    this.executableRegistry.registerVerifiedFunction(
-      implementationRef,
-      implementation,
-    );
   }
 
   unsafeTrustHostValue(

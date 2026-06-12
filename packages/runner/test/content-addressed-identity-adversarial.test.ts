@@ -1087,51 +1087,37 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
   });
 
   // ---------------------------------------------------------------------------
-  // Attack 11 — keyspace separation. E2 deleted every loadId surface, so the
-  // historical "don't leak a verifiedLoadId" concern is structurally moot;
-  // what remains is that admitting a fn to the string-keyed executable index
-  // (the dynamic / legacy rehydration channel) must NOT make it resolvable
-  // through the content-addressed `{ identity, symbol }` index a forged
-  // `$implRef` reads. Pinned at the registry seam.
+  // Attack 11 — host pseudo-module separation (identity E5). Host-trusted
+  // functions register into the SAME content-addressed implementation index
+  // as verified modules (under minted `host:<n>` identities), so the residual
+  // invariant is: that registration makes them EXECUTABLE by `$implRef`, but
+  // never VERIFIED — no provenance is recorded, and the CFC policy-facing
+  // resolution fails closed on its absence.
   // ---------------------------------------------------------------------------
-  describe("attack 11: admission to the executable index does not grant a content-addressed $implRef", () => {
-    // E2 deleted ALL loadId machinery (no verifiedLoadId to leak, no per-load
-    // partitions, no cross-load repair). The residual invariant the dynamic /
-    // legacy read path must preserve is keyspace separation: the STRING-keyed
-    // executable index (`getExecutableFunction`, the rehydration channel for
-    // pre-flip graphs + host + dynamic artifacts) and the content-addressed
-    // `{ identity, symbol }` index (`getVerifiedImplementation`, what a
-    // serialized `$implRef` resolves through) are independent. Admitting a fn
-    // to the former — the only thing the dynamic registrar does — must NOT
-    // make it resolvable by a forged `$implRef`.
-    it("a string-ref registration is executable but not resolvable by { identity, symbol }", () => {
+  describe("attack 11: host pseudo-module registration grants execution, never verification", () => {
+    it("a host entry resolves by { identity, symbol } but carries no provenance", () => {
       const reg = new ExecutableRegistry();
       const fn = (() => {}) as unknown as HarnessedFunction;
-      reg.registerVerifiedFunction("fid1:dynamic-or-legacy", fn);
+      reg.trustHostValue({ implementation: fn }, { reason: "adversarial" });
 
-      // Executable via the legacy string-keyed channel (the rehydration path).
-      expect(reg.getExecutableFunction("fid1:dynamic-or-legacy")).toBe(fn);
-
-      // ...but invisible to the content-addressed index. An attacker who
-      // crafts a `$implRef` whose `{ identity, symbol }` happens to spell the
-      // same string still resolves nothing — the two indexes never alias.
-      expect(reg.getVerifiedImplementation("fid1", "dynamic-or-legacy"))
-        .toBeUndefined();
-      expect(reg.getVerifiedImplementation("fid1:dynamic-or-legacy", ""))
-        .toBeUndefined();
+      const resolved = reg.getVerifiedImplementation("host:0", "fn0");
+      expect(resolved).toBe(fn);
+      expect(getVerifiedProvenance(resolved as never)).toBeUndefined();
     });
 
-    it("a re-registration of a ref points the executable index at the FRESH function (interchangeable by construction)", () => {
-      // Two evaluations of one module mint the same content-derived ref for
-      // behaviorally interchangeable fns; the dynamic registrar likewise
-      // overwrites. There is no stale-pinning and no partitioned divergence to
-      // exploit — last write wins, deterministically.
+    it("a forged $implRef naming a host identity cannot manufacture verification", () => {
       const reg = new ExecutableRegistry();
-      const first = (() => {}) as unknown as HarnessedFunction;
-      const second = (() => {}) as unknown as HarnessedFunction;
-      reg.registerVerifiedFunction("shared-ref", first);
-      reg.registerVerifiedFunction("shared-ref", second);
-      expect(reg.getExecutableFunction("shared-ref")).toBe(second);
+      const fn = (() => {}) as unknown as HarnessedFunction;
+      reg.trustHostValue({ implementation: fn }, { reason: "adversarial" });
+      // The attacker writes `$implRef: { identity: "host:0", symbol: "fn0" }`
+      // into stored data: resolution executes the host fn, but its CFC
+      // identity stays undefined — `writeAuthorizedBy` sees `unsupported`.
+      const resolved = reg.getVerifiedImplementation("host:0", "fn0");
+      const identity = resolvePolicyFacingImplementationIdentity(
+        { type: "javascript" } as unknown as Module,
+        { implementation: resolved },
+      );
+      expect(identity).toBeUndefined();
     });
   });
 
@@ -1142,19 +1128,6 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
   // genuine canonical `fn.src` on a host fn does NOT manufacture verification.
   // ---------------------------------------------------------------------------
   describe("attack 12: host artifacts execute but never resolve verified", () => {
-    it("an unsafe-host: debugName resolves undefined (never verified)", () => {
-      const hostFn = Object.assign(() => 42, {
-        // Even carrying a genuine-looking canonical src...
-        src: "cf:module/SOME_MODULE/main.tsx:1:1",
-      });
-      expect(getVerifiedProvenance(hostFn)).toBeUndefined();
-      const identity = resolvePolicyFacingImplementationIdentity(
-        { type: "javascript", debugName: "unsafe-host:7" } as unknown as Module,
-        { implementation: hostFn },
-      );
-      expect(identity).toBeUndefined();
-    });
-
     it("a host fn with an EMPTY debugName falls into the provenance arm and resolves undefined (src alone is not proof)", () => {
       const hostFn = Object.assign(() => 42, {
         src: "cf:module/SOME_MODULE/main.tsx:1:1",

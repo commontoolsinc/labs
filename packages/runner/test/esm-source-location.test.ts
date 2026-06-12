@@ -59,15 +59,16 @@ function probeHandlerIdentity(
     .map((n) => n.module)
     .find((m) =>
       m && m.type === "javascript" && m.wrapper === "handler" &&
-      typeof m.implementationRef === "string"
+      typeof m.implementation === "function"
     );
   if (!handlerModule) {
     throw new Error("no verified handler node found in compiled pattern");
   }
-  const implementationRef = handlerModule.implementationRef!;
-  const fn = runtime.harness.getExecutableFunction?.(
-    implementationRef,
-  ) as (((...a: unknown[]) => unknown) & { src?: string }) | undefined;
+  // The live module carries its implementation; identity facts ride the
+  // function's provenance (the legacy implementationRef index is gone).
+  const fn = handlerModule.implementation as
+    | (((...a: unknown[]) => unknown) & { src?: string })
+    | undefined;
   const src = fn?.src;
   const identity = resolvePolicyFacingImplementationIdentity(handlerModule, {
     implementation: fn as never,

@@ -5,6 +5,7 @@ import {
   FileSystemProgramResolver,
   InMemoryProgram,
 } from "@commonfabric/js-compiler";
+import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
@@ -465,16 +466,6 @@ describe("Engine.evaluateRecordGraph()", () => {
         module.$implRef!.symbol,
       ),
     ).toBeDefined();
-    // The legacy read path (kept for pre-flip persisted graphs) still admits
-    // the in-memory module's content-derived ref.
-    const liveModule = (main!.default as { nodes: Array<{ module: unknown }> })
-      .nodes[0].module as { implementationRef?: string };
-    expect(typeof liveModule.implementationRef).toBe("string");
-    expect(
-      // deno-lint-ignore no-explicit-any
-      (engine as any).getVerifiedFunction(liveModule.implementationRef),
-    )
-      .toBeDefined();
   });
 
   it("keeps the serialized identity stable across separate load sessions of the same source", async () => {
@@ -514,16 +505,6 @@ describe("Engine.evaluateRecordGraph()", () => {
     expect(firstSerialized.nodes[0].module.$implRef).toEqual(
       secondSerialized.nodes[0].module.$implRef,
     );
-    // The in-memory legacy ref (still minted for the kept pre-flip read path)
-    // is content-derived too — same stability, pinned until the path retires.
-    const firstLive = (first.main!.default as {
-      nodes: Array<{ module: { implementationRef?: string } }>;
-    }).nodes[0].module.implementationRef;
-    const secondLive = (second.main!.default as {
-      nodes: Array<{ module: { implementationRef?: string } }>;
-    }).nodes[0].module.implementationRef;
-    expect(firstLive).toBeDefined();
-    expect(firstLive).toBe(secondLive);
   });
 
   it("rejects authored local-module namespace imports in SES mode", async () => {
@@ -917,13 +898,21 @@ describe("Engine.evaluateRecordGraph()", () => {
     }) => node.module?.wrapper === "handler");
     const module = handlerNode?.module as {
       implementation?: unknown;
-      implementationRef?: string;
     } | undefined;
 
     expect(typeof module?.implementation).toBe("function");
-    expect(typeof module?.implementationRef).toBe("string");
+    // The handler callback's identity facts ride its provenance, and the
+    // engine's implementation index resolves the {identity, symbol} back to
+    // the SAME live function — the binding the legacy ref index used to pin.
+    const provenance = getVerifiedProvenance(
+      module!.implementation as (...args: unknown[]) => unknown,
+    );
+    expect(provenance?.symbol).toBeDefined();
     expect(
-      engine.getExecutableFunction(module!.implementationRef!),
+      engine.getVerifiedImplementation(
+        provenance!.identity,
+        provenance!.symbol!,
+      ),
     ).toBe(module?.implementation);
   });
 });

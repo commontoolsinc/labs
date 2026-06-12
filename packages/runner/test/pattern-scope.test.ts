@@ -1269,8 +1269,7 @@ Deno.test("opaque JS action result uses narrowest effective output scope", async
   const tx = runtime.edit();
 
   try {
-    const { computed, lift, pattern } =
-      createTrustedBuilder(runtime).commonfabric;
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
     const baseSecret = runtime.getCell<number>(
       space,
       "opaque user scoped computation input",
@@ -1284,9 +1283,17 @@ Deno.test("opaque JS action result uses narrowest effective output scope", async
     );
     secret.set(41);
 
+    // The nested computation is a module-scope factory (what the CT-1644
+    // transformer hoist produces); the action INSTANTIATES it — minting a
+    // builder artifact inside an action throws (identity E5).
+    const nested42 = lift(
+      () => 42,
+      { type: "object", properties: {} },
+      { type: "number" },
+    );
     const structured = lift(
       (_x: number) => ({
-        nested: computed(() => 42),
+        nested: nested42({}),
       }),
       { type: "number" },
       {
@@ -1339,11 +1346,17 @@ Deno.test("opaque JS action result schema scope participates in effective output
   const tx = runtime.edit();
 
   try {
-    const { computed, lift, pattern } =
-      createTrustedBuilder(runtime).commonfabric;
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    // Hoisted factory + in-action instantiation (the CT-1644 transformer
+    // shape — minting inside the action throws since identity E5).
+    const nested42 = lift(
+      () => 42,
+      { type: "object", properties: {} },
+      { type: "number" },
+    );
     const structured = lift(
       (_x: number) => ({
-        nested: computed(() => 42),
+        nested: nested42({}),
       }),
       { type: "number" },
       {

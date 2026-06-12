@@ -91,6 +91,8 @@ import {
   type ImplementationIdentity,
 } from "./cfc/types.ts";
 import { enterActionExecution } from "./builder/action-context.ts";
+import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
+import { getArtifactEntryRef } from "./builder/pattern-metadata.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
@@ -2251,22 +2253,27 @@ export class Runner {
   ): ResolvedJavaScriptModule {
     // Resolution order (docs/specs/content-addressed-action-identity.md):
     // 1. content-addressed `$implRef` — resolve the registered builder
-    //    artifact by `{ identity, symbol }` from the in-memory index (only
+    //    artifact by `{ identity, symbol }` from the in-memory indexes (only
     //    trust-gated artifacts are indexed, so whatever resolves is
-    //    builder-made) and run its implementation;
-    // 2. legacy `implementationRef` registry lookup (the retained read path
-    //    for graphs persisted before the writer flip, plus host-trusted and
-    //    dynamic artifacts — gate-2 decision in the implementation plan);
-    // 3. the stringified-source fallback (SES-sandboxed, CFC-unverified).
-    // (The former per-runner FunctionCache is gone — steps 1–2 are two Map
-    // probes against session-lifetime indexes, so the ref-keyed cache only
-    // added a third map in front of them.)
+    //    builder-made — host pseudo-modules included) and run its
+    //    implementation;
+    // 2. the module's LIVE implementation, when it carries trust-gated
+    //    identity facts — module-eval provenance, or a host/artifact entry
+    //    ref (both written only behind trust gates). This is the in-memory
+    //    instantiation path: a trusted module that never round-tripped
+    //    through JSON has no `$implRef` property, but its function IS the
+    //    artifact (pre-E5 this resolved through the legacy ref index —
+    //    same function, different lookup);
+    // 3. the stringified-source fallback (SES-sandboxed, CFC-unverified) —
+    //    test-built / never-verified modules. A forged fn carries neither
+    //    provenance nor an entry ref, so it always lands here.
+    const liveTrusted = typeof module.implementation === "function" &&
+        (getVerifiedProvenance(module.implementation) !== undefined ||
+          getArtifactEntryRef(module.implementation) !== undefined)
+      ? module.implementation as (...args: any[]) => any
+      : undefined;
     const fn: (...args: any[]) => any = this.resolveByImplRef(module) ??
-      (module.implementationRef
-        ? this.runtime.harness.getExecutableFunction(
-          module.implementationRef,
-        ) as ((...args: any[]) => any) | undefined
-        : undefined) ??
+      liveTrusted ??
       this.getFallbackJavaScriptImplementation(module);
 
     const namedFn = fn as {
@@ -2274,7 +2281,7 @@ export class Runner {
       name?: string;
       sourceLocationSample?: Record<string, unknown>;
     };
-    const name = namedFn.src || fn.name || module.implementationRef;
+    const name = namedFn.src || fn.name;
     if (name && namedFn.sourceLocationSample) {
       sourceLocationLogger.flag("sample", name, true, {
         name,
@@ -3471,7 +3478,7 @@ export class Runner {
   ): (...args: any[]) => any {
     const implRef =
       (module as { $implRef?: { identity: string; symbol: string } }).$implRef;
-    if (implRef || module.implementationRef) {
+    if (implRef) {
       // The module carries a content-addressed `$implRef` and/or a legacy
       // `implementationRef` — it was expected to resolve through the verified
       // registries — yet resolution fell through to here. The action will run
@@ -3480,7 +3487,7 @@ export class Runner {
       logger.debug("verified-fallback-downgrade", () => [
         "Verified function resolution missed; running SES-recompiled," +
         " CFC-unverified fallback",
-        { implementationRef: module.implementationRef, $implRef: implRef },
+        { $implRef: implRef },
       ]);
     }
     if (typeof module.implementation === "function") {
