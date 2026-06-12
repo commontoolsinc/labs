@@ -2125,7 +2125,7 @@ export type FetchOptions = {
 export type FetchDataFunction = <T>(
   params: Opaque<{
     url: string;
-    mode?: "json" | "text";
+    mode?: "json" | "text" | "dataUrl";
     options?: FetchOptions;
     result?: T;
   }>,
