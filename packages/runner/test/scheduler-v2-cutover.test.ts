@@ -15,6 +15,7 @@ import type {
   IExtendedStorageTransaction,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
+import { NodeRegistry } from "../src/scheduler/node-record.ts";
 
 async function expectSchedulerIdle(runtime: Runtime): Promise<void> {
   const result = await Promise.race([
@@ -611,5 +612,184 @@ describe("scheduler v2 cutover fixtures", () => {
 
     expect(runs).toBe(0);
     expect(output.get()).toBe(0);
+  });
+
+  it("matches v1 parent-link semantics across registration paths", async () => {
+    const parentlessSource = runtime.getCell<number>(
+      space,
+      "v2-cutover-parentless-source",
+      undefined,
+      tx,
+    );
+    const stickySource = runtime.getCell<number>(
+      space,
+      "v2-cutover-sticky-parent-source",
+      undefined,
+      tx,
+    );
+    const parentTrigger = runtime.getCell<number>(
+      space,
+      "v2-cutover-parent-link-trigger",
+      undefined,
+      tx,
+    );
+    parentlessSource.set(1);
+    stickySource.set(1);
+    parentTrigger.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const parentlessAddress = toMemorySpaceAddress(
+      parentlessSource.getAsNormalizedFullLink(),
+    );
+    const stickyAddress = toMemorySpaceAddress(
+      stickySource.getAsNormalizedFullLink(),
+    );
+    const triggerAddress = toMemorySpaceAddress(
+      parentTrigger.getAsNormalizedFullLink(),
+    );
+
+    const noOpThenAssignChild: Action = function noOpThenAssignChild(
+      actionTx,
+    ) {
+      parentlessSource.withTx(actionTx).get();
+    };
+    const preserveChild: Action = function preserveChild(actionTx) {
+      stickySource.withTx(actionTx).get();
+    };
+    const overwriteChild: Action = function overwriteChild(actionTx) {
+      stickySource.withTx(actionTx).get();
+    };
+    const deferredRegistry = new NodeRegistry();
+    const deferredParent: Action = function deferredParent() {};
+    const deferredChild: Action = function deferredChild() {};
+
+    deferredRegistry.register(deferredChild, "computation");
+    deferredRegistry.linkParent(deferredChild, deferredParent);
+    expect(deferredRegistry.parentOf(deferredChild)).toBeUndefined();
+    deferredRegistry.register(deferredParent, "effect");
+    expect(deferredRegistry.parentOf(deferredChild)?.action).toBe(
+      deferredParent,
+    );
+    expect(
+      deferredRegistry.childrenOf(deferredParent)?.has(
+        deferredRegistry.get(deferredChild)!,
+      ),
+    ).toBe(true);
+
+    const parentlessInitialCancel = runtime.scheduler.subscribe(
+      noOpThenAssignChild,
+      { reads: [parentlessAddress], shallowReads: [], writes: [] },
+      { isEffect: true },
+    );
+    await runtime.scheduler.idle();
+    parentlessInitialCancel();
+    await runtime.scheduler.idle();
+
+    const parentlessNestedCancels: Array<() => void> = [];
+    const parentQ: Action = function parentQ(actionTx) {
+      parentTrigger.withTx(actionTx).get();
+      if (parentlessNestedCancels.length === 0) {
+        parentlessNestedCancels.push(
+          runtime.scheduler.subscribe(
+            noOpThenAssignChild,
+            { reads: [parentlessAddress], shallowReads: [], writes: [] },
+            { isEffect: true },
+          ),
+        );
+      }
+    };
+    const parentQCancel = runtime.scheduler.subscribe(
+      parentQ,
+      { reads: [triggerAddress], shallowReads: [], writes: [] },
+      { isEffect: true },
+    );
+    await runtime.scheduler.idle();
+
+    let graph = runtime.scheduler.getGraphSnapshot();
+    const parentlessNode = graph.nodes.find((node) =>
+      node.id === "noOpThenAssignChild"
+    );
+    expect(parentlessNode).toBeDefined();
+    expect(parentlessNode!.parentId).toBe("parentQ");
+
+    const stickyCancels: Array<() => void> = [];
+    const parentP: Action = function parentP(actionTx) {
+      parentTrigger.withTx(actionTx).get();
+      if (stickyCancels.length === 0) {
+        stickyCancels.push(
+          runtime.scheduler.subscribe(
+            preserveChild,
+            { reads: [stickyAddress], shallowReads: [], writes: [] },
+            { isEffect: true },
+          ),
+        );
+        stickyCancels.push(
+          runtime.scheduler.subscribe(
+            overwriteChild,
+            { reads: [stickyAddress], shallowReads: [], writes: [] },
+            { isEffect: true },
+          ),
+        );
+      }
+    };
+    const parentPCancel = runtime.scheduler.subscribe(
+      parentP,
+      { reads: [triggerAddress], shallowReads: [], writes: [] },
+      { isEffect: true },
+    );
+    await runtime.scheduler.idle();
+
+    graph = runtime.scheduler.getGraphSnapshot();
+    const firstPreserveNode = graph.nodes.find((node) =>
+      node.id === "preserveChild"
+    );
+    const firstOverwriteNode = graph.nodes.find((node) =>
+      node.id === "overwriteChild"
+    );
+    expect(firstPreserveNode?.parentId).toBe("parentP");
+    expect(firstOverwriteNode?.parentId).toBe("parentP");
+
+    const parentRSubscribeCancels: Array<() => void> = [];
+    const parentR: Action = function parentR(actionTx) {
+      parentTrigger.withTx(actionTx).get();
+      runtime.scheduler.resubscribe(
+        preserveChild,
+        { reads: [stickyAddress], shallowReads: [], writes: [] },
+        { isEffect: true },
+      );
+      if (parentRSubscribeCancels.length === 0) {
+        parentRSubscribeCancels.push(
+          runtime.scheduler.subscribe(overwriteChild, {
+            reads: [stickyAddress],
+            shallowReads: [],
+            writes: [],
+          }, { isEffect: true }),
+        );
+      }
+    };
+    const parentRCancel = runtime.scheduler.subscribe(
+      parentR,
+      { reads: [triggerAddress], shallowReads: [], writes: [] },
+      { isEffect: true },
+    );
+    await runtime.scheduler.idle();
+
+    graph = runtime.scheduler.getGraphSnapshot();
+    const secondPreserveNode = graph.nodes.find((node) =>
+      node.id === "preserveChild"
+    );
+    const secondOverwriteNode = graph.nodes.find((node) =>
+      node.id === "overwriteChild"
+    );
+    expect(secondPreserveNode?.parentId).toBe("parentP");
+    expect(secondOverwriteNode?.parentId).toBe("parentR");
+
+    parentQCancel();
+    for (const cancel of parentlessNestedCancels) cancel();
+    parentPCancel();
+    parentRCancel();
+    for (const cancel of stickyCancels) cancel();
+    for (const cancel of parentRSubscribeCancels) cancel();
   });
 });

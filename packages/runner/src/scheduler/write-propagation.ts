@@ -6,6 +6,7 @@ import type {
 } from "../storage/interface.ts";
 import { getTransactionWriteDetails } from "../storage/transaction-inspection.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
+import type { NodeRegistry } from "./node-record.ts";
 import type { TriggerIndexState } from "./trigger-index.ts";
 import type { Action, ReactivityLog } from "./types.ts";
 
@@ -15,7 +16,7 @@ export interface WritePropagationState {
   readonly effects: ReadonlySet<Action>;
   readonly computations: ReadonlySet<Action>;
   readonly conditionallyScheduledEffects: Map<Action, number>;
-  readonly actionParent: WeakMap<Action, Action>;
+  readonly nodes: NodeRegistry;
   readonly pending: Set<Action>;
   readonly markPullDemandContinuation: (action: Action) => void;
   readonly scheduleWithDebounce: (action: Action) => void;
@@ -91,7 +92,7 @@ export function markReadersDirtyForChangedWrites(
       if (state.materializerIndex.isMaterializer(reader)) {
         state.queueExecution();
       }
-      if (isAncestorAction(state.actionParent, sourceAction, reader)) {
+      if (state.nodes.isAncestor(sourceAction, reader)) {
         // Continuations are only for actions in the scheduler parent chain.
         // Dependency edges already schedule ordinary downstream readers; this
         // handles the narrower case where a child created during a pull writes
@@ -103,17 +104,4 @@ export function markReadersDirtyForChangedWrites(
       state.scheduleAffectedEffects(reader);
     }
   }
-}
-
-function isAncestorAction(
-  actionParent: WeakMap<Action, Action>,
-  sourceAction: Action,
-  candidateAncestor: Action,
-): boolean {
-  let parent = actionParent.get(sourceAction);
-  while (parent) {
-    if (parent === candidateAncestor) return true;
-    parent = actionParent.get(parent);
-  }
-  return false;
 }

@@ -32,8 +32,7 @@ type SchedulerActionChangeGroupState = {
 
 type SchedulerParentChildState = {
   readonly getExecutingAction: () => Action | null;
-  readonly actionParent: WeakMap<Action, Action>;
-  readonly actionChildren: WeakMap<Action, Set<Action>>;
+  readonly nodes: NodeRegistry;
 };
 
 export type SchedulerSubscriptionState =
@@ -75,7 +74,6 @@ export interface SchedulerSubscribeActionState {
   readonly pendingDependencyCollection: Set<Action>;
   readonly activePullDemandActions: WeakSet<Action>;
   readonly pullDemandedFirstRunComputations: WeakSet<Action>;
-  readonly actionParent: WeakMap<Action, Action>;
   readonly pending: Set<Action>;
   readonly scheduledFirstTime: Set<Action>;
   readonly effects: ReadonlySet<Action>;
@@ -247,17 +245,11 @@ export function registerParentChildAction(
 ): void {
   const { allowExisting = true } = options;
   const parent = state.getExecutingAction();
-  if (!parent || parent === action) return;
-  if (!allowExisting && state.actionParent.has(action)) return;
-
-  state.actionParent.set(action, parent);
-
-  let children = state.actionChildren.get(parent);
-  if (!children) {
-    children = new Set();
-    state.actionChildren.set(parent, children);
-  }
-  children.add(action);
+  state.nodes.linkParent(
+    action,
+    parent && parent !== action ? parent : undefined,
+    { allowExisting },
+  );
 }
 
 export interface SchedulerUnsubscribeActionState {

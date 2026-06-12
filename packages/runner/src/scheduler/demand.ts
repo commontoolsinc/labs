@@ -7,7 +7,6 @@ export interface PullDemandState {
   readonly effects: ReadonlySet<Action>;
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
-  readonly actionParent: WeakMap<Action, Action>;
   readonly nodes: NodeRegistry;
   readonly pullDemandedFirstRunComputations: WeakSet<Action>;
   readonly pullDemandedContinuationComputations: WeakSet<Action>;
@@ -130,7 +129,7 @@ function hasDemandedParentContext(
   action: Action,
   visited = new Set<Action>(),
 ): boolean {
-  const parent = state.actionParent.get(action);
+  const parent = state.nodes.parentOf(action)?.action;
   if (!parent) return false;
 
   if (isLiveEffect(state, parent)) {
