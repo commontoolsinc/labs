@@ -208,8 +208,8 @@ function getSymbolTypeAtSource(
 interface CapabilitySummaryMemo {
   /** `{ checker, includeNestedCallbacks: true }` analyses. */
   readonly nested: WeakMap<ts.Node, FunctionCapabilitySummary>;
-  /** Checker-less analyses (fallback after a recorded-summary miss). */
-  readonly bare: WeakMap<ts.Node, FunctionCapabilitySummary>;
+  /** Non-nested analyses (fallback after a recorded-summary miss). */
+  readonly fallback: WeakMap<ts.Node, FunctionCapabilitySummary>;
 }
 
 const capabilitySummaryMemos = new WeakMap<
@@ -222,7 +222,7 @@ function capabilitySummaryMemoFor(
 ): CapabilitySummaryMemo {
   let memo = capabilitySummaryMemos.get(context);
   if (!memo) {
-    memo = { nested: new WeakMap(), bare: new WeakMap() };
+    memo = { nested: new WeakMap(), fallback: new WeakMap() };
     capabilitySummaryMemos.set(context, memo);
   }
   return memo;
@@ -248,7 +248,8 @@ function findCapabilitySummaryForParameter(
     : context
     ? (context.lookupCapabilitySummary(fn) ??
       analyzeFunctionCapabilities(fn, {
-        summaryCache: capabilitySummaryMemoFor(context).bare,
+        checker: context.checker,
+        summaryCache: capabilitySummaryMemoFor(context).fallback,
       }))
     : analyzeFunctionCapabilities(fn, {
       checker: options?.checker,
