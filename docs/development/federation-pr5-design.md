@@ -1,10 +1,40 @@
 # Federation PR5 — audience-bound `session.open` + space lifecycle
 
-Status: **design / needs Berni's input.** Last of the §14 federation arc
-(PR1–PR4 + site-table v0 landed). This is the *forcing function* for making the
-site table's host hints trustworthy: until the open authorization is
-audience-bound, a host hint is a replay surface, so the site table stays "v0
-unverified hints."
+Status: **Part A mechanism implemented; one decision needs Berni.** Last of the
+§14 federation arc (PR1–PR4 + site-table v0 landed). This is the *forcing
+function* for making the site table's host hints trustworthy: until the open
+authorization is audience-bound, a host hint is a replay surface, so the site
+table stays "v0 unverified hints."
+
+## Implemented in this PR
+
+The `session.open` verification was a byte-identical copy in two places
+(`packages/memory/v2/standalone.ts` and `packages/toolshed/routes/storage/memory.ts`).
+This PR factors it into a single shared helper —
+`packages/memory/v2/session-open-auth.ts` `verifySessionOpenAuthorization()` —
+both now call, and adds two anti-replay checks on top of the signature:
+
+- **Expiry — complete, end-to-end.** The client (`v2-remote-session.ts`) now
+  stamps `iat` + `exp` (a 5-min `SESSION_OPEN_TTL_SECONDS` window) onto every
+  `session.open`; the helper rejects an expired open with a clock-skew grace.
+  Before this the open carried no expiry and was replayable forever. Backward
+  compatible: `exp` rides in the signed invocation hash, older servers ignore
+  it, and an open without `exp` is still accepted.
+- **Audience — mechanism + tests, gated on one decision.** The helper rejects an
+  open whose `aud` ≠ this server's configured `audience` (cross-host replay).
+  Opt-in on both sides (no `aud` or unconfigured server → skip), so it can't
+  break anything today. Covered by `test/session-open-auth-test.ts` (8 cases:
+  valid / tampered / expired / skew-grace / aud-match / aud-replay-rejected /
+  opt-in).
+
+**The one decision for Berni** (everything above is inert without it): the
+`Invocation` `aud` field is typed `DID`, so a proper audience is the memory
+server's **own identity DID** — which the memory server does not have today.
+Decisions: (1) provision a server identity DID; (2) how the client learns it to
+set `aud` (site-table host DID? a `/.well-known` on the host? handshake?); (3)
+when to flip server enforcement from opt-in to required. Once decided, wiring it
+is a config/plumbing change, not a protocol change — the enforcement path and
+tests are already here. Part B (below) is unchanged: still design-only.
 
 ## Two parts
 
