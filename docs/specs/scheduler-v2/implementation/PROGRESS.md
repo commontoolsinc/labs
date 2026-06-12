@@ -1208,3 +1208,23 @@ packages/runner/src/storage/rejection.ts:6:export function isPermanentRejection(
     `packages/runner/test/scheduler-event-identity.test.ts`,
     `packages/runner/test/scheduler-rejection-taxonomy.test.ts`,
     `packages/runner/src/storage/rejection.ts`.
+
+## 03/step-1
+
+- [x] pending — record per-space commit localSeq on source transactions
+- Deviations: selected `test/memory-v2-transaction-commit-rejection.test.ts`
+  as the storage transaction test from the work-order inventory.
+- Recordings:
+  - `deno fmt packages/runner/src/storage/commit-identity.ts
+    packages/runner/src/storage/v2.ts`: passed (`Checked 2 files`).
+  - `deno lint packages/runner/src/storage/commit-identity.ts
+    packages/runner/src/storage/v2.ts`: passed (`Checked 2 files`).
+  - `deno check src/storage/v2.ts`: passed.
+  - `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-retries.test.ts`: passed, `1 passed (2 steps)`,
+    `0 failed`.
+  - `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/memory-v2-transaction-commit-rejection.test.ts`: passed,
+    `1 passed`, `0 failed`.
