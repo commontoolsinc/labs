@@ -5504,3 +5504,37 @@ $ rg -n "queueInitialActionRehydration|initialRehydrationTokens|canApplyInitialA
     M3 Max / Deno 2.8.1. Clean broad graph `328.3 ms`; transitive invalid
     writer `26.0 ms`; note-shaped 30x7 clean events `1.1 s`; deep
     read-populated handler `683.2 ms`.
+
+## REVIEWER RECORD — 2026-06-12 merge-train state + CI-gap discovery
+
+- #4087 (phase 0) and #4088 (E0) squash-merged to main. #4090 (E1) was
+  rebased onto main (force-push; accepted deviation at retarget boundaries —
+  squash-merging the parent orphans the branch history, `rebase --onto` is
+  the clean recovery), then took five fix commits, all reviewed and verified:
+  engine precondition-only commits validate ahead of every commit shape
+  (`3a0503bc4`), retried events re-record with the lineage registry
+  (`9b0c5e913`), preconditions claim their write space and wrappers fail
+  closed (`1b9027347`), and read-only origin transactions are settled lineage
+  origins (`bb01e3280`).
+- `bb01e3280` root cause, for the record: `cell.send()` forwards its tx as
+  the event origin (E0, for id minting); in read contexts that is
+  `runtime.readTx()`, which never settles, so lineage subscribed via
+  `addCommitCallback()` and hit the read-only guard — breaking every
+  pattern-test gesture. Read-only origins are not speculative launches;
+  they map to confirmed.
+- **CI gap (important):** `.github/workflows/deno.yml` runs on
+  `pull_request: branches: [main]` only. Stacked PRs targeting sibling
+  branches (#4096–#4111) have had NO CI; their green/clean status is
+  vacuous. Each PR meets real CI for the first time when it retargets to
+  main after its parent merges. Plan accordingly: expect first-contact
+  failures at each retarget, fix on the child branch.
+- **Cascade protocol when a parent squash-merges:** for each child, in order:
+  `git rebase --onto main <old-parent-tip> scheduler-v2/<child>` (drop the
+  parent's pre-squash commits, keep only the child's own), resolve, run the
+  affected suites locally (runner + patterns sweep for cutover-adjacent
+  phases), force-push. GitHub retargets the base automatically when the
+  parent branch is deleted.
+- Stack-head verification sweep (scratch worktree at
+  `scheduler-v2/08-phase7` + `bb01e3280` cherry-picked): full pattern-unit
+  sweep + cli suite run locally to surface remaining latent breakage in one
+  pass; results recorded in a follow-up entry.
