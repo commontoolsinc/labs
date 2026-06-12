@@ -57,6 +57,7 @@ import * as Differential from "./differential.ts";
 import type {
   IMemoryAddress,
   IMergedChanges,
+  IPreconditionFailedError,
   IRemoteStorageProviderSettings,
   ISpaceReplica,
   IStorageManager,
@@ -1009,7 +1010,6 @@ type NativeCommitOperation =
     id: URI;
     scope?: CellScope;
     value: EntityDocument;
-    createOnly?: true;
   }
   | {
     op: "patch";
@@ -1400,7 +1400,6 @@ class SpaceReplica implements ISpaceReplica {
                 id: operation.id,
                 scope: operation.scope,
                 value: toExplicitDocument(operation.value),
-                ...(operation.createOnly ? { createOnly: true as const } : {}),
               }
           ),
     );
@@ -1708,9 +1707,6 @@ class SpaceReplica implements ISpaceReplica {
                   id: operation.id,
                   scope: operation.scope,
                   value: operation.value,
-                  ...(emitCommitPreconditions && operation.createOnly
-                    ? { createOnly: true as const }
-                    : {}),
                 };
             }
           }),
@@ -2222,8 +2218,22 @@ const toRejectedError = (
   commit: unknown,
 ): StorageTransactionRejected => {
   const message = error instanceof Error ? error.message : String(error);
+  const name = error instanceof Error
+    ? error.name
+    : (error as { name?: unknown })?.name;
+  const precondition = (error as { precondition?: unknown }).precondition;
   if (
-    (error instanceof Error && error.name === "ConflictError") ||
+    name === "PreconditionFailedError" &&
+    (precondition === "origin-committed" || precondition === "receipt-exists")
+  ) {
+    return {
+      name: "PreconditionFailedError",
+      message,
+      precondition,
+    } as IPreconditionFailedError;
+  }
+  if (
+    name === "ConflictError" ||
     message.includes("stale confirmed read") ||
     message.includes("pending dependency")
   ) {

@@ -751,7 +751,10 @@ export class V2StorageTransaction implements IStorageTransaction {
   #reactivityLogCache?: TransactionReactivityLog;
   #schedulerObservation?: unknown;
   #commitPreconditions = new Map<MemorySpace, CommitPrecondition[]>();
-  #createOnlyMarks = new Map<MemorySpace, Set<string>>();
+  #createOnlyMarks = new Map<
+    MemorySpace,
+    Map<string, { id: string; scope: CellScope }>
+  >();
   // Folded SQLite write ops per space, applied in the same commit as cell ops.
   #sqliteOps = new Map<MemorySpace, SqliteOperation[]>();
   #writeSpace?: MemorySpace;
@@ -874,12 +877,20 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (ready.error) {
       throw ready.error;
     }
+    const claim = this.claimWriteSpace(link.space);
+    if (claim.error) {
+      throw claim.error;
+    }
     let marks = this.#createOnlyMarks.get(link.space);
     if (!marks) {
-      marks = new Set();
+      marks = new Map();
       this.#createOnlyMarks.set(link.space, marks);
     }
-    marks.add(createOnlyMarkKey(link.id, link.scope));
+    const scope = normalizeCellScope(link.scope as CellScope | undefined);
+    marks.set(createOnlyMarkKey(link.id, scope), {
+      id: link.id,
+      scope,
+    });
   }
 
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
@@ -909,10 +920,21 @@ export class V2StorageTransaction implements IStorageTransaction {
     );
     const preconditions = this.#commitPreconditions.get(space);
     const createOnlyMarks = this.#createOnlyMarks.get(space);
+    const createOnlyPreconditions = [...(createOnlyMarks?.values() ?? [])].map(
+      ({ id, scope }) => ({
+        kind: "entity-absent" as const,
+        id,
+        scope,
+      }),
+    );
+    const nativePreconditions = [
+      ...(preconditions ?? []),
+      ...createOnlyPreconditions,
+    ];
     const sqliteOps = this.#sqliteOps.get(space);
     if (
       !branch && schedulerObservation === undefined &&
-      !preconditions?.length && !sqliteOps?.length
+      nativePreconditions.length === 0 && !sqliteOps?.length
     ) {
       return undefined;
     }
@@ -943,9 +965,6 @@ export class V2StorageTransaction implements IStorageTransaction {
           type,
           scope,
           value: doc.current.value,
-          ...(createOnlyMarks?.has(createOnlyMarkKey(id, scope))
-            ? { createOnly: true as const }
-            : {}),
         },
       );
     }
@@ -953,7 +972,9 @@ export class V2StorageTransaction implements IStorageTransaction {
     return {
       operations,
       ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
-      ...(preconditions?.length ? { preconditions: [...preconditions] } : {}),
+      ...(nativePreconditions.length
+        ? { preconditions: nativePreconditions }
+        : {}),
       ...(sqliteOps?.length ? { sqliteOps: [...sqliteOps] } : {}),
     };
   }

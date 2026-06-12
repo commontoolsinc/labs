@@ -1330,7 +1330,6 @@ export type NativeStorageCommitOperation =
     type: MediaType;
     scope?: CellScope;
     value: FabricValue;
-    createOnly?: true;
   }
   | {
     op: "delete";
