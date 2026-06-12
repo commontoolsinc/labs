@@ -696,6 +696,36 @@ export interface CachedCompiledModule {
 }
 
 /**
+ * Unique per-module source name for a cached closure. A single program's
+ * closure has unique filenames, but a fabric importer's closure also carries
+ * its imported subtrees' modules, which routinely share names (`/main.tsx`).
+ * The cached record path keys several side tables by source name
+ * (`specifierByPath` → per-module source maps, export map,
+ * `exportsByIdentity`; the engine's fn.src canonicalization) — a name
+ * collision silently drops one module from all of them. Disambiguate
+ * colliding names with the mount-root convention; a collision-free closure
+ * keeps plain filenames (byte-identical to pre-fabric behavior).
+ */
+export function cachedModuleSourceNames(
+  modules: readonly CachedCompiledModule[],
+): Map<string, string> {
+  const counts = new Map<string, number>();
+  for (const m of modules) {
+    counts.set(m.filename, (counts.get(m.filename) ?? 0) + 1);
+  }
+  const names = new Map<string, string>();
+  for (const m of modules) {
+    names.set(
+      m.identity,
+      counts.get(m.filename)! > 1
+        ? `${FABRIC_MOUNT_ROOT}${m.identity}${m.filename}`
+        : m.filename,
+    );
+  }
+  return names;
+}
+
+/**
  * Build a verified-able record graph **directly from cached compiled modules** —
  * no TypeScript source, no `resolve`, no recompile. This is the warm load path:
  * the content-addressed cache already holds each module's compiled body + its
@@ -715,6 +745,7 @@ export function buildRecordsFromCompiled(
   const runtimeModules = options.runtimeModules ?? {};
   const specifierOf = (identity: string) => `cf:module/${identity}`;
   const byIdentity = new Map(modules.map((m) => [m.identity, m]));
+  const sourceNames = cachedModuleSourceNames(modules);
 
   // Direct export names + `export *` edges (as dependency identities) per module.
   const direct = new Map<
@@ -765,7 +796,7 @@ export function buildRecordsFromCompiled(
 
   for (const m of modules) {
     const specifier = specifierOf(m.identity);
-    specifierByPath.set(m.filename, specifier);
+    specifierByPath.set(sourceNames.get(m.identity)!, specifier);
     compiledBodies.set(specifier, m.code);
     if (m.sourceMap) moduleSourceMaps.set(specifier, m.sourceMap);
 
@@ -784,7 +815,10 @@ export function buildRecordsFromCompiled(
 
     const exportNames = resolveFullExports(m.identity);
     const namespaceExports = [...exportNames, "__esModule"];
-    const sourceUrl = m.filename.replace(/[\r\n\u2028\u2029]/g, "_");
+    const sourceUrl = sourceNames.get(m.identity)!.replace(
+      /[\r\n\u2028\u2029]/g,
+      "_",
+    );
     const compiled = m.code;
     records.set(specifier, {
       imports: importSpecs,

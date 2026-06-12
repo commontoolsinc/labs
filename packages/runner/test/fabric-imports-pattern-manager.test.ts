@@ -131,6 +131,15 @@ describe("PatternManager fabric imports", () => {
           "default",
         ),
       ).toBeDefined();
+      // Importer and dependency share the filename `/main.tsx`. The cached
+      // record path must not let one shadow the other in its filename-keyed
+      // side tables — the IMPORTER's exports must be indexed by identity too.
+      expect(
+        rt2.patternManager.artifactFromIdentitySync(
+          importerIdentity,
+          "default",
+        ),
+      ).toBeDefined();
     } finally {
       await rt2.dispose();
       await rt1.dispose();

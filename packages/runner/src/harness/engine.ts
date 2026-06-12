@@ -36,6 +36,7 @@ import {
 import {
   buildRecordsFromCompiled,
   type CachedCompiledModule,
+  cachedModuleSourceNames,
   type CompiledModuleGraph,
   compileSourcesToRecords,
   computeFabricModuleIdentities,
@@ -969,10 +970,17 @@ export class Engine extends EventTarget implements Harness {
       // and the identities are authoritative. Also populate the canonical
       // source map so `fn.src` resolves to `cf:module/<identity>/<path>`.
       registerHashes: () => {
+        // Keyed by the same (collision-disambiguated) source names the record
+        // graph uses for sourceURLs, so stack-resolved fn.src coordinates land
+        // on the right module even when an importer and its fabric dependency
+        // share a filename. The canonical value keeps the AUTHORED filename —
+        // unchanged continuity with the source-compile path.
+        const sourceNames = cachedModuleSourceNames(modules);
         for (const m of modules) {
-          this.moduleHashByPrefixedSource.set(m.filename, m.identity);
+          const name = sourceNames.get(m.identity)!;
+          this.moduleHashByPrefixedSource.set(name, m.identity);
           this.canonicalSourceByPrefixed.set(
-            m.filename,
+            name,
             `cf:module/${m.identity}${m.filename}`,
           );
         }
