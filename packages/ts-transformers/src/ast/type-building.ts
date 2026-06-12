@@ -590,6 +590,115 @@ export function cloneTypeNode<T extends ts.TypeNode>(typeNode: T): T {
 }
 
 /**
+ * Resolve a source-positioned type-reference name to its commonfabric export
+ * name, or undefined when it is not a commonfabric export.
+ *
+ * Import aliases are resolved first, so `import { Default as D }` still
+ * reports `Default`. User-defined aliases over commonfabric types resolve to
+ * a symbol whose parent is the user's module, not commonfabric, and are
+ * deliberately left alone (rewriting them would drop their hidden type
+ * arguments — see qualifyCommonFabricTypeRefs).
+ */
+function commonFabricExportNameAtLocation(
+  name: ts.Identifier,
+  checker: ts.TypeChecker,
+): string | undefined {
+  try {
+    let symbol = checker.getSymbolAtLocation(name);
+    if (!symbol) return undefined;
+    if (symbol.flags & ts.SymbolFlags.Alias) {
+      symbol = checker.getAliasedSymbol(symbol);
+    }
+    const parent = (symbol as unknown as { parent?: ts.Symbol }).parent;
+    const parentName = parent?.name;
+    return parentName === "commonfabric" || parentName === '"commonfabric"'
+      ? symbol.name
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Deep-clones a TypeNode for emission, stripping source positions throughout.
+ *
+ * Declaration members resolved through a TypeReference may live in a different
+ * source file than the one being emitted. The printer extracts literal text
+ * (e.g. the `""` in `Default<string, "">`) by source position from the file it
+ * is currently printing, so reusing those nodes verbatim emits garbage tokens.
+ * A position-free deep clone makes every node synthetic, forcing the printer
+ * to print structurally (literals fall back to their `.text`).
+ *
+ * Pass `typeRegistry` to carry each node's registered Type onto its clone.
+ *
+ * Pass `checker` to also qualify commonfabric refs to `__cfHelpers.X` while
+ * the original nodes still carry source positions. The declaration's imports
+ * (e.g. `Default`) are not necessarily in scope in the consumer file, and the
+ * type-level qualification pass cannot recover them afterwards: the checker
+ * normalizes conditional aliases like `Default<T, V>` away, so the paired
+ * type retains no commonfabric aliasSymbol to match on.
+ */
+export function cloneTypeNodeDeepForEmission<T extends ts.TypeNode>(
+  typeNode: T,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+  checker?: ts.TypeChecker,
+): T {
+  const nullContext = (ts as typeof ts & {
+    nullTransformationContext?: ts.TransformationContext;
+  }).nullTransformationContext;
+  if (!nullContext) return typeNode;
+  const cloneShallow = (ts.factory as typeof ts.factory & {
+    cloneNode<TNode extends ts.Node>(node: TNode): TNode;
+  }).cloneNode;
+
+  const visit = <N extends ts.Node>(node: N): N => {
+    // Post-order: children first, so leaf nodes (identifiers, literals,
+    // keywords) get cloned explicitly while composite nodes are recreated by
+    // visitEachChild's update calls when any child changed.
+    let result = ts.visitEachChild(
+      node,
+      (child) => visit(child),
+      nullContext,
+    ) as N;
+    if (result === node) {
+      result = cloneShallow(node);
+    }
+    // Qualify while the ORIGINAL node still has a position to resolve from;
+    // the cloned type arguments (already position-stripped) carry over.
+    if (
+      checker &&
+      ts.isTypeReferenceNode(node) &&
+      ts.isIdentifier(node.typeName) &&
+      node.typeName.pos >= 0
+    ) {
+      const exportName = commonFabricExportNameAtLocation(
+        node.typeName,
+        checker,
+      );
+      if (exportName) {
+        result = ts.factory.createTypeReferenceNode(
+          ts.factory.createQualifiedName(
+            ts.factory.createIdentifier("__cfHelpers"),
+            ts.factory.createIdentifier(exportName),
+          ),
+          (result as ts.Node as ts.TypeReferenceNode).typeArguments,
+        ) as ts.Node as N;
+      }
+    }
+    // update* calls copy the original's text range for source maps; strip it
+    // so the printer treats the node as synthesized everywhere.
+    ts.setTextRange(result, { pos: -1, end: -1 });
+    const registered = typeRegistry?.get(node);
+    if (registered) {
+      typeRegistry!.set(result, registered);
+    }
+    return result;
+  };
+
+  return visit(typeNode);
+}
+
+/**
  * Builds TypeScript type elements from a capture tree structure.
  * Works for both nested properties within a tree node and root-level entries.
  * Recursively builds nested type literals for hierarchical captures.

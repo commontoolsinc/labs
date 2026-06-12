@@ -498,6 +498,43 @@ function tryGetTypeFromTypeNodeDirect(
   }
 }
 
+/**
+ * Recover the declared type of a synthetic TypeReference via the symbol the
+ * checker's node builder attached to the synthesized typeName identifier.
+ *
+ * TypeReference nodes printed by `checker.typeToTypeNode` (e.g. the
+ * `EditableListItem` in a capture's inferred `{ items: EditableListItem[] }`)
+ * have no binder information, so `checker.getTypeFromTypeNode` resolves them
+ * to the error type. The node builder, however, stores the referenced symbol
+ * on the identifier it synthesizes — recover the type from there.
+ *
+ * Generic references are skipped: `getDeclaredTypeOfSymbol` would return the
+ * uninstantiated generic, whose members leak unsubstituted type parameters.
+ */
+function tryGetDeclaredTypeFromSynthesizedName(
+  typeNode: ts.TypeReferenceNode,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  if (typeNode.typeArguments?.length) return undefined;
+  const name = ts.isIdentifier(typeNode.typeName)
+    ? typeNode.typeName
+    : typeNode.typeName.right;
+  let symbol = (name as ts.Identifier & { symbol?: ts.Symbol }).symbol;
+  if (!symbol) return undefined;
+  try {
+    if (symbol.flags & ts.SymbolFlags.Alias) {
+      symbol = checker.getAliasedSymbol(symbol);
+    }
+    const declared = checker.getDeclaredTypeOfSymbol(symbol);
+    if ((declared as ts.InterfaceType).typeParameters?.length) {
+      return undefined;
+    }
+    return declared;
+  } catch {
+    return undefined;
+  }
+}
+
 function ensureCompositeChildTypesRegistered(
   typeNode: ts.TypeNode,
   checker: ts.TypeChecker,
@@ -557,6 +594,15 @@ function tryRegisterCompositeSyntheticType(
   }
 
   const internalChecker = checker as InternalTypeChecker;
+
+  if (ts.isTypeReferenceNode(typeNode)) {
+    const declared = tryGetDeclaredTypeFromSynthesizedName(typeNode, checker);
+    if (declared && !isAnyOrUnknownType(declared)) {
+      typeRegistry.set(typeNode, declared);
+      return declared;
+    }
+    return retried;
+  }
 
   if (ts.isParenthesizedTypeNode(typeNode)) {
     const inner = ensureTypeNodeRegistered(
