@@ -174,6 +174,9 @@ export function watchReactiveActionCommit(state: {
         state.markDirectDirty(state.action);
         state.pending.add(state.action);
         state.queueExecution();
+      } else {
+        // WATCH(scheduler-v2): exhausted retries can leave a piece registered
+        // against rolled-back data (accepted zombie — spec §15 decision 9).
       }
     } else {
       // Clear retries after successful commit.
@@ -453,6 +456,8 @@ function rescheduleActionForImmediateRetry(
     state.pending.add(args.action);
     state.queueExecution();
   } else {
+    // WATCH(scheduler-v2): exhausted retries can leave a piece registered
+    // against rolled-back data (accepted zombie — spec §15 decision 9).
     state.retries.delete(args.action);
     logger.error(
       "schedule-error",

@@ -15,6 +15,7 @@ import type {
   IExtendedStorageTransaction,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const secondSigner = await Identity.fromPassphrase(
   "scheduler event lineage second space",
@@ -57,6 +58,27 @@ function rejectNextServerTransact(
       };
     }
     return await original(message);
+  };
+
+  return () => {
+    server.transact = original;
+  };
+}
+
+function rejectServerTransacts(
+  storageManager: SchedulerTestStorageManager,
+): () => void {
+  const server = emulatedServer(storageManager);
+  const original = server.transact.bind(server);
+  server.transact = (message) => {
+    return Promise.resolve({
+      type: "response",
+      requestId: message.requestId,
+      error: {
+        name: "ConflictError",
+        message: "forced scheduler lineage test conflict",
+      },
+    });
   };
 
   return () => {
@@ -555,5 +577,63 @@ describe("scheduler event lineage", () => {
     );
 
     expect(payloads.get()).toEqual([]);
+  });
+
+  it("stops handler-result pieces when the handler commit fails permanently", async () => {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { cell, handler, lift, pattern } = commonfabric;
+    const childPattern = pattern<{ source: number }>(({ source }) => {
+      const observed = lift((value: number) => value)(source);
+      return { observed };
+    });
+    let handlerAttempts = 0;
+    const launchChild = handler(
+      {},
+      {
+        type: "object",
+        properties: {
+          source: { type: "number", asCell: ["cell"] },
+        },
+        required: ["source"],
+      },
+      (_event, { source }) => {
+        handlerAttempts++;
+        source.set((source.get() ?? 0) + 1);
+        return childPattern({ source });
+      },
+    );
+    const rootPattern = pattern(() => {
+      const source = cell(0);
+      return {
+        launch: launchChild({ source }),
+        source,
+      };
+    });
+    const rootCell = runtime.getCell<{ launch: unknown; source: number }>(
+      space,
+      "lineage handler-result piece stop root",
+      undefined,
+      tx,
+    );
+    const root = runtime.run(tx, rootPattern, {}, rootCell);
+    await tx.commit();
+    tx = runtime.edit();
+    await root.pull();
+
+    const runningBefore = runtime.runner.cancels.size;
+    const restoreTransact = rejectServerTransacts(storageManager);
+    try {
+      root.key("launch").send({});
+      await waitForSchedulerCondition(
+        runtime,
+        () => handlerAttempts >= 6,
+        "handler did not exhaust retries",
+      );
+      await runtime.idle();
+
+      expect(runtime.runner.cancels.size).toBe(runningBefore);
+    } finally {
+      restoreTransact();
+    }
   });
 });
