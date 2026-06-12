@@ -201,7 +201,8 @@ describe("fetch-data mutex mechanism", () => {
   it("uses a stable fetchData idempotency key for identical inputs", async () => {
     const fetchData = byRef("fetchData");
     const testPattern = pattern<{ url: string }>(
-      ({ url }) => fetchData({ url, mode: "json" }),
+      ({ url }) =>
+        fetchData({ url, mode: "json", options: { mutexTimeoutMs: 30_000 } }),
     );
 
     const txPrototype = ExtendedStorageTransaction.prototype;
@@ -238,6 +239,11 @@ describe("fetch-data mutex mechanism", () => {
         mode: "json",
       });
 
+      expect(computeInputHashFromValue({
+        url: "http://mock-test-server.local/api/idempotency",
+        mode: "json",
+        options: { mutexTimeoutMs: 30_000 },
+      })).toBe(expectedHash);
       expect(outboxIds.length).toBeGreaterThan(0);
       expect(outboxIds[0]).toBe(`fetchData:${expectedHash}`);
     } finally {
