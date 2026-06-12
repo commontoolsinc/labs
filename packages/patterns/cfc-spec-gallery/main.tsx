@@ -138,7 +138,7 @@ const makeFactCheckDisclosure = lift<
   )
 );
 
-interface GalleryOutput {
+export interface GalleryOutput {
   [NAME]: string;
   [UI]: unknown;
   totalExamples: number;

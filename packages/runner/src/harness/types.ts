@@ -90,7 +90,6 @@ export type Exports = Record<string, any>;
 export interface EvaluateResult {
   main?: Exports;
   exportMap?: Record<string, Exports>;
-  loadId?: string;
   /**
    * Per-module namespaces keyed by content identity (the prefix-free
    * `cf:module/<identity>` hash). Lets the runner register every module in a
@@ -166,39 +165,31 @@ export interface Harness extends EventTarget {
 
   getInvocation(source: string): HarnessedFunction;
 
-  getVerifiedLoadId?(
-    implementationRef: string,
-    patternId?: string,
-  ): string | undefined;
-
-  getVerifiedFunctionInLoad?(
-    loadId: string,
+  getExecutableFunction?(
     implementationRef: string,
   ): HarnessedFunction | undefined;
 
-  isVerifiedSourceInLoad?(
-    loadId: string,
-    source: string,
-  ): boolean;
+  // Resolve a verified implementation function by its content-addressed
+  // `{ identity, symbol }` entry ref — the strong (session-lifetime) index
+  // behind serialized `$implRef`s. Unlike the bounded artifact index this
+  // never evicts, so a `$implRef`-only graph stays resolvable for as long as
+  // its module was verified-evaluated in this session.
+  getVerifiedImplementation?(
+    identity: string,
+    symbol: string,
+  ): HarnessedFunction | undefined;
 
-  getVerifiedBundleId?(
-    loadId: string,
-  ): string | undefined;
-
-  getVerifiedBindingMetadata?(
-    implementationRef: string,
-  ): { sourceFile?: string; bindingPath?: string[] } | undefined;
-
-  registerVerifiedFunction?(
-    loadId: string,
+  // Admit a DYNAMIC (in-action-created) artifact into the global executable
+  // index under its minted content-derived `implementationRef`. Used by the
+  // runner's in-action registrar — the global index is what lets the
+  // artifact's serialized module keep the legacy
+  // `{ implementationRef, body omitted }` live-closure rehydration channel.
+  // Replaced by the synthetic-identity registrar (design §5) when the legacy
+  // read path retires.
+  registerDynamicVerifiedFunction?(
     implementationRef: string,
     implementation: HarnessedFunction,
   ): void;
-
-  getExecutableFunction?(
-    implementationRef: string,
-    patternId?: string,
-  ): HarnessedFunction | undefined;
 
   unsafeTrustHostValue(
     value: unknown,

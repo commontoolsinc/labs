@@ -7,7 +7,7 @@ import {
 
 // deno-lint-ignore no-empty-interface
 interface CopyButtonStoryInput {}
-interface CopyButtonStoryOutput {
+export interface CopyButtonStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

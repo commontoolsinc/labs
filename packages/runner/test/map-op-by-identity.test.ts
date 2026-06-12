@@ -78,7 +78,7 @@ describe("op-pattern-ref helpers", () => {
         "map",
       )
     ).toThrow(
-      /op pattern cf:module\/miss#s is not in the evaluated-module cache/,
+      /op pattern cf:module\/miss#s did not evaluate in this session/,
     );
   });
 
@@ -167,13 +167,13 @@ describe("map op passed by identity", () => {
     cancelSink();
   });
 
-  it("falls back to the embedded op graph when the identity cache evicts the op", async () => {
+  it("fails loudly (no fallback output) when the sentinel cannot resolve", async () => {
     const compiled = await runtime.patternManager.compilePattern(PROGRAM);
 
-    // Simulate the op's module being evicted from the bounded in-memory cache
-    // before the map action runs: force every sync identity lookup to miss.
-    // The map must still produce correct output via the retained `$opFallback`
-    // graph — cache residency is an optimization, not a correctness requirement.
+    // The artifact index is session-lifetime (identity E4), so a genuine miss
+    // means the op's module never evaluated in this session — a bug, not an
+    // eviction. The sentinel carries NO embedded fallback graph anymore: the
+    // map must fail loudly instead of silently running a stale graph.
     const pm = runtime.patternManager;
     let identityMisses = 0;
     pm.artifactFromIdentitySync = () => {
@@ -183,7 +183,7 @@ describe("map op passed by identity", () => {
 
     const resultCell = runtime.getCell<{ vs: number[] }>(
       space,
-      "map op fallback on eviction",
+      "map op miss is loud",
       compiled.resultSchema,
       tx,
     );
@@ -199,9 +199,9 @@ describe("map op passed by identity", () => {
     const cancelSink = result.sink(() => {});
     await runtime.idle();
 
-    expect(await result.key("vs").pull()).toEqual([4, 5, 6]);
-    // The lookups missed (eviction simulated) yet the map still resolved the op.
+    // The lookups missed and no fallback graph exists: no mapped output.
     expect(identityMisses).toBeGreaterThan(0);
+    expect(result.key("vs").get()).not.toEqual([4, 5, 6]);
     cancelSink();
   });
 

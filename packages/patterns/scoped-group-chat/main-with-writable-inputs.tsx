@@ -183,7 +183,7 @@ const selectRoom = handler<SelectRoomEvent, {
   },
 );
 
-interface ScopedGroupChatInput {
+export interface ScopedGroupChatInput {
   name?: PerUser<NameCell>;
   selectedRoom?: PerSession<SelectedRoomCell>;
   conversation?: PerSpace<ConversationCell>;
@@ -191,14 +191,20 @@ interface ScopedGroupChatInput {
   newRoomName?: PerSession<NewRoomNameCell>;
 }
 
-interface ScopedGroupChatOutput {
+// Result fields expose the (scoped) DATA, not write handles: cell brands in a
+// result type grant consumers write access (and surface as `asCell` in the
+// result schema), which this demo's consumers don't need — the test reads
+// values. The Writable<> requests live on the INPUT side above; the body
+// returns its input cells for these plain-declared fields, which is fine
+// (results accept cells at any value position).
+export interface ScopedGroupChatOutput {
   [NAME]: string;
   [UI]: VNode;
-  name: PerUser<NameCell>;
-  selectedRoom: PerSession<SelectedRoomCell>;
-  conversation: PerSpace<ConversationCell>;
-  draft: PerUser<DraftCell>;
-  newRoomName: PerSession<NewRoomNameCell>;
+  name: PerUser<string | Default<"">>;
+  selectedRoom: PerSession<SelectedRoom | Default<EmptySelectedRoom>>;
+  conversation: PerSpace<Conversation | Default<typeof DEFAULT_CONVERSATION>>;
+  draft: PerUser<string | Default<"">>;
+  newRoomName: PerSession<string | Default<"">>;
   messageCount: number;
   roomCount: number;
   sendMessage: Stream<SendMessageEvent>;

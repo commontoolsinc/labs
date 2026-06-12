@@ -7,21 +7,17 @@ import { isPattern, type Pattern } from "./types.ts";
  *
  * - `program` — the rehydration source (`RuntimeProgram`) attached by the engine
  *   after compilation/eval and at registration time.
- * - `verifiedLoadId` — the CFC verified-load identity attached by the engine
- *   while seeding verified-load ids.
  *
- * These used to live as an own data property (`pattern.program`) and a symbol
- * property (`pattern[unsafe_verifiedLoadId]`) on the pattern object. Storing
- * them in module-level WeakMaps instead lets the ESM loader `harden()` exported
- * pattern values at the module boundary: the associations are still attached
- * later, but a WeakMap write does not mutate the (now frozen) object. Keyed by
- * `object` (patterns are callable objects, and derivation copies / bound values
- * also carry the verified-load id), with WeakMap GC semantics so a value's
- * metadata is collected with the value.
+ * This used to live as an own data property (`pattern.program`) on the
+ * pattern object. Storing it in a module-level WeakMap instead lets the ESM
+ * loader `harden()` exported pattern values at the module boundary: the
+ * association is still attached later, but a WeakMap write does not mutate
+ * the (now frozen) object. Keyed by `object` (patterns are callable objects),
+ * with WeakMap GC semantics so a value's metadata is collected with the
+ * value.
  */
 
 const programByPattern = new WeakMap<object, RuntimeProgram>();
-const verifiedLoadIdByValue = new WeakMap<object, string>();
 
 // Provenance brand: a value is added here ONLY by the trusted `pattern()`
 // builder (see builder/pattern.ts). `isPattern` is a purely structural check
@@ -75,18 +71,6 @@ export function setPatternProgram(
 ): void {
   const key = asKey(pattern);
   if (key) programByPattern.set(key, program);
-}
-
-/** The CFC verified-load id associated with a value, if any. */
-export function getVerifiedLoadId(value: unknown): string | undefined {
-  const key = asKey(value);
-  return key ? verifiedLoadIdByValue.get(key) : undefined;
-}
-
-/** Associate a CFC verified-load id with a value (works on frozen values). */
-export function setVerifiedLoadId(value: unknown, id: string): void {
-  const key = asKey(value);
-  if (key) verifiedLoadIdByValue.set(key, id);
 }
 
 /** Stamp a value as produced by the trusted `pattern()` builder. */

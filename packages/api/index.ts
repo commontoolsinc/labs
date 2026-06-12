@@ -168,8 +168,9 @@ export declare const CELL_BRAND: unique symbol;
 
 /**
  * Symbol for phantom property that enables type inference from AnyBrandedCell.
- * This property doesn't exist at runtime - it's purely for TypeScript's benefit.
- * See packages/api/STRIPCELL_TYPE_INFERENCE_FIX.md for details.
+ * This property doesn't exist at runtime - it's purely for TypeScript's benefit:
+ * without a concrete property mentioning T, `AnyBrandedCell<infer U>` cannot
+ * infer U (T would be a phantom parameter and inference produces `unknown`).
  */
 export declare const CELL_INNER_TYPE: unique symbol;
 
@@ -281,22 +282,25 @@ export interface IReadable<T> {
   sample(): Readonly<StripDefaultBrand<T>>;
 }
 
+export type MetaLinkField =
+  | "pattern"
+  | "argument"
+  | "result";
+
 /**
  * The `pattern` field links a result cell to its pattern
  * The `argument` field links a result cell to its argument cell
- * The `internal` field links a result cell to its internal cell for state
+ * The `internal` field contains a manifest with links to derived internal cells.
  * The `schema` field stores the schema for a result cell
  * The `result` field lets a result cell link to its parent result cell,
- * and also lets the argument and internal cells link back to the result cell.
+ * and also lets the argument and derived internal cells link back to the result cell.
  * The cfc code accesses the `cfc` field directly, but I include it here too.
  */
 export type MetaField =
-  | "pattern"
+  | MetaLinkField
   | "patternIdentity" // content-addressed {identity, symbol} pattern reference
-  | "argument"
   | "internal"
   | "schema"
-  | "result" // this lets us get from internal/argument back to result
   | "slug"
   | "cfc";
 
@@ -638,8 +642,6 @@ export type KeyResultTypeOpaque<
 /**
  * Cells that support key() for property access - OpaqueCell variant.
  * OpaqueCell is "sticky" and always returns OpaqueCell<>.
- *
- * Note: And for now it always returns an OpaqueRef<>, until we clean this up.
  */
 export interface IKeyableOpaque<T> {
   /**
@@ -817,7 +819,7 @@ export interface IEquatable {
 
 /**
  * Cells that allow deriving new cells from existing cells via array methods:
- * direct helpers mirror supported Array methods and return OpaqueRef results.
+ * direct helpers mirror supported Array methods and return Reactive results.
  * The WithPattern variants accept pre-defined patterns for per-element
  * operations.
  */
@@ -825,16 +827,16 @@ export interface IDerivable<T> {
   map<S>(
     this: IsThisObject,
     fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T>,
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
     ) => Opaque<S>,
-  ): OpaqueRef<S[]>;
+  ): Reactive<S[]>;
   mapWithPattern<S>(
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
-  ): OpaqueRef<S[]>;
+  ): Reactive<S[]>;
   reduce<S>(
     this: IsThisObject,
     fn: (
@@ -844,7 +846,7 @@ export interface IDerivable<T> {
       array: (T extends Array<infer U> ? U : T)[],
     ) => S,
     initialValue: S,
-  ): OpaqueRef<S>;
+  ): Reactive<S>;
   findIndex(
     this: IsThisObject,
     fn: (
@@ -852,33 +854,33 @@ export interface IDerivable<T> {
       index: number,
       array: (T extends Array<infer U> ? U : T)[],
     ) => boolean,
-  ): OpaqueRef<number>;
+  ): Reactive<number>;
   filter(
     this: IsThisObject,
     fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T>,
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
     ) => Opaque<boolean>,
-  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]>;
+  ): Reactive<(T extends Array<infer U> ? U : T)[]>;
   filterWithPattern<S>(
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
-  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]>;
+  ): Reactive<(T extends Array<infer U> ? U : T)[]>;
   flatMap<S>(
     this: IsThisObject,
     fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T>,
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
     ) => Opaque<S[]>,
-  ): OpaqueRef<S[]>;
+  ): Reactive<S[]>;
   flatMapWithPattern<S>(
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,
     params: Record<string, any>,
-  ): OpaqueRef<S[]>;
+  ): Reactive<S[]>;
 }
 
 export interface IOpaquable<T> {
@@ -1154,17 +1156,19 @@ export interface WriteonlyCell<T>
 export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
 
 // ============================================================================
-// OpaqueRef - Proxy-based variant of OpaqueCell
+// Reactive - annotation for reactively-tracked values
 // ============================================================================
 
 /**
- * OpaqueRef is a variant of OpaqueCell with recursive proxy behavior.
- * Each key access returns another OpaqueRef, allowing chained property access.
- * This is temporary until AST transformation handles .key() automatically.
- *
- * OpaqueRef<Cell<T>> unwraps to Cell<T>.
+ * Reactive<T> marks a value as reactively tracked by the pattern runtime.
+ * It is purely an annotation: at the type level it IS `T` (an identity
+ * alias), and the transformers detect the spelling to classify reactive
+ * positions before erasure. There is no runtime wrapper behind it.
  */
-export type OpaqueRef<T> = T;
+export type Reactive<T> = T;
+
+/** @deprecated Use {@link Reactive}. */
+export type OpaqueRef<T> = Reactive<T>;
 
 // Helper type for OpaqueRef's inner property/array mapping
 // Handles nullable types by extracting the non-null part for mapping
@@ -1212,12 +1216,17 @@ export declare const CELL_LIKE: unique symbol;
  * Helper type to transform Cell<T> to Opaque<T> in pattern/lift/handler inputs.
  * Preserves Stream<T> since Streams are callable interfaces (.send()), not data containers.
  *
+ * INPUT-POSITION ONLY: stripping is an acceptance tool — used inside
+ * `Opaque<StripCell<T>>` so callers can pass the data shape with or without
+ * cell wrappers. It must NOT be applied to factory result types: result-type
+ * brands are exported capabilities, and transformer-inferred result schemas
+ * derive `asCell`/`asStream` from them (see the boundary principle on
+ * PatternFunction).
+ *
  * Implementation is non-distributive by default to preserve union types like RenderNode
  * that intentionally contain AnyBrandedCell as a data variant. However, for optional cell
  * properties like `title?: Writable<string>` (which expand to `Writable<string> | undefined`),
  * we extract the cell parts, strip them, and recombine with the non-cell parts.
- *
- * See packages/api/STRIPCELL_TYPE_INFERENCE_FIX.md for details.
  */
 export type StripCell<T> =
   // Handle optional cell properties: "SomeCell | undefined" pattern
@@ -1239,11 +1248,9 @@ type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - i
 /**
  * Opaque accepts T or any cell wrapping T, recursively at any nesting level.
  * Used in APIs that accept inputs from developers - can be static values
- * or wrapped in cells (OpaqueRef, Cell, etc).
+ * or wrapped in cells (Cell, OpaqueCell, etc).
  *
- * Conceptually: T | AnyCell<T> at any nesting level, but we use OpaqueRef
- * for backward compatibility since it has the recursive proxy behavior that
- * allows property access (e.g., Opaque<{foo: string}> includes {foo: Opaque<string>}).
+ * Conceptually: T | AnyCell<T> at any nesting level.
  *
  * Special cases for JSX:
  * - Opaque<VNode> also accepts JSXElement
@@ -1253,7 +1260,6 @@ export type Opaque<T> =
   | T
   // We have to list them explicitly so Typescript can unwrap them. Doesn't seem
   // to work if we just say AnyBrandedCell<T>
-  | OpaqueRef<T>
   | AnyCell<T>
   | AnyBrandedCell<T>
   | OpaqueCell<T>
@@ -1322,7 +1328,6 @@ export type AnyCellWrapping<T> =
 export interface Pattern {
   argumentSchema: JSONSchema;
   resultSchema: JSONSchema;
-  internalSchema?: JSONSchema;
   defaultScope?: CellScope;
 }
 export interface Module {
@@ -1925,20 +1930,32 @@ export interface BuiltInCompileAndRunState<T> {
 }
 
 // Function type definitions
+//
+// Boundary principle for factory types: factories ACCEPT the stripped data
+// shape — `Opaque<StripCell<T>>` means "this data shape, wrapped however you
+// like" (liberal in what we accept). Factories RETURN exactly what the body
+// returned: `R` unstripped (faithful in what we produce). Cell/Stream brands in
+// a result type are exported capabilities, preserved end-to-end — the brand in
+// the type becomes `asCell`/`asStream` in the generated result schema, which
+// the runtime rematerializes as a live Cell/Stream for consumers. Stripping a
+// result type would not just misreport that; transformer-inferred schemas are
+// derived from these types, so it would silently downgrade live cells to dead
+// values. (`SELF` and the consumer-facing factory result deliberately use the
+// same unstripped `R`.)
 export interface PatternFunction {
   // Function-only overload: T and R inferred from function
   <T, R>(
     fn: (
       input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
     ) => Opaque<R>,
-  ): PatternFactory<StripCell<T>, StripCell<R>>;
+  ): PatternFactory<StripCell<T>, R>;
 
   // Function-only overload: T explicit, R inferred
   <T>(
     fn: (
       input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
     ) => any,
-  ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
+  ): PatternFactory<StripCell<T>, ReturnType<typeof fn>>;
 
   // Function + schema overload: T explicit, R inferred
   <T>(
@@ -1947,7 +1964,7 @@ export interface PatternFunction {
     ) => any,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
-  ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
+  ): PatternFactory<StripCell<T>, ReturnType<typeof fn>>;
 
   // Function + schema overload: T and R explicit
   <T, R>(
@@ -1956,7 +1973,7 @@ export interface PatternFunction {
     ) => Opaque<R>,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
-  ): PatternFactory<StripCell<T>, StripCell<R>>;
+  ): PatternFactory<StripCell<T>, R>;
 }
 
 /**
@@ -1993,15 +2010,15 @@ export type PatternToolFunction = <
 export interface LiftFunction {
   <T, R>(
     implementation: (input: T) => R,
-  ): ModuleFactory<StripCell<T>, StripCell<R>>;
+  ): ModuleFactory<StripCell<T>, R>;
 
   <T>(
     implementation: (input: T) => any,
-  ): ModuleFactory<StripCell<T>, StripCell<ReturnType<typeof implementation>>>;
+  ): ModuleFactory<StripCell<T>, ReturnType<typeof implementation>>;
 
   <T extends (...args: any[]) => any>(
     implementation: T,
-  ): ModuleFactory<StripCell<Parameters<T>[0]>, StripCell<ReturnType<T>>>;
+  ): ModuleFactory<StripCell<Parameters<T>[0]>, ReturnType<T>>;
 }
 
 // Helper type to make non-Cell and non-Stream properties readonly in handler state.
@@ -2095,6 +2112,7 @@ export type GenerateTextFunction = (
 export type FetchOptions = {
   body?: JSONValue;
   headers?: Record<string, string>;
+  mutexTimeoutMs?: number;
   cache?:
     | "default"
     | "no-store"
@@ -2108,7 +2126,7 @@ export type FetchOptions = {
 export type FetchDataFunction = <T>(
   params: Opaque<{
     url: string;
-    mode?: "json" | "text";
+    mode?: "json" | "text" | "dataUrl";
     options?: FetchOptions;
     result?: T;
   }>,

@@ -1,6 +1,17 @@
 import type { Pattern } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 
+// Presence probe for the result container: slots resolve as cells, so the
+// coordinator can ask "is the container initialized?" without materializing
+// element contents. A content-schema get() here would journal real value
+// reads of every element result — under flow labels (S16) that smears every
+// element's taint into the coordinator's per-tx join and from there onto
+// sibling scaffolding (the read-own-output feedback).
+const RESULT_PRESENCE_SCHEMA = internSchema({
+  type: "array",
+  items: { asCell: ["cell"], type: "unknown" },
+});
+
 const FLATMAP_INPUT_SCHEMA = internSchema({
   type: "object",
   properties: {
@@ -16,7 +27,7 @@ import type { AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
-import { trustedFlowPrecisionSchemaForBuiltin } from "../cfc/flow-precision.ts";
+import { listResultSchema } from "./list-result-schema.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import {
@@ -90,12 +101,7 @@ export function flatMap(
     ]);
 
     if (!result || result.getAsNormalizedFullLink().scope !== outputScope) {
-      const resultSchema = trustedFlowPrecisionSchemaForBuiltin(
-        tx.getCfcState().implementationIdentity,
-        "flatMap",
-        undefined,
-        argumentUsage,
-      );
+      const resultSchema = listResultSchema();
       // CT-1623: identify the result container by the reserved output spot
       // (stable, program-independent). See map.ts for rationale.
       const outputSpot = outputSpotFromBinding(outputBinding);
@@ -118,7 +124,14 @@ export function flatMap(
       setPatternCell(result, parentCell.key("pattern"));
       sendResult(tx, result);
     }
-    const resultWithLog = result.withTx(tx);
+    // The coordinator's view of the result container is links-only
+    // (RESULT_PRESENCE_SCHEMA): get() probes presence and set() diffs
+    // prior slots as links, never materializing element contents. A
+    // content-schema view here journals value reads of every element
+    // result on each reconcile — under flow labels (S16) that smears
+    // every element's taint into the coordinator's per-tx join.
+    const resultWithLog = result.asSchema(RESULT_PRESENCE_SCHEMA)
+      .withTx(tx);
     const createRunInput = (element: Cell<any>, index: number) => ({
       ...(argumentUsage.usesElement ? { element } : {}),
       ...(argumentUsage.usesIndex ? { index } : {}),

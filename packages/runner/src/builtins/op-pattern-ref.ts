@@ -1,5 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
-import type { Pattern } from "../builder/types.ts";
+import { isPattern, type Pattern } from "../builder/types.ts";
+import type { MemorySpace } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
 
 /**
@@ -14,22 +15,15 @@ import type { Runtime } from "../runtime.ts";
  * derivation backref — so the builtin reads it back intact and
  * resolves the live canonical pattern without deserializing a graph or mapping
  * functions back by `implementationRef`.
+ *
+ * The sentinel carries NO embedded fallback graph (identity E4): the artifact
+ * index is session-lifetime, and the sentinel is stamped from the op's live
+ * artifact in the same session that reads it back, so sync resolution cannot
+ * miss short of a bug. (Sentinels of the earlier `$opFallback`-carrying
+ * vintage are still read tolerantly — see {@link resolveStoredPattern}.)
  */
 export interface PatternRefSentinel {
   $patternRef: { identity: string; symbol: string };
-  /**
-   * The embedded op pattern graph, retained as a correctness fallback.
-   *
-   * The identity fast path resolves the op from the in-memory evaluated-module
-   * cache, which is bounded (FIFO) — a long-lived session that evaluates enough
-   * other modules can evict an op whose map/filter/flatMap node is still live.
-   * Cache residency must therefore be an optimization, not a correctness
-   * requirement: on a miss we deserialize this graph instead of hard-failing a
-   * running node. (#3898 dropped the session-varying `program.files` from
-   * serialized patterns, so retaining the graph no longer reintroduces the
-   * cross-reload id churn that motivated passing the op by identity.)
-   */
-  $opFallback?: Pattern;
 }
 
 export function isPatternRefSentinel(
@@ -45,14 +39,16 @@ export function isPatternRefSentinel(
  * Resolve the `op` value a list builtin (`map`/`filter`/`flatMap`) reads from
  * its inputs cell into a live `Pattern`.
  *
- * - When `op` is a {@link PatternRefSentinel}, resolve it synchronously from the
- *   in-memory cache via `artifactFromIdentitySync` (the fast path: the op's
- *   module is part of the parent pattern's bundle, normally still
- *   live by the time the list Action runs). On a cache miss (the op was evicted
- *   mid-session — a sync Action cannot await `loadPatternByIdentity`), fall back
- *   to the sentinel's retained `$opFallback` graph so a running node never breaks
- *   just because its op rolled out of the bounded cache.
- * - Otherwise (legacy / ESM loader off / no entry ref), `op` is the embedded
+ * - When `op` is a {@link PatternRefSentinel}, resolve it synchronously from
+ *   the session-lifetime artifact index via `artifactFromIdentitySync` — the
+ *   op's module evaluated in this session by construction (the sentinel was
+ *   stamped from its live artifact at node instantiation).
+ * - A stored pattern VALUE reaching `op` (pattern-as-argument) resolves the
+ *   same way when its module evaluated this session, else from the graph the
+ *   value itself carries (E3-and-earlier vintages). A bare ref from a module
+ *   that never evaluated here throws — loud, since a sync Action cannot await
+ *   the storage-backed `loadPatternByIdentity`.
+ * - Otherwise (no entry ref known at instantiation), `op` is the embedded
  *   pattern graph itself, used as-is.
  */
 export function resolveOpPattern(
@@ -60,18 +56,70 @@ export function resolveOpPattern(
   rawOp: unknown,
   builtinName: string,
 ): Pattern {
-  if (isPatternRefSentinel(rawOp)) {
-    const { identity, symbol } = rawOp.$patternRef;
+  const resolved = resolveStoredPattern(runtime, rawOp);
+  if (resolved === undefined && isPatternRefSentinel(rawOp)) {
+    throw new Error(
+      `${builtinName}: op pattern ${rawOp.$patternRef.identity}#` +
+        `${rawOp.$patternRef.symbol} did not evaluate in this session and ` +
+        `carries no graph`,
+    );
+  }
+  return resolved as Pattern;
+}
+
+/**
+ * Resolve a pattern VALUE read raw from a cell into a runnable `Pattern`.
+ *
+ * Boundary-serialized pattern values carry `$patternRef`: prefer resolving the
+ * LIVE canonical pattern by identity — it carries the trust brand and
+ * content-addressed entry ref a deserialized graph lacks — then fall back to
+ * a graph the value still carries (stored vintages: the E3 dual-write graph
+ * alongside the ref, or a pre-E4 sentinel's `$opFallback`). A bare
+ * unresolvable ref yields `undefined`; callers with an async context follow
+ * up with `loadPatternByIdentity` (compiled artifacts persist in-space as part
+ * of compilation), sync callers fail loudly. Any other value passes through
+ * unchanged (legacy stored graphs).
+ */
+export function resolveStoredPattern(
+  runtime: Runtime,
+  raw: unknown,
+): Pattern | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (isPatternRefSentinel(raw)) {
+    const { identity, symbol } = raw.$patternRef;
     const resolved = runtime.patternManager.artifactFromIdentitySync(
       identity,
       symbol,
     ) as Pattern | undefined;
     if (resolved) return resolved;
-    if (rawOp.$opFallback) return rawOp.$opFallback;
-    throw new Error(
-      `${builtinName}: op pattern ${identity}#${symbol} is not in the ` +
-        `evaluated-module cache and has no embedded fallback`,
-    );
+    const vintageFallback = (raw as { $opFallback?: Pattern }).$opFallback;
+    if (vintageFallback) return vintageFallback;
+    if (isPattern(raw)) return raw as unknown as Pattern;
+    return undefined;
   }
-  return rawOp as Pattern;
+  return raw as Pattern;
+}
+
+/**
+ * {@link resolveStoredPattern} with the async net for refs-only stored values
+ * whose module never evaluated in this session: load it by identity from the
+ * space's persisted compiled artifacts (compilation persists them in-space as
+ * an expected invariant). The usual caller is llm-dialog's tool invocation —
+ * a stored toolDef pattern is normally in-session live (whatever defined the
+ * tool mentioned the pattern, so its module rode that bundle), but a tool
+ * invoked cold after a reload may reach for storage.
+ */
+export async function resolveStoredPatternAsync(
+  runtime: Runtime,
+  raw: unknown,
+  space: MemorySpace,
+): Promise<Pattern | undefined> {
+  const resolved = resolveStoredPattern(runtime, raw);
+  if (resolved !== undefined || !isPatternRefSentinel(raw)) return resolved;
+  const { identity, symbol } = raw.$patternRef;
+  return await runtime.patternManager.loadPatternByIdentity(
+    identity,
+    symbol,
+    space,
+  );
 }

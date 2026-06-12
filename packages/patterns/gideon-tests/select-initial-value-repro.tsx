@@ -22,7 +22,7 @@ import { NAME, pattern, UI, Writable } from "commonfabric";
  * 4. The "Current value" text should also display "video"
  */
 
-interface Output {
+export interface Output {
   [NAME]: string;
   type: string;
   status: string;

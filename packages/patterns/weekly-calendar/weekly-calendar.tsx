@@ -65,7 +65,7 @@ interface Input {
   isHidden?: boolean | Default<false>;
 }
 
-interface Output {
+export interface Output {
   title: string;
   events: EventPiece[];
   mentionable: EventPiece[];
@@ -1245,7 +1245,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                 backlinks.get().length > 0 ? "flex" : "none"
               ),
               alignItems: "center",
-              borderTop: "1px solid var(--cf-color-border, #e5e5e7)",
+              borderTop: "1px solid var(--cf-theme-color-border, #e5e5e7)",
               flexWrap: "wrap",
             }}
           >
@@ -1253,7 +1253,7 @@ const WeeklyCalendar = pattern<Input, Output>(
               style={{
                 fontSize: "12px",
                 lineHeight: "28px",
-                color: "var(--cf-color-text-secondary, #666)",
+                color: "var(--cf-theme-color-text-secondary, #666)",
               }}
             >
               Linked from:

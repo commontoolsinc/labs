@@ -9,7 +9,7 @@ import {
 
 // deno-lint-ignore no-empty-interface
 interface ButtonStoryInput {}
-interface ButtonStoryOutput {
+export interface ButtonStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

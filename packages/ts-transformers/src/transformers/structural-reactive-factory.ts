@@ -2,7 +2,7 @@ import ts from "typescript";
 
 import { detectCallKind } from "../ast/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
-import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
+import { isBrandedCellType } from "./opaque-ref/opaque-ref.ts";
 
 export function isPatternFactoryCalleeExpression(
   expression: ts.Expression,
@@ -40,7 +40,7 @@ export function returnsOpaqueRefResult(
 ): boolean {
   try {
     const type = checker.getTypeAtLocation(expression);
-    return isOpaqueRefType(type, checker);
+    return isBrandedCellType(type, checker);
   } catch {
     return false;
   }

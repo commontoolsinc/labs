@@ -69,7 +69,8 @@ import { stringSchema } from "@commonfabric/runner/schemas";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
-import { runtimeContext } from "../../runtime-context.ts";
+import { runtimeContext, spaceContext } from "../../runtime-context.ts";
+import type { DID } from "@commonfabric/identity";
 import { type StoredFile, uploadFile } from "../../utils/file-cell-storage.ts";
 import {
   Mentionable,
@@ -232,6 +233,10 @@ export class CFCodeEditor extends BaseElement {
   @consume({ context: runtimeContext, subscribe: true })
   @property({ attribute: false })
   accessor runtime: RuntimeClient | undefined = undefined;
+
+  @consume({ context: spaceContext, subscribe: true })
+  @property({ attribute: false })
+  accessor contextSpace: DID | undefined = undefined;
 
   private _editorView: EditorView | undefined;
   private _lang = new Compartment();
@@ -629,7 +634,9 @@ export class CFCodeEditor extends BaseElement {
         noteId: generateId(), // Ensure notes created via [[mention]] have unique IDs
       };
 
-      const page = await rt.createPage(pattern, inputs);
+      // The note is created in the same space as the pattern it backlinks
+      // from — creation, like every page op, names its space.
+      const page = await rt.createPage(pattern, this.pattern.space(), inputs);
       if (!page) {
         throw new Error("Could not create piece.");
       }
@@ -1514,19 +1521,24 @@ export class CFCodeEditor extends BaseElement {
     const runtime = isCellHandle(this.value)
       ? this.value.runtime()
       : this.runtime;
+    // The pasted image's blob belongs to the edited cell's space; fall
+    // back to the view's space from context.
+    const space = isCellHandle(this.value)
+      ? this.value.space()
+      : this.contextSpace;
 
-    if (!runtime) {
-      this.emit("cf-error", {
-        error: new Error("Runtime is not available for pasted image storage"),
-        message: "Runtime is not available for pasted image storage",
-      });
+    if (!runtime || !space) {
+      const message = !runtime
+        ? "Runtime is not available for pasted image storage"
+        : "Space is not available for pasted image storage";
+      this.emit("cf-error", { error: new Error(message), message });
       return;
     }
 
     try {
       const storedFiles: StoredFile[] = [];
       for (const file of files) {
-        storedFiles.push(await uploadFile({ file, runtime }));
+        storedFiles.push(await uploadFile({ file, runtime, space }));
       }
 
       const markdown = storedFiles

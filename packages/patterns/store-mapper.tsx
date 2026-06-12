@@ -71,7 +71,7 @@ interface Input {
   itemLocations: Writable<ItemLocation[] | Default<[]>>;
 }
 
-interface Output {
+export interface Output {
   storeName: string;
   aisles: Aisle[];
   departments: Department[];
@@ -116,9 +116,10 @@ const appendUploadedPhotos = handler<
   ]);
 });
 
-interface ExtractedAisle {
+export interface ExtractedAisle {
   name: string;
-  products: string[];
+  // The AI extraction may omit or null the products list.
+  products?: string[] | null;
 }
 
 // Default departments to load
@@ -150,7 +151,8 @@ const addAisle = handler<
   });
 });
 
-const removeAisle = handler<
+// Exported for tests.
+export const removeAisle = handler<
   unknown,
   { aisles: Writable<Aisle[]>; aisle: Aisle }
 >((_event, { aisles, aisle }) => {
@@ -184,7 +186,11 @@ const removeEntrance = handler<
 });
 
 // Department location handler
-const setDepartmentLocation = handler<
+// Exported for tests. Writes through the element's cell (`.key(index)`) —
+// replacing the array slot with a fresh object literal would re-mint the
+// department's entity identity and orphan previously-held references
+// (see packages/patterns/primitives/editable-list.tsx).
+export const setDepartmentLocation = handler<
   unknown,
   {
     departments: Writable<Department[]>;
@@ -195,14 +201,13 @@ const setDepartmentLocation = handler<
   const current = departments.get();
   const index = current.findIndex((el) => equals(dept, el));
   if (index >= 0) {
-    departments.set(
-      current.toSpliced(index, 1, { ...current[index], location }),
-    );
+    departments.key(index).key("location").set(location);
   }
 });
 
 // Handlers for AI photo import
-const addExtractedAisle = handler<
+// Exported for tests.
+export const addExtractedAisle = handler<
   unknown,
   { aisles: Writable<Aisle[]>; extracted: ExtractedAisle }
 >((_event, { aisles, extracted }) => {
@@ -247,7 +252,10 @@ const addAllExtractedAisles = handler<
   }
 });
 
-const mergeExtractedAisle = handler<
+// Exported for tests. Writes the merged description through the element's
+// cell instead of replacing the array slot — slot replacement re-mints the
+// aisle's entity identity and orphans previously-held references.
+export const mergeExtractedAisle = handler<
   unknown,
   { aisles: Writable<Aisle[]>; extracted: ExtractedAisle }
 >((_event, { aisles, extracted }) => {
@@ -269,9 +277,7 @@ const mergeExtractedAisle = handler<
         ? existing.description + "\n" +
           newProducts.map((p) => `- ${p}`).join("\n")
         : newProducts.map((p) => `- ${p}`).join("\n");
-      aisles.set(
-        current.toSpliced(idx, 1, { ...existing, description: newDesc }),
-      );
+      aisles.key(idx).key("description").set(newDesc);
     }
   }
 });
@@ -1065,7 +1071,7 @@ export default pattern<Input, Output>(
                         style={{
                           textAlign: "center",
                           fontSize: "12px",
-                          color: "var(--cf-color-gray-500)",
+                          color: "var(--cf-colors-gray-500)",
                         }}
                       >
                         <span style={{ color: "#3b82f6" }}>■</span>{" "}
@@ -1452,7 +1458,7 @@ export default pattern<Input, Output>(
                       <div
                         style={{
                           textAlign: "center",
-                          color: "var(--cf-color-gray-500)",
+                          color: "var(--cf-colors-gray-500)",
                           padding: "2rem",
                         }}
                       >
@@ -1743,8 +1749,8 @@ export default pattern<Input, Output>(
                               padding: "4px 8px",
                               borderRadius: "4px",
                               background: dept.location === "unassigned"
-                                ? "var(--cf-color-yellow-100)"
-                                : "var(--cf-color-green-100)",
+                                ? "var(--cf-theme-color-status-warning-soft)"
+                                : "var(--cf-colors-green-100)",
                             }}
                           >
                             {dept.location}
@@ -2070,7 +2076,7 @@ export default pattern<Input, Output>(
                       <p
                         style={{
                           fontSize: "14px",
-                          color: "var(--cf-color-gray-500)",
+                          color: "var(--cf-colors-gray-500)",
                         }}
                       >
                         Record where items are actually located for future
@@ -2125,7 +2131,7 @@ export default pattern<Input, Output>(
                             <cf-hstack
                               gap="2"
                               align="center"
-                              style="padding: 0.5rem; background: var(--cf-color-gray-50); border-radius: 6px;"
+                              style="padding: 0.5rem; background: var(--cf-colors-gray-50); border-radius: 6px;"
                             >
                               <span style={{ flex: 1 }}>
                                 <strong>{loc.itemName}</strong> →{" "}
@@ -2156,7 +2162,7 @@ export default pattern<Input, Output>(
                       <div
                         style={{
                           textAlign: "center",
-                          color: "var(--cf-color-gray-500)",
+                          color: "var(--cf-colors-gray-500)",
                           padding: "2rem",
                         }}
                       >
@@ -2179,7 +2185,7 @@ export default pattern<Input, Output>(
                       <p
                         style={{
                           fontSize: "14px",
-                          color: "var(--cf-color-gray-500)",
+                          color: "var(--cf-colors-gray-500)",
                         }}
                       >
                         This outline is used by the Shopping List for AI-powered
@@ -2187,7 +2193,7 @@ export default pattern<Input, Output>(
                       </p>
                       <pre
                         style={{
-                          background: "var(--cf-color-gray-50)",
+                          background: "var(--cf-colors-gray-50)",
                           padding: "1rem",
                           borderRadius: "6px",
                           fontSize: "13px",

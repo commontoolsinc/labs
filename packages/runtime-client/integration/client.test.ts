@@ -11,6 +11,7 @@ import {
   CellHandle,
   type JSONSchema,
   RuntimeClient,
+  type RuntimeClientOptions,
   type VNode,
 } from "@commonfabric/runtime-client";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
@@ -108,7 +109,7 @@ describe("RuntimeClient", () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEMP_PATTERN, {
+      const page = await rt.createPage(TEMP_PATTERN, session.space, {
         run: true,
       });
       const cell = page.cell();
@@ -334,7 +335,7 @@ describe("RuntimeClient", () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, {
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
         run: true,
       });
       assertExists(page.id());
@@ -344,10 +345,10 @@ describe("RuntimeClient", () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, {
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
         run: true,
       });
-      const retrieved = await rt.getPage(page.id(), true);
+      const retrieved = await rt.getPage(page.id(), session.space, true);
       assertExists(retrieved);
 
       const cell = retrieved.cell();
@@ -363,7 +364,7 @@ describe("RuntimeClient", () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, {
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
         run: false,
       });
       await page.start();
@@ -375,11 +376,11 @@ describe("RuntimeClient", () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, {
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
         run: false,
       });
-      await rt.removePage(page.id());
-      await rt.synced();
+      await rt.removePage(page.id(), session.space);
+      await rt.synced(session.space);
 
       // Note: getPage may still return a reference to a removed page
       // because the ID still maps to a cell that existed. The removal
@@ -390,7 +391,7 @@ describe("RuntimeClient", () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const piecesListCell = await rt.getPiecesListCell();
+      const piecesListCell = await rt.getPiecesListCell(session.space);
       assertExists(piecesListCell);
 
       await piecesListCell.sync();
@@ -430,7 +431,7 @@ export default pattern((_) => {
         },
       );
 
-      await rt.createPage(consoleProgram, { run: true });
+      await rt.createPage(consoleProgram, session.space, { run: true });
       await rt.idle();
 
       await waitFor(
@@ -498,7 +499,7 @@ export default pattern((_) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, {
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
         run: true,
       });
       const cell = page.cell();
@@ -515,7 +516,7 @@ export default pattern((_) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, {
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
         run: true,
       });
       const cell = page.cell();
@@ -588,7 +589,7 @@ export default pattern<unknown, ParentOutput>(() => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(unknownUiProgram, {
+      const page = await rt.createPage(unknownUiProgram, session.space, {
         run: true,
       });
       const mock = new MockDoc(
@@ -647,7 +648,7 @@ export default pattern<State>(({ value }) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(valueProgram, {
+      const page = await rt.createPage(valueProgram, session.space, {
         run: true,
       });
       const mock = new MockDoc(
@@ -701,7 +702,7 @@ export default pattern<State>(({ value }) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(derivedProgram, {
+      const page = await rt.createPage(derivedProgram, session.space, {
         run: true,
       });
       const cell = page.cell() as CellHandle<VNode>;
@@ -775,7 +776,7 @@ export default pattern<Input, Output>(({ question, myName }) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(scopedHeaderProgram, {
+      const page = await rt.createPage(scopedHeaderProgram, session.space, {
         run: true,
       });
       const cell = page.cell() as CellHandle<VNode>;
@@ -853,7 +854,7 @@ export default pattern<State>(({ value }) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(clickProgram, {
+      const page = await rt.createPage(clickProgram, session.space, {
         run: true,
       });
       const valueCell = (page.cell() as any).key("value").asSchema({
@@ -927,7 +928,7 @@ export default pattern<State>(({ value }) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(clickProgram, {
+      const page = await rt.createPage(clickProgram, session.space, {
         run: true,
       });
       const valueCell = (page.cell() as any).key("value").asSchema({
@@ -1001,7 +1002,7 @@ export default pattern<Record<string, never>>(() => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(navigateProgram, {
+      const page = await rt.createPage(navigateProgram, session.space, {
         run: true,
       });
       const mock = new MockDoc(
@@ -1095,7 +1096,7 @@ export default pattern<Record<string, never>>(() => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(navigateProgram, {
+      const page = await rt.createPage(navigateProgram, session.space, {
         run: true,
       });
       const mock = new MockDoc(
@@ -1131,6 +1132,117 @@ export default pattern<Record<string, never>>(() => {
       cancel();
     });
   });
+
+  describe("CFC render-policy threading (S15)", () => {
+    // Guards the field-by-field copy in RuntimeClient.initialize() and the
+    // RuntimeProcessor.initialize() -> WorkerReconciler plumbing: during
+    // #3994's own review cycle the initialize() payload DROPPED
+    // renderDeclassificationPolicy, so {renderDeclassificationPolicy: "deny"}
+    // silently behaved as "allow" (fail open). This exercises the REAL
+    // threading end to end: initialize -> worker InitializationData ->
+    // RuntimeProcessor -> every mount's reconciler.
+    const SECRET_TEXT = "Sensitive diagnosis: migraine";
+    const SECRET_ATOM = "s15-threading-secret";
+    const BLOCKED_TEXT = "Content hidden by policy";
+
+    // Mount (via the worker renderer) a <cf-cfc-render-boundary> whose author
+    // props declassify the label of a confidential cell rendered as its child.
+    async function renderAuthorDeclassifiedSecret(
+      rt: RuntimeClient,
+      space: Session["space"],
+    ) {
+      const nonce = crypto.randomUUID();
+      const secretSchema = {
+        type: "string",
+        ifc: { confidentiality: [SECRET_ATOM] },
+      } as const satisfies JSONSchema;
+      const secret = await rt.getCell<string>(
+        space,
+        "s15-render-policy-secret-" + nonce,
+        secretSchema,
+      );
+      await secret.set(SECRET_TEXT);
+      await rt.idle();
+      await secret.sync();
+
+      const vdom = await rt.getCell(
+        space,
+        "s15-render-policy-vdom-" + nonce,
+        undefined,
+      );
+      await vdom.set({
+        type: "vnode",
+        name: "cf-cfc-render-boundary",
+        props: {
+          maxConfidentiality: [],
+          declassifyConfidentiality: [SECRET_ATOM],
+        },
+        children: [secret],
+      });
+      await rt.idle();
+      await vdom.sync();
+
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+      const cancel = render(
+        root,
+        vdom.asSchema(rendererVDOMSchema) as any,
+        renderOptions,
+      );
+      return { root, cancel };
+    }
+
+    it("threads renderDeclassificationPolicy 'deny' through initialize to the worker reconciler", async () => {
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session, {
+        renderDeclassificationPolicy: "deny",
+      });
+
+      const { root, cancel } = await renderAuthorDeclassifiedSecret(
+        rt,
+        session.space,
+      );
+      try {
+        // Wait for the blocked placeholder (positive signal) rather than for
+        // the absence of the secret, which would pass vacuously pre-render.
+        await waitFor(
+          () => Promise.resolve(root.innerHTML.includes(BLOCKED_TEXT)),
+          { timeout: 10000 },
+        );
+        assertEquals(
+          root.innerHTML.includes(SECRET_TEXT),
+          false,
+          "deny must ignore the author's declassifyConfidentiality",
+        );
+      } finally {
+        cancel();
+      }
+    });
+
+    it("absent renderDeclassificationPolicy keeps the 'allow' default (control)", async () => {
+      // Same fixtures as the deny case: proves the block above comes from the
+      // threaded policy, not from broken fixtures or an always-blocking gate.
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const { root, cancel } = await renderAuthorDeclassifiedSecret(
+        rt,
+        session.space,
+      );
+      try {
+        await waitFor(
+          () => Promise.resolve(root.innerHTML.includes(SECRET_TEXT)),
+          { timeout: 10000 },
+        );
+        assertEquals(root.innerHTML.includes(BLOCKED_TEXT), false);
+      } finally {
+        cancel();
+      }
+    });
+  });
 });
 
 async function createTestSession(): Promise<Session> {
@@ -1140,7 +1252,10 @@ async function createTestSession(): Promise<Session> {
   });
 }
 
-async function createRuntimeClient(session: Session): Promise<RuntimeClient> {
+async function createRuntimeClient(
+  session: Session,
+  extraOptions: Partial<RuntimeClientOptions> = {},
+): Promise<RuntimeClient> {
   // If a space identity was created, replace it with a transferrable
   // key in Deno using the same derivation as Session
   if (session.spaceIdentity && session.spaceName) {
@@ -1156,8 +1271,9 @@ async function createRuntimeClient(session: Session): Promise<RuntimeClient> {
     spaceIdentity: session.spaceIdentity,
     spaceDid: session.space,
     spaceName: session.spaceName,
+    ...extraOptions,
   });
 
-  await worker.synced();
+  await worker.synced(session.space);
   return worker;
 }

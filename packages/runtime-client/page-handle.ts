@@ -41,9 +41,8 @@ export class PageHandle<T = PageType> {
     const res = await this._conn.request<RequestType.PageStart>({
       type: RequestType.PageStart,
       pageId: this.id(),
-      // The page's cell knows its space, so start/stop route to the
-      // right per-space context (the home space resolves identically
-      // to the no-space form).
+      // The page's cell knows its space — start/stop route to that
+      // space's piece context.
       space: this._cell.space(),
     });
     return res.value;

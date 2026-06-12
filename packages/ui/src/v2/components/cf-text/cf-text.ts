@@ -31,6 +31,11 @@ export type TextTone =
  * @attr {string} variant - Typography role. Defaults to "body".
  * @attr {string} tone - Semantic color tone. Defaults to "default".
  * @attr {boolean} block - Render as block text instead of inline text.
+ * @attr {boolean} truncate - Clip overflowing text to a single line with an
+ *   ellipsis. Implies block display (truncation requires a block formatting
+ *   context), so combining it with `block` is allowed but redundant. The host
+ *   gets `min-width: 0` so it can shrink and truncate inside flex rows such
+ *   as cf-hstack.
  *
  * @slot - Text content
  */
@@ -39,17 +44,20 @@ export class CFText extends BaseElement {
     variant: { type: String, reflect: true },
     tone: { type: String, reflect: true },
     block: { type: Boolean, reflect: true },
+    truncate: { type: Boolean, reflect: true },
   };
 
   declare variant: TextVariant;
   declare tone: TextTone;
   declare block: boolean;
+  declare truncate: boolean;
 
   constructor() {
     super();
     this.variant = "body";
     this.tone = "default";
     this.block = false;
+    this.truncate = false;
   }
 
   static override styles = [
@@ -73,6 +81,17 @@ export class CFText extends BaseElement {
 
       :host([block]) {
         display: block;
+      }
+
+      :host([truncate]) {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        /* Allow the host to shrink below its content size so it can
+          actually truncate inside flex rows (e.g. cf-hstack). */
+        min-width: 0;
+        max-width: 100%;
       }
 
       :host([variant="caption"]) {

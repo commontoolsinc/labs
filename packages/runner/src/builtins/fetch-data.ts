@@ -18,10 +18,19 @@ import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { scopedCell } from "./scope-policy.ts";
 
 /** The shape of fetchData's input cell. */
+type FetchDataOptions = {
+  body?: any;
+  method?: string;
+  headers?: Record<string, string>;
+  mutexTimeoutMs?: number;
+};
+
+type FetchRequestOptions = Omit<FetchDataOptions, "mutexTimeoutMs">;
+
 type FetchDataInputs = {
   url?: string;
-  mode?: "text" | "json";
-  options?: { body?: any; method?: string; headers?: Record<string, string> };
+  mode?: "text" | "json" | "dataUrl";
+  options?: FetchDataOptions;
 };
 
 /**
@@ -40,6 +49,7 @@ const fetchDataInputSchema = internSchema(
         properties: {
           body: {},
           method: { type: "string" },
+          mutexTimeoutMs: { type: "number" },
           headers: {
             type: "object",
             additionalProperties: { type: "string" },
@@ -50,24 +60,58 @@ const fetchDataInputSchema = internSchema(
   },
 );
 
-function snapshotFetchDataInputs(
-  cell: Cell<FetchDataInputs>,
+function normalizedFetchDataInputs(
+  url: string | undefined,
+  rawMode: string | undefined,
+  rawOptions: Readonly<FetchDataOptions> | undefined,
 ): FetchDataInputs {
-  const snapshot = cell.asSchema(fetchDataInputSchema).get() ??
-    ({} as FetchDataInputs);
-  const mode = snapshot.mode === "text" || snapshot.mode === "json"
-    ? snapshot.mode
+  const mode = rawMode === "text" || rawMode === "json" ||
+      rawMode === "dataUrl"
+    ? rawMode
     : undefined;
-  const body = snapshot.options?.body;
-  const options = snapshot.options
+  const { mutexTimeoutMs: _mutexTimeoutMs, ...requestOptions } = rawOptions ??
+    {};
+  const body = requestOptions.body;
+  const options = Object.keys(requestOptions).length > 0
     ? {
-      ...snapshot.options,
+      ...requestOptions,
       body: body !== undefined && typeof body !== "string"
         ? JSON.stringify(body)
         : body,
     }
     : undefined;
-  return createFrozenRequestSnapshot({ url: snapshot.url, mode, options });
+  return createFrozenRequestSnapshot({ url, mode, options });
+}
+
+function snapshotFetchDataInputs(
+  cell: Cell<FetchDataInputs>,
+): FetchDataInputs {
+  const snapshot = cell.asSchema(fetchDataInputSchema).get() ??
+    ({} as FetchDataInputs);
+  return normalizedFetchDataInputs(
+    snapshot.url,
+    snapshot.mode,
+    snapshot.options,
+  );
+}
+
+function snapshotFetchDataConfig(
+  cell: Cell<FetchDataInputs>,
+): { inputs: FetchDataInputs; mutexTimeoutMs?: number } {
+  const snapshot = cell.asSchema(fetchDataInputSchema).get() ??
+    ({} as FetchDataInputs);
+  const mutexTimeoutMs = snapshot.options?.mutexTimeoutMs;
+  return {
+    inputs: normalizedFetchDataInputs(
+      snapshot.url,
+      snapshot.mode,
+      snapshot.options,
+    ),
+    ...(typeof mutexTimeoutMs === "number" && Number.isFinite(mutexTimeoutMs) &&
+        mutexTimeoutMs > 0
+      ? { mutexTimeoutMs }
+      : {}),
+  };
 }
 
 /**
@@ -127,7 +171,9 @@ export function fetchData(
 
   return (tx: IExtendedStorageTransaction) => {
     tx.resetNarrowestReadScope();
-    const inputsSnapshot = snapshotFetchDataInputs(inputsCell.withTx(tx));
+    const { inputs: inputsSnapshot, mutexTimeoutMs } = snapshotFetchDataConfig(
+      inputsCell.withTx(tx),
+    );
     const outputScope = tx.getNarrowestReadScope();
 
     if (!cellsInitialized || cellScope !== outputScope) {
@@ -277,6 +323,7 @@ export function fetchData(
             // after commit.
             snapshotFetchDataInputs,
             inputHash,
+            mutexTimeoutMs,
           ).then(
             ({ claimed }) => {
               if (!claimed) {
@@ -339,8 +386,8 @@ async function startFetch(
   runtime: Runtime,
   inputsCell: Cell<FetchDataInputs>,
   url: string,
-  mode: "text" | "json" | undefined,
-  options: FetchDataInputs["options"],
+  mode: "text" | "json" | "dataUrl" | undefined,
+  options: FetchRequestOptions | undefined,
   inputHash: string,
   pending: Cell<boolean>,
   result: Cell<any | undefined>,
@@ -352,14 +399,32 @@ async function startFetch(
     if (!r.ok) {
       throw new Error(`HTTP ${r.status}: ${r.statusText}`);
     }
-    return (mode || "json") === "json" ? await r.json() : await r.text();
+    if (mode === "text") return await r.text();
+    if (mode === "dataUrl") {
+      const contentType = r.headers.get("content-type")?.split(";")[0]
+        .trim() || "application/octet-stream";
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      let binary = "";
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+      }
+      return `data:${contentType};base64,${btoa(binary)}`;
+    }
+    return await r.json();
   };
 
   // Body preprocessing (stringify non-string bodies) is handled by the
   // snapshotInputs callback in tryClaimMutex, so options is ready to use.
   try {
+    // Relative URLs resolve against the executing space's host when the
+    // space is host-mapped (federation: one runtime spans hosts). An
+    // unmapped space keeps the pattern environment's api base — which on
+    // some deployments (toolshed) deliberately differs from the runtime's
+    // default memory host, so hostForSpace's fallback is NOT used here.
+    const mappedHost = runtime.mappedHostFor(inputsCell.space);
     const response = await fetch(
-      new URL(url, getPatternEnvironment().apiUrl),
+      new URL(url, mappedHost ?? getPatternEnvironment().apiUrl),
       {
         signal: abortSignal,
         ...options,

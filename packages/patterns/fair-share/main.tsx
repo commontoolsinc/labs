@@ -126,7 +126,8 @@ const computeSettlements = (balances: Balance[]): Settlement[] => {
 // idiom: each viewer contributes their own #profile snapshot on join, rather
 // than the app querying everyone's private profile state (see
 // docs/specs/shared-profile-rosters.md). `name` stays the natural key.
-const joinWithProfile = handler<
+// Exported for tests.
+export const joinWithProfile = handler<
   unknown,
   {
     people: Writable<Person[]>;
@@ -144,7 +145,11 @@ const joinWithProfile = handler<
     people.push(av ? { name: n, avatar: av } : { name: n });
   } else if (av && !cur[idx].avatar) {
     // Backfill the avatar snapshot if this name was added by hand earlier.
-    people.set(cur.toSpliced(idx, 1, { ...cur[idx], avatar: av }));
+    // Write through the element's cell — replacing the array slot with a
+    // fresh object literal would re-mint the person's entity identity and
+    // orphan previously-held references (selection cells, expense rows read
+    // earlier). See packages/patterns/primitives/editable-list.tsx.
+    people.key(idx).key("avatar").set(av);
   }
   myName.set(n);
 });
@@ -337,25 +342,34 @@ export default pattern<State>(({ people, expenses, myName }) => {
                       const name = { ...cur[idx] }.name;
                       // Cascade-clean so balances stay zero-sum: drop expenses
                       // they paid (money has no creditor now) and remove them
-                      // from every other split. Built with a plain for-loop and
-                      // explicit array spreads — chaining .filter()/.map() on the
-                      // reactive .get() array makes the transformer rewrite them
-                      // to .filterWithPattern()/.mapWithPattern(), which throw at
-                      // runtime here.
+                      // from every other split. Built with a plain for-loop —
+                      // chaining .filter()/.map() on the reactive .get() array
+                      // makes the transformer rewrite them to
+                      // .filterWithPattern()/.mapWithPattern(), which throw at
+                      // runtime here. Kept expenses are pushed by REFERENCE
+                      // (not `{ ...e }` clones) and split changes are written
+                      // through the element's cell — fresh literals would
+                      // re-mint every kept expense's entity identity and
+                      // orphan previously-held references.
+                      const allExpenses = expenses.get();
                       const cleaned: Expense[] = [];
-                      for (const e of expenses.get()) {
+                      for (let i = 0; i < allExpenses.length; i++) {
+                        const e = allExpenses[i];
                         if (e.paidBy === name) continue;
                         const had = [...(e.sharedBy ?? [])];
                         // Empty sharedBy means "split among everyone" — it stays
                         // implicit-everyone (now a smaller group), so keep it as-is.
                         if (had.length === 0) {
-                          cleaned.push({ ...e });
+                          cleaned.push(e);
                           continue;
                         }
                         const shared = had.filter((s) => s !== name);
                         // An explicit split emptied by this removal is dropped.
                         if (shared.length === 0) continue;
-                        cleaned.push({ ...e, sharedBy: shared });
+                        if (shared.length !== had.length) {
+                          expenses.key(i).key("sharedBy").set(shared);
+                        }
+                        cleaned.push(e);
                       }
                       people.set(cur.toSpliced(idx, 1));
                       expenses.set(cleaned);

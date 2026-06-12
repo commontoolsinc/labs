@@ -5,6 +5,7 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { CellScope } from "../builder/types.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { resolveLink } from "../link-resolution.ts";
+import { linkResolutionProbe } from "../storage/reactivity-log.ts";
 import { narrowestScope, scopeRank } from "../scope.ts";
 import {
   createSigilLinkFromParsedLink,
@@ -94,7 +95,17 @@ export function exposedResultCell<T>(
     "writeRedirect",
   );
   const initialCell = cell.withTx(tx);
-  const raw = initialCell.getRaw({ lastNode: "writeRedirect" });
+  // Identity probe: the raw value is only link-parsed to decide which
+  // target the exposed cell should point at — content is never consumed
+  // (a non-link value just fails the parse). Run it under the
+  // link-resolution-probe scope so flow-label derivation treats it as
+  // link topology, not a content read (S16 — without this, a list
+  // coordinator rebuilding its output array re-consumes every reused
+  // element result's label and smears it across fresh elements).
+  const raw = tx.runWithAmbientReadMeta(
+    linkResolutionProbe,
+    () => initialCell.getRaw({ lastNode: "writeRedirect" }),
+  );
   // If the last writeRedirect target is a link, use that, but otherwise use
   // the last writeRedirect target.
   const link = parseLink(raw, target) ?? target;

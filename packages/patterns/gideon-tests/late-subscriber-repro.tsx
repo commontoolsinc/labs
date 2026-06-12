@@ -22,7 +22,7 @@ import { NAME, pattern, UI, Writable } from "commonfabric";
  * 3. Interacting with any component should update its interpolated value
  */
 
-interface Output {
+export interface Output {
   [NAME]: string;
   textValue: string;
   textareaValue: string;

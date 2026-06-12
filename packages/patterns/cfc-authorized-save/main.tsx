@@ -18,7 +18,7 @@ interface AuthorizedSaveInput {
   savedTitle: Writable<Default<TrustedSaveTitleUiContract, "">>;
 }
 
-interface AuthorizedSaveOutput {
+export interface AuthorizedSaveOutput {
   [NAME]: string;
   [UI]: VNode;
   draftTitle: string;

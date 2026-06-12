@@ -541,15 +541,26 @@ export class StorageManager implements IStorageManager {
   #crossSpacePromises = new Set<Promise<void>>();
   #sessionFactory: SessionFactory;
   #spaceIdentity?: Signer;
+  /** Seed map from Options — fixed for the manager's lifetime. */
+  #seedHosts: Record<string, string>;
+  /** Late-bound host hints; see registerSpaceHost. */
+  #dynamicHosts = new Map<string, string>();
 
   static open(options: Options) {
-    return new this(
+    const dynamicHosts = new Map<string, string>();
+    const manager = new this(
       options,
       new RemoteSessionFactory(
-        createStorageAddressResolver(options.memoryHost, options.spaceHostMap),
+        createStorageAddressResolver(
+          options.memoryHost,
+          options.spaceHostMap,
+          dynamicHosts,
+        ),
         options.as,
       ),
     );
+    manager.#dynamicHosts = dynamicHosts;
+    return manager;
   }
 
   protected constructor(
@@ -561,6 +572,46 @@ export class StorageManager implements IStorageManager {
     this.#settings = options.settings ?? defaultSettings;
     this.#sessionFactory = sessionFactory;
     this.#spaceIdentity = options.spaceIdentity;
+    // Snapshot + freeze: the resolver snapshotted its own copy at
+    // open(), so refusal logic must see the same fixed facts — a
+    // caller mutating their map object must not desynchronize them.
+    this.#seedHosts = Object.freeze({ ...(options.spaceHostMap ?? {}) });
+  }
+
+  /**
+   * Record a runtime-learned host hint for a space (e.g. from the
+   * home-space site table). Returns true when the hint is (now) in
+   * effect for the space's storage connection. Refusals, by design:
+   *
+   * - The seed map wins: a seeded space cannot be re-pointed.
+   * - An already-OPENED space keeps its connection — a hint must never
+   *   silently re-point live storage (re-pointing requires an explicit
+   *   close, which is lifecycle follow-up work).
+   *
+   * Idempotent when the hint matches what is already in effect.
+   */
+  registerSpaceHost(space: MemorySpace, host: string): boolean {
+    let normalized: string;
+    try {
+      normalized = new URL(host).toString();
+    } catch (cause) {
+      throw new Error(
+        `Invalid host for space ${space}: "${host}"`,
+        { cause },
+      );
+    }
+    const seeded = this.#seedHosts[space];
+    if (seeded !== undefined) {
+      return new URL(seeded).toString() === normalized;
+    }
+    const existing = this.#dynamicHosts.get(space);
+    if (this.#providers.has(space)) {
+      // Connection already established — only confirmable, not changeable.
+      return existing !== undefined &&
+        new URL(existing).toString() === normalized;
+    }
+    this.#dynamicHosts.set(space, host);
+    return true;
   }
 
   open(space: MemorySpace): IStorageProviderWithReplica {
@@ -1213,45 +1264,82 @@ class SpaceReplica implements ISpaceReplica {
       promise: Promise.resolve({ ok: {} } as Result<Unit, PullError>),
     };
     const cfc = new ContextualFlowControl();
+    // Entries covered by an already-registered selector are not re-fetched,
+    // but the covering watch may still be IN FLIGHT. A sync's contract is
+    // "resolved means the data is locally available", so collect the covering
+    // promises and await them — returning early here would let a caller (e.g.
+    // handler-input presync) proceed before the doc-carrying response lands.
+    // For coverage registered by a long-settled watch the promise is already
+    // resolved and the await is a no-op.
+    const coveredInFlight: Promise<Result<Unit, PullError>>[] = [];
     const newEntries = normalizedEntries.filter(([address, selector]) => {
       const baseAddress = {
         id: address.id,
         type: DOCUMENT_MIME,
         scope: normalizeCellScope(address.scope),
       };
-      const [superset] = this.#watchSelectorTracker.getSupersetSelector(
-        baseAddress,
-        selector,
-        cfc,
-      );
+      const [superset, supersetPromise] = this.#watchSelectorTracker
+        .getSupersetSelector(
+          baseAddress,
+          selector,
+          cfc,
+        );
+      if (superset !== undefined && supersetPromise !== undefined) {
+        coveredInFlight.push(supersetPromise);
+      }
       return superset === undefined;
     });
     if (newEntries.length === 0) {
-      return { ok: {} };
+      if (coveredInFlight.length === 0) {
+        return { ok: {} };
+      }
+      const results = await Promise.all(coveredInFlight);
+      return results.find((result) => result.error) ?? { ok: {} };
     }
     task.entries = newEntries;
     this.#syncTasks.set(key, task);
-    const promise = this.enqueueWatchRefresh("pull", newEntries);
-    task.promise = promise;
+    const fetchPromise = this.enqueueWatchRefresh("pull", newEntries);
+    // Mixed batch: some entries fetched here, others covered by in-flight
+    // watches. The pull resolves only when ALL requested docs are locally
+    // available, and concurrent same-key callers dedupe onto this COMBINED
+    // wait (joining only `fetchPromise` would let them resolve before the
+    // covered docs land).
+    const combinedPromise = coveredInFlight.length === 0
+      ? fetchPromise
+      : (async (): Promise<Result<Unit, PullError>> => {
+        const result = await fetchPromise;
+        if (result.error) {
+          return result;
+        }
+        const covered = await Promise.all(coveredInFlight);
+        return covered.find((coveredResult) => coveredResult.error) ?? result;
+      })();
+    task.promise = combinedPromise;
     for (const [address, selector] of newEntries) {
       const baseAddress = {
         id: address.id,
         type: DOCUMENT_MIME,
         scope: normalizeCellScope(address.scope),
       };
+      // The tracker promise is what FUTURE pulls covered by these selectors
+      // await: their data is available once THIS fetch lands, independent of
+      // this batch's own covered set — so register the raw fetch promise.
       this.#watchSelectorTracker.add(
         baseAddress,
         selector,
-        promise,
+        fetchPromise,
       );
     }
-    this.#syncPromises.add(promise);
+    this.#syncPromises.add(combinedPromise);
     try {
-      return await promise;
+      return await combinedPromise;
     } finally {
       this.#syncTasks.delete(key);
-      this.#syncPromises.delete(promise);
-      const result = await Promise.resolve(task.promise);
+      this.#syncPromises.delete(combinedPromise);
+      // Tracker cleanup is keyed on THIS batch's fetch result alone: a
+      // failure in a covered watch belongs to the pull that registered it,
+      // and must not invalidate selectors whose fetch succeeded here.
+      const result = await fetchPromise;
       if (result.error) {
         for (const [address, selector] of newEntries) {
           const baseAddress = {

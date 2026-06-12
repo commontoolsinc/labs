@@ -100,6 +100,15 @@ export interface RenderPolicy {
   maxConfidentiality?: readonly unknown[];
 
   /**
+   * Caveat kinds admitted by the host's default render ceiling (spec
+   * §8.10.6): a Caveat-type confidentiality atom renders when its `kind` is
+   * listed here even if the atom is not in `maxConfidentiality`. Inherited
+   * unchanged through authored boundaries — narrowing narrows
+   * `maxConfidentiality`, never widens kinds.
+   */
+  caveatKindAllow?: readonly string[];
+
+  /**
    * Confidentiality atoms this subtree may declassify before applying the max bound.
    * This is a temporary low-level capability hook for trusted UI experiments.
    */
@@ -185,6 +194,20 @@ export interface ChildNodeState {
  * Context passed through the reconciliation process.
  */
 export interface ReconcileContext {
+  /**
+   * The space of the cell whose render produced the current subtree.
+   * Changes at cell-follow boundaries (renderCellChild) — including
+   * cross-space transclusion, where a piece renders another piece's UI.
+   */
+  space?: string;
+
+  /**
+   * The space stamped on the nearest ancestor create-element op.
+   * Elements only carry `space` when it differs from this (seefeldb's
+   * elision: leave it off when the parent's space is the same).
+   */
+  emittedSpace?: string;
+
   /** Function to emit VDOM operations */
   emit: (
     ops: import("../vdom-ops.ts").VDomOp[],
@@ -211,9 +234,6 @@ export interface ReconcileContext {
 }
 
 /**
- * Options for the worker reconciler.
- */
-/**
  * Whether author-supplied `declassifyConfidentiality` on a
  * `<cf-cfc-render-boundary>` is honored.
  *
@@ -233,6 +253,67 @@ export interface ReconcileContext {
  */
 export type RenderDeclassificationPolicy = "allow" | "deny";
 
+/**
+ * Normalize an untrusted render-declassification policy value.
+ *
+ * The policy is a security knob that crosses postMessage seams (e.g.
+ * `InitializationData`) with no runtime validation, so a typo'd host config or
+ * a version-skewed peer could otherwise silently fail OPEN to `"allow"`. A
+ * present-but-unknown value therefore normalizes to `"deny"` (fail closed);
+ * only an absent value keeps the documented `"allow"` default.
+ */
+export function normalizeRenderDeclassificationPolicy(
+  value: unknown,
+): RenderDeclassificationPolicy {
+  if (value === undefined) return "allow";
+  return value === "allow" ? "allow" : "deny";
+}
+
+/**
+ * Host-supplied default render ceiling (spec §8.10.6, S16 phase D): the
+ * confidentiality a display surface admits when no authored boundary
+ * narrows further. `atoms` are admitted by structural equality (the place
+ * for acting-user identity atoms); `caveatKinds` admits Caveat-type atoms
+ * by kind (the display-dischargeable classes). Everything else renders as
+ * the blocked placeholder. Undefined = no default ceiling (today's
+ * behavior); the profile may only be tightened, not loosened, without a
+ * new release judgment.
+ */
+export interface RenderConfidentialityCeiling {
+  atoms?: readonly unknown[];
+  caveatKinds?: readonly string[];
+}
+
+/**
+ * Normalize an untrusted render-confidentiality ceiling.
+ *
+ * Like the declassification policy, the ceiling crosses postMessage seams
+ * (e.g. `InitializationData`) with no runtime validation. Fail-closed here
+ * means a present-but-malformed value becomes the EMPTY ceiling (public-only
+ * rendering) — never a mount crash, and never fail-open to unbounded. Only
+ * an absent value keeps the documented no-ceiling default; malformed fields
+ * inside an otherwise well-formed ceiling drop to empty individually.
+ */
+export function normalizeRenderConfidentialityCeiling(
+  value: unknown,
+): RenderConfidentialityCeiling | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "object" || value === null) return {};
+  const { atoms, caveatKinds } = value as {
+    atoms?: unknown;
+    caveatKinds?: unknown;
+  };
+  return {
+    atoms: Array.isArray(atoms) ? atoms : [],
+    caveatKinds: Array.isArray(caveatKinds)
+      ? caveatKinds.filter((kind): kind is string => typeof kind === "string")
+      : [],
+  };
+}
+
+/**
+ * Options for the worker reconciler.
+ */
 export interface WorkerReconcilerOptions {
   /** Callback when operations are ready to send to main thread */
   onOps: (
@@ -248,6 +329,13 @@ export interface WorkerReconcilerOptions {
    * {@link RenderDeclassificationPolicy}.
    */
   renderDeclassificationPolicy?: RenderDeclassificationPolicy;
+
+  /**
+   * Default render ceiling applied at the tree root. Defaults to undefined
+   * (no ceiling — today's behavior). See
+   * {@link RenderConfidentialityCeiling}.
+   */
+  renderConfidentialityCeiling?: RenderConfidentialityCeiling;
 }
 
 /**

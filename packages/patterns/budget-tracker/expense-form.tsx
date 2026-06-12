@@ -71,9 +71,11 @@ const setBudgetHandler = handler<
   );
 
   if (existingIndex >= 0) {
-    budgets.set(
-      current.map((b, i) => (i === existingIndex ? { ...b, limit } : b)),
-    );
+    // Write through the element's cell — rebuilding the array with a fresh
+    // object literal for the matched budget would re-mint its entity identity
+    // and orphan previously-held references (see
+    // packages/patterns/primitives/editable-list.tsx).
+    budgets.key(existingIndex).key("limit").set(limit);
   } else {
     budgets.push({ category: category.trim(), limit });
   }
@@ -215,12 +217,10 @@ export default pattern<Input>(({ expenses, budgets }) => {
                 );
 
                 if (existingIndex >= 0) {
-                  budgets.set(
-                    current.map((
-                      b,
-                      i,
-                    ) => (i === existingIndex ? { ...b, limit: limitVal } : b)),
-                  );
+                  // In-place element-cell write — a fresh literal would
+                  // re-mint the budget's entity identity (see
+                  // setBudgetHandler above).
+                  budgets.key(existingIndex).key("limit").set(limitVal);
                 } else {
                   budgets.push({ category: cat, limit: limitVal });
                 }

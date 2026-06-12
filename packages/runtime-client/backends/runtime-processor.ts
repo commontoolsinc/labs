@@ -25,7 +25,10 @@ import {
   setPatternEnvironment,
   type SigilLink,
 } from "@commonfabric/runner";
-import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
+import {
+  cfcLabelViewForCell,
+  redactCaveatSourcesForDisplay,
+} from "@commonfabric/runner/cfc";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
@@ -78,6 +81,7 @@ import {
   type PageSyncedRequest,
   type PatternSourcesResponse,
   type RecreateSpaceRootPatternRequest,
+  type RegisterSpaceHostRequest,
   RequestType,
   type SetActionRunTraceEnabledRequest,
   type SetBreakpointsRequest,
@@ -103,6 +107,11 @@ import {
 import { HttpProgramResolver, Program } from "@commonfabric/js-compiler";
 import { setLLMUrl } from "@commonfabric/llm";
 import {
+  type SiteTable,
+  siteTableCause,
+  siteTableSchema,
+} from "@commonfabric/home-schemas";
+import {
   createCellRef,
   createPageRef,
   getCell,
@@ -111,11 +120,14 @@ import {
 import { cellRefToKey } from "../shared/utils.ts";
 import { RemoteResponse } from "@commonfabric/runtime-client";
 import {
+  normalizeRenderConfidentialityCeiling,
+  normalizeRenderDeclassificationPolicy,
+  type RenderConfidentialityCeiling,
   type RenderDeclassificationPolicy,
   WorkerReconciler,
 } from "@commonfabric/html/worker";
 import type { VDomOp } from "../protocol/types.ts";
-import type { RuntimeOptions, URI } from "@commonfabric/runner";
+import type { JSONValue, RuntimeOptions, URI } from "@commonfabric/runner";
 
 const MAX_SERIALIZATION_DEPTH = 5;
 const blobUploadEncoding = new JsonEncodingContext();
@@ -133,6 +145,7 @@ export function runtimeOptionsFromInitializationData(
   const apiUrlObj = new URL(data.apiUrl);
   return {
     apiUrl: apiUrlObj,
+    spaceHostMap: data.spaceHostMap,
     storageManager,
     patternEnvironment: { apiUrl: apiUrlObj },
     telemetry,
@@ -278,8 +291,6 @@ export class RuntimeProcessor {
   private pieceManager: PieceManager;
   private cc: PiecesController;
   private spaces = new Map<DID, SpaceContext>();
-  private apiUrl: URL;
-  private space: DID;
   private identity: Identity;
   private _isDisposed = false;
   private disposingPromise: Promise<void> | undefined;
@@ -296,22 +307,22 @@ export class RuntimeProcessor {
   // Render-boundary declassification policy applied to every mount's
   // reconciler. Set from InitializationData; "allow" preserves prior behavior.
   private renderDeclassificationPolicy: RenderDeclassificationPolicy = "allow";
+  // Host-supplied default render ceiling applied to every mount's
+  // reconciler. Undefined preserves prior behavior (no ceiling).
+  private renderConfidentialityCeiling?: RenderConfidentialityCeiling;
 
   private constructor(
     runtime: Runtime,
     pieceManager: PieceManager,
     cc: PiecesController,
-    apiUrl: URL,
-    space: DID,
+    initSpace: DID,
     identity: Identity,
     telemetry: RuntimeTelemetry,
   ) {
     this.runtime = runtime;
     this.pieceManager = pieceManager;
     this.cc = cc;
-    this.spaces.set(space, { pieceManager, cc });
-    this.apiUrl = apiUrl;
-    this.space = space;
+    this.spaces.set(initSpace, { pieceManager, cc });
     this.identity = identity;
     this.telemetry = telemetry;
     this.telemetry.addEventListener("telemetry", this.#onTelemetry);
@@ -424,14 +435,104 @@ export class RuntimeProcessor {
       runtime,
       pieceManager,
       cc,
-      apiUrlObj,
       space,
       identity,
       telemetry,
     );
+    // InitializationData crosses postMessage with no runtime validation, so a
+    // typo'd host config or version-skewed peer must fail CLOSED, not open:
+    // any present-but-unknown value becomes "deny"; absent stays "allow".
     processor.renderDeclassificationPolicy =
-      data.renderDeclassificationPolicy ?? "allow";
+      normalizeRenderDeclassificationPolicy(data.renderDeclassificationPolicy);
+    processor.renderConfidentialityCeiling =
+      normalizeRenderConfidentialityCeiling(data.renderConfidentialityCeiling);
+    // Site-table v0: the home space carries did → host hints; the
+    // runtime reads them as its live host lookup (2026-06-09 federation
+    // session — "move the lookup into the runtime itself"). Refusals
+    // (seeded differently / space already open) are by design; failures
+    // here must not block worker boot.
+    processor.watchSiteTable();
     return processor;
+  }
+
+  #siteTableCancel: Cancel | undefined;
+  #siteTableWarned = new Set<string>();
+
+  /**
+   * Subscribe to the home-space site table and register each entry as
+   * a host hint. Fire-and-forget: resolution hints are an enhancement,
+   * never a boot dependency.
+   *
+   * ORDERING CONTRACT for embedders: this subscription races the first
+   * mount. An embedder about to mount a space it just learned the host
+   * for must push the hint via the RegisterSpaceHost IPC BEFORE that
+   * mount — once a space opens against the default host, the
+   * opened-space rule pins it for the session. The table is the
+   * durable record; the IPC is the ordering guarantee.
+   */
+  watchSiteTable(): void {
+    try {
+      const userDid = this.runtime.userIdentityDID;
+      const table = this.runtime.getCell(
+        userDid,
+        siteTableCause(userDid),
+        siteTableSchema,
+      );
+      Promise.resolve(table.sync()).then(() => {
+        // dispose() may have run while sync was in flight — installing
+        // the sink then would leak a live subscription past disposal.
+        if (this._isDisposed) return;
+        this.#siteTableCancel = table.sink(
+          (entries: Readonly<SiteTable> | undefined) => {
+            for (const entry of entries ?? []) {
+              if (!entry?.did || !entry.host) continue;
+              if (!String(entry.did).startsWith("did:")) continue;
+              try {
+                const accepted = this.runtime.registerSpaceHost(
+                  entry.did as DID,
+                  entry.host,
+                );
+                // The dual of "never silently re-point": never silently
+                // fail to take effect. Warn (once per fact) when the
+                // hint lost — usually the boot race: the space opened
+                // against the default host first.
+                if (!accepted) {
+                  const key = `${entry.did}|${entry.host}`;
+                  const effective = this.runtime.hostForSpace(
+                    entry.did as DID,
+                  ).toString();
+                  if (
+                    effective !== new URL(entry.host).toString() &&
+                    !this.#siteTableWarned.has(key)
+                  ) {
+                    this.#siteTableWarned.add(key);
+                    console.warn(
+                      `[RuntimeProcessor] Site-table hint for ${entry.did} not in effect ` +
+                        `(space already open or seeded elsewhere); using ${effective}`,
+                    );
+                  }
+                }
+              } catch (error) {
+                console.warn(
+                  `[RuntimeProcessor] Ignoring invalid site-table entry for ${entry.did}:`,
+                  error instanceof Error ? error.message : error,
+                );
+              }
+            }
+          },
+        );
+      }).catch((error: unknown) => {
+        console.warn(
+          "[RuntimeProcessor] Site table unavailable (continuing without hints):",
+          error instanceof Error ? error.message : error,
+        );
+      });
+    } catch (error) {
+      console.warn(
+        "[RuntimeProcessor] Site table watch failed to start:",
+        error instanceof Error ? error.message : error,
+      );
+    }
   }
 
   /**
@@ -450,6 +551,8 @@ export class RuntimeProcessor {
     this.disposingPromise = (async () => {
       this.telemetry.removeEventListener("telemetry", this.#onTelemetry);
       try {
+        this.#siteTableCancel?.();
+        this.#siteTableCancel = undefined;
         for (const cancel of this.subscriptions.values()) {
           cancel();
         }
@@ -476,15 +579,22 @@ export class RuntimeProcessor {
   }
 
   /**
-   * Resolve the piece context for a space. No space (or the home
-   * space) ⇒ the context built at initialize; any other space lazily
-   * gets its own PieceManager/PiecesController, sharing this worker's
-   * runtime/scheduler/storage (the storage layer is already
-   * multi-space). The per-space session authenticates as the user —
-   * no per-space signer, matching the storage connections.
+   * Resolve the piece context for a space. The space the worker was
+   * initialized with gets the context built at initialize; any other
+   * space lazily gets its own PieceManager/PiecesController, sharing
+   * this worker's runtime/scheduler/storage (the storage layer is
+   * already multi-space). The per-space session authenticates as the
+   * user — no per-space signer, matching the storage connections.
+   *
+   * `space` is required: page operations carry their space explicitly,
+   * with no implicit default at this layer. (The runtime guard catches
+   * out-of-date callers that still omit it.)
    */
-  private getSpaceCtx(space?: DID): SpaceContext {
-    const target = space ?? this.space;
+  private getSpaceCtx(space: DID): SpaceContext {
+    const target: DID | undefined = space;
+    if (!target) {
+      throw new Error("Page operations must name a space explicitly.");
+    }
     let ctx = this.spaces.get(target);
     if (!ctx) {
       const pieceManager = new PieceManager(
@@ -521,12 +631,24 @@ export class RuntimeProcessor {
     let cell = getCell(this.runtime, request.cell);
     if (request.meta !== undefined) {
       const rootCell = getCell(this.runtime, { ...request.cell, path: [] });
-      const link = getMetaLink(rootCell, request.meta);
-      if (link === undefined) return { value: undefined };
-      cell = this.runtime.getCellFromLink({
-        ...link,
-        path: [...link.path, ...request.cell.path],
-      });
+      if (
+        request.meta === "pattern" || request.meta === "argument" ||
+        request.meta === "result"
+      ) {
+        // For the meta link fields, use the meta linked cell instead
+        const rootCell = getCell(this.runtime, { ...request.cell, path: [] });
+        const link = getMetaLink(rootCell, request.meta);
+        if (link === undefined) return { value: undefined };
+        cell = this.runtime.getCellFromLink({
+          ...link,
+          path: [...link.path, ...request.cell.path],
+        });
+      } else {
+        // For meta cells that aren't link cells, return the raw data
+        return {
+          value: rootCell.getMetaRaw(request.meta) as JSONValue | undefined,
+        };
+      }
     }
     const value = cell.get();
     const converted = convertCellsToLinks(value, {
@@ -637,8 +759,17 @@ export class RuntimeProcessor {
     });
     await syncMetaLinkedDocs(rootCell);
     await cell.sync();
+    // `getCfcLabel()` is the pattern-facing INTROSPECTION surface: the response
+    // is returned to the caller, not round-tripped back into a cell. Redact
+    // `Caveat.source` identities here so a pattern can't learn which principal
+    // introduced a caveat (audit item 28b, inv-12). Observation labeling, the
+    // dereference-trace enforcement path, and the carried-label view all read
+    // the label through other seams and keep `source`.
+    const cfcLabel = cfcLabelViewForCell(cell);
     return {
-      cfcLabel: cfcLabelViewForCell(cell),
+      cfcLabel: cfcLabel === undefined
+        ? undefined
+        : redactCaveatSourcesForDisplay(cfcLabel),
     };
   }
 
@@ -718,9 +849,10 @@ export class RuntimeProcessor {
   async handlePieceCreate(
     request: PageCreateRequest,
   ): Promise<PageResponse> {
+    const { cc } = this.getSpaceCtx(request.space);
     let program: Program | undefined;
     if ("url" in request.source && request.source.url) {
-      program = await this.cc.manager().runtime.harness.resolve(
+      program = await cc.manager().runtime.harness.resolve(
         new HttpProgramResolver(request.source.url),
       );
     } else if ("program" in request.source) {
@@ -729,7 +861,7 @@ export class RuntimeProcessor {
       throw new Error("Invalid source.");
     }
 
-    const piece = await this.cc.create<NameSchema>(program, {
+    const piece = await cc.create<NameSchema>(program, {
       input: request.argument as object | undefined,
       start: request.run ?? true,
     }, request.cause);
@@ -738,27 +870,9 @@ export class RuntimeProcessor {
     };
   }
 
-  /**
-   * Root-pattern ensure/recreate stays home-space only. Both can WRITE
-   * (create + start the default pattern), and they seed the pattern URL
-   * from the requesting user's home `defaultAppUrl` — the right
-   * semantics for your own space, wrong for a foreign one. Mounting an
-   * existing foreign pattern (`PageGet`) doesn't need either. Lift this
-   * when federation defines who provisions a space's root pattern.
-   */
-  private checkRootPatternSpace(space?: DID): void {
-    if (space !== undefined && space !== this.space) {
-      throw new Error(
-        "Root-pattern operations are home-space only; " +
-          `got space ${space}`,
-      );
-    }
-  }
-
   async handleGetSpaceRootPattern(
     request: PatternGetSpaceRoot,
   ): Promise<PageResponse> {
-    this.checkRootPatternSpace(request.space);
     const { cc } = this.getSpaceCtx(request.space);
     const piece = await cc.ensureDefaultPattern();
     return {
@@ -769,7 +883,6 @@ export class RuntimeProcessor {
   async handleRecreateSpaceRootPattern(
     request: RecreateSpaceRootPatternRequest,
   ): Promise<PageResponse> {
-    this.checkRootPatternSpace(request.space);
     const { cc } = this.getSpaceCtx(request.space);
     const piece = await cc.recreateDefaultPattern();
     return {
@@ -881,6 +994,23 @@ export class RuntimeProcessor {
   async handlePageSynced(request: PageSyncedRequest): Promise<void> {
     const { pieceManager } = this.getSpaceCtx(request.space);
     await pieceManager.synced();
+  }
+
+  handleRegisterSpaceHost(
+    request: RegisterSpaceHostRequest,
+  ): BooleanResponse {
+    return {
+      value: this.runtime.registerSpaceHost(request.space, request.host),
+    };
+  }
+
+  /** Convergence across every opened space — no space named, none implied. */
+  async handleRuntimeSynced(): Promise<void> {
+    await Promise.all(
+      [...this.spaces.values()].map(({ pieceManager }) =>
+        pieceManager.synced()
+      ),
+    );
   }
 
   getGraphSnapshot(_: GetGraphSnapshotRequest): GraphSnapshotResponse {
@@ -1010,11 +1140,20 @@ export class RuntimeProcessor {
   async handleUploadBlob(
     request: UploadBlobRequest,
   ): Promise<UploadBlobResponse> {
+    // Guard for untyped callers: the request must name the blob's space
+    // (required since the federation work) — fail with a named error
+    // rather than a confusing server 404 on /undefined/blobs/….
+    if (!request.space || !String(request.space).startsWith("did:")) {
+      throw new Error("uploadBlob requires a space DID");
+    }
     const suffix = (request.suffix ?? "bin").replace(/^\./, "") || "bin";
     const bytes = Uint8Array.from(request.body);
+    // The blob belongs to the named space, so it uploads to — and its
+    // returned URL resolves against — THAT space's host.
+    const host = this.runtime.hostForSpace(request.space);
     const target = new URL(
-      `/${this.space}/blobs/upload.${encodeURIComponent(suffix)}`,
-      this.apiUrl,
+      `/${request.space}/blobs/upload.${encodeURIComponent(suffix)}`,
+      host,
     );
     // Blob upload payloads must preserve FabricBytes even when the wider
     // process is running with legacy memory JSON flags.
@@ -1038,7 +1177,7 @@ export class RuntimeProcessor {
     }
     return {
       id: result.id,
-      url: resolveBlobUrl(result.url, this.apiUrl, this.space),
+      url: resolveBlobUrl(result.url, host, request.space),
     };
   }
 
@@ -1171,6 +1310,10 @@ export class RuntimeProcessor {
         return await this.handlePageGetAll(request);
       case RequestType.PageSynced:
         return await this.handlePageSynced(request);
+      case RequestType.RuntimeSynced:
+        return await this.handleRuntimeSynced();
+      case RequestType.RegisterSpaceHost:
+        return this.handleRegisterSpaceHost(request);
       case RequestType.GetGraphSnapshot:
         return this.getGraphSnapshot(request);
       case RequestType.SetPullMode:
@@ -1261,6 +1404,7 @@ export class RuntimeProcessor {
     // Create a reconciler that sends ops to the main thread
     const reconciler = new WorkerReconciler({
       renderDeclassificationPolicy: this.renderDeclassificationPolicy,
+      renderConfidentialityCeiling: this.renderConfidentialityCeiling,
       onOps: (ops: VDomOp[]) => {
         const batchId = this.vdomBatchIdCounter++;
         self.postMessage({
@@ -1311,9 +1455,10 @@ export class RuntimeProcessor {
 }
 
 /**
- * Sync a root cell and each meta cell reachable from it.
+ * Sync a root cell and each direct metadata-linked cell reachable from it.
  *
- * Callers that need a transactional root cell can create it first and pass it.
+ * `internal` is raw manifest metadata, not a direct metadata link. Callers that
+ * need a transactional root cell can create it first and pass it.
  */
 async function syncMetaLinkedDocs(
   cell: Cell<any>,
@@ -1324,7 +1469,7 @@ async function syncMetaLinkedDocs(
   while (pendingCells.length > 0) {
     const currentCell = pendingCells.shift()!;
     await currentCell.sync();
-    for (const meta of ["pattern", "argument", "internal"] as const) {
+    for (const meta of ["pattern", "argument"] as const) {
       const link = getMetaLink(currentCell, meta);
       if (link === undefined) continue;
       const linkedCell = currentCell.runtime.getCellFromLink(link, undefined);

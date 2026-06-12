@@ -12,7 +12,7 @@ import {
   TrustedRedactedReleaseSurface,
 } from "../cfc/trusted-surfaces/mod.ts";
 
-type ConfirmationReleaseExampleOutput = {
+export type ConfirmationReleaseExampleOutput = {
   [NAME]: string;
   [UI]: unknown;
   decoyStatus: string;

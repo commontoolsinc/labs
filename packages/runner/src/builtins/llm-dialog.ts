@@ -27,6 +27,7 @@ import { isBoolean, isObject, isRecord } from "@commonfabric/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import { isCell, isStream } from "../cell.ts";
 import { type CellScope, ID, NAME, type Pattern } from "../builder/types.ts";
+import { resolveStoredPatternAsync } from "./op-pattern-ref.ts";
 import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
 import { Runtime } from "../runtime.ts";
 import { spaceCellSchema } from "../runtime.ts";
@@ -47,7 +48,10 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import { type CfcLabelView, cfcLabelViewForCell } from "../cfc/label-view.ts";
+import {
+  type CfcLabelView,
+  cfcLabelViewForCellFailClosed,
+} from "../cfc/label-view.ts";
 import {
   cfcConfidentialityForObservationNode,
   cfcObservationFitsCeiling,
@@ -1436,7 +1440,7 @@ function buildAvailableCellsDocumentationWithObservation(
         contextSpace: space,
         rootLink: link,
         labelView: observationMaxConfidentiality
-          ? cfcLabelViewForCell(concreteCell)
+          ? cfcLabelViewForCellFailClosed(concreteCell)
           : undefined,
         observationMaxConfidentiality,
       });
@@ -1546,7 +1550,7 @@ function getObservedDialogMessages(
   messages: readonly BuiltInLLMMessage[];
   observedConfidentiality: readonly unknown[];
 } {
-  const labelView = cfcLabelViewForCell(messagesCell);
+  const labelView = cfcLabelViewForCellFailClosed(messagesCell);
   const observedConfidentiality = joinCfcObservedConfidentiality(
     messages.map((_message, index) => {
       const stored = messageObservations[index.toString()];
@@ -2149,7 +2153,7 @@ async function handleRead(
     seen: new Set(),
     contextSpace: space,
     rootLink: cell.getAsNormalizedFullLink(),
-    labelView: cfcLabelViewForCell(cell),
+    labelView: cfcLabelViewForCellFailClosed(cell),
     observationMaxConfidentiality,
   });
 
@@ -2246,6 +2250,15 @@ async function handleInvoke(
     handler = resolved.handler;
   }
 
+  // A pattern read raw from a cell is the boundary serialization (refs-only
+  // since identity E4): resolve the live canonical pattern via its
+  // $patternRef — sync from the session-lifetime artifact index, async from
+  // the space's persisted compiled artifacts when the module never evaluated
+  // here — with stored graph vintages passing through unchanged.
+  pattern = await resolveStoredPatternAsync(runtime, pattern, space) as
+    | Readonly<Pattern>
+    | undefined;
+
   const input = traverseAndCellify(runtime, space, toolCall.input) as object;
 
   const { resolve, promise } = Promise.withResolvers<any>();
@@ -2321,7 +2334,7 @@ async function handleInvoke(
       rootLink: concreteResult.getAsNormalizedFullLink(),
       labelView: useResultSchemaForObservation
         ? undefined
-        : cfcLabelViewForCell(concreteResult),
+        : cfcLabelViewForCellFailClosed(concreteResult),
       observationMaxConfidentiality,
     });
     return {
@@ -2349,7 +2362,7 @@ async function handleInvoke(
         seen: new Set(),
         contextSpace: space,
         rootLink: result.getAsNormalizedFullLink(),
-        labelView: cfcLabelViewForCell(result),
+        labelView: cfcLabelViewForCellFailClosed(result),
         observationMaxConfidentiality,
       });
       return {
@@ -2986,7 +2999,16 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
     };
 
   // TODO(bf): sendRequest must be given a callback, even if it does nothing
-  const doWork = () => client.sendRequest(llmParams, () => {}, abortSignal);
+  const mappedLlmHost = runtime.mappedHostFor(space);
+  const doWork = () =>
+    client.sendRequest(
+      llmParams,
+      () => {},
+      abortSignal,
+      mappedLlmHost
+        ? { endpoint: new URL("/api/ai/llm", mappedLlmHost) }
+        : undefined,
+    );
 
   const resultPromise = queueName
     ? runtime.getOrCreateQueue(queueName).enqueue(doWork)

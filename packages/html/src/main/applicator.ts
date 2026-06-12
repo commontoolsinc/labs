@@ -13,6 +13,7 @@ import type { VDomBatch, VDomOp } from "../vdom-ops.ts";
 import { CellHandle, cellRefToKey } from "@commonfabric/runtime-client";
 import { setPropDefault, type SetPropHandler } from "../render-utils.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { provideElementSpace } from "./space-context.ts";
 
 const logger = getLogger("vdom-applicator", { enabled: false, level: "debug" });
 
@@ -123,7 +124,7 @@ export class DomApplicator {
   private applyOp(op: VDomOp): void {
     switch (op.op) {
       case "create-element":
-        this.createElement(op.nodeId, op.tagName);
+        this.createElement(op.nodeId, op.tagName, op.space);
         break;
 
       case "create-text":
@@ -282,8 +283,11 @@ export class DomApplicator {
 
   // ============== Operation Implementations ==============
 
-  private createElement(nodeId: number, tagName: string): void {
+  private createElement(nodeId: number, tagName: string, space?: string): void {
     const element = this.document.createElement(tagName);
+    if (space !== undefined) {
+      provideElementSpace(element, space);
+    }
     this.nodes.set(nodeId, element);
   }
 

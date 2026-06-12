@@ -2989,6 +2989,7 @@ interface CFToggleGroupElement extends CFHTMLElement {}
 interface CFRadioElement extends CFHTMLElement {}
 interface CFInputOTPElement extends CFHTMLElement {}
 interface CFLabelElement extends CFHTMLElement {}
+interface CFFieldElement extends CFHTMLElement {}
 
 // Display components
 interface CFTextElement extends CFHTMLElement {}
@@ -2996,6 +2997,7 @@ interface CFAvatarElement extends CFHTMLElement {}
 interface CFProfileBadgeElement extends CFHTMLElement {}
 interface CFBadgeElement extends CFHTMLElement {}
 interface CFChipElement extends CFHTMLElement {}
+interface CFEmptyStateElement extends CFHTMLElement {}
 interface CFProgressElement extends CFHTMLElement {}
 interface CFSkeletonElement extends CFHTMLElement {}
 interface CFSeparatorElement extends CFHTMLElement {}
@@ -3304,6 +3306,18 @@ type TailwindNumberType =
 interface CFStackAttributes<T> extends CFHTMLAttributes<T> {
   "gap"?: TailwindNumberType;
   "padding"?: TailwindNumberType;
+  /** Horizontal (left/right) padding; overrides `padding` on those sides. */
+  "px"?: TailwindNumberType;
+  /** Vertical (top/bottom) padding; overrides `padding` on those sides. */
+  "py"?: TailwindNumberType;
+  /** Padding-top; overrides `padding`/`py` on that side. */
+  "pt"?: TailwindNumberType;
+  /** Padding-right; overrides `padding`/`px` on that side. */
+  "pr"?: TailwindNumberType;
+  /** Padding-bottom; overrides `padding`/`py` on that side. */
+  "pb"?: TailwindNumberType;
+  /** Padding-left; overrides `padding`/`px` on that side. */
+  "pl"?: TailwindNumberType;
   "align"?: "start" | "center" | "end" | "stretch" | "baseline";
   "justify"?: "start" | "center" | "end" | "between" | "around" | "evenly";
   "wrap"?: boolean;
@@ -4168,6 +4182,13 @@ interface CFLabelAttributes<T> extends CFHTMLAttributes<T> {
   }>;
 }
 
+interface CFFieldAttributes<T> extends CFHTMLAttributes<T> {
+  "label"?: string | CellLike<string>;
+  "required"?: boolean | CellLike<boolean>;
+  "error"?: string | CellLike<string>;
+  "help"?: string | CellLike<string>;
+}
+
 // Display component attributes
 interface CFTextAttributes<T> extends CFHTMLAttributes<T> {
   "variant"?:
@@ -4207,6 +4228,8 @@ interface CFTextAttributes<T> extends CFHTMLAttributes<T> {
       | "error"
     >;
   "block"?: boolean | CellLike<boolean>;
+  /** Single-line ellipsis truncation. Implies block display. */
+  "truncate"?: boolean | CellLike<boolean>;
 }
 
 interface CFBadgeAttributes<T> extends CFHTMLAttributes<T> {
@@ -4257,6 +4280,10 @@ interface CFChipAttributes<T> extends CFHTMLAttributes<T> {
   "interactive"?: boolean | CellLike<boolean>;
   "oncf-remove"?: EventHandler<{}>;
   "oncf-click"?: EventHandler<{}>;
+}
+
+interface CFEmptyStateAttributes<T> extends CFHTMLAttributes<T> {
+  "message"?: string | CellLike<string>;
 }
 
 interface CFProgressAttributes<T> extends CFHTMLAttributes<T> {
@@ -5251,6 +5278,10 @@ declare global {
         CFLabelAttributes<CFLabelElement>,
         CFLabelElement
       >;
+      "cf-field": CFDOM.DetailedHTMLProps<
+        CFFieldAttributes<CFFieldElement>,
+        CFFieldElement
+      >;
 
       // Display components
       "cf-text": CFDOM.DetailedHTMLProps<
@@ -5284,6 +5315,10 @@ declare global {
       "cf-separator": CFDOM.DetailedHTMLProps<
         CFSeparatorAttributes<CFSeparatorElement>,
         CFSeparatorElement
+      >;
+      "cf-empty-state": CFDOM.DetailedHTMLProps<
+        CFEmptyStateAttributes<CFEmptyStateElement>,
+        CFEmptyStateElement
       >;
       "cf-tile": CFDOM.DetailedHTMLProps<
         CFTileAttributes<CFTileElement>,

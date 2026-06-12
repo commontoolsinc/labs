@@ -4,7 +4,7 @@ import Note from "../notes/note.tsx";
 
 type Input = Record<string, never>;
 
-type Result = {
+export type Result = {
   counterAValue: number;
   counterBValue: number;
   counterCValue: number;

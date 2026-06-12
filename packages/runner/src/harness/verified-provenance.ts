@@ -19,9 +19,9 @@ import { VERIFIED_BINDING_METADATA_FIELD } from "@commonfabric/utils/sandbox-con
  * The WeakMap itself is the anti-spoof proof for CFC: an attacker-supplied
  * function — even with byte-identical source text — was never registered
  * during a verified evaluation, so it has no entry. There is no string key to
- * collide and no load scoping required. This replaces (and during the
- * transition runs alongside) the `implementationRef` × `verifiedLoadId`
- * registry checks; see docs/specs/content-addressed-action-identity.md.
+ * collide and no load scoping required. This replaced the former
+ * `implementationRef` × `verifiedLoadId` registry checks (deleted in PR E2);
+ * see docs/specs/content-addressed-action-identity.md.
  */
 export type VerifiedProvenance = {
   /** Module content identity (prefix-free `cf:module/<hash>` hash). */
@@ -32,6 +32,16 @@ export type VerifiedProvenance = {
   dynamic?: true;
   /** CT-1665 verified binding identity, when the factory carried one. */
   bindingIdentity?: { sourceFile: string; bindingPath: string[] };
+  /**
+   * The evaluating load's bundle id (hash of the program's concatenated
+   * compiled bodies). Transitional: stored legacy `writeAuthorizedBy` claims
+   * are keyed by bundleId only, and post-flip graphs resolve without a
+   * `verifiedLoadId` (no `implementationRef` to look one up by), so the live
+   * identity sources the bundle id from here instead. Retires together with
+   * the bundleId verification arm (see
+   * docs/specs/content-addressed-action-identity-implementation-plan.md, PR E).
+   */
+  bundleId?: string;
 };
 
 const provenanceByFn = new WeakMap<object, VerifiedProvenance>();
@@ -51,14 +61,15 @@ export function recordVerifiedProvenance(
   if (!provenanceByFn.has(fn)) provenanceByFn.set(fn, provenance);
 }
 
-/** The provenance for a function registered during verified evaluation. */
+/**
+ * The provenance for a function registered during verified evaluation. Only
+ * functions are ever recorded (see `recordVerifiedProvenance`), so any
+ * non-function key is a guaranteed miss.
+ */
 export function getVerifiedProvenance(
   fn: unknown,
 ): VerifiedProvenance | undefined {
-  if (typeof fn !== "function" && (typeof fn !== "object" || fn === null)) {
-    return undefined;
-  }
-  return provenanceByFn.get(fn as object);
+  return typeof fn === "function" ? provenanceByFn.get(fn) : undefined;
 }
 
 /**

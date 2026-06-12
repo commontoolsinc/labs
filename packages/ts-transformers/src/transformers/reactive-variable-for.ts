@@ -15,7 +15,7 @@ import {
 } from "../ast/mod.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
-import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
+import { isBrandedCellType } from "./opaque-ref/opaque-ref.ts";
 import {
   isPatternFactoryCalleeExpression,
   isPatternFactoryHelperExpression,
@@ -765,7 +765,7 @@ function shouldRetargetReactiveReference(
     context.options.logger,
   );
   if (type) {
-    return isOpaqueRefType(type, context.checker) ||
+    return isBrandedCellType(type, context.checker) ||
       isCellLikeType(type, context.checker);
   }
 

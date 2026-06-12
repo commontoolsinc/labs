@@ -8,7 +8,7 @@ import {
 
 // deno-lint-ignore no-empty-interface
 interface SliderStoryInput {}
-interface SliderStoryOutput {
+export interface SliderStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

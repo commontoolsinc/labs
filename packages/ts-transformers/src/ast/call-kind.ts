@@ -31,6 +31,7 @@
  */
 import ts from "typescript";
 
+import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";
 import { CF_HELPERS_IDENTIFIER } from "../core/cf-helpers.ts";
 import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
 import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
@@ -43,7 +44,7 @@ import {
 } from "../core/commonfabric-runtime-registry.ts";
 import {
   getCellKind,
-  isOpaqueRefType,
+  isBrandedCellType,
 } from "../transformers/opaque-ref/opaque-ref.ts";
 import { classifyOpaquePathTerminalCall } from "../transformers/opaque-roots.ts";
 import {
@@ -58,22 +59,21 @@ const ARRAY_OWNER_NAMES = new Set([
   "ReadonlyArray",
 ]);
 
-const OPAQUE_REF_OWNER_NAMES = new Set([
-  "OpaqueRefMethods",
-  "OpaqueRef",
-]);
-
-const CELL_LIKE_CLASSES = new Set([
-  "Cell",
-  "Writable", // Alias for Cell that better expresses write-access semantics
-  "OpaqueCell",
-  "Stream",
-  "ComparableCell",
-  "ReadonlyCell",
-  "WriteonlyCell",
-  "CellTypeConstructor",
-  "ScopedCellTypeConstructor",
-]);
+// Wrapper spellings whose method calls classify as cell-like (get/set/etc.).
+const CELL_LIKE_CLASSES = spellingsWhere({
+  Cell: true,
+  Writable: true,
+  OpaqueCell: true,
+  Stream: true,
+  ComparableCell: true,
+  ReadonlyCell: true,
+  WriteonlyCell: true,
+  CellTypeConstructor: true,
+  ScopedCellTypeConstructor: true,
+  SqliteDb: false,
+  OpaqueRef: false,
+  Reactive: false,
+});
 
 const CELL_FACTORY_NAMES = new Set(["of"]);
 const CELL_FOR_NAMES = new Set(["for"]);
@@ -963,7 +963,7 @@ export function isReactiveValueExpression(
 
       try {
         const type = checker.getTypeAtLocation(target);
-        if (isOpaqueRefType(type, checker)) {
+        if (isBrandedCellType(type, checker)) {
           return true;
         }
       } catch {
@@ -1072,7 +1072,7 @@ function hasReactiveCollectionProvenanceInternal(
       options.typeRegistry,
       options.logger,
     );
-    if (type && isOpaqueRefType(type, checker)) {
+    if (type && isBrandedCellType(type, checker)) {
       return true;
     }
   }
@@ -1908,10 +1908,7 @@ function resolveSymbolKind(
     const cellKind = detectCellMethodFromDeclaration(resolved, declaration);
     if (cellKind) return cellKind;
 
-    if (
-      isArrayMethodDeclaration(declaration) ||
-      isOpaqueRefMethodDeclaration(declaration)
-    ) {
+    if (isArrayMethodDeclaration(declaration)) {
       return { kind: "array-method", symbol: resolved };
     }
     if (
@@ -2123,14 +2120,6 @@ function isArrayMethodDeclaration(declaration: ts.Declaration): boolean {
     declaration,
     isKnownArrayMethodName,
     ARRAY_OWNER_NAMES,
-  );
-}
-
-function isOpaqueRefMethodDeclaration(declaration: ts.Declaration): boolean {
-  return isMethodDeclarationOwnedBy(
-    declaration,
-    isKnownArrayMethodName,
-    OPAQUE_REF_OWNER_NAMES,
   );
 }
 

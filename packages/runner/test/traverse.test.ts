@@ -82,8 +82,10 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
           search_web: {
             pattern: {
               result: {
-                $alias: {
-                  path: ["internal", "__#0"],
+                "/": {
+                  [LINK_V1_TAG]: {
+                    path: ["internal", "__#0"],
+                  },
                 },
               },
             },

@@ -1,5 +1,5 @@
 import type { Immutable } from "@commonfabric/utils/types";
-import type { CellScope, ImmutableJSONValue } from "@commonfabric/api";
+import type { CellScope } from "@commonfabric/api";
 import type {
   EntityDocument,
   PatchOp,
@@ -38,6 +38,7 @@ import { Cell } from "../cell.ts";
 import type {
   CfcDereferenceTrace,
   CfcEnforcementMode,
+  CfcFlowLabelsMode,
   CfcTxState,
   ImplementationIdentity,
   PostCommitSideEffect,
@@ -99,17 +100,10 @@ export interface IReadOptions {
   nonRecursive?: boolean;
 }
 
-// This type is used to tag a document with any important metadata.
-// Currently, the only supported type is confidentiality.
-export type Labels = {
-  confidentiality?: ImmutableJSONValue[];
-};
-
 /** Immutable storage value container. */
 export interface StorageValue<T extends FabricValue = FabricValue> {
   readonly value: Immutable<T>;
   readonly source?: EntityId;
-  readonly labels?: Immutable<Labels>;
 }
 
 /** Optional `StorageValue<T>`. */
@@ -131,6 +125,15 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * space.
    */
   open(space: MemorySpace): IStorageProviderWithReplica;
+
+  /**
+   * Record a runtime-learned host hint for a space (federation site
+   * table). Optional: managers without remote, per-space resolution
+   * (emulated/test) simply don't implement it. Returns true when the
+   * hint is in effect; false when refused (seeded differently, or the
+   * space's connection is already open to another host).
+   */
+  registerSpaceHost?(space: MemorySpace, host: string): boolean;
 
   /**
    * Close all storage providers
@@ -721,6 +724,19 @@ export interface IExtendedStorageTransaction
 
   getCfcState(): Readonly<CfcTxState>;
   setCfcEnforcementMode(mode: CfcEnforcementMode): void;
+  setCfcFlowLabelsMode(mode: CfcFlowLabelsMode): void;
+  /**
+   * Record the addresses whose invalidating writes scheduled this run
+   * (§8.9.2 trigger reads). Their labels join the flow-label derivation
+   * even when the run never re-reads them.
+   */
+  addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void;
+  /**
+   * Run `fn` with `meta` merged into every read issued within (explicit
+   * per-read meta wins). Lets scheduling machinery tag its reads without
+   * threading metadata through intermediate APIs.
+   */
+  runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T;
   markCfcRelevant(reason?: string): void;
   invalidateCfc(reason: string): void;
 

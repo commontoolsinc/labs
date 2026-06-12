@@ -41,7 +41,7 @@ export interface TextImportModuleInput {
 }
 
 // Output interface with unknown for UI properties to prevent OOM (CT-1148)
-interface TextImportModuleOutput {
+export interface TextImportModuleOutput {
   [NAME]: unknown;
   [UI]: unknown;
   content: string;

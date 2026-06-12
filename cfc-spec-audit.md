@@ -501,6 +501,37 @@ commits; every semantic _tightening_ lands in observe mode and rides the
 diagnostics channel before flipping to enforce; the "implemented well" list
 above is the do-not-regress set.
 
+### Remediation status — updated 2026-06-11
+
+The four wave bundles landed the bulk; several items had focused follow-up PRs,
+and a few sub-aspects remain phase work. Conservative status (✅ merged · ⚠️
+partial / sub-aspect deferred · 🔜 next-phase):
+
+| Item                                                                                  | Status | PR(s) / note                                                                                                                                                           |
+| ------------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1–8 — Wave 0 (S2, S3, S13, S17, S10, flow-precision, empty-maxConf, S14-min)          | ✅     | #3970                                                                                                                                                                  |
+| 9 cid: verify (S5), 10 integrity-mint (S4)                                            | ✅     | #3972 (Wave 1)                                                                                                                                                         |
+| 11 `["cfc"]`/`cid:`/`source` chokepoint (S18)                                         | ✅     | #3972, #3996 (+ follow-up #4029)                                                                                                                                       |
+| 12 SQLite column `ifc` (S8)                                                           | ✅     | #4021 — grow-only monotone merge                                                                                                                                       |
+| 13 default-mode + cf-test enforce flip                                                | ✅     | #3999                                                                                                                                                                  |
+| 14 vacuous-pass + ancestor reads (S7)                                                 | ⚠️     | #3973 (Wave 2) + #4015 (provenance-only reads don't gate); vacuous-pass tightening deferred (needs per-write provenance)                                               |
+| 15–18 — exactCopyOf, shared schema-IFC walker, integrity meet, labelMap monotone (S9) | ✅     | #3973 (observe-first)                                                                                                                                                  |
+| 19 SQL ceiling (S6), 20 trusted-event (S12), 23 sink-flush surfaced                   | ✅     | #3975 (Wave 3)                                                                                                                                                         |
+| 21 label-aware sink ceiling                                                           | ✅     | #3993                                                                                                                                                                  |
+| 22 LLM-observation fail-closed                                                        | ✅     | #4025 — read-error ≠ "no label"; ungrantable marker                                                                                                                    |
+| 24 `writeAuthorizedBy` union                                                          | 🔜     | next-phase ("coming soon")                                                                                                                                             |
+| 25 harness fixes                                                                      | ⚠️     | partly via wave bundles; not independently verified                                                                                                                    |
+| 26 render declassification (S15)                                                      | ✅     | #3994 — default-allow knob; product revisit pending                                                                                                                    |
+| 27 `enforce-strict` semantics                                                         | ✅     | no code — already distinguished (fuse `cfc-writeback` requires `parentAnnotation`)                                                                                     |
+| 28 hygiene                                                                            | ✅     | #4051 (28a dead-code) · #4052 (28b `Caveat.source` redaction at the `getCfcLabel` response) · 28c `/value` equivalence already documented · 28d §15 registry spec-side |
+| A1 session ACL (S1)                                                                   | ✅     | #3989                                                                                                                                                                  |
+| A2 server sole-acceptor of `["cfc"]`/`cid:`                                           | 🔜     | next-phase                                                                                                                                                             |
+
+Adjacent work also landed: S16 default-transition / flow-label propagation
+(#4011, #4012); content-addressed action identity B/C/D (#4008, #4009, #4013);
+one-runtime-per-identity (#3995). Still genuinely open: #24, A2, the S7
+vacuous-pass tightening, and same-tx instantiation + link-write.
+
 ### Wave 0 — close the bypasses (all small, independent)
 
 1. **`prepareCfc(input)` bypass (S2)** — always run `prepareBoundaryCommit`; the

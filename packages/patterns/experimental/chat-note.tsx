@@ -57,7 +57,7 @@ type LLMMessage = {
 };
 
 /** Represents a chat-enabled note with inline LLM conversations. */
-type Output = {
+export type Output = {
   [NAME]?: string;
   [UI]: VNode;
   mentioned: Array<MentionablePiece> | Default<[]>;
@@ -462,7 +462,7 @@ const ChatNote = pattern<Input, Output>(
             gap="2"
             padding="4"
             style={{
-              borderBottom: "1px solid var(--cf-color-border, #e5e5e7)",
+              borderBottom: "1px solid var(--cf-theme-color-border, #e5e5e7)",
             }}
           >
             {/* Parent notebook chip */}
@@ -477,7 +477,7 @@ const ChatNote = pattern<Input, Output>(
               <span
                 style={{
                   fontSize: "13px",
-                  color: "var(--cf-color-text-secondary)",
+                  color: "var(--cf-theme-color-text-secondary)",
                 }}
               >
                 In:
@@ -533,8 +533,8 @@ const ChatNote = pattern<Input, Output>(
                   padding: "4px 8px",
                   fontSize: "13px",
                   borderRadius: "6px",
-                  border: "1px solid var(--cf-color-border, #e5e5e7)",
-                  background: "var(--cf-color-bg, white)",
+                  border: "1px solid var(--cf-theme-color-border, #e5e5e7)",
+                  background: "var(--cf-theme-color-background, white)",
                   cursor: "pointer",
                 }}
               >

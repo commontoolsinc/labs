@@ -17,7 +17,7 @@ import {
   type GoogleAuthManagerOutput,
 } from "./google-auth-manager.tsx";
 
-interface TestOutput {
+export interface TestOutput {
   tests: unknown[];
   authDefault: GoogleAuthManagerOutput;
   authWithScopes: GoogleAuthManagerOutput;

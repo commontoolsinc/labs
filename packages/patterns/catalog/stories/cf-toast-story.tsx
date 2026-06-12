@@ -2,7 +2,7 @@ import { action, NAME, pattern, UI, type VNode, Writable } from "commonfabric";
 
 // deno-lint-ignore no-empty-interface
 interface ToastStoryInput {}
-interface ToastStoryOutput {
+export interface ToastStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

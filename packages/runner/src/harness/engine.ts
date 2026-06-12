@@ -63,6 +63,12 @@ import {
 import { setVerifiedFunctionRegistrar } from "../sandbox/function-hardening.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 import { ExecutableRegistry } from "./executable-registry.ts";
+import { isTrustedBuilderArtifact } from "../builder/pattern-metadata.ts";
+import {
+  identityFromCanonicalSource,
+  readBindingIdentity,
+  recordVerifiedProvenance,
+} from "./verified-provenance.ts";
 
 const logger = getLogger("engine");
 
@@ -140,7 +146,7 @@ export class Engine extends EventTarget implements Harness {
   private compilerInternals: CompilerInternals | undefined;
   private ctRuntime: Runtime;
   private sesRuntime: SESRuntime | undefined;
-  private nextLoadId = 0;
+  private nextEvalId = 0;
   // Content-addressed module hash per prefixed source path (`/<id>/file.tsx`),
   // populated at evaluate() time. Used to translate an action's bundle-relative
   // source location into a stable implementation identity.
@@ -506,7 +512,7 @@ export class Engine extends EventTarget implements Harness {
 
   /**
    * Compile + evaluate a program through the ESM module-record path,
-   * returning `{ main, exportMap, loadId }`.
+   * returning `{ main, exportMap }` plus the per-identity namespaces.
    */
   async compileAndEvaluateModules(
     program: RuntimeProgram,
@@ -553,30 +559,12 @@ export class Engine extends EventTarget implements Harness {
     // source-based compile and a source-free by-identity reload, breaking
     // `getExecutableFunction` for resumed callables (CT-1623).
     this.registerModuleHashesFromGraph(id, graph);
-    const verifiedSources = new Set<string>();
-    const addVerifiedSource = (value: string | undefined) => {
-      if (typeof value !== "string" || value.length === 0) return;
-      verifiedSources.add(normalizeVerifiedSource(value));
-      if (value.startsWith(`${prefix}/`)) {
-        verifiedSources.add(
-          normalizeVerifiedSource(value.slice(id.length + 1)),
-        );
-      }
-    };
-    for (const file of files) addVerifiedSource(file.name);
-    for (const path of graph.specifierByPath.keys()) addVerifiedSource(path);
-    // Canonical `cf:module/<hash>/<path>` forms — functions carry these as their
-    // `fn.src`, so CFC's isVerifiedSourceInLoad must recognize them too.
-    for (const canonical of this.canonicalVerifiedSources(id, files)) {
-      addVerifiedSource(canonical);
-    }
 
     return this.evaluateGraph(graph, mainSpecifier, {
-      loadIdPrefix: id,
+      evalIdPrefix: id,
       // Already registered above (idempotent); keep as a no-op so evaluateGraph
       // doesn't recompute the hashes a second time.
       registerHashes: () => {},
-      verifiedSources,
       fileNameForPath: (path) =>
         path.startsWith(prefix) ? path.slice(prefix.length) : path,
       filesForExports: files,
@@ -594,17 +582,20 @@ export class Engine extends EventTarget implements Harness {
     graph: CompiledModuleGraph,
     mainSpecifier: string,
     ctx: {
-      loadIdPrefix: string;
+      evalIdPrefix: string;
       registerHashes(): void;
-      verifiedSources: Set<string>;
       fileNameForPath(path: string): string;
       filesForExports: Source[];
     },
   ): EvaluateResult {
     logger.timeStart("evaluateRecordGraph");
     try {
-      const loadId = `${ctx.loadIdPrefix}:esm:${this.nextLoadId++}`;
-      this.executableRegistry.beginVerifiedLoad(loadId);
+      // Per-evaluation id, used ONLY to key this evaluation's synthetic
+      // source-map names (`${evalId}.js`). The former "verified load id" —
+      // which scoped CFC identity and registry partitions to a load — is gone
+      // (PR E2): identity flows through the content-addressed provenance
+      // recorded below.
+      const evalId = `${ctx.evalIdPrefix}:esm:${this.nextEvalId++}`;
       // Register per-module content hashes — this wires the scheduler's
       // content-addressed implementation hash. Source-location resolution (the
       // `indexOf`-into-`script` fallback plus the per-module source maps
@@ -622,16 +613,12 @@ export class Engine extends EventTarget implements Harness {
       // a from-zero scan, and any mis-attribution degrades fail-closed at the
       // CFC identity layer — see the fn.src note in the design doc.)
       const script = [...graph.compiledBodies.values()].join("\n");
-      this.executableRegistry.setVerifiedLoadBundleId(
-        loadId,
-        hashOf(script).toString(),
-      );
-      // Register a composed bundle source map for `${loadId}.js` so that
-      // `fn.src` / CFC verified-source coordinates (resolved against `script`)
-      // map back to the original authored sources — without this the ESM loader
-      // yields raw bundle coordinates and CFC verified-source fails closed.
-      // Full module path per specifier (the verified-source set is keyed by
-      // these, not the basename the compiler records in the map's `sources`).
+      const bundleId = hashOf(script).toString();
+      // Register a composed bundle source map for `${evalId}.js` so that
+      // `fn.src` coordinates (resolved against `script`) map back to the
+      // original authored sources — without this the ESM loader yields raw
+      // bundle coordinates and the CFC provenance src check fails closed.
+      // Full module path per specifier.
       const sourceNameBySpecifier = new Map<string, string>();
       for (const [name, specifier] of graph.specifierByPath) {
         sourceNameBySpecifier.set(specifier, name);
@@ -642,16 +629,16 @@ export class Engine extends EventTarget implements Harness {
           map: graph.moduleSourceMaps.get(specifier),
           source: sourceNameBySpecifier.get(specifier),
         })),
-        `${loadId}.js`,
+        `${evalId}.js`,
       );
       if (bundleSourceMap) {
-        this.getSESRuntime().loadSourceMap(`${loadId}.js`, bundleSourceMap);
+        this.getSESRuntime().loadSourceMap(`${evalId}.js`, bundleSourceMap);
       }
       // ALSO register each module's map under its eval `//# sourceURL` (its
       // sanitized source name). The browser surfaces the per-module eval frame
       // in `new Error().stack`, and `annotateFunctionDebugMetadata` resolves
       // `fn.src` from that frame FIRST (the indexOf-into-`script` fallback that
-      // `${loadId}.js` covers only wins when the stack frame is absent, e.g.
+      // `${evalId}.js` covers only wins when the stack frame is absent, e.g.
       // under Deno's tamed SES stacks). The frame is keyed on the per-module
       // sourceURL with eval-relative line numbers, so register the per-module
       // map shifted by the factory-wrapper line (`(function (...) {\n` = +1).
@@ -666,25 +653,23 @@ export class Engine extends EventTarget implements Harness {
         );
         if (moduleMap) this.getSESRuntime().loadSourceMap(sourceUrl, moduleMap);
       }
-      // Verified-load sources (the function source locations CFC's
-      // isVerifiedSourceInLoad recognizes) are computed by the caller, since the
-      // path/prefix convention — and the canonical `cf:module/<hash>/<path>`
-      // form — differs between the source-compile and cached load paths.
-      this.executableRegistry.setVerifiedLoadSources(
-        loadId,
-        ctx.verifiedSources,
-      );
 
-      // Register functions defined during this load as verified.
+      // Register functions minted during this evaluation into the global
+      // executable index — the retained legacy read path: a pre-flip stored
+      // graph (`implementationRef`, body omitted) resolves once its module
+      // re-evaluates and the builder re-mints the same content-derived refs.
       const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
-        this.executableRegistry.createVerifiedFunctionRegistrar(loadId),
+        (implementationRef, implementation) =>
+          this.executableRegistry.registerVerifiedFunction(
+            implementationRef,
+            implementation as HarnessedFunction,
+          ),
       );
       const frame = pushFrame({
         runtime: this.ctRuntime,
-        verifiedLoadId: loadId,
         sourceLocationContext: {
           script,
-          filename: `${loadId}.js`,
+          filename: `${evalId}.js`,
           nextSearchOffset: 0,
         },
       });
@@ -708,25 +693,6 @@ export class Engine extends EventTarget implements Harness {
       }
 
       const main = loaded.namespace as Exports;
-      this.executableRegistry.captureVerifiedValue(loadId, main);
-      // CT-1665: register verified binding metadata for NON-exported trusted
-      // handlers. The export-namespace capture above only reaches exported
-      // builders; a non-exported `const setName = handler(...)` is surfaced
-      // instead by the transformer's trailing `__cfReg({...})` into
-      // `graph.registrationSink` — the same registrations pattern-manager indexes
-      // for `{identity, symbol}` addressing. We reuse that ESM channel rather than
-      // a parallel registrar. The `__cfBindVerifiedBinding` annotations are already
-      // attached (it runs in the module body, ahead of the trailing `__cfReg`), so
-      // each registered factory carries its `__cfVerifiedBindingIdentity`.
-      const registrationCandidates: unknown[] = [];
-      for (const entries of graph.registrationSink.values()) {
-        for (const value of entries.values()) {
-          registrationCandidates.push(value);
-        }
-      }
-      this.executableRegistry.captureVerifiedBindingCandidates(
-        registrationCandidates,
-      );
 
       // Build the per-module export map (keyed by normalized source path) from
       // the SAME load, and map each exported value back to its RuntimeProgram
@@ -763,10 +729,24 @@ export class Engine extends EventTarget implements Harness {
           });
         }
       }
-      // Capture the export map too, so verified values from non-entry modules
-      // are indexed by the registry.
-      this.executableRegistry.captureVerifiedValue(loadId, exportMap);
       this.runtimeInternals?.exportsCallback(exportsByValue);
+
+      // Content-addressed CFC provenance: record it HERE, where functions
+      // become verified (this evaluation), rather than in the PatternManager's
+      // later indexing - so provenance covers every load path, including a
+      // pattern compiled by a standalone Engine and registered without going
+      // through `PatternManager.compilePattern`. Keyed by the implementation
+      // function object; gated on the same `isTrustedBuilderArtifact` brand the
+      // index uses, so forged values get nothing. This walk also carries the
+      // CT-1665 verified-binding identity for non-exported handlers: each
+      // `__cfReg`-registered factory already wears its
+      // `__cfVerifiedBindingIdentity` annotation, which recordModuleProvenance
+      // folds into the provenance entry.
+      this.recordModuleProvenance(
+        exportsByIdentity,
+        graph.registrationSink,
+        bundleId,
+      );
 
       // `graph.registrationSink` was populated by each module's `__cfReg` during
       // the `importNow` loop above (committed only for modules that evaluated
@@ -774,12 +754,75 @@ export class Engine extends EventTarget implements Harness {
       return {
         main,
         exportMap,
-        loadId,
         exportsByIdentity,
         registrationsByIdentity: graph.registrationSink,
       };
     } finally {
       logger.timeEnd("evaluateRecordGraph");
+    }
+  }
+
+  /**
+   * Record content-addressed CFC provenance for every trusted builder artifact
+   * surfaced by a verified evaluation — its exports (keyed by export name) and
+   * its `__cfReg` hoist/non-export registrations (keyed by the hoist symbol).
+   * Keyed by the artifact's implementation function object; the same gate the
+   * artifact index uses (`isTrustedBuilderArtifact`) keeps forged values out.
+   * First-write-wins (see `recordVerifiedProvenance`), so an export and a
+   * `__cfReg` entry for one artifact agree on a single canonical symbol.
+   */
+  private recordModuleProvenance(
+    exportsByIdentity: Map<string, Exports>,
+    registrationSink: Map<string, Map<string, unknown>>,
+    bundleId: string,
+  ): void {
+    const record = (identity: string, symbol: string, value: unknown) => {
+      if (!isTrustedBuilderArtifact(value)) return;
+      const implementation =
+        (value as { implementation?: unknown }).implementation ?? value;
+      if (typeof implementation !== "function") return;
+      // Reject a CONFIRMED cross-module mismatch: a re-exporting module
+      // (`export { setName } from "./defn"`) surfaces the same function under
+      // its own identity, but the function's canonical `fn.src` names its
+      // defining module. Provenance is first-write-wins and CFC fails closed on
+      // an identity/`fn.src` mismatch, so letting a re-exporter (possibly
+      // visited first) stamp its identity would make a valid verified artifact
+      // resolve as `unsupported`; dropping the re-exporter's record leaves the
+      // defining module's (matching) record to stick. A non-canonical `src`
+      // (e.g. a standalone-engine load whose src isn't rewritten to
+      // `cf:module/<hash>`) is left ALONE — recording it is harmless (CFC then
+      // fail-closes on its own src check), and blocking it would needlessly
+      // strip the `$implRef` such a module can still resolve by.
+      const srcIdentity = identityFromCanonicalSource(
+        (implementation as { src?: string }).src,
+      );
+      if (srcIdentity !== undefined && srcIdentity !== identity) return;
+      const bindingIdentity = readBindingIdentity(value);
+      recordVerifiedProvenance(implementation, {
+        identity,
+        symbol,
+        bundleId,
+        ...(bindingIdentity ? { bindingIdentity } : {}),
+      });
+      // The strong content-addressed implementation index — the resolution
+      // (and eviction-insurance) backing for serialized `$implRef`s; see
+      // `ExecutableRegistry.registerVerifiedImplementation`.
+      this.executableRegistry.registerVerifiedImplementation(
+        identity,
+        symbol,
+        implementation as HarnessedFunction,
+      );
+    };
+    for (const [identity, namespace] of exportsByIdentity) {
+      for (const [exportName, value] of Object.entries(namespace)) {
+        if (exportName === "__esModule") continue;
+        record(identity, exportName, value);
+      }
+    }
+    for (const [identity, entries] of registrationSink) {
+      for (const [symbol, value] of entries) {
+        record(identity, symbol, value);
+      }
     }
   }
 
@@ -858,23 +901,8 @@ export class Engine extends EventTarget implements Harness {
     }
     verifyModuleGraph(graph.records, mainSpecifier);
 
-    // Verified-load sources: normalized module paths (no `/<id>` prefix — the
-    // cached records use prefix-free filenames as their sourceURLs) plus the
-    // canonical `cf:module/<identity><filename>` forms that functions carry as
-    // their `fn.src` (so CFC's isVerifiedSourceInLoad recognizes them).
-    const verifiedSources = new Set<string>();
-    for (const m of modules) {
-      verifiedSources.add(normalizeVerifiedSource(m.filename));
-      verifiedSources.add(
-        normalizeVerifiedSource(`cf:module/${m.identity}${m.filename}`),
-      );
-    }
-    for (const path of graph.specifierByPath.keys()) {
-      verifiedSources.add(normalizeVerifiedSource(path));
-    }
-
     return this.evaluateGraph(graph, mainSpecifier, {
-      loadIdPrefix: entryIdentity,
+      evalIdPrefix: entryIdentity,
       // Register the KNOWN identities (keyed by normalized filename = the record
       // sourceURL) instead of recomputing from source — we have no source here,
       // and the identities are authoritative. Also populate the canonical
@@ -888,7 +916,6 @@ export class Engine extends EventTarget implements Harness {
           );
         }
       },
-      verifiedSources,
       fileNameForPath: (path) => path, // already normalized
       filesForExports: options.sourceFiles ?? [],
     });
@@ -913,76 +940,33 @@ export class Engine extends EventTarget implements Harness {
     return this.getSESRuntime().evaluateCallback(source) as HarnessedFunction;
   }
 
-  registerVerifiedFunction(
-    loadId: string,
-    implementationRef: string,
-    implementation: HarnessedFunction,
-  ): void {
-    this.executableRegistry.registerVerifiedFunction(
-      loadId,
-      implementationRef,
-      implementation,
-    );
-  }
-
   getVerifiedFunction(
     implementationRef: string,
-    patternId?: string,
   ): HarnessedFunction | undefined {
-    return this.executableRegistry.getVerifiedFunction(
-      implementationRef,
-      patternId,
-    );
-  }
-
-  getVerifiedFunctionInLoad(
-    loadId: string,
-    implementationRef: string,
-  ): HarnessedFunction | undefined {
-    return this.executableRegistry.getVerifiedFunctionInLoad(
-      loadId,
-      implementationRef,
-    );
-  }
-
-  isVerifiedSourceInLoad(loadId: string, source: string): boolean {
-    return this.executableRegistry.isVerifiedSourceInLoad(loadId, source);
-  }
-
-  getVerifiedBundleId(loadId: string): string | undefined {
-    return this.executableRegistry.getVerifiedBundleId(loadId);
-  }
-
-  getVerifiedBindingMetadata(
-    implementationRef: string,
-  ): { sourceFile?: string; bindingPath?: string[] } | undefined {
-    return this.executableRegistry.getVerifiedBindingMetadata(
-      implementationRef,
-    );
-  }
-
-  getVerifiedLoadId(
-    implementationRef: string,
-    patternId?: string,
-  ): string | undefined {
-    return this.executableRegistry.getVerifiedLoadId(
-      implementationRef,
-      patternId,
-    );
+    return this.executableRegistry.getVerifiedFunction(implementationRef);
   }
 
   getExecutableFunction(
     implementationRef: string,
-    patternId?: string,
   ): HarnessedFunction | undefined {
-    return this.executableRegistry.getExecutableFunction(
-      implementationRef,
-      patternId,
-    );
+    return this.executableRegistry.getExecutableFunction(implementationRef);
   }
 
-  associatePattern(patternId: string, value: unknown, loadId?: string): void {
-    this.executableRegistry.associatePattern(patternId, value, loadId);
+  getVerifiedImplementation(
+    identity: string,
+    symbol: string,
+  ): HarnessedFunction | undefined {
+    return this.executableRegistry.getVerifiedImplementation(identity, symbol);
+  }
+
+  registerDynamicVerifiedFunction(
+    implementationRef: string,
+    implementation: HarnessedFunction,
+  ): void {
+    this.executableRegistry.registerVerifiedFunction(
+      implementationRef,
+      implementation,
+    );
   }
 
   unsafeTrustHostValue(
@@ -1039,19 +1023,6 @@ export class Engine extends EventTarget implements Harness {
       (source.startsWith("/")
         ? undefined
         : this.canonicalSourceByPrefixed.get(`/${source}`));
-  }
-
-  // Canonical verified-source forms for a load, so CFC's isVerifiedSourceInLoad
-  // recognizes the `cf:module/<hash>/<path>` locations that functions now carry.
-  private canonicalVerifiedSources(id: string, files: Source[]): string[] {
-    const out: string[] = [];
-    for (const file of files) {
-      const canonical = this.canonicalSourceByPrefixed.get(
-        `/${id}${file.name}`,
-      );
-      if (canonical) out.push(canonical);
-    }
-    return out;
   }
 
   // Translate a source-location string into a stable content-addressed
@@ -1128,7 +1099,7 @@ export class Engine extends EventTarget implements Harness {
     this.sesRuntime = undefined;
     this.runtimeInternals = undefined;
     this.compilerInternals = undefined;
-    this.nextLoadId = 0;
+    this.nextEvalId = 0;
     this.executableRegistry.clear();
     this.moduleHashByPrefixedSource.clear();
     this.canonicalSourceByPrefixed.clear();
@@ -1147,12 +1118,6 @@ export class Engine extends EventTarget implements Harness {
     }
     return this.sesRuntime;
   }
-}
-
-function normalizeVerifiedSource(source: string): string {
-  const withoutFilePrefix = source.replace(/^file:\/\//, "");
-  const normalized = withoutFilePrefix.replace(/\\/g, "/");
-  return normalized.startsWith("/") ? normalized : `/${normalized}`;
 }
 
 function computeId(program: Program): string {

@@ -15,9 +15,9 @@ import {
   handler,
   NAME,
   navigateTo,
-  OpaqueRef,
   pattern,
   patternTool,
+  Reactive,
   Stream,
   UI,
   Writable,
@@ -43,7 +43,7 @@ interface Input {
 }
 
 /** Shopping list with AI-powered aisle sorting. #shoppingList */
-interface Output {
+export interface Output {
   items: ShoppingItem[];
   summary: string;
   totalCount: number;
@@ -51,9 +51,9 @@ interface Output {
   remainingCount: number;
   storeLayout: string;
   // Omnibot handlers
-  addItem: OpaqueRef<Stream<{ detail: { message: string } }>>;
-  addItemForOmnibot: OpaqueRef<Stream<{ itemText: string }>>;
-  addItems: OpaqueRef<Stream<{ itemNames: string[] }>>;
+  addItem: Reactive<Stream<{ detail: { message: string } }>>;
+  addItemForOmnibot: Reactive<Stream<{ itemText: string }>>;
+  addItems: Reactive<Stream<{ itemNames: string[] }>>;
 }
 
 // Demo store layout from Andronico's on Shattuck (community-patterns)
@@ -251,7 +251,8 @@ const openStoreMapper = handler<unknown, Record<string, never>>(
 );
 
 // Handler for removing an item
-const removeItem = handler<
+// Exported for tests.
+export const removeItem = handler<
   unknown,
   { items: Writable<ShoppingItem[]>; item: ShoppingItem }
 >((_event, { items, item }) => {
@@ -289,7 +290,11 @@ const closeCorrection = handler<
 });
 
 // Handler for selecting an aisle correction
-const selectAisle = handler<
+// Exported for tests. Writes through the element's cell (`.key(idx)`) —
+// rebuilding the array with a fresh object literal for the corrected item
+// would re-mint its entity identity and orphan previously-held references
+// (see packages/patterns/primitives/editable-list.tsx).
+export const selectAisle = handler<
   unknown,
   {
     items: Writable<ShoppingItem[]>;
@@ -302,15 +307,8 @@ const selectAisle = handler<
     const itemsList = items.get();
     const item = itemsList[idx];
     if (item) {
-      const updated = itemsList.map((i, index) =>
-        index === idx
-          ? {
-            ...i,
-            aisleOverride: selectedAisle, // Store user's selection
-          }
-          : i
-      );
-      items.set(updated);
+      // Store user's selection
+      items.key(idx).key("aisleOverride").set(selectedAisle);
     }
   }
   correctionIndex.set(-1);
@@ -396,7 +394,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
             <span
               style={{
                 fontSize: "13px",
-                color: "var(--cf-color-gray-500)",
+                color: "var(--cf-colors-gray-500)",
                 flex: 1,
               }}
             >
@@ -448,7 +446,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                       <div
                         style={{
                           textAlign: "center",
-                          color: "var(--cf-color-gray-500)",
+                          color: "var(--cf-colors-gray-500)",
                           padding: "2rem",
                         }}
                       >
@@ -535,8 +533,8 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                                 fontSize: "12px",
                                 padding: "4px 8px",
                                 borderRadius: "4px",
-                                background: "var(--cf-color-green-100)",
-                                color: "var(--cf-color-green-700)",
+                                background: "var(--cf-colors-green-100)",
+                                color: "var(--cf-colors-green-600)",
                               }}
                             >
                               {itemWithAisle.item.aisleOverride}
@@ -559,8 +557,8 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                                 fontSize: "12px",
                                 padding: "4px 8px",
                                 borderRadius: "4px",
-                                background: "var(--cf-color-blue-100)",
-                                color: "var(--cf-color-blue-700)",
+                                background: "var(--cf-colors-blue-100)",
+                                color: "var(--cf-colors-blue-600)",
                               }}
                             >
                               {itemWithAisle.aisle.result?.location || "Other"}

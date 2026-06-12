@@ -3,41 +3,36 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
-import {
-  trustedFlowPrecisionSchemaForBuiltin,
-} from "../src/cfc/flow-precision.ts";
+import { listResultSchema } from "../src/builtins/list-result-schema.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { type Opaque } from "../src/builder/types.ts";
+import { type JSONSchema, type Opaque } from "../src/builder/types.ts";
 
-const signer = await Identity.fromPassphrase("runner-cfc-flow-precision");
+const signer = await Identity.fromPassphrase("runner-list-result-schema");
 const space = signer.did();
 
-const flowPrecisionClaim = {
-  concept: "https://commonfabric.org/cfc/concepts/flow-taint-precision",
-  claims: [
-    { type: "PointwisePresencePreserved" },
-    { type: "PointwiseWriteDependency" },
-  ],
-};
+describe("listResultSchema", () => {
+  it("builds a plain array schema without item schema", () => {
+    expect(listResultSchema()).toEqual({ type: "array" });
+  });
 
-const elementLocalFlowPrecisionClaim = {
-  concept: "https://commonfabric.org/cfc/concepts/flow-taint-precision",
-  claims: [
-    { type: "ElementLocalExpansion" },
-    { type: "StableRelativeOrder" },
-  ],
-};
+  it("threads the item schema and hoists its $defs", () => {
+    const itemSchema = {
+      type: "object",
+      properties: { value: { $ref: "#/$defs/v" } },
+      $defs: { v: { type: "number" } },
+    } as JSONSchema;
+    expect(listResultSchema(itemSchema)).toEqual({
+      type: "array",
+      items: {
+        type: "object",
+        properties: { value: { $ref: "#/$defs/v" } },
+      },
+      $defs: { v: { type: "number" } },
+    });
+  });
 
-describe("CFC flow precision claims", () => {
-  it("keeps untrusted collection precision claims conservative", () => {
-    expect(trustedFlowPrecisionSchemaForBuiltin(undefined, "map"))
-      .toBeUndefined();
-    expect(
-      trustedFlowPrecisionSchemaForBuiltin(
-        { kind: "unsupported", className: "eval", reason: "test" },
-        "map",
-      ),
-    ).toBeUndefined();
+  it("supports boolean item schemas", () => {
+    expect(listResultSchema(true)).toEqual({ type: "array", items: true });
   });
 
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
@@ -50,7 +45,11 @@ describe("CFC flow precision claims", () => {
     storageManager = undefined;
   });
 
-  it("attaches trusted collection flow-precision claims to builtin outputs", async () => {
+  // Do-not-regress for the flowPrecisionClaim removal: list builtin result
+  // containers get plain array schemas with no ifc annotations. Pointwise
+  // label precision is structural (per-element ops run in their own
+  // transactions reading only their element), not a minted trusted claim.
+  it("attaches claim-free array schemas to list builtin outputs", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
     });
@@ -65,12 +64,11 @@ describe("CFC flow precision claims", () => {
     let mappedRef: any;
     let filteredRef: any;
     let flattenedRef: any;
-    let reducedRef: any;
 
     const tx = runtime.edit();
     const valuesCell = runtime.getCell(
       space,
-      "cfc-flow-precision-values",
+      "list-result-schema-values",
       {
         type: "array",
         items: { type: "number" },
@@ -98,21 +96,16 @@ describe("CFC flow precision claims", () => {
         ),
         {},
       );
-      reducedRef = values.reduce(
-        (acc: number, value: number) => acc + value,
-        0,
-      );
       return {
         mapped: mappedRef,
         filtered: filteredRef,
         flattened: flattenedRef,
-        reduced: reducedRef,
       };
     });
 
     const resultCell = runtime.getCell(
       space,
-      "cfc-flow-precision-result",
+      "list-result-schema-result",
       undefined,
       tx,
     );
@@ -126,15 +119,10 @@ describe("CFC flow precision claims", () => {
     await tx.commit();
     await result.pull();
 
-    expect(mappedRef.export().schema?.ifc?.flowPrecisionClaim).toEqual(
-      flowPrecisionClaim,
-    );
-    expect(filteredRef.export().schema?.ifc?.flowPrecisionClaim).toEqual(
-      elementLocalFlowPrecisionClaim,
-    );
-    expect(flattenedRef.export().schema?.ifc?.flowPrecisionClaim).toEqual(
-      elementLocalFlowPrecisionClaim,
-    );
-    expect(reducedRef.export().schema?.ifc?.flowPrecisionClaim).toBeUndefined();
+    for (const ref of [mappedRef, filteredRef, flattenedRef]) {
+      const schema = ref.export().schema;
+      expect(schema?.type).toBe("array");
+      expect(schema?.ifc).toBeUndefined();
+    }
   });
 });

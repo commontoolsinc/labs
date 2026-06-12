@@ -23,7 +23,7 @@ interface Input {
   items: Writable<Item[] | Default<[]>>;
 }
 
-interface Output {
+export interface Output {
   [NAME]: string;
   items: Item[];
   filteredItems: Item[];

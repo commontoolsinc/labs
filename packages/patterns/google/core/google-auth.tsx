@@ -270,7 +270,7 @@ interface Input {
 }
 
 /** Google OAuth authentication for Google APIs. #googleAuth */
-interface Output {
+export interface Output {
   auth: Auth;
   scopes: string[];
   selectedScopes: SelectedScopes;

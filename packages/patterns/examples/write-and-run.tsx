@@ -64,7 +64,7 @@ interface Input {
   prompt: string | Default<"Create a simple counter">;
 }
 
-interface Output {
+export interface Output {
   prompt: string;
 }
 

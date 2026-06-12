@@ -23,7 +23,7 @@ const runDecoy = handler<
   result.set(message);
 });
 
-type SendExampleOutput = {
+export type SendExampleOutput = {
   [NAME]: string;
   [UI]: unknown;
   conversationTitle?: string;
@@ -43,7 +43,7 @@ type SendExampleOutput = {
   triggerDecoy: Stream<void>;
 };
 
-type PublishExampleOutput = {
+export type PublishExampleOutput = {
   [NAME]: string;
   [UI]: unknown;
   targetAudience?: string;

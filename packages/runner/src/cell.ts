@@ -130,7 +130,7 @@ import {
   mergeCfcLabelViews,
   rebaseCfcLabelView,
 } from "./cfc/label-view-state.ts";
-import { flowPrecisionSchemaForBuiltin } from "./cfc/flow-precision.ts";
+import { listResultSchema } from "./builtins/list-result-schema.ts";
 import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
@@ -383,9 +383,6 @@ declare module "@commonfabric/api" {
     path: readonly PropertyKey[];
     copyTrap: boolean;
 
-    // TODO(seefeld): Remove once default schemas are properly propagated
-    setInitialValue(value: T): void;
-
     /** Set the self-reference for SELF symbol support in patterns */
     setSelfRef(selfRef: OpaqueRef<any>): void;
   }
@@ -450,7 +447,6 @@ const cellMethods = new Set<
   "connect",
   "export",
   "getAsOpaqueRefProxy",
-  "setInitialValue",
   "setSelfRef",
   "exec",
   "query",
@@ -1871,12 +1867,6 @@ export class CellImpl<T extends FabricValue>
     cellNodes.get(top)!.add(node);
   }
 
-  // TODO(seefeld): Remove once default schemas are properly propagated
-  private _initialValue?: T;
-  setInitialValue(value: T): void {
-    this._initialValue = value;
-  }
-
   /**
    * Export cell metadata for introspection, similar to OpaqueRef's export method.
    * If the cell has a link, it's included as 'external'.
@@ -1905,7 +1895,7 @@ export class CellImpl<T extends FabricValue>
       // Cast needed: stream sentinel marker isn't actually of type T
       value: this._kind === "stream"
         ? { $stream: true } as unknown as T
-        : this._initialValue,
+        : undefined,
       name: this._causeContainer.cause,
       external: this._link.id
         ? this.getAsWriteRedirectLink({
@@ -2065,10 +2055,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    const schema = flowPrecisionSchemaForBuiltin("map", op.resultSchema);
-    if (schema !== undefined) {
-      result.setSchema(schema);
-    }
+    result.setSchema(listResultSchema(op.resultSchema));
     return result;
   }
 
@@ -2158,10 +2145,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    const schema = flowPrecisionSchemaForBuiltin("filter");
-    if (schema !== undefined) {
-      result.setSchema(schema);
-    }
+    result.setSchema(listResultSchema());
     return result;
   }
 
@@ -2201,10 +2185,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    const schema = flowPrecisionSchemaForBuiltin("flatMap");
-    if (schema !== undefined) {
-      result.setSchema(schema);
-    }
+    result.setSchema(listResultSchema());
     return result;
   }
 
@@ -2946,10 +2927,22 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
         validateStaticData(value);
       }
 
+      // TODO(danfuzz): native values in a `Cell.of(...)` initial value are NOT
+      // normalized to their fabric form (e.g. a `Date` stays a raw `Date`
+      // instead of becoming a `FabricEpochNsec`), unlike the `set()` write path
+      // (which runs `recursivelyAddIDIfNeeded`). The raw value flows both into
+      // `setInitialValue()` and into the schema `default` via
+      // `schemaWithDefaultAndScope()` above, and reaches storage/encode from
+      // there -- so a `Cell.of(new Date())` throws under the strict codec.
+      // (Normalizing only the `setInitialValue()` arg is insufficient; the
+      // schema-`default` copy still leaks the raw value, and embedding a
+      // `FabricSpecialObject` in a hashed schema `default` is its own hazard.)
+      // Fixing this cleanly is entangled with the initial-value / schema-default
+      // materialization path; left for that follow-up.
+
       // Convert schema to object form and merge default value if value is defined
       // BUT: Don't embed Cell objects in the schema's default property, as this
       // causes infinite recursion when the schema is serialized
-      // TODO(ubik2): Use Cell links for default here once that's supported
       const schema = schemaWithDefaultAndScope(value, providedSchema, scope);
       const linkScope = scope ?? schemaCellScope(schema);
 
@@ -2966,23 +2959,6 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
         false,
         kind,
       );
-
-      // Set the initial value only if value is defined.
-      // TODO(danfuzz): native values in a `Cell.of(...)` initial value are NOT
-      // normalized to their fabric form (e.g. a `Date` stays a raw `Date`
-      // instead of becoming a `FabricEpochNsec`), unlike the `set()` write path
-      // (which runs `recursivelyAddIDIfNeeded`). The raw value flows both into
-      // `setInitialValue()` and into the schema `default` via
-      // `schemaWithDefaultAndScope()` above, and reaches storage/encode from
-      // there -- so a `Cell.of(new Date())` throws under the strict codec.
-      // (Normalizing only the `setInitialValue()` arg is insufficient; the
-      // schema-`default` copy still leaks the raw value, and embedding a
-      // `FabricSpecialObject` in a hashed schema `default` is its own hazard.)
-      // Fixing this cleanly is entangled with the initial-value / schema-default
-      // materialization path; left for that follow-up.
-      if (value !== undefined) {
-        cell.setInitialValue(value);
-      }
 
       return cell;
     };

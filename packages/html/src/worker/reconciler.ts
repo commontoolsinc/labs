@@ -29,6 +29,7 @@ import {
 import type { CellRef } from "@commonfabric/runtime-client";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
+import { isRecord } from "@commonfabric/utils/types";
 import type {
   ChildNodeState,
   NodeState,
@@ -41,8 +42,13 @@ import type {
   WorkerRenderNode,
   WorkerVNode,
 } from "./types.ts";
-import { isWorkerVNode } from "./types.ts";
 import {
+  isWorkerVNode,
+  normalizeRenderConfidentialityCeiling,
+  normalizeRenderDeclassificationPolicy,
+} from "./types.ts";
+import {
+  CFC_LABEL_READ_FAILED_ATOM,
   type CfcLabelView,
   cfcLabelViewForCell,
   markRendererTrustedEvent,
@@ -70,6 +76,9 @@ const TEXT_INTEGRITY_PROP_SINKS: ReadonlyMap<string, ReadonlySet<string>> =
 const DEFAULT_RENDER_POLICY: RenderPolicy = {
   declassifyConfidentiality: [],
 };
+// Mirrors CFC_ATOM_TYPE.Caveat in @commonfabric/api/cfc (not a dependency of
+// this package).
+const CFC_CAVEAT_ATOM_TYPE = "https://commonfabric.org/cfc/atom/Caveat";
 
 /**
  * Reserved node ID for the container element.
@@ -103,12 +112,29 @@ export class WorkerReconciler {
   private readonly onOps: (ops: VDomOp[]) => void;
   private readonly onError?: (error: Error) => void;
   private readonly renderDeclassificationPolicy: RenderDeclassificationPolicy;
+  // Root-of-tree render policy: the host's default ceiling when configured
+  // (spec §8.10.6), otherwise the historical unbounded policy. Authored
+  // boundaries can only narrow from here.
+  private readonly rootRenderPolicy: RenderPolicy;
 
   constructor(options: WorkerReconcilerOptions) {
     this.onOps = options.onOps;
     this.onError = options.onError;
-    this.renderDeclassificationPolicy = options.renderDeclassificationPolicy ??
-      "allow";
+    // Security knob: a present-but-unknown value fails closed to "deny";
+    // only an absent option keeps the documented "allow" default.
+    this.renderDeclassificationPolicy = normalizeRenderDeclassificationPolicy(
+      options.renderDeclassificationPolicy,
+    );
+    // Same seam discipline: malformed ceilings normalize to the empty
+    // (public-only) ceiling rather than crashing or failing open.
+    const ceiling = normalizeRenderConfidentialityCeiling(
+      options.renderConfidentialityCeiling,
+    );
+    this.rootRenderPolicy = ceiling === undefined ? DEFAULT_RENDER_POLICY : {
+      declassifyConfidentiality: [],
+      maxConfidentiality: [...(ceiling.atoms ?? [])],
+      caveatKindAllow: [...(ceiling.caveatKinds ?? [])],
+    };
   }
 
   /**
@@ -137,6 +163,15 @@ export class WorkerReconciler {
    * @param vnode - The root VNode, Cell<VNode>, or Cell<unknown> to mount
    * @returns A cancel function to unmount the tree
    */
+  /** Best-effort space of a cell; undefined when it can't name one. */
+  private spaceOfCell(cell: Cell<unknown>): string | undefined {
+    try {
+      return cell.space;
+    } catch {
+      return undefined;
+    }
+  }
+
   mount(vnode: WorkerVNode | Cell<WorkerVNode> | Cell<unknown>): Cancel {
     logger.debug(
       "mount",
@@ -148,7 +183,11 @@ export class WorkerReconciler {
       this.rootCancel();
     }
 
-    const ctx = this.createContext();
+    let ctx = this.createContext();
+    if (isCell(vnode)) {
+      const rootSpace = this.spaceOfCell(vnode);
+      if (rootSpace) ctx = { ...ctx, space: rootSpace };
+    }
     const [cancel, addCancel] = useCancelGroup();
 
     // Handle Cell<VNode> at the root
@@ -162,6 +201,25 @@ export class WorkerReconciler {
       addCancel(
         vnode.sink((resolvedVnode: unknown) => {
           logger.debug("root-cell-update", () => ({ resolvedVnode }));
+          // The mounted cell is an egress like any descendant cell: gate its
+          // own label against the root policy (the host ceiling when
+          // configured) before rendering its resolved content. Checked per
+          // update so label changes re-evaluate, mirroring renderCellChild.
+          if (
+            !this.canRenderCellUnderPolicy(
+              vnode as Cell<unknown>,
+              this.rootRenderPolicy,
+            )
+          ) {
+            this.reconcileIntoWrapper(
+              ctx,
+              wrapperState,
+              this.blockedPlaceholderVNode(),
+              this.rootRenderPolicy,
+            );
+            this.rootChildId = wrapperState.currentChild?.nodeId ?? null;
+            return;
+          }
           // Validate that the resolved value is a valid render node
           if (!this.isValidRenderNode(resolvedVnode)) {
             this.onError?.(
@@ -175,7 +233,7 @@ export class WorkerReconciler {
             ctx,
             wrapperState,
             resolvedVnode as WorkerRenderNode,
-            DEFAULT_RENDER_POLICY,
+            this.rootRenderPolicy,
           );
           // Track the root child for cleanup
           this.rootChildId = wrapperState.currentChild?.nodeId ?? null;
@@ -187,7 +245,7 @@ export class WorkerReconciler {
         ctx,
         vnode,
         new Set(),
-        DEFAULT_RENDER_POLICY,
+        this.rootRenderPolicy,
       );
       if (state) {
         addCancel(state.cancel);
@@ -384,6 +442,10 @@ export class WorkerReconciler {
           parentPolicy.maxConfidentiality,
           localMax,
         ),
+        // The host's caveat-kind allowance is part of the default ceiling
+        // profile; boundaries narrow maxConfidentiality but never widen or
+        // shed the kind allowance.
+        caveatKindAllow: parentPolicy.caveatKindAllow,
         declassifyConfidentiality: [
           ...parentPolicy.declassifyConfidentiality,
           ...declassifyConfidentiality,
@@ -762,7 +824,13 @@ export class WorkerReconciler {
         right.maxConfidentiality,
       );
 
-    return maxConfidentialityEquals &&
+    const caveatKindsEqual = (left.caveatKindAllow ?? []).length ===
+        (right.caveatKindAllow ?? []).length &&
+      (left.caveatKindAllow ?? []).every((kind, index) =>
+        kind === (right.caveatKindAllow ?? [])[index]
+      );
+
+    return maxConfidentialityEquals && caveatKindsEqual &&
       this.atomListsEqual(
         left.declassifyConfidentiality,
         right.declassifyConfidentiality,
@@ -823,26 +891,40 @@ export class WorkerReconciler {
         return true;
       }
       return schemaLabels.every((atom) =>
-        policy.declassifyConfidentiality.some((declassified) =>
-          deepEqual(declassified, atom)
-        ) ||
-        this.canRenderConfidentialityAtom(atom, policy)
+        this.atomRenderableUnderPolicy(atom, policy)
       );
     }
 
     for (const atom of this.confidentialityLabels(labelView)) {
-      if (
-        policy.declassifyConfidentiality.some((declassified) =>
-          deepEqual(declassified, atom)
-        )
-      ) {
-        continue;
-      }
-      if (!this.canRenderConfidentialityAtom(atom, policy)) {
+      if (!this.atomRenderableUnderPolicy(atom, policy)) {
         return false;
       }
     }
     return true;
+  }
+
+  /**
+   * Per-atom admission under a render policy. The read-failure marker is
+   * UNGRANTABLE (audit item 22): it means "the label could not be read", so
+   * neither author declassification nor a ceiling entry — even one naming
+   * the exported marker string — may admit it. Every other atom checks
+   * declassification first, then the ceiling.
+   */
+  private atomRenderableUnderPolicy(
+    atom: unknown,
+    policy: RenderPolicy,
+  ): boolean {
+    if (deepEqual(atom, CFC_LABEL_READ_FAILED_ATOM)) {
+      return false;
+    }
+    if (
+      policy.declassifyConfidentiality.some((declassified) =>
+        deepEqual(declassified, atom)
+      )
+    ) {
+      return true;
+    }
+    return this.canRenderConfidentialityAtom(atom, policy);
   }
 
   private confidentialityLabels(labelView: CfcLabelView): readonly unknown[] {
@@ -877,7 +959,22 @@ export class WorkerReconciler {
     if (max === undefined) {
       return true;
     }
-    return max.some((allowed) => deepEqual(allowed, atom));
+    if (max.some((allowed) => deepEqual(allowed, atom))) {
+      return true;
+    }
+    // Default-ceiling caveat-kind allowance (spec §8.10.6): Caveat-type
+    // atoms of an allow-listed kind render — these are the
+    // display-dischargeable classes (e.g. prompt influence), admitted by
+    // kind rather than by enumerating every (kind, source) instance.
+    const kinds = policy.caveatKindAllow;
+    if (
+      kinds !== undefined && kinds.length > 0 &&
+      isRecord(atom) && atom.type === CFC_CAVEAT_ATOM_TYPE &&
+      typeof atom.kind === "string" && kinds.includes(atom.kind)
+    ) {
+      return true;
+    }
+    return false;
   }
 
   private refreshTextIntegrityBoundary(
@@ -2171,9 +2268,23 @@ export class WorkerReconciler {
       return null;
     }
 
-    // Create element
+    // Create element. Stamp the producing cell's space when it differs
+    // from the nearest ancestor element that carried one — descendants
+    // inherit, so transcluded subtrees re-stamp at their boundary.
+    const stampSpace = ctx.space !== undefined &&
+        ctx.space !== ctx.emittedSpace
+      ? ctx.space
+      : undefined;
     const nodeId = ctx.nextNodeId();
-    this.queueOps([{ op: "create-element", nodeId, tagName: sanitized.name }]);
+    this.queueOps([{
+      op: "create-element",
+      nodeId,
+      tagName: sanitized.name,
+      ...(stampSpace !== undefined ? { space: stampSpace } : {}),
+    }]);
+    if (stampSpace !== undefined) {
+      ctx = { ...ctx, emittedSpace: stampSpace };
+    }
     const childPolicy = this.childRenderPolicyForNode(
       sanitized,
       policy,
@@ -2882,6 +2993,12 @@ export class WorkerReconciler {
     childKey: string,
     policy: RenderPolicy,
   ): ChildNodeState {
+    // A followed cell is a (potential) transclusion boundary: its
+    // subtree renders in the CELL's space, not the surrounding one.
+    const cellSpace = this.spaceOfCell(cell);
+    if (cellSpace !== undefined && cellSpace !== ctx.space) {
+      ctx = { ...ctx, space: cellSpace };
+    }
     const [cancel, addCancel] = useCancelGroup();
 
     // Create child state that will track the current node

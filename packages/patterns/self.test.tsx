@@ -232,13 +232,13 @@ export default pattern(() => {
   const ownedModel = computed(() => selfOwned.selfModel);
 
   const assert_owned_responses_empty = computed(
-    () => ownedModel.responses.length === 0,
+    () => ownedModel.get().responses.length === 0,
   );
   const assert_owned_values_empty = computed(
-    () => ownedModel.values.length === 0,
+    () => ownedModel.get().values.length === 0,
   );
   const assert_owned_neurotypes_empty = computed(
-    () => ownedModel.neurotypes.length === 0,
+    () => ownedModel.get().neurotypes.length === 0,
   );
 
   // =========================================================================

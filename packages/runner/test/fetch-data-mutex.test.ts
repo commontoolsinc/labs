@@ -201,7 +201,8 @@ describe("fetch-data mutex mechanism", () => {
   it("uses a stable fetchData idempotency key for identical inputs", async () => {
     const fetchData = byRef("fetchData");
     const testPattern = pattern<{ url: string }>(
-      ({ url }) => fetchData({ url, mode: "json" }),
+      ({ url }) =>
+        fetchData({ url, mode: "json", options: { mutexTimeoutMs: 30_000 } }),
     );
 
     const txPrototype = ExtendedStorageTransaction.prototype;
@@ -238,6 +239,11 @@ describe("fetch-data mutex mechanism", () => {
         mode: "json",
       });
 
+      expect(computeInputHashFromValue({
+        url: "http://mock-test-server.local/api/idempotency",
+        mode: "json",
+        options: { mutexTimeoutMs: 30_000 },
+      })).toBe(expectedHash);
       expect(outboxIds.length).toBeGreaterThan(0);
       expect(outboxIds[0]).toBe(`fetchData:${expectedHash}`);
     } finally {
@@ -424,6 +430,51 @@ describe("fetch-data mutex mechanism", () => {
 
     // Should have made additional fetch calls for the different mode
     expect(fetchCalls.length).toBeGreaterThan(jsonCallCount);
+  });
+
+  it("converts dataUrl mode responses into a serializable data URL", async () => {
+    globalThis.fetch = (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.toString()
+        : input.url;
+      fetchCalls.push({ url, init });
+      return Promise.resolve(
+        new Response(new Uint8Array([1, 2, 3, 4]), {
+          status: 200,
+          headers: { "Content-Type": "image/webp" },
+        }),
+      );
+    };
+
+    const fetchData = byRef("fetchData");
+    const testPattern = pattern<{ url: string }>(
+      ({ url }) => fetchData({ url, mode: "dataUrl" }),
+    );
+
+    const resultCell = runtime.getCell(space, "data-url-test", undefined, tx);
+    const result = runtime.run(tx, testPattern, {
+      url: "/api/image",
+    }, resultCell);
+    tx.commit();
+
+    await result.pull();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await result.pull();
+
+    const rawData = result.get() as {
+      pending: boolean;
+      result?: string;
+      error?: unknown;
+    };
+
+    expect(rawData.pending).toBe(false);
+    expect(rawData.error).toBeUndefined();
+    expect(rawData.result).toBe("data:image/webp;base64,AQIDBA==");
   });
 
   it("should set pending to true during fetch and false after", async () => {

@@ -53,10 +53,13 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
         (log) => log.habitName === habitName && log.date === todayDate,
       );
       if (existingIdx >= 0) {
-        const updated = currentLogs.map((log, i) =>
-          i === existingIdx ? { ...log, completed: !log.completed } : log
+        // Write through the element's cell — replacing the array slot with a
+        // fresh object literal would re-mint the log's entity identity and
+        // orphan previously-held references (see
+        // packages/patterns/primitives/editable-list.tsx).
+        logs.key(existingIdx).key("completed").set(
+          !currentLogs[existingIdx].completed,
         );
-        logs.set(updated);
       } else {
         logs.push({ habitName, date: todayDate, completed: true });
       }
@@ -122,7 +125,7 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
                 <span style="font-weight: 500;">
                   {habit.name || "(unnamed)"}
                 </span>
-                <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
                   Streak: {streak} days
                 </span>
               </cf-vstack>
@@ -158,14 +161,14 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
                       borderRadius: "4px",
                       backgroundColor: dayCompleted
                         ? habit.color
-                        : "var(--cf-color-gray-200)",
+                        : "var(--cf-colors-gray-200)",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       fontSize: "0.625rem",
                       color: dayCompleted
                         ? "white"
-                        : "var(--cf-color-gray-400)",
+                        : "var(--cf-colors-gray-400)",
                     }}
                   >
                     {date.slice(-2)}
@@ -185,7 +188,7 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
           <cf-vstack slot="header" gap="2">
             <cf-hstack justify="between" align="center">
               <cf-heading level={4}>Habits ({habitCount})</cf-heading>
-              <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
+              <span style="font-size: 0.875rem; color: var(--cf-colors-gray-500);">
                 {todayDate}
               </span>
             </cf-hstack>
@@ -198,7 +201,7 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
               {computed(() =>
                 habits.get().length === 0
                   ? (
-                    <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
+                    <div style="text-align: center; color: var(--cf-colors-gray-500); padding: 2rem;">
                       No habits yet. Add one below!
                     </div>
                   )

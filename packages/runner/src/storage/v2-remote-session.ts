@@ -47,6 +47,13 @@ export const MEMORY_STORAGE_PATH = "/api/storage/memory";
 export const createStorageAddressResolver = (
   defaultHost: URL,
   spaceHostMap?: Record<string, string>,
+  /**
+   * Late-bound host hints (space DID → host base URL) learned at
+   * runtime, e.g. from the home-space site table. Consulted AFTER the
+   * seed map and BEFORE the default. The caller owns mutation rules
+   * (a hint must never re-point an already-opened space).
+   */
+  dynamicHosts?: ReadonlyMap<string, string>,
 ): (space: MemorySpace) => URL => {
   const overrides = new Map<string, URL>();
   for (const [space, host] of Object.entries(spaceHostMap ?? {})) {
@@ -60,7 +67,13 @@ export const createStorageAddressResolver = (
     }
   }
   const fallback = new URL(MEMORY_STORAGE_PATH, defaultHost);
-  return (space) => new URL(overrides.get(space) ?? fallback);
+  return (space) => {
+    const seeded = overrides.get(space);
+    if (seeded) return new URL(seeded);
+    const dynamic = dynamicHosts?.get(space);
+    if (dynamic) return new URL(MEMORY_STORAGE_PATH, dynamic);
+    return new URL(fallback);
+  };
 };
 
 class WebSocketTransport implements MemoryClient.Transport {

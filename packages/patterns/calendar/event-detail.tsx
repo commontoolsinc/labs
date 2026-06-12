@@ -22,7 +22,7 @@ interface EventDetailInput {
  * Output shape of the event piece - this is what gets stored in calendars
  * #event
  */
-interface EventDetailOutput {
+export interface EventDetailOutput {
   [NAME]: string;
   [UI]: VNode;
   title: string;
@@ -70,7 +70,7 @@ export default pattern<EventDetailInput, EventDetailOutput>(
               <cf-card>
                 <cf-vstack gap="2">
                   <cf-vstack gap="1">
-                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
+                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-colors-gray-500);">
                       Title
                     </label>
                     <cf-input $value={title} placeholder="Event title" />
@@ -78,14 +78,14 @@ export default pattern<EventDetailInput, EventDetailOutput>(
 
                   <cf-hstack gap="2">
                     <cf-vstack gap="1" style="flex: 1;">
-                      <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
+                      <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-colors-gray-500);">
                         Date
                       </label>
                       <cf-input $value={date} type="date" />
                     </cf-vstack>
 
                     <cf-vstack gap="1" style="flex: 1;">
-                      <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
+                      <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-colors-gray-500);">
                         Time
                       </label>
                       <cf-input $value={time} type="time" />
@@ -96,7 +96,7 @@ export default pattern<EventDetailInput, EventDetailOutput>(
 
               <cf-card>
                 <cf-vstack gap="1">
-                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
+                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-colors-gray-500);">
                     Notes
                   </label>
                   <cf-textarea

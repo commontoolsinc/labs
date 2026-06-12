@@ -1,7 +1,7 @@
 import ts from "typescript";
 import {
   getCellKind,
-  isOpaqueRefType,
+  isBrandedCellType,
 } from "../transformers/opaque-ref/opaque-ref.ts";
 import {
   getTypeAtLocationWithFallback,
@@ -270,7 +270,7 @@ export function isCellLikeType(
 ): boolean {
   if (!type) return false;
   return getCellKind(type, checker) !== undefined ||
-    isOpaqueRefType(type, checker);
+    isBrandedCellType(type, checker);
 }
 
 /**
@@ -301,7 +301,7 @@ export function unwrapOpaqueLikeType(
     // For OpaqueRef<T> = OpaqueCell<T> & OpaqueRefInner<T>, we want to extract T
     // Look for an OpaqueCell<T> part and extract its type argument
     for (const part of type.types) {
-      if (isOpaqueRefType(part, checker)) {
+      if (isBrandedCellType(part, checker)) {
         const inner = getTypeReferenceArgument(part);
         if (inner) {
           // Recursively unwrap in case T itself contains OpaqueRef types
@@ -322,7 +322,7 @@ export function unwrapOpaqueLikeType(
     return type;
   }
 
-  if (isOpaqueRefType(type, checker)) {
+  if (isBrandedCellType(type, checker)) {
     const inner = unwrapOpaqueLikeType(
       getTypeReferenceArgument(type),
       checker,
@@ -786,7 +786,7 @@ function findOpaqueRefInUnion(
   for (const member of unionType.types) {
     if (
       member.flags & ts.TypeFlags.Intersection ||
-      isOpaqueRefType(member, checker)
+      isBrandedCellType(member, checker)
     ) {
       return member;
     }
@@ -1089,7 +1089,7 @@ function isEffectiveArrayMember(
 
 /**
  * Helper to check if a type's type argument is an array.
- * Handles unions and intersections recursively, similar to isOpaqueRefType.
+ * Handles unions and intersections recursively, similar to isBrandedCellType.
  */
 export function hasArrayTypeArgument(
   type: ts.Type,

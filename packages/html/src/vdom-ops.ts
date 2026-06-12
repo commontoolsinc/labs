@@ -14,6 +14,14 @@ export interface CreateElementOp {
   op: "create-element";
   nodeId: number;
   tagName: string;
+  /**
+   * The space of the cell whose render produced this element, present
+   * only when it differs from the nearest ancestor element that
+   * carried one. The applicator turns it into the element's context
+   * space, so components inside a rendered pattern act in the PIECE's
+   * space — correct across cross-space transclusion.
+   */
+  space?: string;
 }
 
 /**

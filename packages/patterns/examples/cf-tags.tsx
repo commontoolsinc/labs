@@ -4,7 +4,7 @@ type Input = {
   tags: string[];
 };
 
-type Result = {
+export type Result = {
   tags: string[] | Default<[]>;
 };
 

@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { getPropertyNameText } from "@commonfabric/schema-generator/property-name";
+import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";
 import {
   createRegisteredTypeLiteral,
   typeToTypeNodeWithRegistry,
@@ -690,18 +691,30 @@ function findPropertySymbol(
   return undefined;
 }
 
+// Wrapper spellings the shrinking pass treats as cell-like type NODES (the
+// reference may carry capability narrowing rather than a structural change).
+const CELL_LIKE_TYPE_NODE_NAMES = spellingsWhere({
+  Cell: true,
+  Writable: true,
+  OpaqueCell: true,
+  OpaqueRef: true,
+  Reactive: true,
+  ComparableCell: true,
+  ReadonlyCell: true,
+  WriteonlyCell: true,
+  Stream: true,
+  // SqliteDb references are not rewritten by shrinking; the brand survives
+  // capability shrinking via its own path (#3860).
+  SqliteDb: false,
+  CellTypeConstructor: false,
+  ScopedCellTypeConstructor: false,
+});
+
 export function isCellLikeTypeNode(node: ts.TypeNode): boolean {
   if (!ts.isTypeReferenceNode(node)) return false;
   const name = getTypeReferenceNodeName(node);
   if (!name) return false;
-  return name === "Cell" ||
-    name === "Writable" ||
-    name === "OpaqueCell" ||
-    name === "OpaqueRef" ||
-    name === "ComparableCell" ||
-    name === "ReadonlyCell" ||
-    name === "WriteonlyCell" ||
-    name === "Stream";
+  return CELL_LIKE_TYPE_NODE_NAMES.has(name);
 }
 
 function getTypeReferenceNodeName(
@@ -908,7 +921,12 @@ function buildShrunkTypeNodeFromType(
       ) ?? checker.getIndexTypeOfType(type, ts.IndexKind.String);
       if (!indexType) continue;
       propType = indexType;
-      isOptional = typeIncludesUndefined(indexType);
+      // An index signature types whatever keys happen to exist — it never
+      // guarantees this particular key is present. The shrunken property must
+      // be optional, or the injected schema marks it `required` and values
+      // lacking the key fail validation (the whole capture then reads
+      // undefined at runtime).
+      isOptional = true;
     }
 
     const hasDirectAccess = childPaths.some((path) => path.length === 0);

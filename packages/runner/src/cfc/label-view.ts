@@ -8,6 +8,7 @@ import {
 import type { Runtime } from "../runtime.ts";
 import { readStoredCfcMetadata } from "./metadata.ts";
 import type { CfcMetadata } from "./types.ts";
+import { CFC_LABEL_READ_FAILED_ATOM } from "./observation.ts";
 import {
   type CfcLabelView,
   type CfcLabelViewEntry,
@@ -26,6 +27,7 @@ export {
   mergeCfcLabelViews,
   rebaseCfcLabelView,
 } from "./label-view-state.ts";
+export { redactCaveatSourcesForDisplay } from "./label-view-core.ts";
 
 type LabelQueryableCell = {
   getAsNormalizedFullLink(): NormalizedFullLink;
@@ -38,87 +40,149 @@ type LinkedValueMetadata = {
   path: readonly string[];
 };
 
+// `readFailed` distinguishes a genuine metadata read error (fail closed) from a
+// cleanly-absent label (`readOrThrow` already maps NotFound/TypeMismatch to
+// undefined without throwing, so those are NOT failures).
+type StoredMetadataResult = {
+  metadata: CfcMetadata | undefined;
+  readFailed: boolean;
+};
+
+type LinkedValueMetadataResult = {
+  linkedValue: LinkedValueMetadata | undefined;
+  readFailed: boolean;
+};
+
+export type CfcLabelViewStatus = {
+  view: CfcLabelView | undefined;
+  readFailed: boolean;
+};
+
 const storedMetadataForCell = (
   cell: LabelQueryableCell,
   link: NormalizedFullLink,
-): CfcMetadata | undefined => {
+): StoredMetadataResult => {
   if (!cell.runtime) {
-    return undefined;
+    return { metadata: undefined, readFailed: false };
   }
   try {
-    return readStoredCfcMetadata(
-      cell.runtime.readTx(cell.tx),
-      {
-        space: link.space,
-        id: link.id,
-      },
-    );
+    return {
+      metadata: readStoredCfcMetadata(
+        cell.runtime.readTx(cell.tx),
+        {
+          space: link.space,
+          id: link.id,
+        },
+      ),
+      readFailed: false,
+    };
   } catch {
-    return undefined;
+    return { metadata: undefined, readFailed: true };
   }
 };
 
 const linkedValueMetadataForCell = (
   cell: LabelQueryableCell,
   link: NormalizedFullLink,
-): LinkedValueMetadata | undefined => {
+): LinkedValueMetadataResult => {
   if (!cell.runtime || link.path.length === 0) {
-    return undefined;
+    return { linkedValue: undefined, readFailed: false };
   }
   try {
     const tx = cell.runtime.readTx(cell.tx);
     const value = tx.readValueOrThrow(link);
     if (!isPrimitiveCellLink(value)) {
-      return undefined;
+      return { linkedValue: undefined, readFailed: false };
     }
     const target = parseLink(value, link);
     if (target?.id === undefined || target.space === undefined) {
-      return undefined;
+      return { linkedValue: undefined, readFailed: false };
     }
     const metadata = readStoredCfcMetadata(tx, {
       space: target.space,
       id: target.id,
       scope: target.scope,
     });
-    return metadata === undefined ? undefined : { metadata, path: target.path };
+    return {
+      linkedValue: metadata === undefined
+        ? undefined
+        : { metadata, path: target.path },
+      readFailed: false,
+    };
   } catch {
-    return undefined;
+    return { linkedValue: undefined, readFailed: true };
   }
 };
 
-export const cfcLabelViewForCell = (
+/**
+ * Acquire a cell's display label view AND report whether a metadata read
+ * errored while doing so. `cfcLabelViewForCell` drops the flag (the common
+ * consumers treat a missing view as blocked); the LLM-observation path consults
+ * it via `cfcLabelViewForCellFailClosed`.
+ */
+export const cfcLabelViewForCellWithStatus = (
   cell: unknown,
-): CfcLabelView | undefined => {
+): CfcLabelViewStatus => {
   if (
     !isRecord(cell) ||
     typeof cell.getAsNormalizedFullLink !== "function"
   ) {
-    return getCarriedCfcLabelView(cell);
+    return { view: getCarriedCfcLabelView(cell), readFailed: false };
   }
 
   let link: NormalizedFullLink;
   try {
     link = (cell as LabelQueryableCell).getAsNormalizedFullLink();
   } catch {
-    return getCarriedCfcLabelView(cell);
+    return { view: getCarriedCfcLabelView(cell), readFailed: false };
   }
 
-  const metadataView = cfcLabelViewFromMetadata(
-    storedMetadataForCell(cell as LabelQueryableCell, link),
-    link.path,
-  );
-  const linkedValue = linkedValueMetadataForCell(
-    cell as LabelQueryableCell,
-    link,
-  );
+  const stored = storedMetadataForCell(cell as LabelQueryableCell, link);
+  const metadataView = cfcLabelViewFromMetadata(stored.metadata, link.path);
+  const linked = linkedValueMetadataForCell(cell as LabelQueryableCell, link);
   const linkedValueView = cfcLabelViewFromMetadata(
-    linkedValue?.metadata,
-    linkedValue?.path ?? [],
+    linked.linkedValue?.metadata,
+    linked.linkedValue?.path ?? [],
   );
 
+  return {
+    view: mergeCfcLabelViews([
+      metadataView,
+      linkedValueView,
+      getCarriedCfcLabelView(cell),
+    ]),
+    readFailed: stored.readFailed || linked.readFailed,
+  };
+};
+
+export const cfcLabelViewForCell = (
+  cell: unknown,
+): CfcLabelView | undefined => cfcLabelViewForCellWithStatus(cell).view;
+
+/**
+ * Fail-closed label acquisition for the LLM-observation egress path (audit 22).
+ * Identical to `cfcLabelViewForCell` EXCEPT that when a metadata read errored,
+ * the returned view is tainted at the root with `CFC_LABEL_READ_FAILED_ATOM`, so
+ * every observation node under it fails any declared confidentiality ceiling and
+ * is redacted rather than serialized to the model as public. A cleanly-absent
+ * label (no read error) is unchanged, so normal unlabelled data is not
+ * over-redacted.
+ */
+export const cfcLabelViewForCellFailClosed = (
+  cell: unknown,
+): CfcLabelView | undefined => {
+  const { view, readFailed } = cfcLabelViewForCellWithStatus(cell);
+  if (!readFailed) {
+    return view;
+  }
   return mergeCfcLabelViews([
-    metadataView,
-    linkedValueView,
-    getCarriedCfcLabelView(cell),
+    view,
+    {
+      version: 1,
+      entries: [{
+        path: [],
+        label: { confidentiality: [CFC_LABEL_READ_FAILED_ATOM] },
+      }],
+    },
   ]);
 };

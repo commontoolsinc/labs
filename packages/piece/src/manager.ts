@@ -199,7 +199,13 @@ export class PieceManager {
   async getPieces(): Promise<Cell<Cell<unknown>[]>> {
     const defaultPattern = await this.getDefaultPattern(true);
     if (!defaultPattern) {
-      // Return empty array cell if no default pattern
+      // Return empty array cell if no default pattern. Loud on purpose: any
+      // subscription made against this placeholder never fires again, so a
+      // cold-cache miss here silently freezes piece listings (e.g. FUSE).
+      console.warn(
+        `getPieces: no default pattern found for space ${this.space}; ` +
+          "returning detached empty piece list",
+      );
       return this.runtime.getCell(this.space, "empty-pieces", pieceListSchema);
     }
 

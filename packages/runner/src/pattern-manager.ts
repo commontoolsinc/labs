@@ -1,15 +1,13 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import { isPattern, Module, Pattern, Schema } from "./builder/types.ts";
+import { Module, Pattern, Schema } from "./builder/types.ts";
 import {
   getArtifactEntryRef,
   getPatternProgram,
-  getVerifiedLoadId,
   isTrustedBuilderArtifact,
   isTrustedPattern,
   resolveOriginal,
   setArtifactEntryRef,
   setPatternProgram,
-  setVerifiedLoadId,
 } from "./builder/pattern-metadata.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Cell, createCell } from "./cell.ts";
@@ -23,11 +21,6 @@ import type {
 } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { CachedCompiledModule } from "./sandbox/module-record-compiler.ts";
-import {
-  identityFromCanonicalSource,
-  readBindingIdentity,
-  recordVerifiedProvenance,
-} from "./harness/verified-provenance.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   COMPILE_CACHE_RUNTIME_VERSION,
@@ -37,7 +30,6 @@ import {
   writeCompiledDocs,
   writeSourceDocs,
 } from "./compilation-cache/cell-cache.ts";
-import { getTopFrame } from "./builder/pattern.ts";
 import { URI } from "./sigil-types.ts";
 import { toURI } from "./uri-utils.ts";
 import { parseLink } from "./link-utils.ts";
@@ -112,10 +104,17 @@ export class PatternManager {
   // `artifactFromIdentitySync` (the inverse of the forward `valueToEntryRef`),
   // populated by ONE path (`indexArtifact`) from BOTH a module's `__cfReg`
   // registrations (hoists + non-exported top-level) AND its exports — so callers
-  // never look in two places. Bounded (FIFO); a miss returns undefined and
-  // callers fall back (e.g. to an embedded op graph or a source reload).
+  // never look in two places. SESSION-LIFETIME, deliberately unbounded (design
+  // § Open questions 2, resolved): the sync resolution the list builtins and
+  // refs-only pattern JSON depend on must never lose an artifact whose module
+  // evaluated this session. Entries are live builder artifacts of evaluated
+  // modules — the same order of retention the engine's strong implementation
+  // index (E1) already committed to for their implementation functions.
   private addressableByIdentity = new Map<string, Map<string, unknown>>();
-  private patternToVerifiedLoadId = new WeakMap<Pattern, string>();
+  // Bound for the module-NAMESPACE cache below (`modulesByIdentity`) only; its
+  // misses recover through the async storage-backed load. Instance field so
+  // tests can shrink it.
+  private maxEvaluatedModuleCacheSize = MAX_EVALUATED_MODULE_CACHE_SIZE;
   // Pending metadata set before the meta cell exists (e.g., spec, parents)
   private pendingMetaById = new Map<URI, Partial<PatternMeta>>();
   // ESM content-addressed compile-cache instrumentation.
@@ -126,10 +125,7 @@ export class PatternManager {
   // its parent's bundle instead of re-reading the closure from storage and
   // re-evaluating it in SES. Content-addressed, so a hit is always the same
   // bytes — never stale. Bounded (FIFO) to cap memory.
-  private modulesByIdentity = new Map<
-    string,
-    { exports: Exports; loadId?: string }
-  >();
+  private modulesByIdentity = new Map<string, { exports: Exports }>();
   // In-flight compiled-cache write-backs (fire-and-forget); awaited by
   // flushCompileCacheWrites() for graceful shutdown / deterministic tests.
   private compileCacheWrites = new Set<Promise<unknown>>();
@@ -259,82 +255,6 @@ export class PatternManager {
     return resolveOriginal(pattern);
   }
 
-  // Roots already fully seeded per verifiedLoadId. The walk is idempotent
-  // and pattern graphs are frozen after load, but it re-ran on every
-  // by-identity cache hit (i.e. every map/filter op resolve), paying a full
-  // Reflect.ownKeys recursion over the pattern graph each time — ~24% of the
-  // commit-callback phase in the default-app profile.
-  #seededVerifiedRoots = new WeakMap<object, Set<string>>();
-
-  private seedVerifiedLoadIds(
-    value: unknown,
-    verifiedLoadId: string,
-    seen?: Map<unknown, boolean>,
-    trusted = false,
-  ): void {
-    if (!value || (typeof value !== "object" && typeof value !== "function")) {
-      return;
-    }
-    const isRoot = seen === undefined;
-    if (
-      isRoot && this.#seededVerifiedRoots.get(value)?.has(verifiedLoadId)
-    ) {
-      return;
-    }
-    seen ??= new Map<unknown, boolean>();
-
-    // Trust is rooted at a builder-produced (`isTrustedPattern`) value; nested
-    // subpatterns within a trusted pattern's serialized node graph are legit
-    // (and unbranded), so once inside a trusted subtree we propagate to
-    // structurally-`isPattern` values too. A `__cf_data`-forged pattern-shaped
-    // value at the top level (trusted === false) is never seeded, so it cannot
-    // launder a CFC identity into the side-tables.
-    const subtreeTrusted = trusted || isTrustedPattern(value);
-
-    // `seen` records the trust level a node was visited at, so a node reached
-    // first via an untrusted path is still re-processed (and seeded) when later
-    // reached via a trusted path — order-independent. A trusted visit is final.
-    const prior = seen.get(value);
-    if (prior === true || (prior === false && !subtreeTrusted)) {
-      return;
-    }
-    seen.set(value, subtreeTrusted);
-
-    if (subtreeTrusted && isPattern(value)) {
-      const originalPattern = this.findOriginalPattern(value);
-      if (!this.patternToVerifiedLoadId.has(originalPattern)) {
-        this.patternToVerifiedLoadId.set(originalPattern, verifiedLoadId);
-      }
-      // Side-table storage works even when `value` has been frozen by the
-      // loader (no own-property write needed).
-      if (getVerifiedLoadId(value) !== verifiedLoadId) {
-        setVerifiedLoadId(value, verifiedLoadId);
-      }
-    }
-
-    for (const key of Reflect.ownKeys(value as object)) {
-      const descriptor = Object.getOwnPropertyDescriptor(value as object, key);
-      if (!descriptor || !("value" in descriptor)) {
-        continue;
-      }
-      this.seedVerifiedLoadIds(
-        descriptor.value,
-        verifiedLoadId,
-        seen,
-        subtreeTrusted,
-      );
-    }
-
-    if (isRoot) {
-      let ids = this.#seededVerifiedRoots.get(value as object);
-      if (ids === undefined) {
-        ids = new Set();
-        this.#seededVerifiedRoots.set(value as object, ids);
-      }
-      ids.add(verifiedLoadId);
-    }
-  }
-
   async loadPatternMeta(
     patternId: URI,
     space: MemorySpace,
@@ -402,12 +322,6 @@ export class PatternManager {
   ): URI {
     // Walk up derivation copies to original
     pattern = this.findOriginalPattern(pattern as Pattern);
-    const verifiedLoadId = getTopFrame()?.verifiedLoadId ??
-      this.patternToVerifiedLoadId.get(pattern as Pattern) ??
-      getVerifiedLoadId(pattern as Pattern);
-    if (verifiedLoadId) {
-      this.seedVerifiedLoadIds(pattern as Pattern, verifiedLoadId);
-    }
 
     if (src && !getPatternProgram(pattern)) {
       if (typeof src === "string") {
@@ -423,7 +337,6 @@ export class PatternManager {
     // If this pattern object was already registered, return its id
     const existingId = this.patternToIdMap.get(pattern);
     if (existingId) {
-      this.associateVerifiedFunctions(existingId, pattern);
       return existingId;
     }
 
@@ -441,8 +354,6 @@ export class PatternManager {
       // Pattern exists - touch to mark as recently used
       this.touchPattern(generatedId);
     }
-
-    this.associateVerifiedFunctions(generatedId, pattern);
 
     return generatedId;
   }
@@ -893,9 +804,16 @@ export class PatternManager {
       this.esmCacheStats.hits++;
     } else {
       this.esmCacheStats.misses++;
-      // Cold/partial: persist the freshly compiled module set for next time.
-      // Fire-and-forget — the pattern is already returned below, so cache
-      // persistence never blocks the load. Tracked for flush/shutdown.
+      // Cold/partial: persist the freshly compiled module set. AWAITED
+      // (identity E4): refs-only pattern JSON makes artifact persistence part
+      // of the compilation contract — a cell can only carry a `$patternRef`
+      // after compilePattern returned, so completing the write here
+      // guarantees every persisted ref has a durable closure behind it (no
+      // race against session end). Cold compiles only; a warm hit means the
+      // closure was just READ from storage, i.e. it is already durable. A
+      // failed cache write logs and does not fail the compile: the pattern
+      // works in-session regardless, and the next cold compile of the same
+      // content retries the write.
       const writeBack = this.writeBackCompileCache(
         space,
         modules,
@@ -904,10 +822,17 @@ export class PatternManager {
       );
       this.compileCacheWrites.add(writeBack);
       this.pendingCacheWriteBacks.add(writeBack);
-      writeBack.finally(() => {
+      try {
+        await writeBack;
+      } catch (error) {
+        logger.warn("compile-cache-write-back-failed", () => [
+          `entry=${entryIdentity}`,
+          String(error),
+        ]);
+      } finally {
         this.compileCacheWrites.delete(writeBack);
         this.pendingCacheWriteBacks.delete(writeBack);
-      });
+      }
     }
 
     return this.patternFromEvaluation(result, program, entryIdentity);
@@ -1078,7 +1003,7 @@ export class PatternManager {
     entryIdentity: string,
   ): Pattern {
     this.registerEvaluatedModules(result);
-    const { main, loadId } = result;
+    const { main } = result;
     if (!main) {
       throw new Error("Pattern compilation produced no exports.");
     }
@@ -1096,20 +1021,14 @@ export class PatternManager {
         `No "${symbol}" export or hoist registration found in compiled pattern.`,
       );
     }
-    // Gate is pattern-only on purpose: `seedVerifiedLoadIds` is CFC's
-    // pattern-specific verified-load association, so it must not run for a
-    // lift/handler. The forward `{ identity, symbol }` ref for a NON-pattern
-    // artifact is NOT skipped here — `registerEvaluatedModules` (called at the
-    // top of this method) already set it via `indexArtifact`, whose gate is the
-    // wider `isTrustedBuilderArtifact`. Keep that ordering: widening this gate
-    // instead would (wrongly) seed load-ids for non-patterns, and narrowing
-    // `indexArtifact` would drop exported lift/handler forward refs — the gap
-    // Codex flagged on an earlier revision of #3912.
+    // Trust gate stays pattern-only on purpose: the forward
+    // `{ identity, symbol }` ref for a NON-pattern artifact was already set by
+    // `registerEvaluatedModules` via `indexArtifact`, whose gate is the wider
+    // `isTrustedBuilderArtifact` — narrowing `indexArtifact` would drop
+    // exported lift/handler forward refs (the gap Codex flagged on an earlier
+    // revision of #3912).
     if (isTrustedPattern(pattern)) {
       setArtifactEntryRef(pattern, { identity: entryIdentity, symbol });
-      if (loadId) {
-        this.seedVerifiedLoadIds(pattern, loadId);
-      }
     }
     return pattern;
   }
@@ -1127,10 +1046,7 @@ export class PatternManager {
         // by-identity reload (a separate concern from artifact addressing).
         // Refresh insertion order (Map is FIFO-ordered) so eviction is ~LRU.
         this.modulesByIdentity.delete(identity);
-        this.modulesByIdentity.set(identity, {
-          exports,
-          loadId: result.loadId,
-        });
+        this.modulesByIdentity.set(identity, { exports });
         // Index each exported builder artifact for addressing by its export name.
         // (Reload relies on this so a sub-pattern's result cell loads BY IDENTITY
         // instead of cold-recompiling — CT-1623.)
@@ -1139,7 +1055,7 @@ export class PatternManager {
           this.indexArtifact(identity, exportName, exports[exportName]);
         }
       }
-      while (this.modulesByIdentity.size > MAX_EVALUATED_MODULE_CACHE_SIZE) {
+      while (this.modulesByIdentity.size > this.maxEvaluatedModuleCacheSize) {
         const oldest = this.modulesByIdentity.keys().next().value;
         if (oldest === undefined) break;
         this.modulesByIdentity.delete(oldest);
@@ -1157,11 +1073,9 @@ export class PatternManager {
       }
     }
 
-    while (this.addressableByIdentity.size > MAX_EVALUATED_MODULE_CACHE_SIZE) {
-      const oldest = this.addressableByIdentity.keys().next().value;
-      if (oldest === undefined) break;
-      this.addressableByIdentity.delete(oldest);
-    }
+    // No eviction for `addressableByIdentity` — the artifact index is
+    // session-lifetime (see its declaration): sync by-identity resolution
+    // must keep working for every module evaluated this session.
   }
 
   /**
@@ -1183,14 +1097,15 @@ export class PatternManager {
     value: unknown,
   ): void {
     if (!isTrustedBuilderArtifact(value)) return;
-    // Reverse index, refreshing recency (FIFO ~ LRU). Overwrite an existing
-    // symbol so a re-evaluation of the same identity resolves to the FRESH
-    // artifact instance, not a stale one from a prior eval.
+    // Reverse index. Overwrite an existing symbol so a re-evaluation of the
+    // same identity resolves to the FRESH artifact instance, not a stale one
+    // from a prior eval.
     let bucket = this.addressableByIdentity.get(identity);
-    if (bucket) this.addressableByIdentity.delete(identity);
-    else bucket = new Map<string, unknown>();
+    if (!bucket) {
+      bucket = new Map<string, unknown>();
+      this.addressableByIdentity.set(identity, bucket);
+    }
     bucket.set(symbol, value);
-    this.addressableByIdentity.set(identity, bucket);
     // Forward map is FIRST-WRITE-WINS, deliberately, on two grounds:
     //   - One artifact instance legitimately reachable under two refs (e.g. both
     //     a `__cfReg` entry AND an export, or set first by `patternFromMain`)
@@ -1204,57 +1119,27 @@ export class PatternManager {
     // value is, by content identity, the original. `getArtifactEntryRef`
     // consumers tolerate this (it resolves to a real, addressable artifact).
     setArtifactEntryRef(value, { identity, symbol });
-    // Content-addressed CFC provenance for the artifact's implementation
-    // function: registering through this (trust-gated) indexing path is what
-    // makes a function "verified" under the by-identity model. The factory
-    // carries the CT-1665 binding annotation when present.
-    const implementation =
-      (value as { implementation?: unknown }).implementation ?? value;
-    // Skip a CONFIRMED cross-module mismatch: a re-exporting module surfaces a
-    // function defined elsewhere under its OWN identity, but the function's
-    // canonical `fn.src` names the defining module. Provenance is
-    // first-write-wins and CFC fails closed on an identity/`fn.src` mismatch,
-    // so a re-exporter (possibly indexed first) stamping its identity would
-    // make a valid verified artifact resolve as `unsupported`. Recording only
-    // when the src doesn't name a different module leaves the defining
-    // module's matching record to stick. A non-canonical src is left alone.
-    const srcIdentity = identityFromCanonicalSource(
-      (implementation as { src?: string }).src,
-    );
-    if (
-      typeof implementation === "function" &&
-      (srcIdentity === undefined || srcIdentity === identity)
-    ) {
-      recordVerifiedProvenance(implementation, {
-        identity,
-        symbol,
-        ...(readBindingIdentity(value) === undefined
-          ? {}
-          : { bindingIdentity: readBindingIdentity(value)! }),
-      });
-    }
+    // Note: content-addressed CFC provenance is recorded by the engine at
+    // evaluation time (Engine.recordModuleProvenance) — the single home, so it
+    // covers every load path, not only ones routed through this indexing.
   }
 
   /**
    * Resolve a content-addressed `{ identity, symbol }` reference to its live
    * builder artifact, synchronously, from the single in-memory index — or
-   * `undefined` on a miss (never registered, or rolled out of the bounded cache;
-   * callers fall back, e.g. to an embedded op graph or a source reload). Public
-   * so the list builtins can resolve a map/filter/flatMap `op` during a
-   * synchronous Action.
+   * `undefined` on a miss (the module never evaluated in this session; callers
+   * fall back to a stored graph vintage or an async source reload). The index
+   * is session-lifetime, so a hit is guaranteed for any module evaluated this
+   * session — what the list builtins rely on to resolve a map/filter/flatMap
+   * `op` during a synchronous Action without an embedded fallback graph.
    */
   artifactFromIdentitySync(
     identity: string,
     symbol: string,
   ): unknown {
-    const bucket = this.addressableByIdentity.get(identity);
-    if (!bucket || !bucket.has(symbol)) return undefined;
-    // Refresh recency.
-    this.addressableByIdentity.delete(identity);
-    this.addressableByIdentity.set(identity, bucket);
     // Returns the live builder artifact (pattern / lift / handler). Callers know
     // the kind they expect from the symbol's origin and cast accordingly.
-    return bucket.get(symbol);
+    return this.addressableByIdentity.get(identity)?.get(symbol);
   }
 
   /**
@@ -1284,7 +1169,6 @@ export class PatternManager {
     this.modulesByIdentity.delete(entryIdentity);
     this.modulesByIdentity.set(entryIdentity, cached);
     setArtifactEntryRef(pattern, { identity: entryIdentity, symbol });
-    if (cached.loadId) this.seedVerifiedLoadIds(pattern, cached.loadId);
     return pattern;
   }
 
@@ -1323,7 +1207,7 @@ export class PatternManager {
     entryIdentity?: string,
   ): Pattern {
     this.registerEvaluatedModules(result);
-    const { main, loadId } = result;
+    const { main } = result;
     if (!main) {
       throw new Error("Pattern compilation produced no exports.");
     }
@@ -1334,9 +1218,9 @@ export class PatternManager {
       );
     }
     const pattern = main[exportName] as Pattern;
-    // Only a trusted (builder-produced) entry pattern receives rehydration /
-    // verified-load metadata; a forged pattern-shaped export gets none and so
-    // cannot masquerade as a verified-loaded pattern in the side-tables.
+    // Only a trusted (builder-produced) entry pattern receives rehydration
+    // metadata; a forged pattern-shaped export gets none and so cannot
+    // masquerade as a verified-loaded pattern in the side-tables.
     if (isTrustedPattern(pattern)) {
       setPatternProgram(pattern, program);
       if (entryIdentity) {
@@ -1344,9 +1228,6 @@ export class PatternManager {
           identity: entryIdentity,
           symbol: exportName,
         });
-      }
-      if (loadId) {
-        this.seedVerifiedLoadIds(pattern, loadId);
       }
     }
     return pattern;
@@ -1425,7 +1306,6 @@ export class PatternManager {
           this.patternIdMap.set(patternId, pattern);
           this.evictIfNeeded();
         }
-        this.associateVerifiedFunctions(patternId, pattern);
         return pattern;
       })
       .finally(() => {
@@ -1485,7 +1365,6 @@ export class PatternManager {
     this.patternIdMap.set(patternId, pattern);
     this.patternToIdMap.set(pattern, patternId);
     this.patternMetaCellById.set(patternId, metaCell.withTx());
-    this.associateVerifiedFunctions(patternId, pattern);
     this.evictIfNeeded();
     // Persist the entry identity once learned (cold compile) so the next load
     // takes the by-identity fast path. Fire-and-forget — never blocks the load,
@@ -1551,7 +1430,6 @@ export class PatternManager {
     if (!pattern) return undefined;
     this.patternIdMap.set(patternId, pattern);
     this.patternToIdMap.set(pattern, patternId);
-    this.associateVerifiedFunctions(patternId, pattern);
     this.evictIfNeeded();
     return pattern;
   }
@@ -1575,21 +1453,5 @@ export class PatternManager {
       const pending = this.pendingMetaById.get(patternId) ?? {};
       this.pendingMetaById.set(patternId, { ...pending, ...fields });
     }
-  }
-
-  private associateVerifiedFunctions(
-    patternId: URI,
-    value: Pattern | Module,
-  ): void {
-    const originalPattern = this.findOriginalPattern(value as Pattern);
-    const verifiedLoadId = this.patternToVerifiedLoadId.get(originalPattern);
-    if (!getPatternProgram(originalPattern) && !verifiedLoadId) {
-      return;
-    }
-    this.runtime.harness.associatePattern(
-      patternId,
-      value,
-      verifiedLoadId,
-    );
   }
 }

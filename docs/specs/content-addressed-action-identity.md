@@ -6,18 +6,84 @@ symbol }` references and object-keyed (WeakMap/WeakSet) trust.
 
 ## Status
 
-Design. Depends on (and assumes) the shipped state after the AMD-loader
-removal: the ESM module-record loader is the only loader, every module has a
-content-addressed identity (`cf:module/<hash>`), and every module-scope builder
-artifact (pattern / lift / handler) is addressable as `{ identity, symbol }` —
-authored exports by export name, hoisted/non-exported artifacts by their
-`__cfReg` key (see `docs/specs/module-loading.md` and the op-by-identity
-migration that introduced the `$patternRef` sentinel,
-`builtins/op-pattern-ref.ts`).
+Phases 0–2 shipped: #3997 (ordinal-free `implementationRef` + legacy-alias
+shim), #4006 (A: `unsafe_parentPattern` deleted), #4008 (B: derived-copy side
+tables, `unsafe_originalPattern` deleted), #4009 (C: `$implRef` dual-write +
+CFC provenance), #4013 (D: pattern-scoped registries deleted, provenance
+recording in `Engine.recordModuleProvenance`).
+
+Phase 3 shipped in two PRs:
+
+- **E1 (#4053, writer flip)**: writers emit `$implRef` only;
+  `implementationRef` and the stringified body are no longer written where
+  the reading runtime's engine proves the `$implRef` resolvable through its
+  strong content-addressed implementation index
+  (`ExecutableRegistry.registerVerifiedImplementation`, the resolution of
+  open question 1 — see § Open questions). The legacy `implementationRef` is
+  still written for exactly one category: registry-admitted artifacts the
+  `$implRef` cannot cover — host-trusted values (`trustedHostFunctionIndex`,
+  whose closures cannot survive a stringified round-trip) and dynamic
+  in-action-created artifacts (no provenance symbol). `VerifiedProvenance`
+  carries the evaluating load's `bundleId` so stored bundleId-only
+  `writeAuthorizedBy` claims keep verifying without a `verifiedLoadId`.
+- **E2 (legacy machinery deletion)**: every loadId surface is gone — frame
+  threading, side tables, `seedVerifiedLoadIds`, per-load registry
+  partitions and capture walks, the loadId-scoped `Harness` methods, the
+  CFC `implementationRef`×`verifiedLoadId` arm (provenance is the only
+  source of `kind: "verified"`), `FunctionCache`, and the prewarm walk. New
+  `writeAuthorizedBy` claims are stamped with `moduleIdentity` only. What
+  remains of the legacy machinery is exactly the gate-2 retained read path —
+  `ensureImplementationRef` (+ ordinal shim) feeding ONE string-keyed global
+  executable index behind `getExecutableFunction`, the bundleId-only
+  verification arm for stored pre-#4009 claims, and the `unsafe-host:`
+  minting that rides the same channel (the §5 synthetic-identity registrar is
+  deferred to the cycle that retires this read path; decisions recorded in
+  the implementation plan).
+
+- **E3 (pattern JSON boundary, scoped to dual-write)**: `Pattern.toJSON()`
+  emits the pattern's content-addressed `$patternRef: { identity, symbol }`
+  ALONGSIDE the full graph; internal graph serialization
+  (`serializePatternGraph`, the §7 escape hatch — used by builder-time node
+  serialization and thus the `$opFallback` graphs) stays a bare graph, so the
+  in-memory representation and the eviction fallback can never silently
+  become refs. Readers dual-read: `resolveOpPattern` and llm-dialog's tool
+  invocation (`resolveStoredPattern`) prefer the live canonical pattern by
+  identity and fall back to the carried graph. Refs-ONLY emission was
+  assessed and deferred (see §7 below and the implementation plan's E3
+  gating record): there is no session-lifetime strong index for pattern
+  artifacts — E1's implementation index is function-keyed, javascript
+  modules only — so stored refs resolve solely through the FIFO-bounded
+  artifact index (sync) or `loadPatternByIdentity` (async), neither of which
+  covers the sync list builtins or cross-session llm-dialog reads.
+  Canary: `test/pre-e3-pattern-value-canary.test.ts` pins both stored
+  vintages (bare graph; ref+graph) loading and executing.
+- **E4 (refs-only pattern JSON)**: the E3 blocker resolved —
+  `addressableByIdentity` is session-lifetime (open question 1 extended to
+  pattern artifacts; the FIFO eviction deleted), so sync resolution covers
+  every module evaluated in the reading session. `Pattern.toJSON()` emits
+  `{ $patternRef, argumentSchema, resultSchema }` with NO graph (patterns
+  without an entry ref still serialize their graph); the op sentinel drops
+  `$opFallback` (a sync miss is now a loud bug, not a recoverable state);
+  llm-dialog adds the async storage-backed net (`resolveStoredPatternAsync`
+  → `loadPatternByIdentity`; compiled artifacts persist in-space as an
+  expected part of compilation). Stored graph vintages keep loading
+  tolerantly; see §7's status block for the full record.
+
+Phase 4's remainder is the legacy javascript-function read path (the gate-2
+retained pair + the bundleId verification arm), still gated on stored-data
+evidence or a runtime-version cutoff. The §7 pattern-JSON flip shipped as E4.
+
+The design assumes the shipped state after the AMD-loader removal: the ESM
+module-record loader is the only loader, every module has a content-addressed
+identity (`cf:module/<hash>`), and every module-scope builder artifact
+(pattern / lift / handler) is addressable as `{ identity, symbol }` — authored
+exports by export name, hoisted/non-exported artifacts by their `__cfReg` key
+(see `docs/specs/module-loading.md` and the op-by-identity migration that
+introduced the `$patternRef` sentinel, `builtins/op-pattern-ref.ts`).
 
 ## Last Updated
 
-2026-06-10
+2026-06-11
 
 ## Motivation
 
@@ -317,22 +383,42 @@ but `toJSON` runs when a value is *written to a cell* — after
 - `Pattern.nodes` / `result` / `initial` stay as the in-memory instantiation
   representation only; nothing outside the runner consumes them as JSON.
 
-Known things this trips (each becomes a work item):
+Status: COMPLETE in two steps. E3 (2026-06-11) shipped dual-write —
+`$patternRef` alongside the graph — because pattern artifacts then had no
+session-lifetime index: a stored ref resolved only through the FIFO-bounded
+`addressableByIdentity` (sync) or `loadPatternByIdentity` (async), and the
+two production consumers of stored graphs (the list builtins' sync
+`resolveOpPattern`; llm-dialog's cross-session tool invocation) could not
+tolerate a miss. E4 (same day) removed that blocker and completed the flip:
 
-- **`$opFallback`** embeds a full serialized graph *on purpose* (eviction
-  resilience). Refs-only `toJSON` would silently turn the fallback into a ref
-  too, defeating it. Either give the fallback an explicit
-  `serializePatternGraph()` escape hatch (internal serializer, not `toJSON`),
-  or drop the fallback and solve eviction pinning first (open question 2 —
-  these two decisions are now coupled).
-- Anything that JSON-round-trips patterns and expects a graph: json-utils
-  round-trip tests, pattern-as-value deserialization in `pattern-binding`,
-  debug tooling. Deserialization of a ref requires the module to be loadable
-  by identity (in-memory, or storage-backed via the compile cache) — which is
-  the whole point, but makes by-identity load the only rehydration path.
-- Wire/IPC surfaces that today receive pattern JSON (runtime-client
-  `getPatternSources` is source-based and unaffected; audit any other
-  protocol field carrying serialized patterns).
+- `addressableByIdentity` is session-lifetime (open question 1, E4
+  extension): sync resolution covers every module evaluated in the reading
+  session — every authored op by construction, since whatever instantiates
+  the map mentioned the op and loaded it as part of its bundle.
+- `Pattern.toJSON()` emits `{ $patternRef, argumentSchema, resultSchema }` —
+  no graph. Schemas ride along for consumers that read them without
+  resolving (llm-dialog tool schemas). A pattern with NO entry ref
+  (manually constructed / dynamic / bare-Engine evaluation, e.g. the CLI's
+  `--pattern-json` debug dump) still serializes its full graph.
+- `$opFallback` dropped from the op sentinel: it was eviction insurance, and
+  eviction no longer exists; a sync miss is a loud bug. Stored pre-E4
+  sentinel vintages are still read tolerantly.
+- llm-dialog follows the sync resolution with the async storage-backed
+  `loadPatternByIdentity` (`resolveStoredPatternAsync`) — compiled artifacts
+  persist in-space as part of the compilation step (the cold write-back is
+  AWAITED inside `compilePattern`, so a persisted ref always has a durable
+  closure behind it), and a tool invoked cold after a reload rehydrates
+  source-free.
+- The write-path audit (E3) found graphs persisted at exactly three
+  cell-write sites and on no wire/IPC surface; stored graph vintages
+  (pre-E3 bare graph, E3 ref+graph) keep loading and executing — pinned by
+  `test/pre-e3-pattern-value-canary.test.ts` alongside the refs-only
+  vintage's two resolution paths.
+- The internal/boundary split is structural: `serializePatternGraph()`
+  (json-utils) serializes the full graph under an internal-serialization
+  context that suppresses `$patternRef`; `toJSONWithLegacyAliases` (the
+  builder-time node serializer) routes pattern values through it, so
+  `Pattern.nodes` stays a bare-graph in-memory representation.
 
 ## Persisted-data compatibility
 
@@ -463,11 +549,30 @@ canary test compiling+resolving with `$implRef` stripped.
 
 ## Open questions
 
-1. **Eviction pinning.** `addressableByIdentity` is FIFO-bounded; the op path
-   tolerates eviction via `$opFallback`. If Phase 4 drops fallbacks, running
-   patterns must pin their modules' index entries (refcount on running pieces)
-   or the resolver needs a sync-safe re-evaluation path from
-   `modulesByIdentity`. Decide before Phase 4; until then fallbacks cover it.
+1. **Eviction pinning — DECIDED (E1).** `addressableByIdentity` is
+   FIFO-bounded; the op path tolerates eviction via `$opFallback`. Dropping
+   the `implementationRef` writer removed the unbounded legacy registry's
+   eviction insurance for new data, so E1 ships the replacement: a strong,
+   session-lifetime, per-engine content-addressed implementation index
+   (`ExecutableRegistry.verifiedImplementationsByEntryRef`, populated by
+   `Engine.recordModuleProvenance`, surfaced as
+   `Harness.getVerifiedImplementation`, consulted by `resolveByImplRef` after
+   the bounded artifact index misses). Chosen over refcount pinning (piece
+   lifecycle is fuzzy; high complexity) and a WeakRef shadow (fails exactly in
+   the post-eviction-GC scenario it must cover). Memory is bounded by the set
+   of distinct verified implementations per session — strictly less than the
+   legacy per-load registries retained.
+   **E4 extends the same resolution to pattern artifacts:**
+   `addressableByIdentity` itself is now session-lifetime (its FIFO eviction
+   deleted) — the same retention order, since the strong function index
+   already keeps every verified implementation alive, and module-scope
+   functions referencing module-level patterns transitively retain those
+   factories anyway. With sync resolution eviction-proof for every module
+   evaluated in the session, `$opFallback` was dropped: the op sentinel is
+   stamped from its live artifact in the same session that reads it, so a
+   miss is a loud bug, not a recoverable state. The module-NAMESPACE cache
+   (`modulesByIdentity`) stays bounded; its misses recover via the async
+   storage-backed load.
 2. **`cfc/canonical.ts` digests.** Confirm no *persisted* artifact compares
    `bundleId`s across sessions (believed session-only; verify before Phase 3).
 3. **`location`/`preview` retention.** Keep both on serialized modules for

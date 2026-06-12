@@ -5,8 +5,8 @@ import {
   handler,
   ifElse,
   NAME,
-  OpaqueRef,
   pattern,
+  Reactive,
   Stream,
   UI,
   type VNode,
@@ -29,7 +29,7 @@ interface DoListInput {
   items?: Writable<DoItem[] | Default<[]>>;
 }
 
-interface DoListOutput {
+export interface DoListOutput {
   [NAME]: string;
   [UI]: VNode;
   compactUI: VNode;
@@ -39,14 +39,14 @@ interface DoListOutput {
   summary: string;
   mentionable: { [NAME]: string; summary: string; [UI]: VNode }[];
   // UI handlers (use cell references via equals())
-  addItem: OpaqueRef<
+  addItem: Reactive<
     Stream<{ title: string; indent?: number; attachments?: Writable<any>[] }>
   >;
-  removeItem: OpaqueRef<Stream<{ item: DoItem }>>;
-  updateItem: OpaqueRef<
+  removeItem: Reactive<Stream<{ item: DoItem }>>;
+  updateItem: Reactive<
     Stream<{ item: DoItem; title?: string; done?: boolean }>
   >;
-  addItems: OpaqueRef<
+  addItems: Reactive<
     Stream<{
       items: Array<{
         title: string;
@@ -57,9 +57,9 @@ interface DoListOutput {
   >;
   // LLM-friendly handlers (use title matching)
   /** Remove a task and its subtasks by title */
-  removeItemByTitle: OpaqueRef<Stream<{ title: string }>>;
+  removeItemByTitle: Reactive<Stream<{ title: string }>>;
   /** Update a task by title. Set done to mark complete, newTitle to rename, attachments to add references. */
-  updateItemByTitle: OpaqueRef<
+  updateItemByTitle: Reactive<
     Stream<{
       title: string;
       newTitle?: string;
@@ -67,7 +67,7 @@ interface DoListOutput {
       attachments?: Writable<any>[];
     }>
   >;
-  archiveCompleted: OpaqueRef<Stream<unknown>>;
+  archiveCompleted: Reactive<Stream<unknown>>;
 }
 
 // ===== Module-scope Handlers =====
@@ -122,17 +122,18 @@ const updateItemHandler = handler<
   { items: Writable<DoItem[]> }
 >(({ item, title, done }, { items }) => {
   const currentItems = items.get();
-  const newItems = currentItems.map((i) => {
-    if (!equals(i, item)) return i;
+  const index = currentItems.findIndex((i) => equals(i, item));
+  if (index < 0) return;
 
-    return {
-      ...i,
-      ...(title !== undefined ? { title } : {}),
-      ...(done !== undefined ? { done } : {}),
-    };
-  });
-
-  items.set(newItems);
+  // Write THROUGH the element's cells (`items.key(index)` resolves through the
+  // slot's link into the entity doc) — never replace the slot with a fresh
+  // object literal: a fresh literal re-mints the entity identity, so every
+  // previously-held reference to the item (a selection cell, a caller that
+  // read it earlier) stops equals()-matching and later mutations with it
+  // silently no-op. See packages/patterns/primitives/editable-list.tsx.
+  const element = items.key(index);
+  if (title !== undefined) element.key("title").set(title);
+  if (done !== undefined) element.key("done").set(done);
 });
 
 const addItemsHandler = handler<
@@ -202,20 +203,26 @@ const updateItemByTitleHandler = handler<
   { items: Writable<DoItem[]> }
 >(({ title, newTitle, done, attachments }, { items }) => {
   const currentItems = items.get();
-  const newItems = currentItems.map((i) => {
-    if (i.title?.toLowerCase() !== title.toLowerCase()) return i;
-
-    return {
-      ...i,
-      ...(newTitle !== undefined ? { title: newTitle } : {}),
-      ...(done !== undefined ? { done } : {}),
-      ...(attachments !== undefined
-        ? { attachments: [...(i.attachments ?? []), ...attachments] }
-        : {}),
-    };
-  });
-
-  items.set(newItems);
+  // Title matching stays the addressing mechanism (LLM-friendly API), but the
+  // update itself writes through each matched element's cells instead of
+  // replacing the array slot with a fresh literal — slot replacement re-mints
+  // the entity identity and orphans every previously-held item reference
+  // (see updateItemHandler above). All case-insensitive matches are updated,
+  // matching the original `.map()` semantics.
+  const needle = title.toLowerCase();
+  for (let index = 0; index < currentItems.length; index++) {
+    if (currentItems[index].title?.toLowerCase() !== needle) {
+      continue;
+    }
+    const element = items.key(index);
+    if (newTitle !== undefined) element.key("title").set(newTitle);
+    if (done !== undefined) element.key("done").set(done);
+    if (attachments !== undefined) {
+      for (const attachment of attachments) {
+        element.key("attachments").push(attachment);
+      }
+    }
+  }
 });
 
 const addAttachment = handler<
@@ -317,7 +324,7 @@ const DoItemCard = pattern<
           )}
 
           <details style="margin-top: 8px; margin-left: 24px;">
-            <summary style="cursor: pointer; font-size: 0.8rem; color: var(--cf-color-gray-500);">
+            <summary style="cursor: pointer; font-size: 0.8rem; color: var(--cf-colors-gray-500);">
               AI Suggestions
             </summary>
             <Suggestion
@@ -349,7 +356,7 @@ const CompletedItemCard = pattern<
       >
         <cf-hstack gap="2" align="center">
           <cf-checkbox $checked={item.done} />
-          <span style="text-decoration: line-through; flex: 1; color: var(--cf-color-gray-500);">
+          <span style="text-decoration: line-through; flex: 1; color: var(--cf-colors-gray-500);">
             {item.title}
           </span>
         </cf-hstack>
@@ -401,7 +408,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
 
         {hasNoItems
           ? (
-            <div style="text-align: center; color: var(--cf-color-gray-500); padding: 1rem;">
+            <div style="text-align: center; color: var(--cf-colors-gray-500); padding: 1rem;">
               No items yet. Add one below!
             </div>
           )
@@ -414,7 +421,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
           <cf-button
             variant="ghost"
             size="sm"
-            style="font-size: 0.8rem; color: var(--cf-color-gray-500);"
+            style="font-size: 0.8rem; color: var(--cf-colors-gray-500);"
             onClick={() => archiveCompleted.send({})}
           >
             Archive completed
@@ -442,7 +449,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
         <cf-vstack slot="header" gap="1">
           <cf-hstack justify="between" align="center">
             <cf-heading level={4}>Do List</cf-heading>
-            <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
+            <span style="font-size: 0.875rem; color: var(--cf-colors-gray-500);">
               {computed(() => activeItems.length)} items
             </span>
           </cf-hstack>
@@ -454,7 +461,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
 
             {hasNoItems
               ? (
-                <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
+                <div style="text-align: center; color: var(--cf-colors-gray-500); padding: 2rem;">
                   No items yet. Add one below!
                 </div>
               )
@@ -463,7 +470,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
             {ifElse(
               hasCompleted,
               <details style="margin-top: 1rem;">
-                <summary style="cursor: pointer; font-size: 0.875rem; color: var(--cf-color-gray-500); padding: 0.5rem 0;">
+                <summary style="cursor: pointer; font-size: 0.875rem; color: var(--cf-colors-gray-500); padding: 0.5rem 0;">
                   Completed ({computed(() => completedItems.length)})
                 </summary>
                 <cf-vstack gap="2" style="padding-top: 0.5rem;">
@@ -472,7 +479,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
                     <cf-button
                       variant="ghost"
                       size="sm"
-                      style="font-size: 0.8rem; color: var(--cf-color-gray-500);"
+                      style="font-size: 0.8rem; color: var(--cf-colors-gray-500);"
                       onClick={() => archiveCompleted.send({})}
                     >
                       Archive all

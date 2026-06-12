@@ -9,7 +9,7 @@ import {
 
 // deno-lint-ignore no-empty-interface
 interface BadgeStoryInput {}
-interface BadgeStoryOutput {
+export interface BadgeStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

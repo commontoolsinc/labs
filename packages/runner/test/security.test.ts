@@ -323,22 +323,22 @@ describe("SES security regressions", () => {
       ],
     };
 
-    const { main, loadId } = await engine.compileAndEvaluateModules(program);
-    const countVerifiedFunctionsForLoad = () =>
-      ((engine as unknown as {
+    const { main } = await engine.compileAndEvaluateModules(program);
+    const countVerifiedFunctions = () =>
+      (engine as unknown as {
         executableRegistry: {
-          verifiedFunctions: Map<string, Map<string, unknown>>;
+          verifiedFunctionIndex: Map<string, unknown>;
         };
-      }).executableRegistry.verifiedFunctions.get(loadId!)?.size) ?? 0;
+      }).executableRegistry.verifiedFunctionIndex.size;
 
     // The nested computation (now the module-scope `__cfLift_N`) and the
-    // handler are blessed at load: the registry is already populated before any
-    // invocation.
-    const verifiedAtLoad = countVerifiedFunctionsForLoad();
+    // handler are blessed at load: the global executable index is already
+    // populated before any invocation.
+    const verifiedAtLoad = countVerifiedFunctions();
     expect(verifiedAtLoad).toBeGreaterThan(0);
 
     // Invoking the verified handler runs against the load-blessed functions and
-    // succeeds — no invocation-time blessing is needed, and the registry stays
+    // succeeds — no invocation-time blessing is needed, and the index stays
     // consistent (load-time blessing covered every nested callback).
     expect(() =>
       (runtime.runner as unknown as {
@@ -346,20 +346,16 @@ describe("SES security regressions", () => {
           module: { wrapper?: string },
           fn: (...args: any[]) => unknown,
           argument: unknown,
-          verifiedLoadId?: string,
         ): unknown;
       }).invokeJavaScriptImplementation(
         main?.makeNested as { wrapper?: string },
         (main?.makeNested as { implementation: (...args: any[]) => unknown })
           .implementation,
         { $event: undefined, $ctx: undefined },
-        loadId,
       )
     ).not.toThrow();
 
-    expect(countVerifiedFunctionsForLoad()).toBeGreaterThanOrEqual(
-      verifiedAtLoad,
-    );
+    expect(countVerifiedFunctions()).toBeGreaterThanOrEqual(verifiedAtLoad);
   });
 
   it("freezes callback compartment globalThis bindings", () => {

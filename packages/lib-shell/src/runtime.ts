@@ -25,11 +25,6 @@ const identityLogger = getLogger("lib-shell.identity", {
   level: "debug",
 });
 
-export type RuntimeView =
-  | { builtin: "home" }
-  | { spaceName: string }
-  | { spaceDid: DID };
-
 export type ExperimentalRuntimeFlags = {
   modernCellRep?: boolean;
   persistentSchedulerState?: boolean;
@@ -43,9 +38,7 @@ export type RuntimeTrustSnapshot = NonNullable<
   RuntimeClientOptions["trustSnapshot"]
 >;
 
-export type RuntimeNavigationTarget =
-  | { spaceName: string; pieceId: string }
-  | { spaceDid: DID; pieceId: string };
+export type RuntimeNavigationTarget = { spaceDid: DID; pieceId: string };
 
 export type RuntimeInternalsCallbacks = {
   navigate?: (target: RuntimeNavigationTarget) => void;
@@ -55,7 +48,6 @@ export type RuntimeInternalsCallbacks = {
 
 export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   identity: Identity;
-  view: RuntimeView;
   apiUrl: URL;
   /**
    * Optional space DID → host base URL map forwarded to the worker.
@@ -147,19 +139,19 @@ export function createRuntimeClientOptions({
 }
 
 /**
- * RuntimeInternals bundles all resources bound to an identity/host/space triplet.
- * Uses RuntimeClient to run the Runtime in a web client.
+ * RuntimeInternals bundles all resources bound to an identity/host pair:
+ * ONE runtime serving all of that identity's spaces over one worker.
+ * There is no bound/current space — a space is just part of an address,
+ * like an id, and every space-scoped method names it explicitly. (The
+ * "current space" of the old one-piece-at-a-time shell is view state,
+ * owned by the embedder.)
  */
 export class RuntimeInternals extends EventTarget {
   #client: RuntimeClient;
   #disposed = false;
-  #space: DID;
-  #spaceName?: string;
-  #isHomeSpace: boolean;
-  #homeSpaceDID: DID;
   #favorites: FavoritesManager;
   #callbacks: RuntimeInternalsCallbacks;
-  #spaceRootPattern?: Promise<PageHandle<NameSchema>>;
+  #spaceRootPatterns: Map<DID, Promise<PageHandle<NameSchema>>> = new Map();
   #patternCache: Map<
     string,
     { promise: Promise<PageHandle<NameSchema>>; started: boolean }
@@ -169,20 +161,12 @@ export class RuntimeInternals extends EventTarget {
 
   constructor(
     client: RuntimeClient,
-    space: DID,
-    spaceName: string | undefined,
-    isHomeSpace: boolean,
-    homeSpaceDID: DID,
     callbacks: RuntimeInternalsCallbacks = {},
   ) {
     super();
     this.#client = client;
-    this.#space = space;
-    this.#spaceName = spaceName;
-    this.#isHomeSpace = isHomeSpace;
-    this.#homeSpaceDID = homeSpaceDID;
     this.#callbacks = callbacks;
-    this.#favorites = new FavoritesManager(client, space);
+    this.#favorites = new FavoritesManager(client);
     this.#client.on("console", this.#onConsole);
     this.#client.on("navigaterequest", this.#onNavigateRequest);
     this.#client.on("error", this.#onError);
@@ -197,57 +181,51 @@ export class RuntimeInternals extends EventTarget {
     return this.#telemetryMarkers;
   }
 
-  space(): DID {
-    return this.#space;
-  }
-
-  spaceName(): string | undefined {
-    return this.#spaceName;
-  }
-
-  isHomeSpace(): boolean {
-    return this.#isHomeSpace;
-  }
-
-  homeSpaceDID(): DID {
-    return this.#homeSpaceDID;
-  }
-
   favorites(): FavoritesManager {
     this.#check();
     return this.#favorites;
   }
 
   async createPiece<T>(
+    space: DID,
     source: URL | Program | string,
     options?: { argument?: JSONValue; run?: boolean },
   ): Promise<PageHandle<T>> {
     this.#check();
-    const page = await this.#client.createPage<T>(source, options);
+    const page = await this.#client.createPage<T>(source, space, options);
     if (!page) {
       throw new Error("Could not create piece");
     }
     return page;
   }
 
-  getPiecesListCell<T>(): Promise<CellHandle<T[]>> {
+  getPiecesListCell<T>(space: DID): Promise<CellHandle<T[]>> {
     this.#check();
-    return this.#client.getPiecesListCell<T>();
+    return this.#client.getPiecesListCell<T>(space);
   }
 
-  getSpaceRootPattern(): Promise<PageHandle<NameSchema>> {
+  getSpaceRootPattern(space: DID): Promise<PageHandle<NameSchema>> {
     this.#check();
-    if (this.#spaceRootPattern) return this.#spaceRootPattern;
-    this.#spaceRootPattern = this.#client.getSpaceRootPattern();
-    return this.#spaceRootPattern;
+    const cached = this.#spaceRootPatterns.get(space);
+    if (cached) return cached;
+    const pattern = this.#client.getSpaceRootPattern(space);
+    this.#spaceRootPatterns.set(space, pattern);
+    // Evict on rejection: a transient failure (unreachable host, authz)
+    // must not poison the space for the runtime's lifetime.
+    pattern.catch(() => {
+      if (this.#spaceRootPatterns.get(space) === pattern) {
+        this.#spaceRootPatterns.delete(space);
+      }
+    });
+    return pattern;
   }
 
-  async recreateSpaceRootPattern(): Promise<PageHandle<NameSchema>> {
+  async recreateSpaceRootPattern(space: DID): Promise<PageHandle<NameSchema>> {
     this.#check();
     // Clear cached pattern since we're recreating it
-    this.#spaceRootPattern = undefined;
-    const pattern = await this.#client.recreateSpaceRootPattern();
-    this.#spaceRootPattern = Promise.resolve(pattern);
+    this.#spaceRootPatterns.delete(space);
+    const pattern = await this.#client.recreateSpaceRootPattern(space);
+    this.#spaceRootPatterns.set(space, Promise.resolve(pattern));
     return pattern;
   }
 
@@ -260,78 +238,78 @@ export class RuntimeInternals extends EventTarget {
    * (CT-1623: starting all pieces on reload cost ~10s of dependency
    * collection, either in the reload wall or on the first interaction).
    *
-   * Cached per (space, id). A cache entry created with `start: false`
-   * is upgraded (re-fetched with start) when a starting caller asks for
-   * the same pattern.
-   *
-   * Pass `space` to address a pattern in another space, served by the
-   * same worker over the same connection. Absent ⇒ this runtime's
-   * bound space, unchanged.
+   * Cached per (space, id) — a pattern's address. A cache entry created
+   * with `start: false` is upgraded (re-fetched with start) when a
+   * starting caller asks for the same pattern.
    */
   getPattern(
+    space: DID,
     id: string,
-    options?: { start?: boolean; space?: DID },
+    options?: { start?: boolean },
   ): Promise<PageHandle<NameSchema>> {
     this.#check();
     const start = options?.start ?? true;
-    const space = options?.space;
-    const key = this.#patternKey(id, space);
+    const key = `${space}:${id}`;
     const cached = this.#patternCache.get(key);
     if (cached && (cached.started || !start)) {
       return cached.promise;
     }
     const promise = (async () => {
-      const page = await this.#client.getPage<NameSchema>(id, start, space);
+      const page = await this.#client.getPage<NameSchema>(id, space, start);
       if (!page) {
         throw new Error(`Pattern not found: ${id}`);
       }
       return page;
     })();
-    this.#patternCache.set(key, { promise, started: start });
+    const entry = { promise, started: start };
+    this.#patternCache.set(key, entry);
+    // Evict on rejection so the next request retries.
+    promise.catch(() => {
+      if (this.#patternCache.get(key) === entry) {
+        this.#patternCache.delete(key);
+      }
+    });
     return promise;
   }
 
-  /**
-   * Cache key for a pattern. Always space-qualified so the no-space
-   * form and an explicit `space` equal to this runtime's bound space
-   * share one entry.
-   */
-  #patternKey(id: string, space?: DID): string {
-    return `${space ?? this.#space}:${id}`;
-  }
-
-  invalidatePattern(id: string, space?: DID): void {
-    this.#patternCache.delete(this.#patternKey(id, space));
+  invalidatePattern(space: DID, id: string): void {
+    this.#patternCache.delete(`${space}:${id}`);
   }
 
   async refreshPattern(
+    space: DID,
     id: string,
-    space?: DID,
   ): Promise<PageHandle<NameSchema>> {
-    this.invalidatePattern(id, space);
-    return await this.getPattern(id, { space });
+    this.invalidatePattern(space, id);
+    return await this.getPattern(space, id);
   }
 
-  async getSlugCell(slug: string): Promise<CellHandle<unknown>> {
+  async getSlugCell(space: DID, slug: string): Promise<CellHandle<unknown>> {
     this.#check();
-    return await this.#client.getCell(this.#space, {
-      "/": slugIdForSpace(this.#space, slug),
+    return await this.#client.getCell(space, {
+      "/": slugIdForSpace(space, slug),
     });
   }
 
-  async getSlug(id: string): Promise<string | undefined> {
+  async getSlug(space: DID, id: string): Promise<string | undefined> {
     this.#check();
-    return await this.#client.getPageSlug(id);
+    return await this.#client.getPageSlug(id, space);
   }
 
-  async removePage(id: string): Promise<boolean> {
+  async removePage(space: DID, id: string): Promise<boolean> {
     this.#check();
-    return await this.#client.removePage(id);
+    return await this.#client.removePage(id, space);
   }
 
-  async synced(): Promise<void> {
+  async synced(space: DID): Promise<void> {
     this.#check();
-    await this.#client.synced();
+    await this.#client.synced(space);
+  }
+
+  /** See RuntimeClient.registerSpaceHost — the site-table v0 hint API. */
+  async registerSpaceHost(space: DID, host: string): Promise<boolean> {
+    this.#check();
+    return await this.#client.registerSpaceHost(space, host);
   }
 
   async idle(): Promise<void> {
@@ -340,6 +318,7 @@ export class RuntimeInternals extends EventTarget {
   }
 
   async uploadBlob(options: {
+    space: DID;
     contentType: string;
     body: Uint8Array;
     suffix?: string;
@@ -354,14 +333,14 @@ export class RuntimeInternals extends EventTarget {
     await this.#client.dispose();
   }
 
-  async trackRecentPiece(pieceId: string): Promise<void> {
+  async trackRecentPiece(space: DID, pieceId: string): Promise<void> {
     this.#check();
     try {
       // Shell compatibility: assumes the space-root pattern exposes a
       // `trackRecent` handler accepting `{ piece }`.
-      const spaceRoot = await this.getSpaceRootPattern();
+      const spaceRoot = await this.getSpaceRootPattern(space);
       const trackRecent = spaceRoot.cell().key("trackRecent" as any);
-      const page = await this.#client.getPage(pieceId);
+      const page = await this.#client.getPage(pieceId, space);
       if (!page) return;
       await (trackRecent as any).send({ piece: page.cell() });
     } catch (e) {
@@ -369,13 +348,13 @@ export class RuntimeInternals extends EventTarget {
     }
   }
 
+  /** Register a navigated piece in ITS OWN space's root pattern. */
   async registerNavigatedPiece(cell: CellHandle<unknown>): Promise<void> {
     this.#check();
-    if (cell.space() !== this.#space) return;
     try {
       // Shell compatibility: assumes the space-root pattern exposes an
       // `addPiece` handler accepting `{ piece }`.
-      const spaceRoot = await this.getSpaceRootPattern();
+      const spaceRoot = await this.getSpaceRootPattern(cell.space());
       const addPiece = spaceRoot.cell().key("addPiece" as any);
       await (addPiece as any).send({ piece: cell });
       await spaceRoot.cell().sync();
@@ -387,10 +366,10 @@ export class RuntimeInternals extends EventTarget {
     }
   }
 
-  async #waitForNavigationConvergence(): Promise<void> {
+  async #waitForNavigationConvergence(space: DID): Promise<void> {
     this.#check();
     await this.#client.idle();
-    await this.#client.synced();
+    await this.#client.synced(space);
   }
 
   #onConsole = (e: RuntimeClientEvents["console"][0]) => {
@@ -419,24 +398,16 @@ export class RuntimeInternals extends EventTarget {
     const pieceId = cell.id();
     logger.log("navigate", `Navigating to piece: ${pieceId}`);
 
-    const sameSpace = cell.space() === this.#space;
+    void this.registerNavigatedPiece(cell);
+    await this.#waitForNavigationConvergence(cell.space());
 
-    if (sameSpace) {
-      void this.registerNavigatedPiece(cell);
-    }
-    await this.#waitForNavigationConvergence();
-
-    if (sameSpace && this.#spaceName) {
-      (this.#callbacks.navigate ?? defaultNavigate)({
-        spaceName: this.#spaceName,
-        pieceId,
-      });
-    } else {
-      (this.#callbacks.navigate ?? defaultNavigate)({
-        spaceDid: cell.space(),
-        pieceId: cell.id(),
-      });
-    }
+    // The target is an address: (space, piece). Mapping a space DID back
+    // to a human-readable view (e.g. a spaceName URL) is the embedder's
+    // view-state concern, handled in its navigate callback.
+    (this.#callbacks.navigate ?? defaultNavigate)({
+      spaceDid: cell.space(),
+      pieceId,
+    });
   }
 
   #onError = (event: RuntimeClientEvents["error"][0]) => {
@@ -460,7 +431,6 @@ export class RuntimeInternals extends EventTarget {
 
   static async create({
     identity,
-    view,
     apiUrl,
     spaceHostMap,
     experimental,
@@ -472,46 +442,18 @@ export class RuntimeInternals extends EventTarget {
     onConsole,
     onError,
   }: RuntimeInternalsCreateOptions): Promise<RuntimeInternals> {
-    let session: Session | undefined;
-    let isHomeSpace = false;
-
-    if ("builtin" in view) {
-      switch (view.builtin) {
-        case "home":
-          session = await createSession({
-            identity,
-            spaceDid: identity.did(),
-          });
-          session.spaceName = "<home>";
-          isHomeSpace = true;
-          break;
-      }
-    } else if ("spaceName" in view) {
-      session = await createSession({
-        identity,
-        spaceName: view.spaceName,
-      });
-    } else if ("spaceDid" in view) {
-      session = await createSession({
-        identity,
-        spaceDid: view.spaceDid,
-      });
-    }
-
-    if (!session) {
-      throw new Error(`Invalid view: ${view}`);
-    }
+    // One runtime per identity: the worker session is always the
+    // identity's home session. Spaces — including derived named spaces —
+    // are addressed per call; nothing is bound at creation.
+    const session: Session = await createSession({
+      identity,
+      spaceDid: identity.did(),
+    });
 
     // Log user identity for debugging
     identityLogger.log(
       "identity",
       `[Identity] User DID: ${identity.did()}`,
-    );
-    identityLogger.log(
-      "identity",
-      `[Identity] Space: ${session.spaceName ?? "<unknown>"} (${
-        session.space ?? "by name"
-      })`,
     );
 
     // Fetch the build manifest first so the worker URL is cache-busted with
@@ -538,14 +480,25 @@ export class RuntimeInternals extends EventTarget {
     );
 
     // Expose a usable RuntimeInternals immediately. Callers that need
-    // storage/piece-manager convergence should await `rt.synced()` explicitly.
+    // storage/piece-manager convergence should await `rt.synced(space)`
+    // explicitly.
     return new RuntimeInternals(
       client,
-      session.space,
-      session.spaceName,
-      isHomeSpace,
-      identity.did(), // homeSpaceDID is always identity.did()
       { navigate, onConsole, onError },
     );
   }
+}
+
+/**
+ * Resolve a named space to its DID (the derived space key) without
+ * touching any runtime. "Current space" is embedder view state; this is
+ * the one piece of derivation embedders need to translate a
+ * human-readable space name into an address.
+ */
+export async function resolveSpaceDid(
+  identity: Identity,
+  spaceName: string,
+): Promise<DID> {
+  const session = await createSession({ identity, spaceName });
+  return session.space;
 }

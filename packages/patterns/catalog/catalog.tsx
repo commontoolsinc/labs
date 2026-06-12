@@ -40,6 +40,7 @@ interface CatalogInput {
           { id: "button"; label: "Button" },
           { id: "checkbox"; label: "Checkbox" },
           { id: "code-editor"; label: "Code Editor" },
+          { id: "field"; label: "Field" },
           { id: "input"; label: "Input" },
           { id: "picker"; label: "Picker" },
           { id: "textarea"; label: "Textarea" },
@@ -81,6 +82,7 @@ interface CatalogInput {
           { id: "label"; label: "Label" },
           { id: "chip"; label: "Chip" },
           { id: "badge"; label: "Badge" },
+          { id: "empty-state"; label: "Empty State" },
           { id: "separator"; label: "Separator" },
           { id: "markdown"; label: "Markdown" },
           { id: "svg"; label: "SVG" },
@@ -131,7 +133,7 @@ interface CatalogInput {
     ]>;
 }
 
-interface CatalogOutput {
+export interface CatalogOutput {
   [NAME]: string;
   [UI]: VNode;
   selectedStory: string;

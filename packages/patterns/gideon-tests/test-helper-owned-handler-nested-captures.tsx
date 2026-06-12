@@ -34,7 +34,7 @@ interface Input {
   onSaveFile: Stream<{ fileId: string; content: string }>;
 }
 
-interface Output {
+export interface Output {
   trigger: Stream<void>;
 }
 

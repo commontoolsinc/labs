@@ -121,7 +121,7 @@ interface PatternInput {
 }
 
 /** Email pattern launcher that discovers and runs relevant patterns. #emailPatternLauncher */
-interface PatternOutput {
+export interface PatternOutput {
   matchedPatterns: unknown[];
   emailCount: number;
   matchCount: number;

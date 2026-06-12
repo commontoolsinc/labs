@@ -16,7 +16,6 @@ type Favorite = {
   tag: string;
   userTags: Writable<string[]>;
   spaceName?: string;
-  spaceDid?: string;
 };
 
 const onRemoveFavorite = handler<

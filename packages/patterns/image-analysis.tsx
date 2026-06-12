@@ -20,7 +20,7 @@ type ImageChatInput = {
   model?: string;
 };
 
-type ImageChatOutput = {
+export type ImageChatOutput = {
   images: Writable<ImageData[]>;
   prompt: Writable<string>;
   response: string | undefined;

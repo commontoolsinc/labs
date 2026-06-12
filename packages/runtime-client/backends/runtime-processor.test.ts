@@ -18,6 +18,7 @@ import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { cellRefToSigilLink } from "./utils.ts";
 import { Runtime } from "@commonfabric/runner";
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import * as V2Storage from "../../runner/src/storage/v2.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
 
@@ -745,15 +746,21 @@ describe("RuntimeProcessor blob upload IPC", () => {
     };
     // The constructor performs full runtime initialization; this focused unit
     // test calls the handler with the fields it reads directly.
+    const hostForSpaceCalls: string[] = [];
     const processor = {
-      apiUrl: new URL("http://toolshed.test/base"),
-      space: "did:key:test-space",
+      runtime: {
+        hostForSpace: (space: string) => {
+          hostForSpaceCalls.push(space);
+          return new URL("http://toolshed.test/base");
+        },
+      },
     } as unknown as RuntimeProcessor;
 
     try {
       await expect(
         RuntimeProcessor.prototype.handleUploadBlob.call(processor, {
           type: RequestType.UploadBlob,
+          space: "did:key:test-space" as never,
           contentType: "image/png",
           body: [1, 2, 3],
           suffix: "png",
@@ -769,6 +776,8 @@ describe("RuntimeProcessor blob upload IPC", () => {
     expect(requestedUrl).toBe(
       "http://toolshed.test/did:key:test-space/blobs/upload.png",
     );
+    // The host is resolved for the REQUEST's space, not any init space.
+    expect(hostForSpaceCalls).toEqual(["did:key:test-space"]);
     expect(requestedPayload).toEqual({
       type: "image/png",
       body: new FabricBytes(new Uint8Array([1, 2, 3])),
@@ -892,6 +901,60 @@ describe("RuntimeProcessor CFC label IPC", () => {
         }],
       },
     });
+  });
+
+  it("redacts Caveat.source from the introspection response (audit 28b)", async () => {
+    const ref: CellRef = {
+      id: "of:cfc-caveat-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink: () => ({
+          runtime: {
+            readTx: () => ({
+              readOrThrow: () => ({
+                value: "labelled data",
+                cfc: {
+                  version: 1,
+                  schemaHash: "test-schema",
+                  labelMap: {
+                    version: 1,
+                    entries: [{
+                      path: [],
+                      label: {
+                        confidentiality: [{
+                          type: CFC_ATOM_TYPE.Caveat,
+                          kind: "derived-from",
+                          source: "did:key:alice",
+                        }],
+                      },
+                    }],
+                  },
+                },
+              }),
+            }),
+          },
+          getAsNormalizedFullLink: () => ref,
+          getMetaRaw: () => undefined,
+          sync: () => Promise.resolve(),
+        }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    const response = await RuntimeProcessor.prototype.handleCellGetCfcLabel
+      .call(
+        processor,
+        { type: RequestType.CellGetCfcLabel, cell: ref },
+      );
+    const atom = response.cfcLabel?.entries[0].label.confidentiality
+      ?.[0] as Record<string, unknown>;
+    // The caveat survives with its kind/type, but the source identity is gone.
+    expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
+    expect(atom.kind).toBe("derived-from");
+    expect("source" in atom).toBe(false);
   });
 
   it("returns label views on resolved cell refs", () => {
@@ -1033,7 +1096,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     expect(sourceSynced).toBe(false);
   });
 
-  it("syncs pattern, argument, and internal metadata links before reading labels", async () => {
+  it("syncs pattern and argument metadata links before reading labels", async () => {
     const resultRef: CellRef = {
       id: "of:cfc-label-sync-result" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
@@ -1048,12 +1111,6 @@ describe("RuntimeProcessor CFC label IPC", () => {
     };
     const argumentRef: CellRef = {
       id: "of:cfc-label-sync-argument" as CellRef["id"],
-      space: "did:key:test" as CellRef["space"],
-      scope: "space",
-      path: [],
-    };
-    const internalRef: CellRef = {
-      id: "of:cfc-label-sync-internal" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
       scope: "space",
       path: [],
@@ -1081,7 +1138,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     const makeCell = (
       name: string,
       ref: CellRef,
-      links: Partial<Record<"pattern" | "argument" | "internal", CellRef>> = {},
+      links: Partial<Record<"pattern" | "argument", CellRef>> = {},
     ) => {
       let synced = false;
       return {
@@ -1089,10 +1146,11 @@ describe("RuntimeProcessor CFC label IPC", () => {
         sourceURI: `${ref.space}/${ref.scope}/${ref.id}`,
         runtime,
         getAsNormalizedFullLink: () => ref,
-        getMetaRaw: (metaField: "pattern" | "argument" | "internal") =>
-          synced && links[metaField] !== undefined
+        getMetaRaw: (metaField: "pattern" | "argument") => {
+          return synced && links[metaField] !== undefined
             ? cellRefToSigilLink(links[metaField]!)
-            : undefined,
+            : undefined;
+        },
         sync: () => {
           synced = true;
           syncLog.push(name);
@@ -1105,12 +1163,10 @@ describe("RuntimeProcessor CFC label IPC", () => {
       makeCell("result", resultRef, {
         pattern: patternRef,
         argument: argumentRef,
-        internal: internalRef,
       }),
     );
     cells.set(patternRef.id, makeCell("pattern", patternRef));
     cells.set(argumentRef.id, makeCell("argument", argumentRef));
-    cells.set(internalRef.id, makeCell("internal", internalRef));
     const processor = { runtime } as unknown as RuntimeProcessor;
 
     await expect(
@@ -1132,7 +1188,6 @@ describe("RuntimeProcessor CFC label IPC", () => {
       "result",
       "pattern",
       "argument",
-      "internal",
       "result",
     ]);
   });
@@ -1161,7 +1216,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     const makeCell = (
       name: string,
       ref: CellRef,
-      links: Partial<Record<"pattern" | "argument" | "internal", CellRef>> = {},
+      links: Partial<Record<"pattern" | "argument", CellRef>> = {},
     ) => {
       let synced = false;
       return {
@@ -1169,10 +1224,11 @@ describe("RuntimeProcessor CFC label IPC", () => {
         sourceURI: `${ref.space}/${ref.scope}/${ref.id}`,
         runtime,
         getAsNormalizedFullLink: () => ref,
-        getMetaRaw: (metaField: "pattern" | "argument" | "internal") =>
-          synced && links[metaField] !== undefined
+        getMetaRaw: (metaField: "pattern" | "argument") => {
+          return synced && links[metaField] !== undefined
             ? cellRefToSigilLink(links[metaField]!)
-            : undefined,
+            : undefined;
+        },
         sync: () => {
           synced = true;
           syncLog.push(name);
@@ -1189,7 +1245,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     cells.set(
       patternRef.id,
       makeCell("pattern", patternRef, {
-        internal: resultRef,
+        argument: resultRef,
       }),
     );
     const processor = { runtime } as unknown as RuntimeProcessor;
@@ -1640,26 +1696,30 @@ describe("RuntimeProcessor per-space piece contexts", () => {
       pieceManager,
       cc,
       getSpaceCtx,
-      checkRootPatternSpace:
-        (RuntimeProcessor.prototype as any).checkRootPatternSpace,
     };
     return { processor, runtime, homeSpace };
   }
 
-  it("resolves no-space and the home space to the initialize-time context", async () => {
+  it("resolves the home space to the initialize-time context and rejects a missing space", async () => {
     const { processor, runtime, homeSpace } = await makeProcessorState();
     try {
-      expect(processor.getSpaceCtx()).toBe(processor.spaces.get(homeSpace));
+      expect(processor.getSpaceCtx(homeSpace)).toBe(
+        processor.spaces.get(homeSpace),
+      );
       expect(processor.getSpaceCtx(homeSpace).pieceManager).toBe(
         processor.pieceManager,
       );
+      expect(() =>
+        (processor as { getSpaceCtx: (s?: string) => unknown })
+          .getSpaceCtx()
+      ).toThrow("name a space");
     } finally {
       await runtime.dispose();
     }
   });
 
   it("lazily builds a distinct, cached context for a foreign space", async () => {
-    const { processor, runtime } = await makeProcessorState();
+    const { processor, runtime, homeSpace } = await makeProcessorState();
     const spaceB = (await Identity.fromPassphrase(
       "runtime-processor-space-b",
     )).did();
@@ -1669,7 +1729,7 @@ describe("RuntimeProcessor per-space piece contexts", () => {
       expect(ctxB.pieceManager.getSpace()).toBe(spaceB);
       // Cached: the same context comes back, and the home context is intact.
       expect(processor.getSpaceCtx(spaceB)).toBe(ctxB);
-      expect(processor.getSpaceCtx().pieceManager).toBe(
+      expect(processor.getSpaceCtx(homeSpace).pieceManager).toBe(
         processor.pieceManager,
       );
     } finally {
@@ -1688,6 +1748,7 @@ describe("RuntimeProcessor per-space piece contexts", () => {
         type: RequestType.PageGet,
         pageId: "fid1-cross-space-probe",
         runIt: false,
+        space: homeSpace,
       });
       const resB = await handlePageGet.call(processor, {
         type: RequestType.PageGet,
@@ -1700,6 +1761,101 @@ describe("RuntimeProcessor per-space piece contexts", () => {
     } finally {
       await runtime.dispose();
     }
+  });
+
+  it("handleRuntimeSynced awaits every opened space, naming none", async () => {
+    const { processor, runtime } = await makeProcessorState();
+    const spaceB = (await Identity.fromPassphrase(
+      "runtime-processor-space-b",
+    )).did();
+    const handleRuntimeSynced =
+      (RuntimeProcessor.prototype as any).handleRuntimeSynced;
+    try {
+      processor.getSpaceCtx(spaceB);
+      // Resolves across home + spaceB over loopback storage; the request
+      // carries no space at all.
+      await handleRuntimeSynced.call(processor);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("watchSiteTable registers table entries, isolating bad ones", async () => {
+    const { runtime } = createRuntime();
+    const { siteTableCause, siteTableSchema } = await import(
+      "@commonfabric/home-schemas"
+    );
+    const registered: Array<[string, string]> = [];
+    Object.assign(runtime, {
+      registerSpaceHost: (space: string, host: string) => {
+        registered.push([space, host]);
+        // Malformed hosts throw in the real registry — simulate to
+        // assert per-entry isolation.
+        if (host === "not a url") throw new Error("Invalid host");
+        return host !== "http://refused.test/";
+      },
+    });
+    const userDid = runtime.userIdentityDID;
+    const table = runtime.getCell(
+      userDid,
+      siteTableCause(userDid),
+      siteTableSchema,
+    );
+    const tx = runtime.edit();
+    table.withTx(tx).set([
+      { did: "did:key:z6Mk-table-a", host: "http://host-a.test/" },
+      { did: "not-a-did", host: "http://ignored.test/" },
+      { did: "did:key:z6Mk-table-bad", host: "not a url" },
+      { did: "did:key:z6Mk-table-b", host: "http://refused.test/" },
+      { did: "did:key:z6Mk-table-c", host: "http://host-c.test/" },
+    ]);
+    await tx.commit();
+
+    const processor = { runtime } as unknown as RuntimeProcessor;
+    try {
+      (RuntimeProcessor.prototype as unknown as {
+        watchSiteTable(): void;
+      }).watchSiteTable.call(processor);
+      await runtime.idle();
+      // Microtask drain: sync() resolution + first sink fire.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(registered).toEqual([
+        ["did:key:z6Mk-table-a", "http://host-a.test/"],
+        ["did:key:z6Mk-table-bad", "not a url"],
+        ["did:key:z6Mk-table-b", "http://refused.test/"],
+        ["did:key:z6Mk-table-c", "http://host-c.test/"],
+      ]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("handleRegisterSpaceHost forwards to the runtime and reports the verdict", () => {
+    const calls: Array<[string, string]> = [];
+    const processor = {
+      runtime: {
+        registerSpaceHost: (space: string, host: string) => {
+          calls.push([space, host]);
+          return host === "http://accepted.test/";
+        },
+      },
+    } as unknown as RuntimeProcessor;
+    const handle = (RuntimeProcessor.prototype as unknown as {
+      handleRegisterSpaceHost(
+        r: { type: RequestType; space: string; host: string },
+      ): { value: boolean };
+    }).handleRegisterSpaceHost;
+    expect(handle.call(processor, {
+      type: RequestType.RegisterSpaceHost,
+      space: "did:key:z6Mk-ipc-a",
+      host: "http://accepted.test/",
+    })).toEqual({ value: true });
+    expect(handle.call(processor, {
+      type: RequestType.RegisterSpaceHost,
+      space: "did:key:z6Mk-ipc-b",
+      host: "http://refused.test/",
+    })).toEqual({ value: false });
+    expect(calls.length).toBe(2);
   });
 
   it("managerFor returns only existing contexts (no lazy create)", async () => {
@@ -1719,27 +1875,101 @@ describe("RuntimeProcessor per-space piece contexts", () => {
       await runtime.dispose();
     }
   });
+});
 
-  it("rejects root-pattern operations for foreign spaces", async () => {
-    const { processor, runtime, homeSpace } = await makeProcessorState();
-    const spaceB = (await Identity.fromPassphrase(
-      "runtime-processor-space-b",
-    )).did();
-    const handleGetSpaceRootPattern =
-      (RuntimeProcessor.prototype as any).handleGetSpaceRootPattern;
+// S16 phase D: the host's render confidentiality ceiling must reach every
+// mount's reconciler — a ceiling configured at initialization that never
+// arrives at the egress surface is silently unbounded rendering.
+describe("RuntimeProcessor vdom mount render policy", () => {
+  const handleVDomMount = (RuntimeProcessor.prototype as any).handleVDomMount;
+  const handleVDomUnmount =
+    (RuntimeProcessor.prototype as any).handleVDomUnmount;
+
+  type RootRenderPolicy = {
+    maxConfidentiality?: readonly unknown[];
+    caveatKindAllow?: readonly string[];
+  };
+
+  async function mountAndGetRootPolicy(
+    renderConfidentialityCeiling:
+      | { atoms?: unknown[]; caveatKinds?: string[] }
+      | undefined,
+  ): Promise<RootRenderPolicy> {
+    const { runtime } = createRuntime();
+    const space = cfcSigner.did();
+    const tx = runtime.edit();
+    const cell = runtime.getCell<string>(
+      space,
+      "vdom-mount-render-policy",
+      undefined,
+      tx,
+    );
+    cell.set("hello");
+    const commit = await tx.commit();
+    expect(commit.ok !== undefined).toBe(true);
+
+    const state = {
+      runtime,
+      vdomMounts: new Map<
+        number,
+        { reconciler: unknown; cancel: () => void }
+      >(),
+      vdomBatchIdCounter: 0,
+      renderDeclassificationPolicy: "allow",
+      renderConfidentialityCeiling,
+      handleVDomUnmount,
+    };
+    // handleVDomMount's onOps/onError callbacks post to the worker scope;
+    // stub postMessage for the main-thread test.
+    const hadPostMessage = "postMessage" in globalThis;
+    const originalPostMessage = (globalThis as any).postMessage;
+    (globalThis as any).postMessage = () => {};
     try {
-      await expect(handleGetSpaceRootPattern.call(processor, {
-        type: RequestType.GetSpaceRootPattern,
-        space: spaceB,
-      })).rejects.toThrow("home-space only");
-      // The home space (explicit or absent) stays permitted: the guard
-      // itself passes and the call proceeds into ensureDefaultPattern.
-      (processor as { checkRootPatternSpace: (s?: string) => void })
-        .checkRootPatternSpace(homeSpace);
-      (processor as { checkRootPatternSpace: (s?: string) => void })
-        .checkRootPatternSpace();
+      handleVDomMount.call(state, {
+        type: RequestType.VDomMount,
+        mountId: 1,
+        cell: cell.getAsNormalizedFullLink() as unknown as CellRef,
+      });
+      const mount = state.vdomMounts.get(1);
+      expect(mount).toBeDefined();
+      const policy = (mount!.reconciler as { rootRenderPolicy?: unknown })
+        .rootRenderPolicy as RootRenderPolicy;
+      handleVDomUnmount.call(state, {
+        type: RequestType.VDomUnmount,
+        mountId: 1,
+      });
+      return policy;
     } finally {
+      // Reconciler flushes are queueMicrotask batches, so everything queued
+      // by mount/unmount fires before this await's continuation — restoring
+      // postMessage after it means the stub is in place through the last
+      // flush, with no timer heuristics.
       await runtime.dispose();
+      if (hadPostMessage) {
+        (globalThis as any).postMessage = originalPostMessage;
+      } else {
+        delete (globalThis as any).postMessage;
+      }
     }
+  }
+
+  it("threads the configured ceiling into each mount's reconciler", async () => {
+    const userAtom = {
+      type: "https://commonfabric.org/cfc/atom/Resource",
+      class: "ActingUser",
+      subject: cfcSigner.did(),
+    };
+    const caveatKind = "https://commonfabric.org/cfc/concepts/prompt-influence";
+    const policy = await mountAndGetRootPolicy({
+      atoms: [userAtom],
+      caveatKinds: [caveatKind],
+    });
+    expect(policy.maxConfidentiality).toEqual([userAtom]);
+    expect(policy.caveatKindAllow).toEqual([caveatKind]);
+  });
+
+  it("keeps mounts unbounded when no ceiling is configured", async () => {
+    const policy = await mountAndGetRootPolicy(undefined);
+    expect(policy.maxConfidentiality).toBeUndefined();
   });
 });

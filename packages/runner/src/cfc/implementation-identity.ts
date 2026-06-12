@@ -1,5 +1,5 @@
 import type { Module } from "../builder/types.ts";
-import type { Harness, HarnessedFunction } from "../harness/types.ts";
+import type { HarnessedFunction } from "../harness/types.ts";
 import type { ImplementationIdentity } from "./types.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
@@ -7,17 +7,22 @@ import {
   identityFromCanonicalSource,
 } from "../harness/verified-provenance.ts";
 
+/**
+ * Resolve the policy-facing implementation identity for a module invocation.
+ *
+ * `kind: "verified"` is proven EXCLUSIVELY by the function object's
+ * content-addressed provenance (harness/verified-provenance.ts): an entry
+ * exists only for a function registered during a verified evaluation, so the
+ * WeakMap lookup itself is the anti-spoof check — an attacker-supplied
+ * function (even with byte-identical source text) has no entry and resolves
+ * to nothing. The former `implementationRef` × `verifiedLoadId` registry arm
+ * is gone (PR E2): every function the legacy registry could admit is an
+ * evaluation product and therefore carries provenance, so the arm had no
+ * reachable case the provenance path does not cover.
+ */
 export const resolvePolicyFacingImplementationIdentity = (
   module: Module,
   options: {
-    verifiedLoadId?: string;
-    harness?: Pick<
-      Harness,
-      | "getVerifiedBindingMetadata"
-      | "getVerifiedBundleId"
-      | "getVerifiedFunctionInLoad"
-      | "isVerifiedSourceInLoad"
-    >;
     implementation?: HarnessedFunction;
   } = {},
 ): ImplementationIdentity | undefined => {
@@ -26,19 +31,7 @@ export const resolvePolicyFacingImplementationIdentity = (
     return undefined;
   }
   if (typeof debugName !== "string" || debugName.length === 0) {
-    // Content-addressed provenance needs no load scoping — the function
-    // object's registration during verified evaluation IS the proof.
-    const provenanceIdentity = resolveProvenanceImplementationIdentity(
-      options,
-    );
-    if (provenanceIdentity) return provenanceIdentity;
-    if (
-      typeof options.verifiedLoadId !== "string" ||
-      options.verifiedLoadId.length === 0
-    ) {
-      return undefined;
-    }
-    return resolveVerifiedImplementationIdentity(module, options);
+    return resolveProvenanceImplementationIdentity(options.implementation);
   }
 
   return {
@@ -52,101 +45,23 @@ export const resolveBuiltinImplementationIdentity = (
 ): ImplementationIdentity | undefined =>
   resolvePolicyFacingImplementationIdentity(module);
 
-const resolveVerifiedImplementationIdentity = (
-  module: Module,
-  options: {
-    verifiedLoadId?: string;
-    harness?: Pick<
-      Harness,
-      | "getVerifiedBindingMetadata"
-      | "getVerifiedBundleId"
-      | "getVerifiedFunctionInLoad"
-      | "isVerifiedSourceInLoad"
-    >;
-    implementation?: HarnessedFunction;
-  },
-): ImplementationIdentity => {
-  // Legacy path (dual-read until the flip): implementationRef × verifiedLoadId
-  // registry checks. The content-addressed provenance path was already tried
-  // by the caller (resolvePolicyFacingImplementationIdentity).
-  const implementationRef = (module as { implementationRef?: string })
-    .implementationRef;
-  const { verifiedLoadId, harness, implementation } = options;
-
-  if (
-    typeof implementationRef !== "string" ||
-    implementationRef.length === 0 ||
-    typeof verifiedLoadId !== "string" ||
-    verifiedLoadId.length === 0 ||
-    !harness ||
-    typeof implementation !== "function" ||
-    harness.getVerifiedFunctionInLoad?.(verifiedLoadId, implementationRef) !==
-      implementation
-  ) {
-    return {
-      kind: "unsupported",
-      className: "verified",
-      reason:
-        "verified compiled policy identity must resolve through the current verified load",
-    };
-  }
-
-  const bindingMetadata = harness.getVerifiedBindingMetadata?.(
-    implementationRef,
-  );
-  const sourceLocation = parseVerifiedSourceLocation(
-    (implementation as { src?: string }).src,
-  );
-  if (
-    !sourceLocation ||
-    harness.isVerifiedSourceInLoad?.(verifiedLoadId, sourceLocation.source) !==
-      true
-  ) {
-    return {
-      kind: "unsupported",
-      className: "verified",
-      reason:
-        "verified compiled policy identity must map back into the current verified bundle",
-    };
-  }
-
-  return {
-    kind: "verified",
-    bundleId: harness.getVerifiedBundleId?.(verifiedLoadId) ?? verifiedLoadId,
-    ...(bindingMetadata?.sourceFile
-      ? { sourceFile: normalizeIdentitySource(bindingMetadata.sourceFile) }
-      : {}),
-    ...(bindingMetadata?.bindingPath
-      ? { bindingPath: [...bindingMetadata.bindingPath] }
-      : {}),
-    sourceLocation: {
-      line: sourceLocation.line,
-      column: sourceLocation.column,
-    },
-    ...(bindingMetadata?.bindingPath ? {} : {
-      codeHash: hashOf(Function.prototype.toString.call(implementation))
-        .toString(),
-    }),
-  };
-};
-
 /**
  * Resolve `kind: "verified"` from the function object's content-addressed
- * provenance (see harness/verified-provenance.ts). Returns undefined when the
- * function has no provenance — callers fall back to the legacy registry path.
+ * provenance. Returns undefined when the function has no provenance —
+ * fail-closed: no identity, no authorized write.
  *
- * `bundleId` is still attached (from the load's registry) so stored
- * `writeAuthorizedBy` claims written before the moduleIdentity switch keep
- * verifying; new claims are stamped with BOTH (see cfc/prepare.ts).
+ * `bundleId` rides on the provenance (stamped at evaluation time) so stored
+ * legacy bundleId-only `writeAuthorizedBy` claims keep verifying; it retires
+ * together with the bundleId verification arm in prepare.ts. (Claims stamped
+ * with a RAW `verifiedLoadId` — the historical miss corner when no bundle id
+ * was registered at stamp time — are not served anymore: a load id embeds a
+ * session counter, so such a claim could never verify across sessions anyway,
+ * and same-session claims written since #4009 carry `moduleIdentity`, which
+ * wins arm selection.)
  */
 const resolveProvenanceImplementationIdentity = (
-  options: {
-    verifiedLoadId?: string;
-    harness?: Pick<Harness, "getVerifiedBundleId">;
-    implementation?: HarnessedFunction;
-  },
+  implementation: HarnessedFunction | undefined,
 ): ImplementationIdentity | undefined => {
-  const { implementation, verifiedLoadId, harness } = options;
   if (typeof implementation !== "function") return undefined;
   const provenance = getVerifiedProvenance(implementation);
   if (!provenance) return undefined;
@@ -168,23 +83,11 @@ const resolveProvenanceImplementationIdentity = (
     };
   }
 
-  // Mirror the legacy resolver's `getVerifiedBundleId(...) ?? verifiedLoadId`
-  // fallback: a stored legacy `writeAuthorizedBy` claim may carry the raw
-  // `verifiedLoadId` as its `bundleId` (when the bundle id wasn't registered at
-  // stamp time), and the `bundleId` verification arm in cfc/prepare.ts is an
-  // exact equality. Dropping the fallback here would leave `bundleId`
-  // `undefined` on a `getVerifiedBundleId` miss and fail those legacy claims
-  // closed. The `moduleIdentity` arm remains the primary; this only keeps the
-  // legacy arm symmetric with the path that produced those claims.
-  const bundleId = typeof verifiedLoadId === "string" && verifiedLoadId.length
-    ? harness?.getVerifiedBundleId?.(verifiedLoadId) ?? verifiedLoadId
-    : undefined;
-
   return {
     kind: "verified",
     moduleIdentity: provenance.identity,
     ...(provenance.symbol ? { symbol: provenance.symbol } : {}),
-    ...(bundleId ? { bundleId } : {}),
+    ...(provenance.bundleId ? { bundleId: provenance.bundleId } : {}),
     ...(provenance.bindingIdentity
       ? {
         sourceFile: normalizeIdentitySource(

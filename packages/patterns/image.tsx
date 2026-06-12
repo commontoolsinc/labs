@@ -12,7 +12,7 @@ type ImageInput = {
   caption: string | Default<"">;
 };
 
-type ImageOutput = {
+export type ImageOutput = {
   [NAME]: unknown;
   [UI]: unknown;
   url: string;
@@ -44,7 +44,7 @@ export default pattern<ImageInput, ImageOutput>(({ url, caption }) => {
             <div
               style={{
                 fontSize: "14px",
-                color: "var(--cf-color-gray-500)",
+                color: "var(--cf-colors-gray-500)",
                 textAlign: "center",
                 padding: "4px 0",
               }}

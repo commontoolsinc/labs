@@ -11,7 +11,7 @@ import { Controls, SwitchControl } from "../ui/controls/index.ts";
 
 // deno-lint-ignore no-empty-interface
 interface PickerStoryInput {}
-interface PickerStoryOutput {
+export interface PickerStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;
@@ -22,7 +22,7 @@ interface PickerCardInput {
   body: string;
   color: string;
 }
-interface PickerCardOutput {
+export interface PickerCardOutput {
   [NAME]: string;
   [UI]: VNode;
 }

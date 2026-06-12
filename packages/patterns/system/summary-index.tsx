@@ -21,7 +21,7 @@ export type SummaryIndexEntry = {
 
 type Input = Record<string, never>;
 
-type Output = {
+export type Output = {
   entries: SummaryIndexEntry[];
   search: PatternToolResult<{ entries: SummaryIndexEntry[] }>;
 };
@@ -111,7 +111,7 @@ const SummaryIndex = pattern<Input, Output>(() => {
           <span
             style={{
               fontSize: "13px",
-              color: "var(--cf-color-text-secondary)",
+              color: "var(--cf-theme-color-text-secondary)",
             }}
           >
             {filteredCount} of {entryCount} pieces
@@ -127,7 +127,7 @@ const SummaryIndex = pattern<Input, Output>(() => {
                   <td
                     style={{
                       fontSize: "13px",
-                      color: "var(--cf-color-text-secondary)",
+                      color: "var(--cf-theme-color-text-secondary)",
                     }}
                   >
                     {entry.summary}

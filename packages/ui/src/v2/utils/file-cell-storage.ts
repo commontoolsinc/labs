@@ -1,3 +1,4 @@
+import type { DID } from "@commonfabric/identity";
 import type { RuntimeClient } from "@commonfabric/runtime-client";
 
 export interface StoredFile {
@@ -19,6 +20,8 @@ export interface StoredFile {
 export interface StoreFileOptions {
   file: File;
   runtime: RuntimeClient;
+  /** The space the file's blob belongs to — part of its address. */
+  space: DID;
   width?: number;
   height?: number;
   metadata?: Record<string, unknown>;
@@ -28,11 +31,13 @@ export interface StoreFileOptions {
 export async function uploadFile(
   options: StoreFileOptions,
 ): Promise<StoredFile> {
-  const { file, runtime, width, height, metadata, includeDataUrl } = options;
+  const { file, runtime, space, width, height, metadata, includeDataUrl } =
+    options;
   const createdAt = Date.now();
   const mediaType = file.type || "application/octet-stream";
   const buffer = await file.arrayBuffer();
   const upload = await runtime.uploadBlob({
+    space,
     contentType: mediaType,
     body: new Uint8Array(buffer),
     suffix: fileSuffix(file.name, mediaType),

@@ -66,7 +66,7 @@ interface Input {
 }
 
 /** Google Docs Markdown Importer. Import Google Docs as Markdown with comments. #googleDocsImporter */
-interface Output {
+export interface Output {
   docUrl: string;
   markdown: string;
   docTitle: string;
@@ -370,11 +370,11 @@ export default pattern<Input, Output>(
                     style={{
                       marginTop: "8px",
                       padding: "8px 12px",
-                      backgroundColor: "var(--cf-color-red-50, #fef2f2)",
-                      border: "1px solid var(--cf-color-red-200, #fecaca)",
+                      backgroundColor: "var(--cf-colors-red-50, #fef2f2)",
+                      border: "1px solid var(--cf-colors-red-200, #fecaca)",
                       borderRadius: "6px",
                       fontSize: "12px",
-                      color: "var(--cf-color-red-700, #b91c1c)",
+                      color: "var(--cf-colors-red-700, #b91c1c)",
                       whiteSpace: "pre-wrap",
                     }}
                   >
@@ -418,8 +418,7 @@ export default pattern<Input, Output>(
                   <div
                     style={{
                       padding: "16px",
-                      backgroundColor:
-                        "var(--cf-color-surface-secondary, #f9fafb)",
+                      backgroundColor: "var(--cf-theme-color-surface, #f9fafb)",
                       borderRadius: "8px",
                       fontFamily: "monospace",
                       fontSize: "13px",

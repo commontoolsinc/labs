@@ -3,7 +3,7 @@ import { Controls, SelectControl } from "../ui/controls/index.ts";
 
 // deno-lint-ignore no-empty-interface
 interface GridStoryInput {}
-interface GridStoryOutput {
+export interface GridStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

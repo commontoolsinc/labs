@@ -41,7 +41,7 @@ interface TestInput {
   triggerCount: number | Default<0>;
 }
 
-interface TestOutput {
+export interface TestOutput {
   // Note: Output types describe the inner value type, not the cell wrapper
   // The pattern returns OpaqueCell<number>, so the output is `number`
   triggerCount: number;

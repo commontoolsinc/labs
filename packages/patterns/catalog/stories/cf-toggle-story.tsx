@@ -15,7 +15,7 @@ import {
 
 // deno-lint-ignore no-empty-interface
 interface ToggleStoryInput {}
-interface ToggleStoryOutput {
+export interface ToggleStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

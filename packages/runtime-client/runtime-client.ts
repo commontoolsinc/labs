@@ -85,6 +85,21 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     transport: RuntimeTransport,
     options: RuntimeClientOptions,
   ): Promise<RuntimeClient> {
+    // renderDeclassificationPolicy is a security knob: reject unknown values
+    // loudly here, where the host's own config error can surface early. The
+    // worker side additionally fails CLOSED (treats unknown as "deny") for
+    // peers that don't go through this entry point.
+    const renderPolicy = options.renderDeclassificationPolicy;
+    if (
+      renderPolicy !== undefined && renderPolicy !== "allow" &&
+      renderPolicy !== "deny"
+    ) {
+      throw new Error(
+        `Invalid renderDeclassificationPolicy: ${
+          JSON.stringify(renderPolicy)
+        } (expected "allow" or "deny")`,
+      );
+    }
     const initialized = await (new RuntimeConnection(transport)).initialize({
       apiUrl: options.apiUrl.toString(),
       spaceHostMap: options.spaceHostMap,
@@ -95,6 +110,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       experimental: options.experimental,
       cfcEnforcementMode: options.cfcEnforcementMode,
       renderDeclassificationPolicy: options.renderDeclassificationPolicy,
+      renderConfidentialityCeiling: options.renderConfidentialityCeiling,
       trustSnapshot: options.trustSnapshot,
     });
     return new RuntimeClient(initialized, options);
@@ -163,6 +179,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   async createPage<T = unknown>(
     input: string | URL | Program,
+    space: DID,
     options?: { argument?: JSONValue; run?: boolean },
   ): Promise<PageHandle<T>> {
     const source = input instanceof URL
@@ -183,6 +200,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       RequestType.PageCreate
     >({
       type: RequestType.PageCreate,
+      space,
       source,
       argument: options?.argument,
       run: options?.run,
@@ -191,12 +209,12 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new PageHandle<T>(this, response.page);
   }
 
-  // Page operations accept an optional space DID. Absent ⇒ the space
-  // this client was initialized with (unchanged behavior); present ⇒
-  // the worker resolves the operation against that space's piece
-  // context over the same connection.
+  // Page operations name their space explicitly — there is no
+  // implicit/default space at this layer. The worker resolves each
+  // operation against that space's piece context over the same
+  // connection.
 
-  async getSpaceRootPattern(space?: DID): Promise<PageHandle<NameSchema>> {
+  async getSpaceRootPattern(space: DID): Promise<PageHandle<NameSchema>> {
     const response = await this.#conn.request<
       RequestType.GetSpaceRootPattern
     >({
@@ -207,7 +225,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   async recreateSpaceRootPattern(
-    space?: DID,
+    space: DID,
   ): Promise<PageHandle<NameSchema>> {
     const response = await this.#conn.request<
       RequestType.RecreateSpaceRootPattern
@@ -220,8 +238,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   async getPage<T = unknown>(
     pageId: string,
+    space: DID,
     runIt?: boolean,
-    space?: DID,
   ): Promise<PageHandle<T> | null> {
     const response = await this.#conn.request<RequestType.PageGet>({
       type: RequestType.PageGet,
@@ -235,7 +253,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new PageHandle<T>(this, response.page);
   }
 
-  async getPageSlug(pageId: string, space?: DID): Promise<string | undefined> {
+  async getPageSlug(pageId: string, space: DID): Promise<string | undefined> {
     const response = await this.#conn.request<RequestType.PageGetSlug>({
       type: RequestType.PageGetSlug,
       pageId,
@@ -244,7 +262,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return response.slug;
   }
 
-  async removePage(pageId: string, space?: DID): Promise<boolean> {
+  async removePage(pageId: string, space: DID): Promise<boolean> {
     const res = await this.#conn.request<RequestType.PageRemove>({
       type: RequestType.PageRemove,
       pageId: pageId,
@@ -257,7 +275,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * Get the pieces list cell.
    * Subscribe to this cell to get reactive updates of all pieces in the space.
    */
-  async getPiecesListCell<T>(space?: DID): Promise<CellHandle<T[]>> {
+  async getPiecesListCell<T>(space: DID): Promise<CellHandle<T[]>> {
     const response = await this.#conn.request<RequestType.PageGetAll>({
       type: RequestType.PageGetAll,
       space,
@@ -274,10 +292,37 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * space-cell sync) to await — and lazily opens that context if this
    * is the first operation to touch the space.
    */
-  async synced(space?: DID): Promise<void> {
+  async synced(space: DID): Promise<void> {
     await this.#conn.request<RequestType.PageSynced>({
       type: RequestType.PageSynced,
       space,
+    });
+  }
+
+  /**
+   * Record a runtime-learned host hint for a space (site-table v0):
+   * makes a just-learned `space → host` fact effective on the live
+   * runtime. The durable record belongs in the home-space site table;
+   * this is the immediate, in-session half. Returns whether the hint
+   * is in effect (seed wins; an opened space is never re-pointed).
+   */
+  async registerSpaceHost(space: DID, host: string): Promise<boolean> {
+    const res = await this.#conn.request<RequestType.RegisterSpaceHost>({
+      type: RequestType.RegisterSpaceHost,
+      space,
+      host,
+    });
+    return res.value;
+  }
+
+  /**
+   * Wait for convergence across EVERY space this worker has opened.
+   * Spaceless by design (like idle) — for quiescence checks that don't
+   * care about any particular space, e.g. test/debug harnesses.
+   */
+  async allSynced(): Promise<void> {
+    await this.#conn.request<RequestType.RuntimeSynced>({
+      type: RequestType.RuntimeSynced,
     });
   }
 
@@ -487,12 +532,14 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   async uploadBlob(options: {
+    space: DID;
     contentType: string;
     body: Uint8Array;
     suffix?: string;
   }): Promise<UploadBlobResponse> {
     return await this.#conn.request<RequestType.UploadBlob>({
       type: RequestType.UploadBlob,
+      space: options.space,
       contentType: options.contentType,
       body: Array.from(options.body),
       suffix: options.suffix,

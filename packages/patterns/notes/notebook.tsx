@@ -60,7 +60,7 @@ const removeFromAllNotebooks = (
 // ===== Output Type =====
 
 /** A #notebook that organizes notes into collections. */
-interface NotebookOutput extends NotebookPiece {
+export interface NotebookOutput extends NotebookPiece {
   [NAME]: string;
   [UI]: VNode;
   title: string;
@@ -975,7 +975,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                 <span
                   style={{
                     fontSize: "13px",
-                    color: "var(--cf-color-text-secondary)",
+                    color: "var(--cf-theme-color-text-secondary)",
                   }}
                 >
                   In:
@@ -1027,7 +1027,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                       justifyContent: "space-between",
                       padding: "8px",
                       borderRadius: "8px",
-                      background: "var(--cf-color-bg-primary, #fff)",
+                      background: "var(--cf-theme-color-background, #fff)",
                     }}
                   >
                     {/* Editable Title */}
@@ -1110,8 +1110,8 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                     padding: "48px 24px",
                     cursor: "pointer",
                     borderRadius: "8px",
-                    border: "2px dashed var(--cf-color-border, #e5e5e7)",
-                    background: "var(--cf-color-bg-secondary, #f9f9f9)",
+                    border: "2px dashed var(--cf-theme-color-border, #e5e5e7)",
+                    background: "var(--cf-theme-color-surface, #f9f9f9)",
                   }}
                   onClick={showNewNoteModalAction}
                 >
@@ -1122,7 +1122,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                     style={{
                       fontSize: "15px",
                       fontWeight: "500",
-                      color: "var(--cf-color-text-primary)",
+                      color: "var(--cf-theme-color-text)",
                     }}
                   >
                     Click to create your first note
@@ -1143,7 +1143,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                           style={{
                             background: computed(() =>
                               selectedNoteIndices.get().includes(index)
-                                ? "var(--cf-color-bg-secondary, #f5f5f7)"
+                                ? "var(--cf-theme-color-surface, #f5f5f7)"
                                 : "transparent"
                             ),
                           }}
@@ -1230,7 +1230,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                       alignItems: "center",
                       padding: "4px 0",
                       fontSize: "13px",
-                      color: "var(--cf-color-text-secondary, #6e6e73)",
+                      color: "var(--cf-theme-color-text-secondary, #6e6e73)",
                     }}
                   >
                     {/* Checkbox column (32px + 4px padding) */}
@@ -1260,7 +1260,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                   gap="3"
                   style={{
                     display: actionBarDisplay,
-                    background: "var(--cf-color-bg-secondary, #f5f5f7)",
+                    background: "var(--cf-theme-color-surface, #f5f5f7)",
                     borderRadius: "8px",
                     alignItems: "center",
                     marginTop: "8px",
@@ -1314,7 +1314,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                       allPieces,
                       notebooks,
                     })}
-                    style={{ color: "var(--cf-color-danger, #dc3545)" }}
+                    style={{ color: "var(--cf-theme-color-error, #dc3545)" }}
                   >
                     Delete
                   </cf-button>
@@ -1449,7 +1449,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
             style={{
               display: backlinksDisplay,
               alignItems: "center",
-              borderTop: "1px solid var(--cf-color-border, #e5e5e7)",
+              borderTop: "1px solid var(--cf-theme-color-border, #e5e5e7)",
               flexWrap: "wrap",
             }}
           >
@@ -1457,7 +1457,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               style={{
                 fontSize: "12px",
                 lineHeight: "28px",
-                color: "var(--cf-color-text-secondary, #666)",
+                color: "var(--cf-theme-color-text-secondary, #666)",
               }}
             >
               Linked from:

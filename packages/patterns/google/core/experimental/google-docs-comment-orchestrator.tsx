@@ -159,7 +159,7 @@ interface Input {
 }
 
 /** Google Docs Comment Orchestrator. AI-powered comment responses. #googleDocsComments */
-interface Output {
+export interface Output {
   docUrl: string;
   comments: GoogleComment[];
   openCommentCount: number;
@@ -818,11 +818,11 @@ export default pattern<Input, Output>(
                       style={{
                         marginTop: "8px",
                         padding: "8px 12px",
-                        backgroundColor: "var(--cf-color-red-50, #fef2f2)",
-                        border: "1px solid var(--cf-color-red-200, #fecaca)",
+                        backgroundColor: "var(--cf-colors-red-50, #fef2f2)",
+                        border: "1px solid var(--cf-colors-red-200, #fecaca)",
                         borderRadius: "6px",
                         fontSize: "12px",
-                        color: "var(--cf-color-red-700, #b91c1c)",
+                        color: "var(--cf-colors-red-700, #b91c1c)",
                       }}
                     >
                       {lastError}
@@ -900,11 +900,11 @@ export default pattern<Input, Output>(
                   <div
                     style={{
                       borderRadius: "8px",
-                      border: "1px solid var(--cf-color-border, #e0e0e0)",
+                      border: "1px solid var(--cf-theme-color-border, #e0e0e0)",
                       marginBottom: "8px",
                       overflow: "hidden",
                       backgroundColor: item.state?.status === "skipped"
-                        ? "var(--cf-color-surface-secondary, #f5f5f5)"
+                        ? "var(--cf-theme-color-surface, #f5f5f5)"
                         : "white",
                       opacity: item.state?.status === "skipped" ? 0.6 : 1,
                     }}
@@ -997,7 +997,7 @@ export default pattern<Input, Output>(
                                 padding: "2px 6px",
                                 borderRadius: "10px",
                                 backgroundColor:
-                                  "var(--cf-color-surface-secondary, #f0f0f0)",
+                                  "var(--cf-theme-color-surface, #f0f0f0)",
                                 color: "#666",
                               }}
                             >
@@ -1015,10 +1015,10 @@ export default pattern<Input, Output>(
                         <div
                           style={{
                             borderTop:
-                              "1px solid var(--cf-color-border, #e0e0e0)",
+                              "1px solid var(--cf-theme-color-border, #e0e0e0)",
                             padding: "16px",
                             backgroundColor:
-                              "var(--cf-color-surface-secondary, #fafafa)",
+                              "var(--cf-theme-color-surface, #fafafa)",
                           }}
                         >
                           {/* Full quoted text - ternary for conditional content */}
@@ -1029,7 +1029,7 @@ export default pattern<Input, Output>(
                                   padding: "12px",
                                   marginBottom: "12px",
                                   borderLeft:
-                                    "3px solid var(--cf-color-blue-500, #3b82f6)",
+                                    "3px solid var(--cf-colors-blue-500, #3b82f6)",
                                   backgroundColor: "white",
                                   borderRadius: "4px",
                                 }}
@@ -1102,9 +1102,9 @@ export default pattern<Input, Output>(
                   <div
                     style={{
                       padding: "16px",
-                      backgroundColor: "var(--cf-color-green-50, #f0fdf4)",
+                      backgroundColor: "var(--cf-colors-green-50, #f0fdf4)",
                       borderRadius: "8px",
-                      border: "1px solid var(--cf-color-green-200, #bbf7d0)",
+                      border: "1px solid var(--cf-colors-green-100, #bbf7d0)",
                       marginTop: "12px",
                     }}
                   >
@@ -1120,7 +1120,7 @@ export default pattern<Input, Output>(
                         style={{
                           fontSize: "14px",
                           fontWeight: 600,
-                          color: "var(--cf-color-green-700, #15803d)",
+                          color: "var(--cf-colors-green-600, #15803d)",
                         }}
                       >
                         AI Suggested Response

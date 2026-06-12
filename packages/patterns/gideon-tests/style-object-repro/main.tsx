@@ -4,7 +4,7 @@ import { NAME, pattern, UI, type VNode } from "commonfabric";
 
 type ReproInput = Record<string, never>;
 
-interface ReproOutput {
+export interface ReproOutput {
   [NAME]: string;
   [UI]: VNode;
 }

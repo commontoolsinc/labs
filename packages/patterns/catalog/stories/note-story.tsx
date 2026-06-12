@@ -4,7 +4,7 @@ import Note from "../../notes/note.tsx";
 
 // deno-lint-ignore no-empty-interface
 interface NoteStoryInput {}
-interface NoteStoryOutput {
+export interface NoteStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

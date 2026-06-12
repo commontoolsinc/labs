@@ -5,6 +5,124 @@ Prefix the URLs with
 
 ---
 
+# Status tiers
+
+This directory mixes exemplars, capability demos, regression fixtures, and
+legacy experiments. They do NOT carry equal authority. Before imitating any
+pattern, check its tier here (tracked in CT-1701):
+
+- **primitive** — designed for embedding in other patterns (used as a JSX tag),
+  headless-able. Exposes streams + cells + an optional default `[UI]`. Copy
+  these idioms when building composable building blocks. See
+  `docs/common/patterns/primitives.md` for the composition contract.
+- **exemplar** — current best practice. Copy idioms from these.
+- **demo** — illustrates a specific capability or integration. The capability
+  usage is real, but the surrounding wiring may be verbose, dated, or
+  intentionally contrived. Imitate the capability call, not the style.
+- **fixture** — regression/test scaffolding. Exists to pin down a bug or
+  exercise the runtime. Never imitate.
+- **legacy** — superseded or judged non-idiomatic. Do not copy. See also
+  `DEPRECATED_IDIOMS.md` for API-level migrations.
+
+Any pattern not listed below (newly added, or missed) should be treated as
+**demo** until triaged.
+
+## primitive
+
+Composable building blocks designed for embedding in other patterns
+(headless-able). Live under `primitives/`. See
+`docs/common/patterns/primitives.md` for the composition contract and the
+adopter-first entry bar.
+
+Currently no occupants. The first candidate (`EditableList`) was built, proven
+against real callers both headless and rendered, and retired under the kill
+criterion — no caller benefited (see the contract doc's "Lessons" section). New
+primitives require a named, real adopter before they are built.
+
+## exemplar
+
+`catalog/` (type-checked component catalog + `catalog/stories/`), `counter/`,
+`do-list/`, `fair-share/`, `form-demo.tsx`, `notes/`, `reading-list/` (canonical
+list-detail example), `simple-list/`, `todo-list/`.
+
+Caveat: `simple-list/simple-list.tsx` exports `MODULE_METADATA` so it can embed
+in the legacy Record containers — do not copy that export (see the `record/`
+note under legacy).
+
+## demo
+
+Capability and app demos (root files): `annotation.tsx`,
+`annotation-manager.tsx`, `aside.tsx`, `bookmarks.tsx`, `chatbot.tsx`,
+`cheeseboard.tsx`, `compiler.tsx`, `deep-research.tsx`, `dice.tsx` (+
+`dice-handlers.ts`), `group-chat-lobby.tsx`, `group-chat-room.tsx`, `image.tsx`,
+`image-analysis.tsx`, `link-preview.tsx`, `map-demo.tsx`, `mobile-app-demo.tsx`,
+`pattern-index.tsx`, `self.tsx`, `self-improving-classifier.tsx`,
+`shopping-list.tsx`, `store-mapper.tsx`, `text-swapper.tsx`.
+
+App and integration directories: `activity-log/`, `agent/`, `airtable/`,
+`auth/`, `base/`, `battleship/`, `budget-tracker/`, `calendar/`, `card-piles/`,
+`contacts/`, `cozy-poll/`, `examples/`, `experimental/` (explicitly unhardened
+explorations), `github-activity/`, `google/` (the `core/` tree; `google/WIP/` is
+legacy), `habit-tracker/`, `lunch-poll/`, `profile-group-chat/`,
+`project-list/`, `router/`, `scoped-group-chat/`, `scoped-user-directory/`,
+`scrabble/`, `shared-profile-demo/`, `shared-profile-roster/`, `suggestable/`,
+`weekly-calendar/`.
+
+CFC spec demos (intentionally verbose wiring): `cfc/`,
+`cfc-agent-prompt-injection-demo/`, `cfc-authorized-save/`,
+`cfc-authorship-chat/`, `cfc-group-chat-demo/`, `cfc-render-policy-demo/`,
+`cfc-row-label-mailbox/`, `cfc-row-label-records/`, `cfc-spec-gallery/`,
+`cfc-staged-publish/`, `cfc-trusted-component-examples/`,
+`cfc-trusted-surfaces/`.
+
+System patterns: `system/` — live, load-bearing product patterns (home,
+default-app, suggestions). They run the product but are of mixed idiom vintage;
+not a style reference.
+
+## fixture
+
+`gideon-tests/`, `integration/`, `test/`, `scope-bug-computed-vnode-blank/`,
+`scope-bug-ct1597-forward/`, `scope-bug-ct1597-reduce/`, `cell-link.tsx`
+(suggestion tester), `nested-map-ifelse-test.tsx`, `render-test.tsx`,
+`self-reference-test.tsx`, and every `*.test.ts(x)` file anywhere in this
+package. (The blanket `*.test.ts(x)` rule is about pattern-authoring idioms —
+test _style_ is governed by `docs/common/workflows/pattern-testing.md`, and the
+exemplars' own test files remain good references for it.)
+
+## legacy
+
+**`record/`, `record.tsx`, `record-backup.tsx`, `record-icon.tsx`, and
+`container-protocol.ts`** — the registry/`MODULE_METADATA` approach is a
+parallel composition system; do not copy it — compose patterns directly as JSX
+tags + wish discovery instead. Whether `record/` is retired outright or kept as
+a demo is an open question, deliberately deferred to the review of the CT-1701
+tiering PR.
+
+**Attribute/module clones feeding that registry** — their `MODULE_METADATA`
+ceremony exists only to register with Record containers and is not a model to
+follow: `address.tsx`, `age-category.tsx`, `birthday.tsx`, `custom-field.tsx`,
+`dietary-restrictions.tsx`, `email.tsx`, `emoji-picker.tsx`, `gender.tsx`,
+`giftprefs.tsx`, `link.tsx`, `location.tsx`, `location-track.tsx`,
+`nickname.tsx`, `occurrence-tracker.tsx`, `phone.tsx`, `photo.tsx`,
+`rating.tsx`, `relationship.tsx`, `social.tsx`, `status.tsx`, `tags.tsx`,
+`text-import.tsx`, `timeline.tsx`, `timing.tsx`, `type-picker.tsx`.
+
+**`deprecated/`** — already explicitly deprecated; ignored by tooling and agents
+(see AGENTS.md).
+
+**`factory-outputs/`** (+ its support files `vehicles.ts`, `vehicles.test.ts`) —
+machine-generated pattern-factory outputs kept with their eval scores; never
+intended as style references.
+
+**`google/WIP/`** — parked, unfinished work that never graduated into
+`google/core/`.
+
+Support files with no tier (not patterns): `deno.json`, `mod.ts`, `index.md`,
+`README.md`, `DEPRECATED_IDIOMS.md`, `PREEXISTING_BUGS.md`,
+`test-ui-helpers.ts`, `tools/` (codegen tooling).
+
+---
+
 ## `annotation.tsx`
 
 A first-class annotation pattern that points at existing cells/pieces, forms
@@ -191,16 +309,16 @@ interface DoListOutput {
   items: DoItem[];
   itemCount: number;
   compactUI: VNode;
-  addItem: OpaqueRef<Stream<{ title: string; indent?: number }>>;
-  removeItem: OpaqueRef<Stream<{ item: DoItem }>>;
-  updateItem: OpaqueRef<
+  addItem: Reactive<Stream<{ title: string; indent?: number }>>;
+  removeItem: Reactive<Stream<{ item: DoItem }>>;
+  updateItem: Reactive<
     Stream<{ item: DoItem; title?: string; done?: boolean }>
   >;
-  addItems: OpaqueRef<
+  addItems: Reactive<
     Stream<{ items: Array<{ title: string; indent?: number }> }>
   >;
-  removeItemByTitle: OpaqueRef<Stream<{ title: string }>>;
-  updateItemByTitle: OpaqueRef<
+  removeItemByTitle: Reactive<Stream<{ title: string }>>;
+  updateItemByTitle: Reactive<
     Stream<{ title: string; newTitle?: string; done?: boolean }>
   >;
 }
@@ -236,8 +354,9 @@ interface TodoListOutput {
 
 ## `simple-list/simple-list.tsx`
 
-A checklist with indent support. Works standalone or embedded in Record
-containers.
+A checklist with indent support. Works standalone (it also carries a legacy
+`MODULE_METADATA` export for Record containers — see the status-tier caveat
+above; don't copy that part).
 
 **Keywords:** checklist, indentation, composable
 
@@ -298,8 +417,8 @@ interface Output {
   doneCount: number;
   remainingCount: number;
   storeLayout: string;
-  addItem: OpaqueRef<Stream<{ detail: { message: string } }>>;
-  addItems: OpaqueRef<Stream<{ itemNames: string[] }>>;
+  addItem: Reactive<Stream<{ detail: { message: string } }>>;
+  addItems: Reactive<Stream<{ itemNames: string[] }>>;
 }
 ```
 

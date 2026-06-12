@@ -81,7 +81,7 @@ interface FavoriteFoodsInput {
 }
 
 /** Favorite foods extractor from Gmail. #favoriteFoods */
-interface FavoriteFoodsOutput {
+export interface FavoriteFoodsOutput {
   foods: FoodPreference[];
   lastScanAt: number;
   count: number;

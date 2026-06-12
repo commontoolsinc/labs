@@ -41,7 +41,7 @@ interface ActivityLogInput {
 }
 
 /** An #activity-log for recording structured agent events. */
-interface ActivityLogOutput {
+export interface ActivityLogOutput {
   [NAME]: string;
   [UI]: VNode;
   logEvent: unknown;
@@ -159,7 +159,7 @@ export default pattern<ActivityLogInput, ActivityLogOutput>(
               {filtered.map((event: ActivityEvent) => (
                 <cf-hstack
                   gap="2"
-                  style="align-items: flex-start; border-bottom: 1px solid var(--cf-color-gray-100); padding-bottom: 0.5rem;"
+                  style="align-items: flex-start; border-bottom: 1px solid var(--cf-colors-gray-100); padding-bottom: 0.5rem;"
                 >
                   <cf-vstack gap="0" style="flex: 1; min-width: 0;">
                     <cf-hstack
@@ -172,7 +172,7 @@ export default pattern<ActivityLogInput, ActivityLogOutput>(
                       </cf-label>
                       {event.pieceName
                         ? (
-                          <cf-label style="color: var(--cf-color-gray-500);">
+                          <cf-label style="color: var(--cf-colors-gray-500);">
                             {event.pieceName}
                           </cf-label>
                         )
@@ -183,13 +183,13 @@ export default pattern<ActivityLogInput, ActivityLogOutput>(
                     </cf-hstack>
                     {event.note
                       ? (
-                        <cf-label style="color: var(--cf-color-gray-600); font-size: 0.875em;">
+                        <cf-label style="color: var(--cf-colors-gray-600); font-size: 0.875em;">
                           {event.note}
                         </cf-label>
                       )
                       : null}
                   </cf-vstack>
-                  <cf-label style="color: var(--cf-color-gray-400); font-size: 0.75em; white-space: nowrap; flex-shrink: 0;">
+                  <cf-label style="color: var(--cf-colors-gray-400); font-size: 0.75em; white-space: nowrap; flex-shrink: 0;">
                     {new Date(event.timestamp).toLocaleTimeString()}
                   </cf-label>
                 </cf-hstack>
@@ -198,7 +198,7 @@ export default pattern<ActivityLogInput, ActivityLogOutput>(
               {computed(() =>
                 filtered.length === 0
                   ? (
-                    <cf-label style="color: var(--cf-color-gray-400); text-align: center; padding: 2rem 0;">
+                    <cf-label style="color: var(--cf-colors-gray-400); text-align: center; padding: 2rem 0;">
                       No events yet
                     </cf-label>
                   )

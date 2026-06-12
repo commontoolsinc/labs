@@ -4,7 +4,7 @@ import { Controls, SwitchControl } from "../ui/controls/index.ts";
 
 // deno-lint-ignore no-empty-interface
 interface ProgressStoryInput {}
-interface ProgressStoryOutput {
+export interface ProgressStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;
@@ -32,7 +32,7 @@ export default pattern<ProgressStoryInput, ProgressStoryOutput>(() => {
         <cf-vstack gap="1">
           <span style="font-weight: 600;">Various Values</span>
           <cf-hstack gap="2" align="center">
-            <span style="font-size: 0.75rem; color: var(--cf-color-gray-500); width: 30px;">
+            <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500); width: 30px;">
               0%
             </span>
             <div style={{ flex: "1" }}>
@@ -40,7 +40,7 @@ export default pattern<ProgressStoryInput, ProgressStoryOutput>(() => {
             </div>
           </cf-hstack>
           <cf-hstack gap="2" align="center">
-            <span style="font-size: 0.75rem; color: var(--cf-color-gray-500); width: 30px;">
+            <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500); width: 30px;">
               25%
             </span>
             <div style={{ flex: "1" }}>
@@ -48,7 +48,7 @@ export default pattern<ProgressStoryInput, ProgressStoryOutput>(() => {
             </div>
           </cf-hstack>
           <cf-hstack gap="2" align="center">
-            <span style="font-size: 0.75rem; color: var(--cf-color-gray-500); width: 30px;">
+            <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500); width: 30px;">
               50%
             </span>
             <div style={{ flex: "1" }}>
@@ -56,7 +56,7 @@ export default pattern<ProgressStoryInput, ProgressStoryOutput>(() => {
             </div>
           </cf-hstack>
           <cf-hstack gap="2" align="center">
-            <span style="font-size: 0.75rem; color: var(--cf-color-gray-500); width: 30px;">
+            <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500); width: 30px;">
               75%
             </span>
             <div style={{ flex: "1" }}>
@@ -64,7 +64,7 @@ export default pattern<ProgressStoryInput, ProgressStoryOutput>(() => {
             </div>
           </cf-hstack>
           <cf-hstack gap="2" align="center">
-            <span style="font-size: 0.75rem; color: var(--cf-color-gray-500); width: 30px;">
+            <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500); width: 30px;">
               100%
             </span>
             <div style={{ flex: "1" }}>

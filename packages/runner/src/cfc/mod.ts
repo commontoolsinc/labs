@@ -8,12 +8,14 @@ export {
   getCarriedCfcLabelView,
   mergeCfcLabelViews,
   rebaseCfcLabelView,
+  redactCaveatSourcesForDisplay,
 } from "./label-view.ts";
 export type {
   AttemptedWrite,
   CfcAddress,
   CfcDereferenceTrace,
   CfcEnforcementMode,
+  CfcFlowLabelsMode,
   CfcMetadata,
   CfcPrepareState,
   CfcSandboxDiagnostic,
@@ -39,6 +41,7 @@ export {
   CFC_ENFORCING_STRICTNESS,
   cfcEnforcementStrictness,
   DEFAULT_CFC_ENFORCEMENT_MODE,
+  DEFAULT_CFC_FLOW_LABELS_MODE,
   isCfcEnforcementMode,
 } from "./types.ts";
 export {
@@ -50,7 +53,12 @@ export {
   logicalPathToPointer,
   preparedDigestFor,
 } from "./canonical.ts";
-export { prepareBoundaryCommit } from "./prepare.ts";
+export {
+  flowLabelWorkExists,
+  flowReadExcluded,
+  gatedSinkRequestExists,
+  prepareBoundaryCommit,
+} from "./prepare.ts";
 export {
   createSinkRequestPolicyInput,
   recordSinkRequestPolicyInput,
@@ -66,7 +74,6 @@ export { evaluateHarnessWriteFileAuthorization } from "./harness-write-policy.ts
 export {
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
   INITIAL_SINK_INVENTORY,
-  INITIAL_SINK_ROLLOUT_GATE,
   isInitialSinkInventoryName,
 } from "./sink-inventory.ts";
 export type { SinkMaxConfidentiality } from "./sink-inventory.ts";
@@ -81,6 +88,7 @@ export {
   validateAgainstSchema,
 } from "./schema-sanitization.ts";
 export {
+  CFC_LABEL_READ_FAILED_ATOM,
   cfcConfidentialityForObservationNode,
   cfcJsonPointerForPath,
   cfcObservationFitsCeiling,
