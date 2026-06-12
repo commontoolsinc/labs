@@ -10,6 +10,15 @@ export type { CfcLabelView, IFCLabel } from "./label-view-core.ts";
 export const CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION =
   "runtime.setup.result-projection";
 
+// Recorded ONLY by the runtime's cell-serialization path (data-updating.ts
+// BRANCH_CELL) when it materializes a runtime-constructed cell's initial
+// value into the brand-new doc the cell points at. The prepare gate accepts a
+// protected write only when this marker covers the target AND the write
+// creates the doc — arbitrary `cell.set` calls record no marker and stay
+// fully enforced.
+export const CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION =
+  "runtime.setup.seed-materialization";
+
 export type CfcEnforcementMode =
   | "disabled"
   | "observe"

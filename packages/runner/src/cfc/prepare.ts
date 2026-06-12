@@ -42,6 +42,7 @@ import { canonicalizeLogicalPath } from "./canonical.ts";
 import { uniqueCfcAtoms } from "./observation.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import {
+  CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type CfcMetadata,
   type IFCLabel,
@@ -576,6 +577,47 @@ const setupProjectionSourceMatchesValue = (
 // re-writes, and later field edits therefore remain fully enforced; the slot the
 // pattern result is placed into is independently gated by its own
 // `writeAuthorizedBy`, and the owner binding by `currentPrincipalIntegrityReason`.
+// `writeAuthorizedBy` gates *modification* of an existing owner-protected
+// value (§8.15.10); the runtime materializing a runtime-constructed cell's
+// initial value (`Writable(initialValue)` in a lift/handler frame — the CTS
+// wraps derived initializers this way) is the trusted initialization step
+// (§8.15.4), like the projection-marker case above. It is not (and cannot be)
+// the claim-referenced edit handler. Recognize it by BOTH signals together:
+// the seed-materialization marker — recorded ONLY by the runtime's
+// cell-serialization path (data-updating.ts BRANCH_CELL), never reachable
+// from arbitrary `cell.set` — AND the write creating the doc (a root-level
+// write whose previousValue is undefined, the same signal
+// `derivePersistedLinkLabel` uses for same-tx child docs). Edits to existing
+// docs and direct unmarked writes stay fully enforced; ownerPrincipal /
+// integrity minting is gated separately (`currentPrincipalIntegrityReason`
+// runs before this).
+const writeIsSeedMaterialization = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+): boolean => {
+  const marked = tx.getCfcState().writePolicyInputs.some((input) =>
+    input.kind === "structural-provenance" &&
+    input.claim === CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION &&
+    input.sources.some((source) =>
+      source.space === target.space && source.id === target.id &&
+      normalizeCellScope(source.scope) === target.scope
+    )
+  );
+  if (!marked) {
+    return false;
+  }
+  return [...(tx.getWriteDetails?.(target.space) ?? [])].some((detail) =>
+    detail.address.id === target.id &&
+    normalizeCellScope(detail.address.scope) === target.scope &&
+    detail.address.path.length <= 1 &&
+    detail.previousValue === undefined
+  );
+};
+
 const writeIsPatternSetupInitialization = (
   tx: IExtendedStorageTransaction,
   target: {
@@ -2324,7 +2366,8 @@ const verifyInputRequirements = (
       tx,
       target,
       entry.path,
-    ) || writeIsPatternSetupInitialization(tx, target, entry.path);
+    ) || writeIsPatternSetupInitialization(tx, target, entry.path) ||
+      writeIsSeedMaterialization(tx, target);
     if (writeAuthorizedByFailure !== undefined && !setupProjection) {
       return writeAuthorizedByFailure;
     }

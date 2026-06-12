@@ -52,6 +52,7 @@ import {
   allowMutableTransactionRead,
   markReadAsAttemptedWrite,
 } from "./scheduler.ts";
+import { ignoreReadForScheduling } from "./storage/reactivity-log.ts";
 import {
   readStoredCfcMetadata,
   storedCfcMetadataAppliesToPath,
@@ -62,7 +63,10 @@ import {
   cloneCfcLabelView,
   getCarriedCfcLabelView,
 } from "./cfc/label-view-state.ts";
-import type { CfcAddress } from "./cfc/types.ts";
+import {
+  CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
+  type CfcAddress,
+} from "./cfc/types.ts";
 import { LINK_V1_TAG } from "./sigil-types.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
@@ -72,6 +76,26 @@ const diffLogger = getLogger("normalizeAndDiff", {
 
 // Sentinel value to distinguish "no precomputed value" from "precomputed value is undefined"
 const NO_PRECOMPUTED = Symbol("no-precomputed");
+
+// Docs whose seed-materialization absence check found a PRESENT value, keyed
+// `space/id`, per runtime so tests with multiple runtimes stay isolated. A
+// doc can't become un-created, so a settled entry can never suppress a needed
+// seed; pending writes are deliberately not memoized (an aborted tx must
+// re-seed). See the BRANCH_CELL seed materialization below.
+const seedCheckSettled = new WeakMap<Runtime, Set<string>>();
+const seededDocs = (runtime: Runtime): Set<string> => {
+  let docs = seedCheckSettled.get(runtime);
+  if (docs === undefined) {
+    docs = new Set();
+    seedCheckSettled.set(runtime, docs);
+  }
+  return docs;
+};
+// Scope is part of the key: per-user/per-session instances share an id with
+// the space-scoped doc, and one scope's presence must not suppress another's
+// seed.
+const seedMemoKey = (link: NormalizedFullLink): string =>
+  `${link.space}/${link.scope ?? "space"}/${link.id}`;
 
 const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   space: link.space,
@@ -519,6 +543,93 @@ export function normalizeAndDiff(
     );
     linkOriginFromCell = true;
     const carriedCfcLabelView = getCarriedCfcLabelView(newValue);
+    // Materialize a runtime-constructed cell's initial value: a
+    // `Writable(initialValue)` built inside a lift/handler frame (the CTS
+    // wraps derived initials this way) carries its seed only as the link
+    // schema's `default` — nothing else ever writes the backing doc, so a
+    // fresh session reads the field as undefined (and a `required` field
+    // collapses the whole result; the blank-profile-name bug). This is the
+    // first point where the cell's identity is settled AND a live tx covers
+    // the write, so seed the target doc here, only if it has no value yet —
+    // re-derivations serialize the same cell again but find the doc present
+    // and leave user edits alone.
+    const cellSchema = newValue.schema;
+    const seedDefault = isRecord(cellSchema) ? cellSchema.default : undefined;
+    const seedTarget = seedDefault !== undefined &&
+        !(isRecord(seedDefault) &&
+          (seedDefault as Record<string, unknown>).$stream === true)
+      ? newValue.getAsNormalizedFullLink()
+      : undefined;
+    if (
+      seedDefault !== undefined &&
+      // Only root-linked cells: those are the runtime-constructed
+      // `Writable(value)` cells whose doc the default describes in full. A
+      // sub-path cell (e.g. via `.key()`) carries a FIELD default — writing
+      // that over the doc root would clobber the document.
+      seedTarget !== undefined && seedTarget.path.length === 0 &&
+      // Each doc needs the absence check at most once per runtime: once
+      // found present (or seeded here), later serializations of the same
+      // cell skip it — the check would otherwise run on EVERY defaulted-cell
+      // serialization, a measurable hot-path cost (the CI perf check caught
+      // +22–36% on the CLI integration suites for the unmemoized version).
+      !seededDocs(runtime).has(seedMemoKey(seedTarget))
+    ) {
+      // Don't subscribe the serializing action to the seed doc — mirror
+      // materializeDerivedInternalCells' read for the same check.
+      const absent = tx.readValueOrThrow(seedTarget, {
+        meta: ignoreReadForScheduling,
+      }) === undefined;
+      if (!absent) {
+        seededDocs(runtime).add(seedMemoKey(seedTarget));
+      }
+      if (absent) {
+        try {
+          tx.writeValueOrThrow(
+            seedTarget,
+            fabricFromNativeValue(seedDefault) as FabricValue,
+          );
+          // The marker is what authorizes the write above past an
+          // owner-protected schema's `writeAuthorizedBy` (cfc/prepare.ts
+          // requires marker AND doc-creation; both are checked at commit,
+          // so in-tx ordering is immaterial there). Record it only AFTER
+          // the write succeeds: a thrown write must not leave a stray
+          // marker that could authorize an unrelated same-doc write later
+          // in this transaction. It is recorded only here, by the runtime,
+          // never from arbitrary cell.set calls.
+          tx.recordCfcWritePolicyInput({
+            kind: "structural-provenance",
+            target: {
+              space: seedTarget.space,
+              id: seedTarget.id,
+              scope: seedTarget.scope,
+              path: [],
+            },
+            claim: CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
+            sources: [{
+              space: seedTarget.space,
+              id: seedTarget.id,
+              scope: seedTarget.scope,
+              path: [],
+            }],
+          });
+          // Deliberately NOT memoized here: if this tx aborts, the doc stays
+          // absent and the next serialization must seed again. Once the
+          // write commits, the next check finds the doc present and settles.
+        } catch (error) {
+          // Fail open: a seed-materialization failure must not abort the
+          // serialization that references the cell — the link (with its
+          // schema default) still gets written below.
+          diffLogger.warn(
+            "diff",
+            () => [
+              `[BRANCH_CELL] seed materialization failed for`,
+              seedTarget.id,
+              error,
+            ],
+          );
+        }
+      }
+    }
     newValue = attachCfcLabelViewToSigilLink(
       newValue.getAsLink({ includeSchema: true }),
       carriedCfcLabelView,
