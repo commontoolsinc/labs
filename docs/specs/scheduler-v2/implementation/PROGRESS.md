@@ -4714,3 +4714,55 @@ $ rg -n "scheduler\.subscribe\(" packages --glob '!packages/runner/**'
   - Expected noisy passing logs remain: scheduler error-path tests,
     traversal warnings, rehydration timeout warning, and existing
     write-surface/wish warnings.
+
+## 08/4.0-baselines
+
+- [x] pending — recorded Phase 4 startup/pull-seed baselines and added the
+  cold-replica convergence fixture before removing registration prefetch.
+- Deviations:
+  - The cold-replica fixture uses an empty server-side source document created
+    by the writer before reader startup, then fills the value from the second
+    client connection after `start()` returns. This keeps the reader's local
+    source replica cold at startup while giving the current prefetch path a
+    server document to sync/watch. A stricter fully absent-source-root variant
+    did not converge in this harness before the Phase 4 change, so it would not
+    satisfy the fixture-first requirement.
+  - After the post-start writer update, the fixture uses only `reader.idle()`
+    plus timer ticks while waiting for convergence; it does not call
+    `pull()`, reader source `sync()`, or any manual storage nudge.
+- Recordings:
+  - Reload/rehydration baseline:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts`: passed, `1 passed`, `0 failed`,
+    `711ms`. The test asserts `rehydrate/miss/no-snapshot = 0`; this focused
+    run did not print the exact counter values. The expected transient
+    `TypeError: Cannot read properties of undefined (reading 'length')` log
+    appeared while the test still passed.
+  - Cold-replica fixture:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-cold-replica.test.ts`: passed, `1 passed (1 step)`,
+    `0 failed`, `253ms`.
+  - Focused Phase 4.0 test pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts test/scheduler-cold-replica.test.ts`:
+    passed, `2 passed (1 step)`, `0 failed`, `1s`.
+  - Pull-seed bench baseline:
+    `cd packages/runner && deno bench --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull-seeds.bench.ts`: passed on Apple M3 Max / Deno 2.8.1.
+    Results: 50 effects / 20 reschedules `84.4ms`; 200 effects /
+    10 reschedules `104.2ms`.
+  - `deno fmt packages/runner/test/scheduler-cold-replica.test.ts`: passed
+    (`Checked 1 file`).
+  - `deno lint packages/runner/test/scheduler-cold-replica.test.ts`: passed
+    (`Checked 1 file`).
+  - `deno check packages/runner/test/scheduler-cold-replica.test.ts`: passed.
+  - `git diff --check`: passed.
+  - `cd packages/runner && deno task test`: passed,
+    `595 passed (3101 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m1s`.
+  - Expected noisy passing logs remain: scheduler write-surface warnings,
+    deliberate event/retry error logs, createRef no-cause warnings, and the
+    reload-rehydration transient `TypeError`.
