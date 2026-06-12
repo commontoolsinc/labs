@@ -127,6 +127,15 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   open(space: MemorySpace): IStorageProviderWithReplica;
 
   /**
+   * Record a runtime-learned host hint for a space (federation site
+   * table). Optional: managers without remote, per-space resolution
+   * (emulated/test) simply don't implement it. Returns true when the
+   * hint is in effect; false when refused (seeded differently, or the
+   * space's connection is already open to another host).
+   */
+  registerSpaceHost?(space: MemorySpace, host: string): boolean;
+
+  /**
    * Close all storage providers
    */
   close(): Promise<void>;
@@ -722,6 +731,12 @@ export interface IExtendedStorageTransaction
    * even when the run never re-reads them.
    */
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void;
+  /**
+   * Run `fn` with `meta` merged into every read issued within (explicit
+   * per-read meta wins). Lets scheduling machinery tag its reads without
+   * threading metadata through intermediate APIs.
+   */
+  runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T;
   markCfcRelevant(reason?: string): void;
   invalidateCfc(reason: string): void;
 

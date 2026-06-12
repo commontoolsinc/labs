@@ -138,11 +138,21 @@ export type CfcSandboxResult = {
  * - `derived`: default-transition flow label — replaced when the value at
  *   the path is overwritten; an ancestor overwrite clears derived
  *   descendants.
+ * - `structure`: flow label on a container's SHAPE (membership, key set,
+ *   order, length — §8.5.6.1/SC-7) for written values made purely of
+ *   references, where per-slot link entries already label each reference.
+ *   Applies only to reads at exactly the entry's path (observing the
+ *   container is observing its shape); reads strictly below it (slot
+ *   pointer reads, dereferences) are pointer handling and stay clean —
+ *   that asymmetry is what lets membership taint persist without smearing
+ *   the pointwise per-element split. Update discipline matches `derived`.
+ *   Readers that predate this component treat it as covering (over-taint,
+ *   fail-safe).
  * Entries without an origin are legacy (pre-component) entries and are
  * treated as one combined component with the historical update rules.
  * The effective label at a path is the join of all components.
  */
-export type LabelEntryOrigin = "declared" | "link" | "derived";
+export type LabelEntryOrigin = "declared" | "link" | "derived" | "structure";
 
 export type LabelMapEntry = {
   path: readonly string[];
@@ -324,6 +334,22 @@ export type CfcTxState = {
     WritePolicyInput,
     ImplementationIdentity | undefined
   >;
+  // Implementation identity active at each non-privileged write, collapsed to
+  // a per-tx uniformity summary (§8.9.3 TransformedBy). Flow labels are one
+  // per-tx join stamped on every written doc, so derivation provenance is
+  // honest only when every write was authored under the same defined
+  // identity: a write under a different identity — or before any was set —
+  // makes the tx-level claim ambiguous, `multiple` collapses it, and the
+  // mint is omitted (fail-safe under-claim, SC-10). Same capture rationale
+  // as `writePolicyInputIdentities` above: attribution must not borrow an
+  // identity a later run in the same transaction happens to set. The
+  // runtime's own privileged persistence writes are excluded — bookkeeping,
+  // not authorship.
+  writeIdentity: {
+    sawWrite: boolean;
+    multiple: boolean;
+    identity?: ImplementationIdentity;
+  };
   trustSnapshot?: TrustSnapshot;
   implementationIdentity?: ImplementationIdentity;
   outbox: PostCommitSideEffect[];

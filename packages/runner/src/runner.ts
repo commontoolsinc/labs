@@ -66,7 +66,10 @@ import {
   ignoreReadForScheduling,
   markReadAsAttemptedWrite,
 } from "./scheduler.ts";
-import { internalVerifierRead } from "./storage/reactivity-log.ts";
+import {
+  internalVerifierRead,
+  schedulerDependencyRead,
+} from "./storage/reactivity-log.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellScope, narrowestScope } from "./scope.ts";
@@ -2024,6 +2027,15 @@ export class Runner {
     reads: readonly NormalizedFullLink[],
     depTx: IExtendedStorageTransaction,
   ): void {
+    depTx.runWithAmbientReadMeta(schedulerDependencyRead, () => {
+      this.#populateDeclaredSchedulerReadsInner(reads, depTx);
+    });
+  }
+
+  #populateDeclaredSchedulerReadsInner(
+    reads: readonly NormalizedFullLink[],
+    depTx: IExtendedStorageTransaction,
+  ): void {
     // For event preflight, writable-input links are narrower than traversing
     // captured argument objects and avoid treating broad closures as demand.
     for (const read of reads) {
@@ -3571,16 +3583,19 @@ export class Runner {
    * input with its content-addressed `{ identity, symbol }` entry ref (when
    * known) so the builtin can resolve the live canonical pattern by identity
    * instead of deserializing the embedded graph. Mutates `inputBindings` in
-   * place: `op` becomes `{ $patternRef, $opFallback }`.
+   * place: `op` becomes `{ $patternRef }`.
    *
    * Only the `op` key is rewritten — it is the sole pattern-valued input the
    * builtins rehydrate (`resolveOpPattern`). Rewriting other inputs (e.g. a
    * pattern captured in `params`) would leave an unresolved `$patternRef` object
    * that nothing reads back.
    *
-   * The embedded graph is retained as `$opFallback` (correctness over the
-   * bounded module cache — see `resolveOpPattern`). `inputBindings` here is the
-   * freshly bound (mutable, unfrozen) copy produced by
+   * The sentinel carries NO embedded fallback graph (identity E4): the artifact
+   * index is session-lifetime, and the op's module evaluated in this session by
+   * construction (the sentinel is stamped from its live artifact right here),
+   * so the builtin's sync resolution cannot miss short of a bug — and a bug
+   * should be loud, not silently served a stale graph. `inputBindings` here is
+   * the freshly bound (mutable, unfrozen) copy produced by
    * `unwrapOneLevelAndBindtoDoc`; its pattern values carry their derivation
    * link (`noteDerivedCopy`), so `getArtifactEntryRef` can resolve the ref
    * (assigned post-eval by `registerEvaluatedModules`). With no known ref the
@@ -3605,7 +3620,6 @@ export class Runner {
     if (ref) {
       (inputBindings as Record<string, unknown>).op = {
         $patternRef: { identity: ref.identity, symbol: ref.symbol },
-        $opFallback: op,
       };
     }
   }

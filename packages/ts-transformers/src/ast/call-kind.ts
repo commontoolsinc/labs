@@ -31,6 +31,7 @@
  */
 import ts from "typescript";
 
+import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";
 import { CF_HELPERS_IDENTIFIER } from "../core/cf-helpers.ts";
 import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
 import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
@@ -58,22 +59,40 @@ const ARRAY_OWNER_NAMES = new Set([
   "ReadonlyArray",
 ]);
 
-const OPAQUE_REF_OWNER_NAMES = new Set([
-  "OpaqueRefMethods",
-  "OpaqueRef",
-]);
+// Owners of OpaqueRef-style method declarations (array-method detection).
+const OPAQUE_REF_OWNER_NAMES = spellingsWhere({
+  OpaqueRefMethods: true,
+  OpaqueRef: true,
+  // Identity alias — can never own method declarations; row matches OpaqueRef.
+  Reactive: true,
+  Cell: false,
+  Writable: false,
+  ReadonlyCell: false,
+  WriteonlyCell: false,
+  ComparableCell: false,
+  OpaqueCell: false,
+  Stream: false,
+  SqliteDb: false,
+  CellTypeConstructor: false,
+  ScopedCellTypeConstructor: false,
+});
 
-const CELL_LIKE_CLASSES = new Set([
-  "Cell",
-  "Writable", // Alias for Cell that better expresses write-access semantics
-  "OpaqueCell",
-  "Stream",
-  "ComparableCell",
-  "ReadonlyCell",
-  "WriteonlyCell",
-  "CellTypeConstructor",
-  "ScopedCellTypeConstructor",
-]);
+// Wrapper spellings whose method calls classify as cell-like (get/set/etc.).
+const CELL_LIKE_CLASSES = spellingsWhere({
+  Cell: true,
+  Writable: true,
+  OpaqueCell: true,
+  Stream: true,
+  ComparableCell: true,
+  ReadonlyCell: true,
+  WriteonlyCell: true,
+  CellTypeConstructor: true,
+  ScopedCellTypeConstructor: true,
+  SqliteDb: false,
+  OpaqueRef: false, // owner detection handled via OPAQUE_REF_OWNER_NAMES
+  Reactive: false, // same as OpaqueRef
+  OpaqueRefMethods: false,
+});
 
 const CELL_FACTORY_NAMES = new Set(["of"]);
 const CELL_FOR_NAMES = new Set(["for"]);
