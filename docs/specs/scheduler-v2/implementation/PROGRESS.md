@@ -1386,7 +1386,7 @@ Then continue step 3 as written.
 
 ## 03/step-5
 
-- [x] pending — lineage gating for handler-sent events
+- [x] b443cef48 — lineage gating for handler-sent events
 - Deviations: no shared conflict-forcing helper exists in
   `test/scheduler-retries.test.ts`; existing scheduler retry fixtures force
   aborts directly. For the same-space red fixture, patched the emulated memory
@@ -1437,3 +1437,130 @@ Then continue step 3 as written.
     --allow-read --allow-write=/tmp,/var/folders --allow-run=git
     test/scheduler-lineage.test.ts`: passed, `1 passed (6 steps)`,
     `0 failed`.
+
+## IMPLEMENTER STOP — 03/step-6 full runner suite blocked by stale-origin lineage
+
+Step 6's focused implementation was applied locally but NOT committed. The
+piece-stop fixture was red/green as required:
+
+- Red before implementation:
+  `runtime.runner.cancels.size` expected the pre-send baseline `1`, actual
+  `13`, after the handler exhausted retries.
+- Green after adding the non-deferred `recordPieceStop(...)` hook and the two
+  action-run WATCH comments:
+  `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+  --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+  test/scheduler-event-lineage.test.ts` passed, `1 passed (5 steps)`,
+  `0 failed`.
+- File verification passed:
+  `deno fmt`, `deno lint`, and `deno check` on
+  `packages/runner/src/runner.ts`,
+  `packages/runner/src/scheduler/action-run.ts`, and
+  `packages/runner/test/scheduler-event-lineage.test.ts`.
+
+Full runner suite then failed twice despite all visible tests passing:
+
+```text
+$ cd packages/runner && deno task test
+ok | 586 passed (3063 steps) | 0 failed | 0 ignored (10 steps) (2m19s)
+error: Promise resolution is still pending but the event loop has already resolved
+```
+
+Isolated failing tests:
+
+```text
+$ cd packages/runner && ENV=test deno test --allow-ffi --allow-env --allow-read \
+  --allow-write=/tmp,/var/folders --allow-run=git test/llm-dialog-outbox.test.ts
+running 1 test from ./test/llm-dialog-outbox.test.ts
+llmDialog outbox mechanism ...
+  enqueues llmDialog work behind the post-commit outbox ...
+ok | 0 passed | 0 failed (5s)
+error: Promise resolution is still pending but the event loop has already resolved
+
+$ cd packages/runner && ENV=test deno test --allow-ffi --allow-env --allow-read \
+  --allow-write=/tmp,/var/folders --allow-run=git test/llm-dialog.test.ts
+running 1 test from ./test/llm-dialog.test.ts
+llmDialog ...
+  should support a multi-turn conversation via addMessage ...
+ok | 0 passed | 0 failed (5s)
+error: Promise resolution is still pending but the event loop has already resolved
+```
+
+The same isolated failures reproduce at Step 5's committed SHA `b443cef48`
+in a detached comparison worktree, so this is not caused by the Step 6
+`runner.ts` compensation hook.
+
+Temporary diagnostics (reverted; not left in the worktree) showed the
+`llm-dialog-outbox` test reaches `addMessage.send(...)`, and the scheduler
+queue contains a head event with `originTx !== undefined` for the already
+committed setup transaction. Inference: Step 5's
+`queueSchedulerEvent -> recordLineageEvent` can create a fresh pending lineage
+record after the origin transaction has already committed, so the commit
+callback that would confirm/release the origin will never fire and the head
+event parks forever.
+
+Need reviewer direction: allow a follow-up/fixup touching
+`packages/runner/src/scheduler/lineage.ts` (and likely a narrow regression
+fixture) so already-settled origins are treated as confirmed/failed instead of
+registered as pending, or provide a different ruling.
+
+## REVIEWER VERDICT — 03/step-6 stale-origin lineage hang
+
+Your inference is confirmed as the root cause, and it is a bug in MY
+reference implementation: `recordFor()` assumes the origin is in flight.
+An event sent with an ALREADY-SETTLED origin tx (normal for sends from
+test/framework code whose cells are bound to committed transactions)
+creates a record frozen at "pending" — `addCommitCallback` never fires
+for settled transactions — so the head gate parks forever. An
+already-settled successful origin is semantically NO speculation: it
+must behave as confirmed on arrival.
+
+Authorized fixup, on the 03 branch:
+
+1. `src/scheduler/lineage.ts` — in `recordFor(origin)`, before creating
+   the record, inspect `origin.status()`. Use the transaction's actual
+   status vocabulary (read the `IStorageTransactionStatus` type and the
+   existing `status().status === "ready"` checks for the open-state
+   name):
+   - settled successfully → create the record with status "confirmed"
+     and DO NOT register a commit callback;
+   - settled failed/aborted → status "failed", no callback (and no
+     cancellation sweep — there is nothing speculative to cancel from a
+     pre-settled failure; the head gate handles the queued event);
+   - open/in-flight → register the callback exactly as today.
+2. Head gate: the "failed origin at head" branch I marked unreachable
+   is now reachable (failed-before-record origins are never removed by
+   a callback). Replace the assert with: shift + drop the event +
+   `release()` + log debug. A FAILED settled origin must not dispatch
+   its event (I10).
+3. Red-first regression fixtures:
+   - unit (`scheduler-lineage.test.ts`): `recordFor` on a
+     committed-settled tx → originStatus "confirmed", no callback
+     registered; on an aborted tx → "failed".
+   - integration (`scheduler-event-lineage.test.ts`): send to a stream
+     via a cell bound to an ALREADY-COMMITTED tx → event dispatches,
+     `idle()` resolves; same with an aborted tx → event dropped,
+     `idle()` resolves. Paste the red (hang→timeout or assertion) for
+     the committed case from the pre-fix tree.
+   - the two llm-dialog tests are the integration witnesses: both must
+     pass untouched.
+4. Commit: `fix(runner): lineage treats already-settled origins as settled (scheduler-v2 E1)`
+   — separate from the step-6 commit; land it FIRST, then re-run and
+   commit step 6 as planned.
+5. Amend WO03's reference code block + unit-test list in-branch to
+   match — docs commit before the fix commit:
+   `docs(specs): scheduler-v2 WO03 — settled-origin lineage records`.
+6. Note for phase-end: this case also justifies a one-line addition to
+   the step-4 "caveat to verify" — record in PROGRESS that
+   `addCommitCallback` does NOT fire for already-settled transactions
+   (you have now verified it empirically).
+
+Your red/green discipline and the detached-worktree bisect were exactly
+right; the step-6 runner.ts hook itself is approved as-is once the suite
+is green on top of the fix.
+
+## REVIEWER RESOLUTION — 03/step-6 stale-origin lineage docs
+
+- [x] pending — documented the reviewer-approved settled-origin lineage record
+  behavior in WO03 before implementation.
+- Deviations: none.
