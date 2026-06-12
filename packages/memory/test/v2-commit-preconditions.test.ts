@@ -485,3 +485,49 @@ Deno.test("precondition failures keep name and precondition through client round
     await server.close();
   }
 });
+
+Deno.test("entity-absent failures keep receipt-exists through client round trip", async () => {
+  const server = new Server({
+    store: new URL("memory://memory-v2-entity-absent-client"),
+  });
+  const client = await connect({ transport: loopback(server) });
+  const session = await client.mount(
+    "did:key:z6Mk-memory-v2-entity-absent-client",
+  );
+
+  try {
+    await session.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "entity:receipt",
+        value: toEntityDocument({ receipt: 1 }),
+      }],
+    });
+
+    const error = await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 2,
+          reads: { confirmed: [], pending: [] },
+          preconditions: [{
+            kind: "entity-absent",
+            id: "entity:receipt",
+          }],
+          operations: [],
+        }),
+      Error,
+      "entity-absent precondition target already exists",
+    );
+
+    assertEquals(error.name, "PreconditionFailedError");
+    assertEquals(
+      (error as Error & { precondition?: unknown }).precondition,
+      "receipt-exists",
+    );
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});

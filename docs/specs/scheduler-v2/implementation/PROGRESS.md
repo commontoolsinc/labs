@@ -1941,7 +1941,7 @@ semantics.
 
 ## REVIEWER RESOLUTION — 04/step-5 entity-absent memory engine
 
-- [x] pending — memory now uses commit-level `entity-absent` preconditions
+- [x] 83d0c2d22 — memory now uses commit-level `entity-absent` preconditions
   instead of op-level `createOnly`, including precondition-only commits.
 - Deviations: widened the runner storage interface precondition type to the
   memory `CommitPrecondition` union in this commit so the workspace
@@ -1958,3 +1958,29 @@ semantics.
     passed, `10 passed`, `0 failed`.
   - `cd packages/memory && deno task test`: passed, `211 passed
     (95 steps)`, `0 failed`.
+
+## REVIEWER RESOLUTION — 04/step-5 entity-absent runner plumbing
+
+- [x] pending — runner storage now turns `markCreateOnly` into commit-level
+  `entity-absent` preconditions independent of surviving operations.
+- Deviations: includes memory server/client error mapping so
+  `PreconditionFailedError("receipt-exists")` survives the remote storage
+  round trip and reaches runner scheduling as a permanent rejection. Drops the
+  op-level `createOnly` surface from runner native commit operations.
+- Recordings:
+  - `deno fmt packages/runner/src/storage/interface.ts
+    packages/runner/src/storage/v2-transaction.ts
+    packages/runner/src/storage/v2.ts packages/memory/v2/server.ts
+    packages/memory/test/v2-commit-preconditions.test.ts
+    packages/runner/test/scheduler-event-receipts.test.ts`: passed
+    (`Checked 6 files`).
+  - `deno lint` on the same six files: passed (`Checked 6 files`).
+  - `deno check` on the same six files: passed.
+  - `deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders
+    packages/memory/test/v2-commit-preconditions.test.ts`: passed,
+    `11 passed`, `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-event-receipts.test.ts`: passed, `1 passed (6 steps)`,
+    `0 failed`.
