@@ -544,3 +544,98 @@ Corrected contracts:
 Implementer resolution: updated the work order's Step 3 grep contract and exit
 checklist to preserve the frozen graph-snapshot `pullMode` field as the only
 residual mode term.
+
+## IMPLEMENTER STOP — 01/steps-2-3 verification blocked by step-4 callers
+
+Applied the corrected Step 3 contract and deleted the five Step 2 push modules.
+The corrected Step 3 grep is satisfied:
+
+```text
+$ grep -n "pullMode\|PushScheduler\|push-" packages/runner/src/scheduler.ts
+2275:      pullMode: true,
+```
+
+`ls packages/runner/src/scheduler/ | grep push` is empty.
+
+However, the required Step 3 verification command fails because removing
+`Scheduler.isPullModeEnabled()` exposes the Step 4 runner call sites before
+Step 4 is allowed to run:
+
+```text
+$ deno check packages/runner/src/scheduler.ts
+Check packages/runner/src/scheduler.ts
+TS2339 [ERROR]: Property 'isPullModeEnabled' does not exist on type 'Scheduler'.
+    if (!this.runtime.scheduler.isPullModeEnabled()) {
+                                ~~~~~~~~~~~~~~~~~
+    at file:///.../packages/runner/src/runner.ts:2589:33
+
+TS2339 [ERROR]: Property 'isPullModeEnabled' does not exist on type 'Scheduler'.
+    if (!this.runtime.scheduler.isPullModeEnabled() || !pattern) {
+                                ~~~~~~~~~~~~~~~~~
+    at file:///.../packages/runner/src/runner.ts:2700:33
+
+TS2339 [ERROR]: Property 'isPullModeEnabled' does not exist on type 'Scheduler'.
+    if (!this.runtime.scheduler.isPullModeEnabled()) {
+                                ~~~~~~~~~~~~~~~~~
+    at file:///.../packages/runner/src/runner.ts:2715:33
+
+TS2339 [ERROR]: Property 'isPullModeEnabled' does not exist on type 'Scheduler'.
+    if (!this.runtime.scheduler.isPullModeEnabled()) {
+                                ~~~~~~~~~~~~~~~~~
+    at file:///.../packages/runner/src/runner.ts:2728:33
+```
+
+Confirmed grep:
+
+```text
+$ grep -rn "isPullModeEnabled" packages/runner/src packages/runner/test --include="*.ts"
+packages/runner/src/runner.ts:2589:    if (!this.runtime.scheduler.isPullModeEnabled()) {
+packages/runner/src/runner.ts:2700:    if (!this.runtime.scheduler.isPullModeEnabled() || !pattern) {
+packages/runner/src/runner.ts:2715:    if (!this.runtime.scheduler.isPullModeEnabled()) {
+packages/runner/src/runner.ts:2728:    if (!this.runtime.scheduler.isPullModeEnabled()) {
+```
+
+These are exactly the Step 4 sites, but Step 3 requires a green
+`deno check src/scheduler.ts` before the Step 2+3 commit. No Step 4 edits were
+made and no workaround shim was added.
+
+## REVIEWER VERDICT — 01/steps-2-3 compile coupling with step-4 call sites
+
+Correct stop; another work-order sequencing flaw. Deleting the public
+mode API from `scheduler.ts` breaks `runner.ts` compilation, so the
+step-2/3 verification can never pass without the step-4 call-site
+edits — they are one atomic compile unit. The sanctioned merge widens:
+
+1. Fold INTO the steps-2+3 commit exactly the four `runner.ts`
+   call-site edits from step 4 (your grep's four sites), applied as
+   step 4 already specifies them:
+   - `handleJavaScriptHandlerResult` (~2589): delete the entire
+     `if (!isPullModeEnabled()) { ... }` push branch, keeping only
+     `addCancel(() => this.stop(resultCell));` (the lost
+     on-commit-error cleanup note in the work order still applies — no
+     substitute here, it comes in work order 03).
+   - `patternNeedsOneShotPull` (~2700): condition becomes
+     `if (!pattern)`.
+   - `pullCellOnceAfterSuccessfulCommit` (~2715) and
+     `pullCellOnceInPullMode` (~2728): delete each guard, keep bodies.
+   No other `runner.ts` changes in this commit.
+2. Verification for the merged commit: `deno check src/scheduler.ts
+   src/runner.ts`, then the FULL runner suite, then the corrected
+   step-3 grep (one `pullMode: true` match) and
+   `ls src/scheduler | grep push` empty.
+3. Commit message stays the steps-2+3 one:
+   `refactor(runner): remove push scheduler mode and pullMode branches (scheduler-v2 phase 0)`.
+4. Step 4's REMAINING scope (its own commit, original message): the
+   `scheduler.mode.change` telemetry type removal, the repo-wide
+   `isPullModeEnabled` grep (now expected zero everywhere), and the
+   cross-package `mode.change` grep.
+5. As before, amend the work order in your branch to record the wider
+   merge — own docs commit before the code commit, message:
+   `docs(specs): scheduler-v2 WO01 — steps 2-4 runner call sites are one compile unit`.
+6. Then continue (step 4 remainder, step 5 docs, exit checklist with
+   the corrected residual-match list).
+
+Implementer resolution: updated the work order to fold exactly the four
+`src/runner.ts` mode-API call-site edits into the steps 2+3 compile-unit
+commit, leaving Step 4's own commit for `scheduler.mode.change` telemetry type
+removal and repo-wide greps.
