@@ -98,7 +98,7 @@ import {
   collectPullIterationSeeds as collectPullIterationSeedsState,
   type DirtyPullRunnableState,
   type DirtyPullRunnableStateWithDebounce,
-  hasDeferredDirtyEffectWork as hasDeferredDirtyEffectWorkState,
+  hasIdleBlockingDeferredPullWork as hasIdleBlockingDeferredPullWorkState,
   hasRunnablePullWork as hasRunnablePullWorkState,
   type PendingPullRunnableState,
   type PullSchedulingState,
@@ -876,10 +876,10 @@ export class Scheduler {
         this.gates.hasWakeTimer() &&
         ((this.eventQueue.length > 0 &&
           isHeadEventParkedState({ eventQueue: this.eventQueue })) ||
-          this.hasDeferredDirtyEffectWork())
+          this.hasIdleBlockingDeferredPullWork())
       ) {
-        // A queued event is parked behind a throttled dependency. Wait for the
-        // wake timer to re-schedule the queue and then re-check.
+        // A queued event or idle-blocking pull node is parked behind a time
+        // gate. Wait for the wake timer to re-schedule the queue and re-check.
         this.idlePromises.push(resolve);
       } else if (this.hasPendingLineageHeadEvent()) {
         // A cross-space lineage head has no timer; its origin commit callback
@@ -2090,8 +2090,8 @@ export class Scheduler {
     return hasRunnablePullWorkState(this.pullSchedulingState);
   }
 
-  private hasDeferredDirtyEffectWork(): boolean {
-    return hasDeferredDirtyEffectWorkState(this.pullSchedulingState);
+  private hasIdleBlockingDeferredPullWork(): boolean {
+    return hasIdleBlockingDeferredPullWorkState(this.pullSchedulingState);
   }
 
   private clearBackoffForCleanNodes(): void {

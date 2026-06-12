@@ -287,6 +287,32 @@ describe("debounce and throttling", () => {
     expect(runCount).toBe(0);
   });
 
+  it("should cancel pending debounce wake on dispose", async () => {
+    const local = createSchedulerTestRuntime(`${import.meta.url}#dispose-wake`);
+    let runCount = 0;
+    const action: Action = () => {
+      runCount++;
+    };
+
+    try {
+      local.runtime.scheduler.subscribe(
+        action,
+        { reads: [], shallowReads: [], writes: [] },
+        { isEffect: true, debounce: 50 },
+      );
+      expect(runCount).toBe(0);
+
+      local.runtime.scheduler.dispose();
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(runCount).toBe(0);
+    } finally {
+      await local.tx.commit();
+      await local.storageManager.close();
+    }
+  });
+
   it("should auto-debounce slow actions after threshold runs", async () => {
     const cell = runtime.getCell<number>(
       space,

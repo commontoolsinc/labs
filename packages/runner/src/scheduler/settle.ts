@@ -190,23 +190,35 @@ function isIdleMaterializerRunnable(
         .isDebouncedComputationWaiting(action) !== true;
 }
 
-export function hasDeferredDirtyEffectWork(
+export function hasIdleBlockingDeferredPullWork(
   state: PullSchedulingState,
 ): boolean {
   const now = performance.now();
-  for (const record of state.nodes.nodes("effect")) {
+  for (const record of state.nodes.nodes()) {
+    const action = record.action;
     if (
       isInvalidOrNeverRan(record) &&
+      isIdleBlockingDeferredPullNode(state, action) &&
       (
-        state.hasActiveDebounceTimer(record.action) ||
-        state.dirtyPullRunnableStateWithDebounce.isThrottled(record.action) ||
-        isTimeGated(state, record.action, now)
+        state.hasActiveDebounceTimer(action) ||
+        state.dirtyPullRunnableStateWithDebounce.isThrottled(action) ||
+        isTimeGated(state, action, now)
       )
     ) {
       return true;
     }
   }
   return false;
+}
+
+function isIdleBlockingDeferredPullNode(
+  state: PullSchedulingState,
+  action: Action,
+): boolean {
+  return state.effects.has(action) ||
+    state.materializerIndex.isMaterializer(action) ||
+    state.pendingPullRunnableState
+      .shouldRunFirstPullComputationInDemandContext(action);
 }
 
 export function isRunnableSchedulingSeed(

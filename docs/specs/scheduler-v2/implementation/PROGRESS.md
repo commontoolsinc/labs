@@ -5181,3 +5181,45 @@ packages/runner/src/scheduler/run.ts:655:  const throttleMs = state.getThrottle(
     `0 failed`, `242ms`.
   - Expected noisy passing logs remain: experimental flag override messages
     and the rehydration timeout warning in the timeout fallback fixture.
+
+## 08/5.5-gate-validation
+
+- [x] pending — added the single-wake dispose regression, fixed the
+  demand-bound debounce idle gap exposed by the full runner suite, and
+  completed the Phase 5 gate validation pass.
+- Shape:
+  - Added `scheduler-timing.test.ts` coverage that subscribes a debounced
+    effect, disposes the scheduler before the wake opens, waits past the
+    debounce window, and verifies the action never runs.
+  - The first full runner package pass exposed
+    `scheduler-v2-cutover.test.ts`'s provisional debounced child fixture
+    returning from `idle()` before the 200ms gate opened. Fixed the shared-wake
+    continuation/idle path so first-run provisional computations remain
+    idle-blocking while their gate is pending, without making ordinary
+    non-demanded computations block `idle()`.
+- Recordings:
+  - `deno fmt` on the touched scheduler source and timing test files: passed
+    (`Checked 4 files`).
+  - `deno lint` on the touched scheduler source and timing test files: passed
+    (`Checked 4 files`).
+  - `deno check` on the touched scheduler source and timing test files:
+    passed.
+  - `git diff --check`: passed.
+  - Cutover regression:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts`: passed, `1 passed (11 steps)`,
+    `0 failed`, `450ms`; the provisional debounced child fixture waited
+    `214ms` in the focused run.
+  - Phase 5 focused gate files:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-timing.test.ts test/scheduler-throttle.test.ts
+    test/scheduler-events.test.ts test/scheduler-convergence.test.ts
+    test/scheduler-pull-handlers.test.ts test/scheduler-v2-cutover.test.ts`:
+    passed, `6 passed (77 steps)`, `0 failed`, `7s`.
+  - Full runner package suite:
+    `cd packages/runner && deno task test`: passed,
+    `595 passed (3104 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m7s`.
+  - Expected noisy passing logs remain: scheduler event/preflight/retry/error
+    logs and write-surface warnings in wish fixtures.
