@@ -170,8 +170,8 @@ deno task run -- \
   --print-transcript
 ```
 
-Local open-weight model via any OpenAI-compatible server (llama.cpp shown;
-LM Studio, vLLM, and Ollama's `/v1` endpoint work the same way):
+Local open-weight model via any OpenAI-compatible server (llama.cpp shown; LM
+Studio, vLLM, and Ollama's `/v1` endpoint work the same way):
 
 ```bash
 # Serve the model locally (downloads on first run, ~63GB):
@@ -196,9 +196,9 @@ export CF_HARNESS_GATEWAY_AUTH_MODE=none
 export CF_HARNESS_MODEL=gpt-oss-120b
 ```
 
-CLI flags take precedence over these variables; `CF_HARNESS_MODEL` is ignored
-on `--resume-run` (the resumed run keeps its recorded model unless `--model`
-is passed explicitly).
+CLI flags take precedence over these variables; `CF_HARNESS_MODEL` is ignored on
+`--resume-run` (the resumed run keeps its recorded model unless `--model` is
+passed explicitly).
 
 On hosts without the `runsc-cfc` Docker runtime (or where the installed CFC
 policy does not label the workspace mount, which makes in-sandbox file reads
