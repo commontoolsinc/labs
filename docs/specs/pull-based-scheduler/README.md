@@ -5,8 +5,8 @@
 > `packages/runner/src/scheduler/`
 
 This document describes the scheduler behavior in the Common Fabric runtime.
-Pull mode is the default, but the implementation still contains push mode as a
-compatibility path and exposes runtime APIs for switching between the two modes.
+Push mode has been removed; this document describes the remaining (pull)
+behavior. The forward-looking design is `docs/specs/scheduler-v2/`.
 
 ## Background: Why Pull-Based?
 
@@ -363,31 +363,6 @@ retried after the scheduler settles enough for the handler to run.
 
 This section is the normative behavior reference for the current implementation.
 It covers both pull mode and the remaining push-mode compatibility path.
-
-### Mode Control
-
-The scheduler starts in pull mode (`pullMode = true`). `enablePullMode()`:
-
-- Sets pull mode on.
-- Clears stale bookkeeping, rebuilds the dependents graph from current
-  dependencies, and marks actions stale from any direct dirty state.
-- Emits `scheduler.mode.change` with `pullMode: true`.
-- Queues execution so runnable pull work can be reconsidered.
-
-`disablePullMode()`:
-
-- Sets pull mode off.
-- Clears dirty and stale state.
-- Emits `scheduler.mode.change` with `pullMode: false`.
-- Queues execution so pending push work can run.
-
-All mode-specific branches are isolated in scheduler helper modules:
-
-- `pull-subscriptions.ts` / `push-subscriptions.ts`
-- `pull-notifications.ts` / `push-notifications.ts`
-- `pull-events.ts` / `push-events.ts`
-- `pull-execution.ts` / `push-execution.ts`
-- `pull-continuation.ts` / `push-continuation.ts`
 
 ### Subscription Lifecycle
 
@@ -1000,7 +975,6 @@ Logs show:
 ```typescript
 // Overall state
 scheduler.getStats()              // { effects, computations, pending }
-scheduler.isPullModeEnabled()
 
 // Action queries
 scheduler.isEffect(action)
@@ -1106,14 +1080,6 @@ scheduler.addEventHandler(
 ```typescript
 scheduler.onConsole(fn: ConsoleHandler): void
 scheduler.onError(fn: ErrorHandler): void
-```
-
-### Mode Control
-
-```typescript
-scheduler.enablePullMode()
-scheduler.disablePullMode()
-scheduler.isPullModeEnabled()
 ```
 
 ### Timing Controls
