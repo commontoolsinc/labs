@@ -206,8 +206,18 @@ export class SpeculationLineage {
   private recordFor(origin: IExtendedStorageTransaction): OriginRecord {
     let record = this.byOrigin.get(origin);
     if (!record) {
-      record = { status: "pending", events: new Set(), pieceStops: [] };
+      const originStatus = origin.status().status;
+      record = {
+        status: originStatus === "done"
+          ? "confirmed"
+          : originStatus === "error"
+          ? "failed"
+          : "pending",
+        events: new Set(),
+        pieceStops: [],
+      };
       this.byOrigin.set(origin, record);
+      if (record.status !== "pending") return record;
       origin.addCommitCallback((_tx, result) => {
         const settled = this.byOrigin.get(origin);
         if (!settled) return;
@@ -282,7 +292,9 @@ Caveat to verify while implementing: `addCommitCallback` must fire even
 for read-only/no-op commits (the origin handler may have made no writes).
 Read `extended-storage-transaction.ts` `addCommitCallback` + commit (~line
 841-857) and confirm callbacks run on every commit() resolution path; if
-any early-return path skips callbacks, STOP and report it.
+any early-return path skips callbacks, STOP and report it. Commit callbacks do
+not fire retroactively for already-settled transactions; `recordFor()` must
+inspect `origin.status()` before registering a callback.
 
 Unit tests: `test/scheduler-lineage.test.ts` — record/fail cancels events
 (removeQueuedEvent called) and runs pieceStops; record/confirm does NOT
@@ -290,7 +302,10 @@ remove events and drops pieceStops; **two recorded events, origin
 confirms, first release()s → second still reads `"confirmed"`** (the
 stranded-sibling regression); release() of the last event after
 settlement deletes the record; originStatus of an unknown origin returns
-`"confirmed"`; double-settle safe.
+`"confirmed"`; double-settle safe; record on an already-committed origin
+reports `"confirmed"` without registering a commit callback; record on an
+already-failed/aborted origin reports `"failed"` without registering a commit
+callback.
 
 Commit: `feat(runner): speculation lineage registry (scheduler-v2 E1)`
 
@@ -316,8 +331,8 @@ Commit: `feat(runner): speculation lineage registry (scheduler-v2 E1)`
    ```
    if (head.originTx) {
      status = lineage.originStatus(head.originTx)
-     if (status === "failed") { /* unreachable: failure removes it from the
-        queue synchronously in the commit callback; assert + drop + release */ }
+     if (status === "failed") { /* drop + release + debug-log; already-failed
+        settled origins reach this path and must not dispatch */ }
      sameSpace = getCommitLocalSeq(head.originTx.tx, head.eventLink.space) !== undefined
      if (!sameSpace && status === "pending") {
        // Cross-space: park until origin confirmation (spec decision 11).
