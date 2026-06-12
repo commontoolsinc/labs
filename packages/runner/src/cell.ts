@@ -1169,6 +1169,8 @@ export class CellImpl<T extends FabricValue>
         event,
         undefined,
         onCommit,
+        false,
+        { originTx: this.tx ?? undefined },
       );
 
       this.cleanup?.();
