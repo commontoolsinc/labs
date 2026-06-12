@@ -9,11 +9,6 @@ const space = signer.did();
 
 type SchedulerInternals = {
   markDirty: (action: Action) => void;
-  collectDirtyDependencies: (
-    action: Action,
-    workSet: Set<Action>,
-    memo?: Map<Action, boolean>,
-  ) => boolean;
 };
 
 function getSchedulerInternals(
@@ -21,13 +16,10 @@ function getSchedulerInternals(
 ): SchedulerInternals {
   const internal = scheduler as unknown as {
     markAndScheduleInvalidAction: SchedulerInternals["markDirty"];
-    collectDirtyDependencies: SchedulerInternals["collectDirtyDependencies"];
   };
 
   return {
     markDirty: (action) => internal.markAndScheduleInvalidAction(action),
-    collectDirtyDependencies: (action, workSet, memo) =>
-      internal.collectDirtyDependencies(action, workSet, memo),
   };
 }
 
@@ -117,7 +109,7 @@ async function cleanup(
 }
 
 Deno.bench(
-  "Scheduler pull - shared dirty dependency fanout (50 effects, 20 reschedules)",
+  "Scheduler pull - shared invalid dependency fanout (50 effects, 20 reschedules)",
   { group: "pull-shared-memo" },
   async () => {
     const { runtime, storageManager, computation } = await setupSharedSeedGraph(
@@ -135,7 +127,7 @@ Deno.bench(
 );
 
 Deno.bench(
-  "Scheduler pull - shared dirty dependency fanout (200 effects, 10 reschedules)",
+  "Scheduler pull - shared invalid dependency fanout (200 effects, 10 reschedules)",
   { group: "pull-shared-memo" },
   async () => {
     const { runtime, storageManager, computation } = await setupSharedSeedGraph(
@@ -146,49 +138,6 @@ Deno.bench(
     for (let i = 0; i < 10; i++) {
       schedulerInternal.markDirty(computation);
       await runtime.scheduler.idle();
-    }
-
-    await cleanup(runtime, storageManager);
-  },
-);
-
-Deno.bench(
-  "Scheduler pull - shared clean dependency collect (200 effects, 20 scans)",
-  { group: "pull-shared-collect" },
-  async () => {
-    const { runtime, storageManager, effects } = await setupSharedSeedGraph(
-      200,
-    );
-    const schedulerInternal = getSchedulerInternals(runtime.scheduler);
-
-    for (let i = 0; i < 20; i++) {
-      const workSet = new Set<Action>(effects);
-      const memo = new Map<Action, boolean>();
-      for (const effect of effects) {
-        schedulerInternal.collectDirtyDependencies(effect, workSet, memo);
-      }
-    }
-
-    await cleanup(runtime, storageManager);
-  },
-);
-
-Deno.bench(
-  "Scheduler pull - shared dirty dependency collect (200 effects, 20 scans)",
-  { group: "pull-shared-collect" },
-  async () => {
-    const { runtime, storageManager, computation, effects } =
-      await setupSharedSeedGraph(200);
-    const schedulerInternal = getSchedulerInternals(runtime.scheduler);
-
-    schedulerInternal.markDirty(computation);
-
-    for (let i = 0; i < 20; i++) {
-      const workSet = new Set<Action>(effects);
-      const memo = new Map<Action, boolean>();
-      for (const effect of effects) {
-        schedulerInternal.collectDirtyDependencies(effect, workSet, memo);
-      }
     }
 
     await cleanup(runtime, storageManager);

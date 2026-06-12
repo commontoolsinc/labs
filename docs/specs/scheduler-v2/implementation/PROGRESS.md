@@ -4254,3 +4254,82 @@ $ rg -n "cfcTriggerReads|changedWritesHistory|conditionallyScheduledEffects|sche
   - Expected noisy passing logs remain: legacy cycle-cap telemetry in
     convergence cases and the reload-rehydration fixture's expected
     `TypeError`.
+
+## 07/3c.iii-upstream-machinery-deletion
+
+- [x] pending — deleted the upstream dirty/stale machinery and rebuilt the
+  remaining event-preflight and settle seeding paths around node invalid status.
+- Fix shape:
+  - Deleted `src/scheduler/dirty-dependencies.ts` and
+    `src/scheduler/staleness.ts`; scheduler state no longer owns a
+    dirty/stale mirror, `collectStack`, or dirty-dependency trace context.
+  - Added `event-preflight-dependencies.ts` with
+    `collectInvalidUpstreamForLog`, preserving the public preflight stats shape
+    while collecting only invalid/never-ran upstream nodes.
+  - Event preflight now walks through clean intermediates to find invalid
+    ancestors of handler reads, so transient event demand still blocks on
+    stale inputs without restoring pull mode's old dirty collector.
+  - Pull settle work-set construction now uses initial seeds plus invalid/live
+    seeds, invalid materializer promotions, and live downstream closure; the
+    old initial-seed/traversal-root asymmetry and late materializer per-effect
+    recheck are gone.
+  - Continuations, delays, cycle-break shims, graph snapshots, subscription
+    revalidation, and persisted rehydration now derive "dirty" compatibility
+    from node invalid/never-ran status.
+  - The first full-suite attempt exposed an async initial-rehydration race:
+    `never-ran` is both the normal pre-rehydrate state and the state after an
+    explicit invalidation. `markActionInvalid` now cancels any pending initial
+    rehydrate token so a late clean snapshot cannot overwrite that
+    invalidation.
+- Recordings:
+  - Focused scheduler trio:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-events.test.ts test/scheduler-pull.test.ts
+    test/scheduler-convergence.test.ts`: passed, `3 passed (53 steps)`,
+    `0 failed`.
+  - 3c.iii gate pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts
+    test/scheduler-cfc-trigger-reads.test.ts test/scheduler-retries.test.ts
+    test/scheduler-ordering.test.ts test/scheduler-timing.test.ts
+    test/scheduler-throttle.test.ts`: passed, `10 passed (68 steps)`,
+    `0 failed`.
+  - Rehydration regression check:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-observations.test.ts`: passed, `1 passed (22 steps)`,
+    `0 failed`.
+  - Event/stale bench pair:
+    `cd packages/runner && deno bench --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-event-preflight.bench.ts
+    test/scheduler-stale-propagation.bench.ts`: passed. Results:
+    event clean broad graph `328.7ms`, event waits on transitive invalid writer
+    `25.7ms`, note-shaped clean events `1.1s`, deep read-populated handler
+    `545.2ms`; stale-propagation bench, now an end-to-end graph update bench:
+    chain `98.9ms`, diamond `88.6ms`, wide fanout `239.8ms`, dynamic deps
+    `81.5ms`, unchanged recompute `45.9ms`.
+  - `deno fmt` on the 29 touched source/test files: passed
+    (`Checked 29 files`).
+  - `deno lint` on the same 29 files: passed (`Checked 29 files`).
+  - `deno check` on the same 29 files: passed.
+  - `git diff --check`: passed.
+  - Upstream deletion grep returned no matches:
+
+```text
+$ rg -n "staleness|dirty-dependencies|SchedulerStaleness|collectStack|dirtyDependencyTraceContext|DirtyDependencyTraceContext|collectDirtyDependencies|collectDirtyDependenciesForLog|collectDirtyDependenciesFromTraversalRoot|deferEffectForLateMaterializerDependency|isStale\(|getUpstreamStaleCount|stale\.size|upstreamStale|markDirectDirty|clearSchedulerDirectDirty|clearSchedulerDirty|forceClearStale" packages/runner/src packages/runner/test
+```
+
+  - Scheduler-source stale grep returned no matches:
+
+```text
+$ rg -n "stale\b" packages/runner/src/scheduler packages/runner/src/scheduler.ts
+```
+
+  - First `cd packages/runner && deno task test` attempt failed one test:
+    `scheduler-observations.test.ts` /
+    `does not apply async initial rehydration after an action becomes dirty`.
+    The final rerun passed: `594 passed (3106 steps)`, `0 failed`,
+    `0 ignored (10 steps)`, `2m6s`.

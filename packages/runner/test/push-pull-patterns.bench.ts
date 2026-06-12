@@ -178,9 +178,6 @@ type BenchTimingSummary = {
   run?: TimingDelta;
   runAction?: TimingDelta;
   depCollect?: TimingDelta;
-  collectDirty?: TimingDelta;
-  dirtyScan?: TimingDelta;
-  writerLookup?: TimingDelta;
 };
 
 const benchTimingSummaries = new Map<string, BenchTimingSummary>();
@@ -246,21 +243,6 @@ function recordSchedulerTimingSummary(
       after,
       "scheduler/execute/depCollect",
     ),
-    collectDirty: extractTimingDelta(
-      before,
-      after,
-      "scheduler/execute/collectDirtyDependencies",
-    ),
-    dirtyScan: extractTimingDelta(
-      before,
-      after,
-      "scheduler/execute/collectDirtyDependencies/dirtyScan",
-    ),
-    writerLookup: extractTimingDelta(
-      before,
-      after,
-      "scheduler/execute/collectDirtyDependencies/writerLookup",
-    ),
   } satisfies BenchTimingSummary;
 
   const currentWeight = (summary.execute?.totalTime ?? 0) +
@@ -319,9 +301,6 @@ addEventListener("unload", () => {
     for (
       const line of [
         formatTimingDelta("depCollect", summary.depCollect),
-        formatTimingDelta("collectDirtyDependencies", summary.collectDirty),
-        formatTimingDelta("dirtyScan", summary.dirtyScan),
-        formatTimingDelta("writerLookup", summary.writerLookup),
       ]
     ) {
       if (line) console.error(`  ${line}`);

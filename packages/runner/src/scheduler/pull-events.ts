@@ -58,19 +58,18 @@ export async function processPullQueuedEventDuringExecute(
     const preflight = preflightQueuedEventDependencies({
       runtime: state.runtime,
       eventQueue: state.eventQueue,
-      dirty: state.dirty,
+      nodes: state.nodes,
       pending: state.pending,
       pendingActions: state.pending,
       eventBlockingDeps,
       handleError: (error, target) => state.handleError(error, target),
-      setDirtyDependencyTraceContext: (trace) => {
-        state.setDirtyDependencyTraceContext(trace);
+      setEventPreflightTraceContext: (trace) => {
+        state.setEventPreflightTraceContext(trace);
       },
-      collectDirtyDependenciesForLog: (deps, dirtyDeps, dirtyDepMemo) =>
-        state.collectDirtyDependenciesForLog(
+      collectInvalidUpstreamForLog: (deps, invalidDeps) =>
+        state.collectInvalidUpstreamForLog(
           deps,
-          dirtyDeps,
-          dirtyDepMemo,
+          invalidDeps,
         ),
       isDebouncedComputationWaiting: (dep) =>
         state.isDebouncedComputationWaiting(dep),
@@ -90,15 +89,15 @@ export async function processPullQueuedEventDuringExecute(
         shallowReadCount: preflight.deps.shallowReads.length,
         dirtySizeBefore: preflight.dirtySizeBefore,
         pendingSizeBefore: preflight.pendingSizeBefore,
-        dirtyDependencyCount: preflight.dirtyDeps.size,
-        hasDirtyDependencies: preflight.hasDirtyDependencies,
+        dirtyDependencyCount: preflight.invalidDeps.size,
+        hasDirtyDependencies: preflight.hasInvalidDependencies,
         skipped: shouldSkipEvent,
         populateMs: preflight.populateMs,
         txToLogMs: preflight.txToLogMs,
         depCommitMs: preflight.depCommitMs,
         collectMs: preflight.collectMs,
         scheduleMs: preflight.scheduleMs,
-        stats: state.snapshotDirtyDependencyTraceContext(
+        stats: state.snapshotEventPreflightTraceContext(
           preflight.preflightStats,
         ),
       });

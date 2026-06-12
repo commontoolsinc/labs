@@ -16,12 +16,6 @@ import {
   txToReactivityLog,
 } from "../src/scheduler.ts";
 import { setSchedulerDependencies } from "../src/scheduler/dependency-updates.ts";
-import {
-  clearSchedulerDirectDirty,
-  getUpstreamStaleCount as getUpstreamStaleCountFromState,
-  isActionStale,
-  markDirectDirty as markDirectDirtyState,
-} from "../src/scheduler/staleness.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import type {
@@ -107,12 +101,10 @@ async function expectSemanticCommitNotifiesSynchronously(
 
 type StaleSchedulerInternals = {
   pending: Set<Action>;
-  dirty: Set<Action>;
-  isStale: (action: Action) => boolean;
+  pendingDependencyCollection: Set<Action>;
+  isInvalid: (action: Action) => boolean;
   isDemandedPullComputation: (action: Action) => boolean;
-  getUpstreamStaleCount: (action: Action) => number;
-  clearDirectDirty: (action: Action) => boolean;
-  markDirectDirty: (action: Action) => boolean;
+  clearInvalid: (action: Action) => void;
   markDirty: (action: Action) => void;
   registerEffect: (action: Action) => void;
   setDependencies: (
@@ -120,11 +112,6 @@ type StaleSchedulerInternals = {
     log: ReactivityLog,
   ) => ReturnType<typeof setSchedulerDependencies>;
   updateDependents: (action: Action, log: ReactivityLog) => void;
-  collectDirtyDependencies: (
-    action: Action,
-    workSet: Set<Action>,
-    memo?: Map<Action, boolean>,
-  ) => boolean;
 };
 
 function getStaleSchedulerInternals(
@@ -132,34 +119,41 @@ function getStaleSchedulerInternals(
 ): StaleSchedulerInternals {
   const internal = scheduler as unknown as {
     pending: Set<Action>;
-    staleness:
-      & Parameters<typeof isActionStale>[0]
-      & Parameters<typeof markDirectDirtyState>[0];
-    dirtySchedulingState: Parameters<typeof clearSchedulerDirectDirty>[0];
+    pendingDependencyCollection: Set<Action>;
     dependencyUpdateState: Parameters<typeof setSchedulerDependencies>[0];
     nodes: {
       register: (action: Action, kind: "effect" | "computation") => unknown;
+      get: (
+        action: Action,
+      ) =>
+        | {
+          status: "never-ran" | "clean" | "invalid";
+          invalidCauses: unknown[];
+        }
+        | undefined;
     };
     markAndScheduleInvalidAction: (action: Action) => void;
     isDemandedPullComputation: (action: Action) => boolean;
     updateDependents: StaleSchedulerInternals["updateDependents"];
-    collectDirtyDependencies: StaleSchedulerInternals[
-      "collectDirtyDependencies"
-    ];
   };
 
   return {
     pending: internal.pending,
-    dirty: internal.staleness.dirty,
-    isStale: (action) => isActionStale(internal.staleness, action),
+    pendingDependencyCollection: internal.pendingDependencyCollection,
+    isInvalid: (action) => {
+      const record = internal.nodes.get(action);
+      return record?.status === "invalid" || record?.status === "never-ran";
+    },
     isDemandedPullComputation: (action) =>
       internal.isDemandedPullComputation(action),
-    getUpstreamStaleCount: (action) =>
-      getUpstreamStaleCountFromState(internal.staleness, action),
-    clearDirectDirty: (action) =>
-      clearSchedulerDirectDirty(internal.dirtySchedulingState, action),
-    markDirectDirty: (action) =>
-      markDirectDirtyState(internal.staleness, action),
+    clearInvalid: (action) => {
+      const record = internal.nodes.get(action);
+      if (!record) return;
+      if (record.status === "invalid") {
+        record.status = "clean";
+      }
+      record.invalidCauses = [];
+    },
     markDirty: (action) => internal.markAndScheduleInvalidAction(action),
     registerEffect: (action) => {
       internal.nodes.register(action, "effect");
@@ -167,8 +161,6 @@ function getStaleSchedulerInternals(
     setDependencies: (action, log) =>
       setSchedulerDependencies(internal.dependencyUpdateState, action, log),
     updateDependents: (action, log) => internal.updateDependents(action, log),
-    collectDirtyDependencies: (action, workSet, memo) =>
-      internal.collectDirtyDependencies(action, workSet, memo),
   };
 }
 

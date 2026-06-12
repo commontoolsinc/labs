@@ -1,5 +1,6 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { planPullCycleBreak, type SchedulerSettleResult } from "./execution.ts";
+import type { NodeRegistry } from "./node-record.ts";
 import type { Action } from "./types.ts";
 
 const logger = getLogger("scheduler", {
@@ -8,12 +9,11 @@ const logger = getLogger("scheduler", {
 });
 
 export interface PullCycleBreakState {
-  readonly dirty: ReadonlySet<Action>;
+  readonly nodes: NodeRegistry;
   readonly effects: ReadonlySet<Action>;
   readonly runsThisExecute: ReadonlyMap<Action, number>;
   readonly pending: Set<Action>;
   readonly isThrottled: (action: Action) => boolean;
-  readonly clearDirty: (action: Action) => void;
   readonly clearInvalid: (action: Action) => void;
   readonly unsubscribe: (action: Action) => void;
   readonly recordExecuted: () => void;
@@ -32,7 +32,7 @@ export async function breakPullCyclesIfNeeded(
     settledEarly: settleResult.settledEarly,
     lastWorkSet: settleResult.lastWorkSet,
     earlyIterationComputations: settleResult.earlyIterationComputations,
-    dirty: state.dirty,
+    nodes: state.nodes,
     effects: state.effects,
     runsThisExecute: state.runsThisExecute,
     isThrottled: state.isThrottled,
@@ -51,7 +51,6 @@ export async function breakPullCyclesIfNeeded(
     logger.debug("schedule-cycle", () => [
       `[CYCLE-BREAK] Clearing cyclic computation: ${state.getActionId(comp)}`,
     ]);
-    state.clearDirty(comp);
     state.clearInvalid(comp);
     state.pending.delete(comp);
   }
@@ -59,15 +58,20 @@ export async function breakPullCyclesIfNeeded(
   // Run all remaining dirty effects - these shouldn't be lost
   // But skip throttled effects - they should stay dirty for later
   for (const effect of cycleBreakPlan.dirtyEffectsToRun) {
-    if (state.effects.has(effect) && state.dirty.has(effect)) {
+    if (state.effects.has(effect) && isInvalidAction(state.nodes, effect)) {
       logger.debug("schedule-cycle", () => [
         `[CYCLE-BREAK] Running dirty effect: ${state.getActionId(effect)}`,
       ]);
-      state.clearDirty(effect);
+      state.clearInvalid(effect);
       state.pending.delete(effect);
       state.unsubscribe(effect);
       state.recordExecuted();
       await state.runAction(effect);
     }
   }
+}
+
+function isInvalidAction(nodes: NodeRegistry, action: Action): boolean {
+  const record = nodes.get(action);
+  return record?.status === "invalid" || record?.status === "never-ran";
 }

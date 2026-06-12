@@ -72,13 +72,10 @@ import {
   type DependencyCollectionState,
 } from "./scheduler/dependency-collection.ts";
 import {
-  collectDirtyDependencies as collectDirtyDependenciesState,
-  collectDirtyDependenciesForLog as collectDirtyDependenciesForLogState,
-  collectDirtyDependenciesFromTraversalRoot
-    as collectDirtyDependenciesFromTraversalRootState,
-  type DirtyDependencyCollectionState,
-  snapshotDirtyDependencyTraceContext,
-} from "./scheduler/dirty-dependencies.ts";
+  collectInvalidUpstreamForLog as collectInvalidUpstreamForLogState,
+  type EventPreflightDependencyState,
+  snapshotEventPreflightTraceContext,
+} from "./scheduler/event-preflight-dependencies.ts";
 import {
   runSchedulerAction,
   type SchedulerActionRunState,
@@ -135,12 +132,6 @@ import {
 } from "./scheduler/notifications.ts";
 import { processPullStorageNotification } from "./scheduler/pull-notifications.ts";
 import {
-  clearSchedulerDirectDirty,
-  clearSchedulerDirty,
-  type DirtySchedulingState,
-  SchedulerStaleness,
-} from "./scheduler/staleness.ts";
-import {
   type SchedulerSubscribeActionState,
   type SchedulerSubscriptionState,
   type SchedulerUnsubscribeActionState,
@@ -176,8 +167,8 @@ import {
 import type {
   Action,
   ActionRunTraceEntry,
-  DirtyDependencyTraceContext,
   EventHandler,
+  EventPreflightTraceContext,
   PopulateDependencies,
   PopulateDependenciesEntry,
   QueuedEvent,
@@ -270,11 +261,6 @@ export class Scheduler {
   private passCounter = 0;
   private activePassId: number | undefined;
   private provisionalDemandThisPass = new Set<SchedulerNode>();
-  // In pull mode, `dirty` means direct dirty. `stale` additionally includes
-  // actions with dirty upstream computations.
-  private staleness = new SchedulerStaleness({
-    dependents: this.dependents,
-  });
 
   // Debugger breakpoints: action IDs that should trigger `debugger` before execution
   private breakpoints = new Set<string>();
@@ -290,9 +276,7 @@ export class Scheduler {
     anonymousActionIds: new WeakMap<Action | EventHandler, string>(),
     anonymousActionCounter: 0,
   };
-  // Cycle detection during dependency collection
-  private collectStack = new Set<Action>();
-  private dirtyDependencyTraceContext?: DirtyDependencyTraceContext;
+  private eventPreflightTraceContext?: EventPreflightTraceContext;
 
   // Cycle-aware debounce: track runs per action within current execute() call
   private runsThisExecute = new Map<Action, number>();
@@ -342,7 +326,7 @@ export class Scheduler {
 
   private writeIndex!: SchedulerWriteIndex;
   private materializers = new SchedulerMaterializers(this.nodes.effects);
-  private dirtyDependencyCollectionState!: DirtyDependencyCollectionState;
+  private eventPreflightDependencyState!: EventPreflightDependencyState;
   // Filter stats for diagnostics
   private filterStats: FilterStatsState = { filtered: 0, executed: 0 };
 
@@ -364,7 +348,6 @@ export class Scheduler {
   private dependencyGraphState!: DependencyGraphState;
   private dependencyUpdateState!: DependencyUpdateState;
   private triggerSubscriptionState!: TriggerSubscriptionState;
-  private dirtySchedulingState!: DirtySchedulingState;
   private pendingPullRunnableState!: PendingPullRunnableState;
   private dirtyPullRunnableState!: DirtyPullRunnableState;
   private dirtyPullRunnableStateWithDebounce!:
@@ -618,8 +601,6 @@ export class Scheduler {
       record.status = "clean";
       record.invalidCauses = [];
     }
-    clearSchedulerDirectDirty(this.dirtySchedulingState, action);
-    this.staleness.forceClearStale(action);
     this.pending.delete(action);
     this.pendingDependencyCollection.delete(action);
     return true;
@@ -849,7 +830,6 @@ export class Scheduler {
     return this.initialRehydrationTokens.get(action) === token &&
       (this.nodes.effects.has(action) || this.nodes.computations.has(action)) &&
       !this.pending.has(action) &&
-      !this.staleness.dirty.has(action) &&
       record?.status !== "invalid";
   }
 
@@ -1024,7 +1004,7 @@ export class Scheduler {
   }
 
   // ============================================================
-  // Throttle infrastructure - "value can be stale by T ms"
+  // Throttle infrastructure - "value may be outdated by T ms"
   // ============================================================
 
   /**
@@ -1106,7 +1086,7 @@ export class Scheduler {
    * Returns whether an action is marked as dirty.
    */
   isDirty(action: Action): boolean {
-    return this.staleness.dirty.has(action);
+    return this.isInvalidAction(action);
   }
 
   /**
@@ -1173,7 +1153,7 @@ export class Scheduler {
 
   /**
    * Enables or disables collection of per-iteration settle stats during execute().
-   * Disabling also clears the last collected stats to avoid stale reads.
+   * Disabling also clears the last collected stats to avoid outdated reads.
    */
   setSettleStatsEnabled(enabled: boolean): void {
     this.collectSettleStats = enabled;
@@ -1199,7 +1179,7 @@ export class Scheduler {
 
   /**
    * Enables or disables collection of exact action-run history.
-   * Disabling clears the current ring buffer to avoid stale reads.
+   * Disabling clears the current ring buffer to avoid outdated reads.
    */
   setActionRunTraceEnabled(enabled: boolean): void {
     this.collectActionRunTrace = enabled;
@@ -1217,7 +1197,7 @@ export class Scheduler {
 
   /**
    * Enables or disables collection of structured trigger-trace entries.
-   * Disabling clears the current ring buffer to avoid stale reads.
+   * Disabling clears the current ring buffer to avoid outdated reads.
    */
   setTriggerTraceEnabled(enabled: boolean): void {
     this.collectTriggerTrace = enabled;
@@ -1469,7 +1449,7 @@ export class Scheduler {
   private applyAdaptiveCycleDebounce(): void {
     // Apply cycle-aware debounce to effects that ran multiple times this execute().
     // Pull computations are already demand-gated; debouncing them can leave a
-    // live renderer observing stale materialized data until an arbitrary timer
+    // live renderer observing outdated materialized data until an arbitrary timer
     // fires.
     const cycleDebouncePlan = planPullAdaptiveCycleDebounce({
       executeStartTime: this.executeStartTime,
@@ -1577,12 +1557,11 @@ export class Scheduler {
     this.eventQueueWakeState = this.createEventQueueWakeState();
     this.writeIndex = this.createWriteIndex();
     this.delayControlState = this.createDelayControlState();
-    this.dirtyDependencyCollectionState = this
-      .createDirtyDependencyCollectionState();
+    this.eventPreflightDependencyState = this
+      .createEventPreflightDependencyState();
     this.dependencyGraphState = this.createDependencyGraphState();
     this.dependencyUpdateState = this.createDependencyUpdateState();
     this.triggerSubscriptionState = this.createTriggerSubscriptionState();
-    this.dirtySchedulingState = this.createDirtySchedulingState();
     this.storageNotificationState = this.createStorageNotificationState();
     this.pendingPullRunnableState = this.createPendingPullRunnableState();
     this.dirtyPullRunnableState = this.createDirtyPullRunnableState();
@@ -1657,7 +1636,7 @@ export class Scheduler {
       delays: this.delays,
       computations: this.nodes.computations,
       effects: this.nodes.effects,
-      dirty: this.staleness.dirty,
+      isInvalid: (action) => this.isInvalidAction(action),
       pending: this.pending,
       queueExecution: () => this.queueExecution(),
       logDebounce: (message) =>
@@ -1670,19 +1649,16 @@ export class Scheduler {
     };
   }
 
-  private createDirtyDependencyCollectionState(): DirtyDependencyCollectionState {
+  private createEventPreflightDependencyState(): EventPreflightDependencyState {
     return {
-      collectStack: this.collectStack,
-      getTrace: () => this.dirtyDependencyTraceContext,
-      dirty: this.staleness.dirty,
+      getTrace: () => this.eventPreflightTraceContext,
+      nodes: this.nodes,
       pending: this.pending,
-      computations: this.nodes.computations,
       reverseDependencies: this.reverseDependencies,
       dependencies: this.dependencies,
       writersByEntity: this.writeIndex.writersByEntity,
       effects: this.nodes.effects,
       materializerIndex: this.materializers,
-      isStale: (target) => this.staleness.isStale(target),
       getSchedulingWrites: (target) =>
         this.writeIndex.getSchedulingWrites(target),
       getActionId: (target) => this.getActionId(target),
@@ -1696,13 +1672,10 @@ export class Scheduler {
       dependencies: this.dependencies,
       dependents: this.dependents,
       reverseDependencies: this.reverseDependencies,
-      staleness: this.staleness,
       nodes: this.nodes,
       materializerIndex: this.materializers,
       getSchedulingWrites: (action) =>
         this.writeIndex.getSchedulingWrites(action),
-      isStale: (action) => this.staleness.isStale(action),
-      queueExecution: () => this.queueExecution(),
     };
   }
 
@@ -1725,20 +1698,6 @@ export class Scheduler {
         ]);
       },
     });
-  }
-
-  private createDirtySchedulingState(): DirtySchedulingState {
-    return {
-      staleness: this.staleness,
-      computations: this.nodes.computations,
-      scheduleComputationDebounce: (action) =>
-        this.scheduleComputationDebounce(action),
-      clearComputationDebounceState: (action) =>
-        this.delays.clearComputationDebounceState(action),
-      isLiveComputation: (action) => this.isDemandedPullComputation(action),
-      materializerIndex: this.materializers,
-      queueExecution: () => this.queueExecution(),
-    };
   }
 
   private createStorageNotificationState(): StorageNotificationState {
@@ -1866,8 +1825,6 @@ export class Scheduler {
       markProvisionalDemand: (record) => this.markProvisionalDemand(record),
       pending: this.pending,
       effects: this.nodes.effects,
-      dirty: this.staleness.dirty,
-      stale: this.staleness.stale,
       writeIndex: this.writeIndex,
       setDebounce: (action, ms) => this.setDebounce(action, ms),
       setNoDebounce: (action, optOut) => this.setNoDebounce(action, optOut),
@@ -1877,7 +1834,7 @@ export class Scheduler {
       isThrottled: (action) => this.delays.isThrottled(action),
       isDebouncedComputationWaiting: (action) =>
         this.isDebouncedComputationWaiting(action),
-      isStale: (action) => this.staleness.isStale(action),
+      isInvalid: (action) => this.isInvalidAction(action),
       markInvalid: (action) => this.markAndScheduleInvalidAction(action),
       updateDependents: (action, log) => this.updateDependents(action, log),
       registerWriterDependents: (action, writes) =>
@@ -1910,9 +1867,7 @@ export class Scheduler {
       populateDependenciesCallbacks: this.populateDependenciesCallbacks,
       pendingDependencyCollection: this.pendingDependencyCollection,
       getActionId: (target) => this.getActionId(target),
-      clearDirectDirty: (target) =>
-        clearSchedulerDirectDirty(this.dirtySchedulingState, target),
-      forceClearStale: (target) => this.staleness.forceClearStale(target),
+      clearInvalid: (target) => this.clearInvalidAction(target),
       cancelDebounceTimer: (target) => this.delays.cancelDebounceTimer(target),
       clearComputationDebounceState: (target, targetOptions) =>
         this.delays.clearComputationDebounceState(target, targetOptions),
@@ -1921,20 +1876,13 @@ export class Scheduler {
 
   private createCycleBreakState(): PullCycleBreakState {
     return {
-      dirty: this.staleness.dirty,
+      nodes: this.nodes,
       effects: this.nodes.effects,
       runsThisExecute: this.runsThisExecute,
       pending: this.pending,
       isThrottled: (action) => this.delays.isThrottled(action),
-      clearDirty: (action) =>
-        clearSchedulerDirty(this.dirtySchedulingState, action),
       clearInvalid: (action) => {
-        const record = this.nodes.get(action);
-        if (!record) return;
-        if (record.status === "invalid") {
-          record.status = "clean";
-        }
-        record.invalidCauses = [];
+        this.clearInvalidAction(action);
       },
       unsubscribe: (action) => this.unsubscribe(action),
       recordExecuted: () => {
@@ -1953,7 +1901,6 @@ export class Scheduler {
       effects: this.nodes.effects,
       computations: this.nodes.computations,
       pending: this.pending,
-      dirty: this.staleness.dirty,
       dependencies: this.dependencies,
       nodes: this.nodes,
       dependents: this.dependents,
@@ -1972,21 +1919,7 @@ export class Scheduler {
         ),
       collectPullIterationSeeds: (seeds) =>
         this.collectPullIterationSeeds(seeds),
-      collectDirtyDependencies: (seed, targetWorkSet, memo) =>
-        this.collectDirtyDependencies(seed, targetWorkSet, memo),
-      collectDirtyDependenciesFromTraversalRoot: (
-        seed,
-        targetWorkSet,
-        memo,
-      ) =>
-        this.collectDirtyDependenciesFromTraversalRoot(
-          seed,
-          targetWorkSet,
-          memo,
-        ),
       getActionId: (action) => this.getActionId(action),
-      clearDirty: (action) =>
-        clearSchedulerDirty(this.dirtySchedulingState, action),
       isThrottled: (action) => this.delays.isThrottled(action),
       isDebouncedComputationWaiting: (action) =>
         this.isDebouncedComputationWaiting(action),
@@ -2001,7 +1934,7 @@ export class Scheduler {
   private createExecuteContinuationState(): ExecuteContinuationState {
     return {
       pending: this.pending,
-      dirty: this.staleness.dirty,
+      nodes: this.nodes,
       effects: this.nodes.effects,
       eventQueue: this.eventQueue,
       eventQueueWakeState: this.eventQueueWakeState,
@@ -2073,7 +2006,7 @@ export class Scheduler {
     return {
       runtime: this.runtime,
       eventQueue: this.eventQueue,
-      dirty: this.staleness.dirty,
+      nodes: this.nodes,
       pending: this.pending,
       get eventPreflightTelemetryEnabled() {
         return getEventPreflightTelemetryEnabled();
@@ -2086,14 +2019,13 @@ export class Scheduler {
         getSchedulerActionTelemetryInfo(target),
       handleError: (error, target) => this.handleError(error, target),
       queueExecution: () => this.queueExecution(),
-      setDirtyDependencyTraceContext: (trace) => {
-        this.dirtyDependencyTraceContext = trace;
+      setEventPreflightTraceContext: (trace) => {
+        this.eventPreflightTraceContext = trace;
       },
-      collectDirtyDependenciesForLog: (deps, dirtyDeps, dirtyDepMemo) =>
-        this.collectDirtyDependenciesForLog(
+      collectInvalidUpstreamForLog: (deps, invalidDeps) =>
+        this.collectInvalidUpstreamForLog(
           deps,
-          dirtyDeps,
-          dirtyDepMemo,
+          invalidDeps,
         ),
       isDebouncedComputationWaiting: (target) =>
         this.isDebouncedComputationWaiting(target),
@@ -2111,9 +2043,9 @@ export class Scheduler {
       },
       getOriginLocalSeq: (originTx, targetSpace) =>
         getCommitLocalSeq(originTx.tx, targetSpace),
-      snapshotDirtyDependencyTraceContext: (trace) =>
-        snapshotDirtyDependencyTraceContext(
-          this.dirtyDependencyCollectionState,
+      snapshotEventPreflightTraceContext: (trace) =>
+        snapshotEventPreflightTraceContext(
+          this.eventPreflightDependencyState,
           trace,
         ),
     };
@@ -2166,8 +2098,6 @@ export class Scheduler {
       markNodeHasRun: (target) => this.markNodeHasRun(target),
       handleError: (error, target) => this.handleError(error, target),
       resubscribe: (target, log) => this.resubscribe(target, log),
-      clearDirty: (target) =>
-        clearSchedulerDirty(this.dirtySchedulingState, target),
       markInvalid: (target) => this.markActionInvalid(target),
       queueExecution: () => this.queueExecution(),
       setExecutingAction: (target, targetActionId) => {
@@ -2187,7 +2117,6 @@ export class Scheduler {
       effects: this.nodes.effects,
       computations: this.nodes.computations,
       pending: this.pending,
-      dirty: this.staleness.dirty,
       dependencies: this.dependencies,
       dependents: this.dependents,
       nodes: this.nodes,
@@ -2267,10 +2196,19 @@ export class Scheduler {
     action: Action,
     cause?: IMemorySpaceAddress,
   ): void {
+    this.initialRehydrationTokens.delete(action);
     const record = this.nodes.get(action);
     if (!record) return;
     markInvalidRecord(record, cause);
-    this.staleness.markDirectDirty(action);
+  }
+
+  private clearInvalidAction(action: Action): void {
+    const record = this.nodes.get(action);
+    if (!record) return;
+    if (record.status === "invalid") {
+      record.status = "clean";
+    }
+    record.invalidCauses = [];
   }
 
   private markAndScheduleInvalidAction(
@@ -2295,50 +2233,14 @@ export class Scheduler {
     }
   }
 
-  /**
-   * Collects computations that must run before `action` can observe up-to-date
-   * values. This includes explicitly dirty computations and clean intermediates
-   * whose own inputs flow from dirty upstream computations.
-   *
-   * Returns whether `action` itself is stale with respect to the current dirty
-   * set.
-   */
-  private collectDirtyDependencies(
-    action: Action,
-    workSet: Set<Action>,
-    memo = new Map<Action, boolean>(),
-  ): boolean {
-    return collectDirtyDependenciesState(
-      this.dirtyDependencyCollectionState,
-      action,
-      workSet,
-      memo,
-    );
-  }
-
-  private collectDirtyDependenciesFromTraversalRoot(
-    action: Action,
-    workSet: Set<Action>,
-    memo = new Map<Action, boolean>(),
-  ): boolean {
-    return collectDirtyDependenciesFromTraversalRootState(
-      this.dirtyDependencyCollectionState,
-      action,
-      workSet,
-      memo,
-    );
-  }
-
-  private collectDirtyDependenciesForLog(
+  private collectInvalidUpstreamForLog(
     log: ReactivityLog,
     workSet: Set<Action>,
-    memo = new Map<Action, boolean>(),
   ): boolean {
-    return collectDirtyDependenciesForLogState(
-      this.dirtyDependencyCollectionState,
+    return collectInvalidUpstreamForLogState(
+      this.eventPreflightDependencyState,
       log,
       workSet,
-      memo,
     );
   }
 

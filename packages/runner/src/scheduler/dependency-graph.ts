@@ -3,11 +3,10 @@ import { entityKey } from "./keys.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
 import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
 import { readsOverlapWrites } from "./scheduling-writes.ts";
-import type { SchedulerStaleness } from "./staleness.ts";
 import type { TriggerIndexState } from "./trigger-index.ts";
 import type {
   Action,
-  DirtyDependencyTraceContext,
+  EventPreflightTraceContext,
   ReactivityLog,
   SpaceScopeAndURI,
 } from "./types.ts";
@@ -18,14 +17,11 @@ export interface DependencyGraphState {
   readonly dependencies: WeakMap<Action, ReactivityLog>;
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly reverseDependencies: WeakMap<Action, Set<Action>>;
-  readonly staleness: SchedulerStaleness;
   readonly nodes: NodeRegistry;
   readonly materializerIndex: Pick<MaterializerIndexState, "isMaterializer">;
   readonly getSchedulingWrites: (
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;
-  readonly isStale: (action: Action) => boolean;
-  readonly queueExecution: () => void;
 }
 
 export type SchedulerLivenessState = Pick<
@@ -123,7 +119,7 @@ export function collectDirectWritersForLog(state: {
   readonly getSchedulingWrites: (
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;
-  readonly trace?: DirtyDependencyTraceContext;
+  readonly trace?: EventPreflightTraceContext;
 }, log: ReactivityLog): Set<Action> {
   const directWriters = new Set<Action>();
   if (state.trace) {
@@ -272,17 +268,6 @@ export function registerDependentEdge(
       addLiveRef(state, writer, new Set<Action>());
     }
   }
-
-  if (!alreadyDependent && state.isStale(writer)) {
-    state.staleness.addStaleUpstream(writer, dependent);
-    const writerRecord = state.nodes.get(writer);
-    if (
-      writerRecord?.kind === "computation" &&
-      isLive(state, writerRecord)
-    ) {
-      state.queueExecution();
-    }
-  }
 }
 
 export function registerDependentsForWriterSurface(
@@ -328,7 +313,6 @@ export function unregisterDependentEdge(
     if (dependentWasLive) {
       dropLiveRef(state, writer, new Set<Action>());
     }
-    state.staleness.removeStaleUpstream(writer, dependent);
   }
 }
 

@@ -23,7 +23,7 @@ export function applyPullExecuteContinuation(
 
   const continuation = planPullExecuteContinuation({
     pending: state.pending,
-    dirty: state.dirty,
+    nodes: state.nodes,
     effects: state.effects,
     shouldRerunAfterCurrentExecute,
     hasQueuedEventReadyNow,

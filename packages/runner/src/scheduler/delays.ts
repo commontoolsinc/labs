@@ -9,7 +9,7 @@ import type { Action } from "./types.ts";
 interface DebouncedComputationContext {
   readonly computations: ReadonlySet<Action>;
   readonly effects: ReadonlySet<Action>;
-  readonly dirty: ReadonlySet<Action>;
+  readonly isInvalid: (action: Action) => boolean;
   readonly pending: Set<Action>;
   readonly queueExecution: () => void;
   readonly logDebounce: (message: string) => void;
@@ -96,7 +96,7 @@ export class SchedulerDelays {
     | undefined {
     // Auto-debouncing computations in push mode makes observable derived state
     // lag behind writes. Pull-mode demand roots are effects, but delaying them
-    // can leave a live renderer observing stale materialized data.
+    // can leave a live renderer observing outdated materialized data.
     if (!context.canAutomaticallyDebounce(action)) return undefined;
 
     // Check if already has a manual debounce set.
@@ -155,14 +155,14 @@ export class SchedulerDelays {
     context: {
       readonly computations: ReadonlySet<Action>;
       readonly effects: ReadonlySet<Action>;
-      readonly dirty: ReadonlySet<Action>;
+      readonly isInvalid: (action: Action) => boolean;
       readonly shouldDebounceFirstRun?: (action: Action) => boolean;
     },
   ): number | undefined {
     if (!this.shouldDebouncePullComputation(action, context)) {
       return undefined;
     }
-    if (!context.dirty.has(action)) return undefined;
+    if (!context.isInvalid(action)) return undefined;
     if (this.computationDebounceReady.has(action)) return undefined;
     return this.computationDebounceReadyAt.get(action);
   }
@@ -173,7 +173,7 @@ export class SchedulerDelays {
   ): boolean {
     if (
       this.shouldDebouncePullComputation(action, context) &&
-      context.dirty.has(action) &&
+      context.isInvalid(action) &&
       !this.computationDebounceReady.has(action) &&
       this.computationDebounceReadyAt.get(action) === undefined
     ) {
@@ -201,7 +201,7 @@ export class SchedulerDelays {
       this.activeDebounceTimers.delete(timer);
       this.computationDebounceReadyAt.delete(action);
 
-      if (!context.computations.has(action) || !context.dirty.has(action)) {
+      if (!context.computations.has(action) || !context.isInvalid(action)) {
         return;
       }
 

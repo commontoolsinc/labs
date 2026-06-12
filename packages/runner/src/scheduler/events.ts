@@ -17,10 +17,11 @@ import type {
   SchedulerActionInfo,
   SchedulerEventPreflightStats,
 } from "../telemetry.ts";
-import { createDirtyDependencyTraceContext } from "./diagnostics.ts";
+import { createEventPreflightTraceContext } from "./diagnostics.ts";
 import { mintEventId } from "./event-identity.ts";
-import { planEventDirtyDependencyScheduling } from "./execution.ts";
+import { planEventInvalidDependencyScheduling } from "./execution.ts";
 import type { OriginStatus } from "./lineage.ts";
+import type { NodeRegistry } from "./node-record.ts";
 import { RetryImmediately } from "./retry-immediately.ts";
 import {
   hasAnnotatedWrites,
@@ -29,8 +30,8 @@ import {
 } from "./reactivity.ts";
 import type {
   Action,
-  DirtyDependencyTraceContext,
   EventHandler,
+  EventPreflightTraceContext,
   QueuedEvent,
   ReactivityLog,
 } from "./types.ts";
@@ -95,8 +96,8 @@ export function isHeadEventParked(
 export interface EventDependencyPreflightResult {
   shouldSkipEvent: boolean;
   deps: ReactivityLog;
-  dirtyDeps: Set<Action>;
-  hasDirtyDependencies: boolean;
+  invalidDeps: Set<Action>;
+  hasInvalidDependencies: boolean;
   dirtySizeBefore: number;
   pendingSizeBefore: number;
   populateMs: number;
@@ -104,7 +105,7 @@ export interface EventDependencyPreflightResult {
   depCommitMs: number;
   collectMs: number;
   scheduleMs: number;
-  preflightStats: DirtyDependencyTraceContext;
+  preflightStats: EventPreflightTraceContext;
 }
 
 export interface SchedulerEventQueueState {
@@ -222,7 +223,7 @@ export function addSchedulerEventHandler(state: {
 export interface SchedulerEventExecutionState {
   readonly runtime: Runtime;
   readonly eventQueue: QueuedEvent[];
-  readonly dirty: ReadonlySet<Action>;
+  readonly nodes: NodeRegistry;
   readonly pending: Set<Action>;
   readonly eventPreflightTelemetryEnabled: boolean;
   readonly setRunningPromise: (promise: Promise<unknown>) => void;
@@ -235,13 +236,12 @@ export interface SchedulerEventExecutionState {
     action: Action | EventHandler,
   ) => void;
   readonly queueExecution: () => void;
-  readonly setDirtyDependencyTraceContext: (
-    trace: DirtyDependencyTraceContext | undefined,
+  readonly setEventPreflightTraceContext: (
+    trace: EventPreflightTraceContext | undefined,
   ) => void;
-  readonly collectDirtyDependenciesForLog: (
+  readonly collectInvalidUpstreamForLog: (
     deps: ReactivityLog,
-    dirtyDeps: Set<Action>,
-    memo: Map<Action, boolean>,
+    invalidDeps: Set<Action>,
   ) => boolean;
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
@@ -262,26 +262,25 @@ export interface SchedulerEventExecutionState {
     originTx: IExtendedStorageTransaction,
     space: MemorySpace,
   ) => number | undefined;
-  readonly snapshotDirtyDependencyTraceContext: (
-    trace: DirtyDependencyTraceContext,
+  readonly snapshotEventPreflightTraceContext: (
+    trace: EventPreflightTraceContext,
   ) => SchedulerEventPreflightStats;
 }
 
 export function preflightQueuedEventDependencies(state: {
   readonly runtime: Runtime;
   readonly eventQueue: QueuedEvent[];
-  readonly dirty: ReadonlySet<Action>;
+  readonly nodes: NodeRegistry;
   readonly pending: ReadonlySet<Action>;
   readonly pendingActions: Set<Action>;
   readonly eventBlockingDeps: Set<Action>;
   readonly handleError: (error: Error, handler: EventHandler) => void;
-  readonly setDirtyDependencyTraceContext: (
-    trace: DirtyDependencyTraceContext | undefined,
+  readonly setEventPreflightTraceContext: (
+    trace: EventPreflightTraceContext | undefined,
   ) => void;
-  readonly collectDirtyDependenciesForLog: (
+  readonly collectInvalidUpstreamForLog: (
     deps: ReactivityLog,
-    dirtyDeps: Set<Action>,
-    memo: Map<Action, boolean>,
+    invalidDeps: Set<Action>,
   ) => boolean;
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
@@ -289,8 +288,8 @@ export function preflightQueuedEventDependencies(state: {
   readonly scheduleEventQueueWake: (notBefore: number) => void;
 }, queuedEvent: QueuedEvent): EventDependencyPreflightResult {
   const { handler, event: eventValue } = queuedEvent;
-  const preflightStats = createDirtyDependencyTraceContext();
-  const dirtySizeBefore = state.dirty.size;
+  const preflightStats = createEventPreflightTraceContext();
+  const dirtySizeBefore = countInvalidNodes(state.nodes);
   const pendingSizeBefore = state.pending.size;
   let populateMs = 0;
   let txToLogMs = 0;
@@ -362,45 +361,43 @@ export function preflightQueuedEventDependencies(state: {
   );
   depCommitMs = performance.now() - stepStart;
 
-  const dirtyDeps = new Set<Action>();
-  const dirtyDepMemo = new Map<Action, boolean>();
+  const invalidDeps = new Set<Action>();
   stepStart = performance.now();
   logger.timeStart(
     "scheduler",
     "execute",
     "event",
-    "pullCollectDirtyDependencies",
+    "pullCollectInvalidUpstream",
   );
-  let hasDirtyDependencies = false;
-  state.setDirtyDependencyTraceContext(preflightStats);
+  let hasInvalidDependencies = false;
+  state.setEventPreflightTraceContext(preflightStats);
   try {
-    hasDirtyDependencies = state.collectDirtyDependenciesForLog(
+    hasInvalidDependencies = state.collectInvalidUpstreamForLog(
       deps,
-      dirtyDeps,
-      dirtyDepMemo,
+      invalidDeps,
     );
   } finally {
-    state.setDirtyDependencyTraceContext(undefined);
+    state.setEventPreflightTraceContext(undefined);
     logger.timeEnd(
       "scheduler",
       "execute",
       "event",
-      "pullCollectDirtyDependencies",
+      "pullCollectInvalidUpstream",
     );
   }
   collectMs = performance.now() - stepStart;
 
-  if (!shouldSkipEvent && hasDirtyDependencies) {
+  if (!shouldSkipEvent && hasInvalidDependencies) {
     stepStart = performance.now();
     logger.timeStart(
       "scheduler",
       "execute",
       "event",
-      "pullScheduleDirtyDependencies",
+      "pullScheduleInvalidUpstream",
     );
     try {
-      const eventDirtyPlan = planEventDirtyDependencyScheduling({
-        dirtyDeps,
+      const eventDirtyPlan = planEventInvalidDependencyScheduling({
+        invalidDeps,
         isDebouncedComputationWaiting: (dep) =>
           state.isDebouncedComputationWaiting(dep),
         getNextDebounceRunTime: (dep) => state.getNextDebounceRunTime(dep),
@@ -422,7 +419,7 @@ export function preflightQueuedEventDependencies(state: {
         "scheduler",
         "execute",
         "event",
-        "pullScheduleDirtyDependencies",
+        "pullScheduleInvalidUpstream",
       );
     }
     scheduleMs = performance.now() - stepStart;
@@ -431,8 +428,8 @@ export function preflightQueuedEventDependencies(state: {
   return {
     shouldSkipEvent,
     deps,
-    dirtyDeps,
-    hasDirtyDependencies,
+    invalidDeps,
+    hasInvalidDependencies,
     dirtySizeBefore,
     pendingSizeBefore,
     populateMs,
@@ -442,6 +439,16 @@ export function preflightQueuedEventDependencies(state: {
     scheduleMs,
     preflightStats,
   };
+}
+
+function countInvalidNodes(nodes: NodeRegistry): number {
+  let count = 0;
+  for (const record of nodes.nodes()) {
+    if (record.status === "invalid" || record.status === "never-ran") {
+      count++;
+    }
+  }
+  return count;
 }
 
 export async function dispatchQueuedEvent(state: {
