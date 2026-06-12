@@ -2723,7 +2723,7 @@ Verification:
 
 ## 07/3pre
 
-- [x] pending — added the scheduler-v2 cutover fixture pack.
+- [x] 4a607da47 — added the scheduler-v2 cutover fixture pack.
 - Deviations:
   - The cycle-backoff fixture is green on the current v1 cycle-break path with
     a loose bounded-termination assertion (`runCountA + runCountB < 500`) and
@@ -2744,3 +2744,80 @@ Verification:
     `0 failed`.
   - `cd packages/runner && deno task test`: passed,
     `594 passed (3106 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m6s`.
+
+## 07/phase3-baseline
+
+- [x] pending — captured the immediate pre-3a reload and benchmark baselines.
+- Deviations:
+  - `reload-rehydration.test.ts` still emits the fixture's expected action
+    error (`Cannot read properties of undefined (reading 'length')`) while the
+    test passes and asserts the scheduler rehydration counts.
+- Recordings:
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts`: passed, `1 passed`, `0 failed`;
+    test assertions cover `rehydrate/ok > 0` and
+    `rehydrate/miss/no-snapshot = 0`.
+  - Phase 3 benchmark baseline command passed:
+    `cd packages/runner && deno bench --allow-read --allow-write --allow-net
+    --allow-ffi --allow-env --no-check test/scheduler.bench.ts
+    test/scheduler-demand-roots.bench.ts
+    test/scheduler-stale-propagation.bench.ts
+    test/scheduler-event-preflight.bench.ts
+    test/scheduler-materializer-fanout.bench.ts
+    test/scheduler-persistent-state.bench.ts`.
+  - `test/scheduler.bench.ts`:
+    - `Scheduler - 100 computations, shared entity reads`: 19.0 ms.
+    - `Scheduler - wide graph (1 source, 100 readers)`: 17.6 ms.
+    - `Scheduler - 100 entities, sparse deps`: 17.8 ms.
+    - `Scheduler - deep chain (50 levels)`: 11.0 ms.
+    - `Scheduler - diamond pattern (10 diamonds)`: 9.9 ms.
+    - `Scheduler - repeated dirty marking`: 7.6 ms.
+    - `Scheduler - subscribe/unsubscribe cycle (100x)`: 5.7 ms.
+    - `Scheduler - pull with resubscribe (50 pulls)`: 287.3 ms.
+    - `Overhead - setup/teardown only`: 1.3 ms.
+    - `Overhead - create 100 cells (getCell + set)`: 15.8 ms.
+    - `Overhead - 100x getCell only (no set)`: 1.6 ms.
+    - `Overhead - 100x set on existing cells`: 15.7 ms.
+    - `Overhead - runtime.idle() empty`: 1.2 ms.
+    - `Overhead - commit after 100 sets`: 15.8 ms.
+    - `Overhead - empty commit`: 1.2 ms.
+    - `Overhead - 100 raw tx.write + commit`: 7.2 ms.
+    - `Utility - sortAndCompactPaths (100 paths)`: 21.4 us.
+    - `Utility - sortAndCompactPaths (1000 paths)`: 278.8 us.
+    - `Utility - addressesToPathByEntity (100 paths)`: 15.0 us.
+    - `Utility - addressesToPathByEntity (1000 paths)`: 148.2 us.
+    - `Scheduler - bare subscribe (100x)`: 1.7 ms.
+    - `Scheduler - subscribe 100 actions reading same entity`: 1.6 ms.
+    - `Scheduler - resubscribe cycle (100x)`: 1.3 ms.
+  - `test/scheduler-demand-roots.bench.ts`:
+    - `Scheduler demand roots - effect demand root`: 142.0 ms.
+    - `Scheduler demand roots - event demand root`: 138.0 ms.
+    - `Scheduler demand roots - mixed effect and event roots`: 167.5 ms.
+    - `Scheduler demand roots - parent clears generated children`: 79.4 ms.
+  - `test/scheduler-stale-propagation.bench.ts`:
+    - `Scheduler stale propagation - chain`: 95.6 ms.
+    - `Scheduler stale propagation - diamond`: 95.1 ms.
+    - `Scheduler stale propagation - wide fanout`: 239.6 ms.
+    - `Scheduler stale propagation - dynamic deps`: 78.5 ms.
+    - `Scheduler stale propagation - unchanged recompute`: 77.4 ms.
+  - `test/scheduler-event-preflight.bench.ts`:
+    - `Scheduler event preflight - clean event over broad graph`: 274.6 ms.
+    - `Scheduler event preflight - event waits on transitive stale writer`:
+      27.1 ms.
+    - `Scheduler event preflight - note-shaped 30x7 clean events`: 978.0 ms.
+    - `Scheduler event preflight - deep read-populated handler`: 528.7 ms.
+  - `test/scheduler-materializer-fanout.bench.ts`:
+    - `Scheduler materializer fanout - broad side write with 100 readers`:
+      29.4 ms.
+    - `Scheduler materializer fanout - broad side write with 1000 readers`:
+      94.4 ms.
+    - `Scheduler materializer fanout - static declared write control`:
+      16.4 ms.
+  - `test/scheduler-persistent-state.bench.ts`:
+    - `Scheduler persistent state - clean rehydrate 100 actions`: 2.5 ms.
+    - `Scheduler persistent state - targeted dirty rehydrate 100 actions`:
+      4.0 ms.
+    - `Scheduler persistent state - clean rehydrate 1000 actions`: 8.2 ms.
+    - `Scheduler persistent state - targeted dirty rehydrate 1000 actions`:
+      7.6 ms.
