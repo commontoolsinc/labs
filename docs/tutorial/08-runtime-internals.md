@@ -29,8 +29,8 @@ a sibling cell with one more path segment and the narrowed schema.
 `.asSchema()` reinterprets the same location under a different schema.
 `.get()` resolves the link against the local replica of the space *through
 the current transaction*. Path-granular reactivity (Chapter 2) falls out:
-dependencies are recorded as (id, path) pairs, so writing `item.done`
-doesn't disturb readers of `item.title`.
+dependencies are recorded as (space, id, path) addresses, so writing
+`item.done` doesn't disturb readers of `item.title`.
 
 Entity ids are content-derived: `createRef(source, cause)` hashes the
 creation context (`packages/runner/src/create-ref.ts`), so the "same" cell
@@ -38,11 +38,16 @@ created by the same graph node gets the same id deterministically — which is
 what lets a server re-instantiate a piece and arrive at the same cells.
 
 **Links between documents** are stored as serializable references (sigil
-links: `{ "/": { documentId, path, ... } }`). When a read encounters one, it
-resolves through to the target — transparently crossing documents and even
-spaces. This is the mechanism behind `cf piece link` (Chapter 5), and also
-behind the "selection" gotcha (Chapter 6, #7): writing to a cell that
-*contains* a link writes through to the link's target, by design.
+links: `{ "/": { "link@1": { id, path, space } } }`). When a read encounters
+one, it resolves through to the target — transparently crossing documents
+and even spaces. This is the mechanism behind `cf piece link` (Chapter 5).
+Writes are subtler, and worth stating precisely: a write whose path
+continues *past* a link (`selected.key("title").set(...)`) follows the link
+and lands on the target, as does a write through a *write-redirect* link
+(the kind pattern argument/output bindings use) — but writing a plain value
+at the exact location of an ordinary link simply **replaces the link**.
+This asymmetry is what makes the "selection" gotcha (Chapter 6, #7)
+confusing in practice, and why the rule there is to box stored references.
 
 ## The scheduler: reads are subscriptions, literally
 
@@ -56,7 +61,7 @@ The runtime's event loop is the scheduler
    is what subscribes you.
 2. **Commit.** The transaction's writes are applied (next section).
 3. **Re-subscribe.** The action's actual read-set replaces its old one. The
-   scheduler maintains a reverse index — "this (id, path) is read by these
+   scheduler maintains a reverse index — "this (space, id, path) is read by these
    actions" — so dependencies follow the data the action *really* touched
    this run, branch by branch.
 4. **React.** When any write lands (locally, or arriving from the server —
@@ -116,8 +121,10 @@ the previous three sections together:
    receives a value or a writable handle.
 2. Each `Node` in the graph becomes a scheduled action: `javascript` nodes
    (lifts/computeds/handlers) wrap their compiled implementation (fetched
-   via the `implementationRef` function cache); `pattern` nodes recurse into
-   sub-patterns; `isolated` nodes run in the stronger sandbox.
+   via the `implementationRef` function cache) and run in the SES sandbox;
+   `pattern` nodes recurse into sub-patterns; `ref`/`raw`/`passthrough`
+   cover builtins and plumbing. (An `isolated` module type is declared in
+   the API but not currently implemented by the runner.)
 3. Handler nodes register as **stream** consumers: nothing runs until
    something `.send()`s to the stream; then the handler executes as a
    one-shot action with the event as input, in its own transaction.

@@ -19,7 +19,8 @@ The code is `packages/memory` (the store and protocol) plus
 ## The data model: documents in spaces
 
 The unit of storage is an **entity document**: a JSON document named by a
-content-derived id (`of:<hash>`), living in a space, with the cell's payload
+hash id (`of:<hash>`, derived from the cell's creation context — the
+document itself mutates while its id stays stable), living in a space, with the cell's payload
 under its `value` field plus metadata (e.g. a `source` link to the owning
 piece). Cells (Chapter 8) address `(space, id, path)`; the path is resolved
 inside the document.
@@ -120,7 +121,8 @@ blob_store(hash PK, data BLOB, content_type, size)
 
 Reading a document means: find its head revision; if it's a `set`, decode
 it; if a `patch`, replay patches forward from the nearest snapshot
-(snapshots are written every N revisions to bound replay cost). So the store
+(a snapshot is written once enough patch revisions — 10 by default —
+accumulate since the last full value, bounding replay cost). So the store
 is an **event log with materialized checkpoints** — history is retained,
 heads are fast, and the conflict checks in the commit protocol are simple
 indexed queries over `revision`.
@@ -136,7 +138,7 @@ Patterns can also declare cells that *are* SQLite databases (the
 `sqlite-builtin`, `docs/specs/sqlite-builtin`): the cell's entity id names a
 per-`(space, id)` database file. The design is asymmetric, deliberately:
 
-- **Writes** ride inside ordinary commits as `{op: "sqlite", sql, params}`
+- **Writes** ride inside ordinary commits as `{op: "sqlite", db, sql, params}`
   operations — atomic with cell writes in the same transaction, conflict-
   checked like everything else. There is no standalone SQL-write RPC.
 - **Reads** (`sqlite.query`) bypass the engine connection entirely and go
@@ -146,7 +148,7 @@ per-`(space, id)` database file. The design is asymmetric, deliberately:
   read-only is enforced by the OS-level open flag, not by parsing alone.
 
 A server-side registry can also map a handle to an external on-disk
-database (`cf piece link <piece>/<field> sqlite:/abs/path`) — read-only —
+database (`cf piece link sqlite:/abs/path <piece>/<field>`) — read-only —
 which is how local datasets get exposed to patterns.
 
 ## The local/remote symmetry

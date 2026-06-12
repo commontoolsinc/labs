@@ -179,8 +179,9 @@ mechanisms in Chapters 8 and 9:
 - **Reads are subscriptions.** Any value you read inside a `computed()`, a
   JSX expression, or a handler's reactive context re-runs that computation
   when the value changes — even if the change came from another machine.
-- **Writes are transactional.** All writes from one handler invocation
-  commit atomically, or not at all.
+- **Writes are transactional.** All writes from one handler invocation go
+  into one transaction — which targets a single space — and commit
+  atomically, or not at all.
 - **Updates are optimistic but converge.** Your own writes apply locally and
   instantly; if the server detects a conflict with someone else's commit,
   your transaction is rolled back and retried against fresh state. You don't

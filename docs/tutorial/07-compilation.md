@@ -43,7 +43,9 @@ expression like `{price - discount}` is rewritten into a module-scope
 `lift()` node (`__cfLift_1`) with schemas for its inputs and output — this
 is precisely why plain ternaries in JSX "just work" reactively (Chapter 4)
 while the same ternary inside a `computed()` body is plain JavaScript: the
-transformer rewrites JSX sites, not closure bodies.
+transformer lowers JSX expression sites into reactive nodes, while a
+closure's body logic stays plain JavaScript (only its captures are
+rewritten, as described next).
 
 **Closure reification** (`ClosureTransformer`,
 `PatternCallbackLowering`, `BuilderCallbackHoisting`,
@@ -82,10 +84,10 @@ one handles the branded wrapper types:
 |---|---|
 | `number` | `{ type: "number" }` |
 | `Cell<T>` / `Writable<T>` | schema of `T` + `asCell: ["cell"]` |
-| `Stream<T>` | schema of `T` + `asCell: ["stream", "cell"]` |
+| `Stream<T>` | schema of `T` + `asCell: ["stream"]` |
 | `OpaqueRef<T>` | schema of `T` + `asCell: ["opaque"]` |
 | `T \| Default<V>` | schema of `T` + `default: V` |
-| `PerSpace<T>` / `PerUser<T>` / `PerSession<T>` | schema of `T` + `scope: "space" \| "user" \| "session"` |
+| `PerSpace<T>` / `PerUser<T>` / `PerSession<T>` | schema of `T` + `scope: "space" \| "user" \| "session"` (folded into the `asCell` entry when the inner type is cell-wrapped) |
 
 So the "phantom" types of Part I are real after all — each becomes a schema
 annotation the runtime reads: `asCell` tells the runtime to pass a cell
@@ -153,15 +155,17 @@ placeholder, not a number.
 
 ## Identity and caching: `implementationRef`
 
-Each node's code carries an `implementationRef` — a stable identity for the
-implementation (e.g. `"main.tsx#000:handler"`: file, position, export). It
-serves three masters:
+Each node's code carries an `implementationRef` — a stable, content-derived
+identity for the implementation (minted from the function's source, kind,
+and position; trusted host functions get reserved refs). It serves three
+masters:
 
 - **Caching**: compiled functions are cached by ref
   (`packages/runner/src/function-cache.ts`), so re-loading a piece doesn't
   recompile unchanged nodes.
 - **Stable scheduling**: the scheduler identifies actions across re-runs by
-  ref.
+  a content-addressed implementation fingerprint (the implementation hash,
+  falling back to source location).
 - **Provenance**: verified-source tracking ties running code back to the
   exact source that produced it (this also feeds the CFC
   confidential-computing work you'll see in `packages/patterns/cfc-*`).

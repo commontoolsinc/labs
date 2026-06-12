@@ -56,7 +56,7 @@ current (v2) protocol, authorization happens at **session open**
 `packages/toolshed/routes/storage/memory.ts`):
 
 1. The client builds an invocation
-   `{ iss: <user did>, cmd: "session.open", sub: <space did>, args: {session} }`
+   `{ iss: <user did>, cmd: "session.open", sub: <space did>, args: {protocol, session} }`
    and signs its hash with the user's key.
 2. The server verifies the signature against the issuer DID and that the
    signed invocation matches *this exact* session-open request (no replay

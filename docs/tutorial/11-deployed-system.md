@@ -18,7 +18,8 @@ the product needs server-side. Its route groups (`app.ts`) tell the story:
   server-side.
 - `blobs` — content-addressed binary storage (images etc., 10 MB cap),
   per-space.
-- `patterns` — the pattern registry/discovery API.
+- `patterns` — serves the built-in pattern sources
+  (`GET /api/patterns/:filename`).
 - `integrations/*` — OAuth flows (Google, Discord, ...) so pieces can hold
   third-party credentials server-side; `webhooks` for inbound events.
 - `whoami`, `meta`, `health` — introspection; `shell` — serves the web app

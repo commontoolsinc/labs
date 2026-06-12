@@ -115,7 +115,7 @@ seven words.
 - **Space** — a store of cells, named by a DID; the unit of sharing and
   access control.
 - **Pattern** — a TypeScript/JSX module that runs once to define a reactive
-  graph over cells. (Legacy name in code: *recipe*.)
+  graph over cells.
 - **Piece** — a deployed instance of a pattern in a space, with its own
   argument and result cells. (Legacy name: *charm*.)
 - **Stream** — a stateless channel; sending to it fires a handler. Event

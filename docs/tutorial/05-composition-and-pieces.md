@@ -64,8 +64,7 @@ a human **slug** for URLs. In the shell, `/{spaceName}/{pieceIdOrSlug}` shows
 a piece's UI.
 
 > Legacy naming: pieces are called **charms** in older code
-> (`background-charm-service`), and patterns **recipes** in the builder
-> internals. Same concepts.
+> (`background-charm-service`, `BGCharmEntry`, ...). Same concept.
 
 ## Linking pieces
 
@@ -95,8 +94,8 @@ For drill-down flows (list → detail), a handler can return
 `navigateTo` with a freshly-instantiated pattern creates the detail piece
 and navigates the shell to it; with an existing piece it just navigates.
 The canonical list/detail example is `packages/patterns/reading-list/` —
-the detail pattern receives a `Writable<Item>` and edits fields via
-`.key()` bindings.
+the detail pattern receives each editable field as a `Writable<>` input and
+binds them directly with `$value`.
 
 ## Capability: LLM calls
 
@@ -109,7 +108,8 @@ const response = generateText({
   prompt: userInput,                       // reactive — re-runs when it changes
   system: "You are a helpful assistant.",
 });
-// response: { result: string, error: string, pending: boolean }
+// response: { pending: boolean, result?: string, error?: unknown,
+//             partial?: string /* streaming text so far */ }
 
 {response.pending ? <cf-loader /> : <cf-markdown>{response.result}</cf-markdown>}
 ```
@@ -133,7 +133,8 @@ const itemsWithAisles = items.map((item) => {
 
 Model names must be `vendor:model` (e.g. `"anthropic:claude-sonnet-4-5"`,
 `"openai:gpt-4o"`); a malformed name fails with an unhelpful `TypeError`.
-Pass `cache: false` to force regeneration.
+`generateObject` accepts `cache: false` to force regeneration
+(`generateText` is always cached per distinct input).
 
 Think about what this composition means: an LLM call whose *prompt is a
 reactive function of durable shared state*, whose result is durable shared

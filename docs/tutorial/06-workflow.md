@@ -138,13 +138,14 @@ failures (each links to a full writeup under
    inputs inside an action.
 6. **`onClick={stream.send(x)}`** — invokes during render; pass
    `() => stream.send(x)`.
-7. **Storing a cell reference to mark selection** — link resolution makes
-   `.set()` write *through* to the item; box it: `selected.set({ item })`.
+7. **Storing a cell reference to mark selection** — later writes can land on
+   the referenced item (sub-path writes and pattern bindings follow links)
+   instead of changing the selection; box it: `selected.set({ item })`.
 8. **`ifElse` on a composed pattern's cell** — hangs; bridge through a local
    `computed()`.
 9. **`Date.now()` / `Math.random()` / `setTimeout` / `new Proxy()`** — not
    available under SES; use `safeDateNow()` / `nonPrivateRandom()` in
-   handlers only.
+   handlers or one-time initialization, never in `computed()`/`lift()`.
 10. **Unguarded scoped-cell reads while rendering** — `PerSession` cells are
     `undefined` until first sync; guard with `?? []`.
 
