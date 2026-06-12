@@ -194,6 +194,20 @@ export interface ChildNodeState {
  * Context passed through the reconciliation process.
  */
 export interface ReconcileContext {
+  /**
+   * The space of the cell whose render produced the current subtree.
+   * Changes at cell-follow boundaries (renderCellChild) — including
+   * cross-space transclusion, where a piece renders another piece's UI.
+   */
+  space?: string;
+
+  /**
+   * The space stamped on the nearest ancestor create-element op.
+   * Elements only carry `space` when it differs from this (seefeldb's
+   * elision: leave it off when the parent's space is the same).
+   */
+  emittedSpace?: string;
+
   /** Function to emit VDOM operations */
   emit: (
     ops: import("../vdom-ops.ts").VDomOp[],
