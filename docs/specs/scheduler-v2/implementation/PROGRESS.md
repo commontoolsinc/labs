@@ -2007,7 +2007,7 @@ semantics.
 
 ## 04/phase-end self-check
 
-- [x] pending — work order 04 phase-end verification recorded.
+- [x] a49811102 — work order 04 phase-end verification recorded.
 - Deviations: work order 04 lists no phase-specific benchmarks beyond the
   full suites and exit-checklist greps. The flag-on runner pass used a
   temporary local edit to `packages/runner/test/scheduler-test-utils.ts` to
@@ -2084,3 +2084,65 @@ packages/runner/src/scheduler/events.ts:654:            permanent: isPermanentRe
   - `rg -n "createOnly" packages/memory packages/runner/src packages/runner/test/scheduler-event-receipts.test.ts`: no op-level
     `createOnly` operation surface remains; remaining matches are
     `markCreateOnly` API/helper names and local mark maps.
+
+## 05/step-0
+
+- [x] no commit — phase 1 benchmark baseline captured before static write
+  surface changes.
+- Deviations: none.
+- Recordings:
+  - `cd packages/runner && deno bench --allow-read --allow-write
+    --allow-net --allow-ffi --allow-env --no-check test/scheduler.bench.ts
+    test/scheduler-demand-roots.bench.ts
+    test/scheduler-stale-propagation.bench.ts`: passed.
+  - `test/scheduler.bench.ts`:
+    - `Scheduler - 100 computations, shared entity reads`: 19.4 ms
+    - `Scheduler - wide graph (1 source, 100 readers)`: 17.9 ms
+    - `Scheduler - 100 entities, sparse deps`: 17.3 ms
+    - `Scheduler - deep chain (50 levels)`: 11.5 ms
+    - `Scheduler - diamond pattern (10 diamonds)`: 9.6 ms
+    - `Scheduler - repeated dirty marking`: 7.7 ms
+    - `Scheduler - subscribe/unsubscribe cycle (100x)`: 5.8 ms
+    - `Scheduler - pull with resubscribe (50 pulls)`: 291.3 ms
+    - `Overhead - setup/teardown only`: 1.3 ms
+    - `Overhead - create 100 cells (getCell + set)`: 15.4 ms
+    - `Overhead - 100x getCell only (no set)`: 1.6 ms
+    - `Overhead - 100x set on existing cells`: 15.7 ms
+    - `Overhead - runtime.idle() empty`: 1.3 ms
+    - `Overhead - commit after 100 sets`: 15.9 ms
+    - `Overhead - empty commit`: 1.3 ms
+    - `Overhead - 100 raw tx.write + commit`: 7.1 ms
+    - `Utility - sortAndCompactPaths (100 paths)`: 21.7 us
+    - `Utility - sortAndCompactPaths (1000 paths)`: 280.5 us
+    - `Utility - addressesToPathByEntity (100 paths)`: 14.9 us
+    - `Utility - addressesToPathByEntity (1000 paths)`: 150.3 us
+    - `Scheduler - bare subscribe (100x)`: 1.7 ms
+    - `Scheduler - subscribe 100 actions reading same entity`: 1.7 ms
+    - `Scheduler - resubscribe cycle (100x)`: 1.4 ms
+  - `test/scheduler-demand-roots.bench.ts`:
+    - `Scheduler demand roots - effect demand root`: 147.1 ms
+    - `Scheduler demand roots - event demand root`: 131.8 ms
+    - `Scheduler demand roots - mixed effect and event roots`: 169.0 ms
+    - `Scheduler demand roots - parent clears generated children`: 81.3 ms
+  - `test/scheduler-stale-propagation.bench.ts`:
+    - `Scheduler stale propagation - chain`: 105.5 ms
+    - `Scheduler stale propagation - diamond`: 94.7 ms
+    - `Scheduler stale propagation - wide fanout`: 244.0 ms
+    - `Scheduler stale propagation - dynamic deps`: 82.9 ms
+    - `Scheduler stale propagation - unchanged recompute`: 74.7 ms
+
+## 05/step-1
+
+- [x] pending — static write surface demand fixtures added.
+- Deviations: both fixtures already pass on current code, so they pin existing
+  behavior; no behavior-change red case was observed.
+- Recordings:
+  - `deno fmt packages/runner/test/scheduler-static-writes.test.ts`: passed
+    (`Checked 1 file`).
+  - `deno lint packages/runner/test/scheduler-static-writes.test.ts`: passed
+    (`Checked 1 file`).
+  - `deno check packages/runner/test/scheduler-static-writes.test.ts`: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-static-writes.test.ts`: passed, `1 passed (2 steps)`,
+    `0 failed`.
