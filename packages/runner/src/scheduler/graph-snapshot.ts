@@ -8,6 +8,7 @@ import type {
   SchedulerGraphSnapshot,
 } from "../telemetry.ts";
 import { entityKey } from "./keys.ts";
+import type { NodeRegistry } from "./node-record.ts";
 import type { Action, ReactivityLog } from "./types.ts";
 
 export interface SchedulerGraphSnapshotState {
@@ -19,8 +20,7 @@ export interface SchedulerGraphSnapshotState {
   readonly conditionallyScheduledEffects: ReadonlyMap<Action, number>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
   readonly dependents: WeakMap<Action, Set<Action>>;
-  readonly actionParent: WeakMap<Action, Action>;
-  readonly actionChildren: WeakMap<Action, Set<Action>>;
+  readonly nodes: NodeRegistry;
   readonly actionStats: ReadonlyMap<string, ActionStats>;
   readonly getDebounce: (action: Action) => number | undefined;
   readonly getThrottle: (action: Action) => number | undefined;
@@ -52,9 +52,9 @@ export function buildSchedulerGraphSnapshot(
     actionById.set(id, action);
 
     // Get parent-child relationships
-    const parent = state.actionParent.get(action);
+    const parent = state.nodes.parentOf(action)?.action;
     const parentId = parent ? state.getActionId(parent) : undefined;
-    const children = state.actionChildren.get(action);
+    const children = state.nodes.childrenOf(action);
     const childCount = children ? children.size : undefined;
 
     // Get reads and writes for diagnostics
@@ -172,7 +172,7 @@ export function buildSchedulerGraphSnapshot(
 
   // Add parent-child edges
   for (const action of actions) {
-    const parent = state.actionParent.get(action);
+    const parent = state.nodes.parentOf(action)?.action;
     if (!parent) continue;
 
     const parentId = state.getActionId(parent);

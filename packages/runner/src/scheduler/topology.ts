@@ -5,6 +5,7 @@ import {
 } from "../reactive-dependencies.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
+import type { NodeRegistry } from "./node-record.ts";
 import type { Action, ReactivityLog } from "./types.ts";
 
 export function collectTransitiveEffects(state: {
@@ -49,7 +50,7 @@ export function topologicalSort(
   actions: Set<Action>,
   dependencies: WeakMap<Action, ReactivityLog>,
   mightWrite: WeakMap<Action, IMemorySpaceAddress[]>,
-  actionParent?: WeakMap<Action, Action>,
+  nodes?: Pick<NodeRegistry, "parentOf">,
   dependents?: WeakMap<Action, Set<Action>>,
   getAdditionalWrites?: (
     action: Action,
@@ -123,9 +124,9 @@ export function topologicalSort(
   // Add parent-child edges only when no opposing data dependency exists.
   // Structural creation order is a fallback; semantic read/write dependencies
   // should win once a parent actually reads a child's result.
-  if (actionParent) {
+  if (nodes) {
     for (const child of actions) {
-      const parent = actionParent.get(child);
+      const parent = nodes.parentOf(child)?.action;
       if (parent && actions.has(parent)) {
         const graphParent = graph.get(parent)!;
         const graphChild = graph.get(child)!;
@@ -159,8 +160,8 @@ export function topologicalSort(
 
       // Sort by: prefer no unvisited parent, then by in-degree
       unvisited.sort((a, b) => {
-        const aParent = actionParent?.get(a);
-        const bParent = actionParent?.get(b);
+        const aParent = nodes?.parentOf(a)?.action;
+        const bParent = nodes?.parentOf(b)?.action;
         const aHasUnvisitedParent = aParent && !visited.has(aParent) &&
           actions.has(aParent);
         const bHasUnvisitedParent = bParent && !visited.has(bParent) &&

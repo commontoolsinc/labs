@@ -7,8 +7,8 @@ export type NodeStatus = "never-ran" | "clean" | "invalid";
 export interface SchedulerNode {
   readonly action: Action;
   readonly kind: NodeKind;
-  parent?: SchedulerNode;
-  children?: Set<SchedulerNode>;
+  parentAction?: Action;
+  children?: Set<Action>;
   status: NodeStatus;
   invalidCauses: IMemorySpaceAddress[];
   liveRefs: number;
@@ -19,6 +19,7 @@ export interface SchedulerNode {
 
 export class NodeRegistry {
   private records = new WeakMap<Action, SchedulerNode>();
+  private childActionsByParent = new WeakMap<Action, Set<Action>>();
   private all = new Set<SchedulerNode>();
   private activeEffects = new Set<Action>();
   private activeComputations = new Set<Action>();
@@ -29,7 +30,7 @@ export class NodeRegistry {
   register(
     action: Action,
     kind: NodeKind,
-    parent?: SchedulerNode,
+    parentAction?: Action,
   ): SchedulerNode {
     const existing = this.records.get(action);
     if (existing) {
@@ -38,7 +39,6 @@ export class NodeRegistry {
           `Scheduler action re-registered as ${kind}; was ${existing.kind}`,
         );
       }
-      if (parent !== undefined) existing.parent = parent;
       this.activate(existing);
       return existing;
     }
@@ -46,7 +46,6 @@ export class NodeRegistry {
     const record: SchedulerNode = {
       action,
       kind,
-      ...(parent !== undefined ? { parent } : {}),
       status: "never-ran",
       invalidCauses: [],
       liveRefs: 0,
@@ -55,7 +54,14 @@ export class NodeRegistry {
       retries: 0,
     };
     this.records.set(action, record);
+    const children = this.childActionsByParent.get(action);
+    if (children) {
+      record.children = children;
+    }
     this.activate(record);
+    if (parentAction !== undefined) {
+      this.captureParentAction(record, parentAction);
+    }
     return record;
   }
 
@@ -70,6 +76,44 @@ export class NodeRegistry {
 
   get(action: Action): SchedulerNode | undefined {
     return this.records.get(action);
+  }
+
+  linkParent(
+    childAction: Action,
+    parentAction: Action | null | undefined,
+    options: { allowExisting?: boolean } = {},
+  ): SchedulerNode | undefined {
+    const { allowExisting = true } = options;
+    if (!parentAction || parentAction === childAction) return undefined;
+
+    const child = this.records.get(childAction);
+    if (!child) return undefined;
+    if (!allowExisting && child.parentAction) {
+      return this.parentOf(childAction);
+    }
+
+    if (child.parentAction && child.parentAction !== parentAction) {
+      this.childActionsByParent.get(child.parentAction)?.delete(child.action);
+    }
+    this.captureParentAction(child, parentAction);
+    return this.parentOf(childAction);
+  }
+
+  parentOf(action: Action): SchedulerNode | undefined {
+    const parentAction = this.records.get(action)?.parentAction;
+    return parentAction ? this.records.get(parentAction) : undefined;
+  }
+
+  childrenOf(action: Action): ReadonlySet<SchedulerNode> | undefined {
+    const childActions = this.childActionsByParent.get(action);
+    if (!childActions) return undefined;
+
+    const children = new Set<SchedulerNode>();
+    for (const childAction of childActions) {
+      const child = this.records.get(childAction);
+      if (child) children.add(child);
+    }
+    return children;
   }
 
   isEffect(action: Action): boolean {
@@ -100,6 +144,39 @@ export class NodeRegistry {
     return kind === "effect"
       ? this.activeEffects.size
       : this.activeComputations.size;
+  }
+
+  isAncestor(
+    sourceAction: Action,
+    candidateAncestor: Action,
+  ): boolean {
+    let parentAction = this.records.get(sourceAction)?.parentAction;
+    while (parentAction) {
+      if (parentAction === candidateAncestor) {
+        return true;
+      }
+      parentAction = this.records.get(parentAction)?.parentAction;
+    }
+    return false;
+  }
+
+  private captureParentAction(
+    child: SchedulerNode,
+    parentAction: Action,
+  ): void {
+    child.parentAction = parentAction;
+
+    let children = this.childActionsByParent.get(parentAction);
+    if (!children) {
+      children = new Set();
+      this.childActionsByParent.set(parentAction, children);
+    }
+    children.add(child.action);
+
+    const parent = this.records.get(parentAction);
+    if (parent) {
+      parent.children = children;
+    }
   }
 
   private activate(record: SchedulerNode): void {

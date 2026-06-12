@@ -2874,3 +2874,883 @@ Verification:
     passed, `5 passed (70 steps)`, `0 failed`.
   - `cd packages/runner && deno task test`: passed,
     `594 passed (3106 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m7s`.
+
+## 07/3a-creation-context STOP
+
+- [ ] pending — migrated parent/child creation context to
+  `SchedulerNode.parent` / `SchedulerNode.children`, but stopped before commit.
+- STOP reason:
+  - The required full runner suite failed unexpectedly after the migration.
+  - Failure:
+    `Pattern Runner - Derive returning pattern (CT-1316) ... should not
+    spuriously rerun parent derive when returned child pattern changes`.
+  - Assertion at
+    `packages/runner/test/patterns-derive-return-pattern.test.ts:323`:
+    expected parent derive run count `1`, actual `2`.
+  - This suggests the record-backed parent chain changed a continuation or
+    parent/child scheduling edge in a way that makes the parent derive rerun
+    when only the returned child pattern changes.
+- Recordings before STOP:
+  - Contract grep: `rg -n "actionParent|actionChildren"
+    packages/runner/src`: no matches.
+  - `deno fmt packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/node-record.ts
+    packages/runner/src/scheduler/subscriptions.ts
+    packages/runner/src/scheduler/demand.ts
+    packages/runner/src/scheduler/pull-subscriptions.ts
+    packages/runner/src/scheduler/action-run.ts
+    packages/runner/src/scheduler/write-propagation.ts
+    packages/runner/src/scheduler/topology.ts
+    packages/runner/src/scheduler/execution.ts
+    packages/runner/src/scheduler/pull-execution.ts
+    packages/runner/src/scheduler/graph-snapshot.ts`: passed
+    (`Checked 11 files`).
+  - `deno lint` on the same 11 files: passed (`Checked 11 files`).
+  - `deno check` on the same 11 files: passed.
+  - Focused parent/graph/cutover gate:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-ordering.test.ts test/scheduler-effects.test.ts
+    test/scheduler-pull-array.test.ts test/scheduler-v2-cutover.test.ts`:
+    passed, `5 passed (58 steps)`, `0 failed`.
+  - `cd packages/runner && deno task test`: failed,
+    `593 passed (3105 steps)`, `1 failed (1 step)`,
+    `0 ignored (10 steps)`, `2m7s`.
+
+## REVIEWER VERDICT — 07/3a creation-context regression (CT-1316)
+
+Correct stop. `patterns-derive-return-pattern` is a PRODUCT guarantee
+(CT-1316) — it is never eligible for rewrite; the migration must become
+behavior-preserving. The symptom (parent derive reruns when only its
+returned child changes) means the record migration created MORE
+ancestor connectivity than v1 had: the parent-continuation path
+(`write-propagation`'s ancestor-chain check) now finds the parent in a
+child writer's chain where v1 did not.
+
+V1 had two load-bearing WeakMap semantics that are easy to lose:
+
+A. **First assignment wins.** `actionParent` was set at first
+   registration only; the resubscribe path passed
+   `allowExisting: false`. A parent link, once set (or deliberately
+   absent for actions created outside any executing action), was never
+   reassigned.
+B. **Edges survive unsubscribe.** The WeakMaps were intentionally left
+   in place across unsubscribe/resubscribe of the same action object
+   (inventory §2). Your kind-stickiness hard error already implies
+   records persist across remove — parent must persist the same way,
+   and must NOT be recaptured from the CURRENT `executingAction` when a
+   known action re-registers.
+
+Directed investigation, in order:
+
+1. Audit every site that assigns `record.parent`. The likely smoking
+   gun is a get-or-create record helper that stamps
+   `parent = executingAction` when invoked from a NON-registration path
+   (topology, write-propagation, demand, snapshot) or on
+   re-registration of a known action. Parent may be assigned in exactly
+   one place: true first registration of a previously-unknown action,
+   matching v1's `registerParentChildAction` + `allowExisting: false`
+   semantics everywhere else.
+2. Red-first scheduler fixture (goes in
+   `test/scheduler-v2-cutover.test.ts` as an 8th fixture — this is a
+   cutover-preservation property): an action registered parentless at
+   top level, then unsubscribed and re-registered while another action
+   is executing, keeps NO parent; and an action with parent P keeps P
+   when re-registered during Q's run. Paste the red output against the
+   current (broken) tree.
+3. Fix the registry to restore A+B; `rg -n "\.parent\s*=" ` over
+   scheduler src must show only the single sanctioned assignment site.
+4. Gates: the new fixture green; `patterns-derive-return-pattern`
+   passes AS WRITTEN; the focused parent/graph gate you already use;
+   full suite.
+5. If CT-1316 still fails with A+B provably restored (fixture green),
+   STOP with a trace of which ancestor edge the continuation path
+   followed (log `isAncestorAction` inputs for the failing run) — do
+   not attempt a different fix shape without a verdict.
+
+Commit: the creation-context commit as planned plus
+`fixture: parent links are first-assignment-only and survive re-registration`
+folded into it (one commit — the fixture documents the migration's
+invariant).
+
+## IMPLEMENTER FOLLOW-UP — 07/3a creation-context reviewer verdict
+
+- Applied the directed red-first fixture in
+  `packages/runner/test/scheduler-v2-cutover.test.ts`.
+- Red output on the current broken tree:
+  - Command:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts`.
+  - Result: failed in the new fixture
+    `keeps parent links first-assignment-only across re-registration`.
+  - Assertion at `packages/runner/test/scheduler-v2-cutover.test.ts:692`:
+    expected `parentlessChild.parentId` to be `undefined`, actual
+    `"parentQ"`.
+  - Summary: `FAILED | 0 passed (7 steps) | 1 failed (1 step)`.
+
+## IMPLEMENTER STOP — 07/3a creation-context after A+B restoration
+
+- [ ] pending — restored first-assignment-only parent capture and persistent
+  parent edges in `NodeRegistry`, but stopped before commit per reviewer
+  instruction.
+- STOP reason:
+  - The directed parent-link fixture is green and the sanctioned parent
+    assignment grep is clean, but CT-1316 still fails as written.
+  - `patterns-derive-return-pattern.test.ts` failure remains:
+    `should not spuriously rerun parent derive when returned child pattern
+    changes`.
+  - Assertion at
+    `packages/runner/test/patterns-derive-return-pattern.test.ts:323`:
+    expected parent derive run count `1`, actual `2`.
+  - No alternate fix was attempted after A+B restoration.
+- Trace:
+  - Temporary instrumentation logged every `NodeRegistry.isAncestor(...)` call
+    when `SCHEDULER_V2_TRACE_ANCESTOR=1` was set.
+  - Command:
+    `cd packages/runner && ENV=test SCHEDULER_V2_TRACE_ANCESTOR=1 deno test
+    --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/patterns-derive-return-pattern.test.ts >
+    /tmp/scheduler-v2-ct1316-trace.log 2>&1`.
+  - `rg -n "scheduler-v2 ancestor-trace"
+    /tmp/scheduler-v2-ct1316-trace.log`: no matches.
+  - Interpretation: in this failing run, the continuation path does not call
+    `NodeRegistry.isAncestor(...)`; no ancestor-chain edge was followed by that
+    check before the parent derive reran.
+- Recordings after STOP:
+  - `rg -n "\.parent\s*=" packages/runner/src/scheduler`: one match,
+    `packages/runner/src/scheduler/node-record.ts:152: child.parent = parent`.
+  - `rg -n "actionParent|actionChildren" packages/runner/src`: no matches.
+  - `deno fmt packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/node-record.ts
+    packages/runner/src/scheduler/subscriptions.ts
+    packages/runner/src/scheduler/demand.ts
+    packages/runner/src/scheduler/pull-subscriptions.ts
+    packages/runner/src/scheduler/action-run.ts
+    packages/runner/src/scheduler/write-propagation.ts
+    packages/runner/src/scheduler/topology.ts
+    packages/runner/src/scheduler/execution.ts
+    packages/runner/src/scheduler/pull-execution.ts
+    packages/runner/src/scheduler/graph-snapshot.ts
+    packages/runner/test/scheduler-v2-cutover.test.ts`: passed
+    (`Checked 12 files`).
+  - `deno lint` on the same 12 files: passed (`Checked 12 files`).
+  - `deno check` on the same 12 files: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts
+    test/patterns-derive-return-pattern.test.ts`: failed only CT-1316;
+    cutover fixtures passed including
+    `keeps parent links first-assignment-only across re-registration`;
+    summary `FAILED | 1 passed (12 steps) | 1 failed (1 step)`.
+
+## REVIEWER VERDICT — 07/3a creation-context, corrective (my A-rule was wrong)
+
+Root cause found, and it is MY previous verdict: "first assignment
+wins" mis-stated v1. V1's `registerParentChildAction` actually behaves
+as:
+
+  (i)   no executing action → PURE NO-OP: nothing is recorded, and the
+        parent remains assignable by a later call;
+  (ii)  resubscribe path (`allowExisting: false`) → preserves an
+        existing parent, sets it if absent;
+  (iii) subscribe path (`allowExisting: true`, executing action
+        present) → OVERWRITES the parent.
+
+Your `linkParent` instead latches `parentCaptured` on the FIRST CALL —
+including parentless calls — so links v1 would have assigned (or
+reassigned) are now permanently absent. Missing parent edges lose the
+toposort parent-first tie-break, which is exactly the derive-returns-
+pattern shape (child ordered before parent → parent re-dirtied
+mid-pass → the spurious second run).
+
+Corrections:
+
+1. Rewrite `linkParent` as the LITERAL translation of v1:
+
+   - `if (!parentAction || parentAction === childAction) return;` —
+     no latch, no state change.
+   - child/parent records must exist (get; return if either missing).
+   - `if (!allowExisting && child.parent) return;`
+   - assign: if `child.parent` exists and differs, REMOVE child from
+     the old parent's `children` set, then `captureParentRecord`.
+   - Delete `parentCaptured` entirely.
+
+2. REWRITE my 8th cutover fixture (sorry — it encoded the wrong rule)
+   to pin v1's actual semantics, three cases:
+   (a) parentless registration call is a no-op: a later registration
+       under executing Q assigns Q;
+   (b) resubscribe-shaped call (`allowExisting: false`) under executing
+       R preserves an existing parent Q;
+   (c) subscribe-shaped call (`allowExisting: true`) under executing R
+       overwrites Q with R.
+   Run it red against the current latch implementation for case (a)
+   or (c), then green.
+
+3. Gates unchanged: new fixture green, CT-1316 passes AS WRITTEN,
+   focused parent/graph gate, full suite. With literally-equivalent
+   semantics the maps are bisimilar to v1's WeakMaps, so CT-1316 should
+   go green; if it does NOT, stop with a logged call stack for every
+   `markDirectDirty(<parent derive action>)` in the failing run — at
+   that point the divergence is outside the parent family and we need
+   the marking site, not more hypotheses.
+
+4. PROGRESS note: record that the earlier verdict's rule A was
+   reviewer error; the binding definition of creation-context semantics
+   is v1's code, translated literally.
+
+## IMPLEMENTER STOP — 07/3a creation-context after literal v1 parent semantics
+
+- [ ] pending — rewrote the parent-link fixture and `NodeRegistry.linkParent`
+  to match v1 semantics literally, but stopped before commit per reviewer
+  instruction because CT-1316 still fails.
+- Correction recorded:
+  - The earlier "first assignment wins" rule was reviewer error.
+  - The binding definition of creation-context semantics is v1's
+    `registerParentChildAction` behavior translated literally:
+    parentless calls are no-ops, `allowExisting: false` preserves an existing
+    parent, and subscribe-shaped `allowExisting: true` overwrites the parent.
+- Red-first fixture result:
+  - Rewrote the 8th cutover fixture as
+    `matches v1 parent-link semantics across registration paths`.
+  - Red command:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts`.
+  - Red failure on the current latch implementation:
+    assertion at `packages/runner/test/scheduler-v2-cutover.test.ts:697`;
+    expected `"parentQ"`, actual `undefined`.
+- Fix applied:
+  - Removed `parentCaptured`.
+  - `linkParent` now returns without state change when no parent is executing
+    or the parent is the child action.
+  - `allowExisting: false` returns the existing parent without overwrite.
+  - Subscribe-shaped calls overwrite the parent and remove the child from the
+    previous parent's `children` set before linking to the new parent.
+- STOP reason:
+  - The rewritten cutover fixture is green, but CT-1316 still fails as written.
+  - `patterns-derive-return-pattern.test.ts` failure remains:
+    `should not spuriously rerun parent derive when returned child pattern
+    changes`.
+  - Assertion at
+    `packages/runner/test/patterns-derive-return-pattern.test.ts:323`:
+    expected parent derive run count `1`, actual `2`.
+  - No alternate fix was attempted after the reviewer-directed literal
+    translation.
+- Trace:
+  - Temporary instrumentation logged direct dirty marks when
+    `SCHEDULER_V2_TRACE_MARK_DIRECT_DIRTY=1` was set.
+  - Command:
+    `cd packages/runner && ENV=test
+    SCHEDULER_V2_TRACE_MARK_DIRECT_DIRTY=1 deno test --allow-ffi
+    --allow-env --allow-read --allow-write=/tmp,/var/folders
+    --allow-run=git test/patterns-derive-return-pattern.test.ts >
+    /tmp/scheduler-v2-ct1316-mark-direct-dirty.log 2>&1`.
+  - Parent derive action in failing step:
+    `action:/Users/berni/.codex/worktrees/909d/labs/packages/runner/src/builder/pattern.ts:151:21:fid1:Yh9sDtZ`.
+  - Stack for the direct dirty mark:
+    `SchedulerStaleness.markDirectDirty
+    -> markSchedulerDirty (scheduler/staleness.ts:164)
+    -> Object.markDirty (scheduler.ts:1795)
+    -> applyPullTriggeredActionPlan (scheduler/notifications.ts:233)
+    -> processPullStorageNotification (scheduler/pull-notifications.ts:119)
+    -> Scheduler.processStorageNotification (scheduler.ts:1812)
+    -> StorageNotificationRelay.next`.
+  - Interpretation: after literal parent semantics, the parent derive rerun is
+    driven by the storage-notification dirtying path, not by the parent-chain
+    continuation check.
+- Recordings after STOP:
+  - `rg -n
+    "SCHEDULER_V2_TRACE_MARK_DIRECT_DIRTY|scheduler-v2 markDirectDirty|describeAction"
+    packages/runner/src/scheduler/staleness.ts packages/runner/src/scheduler`:
+    no matches.
+  - `rg -n "parentCaptured|\.parent\s*="
+    packages/runner/src/scheduler/node-record.ts packages/runner/src/scheduler`:
+    one assignment site, `packages/runner/src/scheduler/node-record.ts:153:
+    child.parent = parent`; no `parentCaptured` matches.
+  - `deno fmt packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/node-record.ts
+    packages/runner/src/scheduler/subscriptions.ts
+    packages/runner/src/scheduler/demand.ts
+    packages/runner/src/scheduler/pull-subscriptions.ts
+    packages/runner/src/scheduler/action-run.ts
+    packages/runner/src/scheduler/write-propagation.ts
+    packages/runner/src/scheduler/topology.ts
+    packages/runner/src/scheduler/execution.ts
+    packages/runner/src/scheduler/pull-execution.ts
+    packages/runner/src/scheduler/graph-snapshot.ts
+    packages/runner/test/scheduler-v2-cutover.test.ts`: passed
+    (`Checked 12 files`).
+  - `deno lint` on the same 12 files: passed (`Checked 12 files`).
+  - `deno check` on the same 12 files: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts`: passed,
+    `1 passed (8 steps)`, `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts
+    test/patterns-derive-return-pattern.test.ts`: failed only CT-1316;
+    cutover fixtures passed including the rewritten v1 parent-link fixture;
+    summary `FAILED | 1 passed (12 steps) | 1 failed (1 step)`.
+
+## REVIEWER VERDICT — 07/3a CT-1316, discriminating experiments (no fix yet)
+
+Keep the literal-v1 `linkParent` and the rewritten fixture — they are
+correct regardless of CT-1316's outcome. The trace says the parent
+derive is dirtied by the TRIGGER-INDEX path, which the creation-context
+migration does not touch directly — so we localize before fixing.
+Run these three experiments and STOP with the results; attempt no fix:
+
+E1. **Did v1-equivalent code mark it too?** Create a scratch worktree
+    at the 3a-kind commit (`git worktree add /tmp/ct1316-base
+    0feccb68d`), apply the SAME `markDirectDirty` instrumentation
+    there (temporary, not committed), run
+    `test/patterns-derive-return-pattern.test.ts`. Record: is the
+    parent derive action marked via the same
+    `processPullStorageNotification` stack there? (If yes → the
+    marking is pre-existing and the regression is in run-gating or
+    demand; if no → the regression is in registered reads or change
+    production.)
+
+E2. **What change dirtied it?** In the CURRENT tree, capture the
+    concrete triggering change for the parent derive: call
+    `runtime.scheduler.setTriggerTraceEnabled(true)` inside the failing
+    test (temporary edit), rerun, and dump the trigger-trace entries
+    whose triggered list contains the parent action id — record
+    entityId, path, before/after summaries, notification type, and the
+    decision. Same capture in the E1 scratch worktree for comparison
+    (even if E1 shows no marking, record the matched-zero fact).
+
+E3. **Close the diff-review gap.** The creation-context diff is ~790
+    lines and only the subscriptions/topology/write-propagation/demand
+    hunks have been reviewed line-by-line. Paste into PROGRESS a list
+    of every hunk in `scheduler.ts`, `action-run.ts`,
+    `pull-subscriptions.ts`, `pull-execution.ts`, `execution.ts`,
+    `graph-snapshot.ts`, and `node-record.ts` classified as
+    [type/bundle-threading only] or [control-flow change], quoting any
+    hunk in the second class in full. Special attention: the order of
+    record creation (`updateSchedulerActionType`/registration) versus
+    `registerParentChildAction` on EVERY path (subscribe, resubscribe,
+    sink resubscribe-first) — `linkParent` silently no-ops when the
+    child record does not exist yet, which is a NEW precondition v1's
+    WeakMap never had. If any path calls parent-linking before record
+    creation, flag it in the E3 list.
+
+Cleanup rule: all instrumentation reverted after capture, as before.
+
+## IMPLEMENTER STOP — 07/3a CT-1316 discriminating experiments
+
+- [ ] pending — ran the reviewer-requested E1/E2/E3 experiments and stopped
+  without attempting a fix.
+- E1 scratch comparison:
+  - Created `/tmp/ct1316-base` at `0feccb68d`:
+    `git worktree add --detach /tmp/ct1316-base 0feccb68d`.
+  - Applied the same temporary `markDirectDirty` instrumentation there and ran:
+    `cd /tmp/ct1316-base/packages/runner && ENV=test
+    SCHEDULER_V2_TRACE_MARK_DIRECT_DIRTY=1 deno test --allow-ffi
+    --allow-env --allow-read --allow-write=/tmp,/var/folders
+    --allow-run=git test/patterns-derive-return-pattern.test.ts >
+    /tmp/scheduler-v2-ct1316-base-mark-direct-dirty.log 2>&1`.
+  - Result: baseline passed, `ok | 1 passed (5 steps) | 0 failed`.
+  - Baseline did mark the CT-1316 parent derive action through the same
+    storage-notification stack:
+    `action:/private/tmp/ct1316-base/packages/runner/src/builder/pattern.ts:151:21:fid1:MjxHd5M`.
+  - Stack:
+    `SchedulerStaleness.markDirectDirty
+    -> markSchedulerDirty (scheduler/staleness.ts:164)
+    -> Object.markDirty (scheduler.ts:1798)
+    -> applyPullTriggeredActionPlan (scheduler/notifications.ts:233)
+    -> processPullStorageNotification (scheduler/pull-notifications.ts:119)
+    -> Scheduler.processStorageNotification (scheduler.ts:1815)
+    -> StorageNotificationRelay.next`.
+  - Interpretation: the parent dirty mark itself is pre-existing at the
+    3a-kind commit; the current CT-1316 regression is in run-gating/demand or
+    later execution behavior, not in whether the trigger-index path marks the
+    parent.
+- E2 trigger-trace comparison:
+  - Current tree command:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/patterns-derive-return-pattern.test.ts >
+    /tmp/scheduler-v2-ct1316-current-trigger-trace.log 2>&1`.
+  - Current result: failed CT-1316 before the later `double` trace dump.
+    Assertion at
+    `packages/runner/test/patterns-derive-return-pattern.test.ts:352`:
+    expected parent derive run count `1`, actual `2`.
+  - Current trace after `triple` pull:
+    - parent trigger record: `notificationType: "commit"`,
+      `entityId:
+      "of:fid1:jxiSS-u_RdKDipuF4GkyeEJrMaCRL_mI0yKuSWvL6Eg"`, `path:
+      ["value"]`, `before: { kind: "object", size: 1 }`, `after: {
+      kind: "object", size: 1 }`, `matchedActionCount: 1`, triggered
+      parent
+      `action:/Users/berni/.codex/worktrees/909d/labs/packages/runner/src/builder/pattern.ts:151:21:fid1:Yh9sDtZ`,
+      decision `mark-dirty`, `dirtyBefore: false`, `dirtyAfter: true`,
+      `pendingBefore: false`, `pendingAfter: false`, `scheduledEffects: []`.
+    - child-own-commit record: `notificationType: "commit"`, `entityId:
+      "of:fid1:09EamCJB0D_by6ZWjSiEnVtq2ymX-SyO6_Ocu2pypFo"`, `path:
+      ["value"]`, `before: { kind: "object", size: 2 }`, `after: {
+      kind: "object", size: 2 }`, `matchedActionCount: 3`, triggered child
+      `action:/Users/berni/.codex/worktrees/909d/labs/packages/runner/src/builder/pattern.ts:151:21:fid1:kMeW-xi`,
+      decision `skip-own-commit-source`, `dirtyBefore: true`, `dirtyAfter:
+      true`, `pendingBefore: false`, `pendingAfter: false`,
+      `scheduledEffects: []`.
+  - Baseline command:
+    `cd /tmp/ct1316-base/packages/runner && ENV=test deno test --allow-ffi
+    --allow-env --allow-read --allow-write=/tmp,/var/folders
+    --allow-run=git test/patterns-derive-return-pattern.test.ts >
+    /tmp/scheduler-v2-ct1316-base-trigger-trace.log 2>&1`.
+  - Baseline result: passed, `ok | 1 passed (5 steps) | 0 failed`.
+  - Baseline trace after `triple` pull has the same two records and decisions:
+    parent `mark-dirty` for
+    `entityId:
+    "of:fid1:jxiSS-u_RdKDipuF4GkyeEJrMaCRL_mI0yKuSWvL6Eg"`, `path:
+    ["value"]`, before/after `{ kind: "object", size: 1 }`; child
+    `skip-own-commit-source` for
+    `entityId: "of:fid1:09EamCJB0D_by6ZWjSiEnVtq2ymX-SyO6_Ocu2pypFo"`,
+    `path: ["value"]`, before/after `{ kind: "object", size: 2 }`.
+  - Baseline trace after `double` pull repeats those same two trigger records
+    again, and still passes.
+  - Interpretation: E2 does not show a divergent trigger-index change
+    production or decision. The same concrete `commit` changes mark the parent
+    in baseline and current; current diverges after dirtying.
+- E3 hunk classification:
+  - `packages/runner/src/scheduler.ts`: all hunks are
+    `[type/bundle-threading only]`. Removed scheduler-level
+    `actionParent`/`actionChildren` fields, removed old state-bundle entries,
+    and threaded `nodes: this.nodes` where consumers need parent/child lookup.
+  - `packages/runner/src/scheduler/action-run.ts`: all hunks are
+    `[type/bundle-threading only]`. `appendActionRunTrace` now reads
+    `state.nodes.parentOf(args.action)?.action`; state interfaces and callsites
+    no longer thread `actionParent`.
+  - `packages/runner/src/scheduler/execution.ts`: all hunks are
+    `[type/bundle-threading only]`. Added the `NodeRegistry` type import and
+    changed `SchedulerSettleLoopState` from `actionParent` to `nodes`.
+  - `packages/runner/src/scheduler/graph-snapshot.ts`: all hunks are
+    `[type/bundle-threading only]`. Snapshot state now takes `nodes`, and parent
+    and children are read via `nodes.parentOf(...)` / `nodes.childrenOf(...)`.
+  - `packages/runner/src/scheduler/pull-execution.ts`: the only hunk is
+    `[type/bundle-threading only]`. `orderPullWorkSet` receives `state.nodes`
+    instead of `state.actionParent`.
+  - `packages/runner/src/scheduler/pull-subscriptions.ts`: the only direct hunk
+    is `[type/bundle-threading only]`. Demand-first-run logic reads parent via
+    `state.subscriptionState.nodes.parentOf(action)?.action` after
+    `registerParentChildAction`.
+  - Special order check:
+    - Subscribe path: `updateSchedulerActionType(...)` is called at
+      `pull-subscriptions.ts:77-85`; `registerParentChildAction(...)` follows
+      at `pull-subscriptions.ts:88`. The child node record exists before
+      `linkParent`.
+    - Resubscribe path: `updateSchedulerActionType(...)` is called at
+      `pull-subscriptions.ts:215-219`; `registerParentChildAction(...,
+      { allowExisting: false })` follows at `pull-subscriptions.ts:228-230`.
+      The child node record exists before `linkParent`.
+    - Sink resubscribe-first path: `cell.ts` calls
+      `runtime.scheduler.resubscribe(sink.action, log, resubscribeOptions)`,
+      entering the same resubscribe path above. No parent-link-before-record
+      path was found.
+  - `packages/runner/src/scheduler/node-record.ts`: `[control-flow change]`.
+    Quoted hunks:
+
+    ```diff
+    -      if (parent !== undefined) existing.parent = parent;
+           this.activate(existing);
+           return existing;
+    ```
+
+    ```diff
+    -      ...(parent !== undefined ? { parent } : {}),
+           status: "never-ran",
+           invalidCauses: [],
+           liveRefs: 0,
+    @@
+         this.records.set(action, record);
+         this.activate(record);
+    +    if (parent !== undefined) {
+    +      this.captureParentRecord(record, parent);
+    +    }
+         return record;
+    ```
+
+    ```diff
+    +  linkParent(
+    +    childAction: Action,
+    +    parentAction: Action | null | undefined,
+    +    options: { allowExisting?: boolean } = {},
+    +  ): SchedulerNode | undefined {
+    +    const { allowExisting = true } = options;
+    +    if (!parentAction || parentAction === childAction) return undefined;
+    +
+    +    const child = this.records.get(childAction);
+    +    if (!child) return undefined;
+    +    const parent = this.records.get(parentAction);
+    +    if (!parent) return undefined;
+    +    if (!allowExisting && child.parent) return child.parent;
+    +
+    +    if (child.parent && child.parent !== parent) {
+    +      child.parent.children?.delete(child);
+    +    }
+    +    this.captureParentRecord(child, parent);
+    +    return child.parent;
+    +  }
+    +
+    +  parentOf(action: Action): SchedulerNode | undefined {
+    +    return this.records.get(action)?.parent;
+    +  }
+    +
+    +  childrenOf(action: Action): ReadonlySet<SchedulerNode> | undefined {
+    +    return this.records.get(action)?.children;
+    +  }
+    ```
+
+    ```diff
+    +  isAncestor(
+    +    sourceAction: Action,
+    +    candidateAncestor: Action,
+    +  ): boolean {
+    +    let parent = this.records.get(sourceAction)?.parent;
+    +    while (parent) {
+    +      if (parent.action === candidateAncestor) {
+    +        return true;
+    +      }
+    +      parent = parent.parent;
+    +    }
+    +    return false;
+    +  }
+    +
+    +  private captureParentRecord(
+    +    child: SchedulerNode,
+    +    parent: SchedulerNode,
+    +  ): void {
+    +    child.parent = parent;
+    +
+    +    let children = parent.children;
+    +    if (!children) {
+    +      children = new Set();
+    +      parent.children = children;
+    +    }
+    +    children.add(child);
+    +  }
+    ```
+
+- Cleanup after capture:
+  - Reverted all temporary trigger-trace edits in the current tree and scratch
+    worktree.
+  - Reverted the temporary `markDirectDirty` instrumentation in
+    `/tmp/ct1316-base`.
+  - Verification before gates:
+    - current tree:
+      `rg -n
+      "scheduler-v2 trigger-trace|SCHEDULER_V2_TRACE|markDirectDirty\\]|describeAction"
+      packages/runner/test/patterns-derive-return-pattern.test.ts
+      packages/runner/src/scheduler`: no matches.
+    - scratch tree: same grep under `/tmp/ct1316-base`: no matches.
+    - scratch worktree `git status --short`: clean.
+- Gates after STOP recording:
+  - `rg -n "actionParent|actionChildren" packages/runner/src`: no matches.
+  - `rg -n "parentCaptured|\\.parent\\s*="
+    packages/runner/src/scheduler/node-record.ts packages/runner/src/scheduler`:
+    one intentional assignment site,
+    `packages/runner/src/scheduler/node-record.ts:153: child.parent = parent`;
+    no `parentCaptured` matches.
+  - `deno fmt packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/node-record.ts
+    packages/runner/src/scheduler/subscriptions.ts
+    packages/runner/src/scheduler/demand.ts
+    packages/runner/src/scheduler/pull-subscriptions.ts
+    packages/runner/src/scheduler/action-run.ts
+    packages/runner/src/scheduler/write-propagation.ts
+    packages/runner/src/scheduler/topology.ts
+    packages/runner/src/scheduler/execution.ts
+    packages/runner/src/scheduler/pull-execution.ts
+    packages/runner/src/scheduler/graph-snapshot.ts
+    packages/runner/test/scheduler-v2-cutover.test.ts`: passed
+    (`Checked 12 files`).
+  - `deno lint` on the same 12 files: passed (`Checked 12 files`).
+  - `deno check` on the same 12 files: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts`: passed,
+    `1 passed (8 steps) | 0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/patterns-derive-return-pattern.test.ts`: failed CT-1316 as expected
+    for this no-fix stop. Failing step:
+    `should not spuriously rerun parent derive when returned child pattern
+    changes`; assertion at
+    `packages/runner/test/patterns-derive-return-pattern.test.ts:323`;
+    expected parent derive run count `1`, actual `2`.
+
+## REVIEWER VERDICT — 07/3a CT-1316 root-cause localization + bisect protocol
+
+I did hands-on comparative debugging in two scratch worktrees
+(/tmp/ct1316-base = 3a-kind commit, /tmp/ct1316-cur = + your current
+diff; both still exist, instrumented — reuse them). Established facts:
+
+1. The regression is ONE EXTRA RUN OF THE CHILD (not the parent): after
+   parent-run-2's node replacement, base fires 3 child unsubscribes
+   with no further child run; cur fires 2, then the OLD child RUNS
+   (with `record.parent = none` at run time), then the 3rd unsubscribe
+   lands. The extra child run's commit re-dirties the envelope the
+   parent reads → the spurious parent rerun the test catches.
+2. NOT divergent: trigger marking (E1/E2), seed-gate admissions,
+   unsubscribe call-site stacks (identical cancel chains via
+   runner.ts:1234), registry activation/removal code (records persist
+   across remove; only active-set membership drops).
+3. The zombie run's `parent: none` plus the absence of any [SUB] log
+   for it means that child action object's registration never captured
+   a parent — consistent with a different action object (same
+   cause-id) entering via a resubscribe-first or commit-callback-timed
+   path, or with an ordering shift that lets its settle turn land
+   between the second and third cancel.
+
+Stop theorizing; bisect mechanically. The creation-context diff is
+semantically tiny: the node-record parent machinery plus ~10 one-line
+consumer swaps (WeakMap → registry) in demand.ts, topology.ts (2 sites),
+write-propagation.ts, pull-subscriptions.ts, action-run.ts,
+graph-snapshot.ts, subscriptions.ts (registerParentChildAction), and
+execution/pull-execution threading. Protocol:
+
+1. In /tmp/ct1316-cur (or a fresh copy), REVERT consumer swaps one at a
+   time back to a parallel v1 WeakMap: add a temporary
+   `legacyParent = new WeakMap<Action, Action>()` maintained alongside
+   the registry inside `registerParentChildAction` (write BOTH), then
+   point ONE consumer at a time back at `legacyParent` and rerun
+   CT-1316. Order to try: (a) topology.ts both sites, (b)
+   pull-subscriptions first-run-demand parent read, (c) demand.ts
+   hasDemandedParentContext, (d) write-propagation isAncestor, (e)
+   action-run trace read. The first consumer whose reversion flips
+   CT-1316 green is the culprit. (~6 focused runs, no theory required.)
+2. With the culprit known, log that consumer's v1-vs-registry value at
+   the divergence point (the zombie run) — the concrete differing value
+   tells us which registry semantic to fix (likely candidates: parentOf
+   for a NEW object that v1's per-object WeakMap also lacked — meaning
+   the real difference is elsewhere — or an ordering-relevant edge for
+   an action whose record was recreated).
+3. STOP with: culprit consumer, the differing value, and the v1 value's
+   provenance. I will issue the fix verdict; do not fix beyond the
+   instrumentation.
+4. Record in PROGRESS which scratch paths/instrumentation you reused or
+   removed.
+
+Constraint unchanged: CT-1316 passes as written; the 9-fixture cutover
+pack stays green; the literal-v1 linkParent stays.
+
+## IMPLEMENTER STOP — 07/3a CT-1316 topology parent lookup culprit
+
+- [ ] pending — ran the reviewer-requested consumer bisect in scratch and
+  stopped without applying a fix.
+- Scratch paths:
+  - Reused `/tmp/ct1316-cur`, which already contained the current
+    creation-context diff plus reviewer instrumentation (`[RUN]`, `[SUB]`,
+    `[GATE]`, workset logging).
+  - Did not edit `/tmp/ct1316-base` during this pass; it remains reviewer
+    instrumented.
+  - Added scratch-only instrumentation in `/tmp/ct1316-cur`:
+    a temporary `legacyParent: WeakMap<Action, Action>` maintained alongside
+    `NodeRegistry` in `registerParentChildAction`, a
+    `SCHEDULER_V2_LEGACY_PARENT_CONSUMER` selector, and `T_PARENT_DIFF`
+    logging for topology parent lookup mismatches.
+  - No bisect instrumentation was added to the real worktree. Current-tree
+    grep:
+    `rg -n
+    "SCHEDULER_V2_LEGACY_PARENT_CONSUMER|T_PARENT_DIFF|legacyParent|\\[PARENT-DIFF\\]"
+    packages/runner/src packages/runner/test
+    docs/specs/scheduler-v2/implementation/PROGRESS.md` returned only the
+    reviewer verdict / this progress text, no scheduler source matches.
+- Scratch harness check:
+  - `cd /tmp/ct1316-cur && deno check packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/subscriptions.ts
+    packages/runner/src/scheduler/execution.ts
+    packages/runner/src/scheduler/pull-execution.ts
+    packages/runner/src/scheduler/demand.ts
+    packages/runner/src/scheduler/write-propagation.ts
+    packages/runner/src/scheduler/topology.ts
+    packages/runner/src/scheduler/pull-subscriptions.ts
+    packages/runner/src/scheduler/action-run.ts`: passed.
+- Consumer bisect commands:
+  - Control:
+    `cd /tmp/ct1316-cur/packages/runner && ENV=test deno test --allow-ffi
+    --allow-env --allow-read --allow-write=/tmp,/var/folders
+    --allow-run=git test/patterns-derive-return-pattern.test.ts >
+    /tmp/scheduler-v2-ct1316-bisect-none.log 2>&1`: failed CT-1316.
+  - `SCHEDULER_V2_LEGACY_PARENT_CONSUMER=topology`: passed,
+    `ok | 1 passed (5 steps) | 0 failed`.
+  - `SCHEDULER_V2_LEGACY_PARENT_CONSUMER=pull-subscriptions`: failed CT-1316.
+  - `SCHEDULER_V2_LEGACY_PARENT_CONSUMER=demand`: failed CT-1316.
+  - `SCHEDULER_V2_LEGACY_PARENT_CONSUMER=write-propagation`: failed CT-1316.
+  - `SCHEDULER_V2_LEGACY_PARENT_CONSUMER=action-run`: failed CT-1316.
+- Culprit consumer:
+  - `topology.ts` parent lookup is the first and only tested consumer whose
+    one-at-a-time reversion to the parallel v1 WeakMap flips CT-1316 green.
+- Differing value at the divergence point:
+  - Failing control trace command:
+    `cd /tmp/ct1316-cur/packages/runner && ENV=test T_PARENT_DIFF=1 T_RUN=1
+    deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/patterns-derive-return-pattern.test.ts >
+    /tmp/scheduler-v2-ct1316-topology-parent-diff.log 2>&1`.
+  - At `settleIter: 2`, topology's work set contained:
+    `pull:of:fid1:jnHVX0kdQR3xusRXnBe9QNQasI3aLfr0ZG9XnRaczbw`,
+    `action:/private/tmp/ct1316-cur/packages/runner/src/builder/pattern.ts:151:21:fid1:DbhVmJp`,
+    `sink:did:key:z6Mkkjpx4DvoTk8CG4Sj3NRyvdhKgL66Un5BoA762DStXSG8/of:fid1:5G7oFLrAa2KQk80hXe8xLfH5HQJ8iWwhoNXPrHt5Cgg/pattern`,
+    `pull:of:fid1:Egtel0lLfbT_KUBoQZc9GeZZwLuObL9NHXhPi8x9qjE`.
+  - For the old child action
+    `action:/private/tmp/ct1316-cur/packages/runner/src/builder/pattern.ts:151:21:fid1:DbhVmJp`,
+    registry lookup returned `none`.
+  - The parallel v1 WeakMap lookup returned parent
+    `sink:did:key:z6Mkkjpx4DvoTk8CG4Sj3NRyvdhKgL66Un5BoA762DStXSG8/of:fid1:5G7oFLrAa2KQk80hXe8xLfH5HQJ8iWwhoNXPrHt5Cgg/pattern`.
+  - In the failing control run, `[RUN]` immediately showed that same child run
+    with `parent: none`, matching the reviewer-described zombie run.
+- v1 value provenance:
+  - The WeakMap value was captured by the scratch `registerParentChildAction`
+    mirror with `allowExisting: true`.
+  - Provenance stack:
+    `registerParentChildAction
+    -> subscribePullSchedulerAction (scheduler/pull-subscriptions.ts:88)
+    -> Scheduler.subscribe (scheduler.ts:541)
+    -> Runner.instantiateJavaScriptActionNode (runner.ts:3411)
+    -> Runner.instantiateJavaScriptNode (runner.ts:3459)
+    -> Runner.instantiateNode (runner.ts:1910)
+    -> instantiatePattern (runner.ts:1168)`.
+  - Interpretation: v1's per-action WeakMap preserves a parent edge for this
+    old child action object that the registry no longer exposes to topology.
+    Routing only topology through that v1 parent value orders the second sink
+    before the old child and CT-1316 passes.
+- Confirmation with culprit selector:
+  - Command:
+    `cd /tmp/ct1316-cur/packages/runner && ENV=test
+    SCHEDULER_V2_LEGACY_PARENT_CONSUMER=topology T_PARENT_DIFF=1 T_RUN=1
+    deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/patterns-derive-return-pattern.test.ts >
+    /tmp/scheduler-v2-ct1316-topology-legacy-parent-diff.log 2>&1`.
+  - Result: CT-1316 passed, `ok | 1 passed (5 steps) | 0 failed`.
+  - The same `[PARENT-DIFF]` was logged, but the run order used the WeakMap
+    parent: the second sink ran before the old child, and the failing step
+    passed.
+- STOP reason:
+  - Culprit consumer and value mismatch are identified as requested.
+  - No fix was attempted beyond scratch-only instrumentation.
+
+## REVIEWER VERDICT — 07/3a topology culprit confirmed; one probe, then the fix
+
+Bisect accepted: topology is the only consumer whose reversion flips
+CT-1316, and the differing value is exact (registry `none` vs WeakMap
+`sink` for the old child). The WeakMap capture's provenance proves
+`registerParentChildAction(oldChild)` ran with the SINK executing and
+`allowExisting: true` — so the registry path REFUSED a link v1 took.
+`linkParent` has exactly three refusal points; identify which:
+
+1. Probe (scratch): instrument `linkParent` to log, for child ids
+   matching the test's pattern actions, which branch returns:
+   [no-parent-arg] / [child-record-missing] / [parent-record-missing] /
+   [allowExisting-preserve] / [assigned]. Also tag object identity: a
+   module-scope `WeakMap<object, number>` serial for child and parent
+   objects, logged on every linkParent and registry.register call, so
+   object churn (same id, new object) is visible. One control run of
+   CT-1316; paste the branch + serials for the failing window.
+
+2. Fix, pre-authorized by branch:
+   - **[parent-record-missing]** (most likely — the sink's registration
+     may interleave with churn): change the parent edge to be keyed and
+     valued by ACTION OBJECTS, not records — `SchedulerNode.parent`
+     becomes `parentAction: Action | undefined` (resolve the record
+     lazily in `parentOf`/`isAncestor` via `records.get`, which is
+     correct since records persist), and `children` becomes
+     `Set<Action>` resolved the same way for the snapshot. This is the
+     EXACT WeakMap parity: v1 never required the parent to be
+     registered at link time. Update the 8th fixture's case list to
+     include "parent not yet registered at link time → link still
+     captured".
+   - **[child-record-missing]**: fix the call-order on whichever path
+     skipped registration before linking (name it), keeping
+     register-before-link everywhere.
+   - **[allowExisting-preserve]**: impossible for an
+     `allowExisting: true` call — if the log shows this, the call site
+     passed the wrong flag; fix the call site.
+   - **[no-parent-arg]**: `getExecutingAction()` returned null in the
+     registry call but not the mirror — cannot happen in the same
+     scope; if seen, STOP with the two stacks.
+
+3. Then: apply the fix in the real worktree, drop ALL scratch
+   instrumentation, run the 9-fixture pack + CT-1316 + the focused
+   parent/graph gate + full suite, and commit 3a-creation-context as
+   planned (fixture update included). Record the branch result and fix
+   shape here regardless.
+
+## 07/3a-creation-context
+
+- [x] pending — migrated parent/child creation context to registry-owned
+  action-object edges.
+- Branch result:
+  - Scratch probe log:
+    `/tmp/scheduler-v2-ct1316-link-branch-probe.log`.
+  - Failing window:
+    - child `fid1:DbhVmJp` registered as object serial 23, linked to first
+      sink parent serial 22 with branch `assigned`.
+    - the next child object for the same id registered as serial 24, linked
+      to second sink parent serial 25 with branch `parent-record-missing`;
+      topology then saw registry parent `none` while the v1 mirror had that
+      second sink parent.
+    - after the parent record existed, a later child object serial 26 linked
+      to parent serial 25 with branch `assigned`.
+  - Fix branch taken: `[parent-record-missing]`.
+- Fix shape:
+  - `SchedulerNode.parent` / `children` were replaced with
+    `parentAction?: Action` and `children?: Set<Action>`.
+  - `NodeRegistry` now captures parent and child edges by `Action` object even
+    if the parent record is not registered yet, then resolves parent and child
+    records lazily in `parentOf`, `childrenOf`, and `isAncestor`.
+  - `registerParentChildAction` remains the single edge writer and calls
+    `NodeRegistry.linkParent`.
+  - The cutover parent-link fixture now includes a direct registry case for
+    "parent not yet registered at link time -> link still captured".
+- Scratch cleanup:
+  - Removed scratch worktrees `/tmp/ct1316-cur` and `/tmp/ct1316-base` with
+    `git worktree remove --force`; probe logs remain under `/tmp`.
+  - Real-tree scratch-instrumentation grep:
+    `rg -n
+    "SCHEDULER_V2_LEGACY_PARENT_CONSUMER|T_PARENT_DIFF|\\bT_LINK\\b|\\[LINK-PROBE\\]|\\[PARENT-DIFF\\]|legacyParent"
+    packages/runner/src/scheduler
+    packages/runner/test/scheduler-v2-cutover.test.ts`: no matches.
+- Recordings:
+  - Contract grep:
+    `rg -n "actionParent|actionChildren"
+    packages/runner/src packages/runner/test/scheduler-v2-cutover.test.ts`:
+    no matches.
+  - Parent assignment grep:
+    `rg -n "\\.parent\\s*=|parentCaptured|\\.parentAction\\s*="
+    packages/runner/src/scheduler
+    packages/runner/test/scheduler-v2-cutover.test.ts`:
+    `packages/runner/src/scheduler/node-record.ts:167:
+    child.parentAction = parentAction`.
+  - `deno fmt packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/node-record.ts
+    packages/runner/src/scheduler/subscriptions.ts
+    packages/runner/src/scheduler/demand.ts
+    packages/runner/src/scheduler/pull-subscriptions.ts
+    packages/runner/src/scheduler/action-run.ts
+    packages/runner/src/scheduler/write-propagation.ts
+    packages/runner/src/scheduler/topology.ts
+    packages/runner/src/scheduler/execution.ts
+    packages/runner/src/scheduler/pull-execution.ts
+    packages/runner/src/scheduler/graph-snapshot.ts
+    packages/runner/test/scheduler-v2-cutover.test.ts`: passed
+    (`Checked 12 files`).
+  - `deno lint` on the same 12 files: passed (`Checked 12 files`).
+  - `deno check` on the same 12 files: passed.
+  - Cutover fixture pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts`: passed, `1 passed (8 steps)`,
+    `0 failed`.
+  - CT-1316:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/patterns-derive-return-pattern.test.ts`: passed,
+    `1 passed (5 steps)`, `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3107 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m6s`.

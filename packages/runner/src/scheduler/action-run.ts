@@ -156,7 +156,6 @@ export function watchReactiveActionCommit(state: {
 
 export function appendActionRunTrace(state: {
   readonly actionRunTrace: ActionRunTraceEntry[];
-  readonly actionParent: WeakMap<Action, Action>;
   readonly nodes: NodeRegistry;
   readonly getActionId: (action: Action | EventHandler) => string;
   readonly getSchedulingWrites: (
@@ -170,7 +169,7 @@ export function appendActionRunTrace(state: {
   readonly recordedAt?: number;
   readonly maxHistory?: number;
 }): void {
-  const parentAction = state.actionParent.get(args.action);
+  const parentAction = state.nodes.parentOf(args.action)?.action;
   const declaredWrites = (state.getSchedulingWrites(args.action) ?? []).map(
     toActionRunTraceAddress,
   );
@@ -219,7 +218,6 @@ export interface SchedulerActionRunState {
   readonly retries: WeakMap<Action, number>;
   readonly pending: Set<Action>;
   readonly actionRunTrace: ActionRunTraceEntry[];
-  readonly actionParent: WeakMap<Action, Action>;
   readonly nodes: NodeRegistry;
   readonly diagnosisHistory: Map<string, DiagnosisRecord[]>;
   readonly diagnosisNonIdempotent: NonIdempotentReport[];
@@ -703,7 +701,6 @@ function recordOptionalActionRunDiagnostics(
   if (state.getCollectActionRunTrace()) {
     appendActionRunTrace({
       actionRunTrace: state.actionRunTrace,
-      actionParent: state.actionParent,
       nodes: state.nodes,
       getActionId: state.getActionId,
       getSchedulingWrites: state.getSchedulingWrites,

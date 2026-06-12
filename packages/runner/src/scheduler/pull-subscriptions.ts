@@ -86,7 +86,7 @@ export function subscribePullSchedulerAction(
 
   // Track parent-child relationship if action is created during another action's execution
   registerParentChildAction(state.subscriptionState, action);
-  const parent = state.actionParent.get(action);
+  const parent = state.subscriptionState.nodes.parentOf(action)?.action;
   if (
     !actionIsEffect &&
     parent &&

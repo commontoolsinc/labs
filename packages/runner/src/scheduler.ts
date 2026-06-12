@@ -387,8 +387,6 @@ export class Scheduler {
   // When a child action is created during parent execution, parent must run first
   private executingAction: Action | null = null;
   currentActionId?: string;
-  private actionParent = new WeakMap<Action, Action>();
-  private actionChildren = new WeakMap<Action, Set<Action>>();
   private pullDemandState!: PullDemandState;
   private dependencyGraphState!: DependencyGraphState;
   private dependencyUpdateState!: DependencyUpdateState;
@@ -1674,7 +1672,6 @@ export class Scheduler {
       effects: this.nodes.effects,
       dependents: this.dependents,
       dependencies: this.dependencies,
-      actionParent: this.actionParent,
       nodes: this.nodes,
       pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
       pullDemandedContinuationComputations: this
@@ -1872,7 +1869,7 @@ export class Scheduler {
       effects: this.nodes.effects,
       computations: this.nodes.computations,
       conditionallyScheduledEffects: this.conditionallyScheduledEffects,
-      actionParent: this.actionParent,
+      nodes: this.nodes,
       pending: this.pending,
       markPullDemandContinuation: (action) =>
         this.pullDemandedContinuationComputations.add(action),
@@ -1896,8 +1893,6 @@ export class Scheduler {
       queueExecution: () => this.queueExecution(),
       getActionId: (target) => this.getActionId(target),
       getExecutingAction: () => this.executingAction,
-      actionParent: this.actionParent,
-      actionChildren: this.actionChildren,
     };
   }
 
@@ -1923,7 +1918,6 @@ export class Scheduler {
       pendingDependencyCollection: this.pendingDependencyCollection,
       activePullDemandActions: this.activePullDemandActions,
       pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
-      actionParent: this.actionParent,
       pending: this.pending,
       scheduledFirstTime: this.scheduledFirstTime,
       effects: this.nodes.effects,
@@ -2015,7 +2009,7 @@ export class Scheduler {
       pending: this.pending,
       dirty: this.staleness.dirty,
       dependencies: this.dependencies,
-      actionParent: this.actionParent,
+      nodes: this.nodes,
       dependents: this.dependents,
       conditionallyScheduledEffects: this.conditionallyScheduledEffects,
       filterStats: this.filterStats,
@@ -2229,7 +2223,6 @@ export class Scheduler {
       retries: this.retries,
       pending: this.pending,
       actionRunTrace: this.actionRunTrace,
-      actionParent: this.actionParent,
       nodes: this.nodes,
       diagnosisHistory: this.diagnosisHistory,
       diagnosisNonIdempotent: this.diagnosisNonIdempotent,
@@ -2299,8 +2292,7 @@ export class Scheduler {
       conditionallyScheduledEffects: this.conditionallyScheduledEffects,
       dependencies: this.dependencies,
       dependents: this.dependents,
-      actionParent: this.actionParent,
-      actionChildren: this.actionChildren,
+      nodes: this.nodes,
       actionStats: this.actionStats,
       getDebounce: (action) => this.delays.getDebounce(action),
       getThrottle: (action) => this.delays.getThrottle(action),
