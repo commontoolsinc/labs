@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   computeModuleHashes,
   resolveModuleImports,
 } from "../src/harness/module-identity.ts";
-import type { CacheableModule } from "../src/harness/types.ts";
+import type { CacheableModule, RuntimeProgram } from "../src/harness/types.ts";
 
 import {
   buildSourceDocs,
@@ -23,6 +26,44 @@ import {
   writeCompiledDocs,
   writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
+
+// ---------------------------------------------------------------------------
+// Shared-server helper: two managers with DIFFERENT signers over ONE in-process
+// memory server. Modelled after cross-space-value-read.test.ts. The shared
+// server is closed once by the test's afterEach — each manager's override()
+// returns the same instance without the base class closing it twice.
+// ---------------------------------------------------------------------------
+class SharedServerStorageManager extends EmulatedStorageManager {
+  static connectTo(
+    server: MemoryV2Server.Server,
+    options: Omit<Options, "memoryHost" | "spaceHostMap">,
+  ): SharedServerStorageManager {
+    const manager = new SharedServerStorageManager(
+      { ...options, memoryHost: new URL("memory://") },
+      () => server,
+    );
+    manager._sharedServer = server;
+    return manager;
+  }
+
+  private _sharedServer!: MemoryV2Server.Server;
+
+  protected override server(): MemoryV2Server.Server {
+    return this._sharedServer;
+  }
+  // NOTE: super.close() checks its private `#server` field (never set by this
+  // override), so closing a SharedServerStorageManager only tears down the
+  // per-space client sessions — the shared server is closed once by the test.
+}
+
+const newSharedServer = () =>
+  new MemoryV2Server.Server({
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+  });
 
 const signer = await Identity.fromPassphrase("cell-cache test");
 
@@ -584,5 +625,185 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     expect(depSource?.has(depIdentity)).toBe(true);
     expect(compiled.has(importerIdentity)).toBe(true);
     expect(compiled.has(depIdentity)).toBe(true);
+  });
+  // Regression: before bd98e01a4, compiled docs were stamped with a per-user
+  // `cf-compiled-by:<did>` atom. A second user's cold-compile writeback of the
+  // SAME content into the same space was rejected by the CFC label merge
+  // ("addIntegrity cannot be weakened at /") because the deployer's per-DID
+  // atom was already present and could not be merged with a different user's
+  // atom. The constant system-compiler atom (COMPILED_INTEGRITY_ATOM) makes
+  // the cache shared: a re-write of the same content by any user merges
+  // cleanly because both sides carry the identical atom.
+  it("second user's writeback of the same content commits cleanly (per-user DID collision regression)", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+
+    // First writer (the deployer) populates the cache.
+    const wtxA = runtime.edit();
+    writeCompiledDocs(
+      runtime,
+      spaceA,
+      modules,
+      entryIdentity,
+      opts(),
+      wtxA,
+    );
+    wtxA.prepareCfc();
+    const a = await wtxA.commit();
+    expect(a.error).toBe(undefined);
+
+    // Second writer (another user's runtime cold-compiling the same content)
+    // writes the same docs back. Same content identity, same constant atom —
+    // the label merge must accept it without "addIntegrity cannot be weakened".
+    const wtxB = runtime.edit();
+    writeCompiledDocs(
+      runtime,
+      spaceA,
+      modules,
+      entryIdentity,
+      opts(),
+      wtxB,
+    );
+    wtxB.prepareCfc();
+    const b = await wtxB.commit();
+    expect(b.error?.message).toBe(undefined);
+
+    // Any member can then warm-hit the cache.
+    const rtx = runtime.edit();
+    const loaded = await loadCompiledClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      opts(),
+      rtx,
+    );
+    rtx.abort?.();
+    expect(loaded.size).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// End-to-end: two runtimes with DISTINCT user identities over shared storage
+// ---------------------------------------------------------------------------
+
+// Two distinct signers for the two "users" in the e2e describe.
+// Declared at module level so top-level await applies.
+const e2eSignerA = await Identity.fromPassphrase("cell-cache-e2e user A");
+const e2eSignerB = await Identity.fromPassphrase("cell-cache-e2e user B");
+
+describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
+  // The shared compile-cache space — owned by signerA (its DID is the address).
+  const sharedSpace = e2eSignerA.did();
+  const RTVER = COMPILE_CACHE_RUNTIME_VERSION;
+
+  // Minimal two-file program for the e2e compile cycle.
+  const E2E_PROGRAM: RuntimeProgram = {
+    main: "/main.tsx",
+    files: [
+      { name: "/util.ts", contents: "export const triple = (x:number)=>x*3;" },
+      {
+        name: "/main.tsx",
+        contents: [
+          "import { pattern, lift } from 'commonfabric';",
+          "import { triple } from './util.ts';",
+          "const t = lift((x:number)=>triple(x));",
+          "export default pattern<{ value: number }>(({ value }) => ({ result: t(value) }));",
+        ].join("\n"),
+      },
+    ],
+  };
+
+  let server: MemoryV2Server.Server;
+  let smA: SharedServerStorageManager;
+  let smB: SharedServerStorageManager;
+  let rtA: Runtime;
+  let rtB: Runtime;
+
+  beforeEach(() => {
+    server = newSharedServer();
+    smA = SharedServerStorageManager.connectTo(server, { as: e2eSignerA });
+    smB = SharedServerStorageManager.connectTo(server, { as: e2eSignerB });
+    rtA = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smA,
+      cfcEnforcementMode: "enforce-explicit",
+      trustSnapshotProvider: () => ({
+        id: "e2e-user-a",
+        actingPrincipal: e2eSignerA.did(),
+      }),
+    });
+    rtB = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smB,
+      cfcEnforcementMode: "enforce-explicit",
+      trustSnapshotProvider: () => ({
+        id: "e2e-user-b",
+        actingPrincipal: e2eSignerB.did(),
+      }),
+    });
+  });
+
+  afterEach(async () => {
+    await rtA?.dispose();
+    await rtB?.dispose();
+    await smA?.close();
+    await smB?.close();
+    await server?.close();
+  });
+
+  it("runtime B warms from A's cache write and B's cold-compile writeback commits without error", async () => {
+    // --- Session A: cold compile + write-back ---
+    const pmA = rtA.patternManager;
+    const txA = rtA.edit();
+    await pmA.compilePattern(E2E_PROGRAM, { space: sharedSpace, tx: txA });
+    await pmA.flushCompileCacheWrites();
+    await txA.commit();
+    // Ensure the docs have propagated through the in-process server.
+    await smA.synced();
+
+    expect(pmA.getCompileCacheStats()).toEqual({
+      hits: 0,
+      misses: 1,
+      byIdentityHits: 0,
+    });
+
+    // --- Session B: should warm-hit A's committed cache ---
+    // smB has its own per-space client replicas, so it must fetch from the
+    // shared server. compilePattern drives the storage read-through internally.
+    const pmB = rtB.patternManager;
+    const txB = rtB.edit();
+    const compiled = await pmB.compilePattern(E2E_PROGRAM, {
+      space: sharedSpace,
+      tx: txB,
+    });
+    await txB.commit();
+
+    // (a) Warm hit: B found A's compiled docs without recompiling.
+    expect(pmB.getCompileCacheStats()).toEqual({
+      hits: 1,
+      misses: 0,
+      byIdentityHits: 0,
+    });
+    // The pattern is a runnable function.
+    expect(typeof compiled).toBe("function");
+
+    // (b) B's own cold-compile writeback (if it had been a miss) also
+    // commits cleanly — the constant atom merges without "addIntegrity cannot
+    // be weakened". Exercise this directly via writeCompiledDocs + commit.
+    const { modules, entryIdentity } = toModules({
+      main: E2E_PROGRAM.main,
+      files: E2E_PROGRAM.files,
+    });
+    const wtxB2 = rtB.edit();
+    writeCompiledDocs(
+      rtB,
+      sharedSpace,
+      modules,
+      entryIdentity,
+      { runtimeVersion: RTVER },
+      wtxB2,
+    );
+    wtxB2.prepareCfc();
+    const result = await wtxB2.commit();
+    expect(result.error).toBe(undefined);
   });
 });
