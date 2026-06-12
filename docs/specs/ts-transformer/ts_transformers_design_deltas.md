@@ -61,6 +61,31 @@ behavior and open follow-up work.
     `.flatMap` coverage (`.find`, `.some`, `.every`, etc.)
   - full diagnostics convergence onto lowerability-only checks
 
+### Addendum (landed since the March 17 snapshot)
+
+The `derive→lift→selfcontained` arc and content-addressed builder identity
+landed after the snapshot above:
+
+- Landed:
+  - `derive`/`computed` → lift-applied lowering (Phase 1, CT-1615)
+  - whole-builder-call hoisting to module scope for `lift` (CT-1644), then
+    `handler`, `pattern`, and `patternTool` (CT-1655), via the single
+    `BuilderCallHoistingTransformer` (current-behavior spec §11). The former
+    lift-only `LiftHoistingTransformer` and the callback-only
+    `BuilderCallbackHoistingTransformer` are both gone (the latter deleted in
+    #3864).
+  - content-addressed builder artifacts: a single trailing `__cfReg({ … })`
+    registration per module (CT-1623), consumed by the runner's module-record
+    compiler and `PatternManager` reverse index. Shipped and exercised across
+    the builder-bearing fixture corpus.
+- Open (forward-looking, NOT on `main`):
+  - Phase 3 `selfcontained(...)` wrapping (CT-1654): wrap each hoisted builder
+    const with `__cfHelpers.selfcontained(...)`. Blocked on a `selfcontained`
+    runtime helper / `__cfHelpers` export that does not yet exist. Today
+    `selfcontained` appears only in design comments in `ast/call-kind.ts` and
+    `builder-call-hoisting.ts`; no transformer emits it and no fixture expects
+    it. See `packages/ts-transformers/docs/derive-to-lift-design.md`.
+
 ## D-001 Rename Context Terms (`safe` -> `compute` / `pattern`)
 
 **Current term:** `safe context` / `safe wrapper`\
