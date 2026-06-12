@@ -1231,7 +1231,7 @@ packages/runner/src/storage/rejection.ts:6:export function isPermanentRejection(
 
 ## 03/step-2
 
-- [x] pending — commit precondition plumbing behind `commitPreconditions`
+- [x] fa9711c19 — commit precondition plumbing behind `commitPreconditions`
   flag
 - Deviations: updated the narrow memory/runtime flag tests because the new
   protocol flag makes their exact object assertions stale. Implemented the
@@ -1260,3 +1260,78 @@ packages/runner/src/storage/rejection.ts:6:export function isPermanentRejection(
     `0 failed`.
   - `cd packages/runner && deno task test`: passed,
     `588 passed (3075 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m4s`.
+
+## IMPLEMENTER STOP — 03/step-3 precondition error wire route
+
+Step 3 requires a precondition rejection whose wire shape reaches the client as
+`{ name: "PreconditionFailedError", precondition: "origin-committed",
+message: ... }`, and explicitly says to STOP if the existing route normalizes
+error names.
+
+Findings:
+
+- `packages/memory/v2/engine.ts` `applyCommitTransaction` has the same-session
+  identity needed for the check: it computes `sessionKey =
+  resolveCommitSessionKey(sessionId, principal)` before read validation.
+- Existing stale-read conflict rejection throws `Engine.ConflictError` from
+  `validateConfirmedReads` / `resolvePendingReads`.
+- `packages/memory/v2/server.ts` `MemoryServer.transact` catches engine errors
+  and normalizes names through `toError(...)`:
+  `Engine.ConflictError` → `"ConflictError"`, `Engine.ProtocolError` →
+  `"ProtocolError"`, all other errors → `"TransactionError"`.
+- `packages/memory/v2.ts` `V2Error` currently has only `{ name, message }`.
+  There is no `precondition` field on the wire error type.
+- `packages/memory/v2/client.ts` `Client.request` reconstructs an `Error` from
+  `response.error.message` and `response.error.name` only.
+
+Therefore, adding an engine-side `PreconditionFailedError` now would reach the
+runner as `TransactionError`, and its `precondition: "origin-committed"`
+metadata would be dropped. No Step 3 implementation or test edits were applied.
+Need reviewer direction: extend the v2 wire error surface and server/client
+mapping for `PreconditionFailedError`, or encode the precondition failure
+through an existing normalized route.
+
+## REVIEWER VERDICT — 03/step-3 precondition error wire route
+
+Excellent trace; the route is exactly the normalize-and-drop case the
+step anticipated. Ruling: EXTEND THE WIRE SURFACE — the taxonomy is a
+real new error class (E0's whole point, and E2 receipts need the same
+route). Do NOT encode through ConflictError or TransactionError: name
+is what `isPermanentRejection` keys on, and ConflictError means
+retryable — overloading either poisons the taxonomy.
+
+Concrete route, end to end:
+
+1. Engine (`packages/memory/v2/engine.ts` or wherever
+   `Engine.ConflictError` is defined — same module): add a sibling
+   error class `PreconditionFailedError` with
+   `name = "PreconditionFailedError"` and a
+   `precondition: "origin-committed" | "receipt-exists"` field. Throw
+   it from the `applyCommitTransaction` origin-committed check (using
+   the `sessionKey` you located).
+2. Server (`packages/memory/v2/server.ts` `toError`): add the branch
+   mapping `Engine.PreconditionFailedError` →
+   `{ name: "PreconditionFailedError", message, precondition }` —
+   BEFORE the catch-all TransactionError arm.
+3. Wire type (`packages/memory/v2.ts` `V2Error`): add optional
+   `precondition?: string`. JSON-additive; old peers ignore it.
+4. Client (`packages/memory/v2/client.ts` `Client.request`): when
+   reconstructing the Error, copy `response.error.precondition` onto
+   the object as a plain property when present. Name/message handling
+   otherwise unchanged.
+5. Runner: NO changes — `IPreconditionFailedError` and
+   `isPermanentRejection` (name-keyed) already match this shape.
+6. Compat: no flag gating on the ERROR path. Safety comes from the
+   ATTACH side already being gated on the negotiated
+   `commitPreconditions` flag — an old client never attaches
+   preconditions, so it can never receive this error.
+7. Tests: in `v2-commit-preconditions.test.ts`, assert the
+   CLIENT-VISIBLE shape (name + precondition survive the full
+   server→client round trip) if the harness runs through server+client;
+   if the existing engine tests hit the engine directly, add one
+   focused `toError` mapping test for the server instead, plus keep the
+   engine-level assertions.
+8. Amend WO03 step 3 in-branch with this route — own docs commit first:
+   `docs(specs): scheduler-v2 WO03 — precondition error wire route`.
+
+Then continue step 3 as written.
