@@ -364,6 +364,82 @@ describe("persistent scheduler observations", () => {
     }
   });
 
+  it("persists and rehydrates immediate-log write surfaces", async () => {
+    // An action whose static surface came from subscribe's ReactivityLog
+    // (no `.writes` annotation) must persist that live surface and restore
+    // it on rehydration — otherwise a restored action reads as writing
+    // nothing.
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      const { runtime, tx } = testRuntime;
+      const source = runtime.getCell<number>(
+        space,
+        "scheduler-observation-immediate-log-source",
+        undefined,
+        tx,
+      );
+      const target = runtime.getCell<number>(
+        space,
+        "scheduler-observation-immediate-log-target",
+        undefined,
+        tx,
+      );
+      source.set(0);
+      target.set(0);
+      await tx.commit();
+
+      const observations: SchedulerActionObservation[] = [];
+      const originalEdit = runtime.edit.bind(runtime);
+      runtime.edit = ((...args: Parameters<typeof originalEdit>) => {
+        const actionTx = originalEdit(...args);
+        const originalSetSchedulerObservation = actionTx
+          .setSchedulerObservation?.bind(actionTx);
+        actionTx.setSchedulerObservation = (observation: unknown) => {
+          if (isSchedulerActionObservation(observation)) {
+            observations.push(observation);
+          }
+          originalSetSchedulerObservation?.(observation);
+        };
+        return actionTx;
+      }) as typeof runtime.edit;
+
+      const surface = [
+        toMemorySpaceAddress(target.getAsNormalizedFullLink()),
+      ];
+      let runs = 0;
+      const logSurfaceWriter = function logSurfaceWriter(
+        actionTx: IExtendedStorageTransaction,
+      ) {
+        runs++;
+        source.withTx(actionTx).get();
+        target.withTx(actionTx).set(runs);
+      } as Action;
+
+      runtime.scheduler.subscribe(logSurfaceWriter, {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: surface,
+      });
+
+      await runtime.scheduler.run(logSurfaceWriter);
+      expect(observations.at(-1)?.currentKnownWrites).toEqual(surface);
+
+      const restoredWriter = (() => {}) as Action;
+      (restoredWriter as { src?: string }).src = "logSurfaceWriter";
+      expect(
+        runtime.scheduler.rehydrateActionFromObservation(
+          restoredWriter,
+          { observation: observations.at(-1)! },
+        ),
+      ).toBe(true);
+      expect(runtime.scheduler.getMightWrite(restoredWriter)).toEqual(
+        surface,
+      );
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
   it("rehydrates failed scheduler observations as runnable work", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {

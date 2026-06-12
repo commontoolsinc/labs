@@ -597,7 +597,14 @@ export class Scheduler {
       return false;
     }
 
-    const surface = resolveRegistrationSurface(action, undefined);
+    // Annotation first; otherwise restore the persisted live surface —
+    // mirroring registration, where subscribe's ReactivityLog supplies the
+    // surface for annotation-less actions.
+    const surface = resolveRegistrationSurface(action, {
+      reads: [],
+      shallowReads: [],
+      writes: observation.currentKnownWrites,
+    });
     if (observation.actionKind !== "effect" && surface.length > 0) {
       this.writeIndex.setSurface(action, surface);
       registerDependentsForWriterSurface(

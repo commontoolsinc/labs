@@ -639,7 +639,11 @@ function attachSchedulerActionObservation(
     observedAtSeq: 0,
     transactionKind: "action-run",
     transactionLog: log,
-    currentKnownWrites: declaredWrites,
+    // The live registered surface — for actions without a `.writes`
+    // annotation it came from subscribe's ReactivityLog, which
+    // declaredWrites (annotation-only) does not capture.
+    currentKnownWrites: state.getSchedulingWrites(args.action) ??
+      declaredWrites,
     declaredWrites,
     materializerWriteEnvelopes:
       state.getMaterializerWriteEnvelopes(args.action) ?? [],

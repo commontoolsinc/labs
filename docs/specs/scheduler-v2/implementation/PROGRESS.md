@@ -2706,3 +2706,21 @@ Verification:
     `0 failed`.
   - Test rewrites were confined to the reviewer-approved named files; step 4
     clean removal held without the decision-tree fallback.
+
+## REVIEWER RESOLUTION — PR #4098 review findings
+
+- [x] pending — immediate-log write surfaces survive persistence and
+  rehydration.
+- Findings addressed (Codex/cubic review on PR #4098), red-first:
+  - Actions whose static surface came from `subscribe(action,
+    ReactivityLog)` (no `.writes` annotation) persisted
+    `currentKnownWrites: []` (annotation-only `declaredWrites`), and
+    `rehydrateActionFromObservation` resolved the surface with no
+    immediate log, so a restored action read as writing nothing.
+    Observations now persist the live registered surface
+    (`getSchedulingWrites(action) ?? declaredWrites`) and rehydration
+    resolves through `resolveRegistrationSurface(action, { writes:
+    observation.currentKnownWrites })`, mirroring registration
+    (`test/scheduler-observations.test.ts` "persists and rehydrates
+    immediate-log write surfaces").
+- Deviations: none.
