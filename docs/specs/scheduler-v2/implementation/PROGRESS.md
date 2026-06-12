@@ -5265,3 +5265,58 @@ packages/runner/src/scheduler/run.ts:655:  const throttleMs = state.getThrottle(
     the reload fixture's transient `TypeError: Cannot read properties of
     undefined (reading 'length')` log while passing, and the intentional
     rehydration timeout warning in the timeout fallback fixture.
+
+## 08/7.2-delete-rehydration-race
+
+- [x] pending — deleted per-action async initial rehydration and made
+  preloaded batch observations the only resume rehydration path.
+- Shape:
+  - Removed the scheduler race apparatus:
+    `queueInitialActionRehydration`, `initialRehydrationTokens`,
+    `canApplyInitialActionRehydration`, `awaitSpaceSyncedWithTimeout`,
+    `runInitialActionRehydrationWithTimeout`,
+    `DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS`, `deferInitialExecution`,
+    `scheduleInitialActionRun`, and `rehydrateActionFromStorage`.
+  - Scheduler registration now always registers fresh work first; a matching
+    preloaded snapshot synchronously overwrites that fresh state with clean or
+    dirty persisted state. Missing or mismatched preloaded entries simply leave
+    the fresh initial run in place.
+  - Removed `awaitSyncBeforeInitialRun` / `awaitSync` propagation from runner
+    start options, nested pattern runs, and raw `map`/`filter`/`flatMap`
+    per-element runs. The resumed piece has already awaited sync before the
+    batch snapshot load.
+  - Rewrote `scheduler-observations.test.ts` around the new contract:
+    deleted the old storage-unavailable, per-action auto-query, pending
+    rehydration, timeout fallback, unsubscribe-token, and dirty-token tests;
+    changed mismatch/miss cases to use preloaded snapshot maps; and changed
+    the direct resubscribe dirty-only fixture to preload the persisted consumer
+    snapshot batch.
+- Exit grep:
+
+```text
+$ rg -n "queueInitialActionRehydration|initialRehydrationTokens|canApplyInitialActionRehydration|awaitSpaceSyncedWithTimeout|runInitialActionRehydrationWithTimeout|DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS|deferInitialExecution|awaitSync|awaitSyncBeforeInitialRun|rehydrateActionFromStorage|scheduleInitialActionRun" packages/runner/src packages/runner/test/scheduler-observations.test.ts packages/runner/test/reload-rehydration.test.ts -g '*.ts'
+```
+
+  No matches.
+- Recordings:
+  - `deno fmt` on the touched runner source/test files: passed (`Checked 7
+    files`).
+  - `deno lint` on the touched runner source/test files: passed (`Checked 7
+    files`).
+  - `deno check` on the touched runner source/test files: passed.
+  - `git diff --check`: passed.
+  - Phase 7.2 focused persistence pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts test/scheduler-observations.test.ts`:
+    passed, `2 passed (17 steps)`, `0 failed`, `968ms`.
+  - Raw list builtin regression pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/patterns-dynamic.test.ts test/map-op-by-identity.test.ts
+    test/pattern-scope.test.ts`: passed, `42 passed (29 steps)`,
+    `0 failed`, `2s`.
+  - Expected noisy passing logs remain: the reload fixture's transient
+    `TypeError: Cannot read properties of undefined (reading 'length')` log
+    while passing, experimental flag override messages, and known
+    write-surface warnings in pattern/builtin fixtures.

@@ -64,7 +64,7 @@ export function filter(
   }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   addCancel: AddCancel,
-  cause: any,
+  _cause: any,
   parentCell: Cell<any>,
   runtime: Runtime,
   outputBinding?: NormalizedFullLink,
@@ -78,14 +78,7 @@ export function filter(
     { resultCell: Cell<any>; lastIndex: number }
   >();
 
-  // Only the initial (resume) reconcile defers its per-element sub-pattern runs
-  // until sync completes; elements from later (post-resume) reconciles are fresh
-  // and must not wait. Cleared once a non-empty resume batch is processed.
-  let resumeBatchAwaitSync = !!(cause as { awaitSync?: boolean } | undefined)
-    ?.awaitSync;
-
   return (tx: IExtendedStorageTransaction) => {
-    const elementAwaitSync = resumeBatchAwaitSync;
     const { list, op } = inputsCell.asSchema(FILTER_INPUT_SCHEMA)
       .withTx(tx).get();
 
@@ -153,8 +146,6 @@ export function filter(
       throw new Error("filter currently only supports arrays");
     }
 
-    if (list.length > 0) resumeBatchAwaitSync = false;
-
     const keyCounts = new Map<string, number>();
     const newArrayValue: any[] = [];
     for (let i = 0; i < list.length; i++) {
@@ -176,7 +167,6 @@ export function filter(
             existing.resultCell,
             {
               doNotUpdateOnPatternChange: true,
-              awaitSyncBeforeInitialRun: elementAwaitSync,
             },
           );
         }
@@ -195,7 +185,6 @@ export function filter(
           resultCell,
           {
             doNotUpdateOnPatternChange: true,
-            awaitSyncBeforeInitialRun: elementAwaitSync,
           },
         );
         // Link these individual cells to the top cell

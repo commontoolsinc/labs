@@ -3,7 +3,6 @@ import {
   describe,
   disposeSchedulerTestRuntime,
   expect,
-  getStaleSchedulerInternals,
   it,
   space,
   toMemorySpaceAddress,
@@ -12,6 +11,7 @@ import type { TransactionReactivityLog } from "../src/storage/interface.ts";
 import {
   buildSchedulerActionObservation,
   isSchedulerActionObservation,
+  type PersistedSchedulerObservationSnapshot,
   type SchedulerActionObservation,
 } from "../src/scheduler/persistent-observation.ts";
 import {
@@ -111,6 +111,27 @@ const hasPersistedDirtyState = (
   snapshot.directDirtySeq !== undefined ||
   snapshot.staleSeq !== undefined ||
   snapshot.unknownReason !== undefined;
+
+const snapshotsByActionId = (
+  snapshots: SchedulerSnapshotWithObservation[],
+): ReadonlyMap<string, PersistedSchedulerObservationSnapshot> =>
+  new Map(
+    snapshots.map((snapshot) => [
+      snapshot.observation.actionId,
+      {
+        observation: snapshot.observation,
+        ...(snapshot.directDirtySeq !== undefined
+          ? { directDirtySeq: snapshot.directDirtySeq }
+          : {}),
+        ...(snapshot.staleSeq !== undefined
+          ? { staleSeq: snapshot.staleSeq }
+          : {}),
+        ...(snapshot.unknownReason !== undefined
+          ? { unknownReason: snapshot.unknownReason }
+          : {}),
+      },
+    ]),
+  );
 
 const sameSchedulerAddress = (
   left: SchedulerActionObservation["reads"][number],
@@ -524,113 +545,6 @@ describe("persistent scheduler observations", () => {
     }
   });
 
-  it("reports unavailable storage-backed rehydration without mutating", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
-    try {
-      const storageBackedAction = () => {};
-      testRuntime.runtime.scheduler.subscribe(storageBackedAction, {
-        reads: [],
-        shallowReads: [],
-        writes: [],
-      });
-
-      await expect(
-        testRuntime.runtime.scheduler.rehydrateActionFromStorage(
-          storageBackedAction,
-          space,
-        ),
-      ).resolves.toBe(false);
-      expect(testRuntime.runtime.scheduler.isDirty(storageBackedAction)).toBe(
-        true,
-      );
-    } finally {
-      await disposeSchedulerTestRuntime(testRuntime);
-    }
-  });
-
-  it("auto-rehydrates subscribed actions before first execution", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
-    try {
-      let runs = 0;
-      const autoPersistedAction = Object.assign(
-        function autoPersistedAction() {
-          runs++;
-        },
-        { writes: [writeLink] },
-      );
-      const actionId = "autoPersistedAction";
-      const provider = testRuntime.runtime.storageManager.open(space) as {
-        listSchedulerActionSnapshots?: (
-          query?: unknown,
-        ) => Promise<{
-          serverSeq: number;
-          snapshots: unknown[];
-        }>;
-      };
-      let querySeen: unknown;
-      provider.listSchedulerActionSnapshots = (query) => {
-        querySeen = query;
-        return Promise.resolve({
-          serverSeq: 5,
-          snapshots: [{
-            observationId: 1,
-            commitSeq: null,
-            observedAtSeq: 5,
-            observation: buildSchedulerActionObservation({
-              actionId,
-              actionKind: "computation",
-              branch: "",
-              pieceId: "space:process",
-              processGeneration: 1,
-              implementationFingerprint: schedulerImplementationFingerprint(
-                autoPersistedAction,
-                actionId,
-                undefined,
-              ),
-              runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
-              observedAtSeq: 5,
-              transactionKind: "action-run",
-              transactionLog: {
-                reads: [readAddress],
-                shallowReads: [],
-                writes: [],
-              },
-              currentKnownWrites: [writeAddress],
-            }),
-          }],
-        });
-      };
-
-      testRuntime.runtime.scheduler.subscribe(autoPersistedAction, {
-        reads: [],
-        shallowReads: [],
-        writes: [],
-      }, {
-        rehydrateFromStorage: {
-          space,
-          pieceId: "space:process",
-          processGeneration: 1,
-        },
-      });
-
-      await testRuntime.runtime.idle();
-
-      expect(runs).toBe(0);
-      expect(querySeen).toMatchObject({
-        actionId: "autoPersistedAction",
-        pieceId: "space:process",
-        processGeneration: 1,
-      });
-      expect(testRuntime.runtime.scheduler.isDirty(autoPersistedAction)).toBe(
-        false,
-      );
-      expect(testRuntime.runtime.scheduler.getMightWrite(autoPersistedAction))
-        .toEqual([writeAddress]);
-    } finally {
-      await disposeSchedulerTestRuntime(testRuntime);
-    }
-  });
-
   it("auto-rehydrates subscribed actions from preloaded piece snapshots", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
@@ -704,132 +618,6 @@ describe("persistent scheduler observations", () => {
         testRuntime.runtime.scheduler.getMightWrite(preloadedPersistedAction),
       )
         .toEqual([writeAddress]);
-    } finally {
-      await disposeSchedulerTestRuntime(testRuntime);
-    }
-  });
-
-  it("does not run while initial rehydration is pending", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
-    try {
-      const { runtime } = testRuntime;
-      const provider = runtime.storageManager.open(space) as {
-        listSchedulerActionSnapshots?: () => Promise<{
-          serverSeq: number;
-          snapshots: unknown[];
-        }>;
-      };
-      let resolveSnapshots:
-        | ((result: { serverSeq: number; snapshots: unknown[] }) => void)
-        | undefined;
-      provider.listSchedulerActionSnapshots = () =>
-        new Promise((resolve) => {
-          resolveSnapshots = resolve;
-        });
-
-      let runs = 0;
-      const rehydratingAction = Object.assign(
-        function rehydratingAction() {
-          runs++;
-        },
-        { writes: [writeLink] },
-      );
-      runtime.scheduler.subscribe(rehydratingAction, {
-        rehydrateFromStorage: {
-          space,
-          pieceId: "space:pending-rehydrate-process",
-          processGeneration: 1,
-        },
-      });
-
-      const wakeEffect = () => {};
-      runtime.scheduler.subscribe(wakeEffect, {
-        reads: [],
-        shallowReads: [],
-        writes: [],
-      }, { isEffect: true });
-
-      await (runtime.scheduler as unknown as { execute(): Promise<void> })
-        .execute();
-      const runsBeforeRehydrate = runs;
-
-      resolveSnapshots?.({
-        serverSeq: 5,
-        snapshots: [{
-          observationId: 1,
-          commitSeq: null,
-          observedAtSeq: 5,
-          observation: buildSchedulerActionObservation({
-            actionId: "rehydratingAction",
-            actionKind: "computation",
-            branch: "",
-            pieceId: "space:pending-rehydrate-process",
-            processGeneration: 1,
-            implementationFingerprint: schedulerImplementationFingerprint(
-              rehydratingAction,
-              "rehydratingAction",
-              undefined,
-            ),
-            runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
-            observedAtSeq: 5,
-            transactionKind: "action-run",
-            transactionLog: {
-              reads: [readAddress],
-              shallowReads: [],
-              writes: [],
-            },
-            currentKnownWrites: [writeAddress],
-          }),
-        }],
-      });
-      await runtime.idle();
-
-      expect(runsBeforeRehydrate).toBe(0);
-      expect(runs).toBe(0);
-      expect(runtime.scheduler.isDirty(rehydratingAction)).toBe(false);
-      expect(runtime.scheduler.getMightWrite(rehydratingAction)).toEqual([
-        writeAddress,
-      ]);
-    } finally {
-      await disposeSchedulerTestRuntime(testRuntime);
-    }
-  });
-
-  it("falls back to an initial run when storage rehydration times out", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
-    try {
-      const { runtime } = testRuntime;
-      const provider = runtime.storageManager.open(space) as {
-        listSchedulerActionSnapshots?: () => Promise<{
-          serverSeq: number;
-          snapshots: unknown[];
-        }>;
-      };
-      provider.listSchedulerActionSnapshots = () => new Promise(() => {});
-
-      let runs = 0;
-      const rehydrateTimeoutAction = () => {
-        runs++;
-      };
-      runtime.scheduler.subscribe(rehydrateTimeoutAction, {
-        reads: [],
-        shallowReads: [],
-        writes: [],
-      }, {
-        isEffect: true,
-        rehydrateFromStorage: {
-          space,
-          pieceId: "space:timeout-rehydrate-process",
-          processGeneration: 1,
-          timeoutMs: 1,
-        },
-      });
-
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      await runtime.idle();
-
-      expect(runs).toBe(1);
-      expect(runtime.scheduler.isDirty(rehydrateTimeoutAction)).toBe(false);
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
     }
@@ -1234,7 +1022,9 @@ describe("persistent scheduler observations", () => {
         },
       });
 
-      const subscribeGeneratedReader = () =>
+      const subscribeGeneratedReader = (
+        preloaded?: ReadonlyMap<string, PersistedSchedulerObservationSnapshot>,
+      ) =>
         runtime.scheduler.subscribe(
           readGenerated,
           {
@@ -1250,10 +1040,15 @@ describe("persistent scheduler observations", () => {
               space,
               pieceId: consumerPieceId,
               processGeneration: 0,
+              ...(preloaded !== undefined
+                ? { snapshotsByActionId: preloaded }
+                : {}),
             },
           },
         );
-      const subscribeStableReader = () =>
+      const subscribeStableReader = (
+        preloaded?: ReadonlyMap<string, PersistedSchedulerObservationSnapshot>,
+      ) =>
         runtime.scheduler.subscribe(
           readStable,
           {
@@ -1269,6 +1064,9 @@ describe("persistent scheduler observations", () => {
               space,
               pieceId: consumerPieceId,
               processGeneration: 0,
+              ...(preloaded !== undefined
+                ? { snapshotsByActionId: preloaded }
+                : {}),
             },
           },
         );
@@ -1297,16 +1095,22 @@ describe("persistent scheduler observations", () => {
       expect(generatedReaderRuns).toBe(1);
       expect(stableReaderRuns).toBe(1);
 
-      const dirtyConsumerSnapshots = (await persistedSchedulerSnapshots(
+      const persistedConsumerSnapshots = await persistedSchedulerSnapshots(
         runtime,
         consumerPieceId,
-      )).filter(hasPersistedDirtyState);
+      );
+      const dirtyConsumerSnapshots = persistedConsumerSnapshots.filter(
+        hasPersistedDirtyState,
+      );
       expect(
         dirtyConsumerSnapshots.map((snapshot) => snapshot.observation.actionId),
       ).toEqual(["readGenerated"]);
 
-      subscribeGeneratedReader();
-      subscribeStableReader();
+      const preloadedConsumerSnapshots = snapshotsByActionId(
+        persistedConsumerSnapshots,
+      );
+      subscribeGeneratedReader(preloadedConsumerSnapshots);
+      subscribeStableReader(preloadedConsumerSnapshots);
       await runtime.idle();
 
       expect(generatedReaderRuns).toBe(2);
@@ -1528,195 +1332,30 @@ describe("persistent scheduler observations", () => {
     }
   });
 
-  it("does not reattach an action when async initial rehydration resolves after unsubscribe", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
-    try {
-      const { runtime } = testRuntime;
-      const provider = runtime.storageManager.open(space) as {
-        listSchedulerActionSnapshots?: () => Promise<{
-          serverSeq: number;
-          snapshots: unknown[];
-        }>;
-      };
-      let resolveSnapshots:
-        | ((result: { serverSeq: number; snapshots: unknown[] }) => void)
-        | undefined;
-      provider.listSchedulerActionSnapshots = () =>
-        new Promise((resolve) => {
-          resolveSnapshots = resolve;
-        });
-
-      const canceledBeforeRehydrate = () => {};
-      const cancel = runtime.scheduler.subscribe(canceledBeforeRehydrate, {
-        reads: [],
-        shallowReads: [],
-        writes: [],
-      }, {
-        rehydrateFromStorage: {
-          space,
-          pieceId: "space:canceled-process",
-          processGeneration: 1,
-        },
-      });
-      cancel();
-
-      resolveSnapshots?.({
-        serverSeq: 5,
-        snapshots: [{
-          observationId: 1,
-          commitSeq: null,
-          observedAtSeq: 5,
-          observation: buildSchedulerActionObservation({
-            actionId: "canceledBeforeRehydrate",
-            actionKind: "computation",
-            branch: "",
-            pieceId: "space:canceled-process",
-            processGeneration: 1,
-            implementationFingerprint: schedulerImplementationFingerprint(
-              canceledBeforeRehydrate,
-              "canceledBeforeRehydrate",
-              undefined,
-            ),
-            runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
-            observedAtSeq: 5,
-            transactionKind: "action-run",
-            transactionLog: {
-              reads: [readAddress],
-              shallowReads: [],
-              writes: [],
-            },
-            currentKnownWrites: [writeAddress],
-          }),
-        }],
-      });
-      await runtime.idle();
-
-      expect(runtime.scheduler.getMightWrite(canceledBeforeRehydrate))
-        .toBeUndefined();
-      expect(
-        runtime.scheduler.getGraphSnapshot().nodes.some((node) =>
-          node.id === "canceledBeforeRehydrate"
-        ),
-      ).toBe(false);
-    } finally {
-      await disposeSchedulerTestRuntime(testRuntime);
-    }
-  });
-
-  it("does not apply async initial rehydration after an action becomes dirty", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
-    try {
-      const { runtime } = testRuntime;
-      const provider = runtime.storageManager.open(space) as {
-        listSchedulerActionSnapshots?: () => Promise<{
-          serverSeq: number;
-          snapshots: unknown[];
-        }>;
-      };
-      let resolveSnapshots:
-        | ((result: { serverSeq: number; snapshots: unknown[] }) => void)
-        | undefined;
-      provider.listSchedulerActionSnapshots = () =>
-        new Promise((resolve) => {
-          resolveSnapshots = resolve;
-        });
-
-      const dirtyBeforeRehydrate = () => {};
-      runtime.scheduler.subscribe(dirtyBeforeRehydrate, {
-        reads: [],
-        shallowReads: [],
-        writes: [],
-      }, {
-        rehydrateFromStorage: {
-          space,
-          pieceId: "space:dirty-process",
-          processGeneration: 1,
-        },
-      });
-
-      getStaleSchedulerInternals(runtime.scheduler).markDirty(
-        dirtyBeforeRehydrate,
-      );
-
-      resolveSnapshots?.({
-        serverSeq: 5,
-        snapshots: [{
-          observationId: 1,
-          commitSeq: null,
-          observedAtSeq: 5,
-          observation: buildSchedulerActionObservation({
-            actionId: "dirtyBeforeRehydrate",
-            actionKind: "computation",
-            branch: "",
-            pieceId: "space:dirty-process",
-            processGeneration: 1,
-            implementationFingerprint: schedulerImplementationFingerprint(
-              dirtyBeforeRehydrate,
-              "dirtyBeforeRehydrate",
-              undefined,
-            ),
-            runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
-            observedAtSeq: 5,
-            transactionKind: "action-run",
-            transactionLog: {
-              reads: [readAddress],
-              shallowReads: [],
-              writes: [],
-            },
-            currentKnownWrites: [writeAddress],
-          }),
-        }],
-      });
-      await runtime.idle();
-
-      expect(runtime.scheduler.isDirty(dirtyBeforeRehydrate)).toBe(true);
-      expect(runtime.scheduler.getMightWrite(dirtyBeforeRehydrate))
-        .toBeUndefined();
-    } finally {
-      await disposeSchedulerTestRuntime(testRuntime);
-    }
-  });
-
   it("falls back to the normal first run when fingerprints mismatch", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
-      const provider = testRuntime.runtime.storageManager.open(space) as {
-        listSchedulerActionSnapshots?: () => Promise<{
-          serverSeq: number;
-          snapshots: unknown[];
-        }>;
-      };
-      provider.listSchedulerActionSnapshots = () =>
-        Promise.resolve({
-          serverSeq: 5,
-          snapshots: [{
-            observationId: 1,
-            commitSeq: null,
-            observedAtSeq: 5,
-            observation: buildSchedulerActionObservation({
-              actionId: "stalePersistedAction",
-              actionKind: "effect",
-              branch: "",
-              pieceId: "space:stale-process",
-              processGeneration: 1,
-              implementationFingerprint: "impl:old",
-              runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
-              observedAtSeq: 5,
-              transactionKind: "action-run",
-              transactionLog: {
-                reads: [readAddress],
-                shallowReads: [],
-                writes: [],
-              },
-              currentKnownWrites: [writeAddress],
-            }),
-          }],
-        });
-
       let runs = 0;
       const stalePersistedAction = () => {
         runs++;
       };
+      const observation = buildSchedulerActionObservation({
+        actionId: "stalePersistedAction",
+        actionKind: "effect",
+        branch: "",
+        pieceId: "space:stale-process",
+        processGeneration: 1,
+        implementationFingerprint: "impl:old",
+        runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
+        observedAtSeq: 5,
+        transactionKind: "action-run",
+        transactionLog: {
+          reads: [readAddress],
+          shallowReads: [],
+          writes: [],
+        },
+        currentKnownWrites: [writeAddress],
+      });
 
       testRuntime.runtime.scheduler.subscribe(stalePersistedAction, {
         reads: [],
@@ -1728,6 +1367,10 @@ describe("persistent scheduler observations", () => {
           space,
           pieceId: "space:stale-process",
           processGeneration: 1,
+          snapshotsByActionId: new Map([[
+            "stalePersistedAction",
+            { observation },
+          ]]),
         },
       });
 
@@ -1741,21 +1384,9 @@ describe("persistent scheduler observations", () => {
     }
   });
 
-  it("falls back to the normal first run when auto-rehydration misses", async () => {
+  it("falls back to the normal first run when preloaded rehydration misses", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
-      const provider = testRuntime.runtime.storageManager.open(space) as {
-        listSchedulerActionSnapshots?: () => Promise<{
-          serverSeq: number;
-          snapshots: unknown[];
-        }>;
-      };
-      provider.listSchedulerActionSnapshots = () =>
-        Promise.resolve({
-          serverSeq: 5,
-          snapshots: [],
-        });
-
       let runs = 0;
       const missingPersistedAction = () => {
         runs++;
@@ -1771,6 +1402,7 @@ describe("persistent scheduler observations", () => {
           space,
           pieceId: "space:missing-process",
           processGeneration: 1,
+          snapshotsByActionId: new Map(),
         },
       });
 
