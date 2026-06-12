@@ -1,0 +1,24 @@
+import { computed, type Default, pattern } from "commonfabric";
+
+// FIXTURE: default-survives-path-lowering
+// Verifies: Default<…> annotations survive PATH-LOWERED captures. A scalar
+// property access (`settings.note`) lowers to `settings.key("note")` with a
+// leaf type node rebuilt from the checker type — which cannot carry the
+// default value V — so the injected lift capture schema silently dropped
+// `"default"`. (Longstanding, distinct from the capture-shrink loss: the
+// destructured-binding form `({ note })` preserved the authored node and
+// kept its default; the access-chain form did not.)
+interface Settings {
+  note: Default<string, "n/a">;
+  count: Default<number, 3>;
+}
+
+interface Input {
+  settings: Settings;
+}
+
+export default pattern<Input>(({ settings }) => {
+  const noteIsUnset = computed(() => settings.note === "n/a");
+  const countTimesTwo = computed(() => settings.count * 2);
+  return { noteIsUnset, countTimesTwo };
+});

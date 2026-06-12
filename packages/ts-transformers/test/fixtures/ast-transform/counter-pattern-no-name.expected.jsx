@@ -47,7 +47,7 @@ const decrement = handler(false as const satisfies __cfHelpers.JSONSchema, {
 });
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
-        value: number;
+        value: __cfHelpers.Default<number, 0>;
     };
 }, number>(({ state }) => state.value + 1, {
     type: "object",
@@ -56,7 +56,8 @@ const __cfLift_1 = __cfHelpers.lift<{
             type: "object",
             properties: {
                 value: {
-                    type: "number"
+                    type: "number",
+                    "default": 0
                 }
             },
             required: ["value"]

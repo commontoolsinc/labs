@@ -17,7 +17,7 @@ interface PatternState {
 }
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
-        count: number;
+        count: __cfHelpers.Default<number, 0>;
     };
 }, boolean>(({ state }) => state.count > 0, {
     type: "object",
@@ -26,7 +26,8 @@ const __cfLift_1 = __cfHelpers.lift<{
             type: "object",
             properties: {
                 count: {
-                    type: "number"
+                    type: "number",
+                    "default": 0
                 }
             },
             required: ["count"]

@@ -3,6 +3,10 @@ import type { TransformationContext } from "../core/mod.ts";
 import type { CaptureTreeNode } from "../utils/capture-tree.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 import {
+  getAuthoredDefaultValueForPropertyAccess,
+  wrapTypeNodeWithDefault,
+} from "./authored-defaults.ts";
+import {
   ensureTypeNodeRegistered,
   inferWidenedTypeFromExpression,
 } from "./type-inference.ts";
@@ -454,11 +458,110 @@ export function expressionToTypeNode(
     context.checker,
     context.options.state?.typeRegistry,
   );
+  // A property-access leaf (`settings.note`) whose authored declaration
+  // spells Default<T, V> has already lost V here — the checker type cannot
+  // carry it — which silently drops the property's `"default"` from injected
+  // capture schemas. Graft it back as `__cfHelpers.Default<base, V>` with
+  // the DefaultMarker brand stripped from the base: the schema pipeline
+  // already consumes that spelling, and the marker arms would otherwise
+  // print as synthesized `DefaultMarker<…>` references no consumer can
+  // resolve.
+  const authoredDefault = getAuthoredDefaultValueForPropertyAccess(
+    expr,
+    context.factory,
+    context.checker,
+  );
+  if (authoredDefault) {
+    const base = buildDefaultBaseTypeNode(
+      type,
+      context,
+      context.options.state?.typeRegistry,
+    );
+    const wrapped = wrapTypeNodeWithDefault(
+      base,
+      authoredDefault,
+      context.factory,
+    );
+    context.options.state?.typeRegistry?.set(wrapped, type);
+    return wrapped;
+  }
+
   return typeToTypeNodeWithRegistry(
     type,
     context,
     context.options.state?.typeRegistry,
   );
+}
+
+/**
+ * True for a "brand-only" object type that carries only symbol-keyed markers
+ * (e.g. `{ readonly [DEFAULT_MARKER]: T }`) — no string-keyed data
+ * properties. TypeScript encodes unique-symbol property names as "__@..."
+ * internally. (Mirrors the schema-generator formatters' convention.)
+ */
+function isBrandOnlyMarkerType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
+  if ((type.flags & ts.TypeFlags.Object) === 0) return false;
+  const props = checker.getPropertiesOfType(type);
+  if (props.length === 0) return true;
+  return props.every((prop) =>
+    String(prop.escapedName as string).startsWith("__@")
+  );
+}
+
+/**
+ * Build a type node for a `Default<T, V>` leaf's SEMANTIC base type: the
+ * checker resolves the alias to `T | (T & DefaultMarker<T>)`, and the marker
+ * arms are schema-invisible brands that only obscure the emitted annotation.
+ * Strips brand-only members/parts and builds the node from what remains;
+ * falls back to the full type when the shape is not marker-branded.
+ */
+function buildDefaultBaseTypeNode(
+  type: ts.Type,
+  context: TransformationContext,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.TypeNode {
+  const { checker, factory } = context;
+
+  const stripBrandParts = (member: ts.Type): ts.Type | undefined => {
+    if (isBrandOnlyMarkerType(member, checker)) return undefined;
+    if (member.isIntersection()) {
+      const kept = member.types.filter(
+        (part) => !isBrandOnlyMarkerType(part, checker),
+      );
+      // `T & DefaultMarker<T>` reduces to T; a multi-part remainder keeps
+      // its non-brand intersection, but synthesizing a new intersection
+      // Type is not possible here — only single-survivor reductions strip.
+      if (kept.length === 1) return kept[0];
+      if (kept.length === member.types.length) return member;
+      return undefined;
+    }
+    return member;
+  };
+
+  const members = type.isUnion() ? type.types : [type];
+  let changed = false;
+  const kept: ts.Type[] = [];
+  for (const member of members) {
+    const stripped = stripBrandParts(member);
+    if (stripped !== member) changed = true;
+    if (stripped === undefined) continue;
+    if (!kept.includes(stripped)) kept.push(stripped);
+  }
+
+  if (!changed || kept.length === 0) {
+    return typeToTypeNodeWithRegistry(type, context, typeRegistry);
+  }
+
+  const memberNodes = kept.map((member) =>
+    typeToTypeNodeWithRegistry(member, context, typeRegistry)
+  );
+  if (memberNodes.length === 1) return memberNodes[0]!;
+  const unionNode = factory.createUnionTypeNode(memberNodes);
+  typeRegistry?.set(unionNode, type);
+  return unionNode;
 }
 
 function getDestructuredBindingDeclaredTypeNode(
