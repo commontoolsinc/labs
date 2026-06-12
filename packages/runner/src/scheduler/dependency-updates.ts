@@ -13,10 +13,16 @@ export function setSchedulerDependencies(
   action: Action,
   log: ReactivityLog,
 ): {
+  previousLog: ReactivityLog;
   reads: IMemorySpaceAddress[];
   shallowReads: IMemorySpaceAddress[];
   log: ReactivityLog;
 } {
+  const previousLog = state.dependencies.get(action) ?? {
+    reads: [],
+    shallowReads: [],
+    writes: [],
+  };
   const reads = sortAndCompactPaths(log.reads);
   const shallowReads = sortAndCompactPaths(log.shallowReads, false);
   const schedulingLog: ReactivityLog = {
@@ -25,5 +31,5 @@ export function setSchedulerDependencies(
     writes: state.writeIndex.getSchedulingWrites(action) ?? [],
   };
   state.dependencies.set(action, schedulingLog);
-  return { reads, shallowReads, log: schedulingLog };
+  return { previousLog, reads, shallowReads, log: schedulingLog };
 }
