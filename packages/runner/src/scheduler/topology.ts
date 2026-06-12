@@ -50,7 +50,7 @@ export function topologicalSort(
   actions: Set<Action>,
   dependencies: WeakMap<Action, ReactivityLog>,
   mightWrite: WeakMap<Action, IMemorySpaceAddress[]>,
-  nodes?: Pick<NodeRegistry, "parentActionOf">,
+  nodes?: Pick<NodeRegistry, "get" | "parentActionOf">,
   dependents?: WeakMap<Action, Set<Action>>,
   getAdditionalWrites?: (
     action: Action,
@@ -79,6 +79,13 @@ export function topologicalSort(
         inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
       }
     }
+    addDeclaredReadOrderingEdges({
+      actions,
+      graph,
+      inDegree,
+      mightWrite,
+      nodes,
+    });
   } else {
     for (const actionA of actions) {
       const log = dependencies.get(actionA);
@@ -88,7 +95,7 @@ export function topologicalSort(
       for (const write of writes) {
         for (const actionB of actions) {
           if (actionA !== actionB && !graphA.has(actionB)) {
-            const logB = dependencies.get(actionB);
+            const logB = getOrderingReadLog(actionB, dependencies, nodes);
             if (!logB) continue;
             if (
               logB.reads.some(
@@ -117,6 +124,7 @@ export function topologicalSort(
       dependencies,
       graph,
       inDegree,
+      nodes,
       getAdditionalWrites,
     });
   }
@@ -200,6 +208,7 @@ function addAdditionalWriteEdges(state: {
   readonly dependencies: WeakMap<Action, ReactivityLog>;
   readonly graph: Map<Action, Set<Action>>;
   readonly inDegree: Map<Action, number>;
+  readonly nodes?: Pick<NodeRegistry, "get">;
   readonly getAdditionalWrites: (
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;
@@ -211,7 +220,11 @@ function addAdditionalWriteEdges(state: {
     const graphA = state.graph.get(actionA)!;
     for (const actionB of state.actions) {
       if (actionA === actionB || graphA.has(actionB)) continue;
-      const logB = state.dependencies.get(actionB);
+      const logB = getOrderingReadLog(
+        actionB,
+        state.dependencies,
+        state.nodes,
+      );
       if (!logB) continue;
       if (
         logB.reads.some(
@@ -234,6 +247,59 @@ function addAdditionalWriteEdges(state: {
       }
     }
   }
+}
+
+function addDeclaredReadOrderingEdges(state: {
+  readonly actions: Set<Action>;
+  readonly graph: Map<Action, Set<Action>>;
+  readonly inDegree: Map<Action, number>;
+  readonly mightWrite: WeakMap<Action, IMemorySpaceAddress[]>;
+  readonly nodes?: Pick<NodeRegistry, "get">;
+}): void {
+  if (!state.nodes) return;
+
+  for (const actionA of state.actions) {
+    const writes = state.mightWrite.get(actionA) ?? [];
+    if (writes.length === 0) continue;
+
+    const graphA = state.graph.get(actionA)!;
+    for (const actionB of state.actions) {
+      if (actionA === actionB || graphA.has(actionB)) continue;
+      const recordB = state.nodes.get(actionB);
+      if (
+        recordB?.status !== "never-ran" ||
+        recordB.declaredReads.length === 0
+      ) {
+        continue;
+      }
+      if (
+        recordB.declaredReads.some((read) =>
+          writes.some((write) =>
+            addressesShareEntity(read, write) &&
+            arraysOverlap(write.path, read.path)
+          )
+        )
+      ) {
+        graphA.add(actionB);
+        state.inDegree.set(actionB, (state.inDegree.get(actionB) || 0) + 1);
+      }
+    }
+  }
+}
+
+function getOrderingReadLog(
+  action: Action,
+  dependencies: WeakMap<Action, ReactivityLog>,
+  nodes?: Pick<NodeRegistry, "get">,
+): Pick<ReactivityLog, "reads" | "shallowReads"> | undefined {
+  const record = nodes?.get(action);
+  if (record?.status === "never-ran" && record.declaredReads.length > 0) {
+    return {
+      reads: record.declaredReads,
+      shallowReads: [],
+    };
+  }
+  return dependencies.get(action);
 }
 
 function addressesShareEntity(

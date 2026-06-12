@@ -1,10 +1,12 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { topologicalSort } from "./topology.ts";
 import type { Action, SettleIterationStats } from "./types.ts";
+import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import {
   collectMaterializerWritersForLog,
   type MaterializerIndexState,
 } from "./materializers.ts";
+import { readsOverlapWrites } from "./scheduling-writes.ts";
 import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
 import {
   collectPendingDependencyActions,
@@ -240,6 +242,7 @@ type PullSettleIteration = { settled: true } | {
   settled: false;
   workSet: Set<Action>;
   order: Action[];
+  declaredReadPulledActions: Set<Action>;
 };
 
 function buildPullIterationWorkSet(state: {
@@ -248,15 +251,20 @@ function buildPullIterationWorkSet(state: {
   readonly dependencies: SchedulerSettleLoopState["dependencies"];
   readonly materializerIndex: SchedulerSettleLoopState["materializerIndex"];
   readonly dependents: WeakMap<Action, Set<Action>>;
+  readonly getSchedulingWrites: (
+    action: Action,
+  ) => readonly IMemorySpaceAddress[] | undefined;
   readonly isLiveAction: (action: Action) => boolean;
   readonly collectPullIterationSeeds: (iterationSeeds: Set<Action>) => void;
 }): {
   workSet: Set<Action>;
   iterationSeeds: Set<Action>;
   materializerPromotionCount: number;
+  declaredReadPulledActions: Set<Action>;
 } {
   const workSet = new Set<Action>();
   const iterationSeeds = new Set<Action>();
+  const declaredReadPulledActions = new Set<Action>();
 
   for (const seed of state.initialSeeds) {
     iterationSeeds.add(seed);
@@ -274,13 +282,64 @@ function buildPullIterationWorkSet(state: {
   const beforePromotions = workSet.size;
   addInvalidMaterializerPromotions(state, iterationSeeds, workSet);
   const materializerPromotionCount = workSet.size - beforePromotions;
+  addDeclaredReadWriterClosure(state, workSet, declaredReadPulledActions);
   addLiveDownstreamClosure(state, workSet);
+  addDeclaredReadWriterClosure(state, workSet, declaredReadPulledActions);
 
   return {
     workSet,
     iterationSeeds,
     materializerPromotionCount,
+    declaredReadPulledActions,
   };
+}
+
+function addDeclaredReadWriterClosure(
+  state: {
+    readonly nodes: SchedulerSettleLoopState["nodes"];
+    readonly materializerIndex: SchedulerSettleLoopState["materializerIndex"];
+    readonly getSchedulingWrites: (
+      action: Action,
+    ) => readonly IMemorySpaceAddress[] | undefined;
+  },
+  workSet: Set<Action>,
+  declaredReadPulledActions: Set<Action>,
+): void {
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const readerAction of [...workSet]) {
+      const reader = state.nodes.get(readerAction);
+      if (
+        reader?.status !== "never-ran" ||
+        reader.declaredReads.length === 0
+      ) {
+        continue;
+      }
+
+      for (const writer of state.nodes.nodes()) {
+        if (writer.action === readerAction || workSet.has(writer.action)) {
+          continue;
+        }
+        if (!isInvalidOrNeverRan(writer)) continue;
+
+        const writes = [
+          ...(state.getSchedulingWrites(writer.action) ?? []),
+          ...(state.materializerIndex.getMaterializerWriteEnvelopes(
+            writer.action,
+          ) ?? []),
+        ];
+        if (
+          writes.length > 0 &&
+          readsOverlapWrites(reader.declaredReads, [], writes)
+        ) {
+          workSet.add(writer.action);
+          declaredReadPulledActions.add(writer.action);
+          changed = true;
+        }
+      }
+    }
+  }
 }
 
 function addInvalidMaterializerPromotions(
@@ -378,7 +437,11 @@ export async function runPullSchedulerSettleLoop(
 
     lastWorkSet = iteration.workSet;
     const iterationWorkSetSize = iteration.workSet.size;
-    const iterActionsRun = await runPullSettleOrder(state, iteration.order);
+    const iterActionsRun = await runPullSettleOrder(
+      state,
+      iteration.order,
+      iteration.declaredReadPulledActions,
+    );
     if (didAnyActionHitPassRunBudget(state, iteration.order)) {
       const budgetBackoff = maybeApplyBudgetBackoff(
         state,
@@ -467,11 +530,12 @@ function preparePullSettleIteration(
   initialSeeds: ReadonlySet<Action>,
   settleIter: number,
 ): PullSettleIteration {
-  const { workSet } = buildAndLogPullIterationWorkSet(
-    state,
-    initialSeeds,
-    settleIter,
-  );
+  const { workSet, declaredReadPulledActions } =
+    buildAndLogPullIterationWorkSet(
+      state,
+      initialSeeds,
+      settleIter,
+    );
 
   if (workSet.size === 0) {
     return { settled: true };
@@ -479,7 +543,7 @@ function preparePullSettleIteration(
 
   const order = orderPullWorkSet(state, workSet, settleIter);
 
-  return { settled: false, workSet, order };
+  return { settled: false, workSet, order, declaredReadPulledActions };
 }
 
 function buildAndLogPullIterationWorkSet(
@@ -490,6 +554,7 @@ function buildAndLogPullIterationWorkSet(
   workSet: Set<Action>;
   iterationSeeds: Set<Action>;
   materializerPromotionCount: number;
+  declaredReadPulledActions: Set<Action>;
 } {
   const buildPullWorkSetStart = performance.now();
   const result = buildPullIterationWorkSet({
@@ -498,6 +563,7 @@ function buildAndLogPullIterationWorkSet(
     dependencies: state.dependencies,
     materializerIndex: state.materializerIndex,
     dependents: state.dependents,
+    getSchedulingWrites: state.getSchedulingWrites,
     isLiveAction: state.isLiveAction,
     collectPullIterationSeeds: state.collectPullIterationSeeds,
   });
@@ -548,10 +614,15 @@ function orderPullWorkSet(
 async function runPullSettleOrder(
   state: SchedulerSettleLoopState,
   order: readonly Action[],
+  declaredReadPulledActions: ReadonlySet<Action>,
 ): Promise<number> {
   let actionsRun = 0;
   for (const fn of order) {
-    actionsRun += await runPullSettleAction(state, fn);
+    actionsRun += await runPullSettleAction(
+      state,
+      fn,
+      declaredReadPulledActions.has(fn),
+    );
   }
   return actionsRun;
 }
@@ -559,13 +630,16 @@ async function runPullSettleOrder(
 async function runPullSettleAction(
   state: SchedulerSettleLoopState,
   fn: Action,
+  isDeclaredReadPulled: boolean,
 ): Promise<number> {
   // Check if action is still scheduled (not unsubscribed during this tick).
   // Running an action might unsubscribe other actions in the workSet.
   const isStillScheduled = state.computations.has(fn) || state.effects.has(fn);
   if (!isStillScheduled) return 0;
 
-  if (!isPullSettleActionStillRunnable(state, fn)) return 0;
+  if (!isPullSettleActionStillRunnable(state, fn, isDeclaredReadPulled)) {
+    return 0;
+  }
   if (skipPullDelayedSettleAction(state, fn)) return 0;
 
   // Clean up explicit scheduling state before running. The node status is
@@ -648,11 +722,16 @@ function collectCurrentBackoffCandidates(
 function isPullSettleActionStillRunnable(
   state: SchedulerSettleLoopState,
   fn: Action,
+  isDeclaredReadPulled: boolean,
 ): boolean {
   const record = state.nodes.get(fn);
   return record !== undefined &&
     isInvalidOrNeverRan(record) &&
-    (state.isLiveAction(fn) || state.pending.has(fn)) &&
+    (
+      state.isLiveAction(fn) ||
+      state.pending.has(fn) ||
+      isDeclaredReadPulled
+    ) &&
     record.passRuns < PASS_RUN_BUDGET;
 }
 

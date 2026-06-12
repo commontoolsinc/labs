@@ -62,10 +62,7 @@ import type {
   URI,
 } from "./storage/interface.ts";
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
-import {
-  ignoreReadForScheduling,
-  markReadAsAttemptedWrite,
-} from "./scheduler.ts";
+import { ignoreReadForScheduling } from "./scheduler.ts";
 import { schedulerDependencyRead } from "./storage/reactivity-log.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
@@ -3402,35 +3399,8 @@ export class Runner {
       pattern,
     });
 
-    const populateDependencies = (depTx: IExtendedStorageTransaction) => {
-      logger.timeStart("action", "populateDependencies");
-      try {
-        if (reads.length > 0) {
-          this.populateDeclaredSchedulerReads(reads, depTx);
-        } else if (module.argumentSchema !== undefined) {
-          const inputsCell = this.runtime.getImmutableCell(
-            processCell.space,
-            inputs,
-            undefined,
-            depTx,
-          );
-          inputsCell.asSchema(module.argumentSchema!).get({
-            traverseCells: true,
-          });
-        }
-
-        for (const output of writes) {
-          this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
-            meta: markReadAsAttemptedWrite,
-          });
-        }
-      } finally {
-        logger.timeEnd("action", "populateDependencies");
-      }
-    };
-
     addCancel(
-      this.runtime.scheduler.subscribe(wrappedAction, populateDependencies, {
+      this.runtime.scheduler.subscribe(wrappedAction, {
         ...schedulerRehydration,
       }),
     );
@@ -3757,9 +3727,6 @@ export class Runner {
     const builtinIsEffect = isRawBuiltinResult(builtinResult)
       ? builtinResult.isEffect
       : undefined;
-    const builtinPopulateDependencies = isRawBuiltinResult(builtinResult)
-      ? builtinResult.populateDependencies
-      : undefined;
     const builtinDebounce = isRawBuiltinResult(builtinResult)
       ? builtinResult.debounce
       : undefined;
@@ -3811,8 +3778,8 @@ export class Runner {
       this.applyImplementationHash(action, impl.src);
     }
 
-    // Seed raw actions with their pattern/module/write metadata so pull-mode
-    // scheduling can discover pending computations before their first run.
+    // Annotate raw actions with their pattern/module/write metadata so
+    // scheduler registration can derive static surfaces and ordering hints.
     const staticRedirectWriteTargets = module.materializerWriteEnvelopes
       ? []
       : this.collectStaticRedirectWriteTargets(tx, outputCells);
@@ -3830,41 +3797,6 @@ export class Runner {
       pattern,
     });
 
-    // Create populateDependencies callback.
-    // If builtin provides custom reads, use that; otherwise read all inputs.
-    // Always register output writes so dependency ordering can find this
-    // computation when an effect or event reads its outputs.
-    const populateDependencies = (depTx: IExtendedStorageTransaction) => {
-      logger.timeStart("raw", "populateDependencies");
-      try {
-        // Capture read dependencies - use custom if provided, otherwise read all inputs
-        if (builtinPopulateDependencies) {
-          if (typeof builtinPopulateDependencies === "function") {
-            builtinPopulateDependencies(depTx);
-          } else {
-            // It's a ReactivityLog - reads are already captured, nothing to do
-            for (const read of builtinPopulateDependencies.reads) {
-              depTx.readOrThrow(read);
-            }
-          }
-        } else {
-          // Default: read all inputs
-          for (const input of inputCells) {
-            this.runtime.getCellFromLink(input, undefined, depTx)?.get();
-          }
-        }
-        // Always capture write dependencies by marking outputs as attempted writes
-        for (const output of outputCells) {
-          // Reading with markReadAsAttemptedWrite registers this as a write dependency
-          this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
-            meta: markReadAsAttemptedWrite,
-          });
-        }
-      } finally {
-        logger.timeEnd("raw", "populateDependencies");
-      }
-    };
-
     // isEffect can come from module options or from the builtin result
     const isEffect = module.isEffect ?? builtinIsEffect;
     const debounce = module.debounce ?? builtinDebounce;
@@ -3872,7 +3804,7 @@ export class Runner {
     const throttle = module.throttle ?? builtinThrottle;
 
     addCancel(
-      this.runtime.scheduler.subscribe(action, populateDependencies, {
+      this.runtime.scheduler.subscribe(action, {
         isEffect,
         debounce,
         noDebounce,

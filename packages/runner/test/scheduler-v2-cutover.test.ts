@@ -785,6 +785,71 @@ describe("scheduler v2 cutover fixtures", () => {
     expect(output.get()).toBe(0);
   });
 
+  it("does not trigger a never-ran node from declared reads alone", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "v2-cutover-declared-read-source",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "v2-cutover-declared-read-output",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runs = 0;
+    const sourceLink = source.getAsNormalizedFullLink();
+    const outputLink = output.getAsNormalizedFullLink();
+    const sourceAddress = toMemorySpaceAddress(sourceLink);
+    const writer = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        runs++;
+        output.withTx(actionTx).send(source.withTx(actionTx).get() * 10);
+      }) as Action,
+      {
+        reads: [sourceLink],
+        writes: [outputLink],
+      },
+    );
+    const internal = runtime.scheduler as unknown as {
+      nodes: {
+        get(action: Action): {
+          status: string;
+          declaredReads: unknown[];
+          invalidCauses: unknown[];
+        } | undefined;
+      };
+    };
+
+    const cancel = runtime.scheduler.subscribe(writer);
+
+    try {
+      await runtime.scheduler.idle();
+      const record = internal.nodes.get(writer);
+      expect(record?.status).toBe("never-ran");
+      expect(record?.declaredReads).toEqual([sourceAddress]);
+      expect(record?.invalidCauses).toEqual([]);
+      expect(runs).toBe(0);
+
+      source.withTx(tx).send(2);
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.scheduler.idle();
+
+      expect(internal.nodes.get(writer)?.invalidCauses).toEqual([]);
+      expect(runs).toBe(0);
+      expect(output.get()).toBe(0);
+    } finally {
+      cancel();
+    }
+  });
+
   it("matches v1 parent-link semantics across registration paths", async () => {
     const parentlessSource = runtime.getCell<number>(
       space,

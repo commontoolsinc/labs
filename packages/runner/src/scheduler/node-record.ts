@@ -12,6 +12,7 @@ export interface SchedulerNode {
   parentAction?: Action;
   children?: Set<Action>;
   status: NodeStatus;
+  declaredReads: IMemorySpaceAddress[];
   invalidCauses: IMemorySpaceAddress[];
   liveRefs: number;
   provisionalDemand: boolean;
@@ -66,6 +67,7 @@ export class NodeRegistry {
       action,
       kind,
       status: "never-ran",
+      declaredReads: [],
       invalidCauses: [],
       liveRefs: 0,
       provisionalDemand: false,

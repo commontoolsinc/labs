@@ -4766,3 +4766,63 @@ $ rg -n "scheduler\.subscribe\(" packages --glob '!packages/runner/**'
   - Expected noisy passing logs remain: scheduler write-surface warnings,
     deliberate event/retry error logs, createRef no-cause warnings, and the
     reload-rehydration transient `TypeError`.
+
+## 08/4.1-declared-read-ordering
+
+- [x] pending — removed JS/raw registration prefetch closures and moved
+  annotated `reads` into scheduler node records as never-ran ordering hints.
+- Reviewer poll:
+  - No new reviewer verdict was present after the latest `IMPLEMENTER STOP` at
+    the start of this work session.
+- Fix shape:
+  - `instantiateJavaScriptActionNode` and `instantiateRawNode` no longer build
+    per-node `populateDependencies` closures or pass them during scheduler
+    registration. The runner registers those actions with options only.
+  - Scheduler node records now store `declaredReads` derived from annotated
+    `reads`. Topological ordering and the settle work-set use these reads only
+    while a node is `never-ran`.
+  - Declared reads are not added to the trigger index and are not persistent
+    demand evidence. When a live never-ran reader's declared reads overlap an
+    invalid/never-ran writer's static surface, settle pulls that writer for the
+    current pass only so ordering can run producer before consumer.
+  - Existing output-less/no-callback registrations still enter
+    `pendingDependencyCollection` to preserve the existing no-output first-run
+    path, but no callback is installed or invoked.
+  - Added a cutover fixture proving that a never-ran node with overlapping
+    declared reads is not invalidated by a storage change from those declared
+    reads alone.
+- Debug notes:
+  - The first full-suite attempt after deleting registration prefetch exposed
+    two gaps: output-less/no-callback computations were skipped, and the raw
+    `wish({ query: computed(...) })` case could run before its computed input.
+  - The final `wish` fix keeps declared-read pull-through pass-local: it makes
+    the overlapping writer runnable for that settle pass without marking it
+    live, pending, demanded, or trigger-subscribed.
+- Recordings:
+  - `deno fmt` on the touched source/test files: passed (`Checked 7 files`).
+  - `deno lint` on the touched source/test files: passed (`Checked 7 files`).
+  - `deno check` on the touched source/test files: passed.
+  - Focused regression pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/ensure-piece-running.test.ts test/runner.test.ts test/wish.test.ts`:
+    passed, `9 passed (127 steps)`, `0 failed`, `2s`.
+  - Phase 4.1 focused pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts test/scheduler-cold-replica.test.ts
+    test/patterns-ifelse.test.ts test/navigate-handler.test.ts`: passed,
+    `7 passed (16 steps)`, `0 failed`, `1s`.
+  - Broad scheduler pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts test/scheduler-ordering.test.ts
+    test/scheduler-pull.test.ts test/scheduler-events.test.ts
+    test/scheduler-cold-replica.test.ts`: passed, `6 passed (67 steps)`,
+    `0 failed`, `2s`.
+  - `git diff --check`: passed.
+  - `cd packages/runner && deno task test`: passed,
+    `595 passed (3102 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m1s`.
+  - Expected noisy passing logs remain: scheduler write-surface warnings,
+    deliberate event/retry error logs, createRef no-cause warnings, and
+    traversal warnings.
