@@ -90,12 +90,7 @@ import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type ImplementationIdentity,
 } from "./cfc/types.ts";
-import { setVerifiedFunctionRegistrar } from "./sandbox/function-hardening.ts";
-import {
-  getVerifiedProvenance,
-  identityFromCanonicalSource,
-  recordVerifiedProvenance,
-} from "./harness/verified-provenance.ts";
+import { enterActionExecution } from "./builder/action-context.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
@@ -3522,59 +3517,18 @@ export class Runner {
       return fn(argument);
     };
 
-    // A verified execution context is proven by the resolved function's
-    // content-addressed provenance — the registration recorded during a
-    // verified evaluation. An unverified function (fallback-resolved or
-    // forged) has none, so it can never register dynamic artifacts as
-    // verified. (The former verifiedLoadId arm is gone with the loadId
-    // machinery: every function the legacy registry could hand out is an
-    // evaluation product and so carries provenance.)
-    const invokerProvenance = getVerifiedProvenance(fn);
-    if (invokerProvenance === undefined) {
-      return invoke();
-    }
-
-    const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
-      (implementationRef, implementation) => {
-        // Admit the dynamic artifact into the GLOBAL executable index under
-        // its minted content-derived ref, so its serialized module keeps the
-        // legacy `{ implementationRef, body omitted }` form — the
-        // live-closure rehydration channel (PR #4053 review finding). A
-        // `$implRef` is not an option here: a dynamic function frequently has
-        // NO canonical `fn.src` (action-time stacks don't resolve under tamed
-        // SES, only module-eval ones do), so the minted ref — which the
-        // builder hands this registrar directly — is the one deterministic,
-        // re-mintable key. Replaced wholesale by the synthetic-identity
-        // registrar when the legacy read path retires (design §5).
-        this.runtime.harness.registerDynamicVerifiedFunction?.(
-          implementationRef,
-          implementation as (input: any) => void,
-        );
-        // Content-addressed provenance for artifacts created DURING a
-        // verified action's execution: the identity derives from the new
-        // function's canonical source location (it was compiled as part of a
-        // verified module) when one resolves. The inherited bundle id keeps
-        // stored bundleId-only `writeAuthorizedBy` claims verifying for the
-        // dynamic artifact's own writes when CFC identity resolves through
-        // provenance.
-        const identity = identityFromCanonicalSource(
-          (implementation as { src?: string }).src,
-        );
-        if (identity) {
-          recordVerifiedProvenance(implementation, {
-            identity,
-            dynamic: true,
-            ...(invokerProvenance.bundleId
-              ? { bundleId: invokerProvenance.bundleId }
-              : {}),
-          });
-        }
-      },
-    );
+    // Builder artifacts cannot be minted inside a running action (identity
+    // E5): they would have no content-addressed identity, no provenance, and
+    // — closure-bearing — no serializable body, so nothing could ever
+    // rehydrate them. The transformer hoists every authored builder call to
+    // module scope; the window makes a mint that slipped through fail loudly
+    // at creation time (see builder/action-context.ts) instead of producing
+    // an unrehydratable value.
+    const exitActionExecution = enterActionExecution();
     try {
       return invoke();
     } finally {
-      restoreVerifiedFunctionRegistrar();
+      exitActionExecution();
     }
   }
 

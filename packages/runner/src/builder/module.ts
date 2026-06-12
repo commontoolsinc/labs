@@ -21,6 +21,7 @@ import {
   applyArgumentIfcToResult,
   connectInputAndOutputs,
 } from "./node-utils.ts";
+import { assertNotInActionExecution } from "./action-context.ts";
 import { moduleToJSON } from "./json-utils.ts";
 import { brandTrustedBuilderArtifact } from "./pattern-metadata.ts";
 import { getTopFrame } from "./pattern.ts";
@@ -116,6 +117,7 @@ export function createNodeFactory<T = any, R = any>(
 ): ModuleFactory<T, R> {
   // Attach source location and preview to function implementations for debugging
   if (typeof moduleSpec.implementation === "function") {
+    assertNotInActionExecution("lift");
     const implementation = prepareInspectableImplementation(
       moduleSpec.implementation,
     );
@@ -412,6 +414,7 @@ function handlerInternal<E, T>(
   // Attach source location and preview to handler function for debugging
   let implementationRef: string | undefined;
   if (typeof handler === "function") {
+    assertNotInActionExecution("handler");
     handler = prepareInspectableImplementation(handler);
     annotateFunctionDebugMetadata(handler);
     implementationRef = ensureImplementationRef(handler, "handler");
