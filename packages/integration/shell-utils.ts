@@ -101,7 +101,34 @@ export async function login(page: Page, identity: Identity): Promise<void> {
 
 export interface ShellIntegrationConfig {
   pipeConsole?: boolean;
+  /**
+   * When `true` (the default), `afterEach` throws if any browser
+   * `console.error` message was collected during the test.
+   *
+   * Set to `false` only to opt an entire suite out of the check when
+   * you have strong reason to believe every error is benign AND cannot
+   * be narrowly allowlisted.
+   */
   failOnConsoleError?: boolean;
+  /**
+   * Strings or RegExps that match console error messages that are known-
+   * benign for this suite.  A collected error is suppressed (does not
+   * cause `afterEach` to throw) when it matches ANY entry in this list.
+   *
+   * Prefer narrow patterns (exact substring or anchored regex) so that
+   * genuinely unexpected errors still surface.
+   *
+   * Example:
+   * ```ts
+   * new ShellIntegration({
+   *   allowedConsoleErrors: [
+   *     "Expected cross-origin rejection",
+   *     /^ResizeObserver loop/,
+   *   ],
+   * })
+   * ```
+   */
+  allowedConsoleErrors?: (string | RegExp)[];
 }
 
 export class ShellIntegration {
@@ -109,12 +136,13 @@ export class ShellIntegration {
   #page?: Page;
   #exceptions: Array<string> = [];
   #errorLogs: Array<string> = [];
-  #config: ShellIntegrationConfig;
+  #config: Required<ShellIntegrationConfig>;
 
   constructor(config: ShellIntegrationConfig = {}) {
     this.#config = {
       pipeConsole: config.pipeConsole ?? env.PIPE_CONSOLE,
-      failOnConsoleError: config.failOnConsoleError ?? false,
+      failOnConsoleError: config.failOnConsoleError ?? true,
+      allowedConsoleErrors: config.allowedConsoleErrors ?? [],
     };
   }
 
@@ -242,13 +270,31 @@ export class ShellIntegration {
   };
 
   #afterEach = () => {
+    // Uncaught page exceptions always fail the test, regardless of
+    // `failOnConsoleError`.  They indicate a JavaScript crash, not a
+    // deliberate console.error call.
     if (this.#exceptions.length > 0) {
       throw new Error(
-        `Exceptions recorded: \n${this.#exceptions.join("\n")}`,
+        `Uncaught browser exception(s):\n${
+          this.#exceptions.map((m) => `  ${m}`).join("\n")
+        }`,
       );
     }
-    if (this.#config.failOnConsoleError && this.#errorLogs.length > 0) {
-      throw new Error(`Errors logged: \n${this.#errorLogs.join("\n")}`);
+    if (this.#config.failOnConsoleError) {
+      const offending = this.#errorLogs.filter((msg) =>
+        !this.#config.allowedConsoleErrors.some((pattern) =>
+          typeof pattern === "string"
+            ? msg.includes(pattern)
+            : pattern.test(msg)
+        )
+      );
+      if (offending.length > 0) {
+        throw new Error(
+          `Browser console error(s) recorded during test:\n${
+            offending.map((m) => `  ${m}`).join("\n")
+          }`,
+        );
+      }
     }
   };
 
