@@ -26,6 +26,7 @@ export interface ExecuteContinuationState {
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
+  readonly hasPendingLineageHeadEvent: () => boolean;
   readonly resetLoopCounter: () => void;
   readonly setScheduled: (scheduled: boolean) => void;
   readonly resetSettlingTracker: () => void;
@@ -65,6 +66,15 @@ export function applyQuiescentContinuation(
 
     // Waiting on a future wake is quiescent from the scheduler's perspective,
     // so reset the non-settling tracker.
+    state.resetSettlingTracker();
+    return;
+  }
+
+  if (continuation.hasParkedHeadEvent) {
+    markNotScheduled(state);
+
+    // A lineage-parked head has no timer; the origin transaction's commit
+    // callback is the wake source.
     state.resetSettlingTracker();
     return;
   }

@@ -169,6 +169,7 @@ import {
   type ActionTimingState,
   getActionStats as getActionStatsFromState,
 } from "./scheduler/timing.ts";
+import { getCommitLocalSeq } from "./storage/commit-identity.ts";
 import {
   addSchedulerEventHandler,
   cancelEventQueueWake as cancelEventQueueWakeState,
@@ -180,6 +181,7 @@ import {
   type SchedulerEventExecutionState,
   type SchedulerEventQueueState,
 } from "./scheduler/events.ts";
+import { SpeculationLineage } from "./scheduler/lineage.ts";
 import { processPullQueuedEventDuringExecute } from "./scheduler/pull-events.ts";
 import {
   buildSchedulerGraphSnapshot,
@@ -261,6 +263,14 @@ export {
 export class Scheduler {
   private eventQueue: QueuedEvent[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
+  readonly lineage = new SpeculationLineage({
+    removeQueuedEvent: (event) => {
+      const index = this.eventQueue.indexOf(event);
+      if (index >= 0) this.eventQueue.splice(index, 1);
+    },
+    queueExecution: () => this.queueExecution(),
+    onError: (error) => logger.error("lineage", () => [error]),
+  });
 
   private pending = new Set<Action>();
   private dependencies = new WeakMap<Action, ReactivityLog>();
@@ -908,6 +918,10 @@ export class Scheduler {
       ) {
         // A queued event is parked behind a throttled dependency. Wait for the
         // wake timer to re-schedule the queue and then re-check.
+        this.idlePromises.push(resolve);
+      } else if (this.hasPendingLineageHeadEvent()) {
+        // A cross-space lineage head has no timer; its origin commit callback
+        // is the wake source, so idle must stay open until that callback runs.
         this.idlePromises.push(resolve);
       } else if (!this.scheduled) {
         if (this.hasRunnablePullWork()) {
@@ -2080,6 +2094,7 @@ export class Scheduler {
       getNextDebounceRunTime: (action) => this.getNextDebounceRunTime(action),
       getNextEligibleRunTime: (action) =>
         this.delays.getNextEligibleRunTime(action),
+      hasPendingLineageHeadEvent: () => this.hasPendingLineageHeadEvent(),
       resetLoopCounter: () => {
         this.loopCounter = new WeakMap();
       },
@@ -2119,6 +2134,9 @@ export class Scheduler {
           targetDoNotLoad,
           targetOpts,
         ),
+      recordLineageEvent: (originTx, queuedEvent) => {
+        this.lineage.recordEvent(originTx, queuedEvent);
+      },
     };
   }
 
@@ -2157,6 +2175,12 @@ export class Scheduler {
         this.delays.getNextEligibleRunTime(target),
       scheduleEventQueueWake: (notBefore) =>
         scheduleEventQueueWakeState(this.eventQueueWakeState, notBefore),
+      lineageStatus: (originTx) => this.lineage.originStatus(originTx),
+      releaseLineageEvent: (originTx, queuedEvent) => {
+        this.lineage.release(originTx, queuedEvent);
+      },
+      getOriginLocalSeq: (originTx, targetSpace) =>
+        getCommitLocalSeq(originTx.tx, targetSpace),
       snapshotDirtyDependencyTraceContext: (trace) =>
         snapshotDirtyDependencyTraceContext(
           this.dirtyDependencyCollectionState,
@@ -2413,6 +2437,14 @@ export class Scheduler {
 
   private hasDeferredDirtyEffectWork(): boolean {
     return hasDeferredDirtyEffectWorkState(this.pullSchedulingState);
+  }
+
+  private hasPendingLineageHeadEvent(): boolean {
+    const head = this.eventQueue[0];
+    if (head?.originTx === undefined) return false;
+    if (this.lineage.originStatus(head.originTx) !== "pending") return false;
+    return getCommitLocalSeq(head.originTx.tx, head.eventLink.space) ===
+      undefined;
   }
 
   private scheduleAffectedEffects(
