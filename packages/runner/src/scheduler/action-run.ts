@@ -213,8 +213,6 @@ export interface SchedulerActionRunState {
   ) => void;
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
   readonly actionTimingState: ActionTimingState;
-  readonly pullDemandedFirstRunComputations: WeakSet<Action>;
-  readonly pullDemandedContinuationComputations: WeakSet<Action>;
   readonly retries: WeakMap<Action, number>;
   readonly pending: Set<Action>;
   readonly actionRunTrace: ActionRunTraceEntry[];
@@ -361,8 +359,6 @@ function finalizeSchedulerAction(
   state.maybeAutoDebounce(args.action);
   state.markActionHasRun(args.action);
   state.markNodeHasRun(args.action);
-  state.pullDemandedFirstRunComputations.delete(args.action);
-  state.pullDemandedContinuationComputations.delete(args.action);
 
   // A RetryImmediately signal means the action referenced an inSpace("name")
   // target that has now been resolved into the runtime cache. Abort this run's

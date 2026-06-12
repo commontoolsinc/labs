@@ -25,7 +25,6 @@ export interface DependencyGraphState {
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;
   readonly isStale: (action: Action) => boolean;
-  readonly isDemandedPullComputation: (action: Action) => boolean;
   readonly queueExecution: () => void;
 }
 
@@ -94,6 +93,28 @@ export function groupReadsByEntity(
     entityReads.push(read);
   }
   return readsByEntity;
+}
+
+export function hasDependentPath(
+  dependentsByAction: WeakMap<Action, Set<Action>>,
+  from: Action,
+  to: Action,
+  visited = new Set<Action>(),
+): boolean {
+  if (from === to) return true;
+  if (visited.has(from)) return false;
+  visited.add(from);
+
+  const dependents = dependentsByAction.get(from);
+  if (!dependents) return false;
+
+  for (const dependent of dependents) {
+    if (hasDependentPath(dependentsByAction, dependent, to, visited)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export function collectDirectWritersForLog(state: {
@@ -254,7 +275,11 @@ export function registerDependentEdge(
 
   if (!alreadyDependent && state.isStale(writer)) {
     state.staleness.addStaleUpstream(writer, dependent);
-    if (state.isDemandedPullComputation(writer)) {
+    const writerRecord = state.nodes.get(writer);
+    if (
+      writerRecord?.kind === "computation" &&
+      isLive(state, writerRecord)
+    ) {
       state.queueExecution();
     }
   }

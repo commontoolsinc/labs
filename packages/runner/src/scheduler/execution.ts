@@ -317,7 +317,6 @@ export interface SchedulerSettleLoopState {
   readonly filterStats: { filtered: number; executed: number };
   readonly getLoopCounter: () => WeakMap<Action, number>;
   readonly runsThisExecute: Map<Action, number>;
-  readonly activePullDemandActions: WeakSet<Action>;
   readonly materializerIndex: MaterializerIndexState;
   readonly getSchedulingWrites: (
     action: Action,
@@ -353,7 +352,6 @@ export interface SchedulerSettleLoopState {
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
   readonly clearComputationDebounceState: (action: Action) => void;
   readonly conditionalEffectHasChangedInputs: (action: Action) => boolean;
-  readonly isPullDemandRootEffect: (action: Action) => boolean;
   readonly handleError: (error: Error, action: Action) => void;
   readonly runAction: (action: Action) => Promise<unknown>;
 }

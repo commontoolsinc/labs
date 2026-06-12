@@ -3954,3 +3954,74 @@ CT-1316, and the differing value is exact (registry `none` vs WeakMap
     `0 failed`.
   - `cd packages/runner && deno task test`: passed,
     `594 passed (3109 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m7s`.
+
+## 07/3b-demand-consumers
+
+- [x] 07/3b.3 — pending — replaced `demand.ts` consumers with node-record
+  liveness lookups and deleted the old demand module/sets.
+- Fix shape:
+  - `isDemandedPullComputation` now resolves to
+    `record.kind === "computation" && isLive(record)`.
+  - `isLiveEffect` now resolves to `record.kind === "effect"`.
+  - `isPullDemandRootEffect` now resolves to an effect record with an empty
+    static scheduling surface.
+  - First-run demand context now resolves to
+    `record.status === "never-ran" && record.provisionalDemand`.
+  - Deleted `activePullDemandActions`,
+    `pullDemandedFirstRunComputations`, and
+    `pullDemandedContinuationComputations`.
+  - Deleted `packages/runner/src/scheduler/demand.ts`.
+  - Moved `hasDependentPath` to `dependency-graph.ts` because it is graph
+    traversal, not demand state.
+  - Kept the transitional `markPullDemandContinuation` hook required until 3c,
+    but it now sets node provisional demand through the liveness helper.
+  - Unsubscribe clears provisional demand before removing the node so
+    re-subscribing the same action object cannot inherit stale demand.
+- Test fallout:
+  - Initial focused gate failed at type-check because
+    `test/scheduler-test-utils.ts` still imported deleted
+    `scheduler/demand.ts`.
+  - Updated the test utility to call the scheduler's liveness-backed internal
+    demand helper and updated the continuation-unsubscribe test to use the 3b.3
+    provisional-demand alias.
+- Contract greps:
+  - `rg -n "demand\\.ts" packages/runner/src`: no matches.
+  - `rg -n
+    "activePullDemandActions|pullDemandedFirstRunComputations|pullDemandedContinuationComputations|PullDemandState|pullDemandState"
+    packages/runner/src packages/runner/test`: no matches.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/action-run.ts
+    packages/runner/src/scheduler/dependency-graph.ts
+    packages/runner/src/scheduler/execution.ts
+    packages/runner/src/scheduler/pull-execution.ts
+    packages/runner/src/scheduler/staleness.ts
+    packages/runner/src/scheduler/subscriptions.ts
+    packages/runner/src/scheduler/write-propagation.ts
+    packages/runner/test/scheduler-test-utils.ts
+    packages/runner/test/scheduler-pull.test.ts`: passed
+    (`Checked 10 files`).
+  - `deno lint` on the same 10 files: passed (`Checked 10 files`).
+  - `deno check` on the same 10 files: passed.
+  - Focused scheduler gate:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull*.test.ts test/scheduler-v2-cutover.test.ts
+    test/scheduler-effects.test.ts test/scheduler-ordering.test.ts
+    test/scheduler-timing.test.ts
+    test/patterns-derive-return-pattern.test.ts`: passed,
+    `11 passed (132 steps)`, `0 failed`.
+  - `deno bench --allow-read --allow-write --allow-net --allow-ffi
+    --allow-env --no-check test/scheduler-demand-roots.bench.ts`: passed.
+    Compared with the latest recorded baseline in this document:
+    - `Scheduler demand roots - effect demand root`: 142.0 ms -> 138.3 ms
+      (-2.6%).
+    - `Scheduler demand roots - event demand root`: 138.0 ms -> 130.7 ms
+      (-5.3%).
+    - `Scheduler demand roots - mixed effect and event roots`: 167.5 ms ->
+      175.1 ms (+4.5%).
+    - `Scheduler demand roots - parent clears generated children`: 79.4 ms ->
+      80.0 ms (+0.8%).
+    - No case exceeded the >10% regression STOP threshold.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3109 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m7s`.
