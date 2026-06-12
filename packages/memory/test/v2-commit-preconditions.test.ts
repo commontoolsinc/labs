@@ -6,7 +6,9 @@ import {
   type Engine,
   open,
   PreconditionFailedError,
+  ProtocolError,
   read,
+  type SchedulerActionObservation,
 } from "../v2/engine.ts";
 import { Server } from "../v2/server.ts";
 import { connect, loopback } from "../v2/client.ts";
@@ -179,6 +181,169 @@ Deno.test("commits without preconditions are unaffected", async () => {
     assertEquals(read(engine, { id: "entity:plain" }), {
       value: { ok: true },
     });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+const observationOnlyFixture = (
+  localSeq: number,
+): SchedulerActionObservation => ({
+  version: 1,
+  ownerSpace: undefined,
+  branch: "main",
+  pieceId: "piece:preconditions",
+  processGeneration: 1,
+  actionId: "pattern.tsx:handler:precondition-test",
+  actionKind: "event-handler",
+  implementationFingerprint: "impl:preconditions",
+  runtimeFingerprint: "runtime:test",
+  observedAtSeq: 0,
+  observedAtLocalSeq: localSeq,
+  transactionKind: "action-run",
+  reads: [],
+  shallowReads: [],
+  actualChangedWrites: [],
+  currentKnownWrites: [],
+  declaredWrites: [],
+  materializerWriteEnvelopes: [],
+  status: "success",
+});
+
+Deno.test("precondition-only commit validates and records against a committed origin", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:lineage",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:origin",
+          value: toEntityDocument({ ok: true }),
+        }],
+      },
+    });
+
+    // A descendant handler that performed no semantic writes still commits
+    // its origin-committed precondition: the engine must validate it and
+    // record the localSeq instead of rejecting the commit as empty.
+    const followUp = applyCommit(engine, {
+      sessionId: "session:lineage",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        preconditions: [{
+          kind: "origin-committed",
+          originLocalSeq: 1,
+        }],
+        operations: [],
+      },
+    });
+
+    assertEquals(followUp.seq, 2);
+    assertEquals(followUp.revisions, []);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("precondition-only commit rejects a missing origin with PreconditionFailedError", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const rejected = assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:lineage",
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            preconditions: [{
+              kind: "origin-committed",
+              originLocalSeq: 99,
+            }],
+            operations: [],
+          },
+        }),
+      PreconditionFailedError,
+      "origin commit not committed",
+    );
+    assertEquals(rejected.precondition, "origin-committed");
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("observation-only commit still validates preconditions", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    // Preconditions must be validated before the observation-only fast path;
+    // otherwise a descendant of an uncommitted origin can persist its
+    // scheduler observation.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:lineage",
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            preconditions: [{
+              kind: "origin-committed",
+              originLocalSeq: 99,
+            }],
+            operations: [],
+            schedulerObservation: observationOnlyFixture(1),
+          },
+        }),
+      PreconditionFailedError,
+      "origin commit not committed",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("malformed preconditions are rejected with ProtocolError", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const malformed: unknown[] = [
+      null,
+      "origin-committed",
+      { kind: 42 },
+      { kind: "origin-committed", originLocalSeq: "1" },
+      { kind: "origin-committed", originLocalSeq: 1.5 },
+      { kind: "origin-committed" },
+    ];
+    for (const precondition of malformed) {
+      assertThrows(
+        () =>
+          applyCommit(engine, {
+            sessionId: "session:lineage",
+            commit: {
+              localSeq: 1,
+              reads: { confirmed: [], pending: [] },
+              // deno-lint-ignore no-explicit-any
+              preconditions: [precondition as any],
+              operations: [{
+                op: "set",
+                id: "entity:should-not-commit",
+                value: toEntityDocument({ ok: false }),
+              }],
+            },
+          }),
+        ProtocolError,
+      );
+    }
+    assertEquals(read(engine, { id: "entity:should-not-commit" }), null);
   } finally {
     close(engine);
     await Deno.remove(path);

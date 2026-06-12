@@ -3113,15 +3113,21 @@ const applyCommitTransaction = (
       "memory v2 schedulerObservationBatch commits must not include semantic operations",
     );
   }
+  const hasPreconditions = (commit.preconditions?.length ?? 0) > 0;
   if (
     commit.operations.length === 0 && !schedulerObservation &&
-    !hasSchedulerObservationBatch
+    !hasSchedulerObservationBatch && !hasPreconditions
   ) {
     throw new Error("memory v2 commit requires at least one operation");
   }
 
   const branch = commit.branch ?? DEFAULT_BRANCH;
   ensureActiveBranch(engine, branch);
+
+  // Preconditions gate every commit shape, including the observation-only
+  // fast paths below — a descendant of an uncommitted origin must not
+  // persist anything, observations included.
+  validateCommitPreconditions(engine, sessionKey, commit);
 
   if (commit.operations.length === 0 && hasSchedulerObservationBatch) {
     return applySchedulerObservationBatchCommit(engine, {
@@ -3164,7 +3170,6 @@ const applyCommitTransaction = (
     };
   }
 
-  validateCommitPreconditions(engine, sessionKey, commit);
   validateConfirmedReads(engine, branch, commit, { principal, sessionId });
   const resolvedPendingReads = resolvePendingReads(
     engine,
@@ -3414,11 +3419,24 @@ const validateCommitPreconditions = (
   commit: ClientCommit,
 ): void => {
   for (const precondition of commit.preconditions ?? []) {
+    // Wire input: validate the shape deterministically so malformed entries
+    // surface as ProtocolError instead of a TypeError-turned-TransactionError.
+    if (
+      precondition === null || typeof precondition !== "object" ||
+      Array.isArray(precondition)
+    ) {
+      throw new ProtocolError("malformed commit precondition: not an object");
+    }
     if (precondition.kind !== "origin-committed") {
       throw new ProtocolError(
         `unsupported commit precondition: ${
           String((precondition as { kind?: unknown }).kind)
         }`,
+      );
+    }
+    if (!Number.isInteger(precondition.originLocalSeq)) {
+      throw new ProtocolError(
+        "malformed origin-committed precondition: originLocalSeq must be an integer",
       );
     }
 
