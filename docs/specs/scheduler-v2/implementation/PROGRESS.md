@@ -1634,7 +1634,7 @@ is green on top of the fix.
 
 ## 03/phase-end
 
-- [x] pending — WO03 exit checklist self-check complete.
+- [x] 6ebfbff2d — WO03 exit checklist self-check complete.
 - Benchmarks: none listed in WO03.
 - Recordings:
   - `cd packages/runner && deno task test`: passed,
@@ -1662,3 +1662,27 @@ is green on top of the fix.
     `eventQueue.push`, processing remains head-only, retry uses the existing
     `unshift` path for the same event id, and lineage failure only removes
     failed descendants or shifts a failed head without reordering survivors.
+
+## 04/step-1
+
+- [x] pending — one handler per event link; replacement warns and the last
+  registration wins.
+- Deviations: used `scheduler-events.test.ts` because the file now type-checks
+  cleanly; asserted the warn through `getLoggerCountsBreakdown`.
+- Red-first recordings:
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-events.test.ts`: failed as expected before the fix:
+    replacement fixture expected first handler count `0`, actual `1`.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler/events.ts
+    packages/runner/test/scheduler-events.test.ts`: passed
+    (`Checked 2 files`).
+  - `deno lint` on the same two files: passed (`Checked 2 files`).
+  - `deno check` on the same two files: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-events.test.ts`: passed, `1 passed (15 steps)`,
+    `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `590 passed (3091 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m5s`.

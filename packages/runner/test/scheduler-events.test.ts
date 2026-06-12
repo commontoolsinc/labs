@@ -1,6 +1,10 @@
 // Scheduler event handling tests.
 
 import {
+  getLoggerCountsBreakdown,
+  resetAllLoggerCounts,
+} from "@commonfabric/utils/logger";
+import {
   afterEach,
   beforeEach,
   createSchedulerTestRuntime,
@@ -218,6 +222,61 @@ describe("event handling", () => {
 
     expect(eventCount).toBe(1);
     expect(eventCell.get()).toBe(1);
+  });
+
+  it("replaces an existing handler for the same event link", async () => {
+    resetAllLoggerCounts();
+    const eventCell = runtime.getCell<number>(
+      space,
+      "single handler per link event",
+      undefined,
+      tx,
+    );
+    const payloads = runtime.getCell<string[]>(
+      space,
+      "single handler per link payloads",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    payloads.set([]);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let firstCount = 0;
+    let secondCount = 0;
+    const firstHandler: EventHandler = (handlerTx, event) => {
+      firstCount++;
+      const current = payloads.withTx(handlerTx).get();
+      payloads.withTx(handlerTx).set([...current, `first:${event}`]);
+    };
+    const secondHandler: EventHandler = (handlerTx, event) => {
+      secondCount++;
+      const current = payloads.withTx(handlerTx).get();
+      payloads.withTx(handlerTx).set([...current, `second:${event}`]);
+    };
+
+    runtime.scheduler.addEventHandler(
+      firstHandler,
+      eventCell.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.addEventHandler(
+      secondHandler,
+      eventCell.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 42);
+
+    await waitForSignal(
+      runtime.idle(),
+      "replacement handler event did not settle",
+    );
+
+    expect(firstCount).toBe(0);
+    expect(secondCount).toBe(1);
+    expect(payloads.get()).toEqual(["second:42"]);
+    expect(
+      getLoggerCountsBreakdown().scheduler?.["event-handler-replaced"]?.warn,
+    ).toBe(1);
   });
 
   it("should handle events with nested paths", async () => {
