@@ -25,6 +25,10 @@ type PullSettleIteration = { settled: true } | {
 function buildPullIterationWorkSet(state: {
   readonly initialSeeds: ReadonlySet<Action>;
   readonly settleIter: number;
+  readonly dirty: ReadonlySet<Action>;
+  readonly effects: ReadonlySet<Action>;
+  readonly dependents: WeakMap<Action, Set<Action>>;
+  readonly isLiveAction: (action: Action) => boolean;
   readonly collectPullIterationSeeds: (iterationSeeds: Set<Action>) => void;
   readonly collectDirtyDependencies: (
     seed: Action,
@@ -79,11 +83,43 @@ function buildPullIterationWorkSet(state: {
     state.collectDirtyDependencies(seed, workSet, dirtyDependencyMemo);
   }
 
+  const dirtyDependencyCount = workSet.size - iterationSeeds.size;
+  addLiveDownstreamEffectClosure(state, workSet);
+
   return {
     workSet,
     iterationSeeds,
-    dirtyDependencyCount: workSet.size - iterationSeeds.size,
+    dirtyDependencyCount,
   };
+}
+
+function addLiveDownstreamEffectClosure(state: {
+  readonly dirty: ReadonlySet<Action>;
+  readonly effects: ReadonlySet<Action>;
+  readonly dependents: WeakMap<Action, Set<Action>>;
+  readonly isLiveAction: (action: Action) => boolean;
+}, workSet: Set<Action>): void {
+  const visited = new Set<Action>();
+  const dirtyRoots = [...workSet].filter((action) => state.dirty.has(action));
+
+  const visit = (action: Action): void => {
+    if (visited.has(action)) return;
+    visited.add(action);
+
+    const dependents = state.dependents.get(action);
+    if (!dependents) return;
+
+    for (const dependent of dependents) {
+      if (!state.effects.has(dependent)) continue;
+      if (!state.isLiveAction(dependent)) continue;
+      workSet.add(dependent);
+      visit(dependent);
+    }
+  };
+
+  for (const action of dirtyRoots) {
+    visit(action);
+  }
 }
 
 export async function runPullSchedulerSettleLoop(
@@ -226,6 +262,10 @@ function buildAndLogPullIterationWorkSet(
   const result = buildPullIterationWorkSet({
     initialSeeds,
     settleIter,
+    dirty: state.dirty,
+    effects: state.effects,
+    dependents: state.dependents,
+    isLiveAction: state.isLiveAction,
     collectPullIterationSeeds: state.collectPullIterationSeeds,
     collectDirtyDependencies: state.collectDirtyDependencies,
     collectDirtyDependenciesFromTraversalRoot:

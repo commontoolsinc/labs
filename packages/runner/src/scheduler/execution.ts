@@ -352,6 +352,7 @@ export interface SchedulerSettleLoopState {
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
   readonly clearComputationDebounceState: (action: Action) => void;
   readonly conditionalEffectHasChangedInputs: (action: Action) => boolean;
+  readonly isLiveAction: (action: Action) => boolean;
   readonly handleError: (error: Error, action: Action) => void;
   readonly runAction: (action: Action) => Promise<unknown>;
 }
