@@ -90,7 +90,7 @@ import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type ImplementationIdentity,
 } from "./cfc/types.ts";
-import { enterActionExecution } from "./builder/action-context.ts";
+import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import { getArtifactEntryRef } from "./builder/pattern-metadata.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -2258,18 +2258,27 @@ export class Runner {
     //    builder-made — host pseudo-modules included) and run its
     //    implementation;
     // 2. the module's LIVE implementation, when it carries trust-gated
-    //    identity facts — module-eval provenance, or a host/artifact entry
-    //    ref (both written only behind trust gates). This is the in-memory
-    //    instantiation path: a trusted module that never round-tripped
-    //    through JSON has no `$implRef` property, but its function IS the
-    //    artifact (pre-E5 this resolved through the legacy ref index —
-    //    same function, different lookup);
+    //    identity facts — module-eval provenance (process-global,
+    //    content-derived), or an entry ref THIS runtime's engine resolves to
+    //    the same function (host pseudo-modules are registry-scoped: a host
+    //    trust grant in another runtime of the same process proves nothing
+    //    here). This is the in-memory instantiation path: a trusted module
+    //    that never round-tripped through JSON has no `$implRef` property,
+    //    but its function IS the artifact (pre-E5 this resolved through the
+    //    legacy ref index — same function, different lookup);
     // 3. the stringified-source fallback (SES-sandboxed, CFC-unverified) —
     //    test-built / never-verified modules. A forged fn carries neither
     //    provenance nor an entry ref, so it always lands here.
+    const liveEntryRef = typeof module.implementation === "function"
+      ? getArtifactEntryRef(module.implementation)
+      : undefined;
     const liveTrusted = typeof module.implementation === "function" &&
         (getVerifiedProvenance(module.implementation) !== undefined ||
-          getArtifactEntryRef(module.implementation) !== undefined)
+          (liveEntryRef !== undefined &&
+            this.runtime.harness.getVerifiedImplementation?.(
+                liveEntryRef.identity,
+                liveEntryRef.symbol,
+              ) === module.implementation))
       ? module.implementation as (...args: any[]) => any
       : undefined;
     const fn: (...args: any[]) => any = this.resolveByImplRef(module) ??
@@ -3530,13 +3539,9 @@ export class Runner {
     // rehydrate them. The transformer hoists every authored builder call to
     // module scope; the window makes a mint that slipped through fail loudly
     // at creation time (see builder/action-context.ts) instead of producing
-    // an unrehydratable value.
-    const exitActionExecution = enterActionExecution();
-    try {
-      return invoke();
-    } finally {
-      exitActionExecution();
-    }
+    // an unrehydratable value. The window rides AsyncLocalStorage, so an
+    // async action's continuations stay covered past its awaits.
+    return runInActionExecution(invoke);
   }
 
   /**

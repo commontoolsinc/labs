@@ -384,12 +384,25 @@ export function moduleToJSON(module: Module) {
     const provenance = module.type === "javascript"
       ? getVerifiedProvenance(implementation)
       : undefined;
+    // The entry-ref fallback (host pseudo-modules) is REGISTRY-scoped, unlike
+    // provenance (process-global, content-derived): emit it only when the
+    // serializing frame's OWN engine resolves the ref to this very function —
+    // a host trust grant in another runtime of the same process proves
+    // nothing here (Codex/cubic P1 on the E5 PR).
+    const entryRefCandidate =
+      provenance?.symbol === undefined && module.type === "javascript"
+        ? getArtifactEntryRef(implementation)
+        : undefined;
+    const entryRefValue = entryRefCandidate !== undefined &&
+        frame?.runtime?.harness?.getVerifiedImplementation?.(
+            entryRefCandidate.identity,
+            entryRefCandidate.symbol,
+          ) === implementation
+      ? entryRefCandidate
+      : undefined;
     const implRefValue = (provenance?.symbol
       ? { identity: provenance.identity, symbol: provenance.symbol }
-      : undefined) ??
-      (module.type === "javascript"
-        ? getArtifactEntryRef(implementation)
-        : undefined);
+      : undefined) ?? entryRefValue;
     const implRef = implRefValue ? { $implRef: implRefValue } : {};
     const preview = (implementation as { preview?: string }).preview ??
       implementation.toString().slice(0, 200);

@@ -7,6 +7,7 @@ import { Runtime } from "../src/runtime.ts";
 import type { Module } from "../src/builder/types.ts";
 import type { toJSON } from "../src/builder/types.ts";
 import { moduleToJSON } from "../src/builder/json-utils.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
 
 /**
@@ -107,6 +108,42 @@ describe("host-trusted values ride a pseudo-module", () => {
       $implRef: { identity: string; symbol: string };
     };
     expect(first.$implRef).toEqual(second.$implRef);
+  });
+
+  it("a host ref from ANOTHER runtime is not trusted here (per-engine scoping)", async () => {
+    // Host identities are session/registry-scoped: the entry-ref side table
+    // is process-wide, but trust facts must not leak across runtimes in one
+    // process (Codex/cubic P1 on the E5 PR). A module whose function was
+    // host-trusted only in runtime A must NOT serialize body-less in runtime
+    // B, and B must not execute the live closure directly.
+    const otherStorage = StorageManager.emulate({ as: signer });
+    const other = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: otherStorage,
+    });
+    try {
+      const base = 41;
+      const module = hostModule((value) => (value as number) + base);
+      // Trusted in the OTHER runtime only.
+      other.unsafeTrustModule(module, { reason: "host pseudo-module test" });
+
+      // Serialize under THIS suite's primary runtime's frame: it never
+      // granted host trust, so its engine cannot prove the ref and the
+      // serialization must keep the stringified body and emit no host
+      // $implRef.
+      const frame = pushFrame({ runtime } as never);
+      let json: { $implRef?: unknown; implementation?: unknown };
+      try {
+        json = (module as Module & toJSON).toJSON() as typeof json;
+      } finally {
+        popFrame(frame);
+      }
+      expect(json.$implRef).toBeUndefined();
+      expect(typeof json.implementation).toBe("string");
+    } finally {
+      await other.dispose();
+      await otherStorage.close();
+    }
   });
 
   it("host trust never yields a verified CFC identity (fail closed)", () => {

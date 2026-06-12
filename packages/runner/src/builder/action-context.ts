@@ -1,3 +1,6 @@
+import { isDeno } from "@commonfabric/utils/env";
+import { getTopFrame } from "./pattern.ts";
+
 /**
  * Ambient marker for "a runner Action (lift/handler invocation) is currently
  * executing user code" — the window in which minting NEW builder artifacts is
@@ -13,24 +16,72 @@
  * loudly at creation time instead of producing a value that cannot be
  * rehydrated.
  *
- * Synchronous push/pop — action invocation never awaits while user code runs.
+ * The window rides `AsyncLocalStorage`, so an ASYNC action's continuations
+ * stay covered past its awaits (Codex/cubic P1 on the E5 PR). Module
+ * evaluation that interleaves while an action is suspended must stay legal:
+ * engine evaluation pushes a frame carrying `sourceLocationContext` and is
+ * fully synchronous (no microtask can interleave inside it), so "a module-
+ * eval frame is on top" precisely identifies the transformer's module-scope
+ * mints — including under the non-Deno fallback store, whose window
+ * conservatively spans the whole pending action promise.
  */
-let actionExecutionDepth = 0;
+interface ActionWindowStore {
+  getStore(): true | undefined;
+  run<R>(value: true, fn: () => R): R;
+}
 
-/** Enter the action-execution window. Returns the matching exit. */
-export function enterActionExecution(): () => void {
-  actionExecutionDepth++;
-  return () => {
-    actionExecutionDepth--;
-  };
+class FallbackActionWindowStore implements ActionWindowStore {
+  #store: true | undefined;
+
+  getStore(): true | undefined {
+    return this.#store;
+  }
+
+  run<R>(value: true, fn: () => R): R {
+    const previous = this.#store;
+    this.#store = value;
+    try {
+      const result = fn();
+      if (result instanceof Promise) {
+        return result.finally(() => {
+          this.#store = previous;
+        }) as R;
+      }
+      this.#store = previous;
+      return result;
+    } catch (error) {
+      this.#store = previous;
+      throw error;
+    }
+  }
+}
+
+const ActionWindowStorage = isDeno()
+  ? (await import("node:async_hooks"))
+    .AsyncLocalStorage as new () => ActionWindowStore
+  : FallbackActionWindowStore;
+
+const actionWindow = new ActionWindowStorage();
+
+/**
+ * Run an action's user code inside the no-minting window. Async results keep
+ * the window open across their awaits.
+ */
+export function runInActionExecution<R>(fn: () => R): R {
+  return actionWindow.run(true, fn);
 }
 
 /**
  * Throw when called inside a running action: builder artifacts must be
- * defined at module level. Called by the lift/handler/pattern mint sites.
+ * defined at module level. Called by the lift/handler mint sites. Mints under
+ * a module-evaluation frame (`sourceLocationContext`) are the transformer's
+ * legal module-scope output and pass.
  */
 export function assertNotInActionExecution(kind: string): void {
-  if (actionExecutionDepth > 0) {
+  if (
+    actionWindow.getStore() === true &&
+    getTopFrame()?.sourceLocationContext === undefined
+  ) {
     throw new Error(
       `Cannot create a ${kind} inside a running action: define the ${kind} ` +
         `at module level. (If this code came from pattern source, this may ` +
