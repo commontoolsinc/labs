@@ -1567,7 +1567,7 @@ is green on top of the fix.
 
 ## REVIEWER RESOLUTION — 03/step-6 stale-origin lineage fix
 
-- [x] pending — lineage now initializes records from already-settled origin
+- [x] e9a27d0a4 — lineage now initializes records from already-settled origin
   transaction status before registering commit callbacks.
 - Deviations: none. Verified the missing caveat from 03/step-4 empirically:
   `addCommitCallback` does not fire retroactively for already-settled
@@ -1606,3 +1606,28 @@ is green on top of the fix.
   - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
     --allow-read --allow-write=/tmp,/var/folders --allow-run=git
     test/llm-dialog.test.ts`: passed, `1 passed (17 steps)`, `0 failed`.
+
+## 03/step-6
+
+- [x] pending — handler-launched piece registrations are stopped when the
+  launching handler transaction fails permanently.
+- Deviations: restored the reviewer-approved Step 6 work after the
+  settled-origin fixup; stash conflict resolution in
+  `scheduler-event-lineage.test.ts` kept both settled-origin fixtures and the
+  Step 6 piece-stop fixture.
+- Red-first recordings:
+  - Before the Step 6 hook, `runtime.runner.cancels.size` expected the pre-send
+    baseline `1`, actual `13`, after the handler exhausted retries.
+- Recordings:
+  - `deno fmt packages/runner/src/runner.ts
+    packages/runner/src/scheduler/action-run.ts
+    packages/runner/test/scheduler-event-lineage.test.ts`: passed
+    (`Checked 3 files`).
+  - `deno lint` on the same three files: passed (`Checked 3 files`).
+  - `deno check` on the same three files: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-event-lineage.test.ts`: passed, `1 passed (7 steps)`,
+    `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `590 passed (3090 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m4s`.
