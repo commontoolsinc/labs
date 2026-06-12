@@ -17,6 +17,8 @@ import type {
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { resolveLink } from "../src/link-resolution.ts";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 type TransactMessage = { requestId: string };
 type TransactResponse = {
@@ -538,4 +540,102 @@ describe("scheduler event receipts", () => {
     expect(handlerInvocations).toBe(2);
     expect(root.key("effectsTotal").get()).toBe(10);
   });
+});
+
+Deno.test("navigateTo handler results navigate once and deduplicate redelivery", async () => {
+  const navSigner = await Identity.fromPassphrase(
+    "receipts navigate operator",
+  );
+  const navSpace = navSigner.did();
+  const storageManager = StorageManager.emulate({ as: navSigner });
+  const navigations: string[] = [];
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+    experimental: { commitPreconditions: true },
+    navigateCallback: (target) => {
+      navigations.push(target.entityId?.["/"] ?? "");
+    },
+  });
+  let tx = runtime.edit();
+
+  try {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { NAME, handler, navigateTo, pattern } = commonfabric;
+
+    const Target = pattern(() => ({
+      [NAME]: "receipts navigate target",
+    }));
+    let handlerInvocations = 0;
+    const openTarget = handler<Record<string, never>, Record<string, never>>(
+      () => {
+        handlerInvocations++;
+        return navigateTo(Target({}));
+      },
+      { proxy: true },
+    );
+    const rootPattern = pattern(() => {
+      return { stream: openTarget({}) };
+    });
+    const rootCell = runtime.getCell<{ stream: unknown }>(
+      navSpace,
+      "receipts navigate root",
+      undefined,
+      tx,
+    );
+    const root = runtime.run(tx, rootPattern, {}, rootCell);
+    await tx.commit();
+    tx = runtime.edit();
+    await root.pull();
+
+    const eventId = "evt:receipt-navigate:0:receipts-navigate-root";
+    const streamLink = resolveLink(
+      runtime,
+      runtime.readTx(),
+      root.key("stream").getAsNormalizedFullLink(),
+    );
+
+    // First delivery: the receipt must not strangle the launch itself —
+    // the deferred navigateTo start has to survive its own receipt mark.
+    runtime.scheduler.queueEvent(
+      streamLink,
+      {},
+      undefined,
+      undefined,
+      false,
+      { eventId },
+    );
+    await waitForSchedulerCondition(
+      runtime,
+      () => navigations.length >= 1,
+      "first navigateTo delivery did not navigate",
+    );
+    expect(handlerInvocations).toBe(1);
+    expect(navigations.length).toBe(1);
+
+    // Redelivery of the same event id: the receipt dedupes; no second
+    // navigation.
+    runtime.scheduler.queueEvent(
+      streamLink,
+      {},
+      undefined,
+      undefined,
+      false,
+      { eventId },
+    );
+    await waitForSchedulerCondition(
+      runtime,
+      () => handlerInvocations === 2,
+      "redelivered navigateTo event did not run",
+    );
+    await runtime.idle();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await runtime.idle();
+
+    expect(navigations.length).toBe(1);
+  } finally {
+    await tx.commit();
+    await runtime.dispose();
+    await storageManager.close();
+  }
 });

@@ -2221,7 +2221,9 @@ const toRejectedError = (
   const name = error instanceof Error
     ? error.name
     : (error as { name?: unknown })?.name;
-  const precondition = (error as { precondition?: unknown }).precondition;
+  // `error` may be a primitive or null — never throw while normalizing a
+  // commit failure, that would mask the real rejection.
+  const precondition = (error as { precondition?: unknown })?.precondition;
   if (
     name === "PreconditionFailedError" &&
     (precondition === "origin-committed" || precondition === "receipt-exists")

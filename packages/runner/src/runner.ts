@@ -1455,7 +1455,6 @@ export class Runner {
     givenPattern?: Pattern,
     options: RunnerRunOptions = {},
     pullOnceAfterStart: boolean = false,
-    markCreateOnlyResult: boolean = false,
   ): void {
     const resultLink = resultCell.getAsNormalizedFullLink();
     tx.addCommitCallback((_committedTx, result) => {
@@ -1471,11 +1470,6 @@ export class Runner {
       );
       try {
         this.startWithTx(startTx, committedResultCell, givenPattern, options);
-        if (markCreateOnlyResult) {
-          startTx.markCreateOnly?.(
-            committedResultCell.getAsNormalizedFullLink(),
-          );
-        }
         this.runtime.prepareTxForCommit(startTx);
         startTx.commit().then(({ error }) => {
           if (error) {
@@ -2707,6 +2701,14 @@ export class Runner {
       undefined,
       resultCell,
     );
+    // The receipt mark must ride the transaction that creates the result
+    // cell's head — setupInternal just wrote it into the handler tx. Marking
+    // the deferred start tx instead would see the already-committed head and
+    // reject the FIRST delivery as receipt-exists, while redeliveries (whose
+    // own handler tx re-creates the cell) would go unguarded.
+    if (markCreateOnlyResult) {
+      tx.markCreateOnly?.(resultCell.getAsNormalizedFullLink());
+    }
     if (resultSetup.needsStart) {
       this.startAfterSuccessfulCommit(
         tx,
@@ -2714,7 +2716,6 @@ export class Runner {
         resultSetup.pattern,
         {},
         this.patternNeedsOneShotPull(resultSetup.pattern),
-        markCreateOnlyResult,
       );
     }
     return resultCell;

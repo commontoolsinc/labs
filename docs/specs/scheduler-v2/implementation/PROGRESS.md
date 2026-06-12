@@ -2112,3 +2112,29 @@ packages/runner/src/scheduler/events.ts:654:            permanent: isPermanentRe
   - `rg -n "createOnly" packages/memory packages/runner/src packages/runner/test/scheduler-event-receipts.test.ts`: no op-level
     `createOnly` operation surface remains; remaining matches are
     `markCreateOnly` API/helper names and local mark maps.
+
+## REVIEWER RESOLUTION — PR #4096 review findings
+
+- [x] pending — deferred-navigate receipt placement + rejection-normalization
+  hardening.
+- Findings addressed (Codex/cubic review on PR #4096), red-first where
+  applicable:
+  1. `setupDeferredHandlerResultPattern` created the result-cell head in the
+     handler transaction (`setupInternal`) but the create-only receipt mark
+     rode the deferred start transaction — the first delivery's deferred
+     start saw an existing head and died as `receipt-exists`, while
+     redeliveries went unguarded. The mark now rides the handler transaction
+     that performs the create; `startAfterSuccessfulCommit` loses its unused
+     `markCreateOnlyResult` parameter
+     (`test/scheduler-event-receipts.test.ts` "navigateTo handler results
+     navigate once and deduplicate redelivery", red-first: first delivery
+     never navigated).
+  2. `toRejectedError` accessed `.precondition` without optional chaining;
+     a primitive/null rejection would throw while normalizing a commit
+     failure and mask the real error.
+- Rebase note: main now validates preconditions ahead of every commit shape
+  (#4090 resolution); the entity-absent precondition made re-validation on
+  commit replays unsafe, so the generic same-session replay check is hoisted
+  ABOVE precondition validation (still before the observation fast paths,
+  which keep their own replay table and never hit the generic check).
+- Deviations: none.
