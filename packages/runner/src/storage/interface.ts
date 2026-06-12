@@ -731,6 +731,12 @@ export interface IExtendedStorageTransaction
    * even when the run never re-reads them.
    */
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void;
+  /**
+   * Run `fn` with `meta` merged into every read issued within (explicit
+   * per-read meta wins). Lets scheduling machinery tag its reads without
+   * threading metadata through intermediate APIs.
+   */
+  runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T;
   markCfcRelevant(reason?: string): void;
   invalidateCfc(reason: string): void;
 

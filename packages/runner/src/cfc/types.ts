@@ -138,11 +138,21 @@ export type CfcSandboxResult = {
  * - `derived`: default-transition flow label — replaced when the value at
  *   the path is overwritten; an ancestor overwrite clears derived
  *   descendants.
+ * - `structure`: flow label on a container's SHAPE (membership, key set,
+ *   order, length — §8.5.6.1/SC-7) for written values made purely of
+ *   references, where per-slot link entries already label each reference.
+ *   Applies only to reads at exactly the entry's path (observing the
+ *   container is observing its shape); reads strictly below it (slot
+ *   pointer reads, dereferences) are pointer handling and stay clean —
+ *   that asymmetry is what lets membership taint persist without smearing
+ *   the pointwise per-element split. Update discipline matches `derived`.
+ *   Readers that predate this component treat it as covering (over-taint,
+ *   fail-safe).
  * Entries without an origin are legacy (pre-component) entries and are
  * treated as one combined component with the historical update rules.
  * The effective label at a path is the join of all components.
  */
-export type LabelEntryOrigin = "declared" | "link" | "derived";
+export type LabelEntryOrigin = "declared" | "link" | "derived" | "structure";
 
 export type LabelMapEntry = {
   path: readonly string[];

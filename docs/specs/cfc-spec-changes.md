@@ -90,7 +90,13 @@ expected to originate from static analysis earlier in the pipeline (§14.4.4)
 rather than runtime schema metadata — the claim mechanism should not assume
 schema embedding is the only carrier. (Implementation note 2026-06-10: claim
 minting deleted from the list builtins; the schema key is reserved-and-tolerated
-for already-persisted data.)
+for already-persisted data. The coordinator-write taint is implemented as the
+`structure` labelMap component: container nodes of pure-link-structure writes
+carry the writing tx's J as exact-path shape labels — joined by reads at the
+container path and by recursive ancestor reads, never by reads strictly below —
+so the §8.5.6.1 membership/length channel is labeled while per-slot pointer
+handling stays clean. Pointer identity at a slot, i.e. WHICH element sits
+there observed without dereferencing, remains an SC-4/SC-8 residual.)
 
 **SC-8 [normative] Read-API → observation-class mapping — §4.6.3.** The
 primitive read profile defines `shape`/`value`/`enumerate`/`count`/ `followRef`,
