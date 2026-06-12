@@ -54,8 +54,7 @@ export function computeInputHashFromValue<T extends Record<string, any>>(
   const options = inputsOnly.options;
   if (
     options !== null && typeof options === "object" &&
-    !Array.isArray(options) &&
-    Object.hasOwn(options, "mutexTimeoutMs")
+    !Array.isArray(options)
   ) {
     const {
       mutexTimeoutMs: _mutexTimeoutMs,
@@ -65,13 +64,11 @@ export function computeInputHashFromValue<T extends Record<string, any>>(
       string,
       unknown
     >;
-    const normalizedInputs = { ...inputsOnly };
     if (Object.keys(normalizedOptions).length > 0) {
-      normalizedInputs.options = normalizedOptions;
+      inputsOnly.options = normalizedOptions;
     } else {
-      delete normalizedInputs.options;
+      delete inputsOnly.options;
     }
-    return hashStringOf(stripUndefinedProps(normalizedInputs));
   }
   return hashStringOf(stripUndefinedProps(inputsOnly));
 }

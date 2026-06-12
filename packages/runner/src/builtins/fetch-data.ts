@@ -60,17 +60,17 @@ const fetchDataInputSchema = internSchema(
   },
 );
 
-function snapshotFetchDataInputs(
-  cell: Cell<FetchDataInputs>,
+function normalizedFetchDataInputs(
+  url: string | undefined,
+  rawMode: string | undefined,
+  rawOptions: Readonly<FetchDataOptions> | undefined,
 ): FetchDataInputs {
-  const snapshot = cell.asSchema(fetchDataInputSchema).get() ??
-    ({} as FetchDataInputs);
-  const mode = snapshot.mode === "text" || snapshot.mode === "json" ||
-      snapshot.mode === "dataUrl"
-    ? snapshot.mode
+  const mode = rawMode === "text" || rawMode === "json" ||
+      rawMode === "dataUrl"
+    ? rawMode
     : undefined;
-  const { mutexTimeoutMs: _mutexTimeoutMs, ...requestOptions } =
-    snapshot.options ?? {};
+  const { mutexTimeoutMs: _mutexTimeoutMs, ...requestOptions } = rawOptions ??
+    {};
   const body = requestOptions.body;
   const options = Object.keys(requestOptions).length > 0
     ? {
@@ -80,7 +80,19 @@ function snapshotFetchDataInputs(
         : body,
     }
     : undefined;
-  return createFrozenRequestSnapshot({ url: snapshot.url, mode, options });
+  return createFrozenRequestSnapshot({ url, mode, options });
+}
+
+function snapshotFetchDataInputs(
+  cell: Cell<FetchDataInputs>,
+): FetchDataInputs {
+  const snapshot = cell.asSchema(fetchDataInputSchema).get() ??
+    ({} as FetchDataInputs);
+  return normalizedFetchDataInputs(
+    snapshot.url,
+    snapshot.mode,
+    snapshot.options,
+  );
 }
 
 function snapshotFetchDataConfig(
@@ -88,10 +100,13 @@ function snapshotFetchDataConfig(
 ): { inputs: FetchDataInputs; mutexTimeoutMs?: number } {
   const snapshot = cell.asSchema(fetchDataInputSchema).get() ??
     ({} as FetchDataInputs);
-  const inputs = snapshotFetchDataInputs(cell);
   const mutexTimeoutMs = snapshot.options?.mutexTimeoutMs;
   return {
-    inputs,
+    inputs: normalizedFetchDataInputs(
+      snapshot.url,
+      snapshot.mode,
+      snapshot.options,
+    ),
     ...(typeof mutexTimeoutMs === "number" && Number.isFinite(mutexTimeoutMs) &&
         mutexTimeoutMs > 0
       ? { mutexTimeoutMs }
