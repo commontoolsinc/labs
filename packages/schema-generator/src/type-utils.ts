@@ -31,6 +31,7 @@ const CELL_LIKE_WRAPPER_NAMES = spellingsWhere({
   Stream: false, // handled separately at each call site
   SqliteDb: false, // handled separately at each call site
   OpaqueRef: false,
+  Reactive: false,
   OpaqueRefMethods: false,
   CellTypeConstructor: false,
   ScopedCellTypeConstructor: false,
@@ -45,6 +46,7 @@ const OPAQUE_WRAPPER_NAMES = spellingsWhere({
   Stream: false,
   SqliteDb: false,
   OpaqueRef: false,
+  Reactive: false,
   OpaqueRefMethods: false,
   CellTypeConstructor: false,
   ScopedCellTypeConstructor: false,
@@ -55,10 +57,11 @@ function getEntityNameText(name: ts.EntityName): string {
   return ts.isIdentifier(name) ? name.text : name.right.text;
 }
 
-// Spellings that participate in node-level wrapper detection. OpaqueRef is
-// deliberately excluded: wrapperKindForName has never treated it as a node
-// wrapper, and its callers (Default-literal and type-name resolution) must
-// not start unwrapping it — revisit with the OpaqueRef deprecation.
+// Spellings that participate in node-level wrapper detection. OpaqueRef (and
+// its successor spelling Reactive) is deliberately excluded: wrapperKindForName
+// has never treated it as a node wrapper, and its callers (Default-literal and
+// type-name resolution) must not start unwrapping it — revisit with the
+// OpaqueRef deprecation.
 const NODE_WRAPPER_SPELLINGS: Readonly<Record<WrapperSpelling, boolean>> = {
   Cell: true,
   Writable: true,
@@ -69,6 +72,7 @@ const NODE_WRAPPER_SPELLINGS: Readonly<Record<WrapperSpelling, boolean>> = {
   Stream: true,
   SqliteDb: true,
   OpaqueRef: false,
+  Reactive: false,
   OpaqueRefMethods: false,
   CellTypeConstructor: false,
   ScopedCellTypeConstructor: false,
@@ -438,7 +442,7 @@ export function getNamedTypeKey(
   if (
     aliasName === "Default" || CELL_LIKE_WRAPPER_NAMES.has(aliasName ?? "") ||
     aliasName === "Stream" || aliasName === "SqliteDb" ||
-    aliasName === "OpaqueRef"
+    aliasName === "OpaqueRef" || aliasName === "Reactive"
   ) {
     return undefined;
   }
