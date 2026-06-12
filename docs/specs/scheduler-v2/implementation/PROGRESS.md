@@ -5241,3 +5241,19 @@ $ rg -n "queueInitialActionRehydration|initialRehydrationTokens|canApplyInitialA
   `scheduler-v2/08-phase7` + `bb01e3280` cherry-picked): full pattern-unit
   sweep + cli suite run locally to surface remaining latent breakage in one
   pass; results recorded in a follow-up entry.
+
+## REVIEWER RECORD — stack-head sweep results + cascade status
+
+- Stack-head pattern sweep (08-phase7 + `bb01e3280`): **59/60 green**, full
+  cli suite green. The one failure (`primitives/editable-list.test.tsx`
+  assertion_10) reproduces identically at fork base `cd1da3d4e` under the
+  v1 scheduler — pre-existing, fixed by #4082 and retired by #4086 on main,
+  moot for the train. Verdict: no remaining latent pattern-visible breakage
+  in the cutover phases.
+- #4090 (E1) MERGED to main (`93217ccf8`); `scheduler-v2/03-e1` deleted;
+  #4096 (E2) auto-retargeted to main and is CONFLICTING as expected — the
+  rebase-onto-main surgery for 04-e2 is in progress in the parallel
+  session's worktree (engine precondition files mid-resolve). Reviewer will
+  verify the entity-absent arm survives the merge with `3a0503bc4`'s
+  validation ordering (preconditions validate ahead of every commit shape,
+  shape checks at the wire boundary) intact.
