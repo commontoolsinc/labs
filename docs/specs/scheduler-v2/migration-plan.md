@@ -314,9 +314,22 @@ Coordinate with memory-layer owners (observation rows live in memory v2):
 
 ## Flag end-state
 
+Verified against code on 2026-06-12 after phase 7:
+
+- `rg -n "setPullMode|enablePullMode|disablePullMode|isPullModeEnabled|schedulerHistoricalMightWrite|historicalMightWrite" --glob '!docs/**' .`
+  returns no matches.
+- `pullMode` remains only as the frozen scheduler graph-snapshot diagnostic
+  field (`pullMode: true`) and one ignored bench-helper compatibility
+  parameter.
+- `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` /
+  `experimental.persistentSchedulerState` remains present in shell/toolshed
+  env plumbing, runner runtime options, memory-v2 handshake/config, and tests.
+- No old-vs-new scheduler selector flag was introduced; the cutover was the
+  branch series plus test gates.
+
 | Flag / API | Disposition |
 | --- | --- |
-| `pullMode` + `enablePullMode`/`disablePullMode`/`isPullModeEnabled` | Removed (phase 0) |
+| `pullMode` + `enablePullMode`/`disablePullMode`/`isPullModeEnabled` | Mode-control API removed (phase 0); frozen graph-snapshot `pullMode: true` diagnostic retained for compatibility |
 | `experimental.schedulerHistoricalMightWrite` | Removed (phase 1) |
 | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` / `experimental.persistentSchedulerState` | Kept through v2; default-on is a separate rollout (phase 7.4) |
-| New old-vs-new scheduler flag | **Not introduced** — cutover happens on a branch series with the test suite as the gate |
+| New old-vs-new scheduler flag | **Not introduced** — cutover happened on a branch series with the test suite as the gate |

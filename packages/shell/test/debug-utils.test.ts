@@ -55,11 +55,6 @@ describe("debug utils", () => {
             pendingAfter: true,
             dirtyBefore: false,
             dirtyAfter: false,
-            scheduledEffects: [{
-              actionId: "effect:a",
-              pendingBefore: false,
-              dirtyBefore: false,
-            }],
           },
           {
             actionId: "action:b",
@@ -70,7 +65,6 @@ describe("debug utils", () => {
             pendingAfter: true,
             dirtyBefore: false,
             dirtyAfter: false,
-            scheduledEffects: [],
           },
         ],
       },
@@ -95,7 +89,6 @@ describe("debug utils", () => {
           pendingAfter: true,
           dirtyBefore: false,
           dirtyAfter: false,
-          scheduledEffects: [],
         }],
       },
       {
@@ -118,7 +111,6 @@ describe("debug utils", () => {
           pendingAfter: true,
           dirtyBefore: false,
           dirtyAfter: false,
-          scheduledEffects: [],
         }],
       },
     ];
@@ -133,7 +125,6 @@ describe("debug utils", () => {
     );
     expect(summary.topChanges[0]?.entryCount).toBe(2);
     expect(summary.topChanges[0]?.directSchedules).toBe(3);
-    expect(summary.topChanges[0]?.downstreamSchedules).toBe(1);
     expect(summary.topChanges[0]?.writers).toEqual(["writer:a"]);
     expect(summary.topChanges[0]?.topDirectActions[0]).toEqual(["action:a", 2]);
 

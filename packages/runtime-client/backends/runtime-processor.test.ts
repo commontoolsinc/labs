@@ -616,11 +616,6 @@ describe("RuntimeProcessor diagnosis helpers", () => {
         pendingAfter: false,
         dirtyBefore: false,
         dirtyAfter: true,
-        scheduledEffects: [{
-          actionId: "action:effect",
-          pendingBefore: false,
-          dirtyBefore: false,
-        }],
       }],
     }];
     const settleEnabledValues: boolean[] = [];
