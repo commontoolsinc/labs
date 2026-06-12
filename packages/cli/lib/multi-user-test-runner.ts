@@ -185,6 +185,8 @@ interface ParticipantState {
   lastActionName: string | null;
   allowRuntimeErrors: boolean;
   expectNonIdempotent: boolean;
+  allowConsoleErrors: boolean;
+  allowConsoleWarnings: boolean;
 }
 
 export async function runMultiUserTestPattern(
@@ -239,6 +241,8 @@ export async function runMultiUserTestPattern(
           lastActionName: null,
           allowRuntimeErrors: init.allowRuntimeErrors,
           expectNonIdempotent: init.expectNonIdempotent,
+          allowConsoleErrors: init.allowConsoleErrors,
+          allowConsoleWarnings: init.allowConsoleWarnings,
         });
         if (options.verbose) {
           console.log(
@@ -351,20 +355,36 @@ export async function runMultiUserTestPattern(
       }
     }
 
-    // Apply allowRuntimeErrors / expectNonIdempotent PER participant — one
-    // participant opting out must not mask another participant's failures —
-    // so the aggregate result reports only unallowed entries with the flags
-    // left off.
+    // Apply allowRuntimeErrors / expectNonIdempotent / allowConsoleErrors /
+    // allowConsoleWarnings PER participant — one participant opting out must
+    // not mask another participant's failures — so the aggregate result reports
+    // only unallowed entries with the flags left off.
     let anyExpectNonIdempotent = false;
     let expectedNonIdempotentDetected = false;
+    const consoleErrors: string[] = [];
+    const consoleWarnings: string[] = [];
     for (const participant of participants) {
       const health = await participant.worker.call("health") as {
         runtimeErrors: string[];
+        consoleErrors: string[];
+        consoleWarnings: string[];
         nonIdempotent: string[];
       };
       if (!participant.allowRuntimeErrors) {
         runtimeErrors.push(
           ...health.runtimeErrors.map((e) => `[${participant.spec.name}] ${e}`),
+        );
+      }
+      if (!participant.allowConsoleErrors) {
+        consoleErrors.push(
+          ...health.consoleErrors.map((e) => `[${participant.spec.name}] ${e}`),
+        );
+      }
+      if (!participant.allowConsoleWarnings) {
+        consoleWarnings.push(
+          ...health.consoleWarnings.map((e) =>
+            `[${participant.spec.name}] ${e}`
+          ),
         );
       }
       if (participant.expectNonIdempotent) {
@@ -400,6 +420,8 @@ export async function runMultiUserTestPattern(
       navigations: [],
       runtimeErrors,
       nonIdempotent,
+      consoleErrors,
+      consoleWarnings,
     };
   } catch (error) {
     return {
@@ -409,6 +431,8 @@ export async function runMultiUserTestPattern(
       navigations: [],
       runtimeErrors,
       nonIdempotent,
+      consoleErrors: [],
+      consoleWarnings: [],
       error: error instanceof Error
         ? `${error.message}\n${error.stack ?? ""}`
         : String(error),

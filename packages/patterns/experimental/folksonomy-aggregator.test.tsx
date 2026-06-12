@@ -627,5 +627,8 @@ export default pattern(() => {
       { assertion: assert_dense_100_tags },
       { assertion: assert_dense_sorted },
     ],
+    // The invalid-event test deliberately feeds malformed events, which the
+    // aggregator rejects with console.warn("Invalid event received").
+    allowConsoleWarnings: true,
   };
 });

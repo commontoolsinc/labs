@@ -214,5 +214,8 @@ export default pattern(() => {
     ],
     // Expose subject for debugging when deployed as piece
     subject,
+    // generateObject has no LLM endpoint in the unit-test environment; the
+    // llm builtin warns ("Invalid URL: '//api/ai/llm/generateObject'").
+    allowConsoleWarnings: true,
   };
 });

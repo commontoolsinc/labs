@@ -102,6 +102,31 @@ export default pattern(() => {
 - test a sub-pattern before building the next dependent layer when that helps
   isolate failures
 
+## Console Errors and Warnings Fail Tests
+
+`cf test` fails a test when anything is logged at error or warn level during
+the run phase, even if every assertion passes. Two channels are captured:
+`console.error`/`console.warn` calls from pattern code, and error/warn-level
+activity from the runtime's own loggers (reported by logger name and message
+key). A clean run is part of the contract — a passing test that logs errors
+hides real failures (this is how a production CFC commit-rejection shipped
+behind green tests).
+
+If a test intentionally provokes errors or warnings, opt out explicitly on the
+returned descriptor — each flag covers only its own level:
+
+```tsx
+return {
+  tests: [/* ... */],
+  allowConsoleErrors: true, // expected console/logger errors don't fail
+  allowConsoleWarnings: true, // expected console/logger warnings don't fail
+};
+```
+
+In multi-user tests the flags are per participant: one participant opting out
+does not mask another participant's errors. (The same applies to the
+pre-existing `allowRuntimeErrors` flag for scheduler-level errors.)
+
 ## Multi-User Tests
 
 A single-runtime test cannot exercise `PerUser`/`PerSession` scoping or

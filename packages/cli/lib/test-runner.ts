@@ -26,9 +26,10 @@
  */
 
 import { Identity } from "@commonfabric/identity";
-import { Runtime } from "@commonfabric/runner";
+import { ConsoleMethod, Runtime } from "@commonfabric/runner";
 import type {
   Cell,
+  ConsoleHandler,
   ErrorWithContext,
   Pattern,
   SettleStats,
@@ -42,6 +43,10 @@ import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { basename } from "@std/path";
 import { timeout } from "@commonfabric/utils/sleep";
 import { experimentalOptionsFromEnv } from "./utils.ts";
+import {
+  appendLoggerDeltaMessages,
+  snapshotLoggerErrorWarnCounts,
+} from "./console-capture.ts";
 import {
   buildActionEvent,
   type TrustedUiDescriptor,
@@ -203,6 +208,20 @@ export interface TestRunResult {
    * don't fail the test, and detecting NONE fails it (the flag asserts the
    * detector fires; it is not a mere tolerance). */
   expectNonIdempotent?: boolean;
+  /**
+   * console.error() calls captured via the harness console event during the
+   * run phase, plus logger-level error activity detected via count deltas.
+   */
+  consoleErrors: string[];
+  /** If true, console errors are expected and should not fail the test. */
+  allowConsoleErrors?: boolean;
+  /**
+   * console.warn() calls captured via the harness console event during the
+   * run phase, plus logger-level warn activity detected via count deltas.
+   */
+  consoleWarnings: string[];
+  /** If true, console warnings are expected and should not fail the test. */
+  allowConsoleWarnings?: boolean;
 }
 
 export interface TestRunnerOptions {
@@ -833,6 +852,12 @@ export async function runTestPattern(
   // Collect runtime errors via the scheduler's error handler
   const runtimeErrors: ErrorWithContext[] = [];
 
+  // Collect pattern-code console.error / console.warn calls (channel 1: harness
+  // console event) and logger-level error/warn activity (channel 2: logger count
+  // deltas).  Both are populated during the run phase only (after compile).
+  const consoleErrors: string[] = [];
+  const consoleWarnings: string[] = [];
+
   // 1. Create emulated runtime (same as piece step)
   const identity = await withPhase(
     ["runTestPattern", "identity"],
@@ -887,6 +912,21 @@ export async function runTestPattern(
     runtime.scheduler.enablePullMode();
   }
   runtime.enableIdempotencyCheck();
+  // Channel 1: capture pattern-code console.error / console.warn calls that
+  // flow through the scheduler's harness console event.  The handler must
+  // return args unchanged so the call still appears in the host console.
+  runtime.scheduler.onConsole(
+    (({ method, args }) => {
+      if (method === ConsoleMethod.Error) {
+        const text = args.map((a) => String(a)).join(" ");
+        consoleErrors.push(`[console.error] ${text}`);
+      } else if (method === ConsoleMethod.Warn) {
+        const text = args.map((a) => String(a)).join(" ");
+        consoleWarnings.push(`[console.warn] ${text}`);
+      }
+      return args;
+    }) satisfies ConsoleHandler,
+  );
   if (options.verbose) {
     runtime.scheduler.enableSettleStats();
   }
@@ -965,6 +1005,13 @@ export async function runTestPattern(
       await runtime.idle();
     });
 
+    // Channel 2: snapshot logger error/warn counts AFTER compile but BEFORE the
+    // run/assert phase.  This excludes compile-cache and infrastructure noise
+    // (e.g. cache-miss warnings emitted during engine.compileAndEvaluateModules)
+    // while capturing everything the pattern's own handlers log at error/warn
+    // level through the runtime logger.
+    const loggerCountsBeforeRun = snapshotLoggerErrorWarnCounts();
+
     // 4. Instantiate the test pattern using runtime.run() for proper space context
     const patternResult = await withPhase(
       ["runTestPattern", "patternRun"],
@@ -1017,7 +1064,7 @@ export async function runTestPattern(
       );
     }
 
-    // Check for allowRuntimeErrors and expectNonIdempotent flags
+    // Check for allowRuntimeErrors, expectNonIdempotent, and console opt-out flags
     const allowRuntimeErrors = await withPhase(
       ["runTestPattern", "allowRuntimeErrors"],
       async () =>
@@ -1028,6 +1075,18 @@ export async function runTestPattern(
       ["runTestPattern", "expectNonIdempotent"],
       async () =>
         await (patternResult.key("expectNonIdempotent") as Cell<unknown>)
+          .pull() === true,
+    );
+    const allowConsoleErrors = await withPhase(
+      ["runTestPattern", "allowConsoleErrors"],
+      async () =>
+        await (patternResult.key("allowConsoleErrors") as Cell<unknown>)
+          .pull() === true,
+    );
+    const allowConsoleWarnings = await withPhase(
+      ["runTestPattern", "allowConsoleWarnings"],
+      async () =>
+        await (patternResult.key("allowConsoleWarnings") as Cell<unknown>)
           .pull() === true,
     );
 
@@ -1466,6 +1525,14 @@ export async function runTestPattern(
           : id;
       });
 
+    // Channel 2: compute logger error/warn deltas since the run-phase snapshot
+    // and append any new activity to the console capture lists.
+    appendLoggerDeltaMessages(
+      loggerCountsBeforeRun,
+      consoleErrors,
+      consoleWarnings,
+    );
+
     const errorMessages = runtimeErrors.map((e) => String(e));
     return {
       path: testPath,
@@ -1476,6 +1543,10 @@ export async function runTestPattern(
       allowRuntimeErrors,
       nonIdempotent,
       expectNonIdempotent,
+      consoleErrors,
+      allowConsoleErrors,
+      consoleWarnings,
+      allowConsoleWarnings,
     };
   } catch (err) {
     let errorMessage = err instanceof Error ? err.message : String(err);
@@ -1499,6 +1570,8 @@ export async function runTestPattern(
       runtimeErrors: errorMessages,
       nonIdempotent: [],
       error: errorMessage,
+      consoleErrors,
+      consoleWarnings,
     };
   } finally {
     // 6. Cleanup
@@ -1610,6 +1683,46 @@ export async function runTests(
             const truncated = firstLine.length > 120
               ? firstLine.slice(0, 120) + "..."
               : firstLine;
+            console.log(`    ${truncated}`);
+          }
+        }
+      }
+
+      // Report console errors (channel 1: console.error; channel 2: logger errors)
+      if (result.consoleErrors && result.consoleErrors.length > 0) {
+        if (result.allowConsoleErrors) {
+          console.log(
+            `  ⊘ ${result.consoleErrors.length} console error(s) (allowed)`,
+          );
+        } else {
+          totalFailed++;
+          console.log(
+            `  ✗ ${result.consoleErrors.length} console error(s) during test:`,
+          );
+          for (const msg of result.consoleErrors) {
+            const truncated = msg.length > 120
+              ? msg.slice(0, 120) + "..."
+              : msg;
+            console.log(`    ${truncated}`);
+          }
+        }
+      }
+
+      // Report console warnings (channel 1: console.warn; channel 2: logger warns)
+      if (result.consoleWarnings && result.consoleWarnings.length > 0) {
+        if (result.allowConsoleWarnings) {
+          console.log(
+            `  ⊘ ${result.consoleWarnings.length} console warning(s) (allowed)`,
+          );
+        } else {
+          totalFailed++;
+          console.log(
+            `  ✗ ${result.consoleWarnings.length} console warning(s) during test:`,
+          );
+          for (const msg of result.consoleWarnings) {
+            const truncated = msg.length > 120
+              ? msg.slice(0, 120) + "..."
+              : msg;
             console.log(`    ${truncated}`);
           }
         }

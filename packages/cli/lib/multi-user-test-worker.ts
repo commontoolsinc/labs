@@ -17,12 +17,19 @@
 
 import {
   type Cell,
+  type ConsoleHandler,
+  ConsoleMethod,
   type Engine,
   type Pattern,
   Runtime,
 } from "@commonfabric/runner";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { buildActionEvent } from "./trusted-test-event.ts";
+import {
+  appendLoggerDeltaMessages,
+  type LoggerErrorWarnSnapshot,
+  snapshotLoggerErrorWarnCounts,
+} from "./console-capture.ts";
 import {
   createSession,
   Identity,
@@ -52,6 +59,8 @@ export interface ParticipantInitResult {
   steps: StepMeta[];
   allowRuntimeErrors: boolean;
   expectNonIdempotent: boolean;
+  allowConsoleErrors: boolean;
+  allowConsoleWarnings: boolean;
 }
 
 const SETUP_CAUSE = "multi-user-test-setup";
@@ -64,6 +73,11 @@ let storageManager:
 let engine: Engine | undefined;
 let stepCells: Cell<unknown>[] = [];
 const runtimeErrors: string[] = [];
+/** Channel 1: console.error/warn captured via the harness console event. */
+const consoleErrors: string[] = [];
+const consoleWarnings: string[] = [];
+/** Channel 2: logger error/warn count snapshot taken after compile, before run. */
+let loggerCountsBeforeRun: LoggerErrorWarnSnapshot = new Map();
 
 function rt(): Runtime {
   if (!runtime) throw new Error("worker not initialized");
@@ -158,6 +172,21 @@ const handlers: Record<
       errorHandlers: [(error: Error) => runtimeErrors.push(String(error))],
     });
     runtime.enableIdempotencyCheck();
+    // Channel 1: capture pattern-code console.error / console.warn calls.
+    runtime.scheduler.onConsole(
+      (({ method, args }) => {
+        if (method === ConsoleMethod.Error) {
+          consoleErrors.push(
+            `[console.error] ${args.map((a) => String(a)).join(" ")}`,
+          );
+        } else if (method === ConsoleMethod.Warn) {
+          consoleWarnings.push(
+            `[console.warn] ${args.map((a) => String(a)).join(" ")}`,
+          );
+        }
+        return args;
+      }) satisfies ConsoleHandler,
+    );
     // Use the runtime's own harness (see test-runner.ts): a second Engine
     // splits verified-load/source-map state and breaks CFC verified-binding
     // identities under enforcement.
@@ -170,6 +199,8 @@ const handlers: Record<
       ),
     );
     const { main } = await engine.compileAndEvaluateModules(program);
+    // Channel 2: snapshot logger counts AFTER compile, before the run phase.
+    loggerCountsBeforeRun = snapshotLoggerErrorWarnCounts();
     const descriptor = (main?.default ?? {}) as {
       setup?: Pattern;
       participants?: Record<string, Pattern | { pattern: Pattern }>;
@@ -263,6 +294,12 @@ const handlers: Record<
       expectNonIdempotent:
         await (resultCell.key("expectNonIdempotent") as Cell<unknown>)
           .pull() === true,
+      allowConsoleErrors:
+        await (resultCell.key("allowConsoleErrors") as Cell<unknown>)
+          .pull() === true,
+      allowConsoleWarnings:
+        await (resultCell.key("allowConsoleWarnings") as Cell<unknown>)
+          .pull() === true,
     };
     return result;
   },
@@ -301,8 +338,17 @@ const handlers: Record<
 
   /** Runtime health for end-of-run reporting. */
   health() {
+    // Apply channel-2 logger deltas now (end of run) so they are included in
+    // the health report returned to the orchestrator.
+    appendLoggerDeltaMessages(
+      loggerCountsBeforeRun,
+      consoleErrors,
+      consoleWarnings,
+    );
     return Promise.resolve({
       runtimeErrors: [...runtimeErrors],
+      consoleErrors: [...consoleErrors],
+      consoleWarnings: [...consoleWarnings],
       nonIdempotent: rt().getIdempotencyViolations?.()?.map((violation) => {
         const { actionId, differingWriteKeys } = violation as {
           actionId?: string;
