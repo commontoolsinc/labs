@@ -1335,3 +1335,31 @@ Concrete route, end to end:
    `docs(specs): scheduler-v2 WO03 — precondition error wire route`.
 
 Then continue step 3 as written.
+
+## REVIEWER RESOLUTION — 03/step-3 precondition error wire route docs
+
+- [x] 5f180b852 — documented the reviewer-approved
+  `PreconditionFailedError` wire route in WO03 Step 3 before implementation.
+- Deviations: none.
+
+## 03/step-3
+
+- [x] pending — origin-committed commit precondition
+- Deviations: implemented the reviewer verdict by adding the
+  `PreconditionFailedError` route through the memory server/client wire path;
+  no runner changes were needed. The new test file uses the memory
+  server/client path, so its direct test run needs the same env/read/write/ffi
+  permissions as other server-backed memory tests.
+- Recordings:
+  - `deno fmt packages/memory/v2/engine.ts packages/memory/v2/server.ts
+    packages/memory/v2/client.ts packages/memory/v2.ts
+    packages/memory/test/v2-commit-preconditions.test.ts`: passed
+    (`Checked 5 files`).
+  - `deno lint` on the same five files: passed (`Checked 5 files`).
+  - `deno check` on the same five files: passed.
+  - `cd packages/memory && deno test test/v2-commit-preconditions.test.ts`:
+    failed before execution because importing the server/client path requires
+    env access for `TSC_WATCHFILE`.
+  - `cd packages/memory && deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders test/v2-commit-preconditions.test.ts`:
+    passed, `4 passed`, `0 failed`, `26ms`.
