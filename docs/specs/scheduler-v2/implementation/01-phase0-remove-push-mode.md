@@ -101,6 +101,9 @@ this step and commit both steps as ONE commit with the step-3 message.
 (Correction: steps 2+3 also include exactly the four `src/runner.ts`
 mode-API call-site edits listed in step 4. Removing the scheduler mode API
 otherwise leaves `src/runner.ts` unable to compile.)
+(Correction: steps 2+3 also include the `scheduler-cfc-trigger-reads.test.ts`
+push-arm deletion because that test imports the deleted push notification
+module directly.)
 (This is the single sanctioned two-step merge in this work order.)
 
 ## Step 3 — Remove `pullMode` and all mode branches from `scheduler.ts`
@@ -195,10 +198,20 @@ Because the public mode API is removed here, include exactly these
   the `if (!this.runtime.scheduler.isPullModeEnabled()) { return; }` guard in
   each, keeping the bodies.
 
+Also include exactly this test-file edit:
+
+- `test/scheduler-cfc-trigger-reads.test.ts`: delete the
+  `processPushStorageNotification` import, delete the
+  `["push", processPushStorageNotification]` parameterization entry, and keep
+  the pull arm's assertions unchanged. Keep the loop/parameterization shape
+  even though it has one entry.
+
 Merged verification for this commit:
-`deno check src/scheduler.ts src/runner.ts`, then the full runner suite
-(`deno task test`), then the corrected Step 3 grep and
-`ls src/scheduler | grep push`.
+`deno check src/scheduler.ts src/runner.ts`, then the focused
+`test/scheduler-cfc-trigger-reads.test.ts` run, then the full runner suite
+(`deno task test`), then the corrected Step 3 grep,
+`ls src/scheduler | grep push`, and
+`grep -rn "scheduler/push-\|processPush\|PushScheduler" src/ test/`.
 
 Commit (covers steps 2+3):
 `refactor(runner): remove push scheduler mode and pullMode branches (scheduler-v2 phase 0)`
