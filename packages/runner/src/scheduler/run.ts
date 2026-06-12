@@ -25,7 +25,7 @@ import { buildSchedulerActionObservation } from "./persistent-observation.ts";
 import { filterIgnoredAddresses, txToReactivityLog } from "./reactivity.ts";
 import { type ActionTimingState, recordActionTime } from "./timing.ts";
 import type { NodeRegistry } from "./node-record.ts";
-import { restoreInvalidCauses, takeInvalidCauses } from "./notifications.ts";
+import { restoreInvalidCauses, takeInvalidCauses } from "./invalidation.ts";
 import type {
   Action,
   ActionRunTraceEntry,
