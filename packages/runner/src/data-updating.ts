@@ -62,7 +62,10 @@ import {
   cloneCfcLabelView,
   getCarriedCfcLabelView,
 } from "./cfc/label-view-state.ts";
-import type { CfcAddress } from "./cfc/types.ts";
+import {
+  CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
+  type CfcAddress,
+} from "./cfc/types.ts";
 import { LINK_V1_TAG } from "./sigil-types.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
@@ -519,6 +522,63 @@ export function normalizeAndDiff(
     );
     linkOriginFromCell = true;
     const carriedCfcLabelView = getCarriedCfcLabelView(newValue);
+    // Materialize a runtime-constructed cell's initial value: a
+    // `Writable(initialValue)` built inside a lift/handler frame (the CTS
+    // wraps derived initials this way) carries its seed only as the link
+    // schema's `default` — nothing else ever writes the backing doc, so a
+    // fresh session reads the field as undefined (and a `required` field
+    // collapses the whole result; the blank-profile-name bug). This is the
+    // first point where the cell's identity is settled AND a live tx covers
+    // the write, so seed the target doc here, only if it has no value yet —
+    // re-derivations serialize the same cell again but find the doc present
+    // and leave user edits alone.
+    const cellSchema = newValue.schema;
+    const seedDefault = isRecord(cellSchema) ? cellSchema.default : undefined;
+    if (
+      seedDefault !== undefined &&
+      !(isRecord(seedDefault) &&
+        (seedDefault as Record<string, unknown>).$stream === true)
+    ) {
+      const targetLink = newValue.getAsNormalizedFullLink();
+      const targetRoot: NormalizedFullLink = { ...targetLink, path: [] };
+      if (tx.readValueOrThrow(targetRoot, options) === undefined) {
+        try {
+          // The marker is what authorizes this write past an owner-protected
+          // schema's `writeAuthorizedBy` (cfc/prepare.ts requires marker AND
+          // doc-creation); it is recorded only here, by the runtime, never
+          // from arbitrary cell.set calls.
+          tx.recordCfcWritePolicyInput({
+            kind: "structural-provenance",
+            target: {
+              space: targetRoot.space,
+              id: targetRoot.id,
+              scope: targetRoot.scope,
+              path: [],
+            },
+            claim: CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
+            sources: [{
+              space: targetRoot.space,
+              id: targetRoot.id,
+              scope: targetRoot.scope,
+              path: [],
+            }],
+          });
+          tx.writeValueOrThrow(targetRoot, seedDefault as FabricValue);
+        } catch (error) {
+          // Fail open: a seed-materialization failure must not abort the
+          // serialization that references the cell — the link (with its
+          // schema default) still gets written below.
+          diffLogger.warn(
+            "diff",
+            () => [
+              `[BRANCH_CELL] seed materialization failed for`,
+              targetRoot.id,
+              error,
+            ],
+          );
+        }
+      }
+    }
     newValue = attachCfcLabelViewToSigilLink(
       newValue.getAsLink({ includeSchema: true }),
       carriedCfcLabelView,
