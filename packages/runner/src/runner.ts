@@ -522,16 +522,12 @@ type SchedulerRehydrationSubscriptionOptions = {
       string,
       PersistedSchedulerObservationSnapshot
     >;
-    awaitSync?: boolean;
   };
 };
 
 // Options shared by run()/startWithTx()/startAfterSuccessfulCommit().
 type RunnerRunOptions = {
   doNotUpdateOnPatternChange?: boolean;
-  // Resumed-from-synced-state: hold each action's initial rehydration/run until
-  // the space has finished syncing, so consumers don't race the data.
-  awaitSyncBeforeInitialRun?: boolean;
 };
 
 function dedupeNormalizedLinks(
@@ -1127,9 +1123,6 @@ export class Runner {
       doNotUpdateOnPatternChange?: boolean;
       rehydrateSchedulerFromStorage?: boolean;
       schedulerRehydration?: SchedulerRehydrationSubscriptionOptions;
-      // Resumed-from-synced-state: hold each action's initial rehydration/run
-      // until the space has finished syncing, so consumers don't race the data.
-      awaitSyncBeforeInitialRun?: boolean;
     } = {},
   ): void {
     const { tx, givenPattern, doNotUpdateOnPatternChange } = options;
@@ -1170,7 +1163,6 @@ export class Runner {
           ? {}
           : this.schedulerRehydrationOptions(
             resultCell,
-            options.awaitSyncBeforeInitialRun,
           ));
       try {
         for (const node of pattern.nodes) {
@@ -1433,14 +1425,8 @@ export class Runner {
             givenPattern: resolvedPattern,
             schedulerRehydration: this.schedulerRehydrationOptions(
               rootCell,
-              true,
               snapshotsByActionId,
             ),
-            // This pattern is resumed from a synced state (it just awaited
-            // syncCellsForRunningPattern): hold each action's initial run until
-            // the space finishes syncing so we don't race the data (e.g. maps
-            // reconciling an empty array, then re-running once it streams in).
-            awaitSyncBeforeInitialRun: true,
           });
         } catch (err) {
           return Promise.reject(err);
@@ -1463,7 +1449,6 @@ export class Runner {
       tx,
       givenPattern,
       doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
-      awaitSyncBeforeInitialRun: options.awaitSyncBeforeInitialRun,
     });
   }
 
@@ -1769,7 +1754,6 @@ export class Runner {
 
   private schedulerRehydrationOptions(
     resultCell: Cell<any>,
-    awaitSync?: boolean,
     snapshotsByActionId?: ReadonlyMap<
       string,
       PersistedSchedulerObservationSnapshot
@@ -1785,7 +1769,6 @@ export class Runner {
         pieceId: `${scope}:${id}`,
         processGeneration: 0,
         ...(snapshotsByActionId !== undefined ? { snapshotsByActionId } : {}),
-        ...(awaitSync ? { awaitSync: true } : {}),
       },
     };
   }
@@ -2024,7 +2007,6 @@ export class Runner {
             resultCell,
             addCancel,
             pattern,
-            schedulerRehydration,
           );
           break;
         default:
@@ -3800,12 +3782,6 @@ export class Runner {
               },
             }
             : {}),
-          // Propagate the resumed-from-synced-state flag so container-minting
-          // builtins (map/filter/flatmap) defer their per-element sub-pattern
-          // runs until sync completes too.
-          ...(schedulerRehydration.rehydrateFromStorage?.awaitSync
-            ? { awaitSync: true }
-            : {}),
         },
         processCell,
         this.runtime,
@@ -3974,7 +3950,6 @@ export class Runner {
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
-    schedulerRehydration: SchedulerRehydrationSubscriptionOptions = {},
   ) {
     const parentResultCell = resultCell;
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
@@ -4111,10 +4086,7 @@ export class Runner {
         parentResultCell.space,
       );
     }
-    this.run(tx, patternImpl, inputs, childResultCell, {
-      awaitSyncBeforeInitialRun: schedulerRehydration.rehydrateFromStorage
-        ?.awaitSync,
-    });
+    this.run(tx, patternImpl, inputs, childResultCell);
 
     if (sendToBindings) {
       sendValueToBinding(

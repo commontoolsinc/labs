@@ -72,7 +72,6 @@ export interface SchedulerSubscribeOptions {
   noDebounce?: boolean;
   throttle?: number;
   changeGroup?: ChangeGroup;
-  deferInitialExecution?: boolean;
 }
 
 export interface SchedulerResubscribeOptions {
@@ -127,7 +126,6 @@ export function subscribePullSchedulerAction(
     debounce,
     noDebounce,
     throttle,
-    deferInitialExecution = false,
   } = options;
 
   updateSchedulerActionChangeGroup(
@@ -141,7 +139,7 @@ export function subscribePullSchedulerAction(
     action,
     isEffect,
     {
-      queueExecution: !deferInitialExecution,
+      queueExecution: true,
       queueComputation: state.subscriptionState.getIdempotencyCheckMode(),
     },
   );
@@ -170,9 +168,7 @@ export function subscribePullSchedulerAction(
     isLive(state.subscriptionState.dependencyGraphState, parentRecord)
   ) {
     state.markProvisionalDemand(record);
-    if (!deferInitialExecution) {
-      state.queueExecution();
-    }
+    state.queueExecution();
   }
 
   logger.debug(
@@ -188,7 +184,7 @@ export function subscribePullSchedulerAction(
   if (!actionIsEffect && surface.length > 0) {
     state.writeIndex.setSurface(action, surface);
     state.registerWriterDependents(action, surface);
-  } else if (!actionIsEffect && !deferInitialExecution && !immediateLog) {
+  } else if (!actionIsEffect && !immediateLog) {
     state.pending.add(action);
   }
 
@@ -211,9 +207,7 @@ export function subscribePullSchedulerAction(
     );
   }
 
-  if (!deferInitialExecution) {
-    state.markInvalid(action);
-  }
+  state.markInvalid(action);
 
   const actionId = state.getActionId(action);
   state.submitSubscribeTelemetry({
