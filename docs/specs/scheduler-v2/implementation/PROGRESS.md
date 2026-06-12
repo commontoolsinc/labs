@@ -2133,7 +2133,7 @@ packages/runner/src/scheduler/events.ts:654:            permanent: isPermanentRe
 
 ## 05/step-1
 
-- [x] pending — static write surface demand fixtures added.
+- [x] ca77bc16e — static write surface demand fixtures added.
 - Deviations: both fixtures already pass on current code, so they pin existing
   behavior; no behavior-change red case was observed.
 - Recordings:
@@ -2146,3 +2146,150 @@ packages/runner/src/scheduler/events.ts:654:            permanent: isPermanentRe
     --allow-read --allow-write=/tmp,/var/folders --allow-run=git
     test/scheduler-static-writes.test.ts`: passed, `1 passed (2 steps)`,
     `0 failed`.
+
+## IMPLEMENTER STOP — 05/step-3 static write surface sweep
+
+Stopped after implementing the step 2/3 static-surface rewrite locally because
+the full runner suite produced failures outside the three work-order-named
+rewrite files. Continuing would require either changing public scheduler API
+compatibility for direct `subscribe(..., ReactivityLog)` callers, or widening
+test rewrites beyond the allowed files.
+
+Local changes currently include:
+
+- `pull-subscriptions.ts`: unconditional static surface registration from
+  action annotations before `immediateLog` setup.
+- `dependency-updates.ts`: scheduling writes are derived only from the
+  annotated static surface, never `log.writes`.
+- `scheduling-writes.ts`: deleted dynamic write discovery helpers and
+  historical might-write mode; `SchedulerWriteIndex` now stores the current
+  static surface.
+- `dependency-graph.ts`/`subscriptions.ts`/`scheduler.ts`: added static
+  registration-time dependent edge attachment so existing readers can see a
+  newly registered static writer without resurrecting dynamic write-growth
+  diffing.
+- `action-run.ts`: persisted observations keep both write fields populated
+  from the static surface.
+- `runtime.ts` and experimental-option tests: removed
+  `schedulerHistoricalMightWrite`.
+- Named test rewrites in `scheduler-ordering.test.ts`,
+  `scheduler-observations.test.ts`, and `scheduler-effects.test.ts` assert
+  static surfaces instead of v1 write-set learning. The step-1 fixture was
+  also corrected to express declared writes through `action.writes`, because
+  v2 ignores direct `log.writes` as scheduler surface.
+
+Verification before the full-suite STOP:
+
+- `deno fmt packages/runner/src/scheduler/pull-subscriptions.ts
+  packages/runner/src/scheduler/dependency-updates.ts
+  packages/runner/src/scheduler/scheduling-writes.ts
+  packages/runner/src/scheduler/dependency-graph.ts
+  packages/runner/src/scheduler/action-run.ts
+  packages/runner/src/scheduler/subscriptions.ts packages/runner/src/scheduler.ts
+  packages/runner/src/runtime.ts packages/runner/test/experimental-options.test.ts
+  packages/runner/test/scheduler-ordering.test.ts
+  packages/runner/test/scheduler-observations.test.ts
+  packages/runner/test/scheduler-effects.test.ts
+  packages/runner/test/scheduler-static-writes.test.ts`: passed
+  (`Checked 13 files`).
+- `deno lint` on the same 13 files: passed (`Checked 13 files`).
+- `deno check` on the same 13 files: passed.
+- `grep -rn "backfillDependentsForNewWrites\|pruneDependentsForCurrentWrites"
+  packages/runner/src/`: no matches.
+- `grep -rn "schedulerHistoricalMightWrite\|historicalMightWrite" packages
+  --include="*.ts"`: no matches.
+- `grep -rn
+  "buildKnownSchedulingWrites\|historicalMightWrite\|diffSchedulingWrites\|pruneStructuralAncestorWrites"
+  packages/runner/src`: no matches.
+- Focused tests passed:
+  - `test/scheduler-static-writes.test.ts`: `1 passed (2 steps)`.
+  - `test/scheduler-ordering.test.ts`: `2 passed (17 steps)`.
+  - `test/scheduler-observations.test.ts`: `1 passed (22 steps)`.
+  - `test/scheduler-effects.test.ts`: `1 passed (20 steps)`.
+  - `test/experimental-options.test.ts`: `1 passed (11 steps)`.
+
+Full suite failure:
+
+- `cd packages/runner && deno task test`: failed, `580 passed
+  (3032 steps)`, `12 failed (63 steps)`, `0 ignored (10 steps)`, `2m5s`.
+- Failure groups:
+  - `test/cell-callbacks.test.ts`: persistent effect after `pull()` cleanup.
+  - `test/memory-v2-pull-reactivity.test.ts`: 2 pull reactivity failures.
+  - `test/scheduler-convergence.test.ts`: 6 convergence/cycle/stat failures.
+  - `test/scheduler-core.test.ts`: 5 scheduler core/trace/cancel failures.
+  - `test/scheduler-events.test.ts`: 2 event recomputation/in-flight demand
+    failures.
+  - `test/scheduler-pull-array.test.ts`: 7 array/demand/navigation failures.
+  - `test/scheduler-pull-handlers.test.ts`: 7 handler dependency pulling
+    failures.
+  - `test/scheduler-pull-references.test.ts`: reference propagation failure.
+  - `test/scheduler-pull.test.ts`: broad pull scheduling/staleness failures,
+    including the explicit legacy assertion
+    `should preserve writes when collecting dependencies from ReactivityLog`.
+  - `test/scheduler-retries.test.ts`: retry dependency preservation failure.
+  - `test/scheduler-throttle.test.ts`: 4 throttle/staleness failures.
+  - `test/scheduler-timing.test.ts`: 7 debounce/auto-debounce/cycle-debounce
+    failures.
+
+Reviewer question: should the scheduler keep a compatibility path where a
+direct `ReactivityLog` passed to `subscribe`/`resubscribe` seeds a static
+surface for unannotated actions, or should the work order explicitly authorize
+widening rewrites/annotations across the additional direct-scheduler tests?
+
+## REVIEWER VERDICT — 05/step-3 subscribe-time logs are declarations
+
+Keep the compatibility path — and not as a concession: it is the
+P4-correct reading. A `ReactivityLog` passed to `subscribe(...)` is a
+REGISTRATION-TIME declaration (the caller saying "this action reads X,
+writes Y"), the same rank as runner annotations. What P4 forbids is the
+surface changing from RUN logs. Do NOT widen test rewrites beyond the
+three named files.
+
+The rule:
+
+1. Surface resolution at REGISTRATION, in priority order:
+   annotated `action.writes` (non-empty) → else `immediateLog.writes`
+   (subscribe-with-log path) → else empty. Applied once.
+2. `resubscribe(action, runLog)` NEVER touches the surface — for
+   annotated and unannotated actions alike. This is the only intended
+   v1→v2 semantic change, and the three named files' rewrites already
+   express it.
+3. Architectural placement: move surface registration OUT of
+   `setSchedulerDependencies` entirely — registration sites own it
+   (`subscribePullSchedulerAction` for both the annotation and
+   immediate-log cases; the rehydration path keeps using the annotation
+   as you already have it). `setSchedulerDependencies` becomes
+   reads/edges only and never writes to the write index. This matches
+   the v2 component split (registration owns the surface) and makes the
+   resubscribe path structurally unable to clobber it.
+4. Populate-callback subscribers with no log and no annotation (e.g.
+   `cell.pull()`'s ephemeral effect) keep an empty surface — correct,
+   they are effects.
+
+Expected effect: the direct-subscribe test population (the 12 failing
+files) declares writes in their initial logs, so their surfaces, writer
+edges, demand, and ordering come back without any test edits —
+including the explicitly-legacy
+`should preserve writes when collecting dependencies from ReactivityLog`
+(subscribe-time, so it must pass unchanged) and the retry-preservation
+test (retry resubscribes with the captured log; surface stays the
+registration-time one).
+
+After implementing: run the full suite. If failures remain, list them
+per-test in PROGRESS with a one-line classification — (a) asserts
+run-log surface EVOLUTION (rewrite authorized, name it), (b) anything
+else (STOP with the failure). Do not bulk-rewrite.
+
+Docs: amend WO05 step 2/3 with the declaration rule — own commit:
+`docs(specs): scheduler-v2 WO05 — subscribe-time logs declare the surface`.
+Deferred spec note recorded: P4's text should gain one sentence naming
+the immediate-log declaration channel (rides the later docs change with
+the settled-origin note).
+
+## REVIEWER RESOLUTION — 05/step-3 declaration-rule docs
+
+- [x] pending — WO05 step 2/3 amended so registration-time `ReactivityLog`
+  writes declare the static surface when annotations are absent, while
+  resubscribe/run logs never change the surface.
+- Recordings: docs-only commit; no `deno fmt`/`deno lint`/`deno check`
+  required.

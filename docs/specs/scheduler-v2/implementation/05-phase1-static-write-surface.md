@@ -60,27 +60,29 @@ becomes the unconditional surface registration:
 ```typescript
 // Static write surface (spec scheduler-v2 P4): the action's writes are
 // fixed at registration — declared outputs plus statically resolved
-// redirect targets, already computed by the runner. Nothing about the
+// redirect targets, already computed by the runner, or a registration-time
+// ReactivityLog supplied by direct scheduler callers. Nothing about the
 // surface is learned from runs.
-const surface = (action as Partial<TelemetryAnnotations>).writes ?? [];
+const annotatedSurface = (action as Partial<TelemetryAnnotations>).writes ?? [];
+const surface = annotatedSurface.length > 0
+  ? annotatedSurface.map(toMemorySpaceAddress)
+  : (immediateLog?.writes ?? []);
 if (!actionIsEffect && surface.length > 0) {
-  setSchedulerDependencies(
-    state.dependencyUpdateState,
-    action,
-    {
-      reads: [],
-      shallowReads: [],
-      writes: surface.map(toMemorySpaceAddress),
-    },
-  );
+  state.writeIndex.setSurface(action, surface);
+  state.registerWriterDependents(action, surface);
 }
 ```
 
 (Identical to today's block minus the `!immediateLog` condition and with
 the comment replaced; with an `immediateLog` the subsequent
 `setSchedulerDependencies(state..., immediateLog)` call now must NOT
-clobber the surface — that is handled by step 3's rewrite, which ignores
-log writes. Order the calls so the surface registration runs first.)
+clobber the surface — that is handled by step 3's rewrite, which keeps
+surface registration out of dependency updates. Order the calls so the
+surface registration runs first.)
+
+Surface resolution is a registration-time declaration, in priority order:
+non-empty annotated `action.writes`, then `immediateLog.writes`, then empty.
+`resubscribe(action, runLog)` never changes the surface.
 
 Commit with step 3 (single commit; this step alone is incoherent).
 
@@ -101,28 +103,20 @@ export function setSchedulerDependencies(
 } {
   const reads = sortAndCompactPaths(log.reads);
   const shallowReads = sortAndCompactPaths(log.shallowReads, false);
-  const ignoredSchedulingWrites =
-    (action as Partial<TelemetryAnnotations>).ignoredSchedulingWrites ?? [];
-  // Static write surface (spec scheduler-v2 P4): scheduling writes are the
-  // declared surface, never the transaction's observed writes.
-  const surface = sortAndCompactPaths(
-    filterIgnoredAddresses(
-      ((action as Partial<TelemetryAnnotations>).writes ?? []).map(
-        toMemorySpaceAddress,
-      ),
-      ignoredSchedulingWrites,
-    ),
-  );
   const schedulingLog: ReactivityLog = {
     reads,
     shallowReads,
-    writes: surface,
+    writes: state.writeIndex.getSchedulingWrites(action) ?? [],
   };
   state.dependencies.set(action, schedulingLog);
-  state.writeIndex.setSurface(action, surface);
   return { reads, shallowReads, log: schedulingLog };
 }
 ```
+
+`setSchedulerDependencies` must not register, update, derive, or rederive the
+write surface. Registration sites own `state.writeIndex.setSurface(...)`;
+dependency updates only refresh reads and return the already-registered
+scheduling writes for compatibility with existing graph/telemetry payloads.
 
 Deletions in the same commit:
 
