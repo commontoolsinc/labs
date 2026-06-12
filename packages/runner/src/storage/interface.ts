@@ -713,6 +713,13 @@ export interface IExtendedStorageTransaction
   extends Omit<IStorageTransaction, "reader" | "writer"> {
   tx: IStorageTransaction;
 
+  /**
+   * The durable id of the event whose dispatch opened this transaction
+   * (spec §7.5). Set by the scheduler's event dispatch; consumed by the
+   * runner to derive the handler result cell's cause (spec §7.6).
+   */
+  dispatchedEventId?: string;
+
   getCfcState(): Readonly<CfcTxState>;
   setCfcEnforcementMode(mode: CfcEnforcementMode): void;
   setCfcFlowLabelsMode(mode: CfcFlowLabelsMode): void;
