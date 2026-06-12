@@ -187,6 +187,267 @@ Deno.test("commits without preconditions are unaffected", async () => {
   }
 });
 
+Deno.test("entity-absent precondition applies on a fresh entity", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const applied = applyCommit(engine, {
+      sessionId: "session:entity-absent-fresh",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        preconditions: [{
+          kind: "entity-absent",
+          id: "entity:receipt",
+        }],
+        operations: [{
+          op: "set",
+          id: "entity:receipt",
+          value: toEntityDocument({ receipt: 1 }),
+        }],
+      },
+    });
+
+    assertEquals(applied.seq, 1);
+    assertEquals(read(engine, { id: "entity:receipt" }), {
+      value: { receipt: 1 },
+    });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("entity-absent precondition rejects when the entity head already exists", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:entity-absent-existing",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        preconditions: [{
+          kind: "entity-absent",
+          id: "entity:receipt",
+        }],
+        operations: [{
+          op: "set",
+          id: "entity:receipt",
+          value: toEntityDocument({ receipt: 1 }),
+        }],
+      },
+    });
+
+    const rejected = assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:entity-absent-existing",
+          commit: {
+            localSeq: 2,
+            reads: { confirmed: [], pending: [] },
+            preconditions: [{
+              kind: "entity-absent",
+              id: "entity:receipt",
+            }],
+            operations: [
+              {
+                op: "set",
+                id: "entity:receipt",
+                value: toEntityDocument({ receipt: 2 }),
+              },
+              {
+                op: "set",
+                id: "entity:side-effect",
+                value: toEntityDocument({ shouldNotCommit: true }),
+              },
+            ],
+          },
+        }),
+      PreconditionFailedError,
+      "entity-absent precondition target already exists",
+    );
+
+    assertEquals(rejected.name, "PreconditionFailedError");
+    assertEquals(rejected.precondition, "receipt-exists");
+    assertEquals(read(engine, { id: "entity:receipt" }), {
+      value: { receipt: 1 },
+    });
+    assertEquals(read(engine, { id: "entity:side-effect" }), null);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("set without entity-absent precondition overwrites an existing entity", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:entity-absent-normal-set",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        preconditions: [{
+          kind: "entity-absent",
+          id: "entity:receipt",
+        }],
+        operations: [{
+          op: "set",
+          id: "entity:receipt",
+          value: toEntityDocument({ receipt: 1 }),
+        }],
+      },
+    });
+
+    const applied = applyCommit(engine, {
+      sessionId: "session:entity-absent-normal-set",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:receipt",
+          value: toEntityDocument({ receipt: 2 }),
+        }],
+      },
+    });
+
+    assertEquals(applied.seq, 2);
+    assertEquals(read(engine, { id: "entity:receipt" }), {
+      value: { receipt: 2 },
+    });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("entity-absent precondition treats a deleted head as existing", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:entity-absent-delete-head",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:receipt",
+          value: toEntityDocument({ receipt: 1 }),
+        }],
+      },
+    });
+    applyCommit(engine, {
+      sessionId: "session:entity-absent-delete-head",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "delete", id: "entity:receipt" }],
+      },
+    });
+
+    assertEquals(read(engine, { id: "entity:receipt" }), null);
+
+    const rejected = assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:entity-absent-delete-head",
+          commit: {
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            preconditions: [{
+              kind: "entity-absent",
+              id: "entity:receipt",
+            }],
+            operations: [{
+              op: "set",
+              id: "entity:receipt",
+              value: toEntityDocument({ receipt: 3 }),
+            }],
+          },
+        }),
+      PreconditionFailedError,
+      "entity-absent precondition target already exists",
+    );
+
+    assertEquals(rejected.precondition, "receipt-exists");
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("entity-absent precondition-only commit applies for an absent entity", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const applied = applyCommit(engine, {
+      sessionId: "session:entity-absent-only-fresh",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        preconditions: [{
+          kind: "entity-absent",
+          id: "entity:receipt",
+        }],
+        operations: [],
+      },
+    });
+
+    assertEquals(applied.seq, 1);
+    assertEquals(applied.revisions, []);
+    assertEquals(read(engine, { id: "entity:receipt" }), null);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("entity-absent precondition-only commit rejects for an existing entity", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:entity-absent-only-existing",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:receipt",
+          value: toEntityDocument({ receipt: 1 }),
+        }],
+      },
+    });
+
+    const rejected = assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:entity-absent-only-existing",
+          commit: {
+            localSeq: 2,
+            reads: { confirmed: [], pending: [] },
+            preconditions: [{
+              kind: "entity-absent",
+              id: "entity:receipt",
+            }],
+            operations: [],
+          },
+        }),
+      PreconditionFailedError,
+      "entity-absent precondition target already exists",
+    );
+
+    assertEquals(rejected.precondition, "receipt-exists");
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 const observationOnlyFixture = (
   localSeq: number,
 ): SchedulerActionObservation => ({
@@ -383,6 +644,52 @@ Deno.test("precondition failures keep name and precondition through client round
     assertEquals(
       (error as Error & { precondition?: unknown }).precondition,
       "origin-committed",
+    );
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("entity-absent failures keep receipt-exists through client round trip", async () => {
+  const server = new Server({
+    store: new URL("memory://memory-v2-entity-absent-client"),
+  });
+  const client = await connect({ transport: loopback(server) });
+  const session = await client.mount(
+    "did:key:z6Mk-memory-v2-entity-absent-client",
+  );
+
+  try {
+    await session.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "entity:receipt",
+        value: toEntityDocument({ receipt: 1 }),
+      }],
+    });
+
+    const error = await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 2,
+          reads: { confirmed: [], pending: [] },
+          preconditions: [{
+            kind: "entity-absent",
+            id: "entity:receipt",
+          }],
+          operations: [],
+        }),
+      Error,
+      "entity-absent precondition target already exists",
+    );
+
+    assertEquals(error.name, "PreconditionFailedError");
+    assertEquals(
+      (error as Error & { precondition?: unknown }).precondition,
+      "receipt-exists",
     );
   } finally {
     await client.close();

@@ -57,6 +57,7 @@ import * as Differential from "./differential.ts";
 import type {
   IMemoryAddress,
   IMergedChanges,
+  IPreconditionFailedError,
   IRemoteStorageProviderSettings,
   ISpaceReplica,
   IStorageManager,
@@ -1004,7 +1005,12 @@ type WatchRefreshBatch = {
 };
 
 type NativeCommitOperation =
-  | { op: "set"; id: URI; scope?: CellScope; value: EntityDocument }
+  | {
+    op: "set";
+    id: URI;
+    scope?: CellScope;
+    value: EntityDocument;
+  }
   | {
     op: "patch";
     id: URI;
@@ -1655,7 +1661,8 @@ class SpaceReplica implements ISpaceReplica {
     preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    const activePreconditions = getCommitPreconditionsConfig()
+    const emitCommitPreconditions = getCommitPreconditionsConfig();
+    const activePreconditions = emitCommitPreconditions
       ? (preconditions ?? [])
       : [];
     if (
@@ -2211,8 +2218,24 @@ const toRejectedError = (
   commit: unknown,
 ): StorageTransactionRejected => {
   const message = error instanceof Error ? error.message : String(error);
+  const name = error instanceof Error
+    ? error.name
+    : (error as { name?: unknown })?.name;
+  // `error` may be a primitive or null — never throw while normalizing a
+  // commit failure, that would mask the real rejection.
+  const precondition = (error as { precondition?: unknown })?.precondition;
   if (
-    (error instanceof Error && error.name === "ConflictError") ||
+    name === "PreconditionFailedError" &&
+    (precondition === "origin-committed" || precondition === "receipt-exists")
+  ) {
+    return {
+      name: "PreconditionFailedError",
+      message,
+      precondition,
+    } as IPreconditionFailedError;
+  }
+  if (
+    name === "ConflictError" ||
     message.includes("stale confirmed read") ||
     message.includes("pending dependency")
   ) {

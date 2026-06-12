@@ -129,11 +129,17 @@ export interface SchedulerObservationCommit {
   schedulerObservation: unknown;
 }
 
-export interface CommitPrecondition {
-  kind: "origin-committed";
-  /** localSeq of a commit from the SAME session in this space. */
-  originLocalSeq: number;
-}
+export type CommitPrecondition =
+  | {
+    kind: "origin-committed";
+    /** localSeq of a commit from the SAME session in this space. */
+    originLocalSeq: number;
+  }
+  | {
+    kind: "entity-absent";
+    id: EntityId;
+    scope?: CellScope;
+  };
 
 export interface ClientCommit {
   localSeq: number;

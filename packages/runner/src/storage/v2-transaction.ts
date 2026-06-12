@@ -128,6 +128,11 @@ const logger = getLogger("storage.v2.transaction", {
   level: "error",
 });
 
+const createOnlyMarkKey = (
+  id: string,
+  scope?: unknown,
+): string => `${normalizeCellScope(scope as CellScope | undefined)}\0${id}`;
+
 // Enabled so cross-space partial-commit failures (no rollback) are visible.
 const multiSpaceCommitLogger = getLogger("storage.v2.multi-space-commit", {
   enabled: true,
@@ -746,6 +751,10 @@ export class V2StorageTransaction implements IStorageTransaction {
   #reactivityLogCache?: TransactionReactivityLog;
   #schedulerObservation?: unknown;
   #commitPreconditions = new Map<MemorySpace, CommitPrecondition[]>();
+  #createOnlyMarks = new Map<
+    MemorySpace,
+    Map<string, { id: string; scope: CellScope }>
+  >();
   // Folded SQLite write ops per space, applied in the same commit as cell ops.
   #sqliteOps = new Map<MemorySpace, SqliteOperation[]>();
   #writeSpace?: MemorySpace;
@@ -860,6 +869,30 @@ export class V2StorageTransaction implements IStorageTransaction {
     return this.#commitPreconditions.get(space);
   }
 
+  markCreateOnly(
+    link: { space: MemorySpace; id: string; scope?: unknown },
+  ): void {
+    this.assertWritable("markCreateOnly()");
+    const ready = this.editable();
+    if (ready.error) {
+      throw ready.error;
+    }
+    const claim = this.claimWriteSpace(link.space);
+    if (claim.error) {
+      throw claim.error;
+    }
+    let marks = this.#createOnlyMarks.get(link.space);
+    if (!marks) {
+      marks = new Map();
+      this.#createOnlyMarks.set(link.space, marks);
+    }
+    const scope = normalizeCellScope(link.scope as CellScope | undefined);
+    marks.set(createOnlyMarkKey(link.id, scope), {
+      id: link.id,
+      scope,
+    });
+  }
+
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
     this.assertWritable("recordSqliteWrite()");
     const ready = this.editable();
@@ -886,10 +919,22 @@ export class V2StorageTransaction implements IStorageTransaction {
       space,
     );
     const preconditions = this.#commitPreconditions.get(space);
+    const createOnlyMarks = this.#createOnlyMarks.get(space);
+    const createOnlyPreconditions = [...(createOnlyMarks?.values() ?? [])].map(
+      ({ id, scope }) => ({
+        kind: "entity-absent" as const,
+        id,
+        scope,
+      }),
+    );
+    const nativePreconditions = [
+      ...(preconditions ?? []),
+      ...createOnlyPreconditions,
+    ];
     const sqliteOps = this.#sqliteOps.get(space);
     if (
       !branch && schedulerObservation === undefined &&
-      !preconditions?.length && !sqliteOps?.length
+      nativePreconditions.length === 0 && !sqliteOps?.length
     ) {
       return undefined;
     }
@@ -914,16 +959,22 @@ export class V2StorageTransaction implements IStorageTransaction {
       }
 
       operations.push(
-        doc.current.value === undefined
-          ? { op: "delete", id, type, scope }
-          : { op: "set", id, type, scope, value: doc.current.value },
+        doc.current.value === undefined ? { op: "delete", id, type, scope } : {
+          op: "set",
+          id,
+          type,
+          scope,
+          value: doc.current.value,
+        },
       );
     }
 
     return {
       operations,
       ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
-      ...(preconditions?.length ? { preconditions: [...preconditions] } : {}),
+      ...(nativePreconditions.length
+        ? { preconditions: nativePreconditions }
+        : {}),
       ...(sqliteOps?.length ? { sqliteOps: [...sqliteOps] } : {}),
     };
   }

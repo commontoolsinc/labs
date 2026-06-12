@@ -1634,7 +1634,7 @@ is green on top of the fix.
 
 ## 03/phase-end
 
-- [x] pending — WO03 exit checklist self-check complete.
+- [x] 6ebfbff2d — WO03 exit checklist self-check complete.
 - Benchmarks: none listed in WO03.
 - Recordings:
   - `cd packages/runner && deno task test`: passed,
@@ -1689,4 +1689,452 @@ is green on top of the fix.
      transaction wrappers now throw instead of silently dropping
      preconditions on storage that cannot enforce them
      (`test/storage-commit-preconditions.test.ts`).
+- Deviations: none.
+
+## 04/step-1
+
+- [x] 364e86ad4 — one handler per event link; replacement warns and the last
+  registration wins.
+- Deviations: used `scheduler-events.test.ts` because the file now type-checks
+  cleanly; asserted the warn through `getLoggerCountsBreakdown`.
+- Red-first recordings:
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-events.test.ts`: failed as expected before the fix:
+    replacement fixture expected first handler count `0`, actual `1`.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler/events.ts
+    packages/runner/test/scheduler-events.test.ts`: passed
+    (`Checked 2 files`).
+  - `deno lint` on the same two files: passed (`Checked 2 files`).
+  - `deno check` on the same two files: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-events.test.ts`: passed, `1 passed (15 steps)`,
+    `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `590 passed (3091 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m5s`.
+
+## 04/step-2
+
+- [x] 729618409 — handler-frame causes derive from the durable event id, falling
+  back to `crypto.randomUUID()` only for non-dispatch invocations.
+- Deviations: none.
+- Recordings:
+  - No baked per-attempt-id failures observed.
+  - `deno fmt packages/runner/src/runner.ts`: passed (`Checked 1 file`).
+  - `deno lint packages/runner/src/runner.ts`: passed (`Checked 1 file`).
+  - `deno check packages/runner/src/runner.ts`: passed.
+  - `cd packages/runner && deno task test`: passed,
+    `590 passed (3091 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m5s`.
+  - `cd packages/patterns && deno task test`: passed; package test task is
+    currently a stub (`No tests defined.`).
+
+## 04/step-3
+
+- [x] 1b0395f1b — memory v2 create-only `set` operations reject when the target
+  entity head already exists.
+- Deviations: added an extra deleted-head fixture because the engine `head`
+  table is upserted by `delete`; tombstoned heads therefore count as existing
+  under the same head-exists semantics used here.
+- Red-first recordings:
+  - `cd packages/memory && deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders test/v2-commit-preconditions.test.ts`:
+    failed as expected before the engine check, `6 passed`, `2 failed`;
+    duplicate create-only and deleted-head create-only fixtures both failed
+    with `AssertionError: Expected function to throw.`
+- Recordings:
+  - `deno fmt packages/memory/v2.ts packages/memory/v2/engine.ts
+    packages/memory/test/v2-commit-preconditions.test.ts`: passed
+    (`Checked 3 files`).
+  - `deno lint` on the same three files: passed (`Checked 3 files`).
+  - `deno check` on the same three files: passed.
+  - `cd packages/memory && deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders test/v2-commit-preconditions.test.ts`:
+    passed, `8 passed`, `0 failed`.
+  - `cd packages/memory && deno task test`: passed, `211 passed
+    (95 steps)`, `0 failed`.
+
+## 04/step-4
+
+- [x] ee9b3c89e — every event handling result cell is marked as a create-only
+  receipt when the commit-preconditions protocol flag is enabled.
+- Deviations: none. Preserved existing cross-space handler-result
+  materialization: launched result cells still live in the resolved result
+  space; receipt-only no-launch handlers create `{}` in `processCell.space`.
+- Recordings:
+  - Constraint grep:
+
+```text
+$ grep -n "handleJavaScriptHandlerResult" packages/runner/src/runner.ts
+2502:  private handleJavaScriptHandlerResult(
+2981:            return this.handleJavaScriptHandlerResult(
+```
+
+  - `crypto.randomUUID()` fallback grep:
+
+```text
+$ rg -n "crypto\.randomUUID\(\)" packages/runner/src/runner.ts
+2884:        $event: tx.dispatchedEventId ?? crypto.randomUUID(),
+```
+
+  - Receipt mark site grep:
+
+```text
+$ rg -n "markCreateOnly" packages/runner/src
+packages/runner/src/runner.ts:1460:    markCreateOnlyResult: boolean = false,
+packages/runner/src/runner.ts:1476:        if (markCreateOnlyResult) {
+packages/runner/src/runner.ts:1477:          startTx.markCreateOnly?.(
+packages/runner/src/runner.ts:1517:    markCreateOnlyResult = false,
+packages/runner/src/runner.ts:1531:        if (markCreateOnlyResult) {
+packages/runner/src/runner.ts:1532:          startTx.markCreateOnly?.(
+packages/runner/src/runner.ts:2528:        tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
+packages/runner/src/runner.ts:2611:      tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
+packages/runner/src/runner.ts:2675:    markCreateOnlyResult = false,
+packages/runner/src/runner.ts:2696:        markCreateOnlyResult,
+packages/runner/src/storage/extended-storage-transaction.ts:563:  markCreateOnly(
+packages/runner/src/storage/extended-storage-transaction.ts:566:    this.assertWritable("markCreateOnly");
+packages/runner/src/storage/extended-storage-transaction.ts:573:    this.tx.markCreateOnly?.(link);
+packages/runner/src/storage/extended-storage-transaction.ts:1109:  markCreateOnly(
+packages/runner/src/storage/extended-storage-transaction.ts:1112:    this.wrapped.markCreateOnly?.(link);
+packages/runner/src/storage/interface.ts:587:  markCreateOnly?(
+packages/runner/src/storage/interface.ts:764:  markCreateOnly?(
+packages/runner/src/storage/v2-transaction.ts:862:  markCreateOnly(
+packages/runner/src/storage/v2-transaction.ts:865:    this.assertWritable("markCreateOnly()");
+```
+
+  - `deno fmt packages/runner/src/storage/interface.ts
+    packages/runner/src/storage/extended-storage-transaction.ts
+    packages/runner/src/storage/v2-transaction.ts
+    packages/runner/src/storage/v2.ts packages/runner/src/runner.ts
+    packages/runner/src/scheduler/events.ts packages/runner/src/telemetry.ts`:
+    passed (`Checked 7 files`).
+  - `deno lint` on the same seven files: passed (`Checked 7 files`).
+  - `deno check` on the same seven files: passed.
+  - `cd packages/runner && deno task test` with default
+    `commitPreconditions` off: passed, `590 passed (3091 steps)`,
+    `0 failed`, `0 ignored (10 steps)`, `2m5s`.
+  - `cd packages/runner && deno task test` with a temporary
+    `scheduler-test-utils.ts` default of `commitPreconditions: true`: passed,
+    `590 passed (3091 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m5s`.
+    The helper toggle was reverted before commit.
+
+## MEMORY-OWNER REVIEW — PR #4090 engine changes: APPROVED + two E2 rulings
+
+Engine review of the origin-committed precondition (acting memory
+owner):
+
+- APPROVED. Check placement is inside the engine's SQLite transaction,
+  before read validation; `SELECT_PENDING_RESOLUTION` row-presence is
+  valid committed-evidence because rejected commits throw BEFORE the
+  commit-row insert (rolled back), and it is the exact statement/
+  semantics pending-read resolution already trusts — the precondition
+  inherits the session/localSeq continuity the system already depends
+  on, so no new reconnect failure mode. ProtocolError on unknown kinds
+  is the right strict posture. Client round-trip test shape verified.
+
+Two rulings WO04 (E2) must apply — do not stop for these:
+
+1. **Tombstones count as existing.** For the create-only receipt
+   precondition, "head exists" includes DELETED/tombstoned heads: a
+   receipt that was created and later deleted still witnesses that the
+   event was handled (I11 is exactly-once EVER, not exactly-once-while-
+   retained). Use the same head/delete-aware existence notion the
+   set/delete conflict detection uses (`selectSetDeleteConflict`
+   neighborhood), and add an engine test: create → delete → create-only
+   commit for the same entity → `PreconditionFailedError`
+   ("receipt-exists"). Retention/GC interplay is spec open question 2 —
+   out of scope.
+2. **Version the precondition capability.** The engine throws
+   ProtocolError on unknown precondition kinds, so an E2 client sending
+   `receipt-exists` to an E1-only server that advertises
+   `commitPreconditions` would loop on a retryable error. In WO04:
+   change the handshake flag to a LEVEL — servers advertise
+   `commitPreconditions: 2` once receipt-exists ships (E1-only code
+   advertises 1, or keep boolean=origin-committed-only); the client
+   attaches `origin-committed` at level ≥1 and `receipt-exists` /
+   `createOnly` ops at level ≥2. Since E1 has not deployed anywhere
+   yet, you may instead simply ship E1+E2 with the boolean flag meaning
+   BOTH — but then the E1 commit range must never be deployed alone:
+   record whichever you implement; the level scheme is preferred.
+
+## IMPLEMENTER STOP — 04/step-5 receipt fixtures expose runner receipt gap
+
+Step 5 fixture work is uncommitted in
+`packages/runner/test/scheduler-event-receipts.test.ts`. The focused fixture
+currently demonstrates that the Step 4 runner implementation does not yet
+enforce receipt exactly-once for handler frames with opaque refs or already
+materialized launched results:
+
+```text
+$ cd packages/runner && ENV=test deno test --allow-ffi --allow-env --allow-read \
+  --allow-write=/tmp,/var/folders --allow-run=git \
+  test/scheduler-event-receipts.test.ts
+Check test/scheduler-event-receipts.test.ts
+running 1 test from ./test/scheduler-event-receipts.test.ts
+scheduler event receipts ...
+  deduplicates redelivered events by create-only receipt ... FAILED
+  deduplicates redelivered pattern launches by receipt ... FAILED
+  retries transient conflicts with the same receipt id ... FAILED
+  creates a receipt document for handlers that launch nothing ... ok
+  allows redelivered events to commit twice while receipts are disabled ... FAILED
+FAILED | 0 passed (1 step) | 1 failed (4 steps)
+```
+
+Key failure excerpts:
+
+```text
+deduplicates redelivered events by create-only receipt:
+expected effectsTotal 1, actual 2
+
+deduplicates redelivered pattern launches by receipt:
+expected a scheduler.event.commit marker with permanentRejection
+"receipt-exists", actual false
+```
+
+Inference: the no-props/no-launch receipt-only path is green because it writes
+`{}` directly, but stateful handlers and duplicate pattern launches go through
+the launching/materialization branch. In duplicate cases that branch can avoid a
+fresh `set` on the existing result cell, so `markCreateOnly` has no matching
+commit operation to tag and no `receipt-exists` precondition reaches memory.
+
+Fixing this appears to require touching `packages/runner/src/runner.ts` or the
+runner storage receipt-marking path to force a create-only receipt operation for
+already-materialized result cells. Work order 04 step 5 names only
+`test/scheduler-event-receipts.test.ts`, so per 00-README G4 I am stopping for
+reviewer direction rather than widening the step.
+
+Additional memory-owner rulings above are acknowledged: tombstones already
+count as existing in 04/step-3, and the current implementation records the
+transitional boolean `commitPreconditions` flag as E1+E2 together rather than
+introducing a numeric level in this unmerged stack.
+
+## REVIEWER RESOLUTION — 04/step-5 entity-absent docs amendment
+
+- [x] 67a160c2c — documented the reviewer-approved replacement of op-level
+  `createOnly` receipts with commit-level `entity-absent` preconditions.
+- Deviations: none. Progress also backfills 04/step-4 to `ee9b3c89e`.
+
+## REVIEWER + MEMORY-OWNER VERDICT — 04/step-5 receipt gap (design correction)
+
+Your inference is right and the flaw is in MY step-4 design: tagging
+`createOnly` on a SET OPERATION makes the witness disappear whenever the
+duplicate handling's writes are elided as no-ops — and in the limit a
+fully-elided transaction short-circuits client-side without reaching the
+engine at all. The receipt must be a COMMIT-LEVEL precondition,
+independent of operations. Authorized redesign (touches runner storage +
+memory engine; G4 scope granted):
+
+1. **New precondition kind** alongside origin-committed:
+   `{ kind: "entity-absent", id, scope? }` — evaluated in
+   `validateCommitPreconditions`, scope resolved exactly as head lookups
+   resolve it; "exists" INCLUDES tombstoned heads (standing ruling — use
+   the `selectSetDeleteConflict`-style delete-aware lookup); violation →
+   `PreconditionFailedError("receipt-exists", ...)`.
+2. **Drop the op-level `createOnly` flag** (revert that part of
+   1b0395f1b's surface) — one mechanism, not two. Engine tests retarget
+   to the precondition, keeping the tombstone case
+   (create → delete → entity-absent commit → receipt-exists).
+3. **Client plumbing** (`markCreateOnly` keeps its name/signature):
+   marked entities emit an `entity-absent` precondition for their space
+   in `commitOperations`, regardless of what operations survive
+   elision.
+4. **Kill the zero-op escape**: a transaction carrying preconditions
+   must NOT take the no-op short-circuit — locate the early-return in
+   `commitOperations` (the path that returns ok without calling the
+   engine when no semantic ops exist) and exempt precondition-bearing
+   commits. Engine side: accept ops-empty commits when
+   `preconditions` is non-empty (mirror how observation-only commits
+   relaxed the zero-op rule), writing the commit row for localSeq
+   continuity. Engine test: precondition-only commit, both pass and
+   receipt-exists outcomes.
+5. **Fixture to add** (the corner that motivates 4): an IDEMPOTENT
+   handler (all writes elided on redelivery) — duplicate delivery must
+   still be rejected receipt-exists, not silently "succeed" locally.
+6. Sequence: docs amendment to WO04 step 3/4 describing the
+   entity-absent design
+   (`docs(specs): scheduler-v2 WO04 — receipt is a commit-level entity-absent precondition`),
+   then `feat(memory): entity-absent commit precondition replaces op-level createOnly`,
+   then the runner plumbing commit, then step 5's fixtures (all green)
+   as planned.
+
+Flag acknowledgment ACCEPTED: transitional boolean = E1+E2 ship
+together; constraint recorded — `commitPreconditions` stays default-off
+until the 04 PR merges (already true; experimental flags default off).
+
+Memory-owner note for the engine commit: keep the entity-absent lookup
+inside the same transaction scope as the other validations, and reuse
+the existing scope-key resolution helpers rather than re-deriving scope
+semantics.
+
+## REVIEWER RESOLUTION — 04/step-5 entity-absent memory engine
+
+- [x] 83d0c2d22 — memory now uses commit-level `entity-absent` preconditions
+  instead of op-level `createOnly`, including precondition-only commits.
+- Deviations: widened the runner storage interface precondition type to the
+  memory `CommitPrecondition` union in this commit so the workspace
+  type-checks; runner emission logic remains for the next reviewer-requested
+  commit.
+- Recordings:
+  - `deno fmt packages/memory/v2.ts packages/memory/v2/engine.ts
+    packages/memory/test/v2-commit-preconditions.test.ts
+    packages/runner/src/storage/interface.ts`: passed (`Checked 4 files`).
+  - `deno lint` on the same four files: passed (`Checked 4 files`).
+  - `deno check` on the same four files: passed.
+  - `cd packages/memory && deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders test/v2-commit-preconditions.test.ts`:
+    passed, `10 passed`, `0 failed`.
+  - `cd packages/memory && deno task test`: passed, `211 passed
+    (95 steps)`, `0 failed`.
+
+## REVIEWER RESOLUTION — 04/step-5 entity-absent runner plumbing
+
+- [x] c6e33b303 — runner storage now turns `markCreateOnly` into commit-level
+  `entity-absent` preconditions independent of surviving operations.
+- Deviations: includes memory server/client error mapping so
+  `PreconditionFailedError("receipt-exists")` survives the remote storage
+  round trip and reaches runner scheduling as a permanent rejection. Drops the
+  op-level `createOnly` surface from runner native commit operations.
+- Recordings:
+  - `deno fmt packages/runner/src/storage/interface.ts
+    packages/runner/src/storage/v2-transaction.ts
+    packages/runner/src/storage/v2.ts packages/memory/v2/server.ts
+    packages/memory/test/v2-commit-preconditions.test.ts
+    packages/runner/test/scheduler-event-receipts.test.ts`: passed
+    (`Checked 6 files`).
+  - `deno lint` on the same six files: passed (`Checked 6 files`).
+  - `deno check` on the same six files: passed.
+  - `deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders
+    packages/memory/test/v2-commit-preconditions.test.ts`: passed,
+    `11 passed`, `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-event-receipts.test.ts`: passed, `1 passed (6 steps)`,
+    `0 failed`.
+
+## 04/step-5
+
+- [x] 5fdd5375a — receipt exactly-once fixtures cover redelivery, launches,
+  transient retry, precondition-only idempotent redelivery, receipt-only
+  handling, and flag-off transitional behavior.
+- Deviations: includes the reviewer-requested idempotent handler fixture where
+  duplicate delivery's semantic writes are elided, leaving the receipt
+  precondition as the only surviving commit guard. Red output for the
+  fixture-first cases is recorded above in the IMPLEMENTER STOP section.
+- Recordings:
+  - `deno fmt packages/runner/test/scheduler-event-receipts.test.ts`: passed
+    (`Checked 1 file`).
+  - `deno lint packages/runner/test/scheduler-event-receipts.test.ts`: passed
+    (`Checked 1 file`).
+  - `deno check packages/runner/test/scheduler-event-receipts.test.ts`: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-event-receipts.test.ts`: passed, `1 passed (6 steps)`,
+    `0 failed`.
+
+## 04/phase-end self-check
+
+- [x] pending — work order 04 phase-end verification recorded.
+- Deviations: work order 04 lists no phase-specific benchmarks beyond the
+  full suites and exit-checklist greps. The flag-on runner pass used a
+  temporary local edit to `packages/runner/test/scheduler-test-utils.ts` to
+  default `commitPreconditions: true`; that edit was reverted before this
+  record was written, and `git status --short` was clean.
+- Recordings:
+  - `cd packages/memory && deno task test`: passed, `211 passed
+    (95 steps)`, `0 failed`.
+  - `cd packages/runner && deno task test` with default
+    `commitPreconditions` off: passed, `591 passed (3097 steps)`,
+    `0 failed`, `0 ignored (10 steps)`, `2m5s`.
+  - `cd packages/runner && deno task test` with a temporary
+    `scheduler-test-utils.ts` default of `commitPreconditions: true`: passed,
+    `591 passed (3097 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m5s`.
+    The helper toggle was reverted before recording.
+  - `grep -n "handleJavaScriptHandlerResult" packages/runner/src/runner.ts`:
+
+```text
+2502:  private handleJavaScriptHandlerResult(
+2981:            return this.handleJavaScriptHandlerResult(
+```
+
+  - `rg -n "crypto\.randomUUID\(\)" packages/runner/src/runner.ts`:
+
+```text
+2884:        $event: tx.dispatchedEventId ?? crypto.randomUUID(),
+```
+
+  - `rg -n "markCreateOnly" packages/runner/src`:
+
+```text
+packages/runner/src/runner.ts:1460:    markCreateOnlyResult: boolean = false,
+packages/runner/src/runner.ts:1476:        if (markCreateOnlyResult) {
+packages/runner/src/runner.ts:1477:          startTx.markCreateOnly?.(
+packages/runner/src/runner.ts:1517:    markCreateOnlyResult = false,
+packages/runner/src/runner.ts:1531:        if (markCreateOnlyResult) {
+packages/runner/src/runner.ts:1532:          startTx.markCreateOnly?.(
+packages/runner/src/runner.ts:2528:        tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
+packages/runner/src/runner.ts:2611:      tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
+packages/runner/src/runner.ts:2675:    markCreateOnlyResult = false,
+packages/runner/src/runner.ts:2696:        markCreateOnlyResult,
+packages/runner/src/storage/v2-transaction.ts:865:  markCreateOnly(
+packages/runner/src/storage/v2-transaction.ts:868:    this.assertWritable("markCreateOnly()");
+packages/runner/src/storage/extended-storage-transaction.ts:563:  markCreateOnly(
+packages/runner/src/storage/extended-storage-transaction.ts:566:    this.assertWritable("markCreateOnly");
+packages/runner/src/storage/extended-storage-transaction.ts:573:    this.tx.markCreateOnly?.(link);
+packages/runner/src/storage/extended-storage-transaction.ts:1109:  markCreateOnly(
+packages/runner/src/storage/extended-storage-transaction.ts:1112:    this.wrapped.markCreateOnly?.(link);
+packages/runner/src/storage/interface.ts:587:  markCreateOnly?(
+packages/runner/src/storage/interface.ts:764:  markCreateOnly?(
+```
+
+  - `rg -n "event-handler-replaced|Exactly one handler per event|event-lost-race|permanentRejection|isPermanentRejection|receipt-exists" packages/runner/src/scheduler/events.ts packages/runner/src/telemetry.ts packages/runner/src/storage/rejection.ts`:
+
+```text
+packages/runner/src/storage/rejection.ts:4: * for `receipt-exists` a retry would double-handle an event.
+packages/runner/src/storage/rejection.ts:6:export function isPermanentRejection(
+packages/runner/src/telemetry.ts:170:  permanentRejection?: "origin-committed" | "receipt-exists";
+packages/runner/src/scheduler/events.ts:16:import { isPermanentRejection } from "../storage/rejection.ts";
+packages/runner/src/scheduler/events.ts:162:      // Exactly one handler per event (spec scheduler-v2 decision 12).
+packages/runner/src/scheduler/events.ts:210:    logger.warn("event-handler-replaced", () => [
+packages/runner/src/scheduler/events.ts:594:      const permanentRejection =
+packages/runner/src/scheduler/events.ts:595:        result.error && isPermanentRejection(result.error)
+packages/runner/src/scheduler/events.ts:613:        ...(permanentRejection !== undefined ? { permanentRejection } : {}),
+packages/runner/src/scheduler/events.ts:617:        !isPermanentRejection(result.error)
+packages/runner/src/scheduler/events.ts:639:        if (permanentRejection === "receipt-exists") {
+packages/runner/src/scheduler/events.ts:641:            "event-lost-race",
+packages/runner/src/scheduler/events.ts:654:            permanent: isPermanentRejection(result.error),
+```
+
+  - `rg -n "entity-absent|PreconditionFailedError|receipt-exists" packages/memory/v2.ts packages/memory/v2/engine.ts packages/memory/v2/server.ts packages/runner/src/storage/interface.ts packages/runner/src/storage/v2-transaction.ts packages/runner/src/storage/v2.ts`: entity-absent precondition type, engine validation,
+    memory server typed-error mapping, runner native precondition emission, and
+    runner permanent rejection mapping all present.
+  - `rg -n "createOnly" packages/memory packages/runner/src packages/runner/test/scheduler-event-receipts.test.ts`: no op-level
+    `createOnly` operation surface remains; remaining matches are
+    `markCreateOnly` API/helper names and local mark maps.
+
+## REVIEWER RESOLUTION — PR #4096 review findings
+
+- [x] pending — deferred-navigate receipt placement + rejection-normalization
+  hardening.
+- Findings addressed (Codex/cubic review on PR #4096), red-first where
+  applicable:
+  1. `setupDeferredHandlerResultPattern` created the result-cell head in the
+     handler transaction (`setupInternal`) but the create-only receipt mark
+     rode the deferred start transaction — the first delivery's deferred
+     start saw an existing head and died as `receipt-exists`, while
+     redeliveries went unguarded. The mark now rides the handler transaction
+     that performs the create; `startAfterSuccessfulCommit` loses its unused
+     `markCreateOnlyResult` parameter
+     (`test/scheduler-event-receipts.test.ts` "navigateTo handler results
+     navigate once and deduplicate redelivery", red-first: first delivery
+     never navigated).
+  2. `toRejectedError` accessed `.precondition` without optional chaining;
+     a primitive/null rejection would throw while normalizing a commit
+     failure and mask the real error.
+- Rebase note: main now validates preconditions ahead of every commit shape
+  (#4090 resolution); the entity-absent precondition made re-validation on
+  commit replays unsafe, so the generic same-session replay check is hoisted
+  ABOVE precondition validation (still before the observation fast paths,
+  which keep their own replay table and never hit the generic check).
 - Deviations: none.
