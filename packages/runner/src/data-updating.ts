@@ -77,6 +77,21 @@ const diffLogger = getLogger("normalizeAndDiff", {
 // Sentinel value to distinguish "no precomputed value" from "precomputed value is undefined"
 const NO_PRECOMPUTED = Symbol("no-precomputed");
 
+// Docs whose seed-materialization absence check found a PRESENT value, keyed
+// `space/id`, per runtime so tests with multiple runtimes stay isolated. A
+// doc can't become un-created, so a settled entry can never suppress a needed
+// seed; pending writes are deliberately not memoized (an aborted tx must
+// re-seed). See the BRANCH_CELL seed materialization below.
+const seedCheckSettled = new WeakMap<Runtime, Set<string>>();
+const seededDocs = (runtime: Runtime): Set<string> => {
+  let docs = seedCheckSettled.get(runtime);
+  if (docs === undefined) {
+    docs = new Set();
+    seedCheckSettled.set(runtime, docs);
+  }
+  return docs;
+};
+
 const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   space: link.space,
   id: link.id,
@@ -535,7 +550,9 @@ export function normalizeAndDiff(
     // and leave user edits alone.
     const cellSchema = newValue.schema;
     const seedDefault = isRecord(cellSchema) ? cellSchema.default : undefined;
-    const seedTarget = seedDefault !== undefined
+    const seedTarget = seedDefault !== undefined &&
+        !(isRecord(seedDefault) &&
+          (seedDefault as Record<string, unknown>).$stream === true)
       ? newValue.getAsNormalizedFullLink()
       : undefined;
     if (
@@ -545,14 +562,21 @@ export function normalizeAndDiff(
       // sub-path cell (e.g. via `.key()`) carries a FIELD default — writing
       // that over the doc root would clobber the document.
       seedTarget !== undefined && seedTarget.path.length === 0 &&
-      !(isRecord(seedDefault) &&
-        (seedDefault as Record<string, unknown>).$stream === true)
+      // Each doc needs the absence check at most once per runtime: once
+      // found present (or seeded here), later serializations of the same
+      // cell skip it — the check would otherwise run on EVERY defaulted-cell
+      // serialization, a measurable hot-path cost (the CI perf check caught
+      // +22–36% on the CLI integration suites for the unmemoized version).
+      !seededDocs(runtime).has(`${seedTarget.space}/${seedTarget.id}`)
     ) {
       // Don't subscribe the serializing action to the seed doc — mirror
       // materializeDerivedInternalCells' read for the same check.
       const absent = tx.readValueOrThrow(seedTarget, {
         meta: ignoreReadForScheduling,
       }) === undefined;
+      if (!absent) {
+        seededDocs(runtime).add(`${seedTarget.space}/${seedTarget.id}`);
+      }
       if (absent) {
         try {
           // The marker is what authorizes this write past an owner-protected
@@ -579,6 +603,9 @@ export function normalizeAndDiff(
             seedTarget,
             fabricFromNativeValue(seedDefault) as FabricValue,
           );
+          // Deliberately NOT memoized here: if this tx aborts, the doc stays
+          // absent and the next serialization must seed again. Once the
+          // write commits, the next check finds the doc present and settles.
         } catch (error) {
           // Fail open: a seed-materialization failure must not abort the
           // serialization that references the cell — the link (with its
