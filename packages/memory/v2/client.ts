@@ -156,6 +156,10 @@ export class Client {
     if (result.error) {
       const error = new Error(result.error.message);
       error.name = result.error.name;
+      if (result.error.precondition !== undefined) {
+        (error as Error & { precondition?: string }).precondition =
+          result.error.precondition;
+      }
       throw error;
     }
     return result.ok as Result;

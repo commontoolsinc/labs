@@ -676,6 +676,19 @@ export class ConflictError extends Error {
   }
 }
 
+export class PreconditionFailedError extends Error {
+  readonly precondition: "origin-committed" | "receipt-exists";
+
+  constructor(
+    precondition: PreconditionFailedError["precondition"],
+    message: string,
+  ) {
+    super(message);
+    this.name = "PreconditionFailedError";
+    this.precondition = precondition;
+  }
+}
+
 export class ProtocolError extends Error {
   constructor(message: string) {
     super(message);
@@ -3151,6 +3164,7 @@ const applyCommitTransaction = (
     };
   }
 
+  validateCommitPreconditions(engine, sessionKey, commit);
   validateConfirmedReads(engine, branch, commit, { principal, sessionId });
   const resolvedPendingReads = resolvePendingReads(
     engine,
@@ -3390,6 +3404,35 @@ const writeOperation = (
         commitSeq: seq,
         op: "delete",
       };
+    }
+  }
+};
+
+const validateCommitPreconditions = (
+  engine: Engine,
+  sessionKey: string,
+  commit: ClientCommit,
+): void => {
+  for (const precondition of commit.preconditions ?? []) {
+    if (precondition.kind !== "origin-committed") {
+      throw new ProtocolError(
+        `unsupported commit precondition: ${
+          String((precondition as { kind?: unknown }).kind)
+        }`,
+      );
+    }
+
+    // Same-session commits are applied in order, so the origin's fate is
+    // decided when the follow-up arrives; an absent origin means rejection.
+    const row = engine.statements.selectPendingResolution.get({
+      session_id: sessionKey,
+      local_seq: precondition.originLocalSeq,
+    }) as { seq: number } | undefined;
+    if (!row) {
+      throw new PreconditionFailedError(
+        "origin-committed",
+        `origin commit not committed: localSeq ${precondition.originLocalSeq}`,
+      );
     }
   }
 };
