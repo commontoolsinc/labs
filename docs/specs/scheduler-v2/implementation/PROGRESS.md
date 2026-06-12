@@ -4915,3 +4915,46 @@ packages/runner/test/scheduler-bench-helpers.ts:62:  ["event/populate", "schedul
   - Expected noisy passing logs remain: scheduler write-surface warnings,
     deliberate event/retry/preflight error logs, createRef no-cause warnings,
     and traversal warnings.
+
+## 08/4.3-phase-4-gates
+
+- [x] pending — re-ran the Phase 4 gates and added the dormant-registration
+  cell-data-read assertion requested by the work order.
+- Gate shape:
+  - Added `runner.test.ts` coverage for a JavaScript-node piece with a linked
+    input and no downstream demand. After setup/registration, the test wraps
+    scheduler-created transactions during `idle()` and asserts the piece does
+    not run and performs zero reads of the linked source document.
+  - Re-ran the cold-replica startup fixture, the declared-read cutover fixture
+    pack, the reload rehydration fixture, and the full runner suite.
+- Recordings:
+  - `deno fmt packages/runner/test/runner.test.ts`: passed (`Checked 1 file`).
+  - `deno lint packages/runner/test/runner.test.ts`: passed (`Checked 1 file`).
+  - `deno check packages/runner/test/runner.test.ts`: passed.
+  - Focused runner fixture:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/runner.test.ts`: passed, `4 passed (42 steps)`, `0 failed`, `460ms`.
+  - Phase 4.3 focused gate pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-cold-replica.test.ts test/scheduler-v2-cutover.test.ts
+    test/reload-rehydration.test.ts test/runner.test.ts`: passed,
+    `7 passed (54 steps)`, `0 failed`, `2s`. The reload fixture still emits
+    the expected transient `TypeError` log while passing; it asserts
+    `rehydrate/ok > 0` and `rehydrate/miss/no-snapshot = 0`.
+  - Default-app/reload comparison:
+    `reload-rehydration.test.ts` completed inside the gate pack in `426ms`
+    versus the 4.0 recorded `711ms`; `rehydrate/miss/no-snapshot` remained
+    asserted at `0`.
+  - Pull-seed bench:
+    `cd packages/runner && deno bench --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull-seeds.bench.ts`: passed on Apple M3 Max / Deno 2.8.1.
+    Results: 50 effects / 20 reschedules `79.9ms` (4.0 baseline `84.4ms`);
+    200 effects / 10 reschedules `106.1ms` (4.0 baseline `104.2ms`).
+  - `cd packages/runner && deno task test`: passed,
+    `595 passed (3103 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m4s`.
+  - Expected noisy passing logs remain: scheduler write-surface warnings,
+    deliberate event/retry/preflight error logs, createRef no-cause warnings,
+    traversal warnings, and the reload-rehydration transient `TypeError`.
