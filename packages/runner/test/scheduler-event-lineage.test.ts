@@ -478,4 +478,82 @@ describe("scheduler event lineage", () => {
       await idlePromise?.catch(() => {});
     }
   });
+
+  it("dispatches stream events whose origin transaction already committed", async () => {
+    const stream = runtime.getCell<unknown>(
+      space,
+      "lineage committed-origin stream",
+      undefined,
+      tx,
+    );
+    const payloads = runtime.getCell<unknown[]>(
+      space,
+      "lineage committed-origin payloads",
+      undefined,
+      tx,
+    );
+    stream.set({ $stream: true });
+    payloads.set([]);
+    await tx.commit();
+
+    const originTx = runtime.edit();
+    await originTx.commit();
+    tx = runtime.edit();
+
+    const handler: EventHandler = (handlerTx, event: unknown) => {
+      const current = payloads.withTx(handlerTx).get();
+      payloads.withTx(handlerTx).set([...current, event]);
+    };
+    runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+
+    stream.withTx(originTx).send("settled origin payload");
+    await waitForSignal(
+      runtime.idle(),
+      "already-committed origin event did not reach idle",
+    );
+
+    expect(payloads.get()).toEqual(["settled origin payload"]);
+  });
+
+  it("drops stream events whose origin transaction already failed", async () => {
+    const stream = runtime.getCell<unknown>(
+      space,
+      "lineage failed-origin stream",
+      undefined,
+      tx,
+    );
+    const payloads = runtime.getCell<unknown[]>(
+      space,
+      "lineage failed-origin payloads",
+      undefined,
+      tx,
+    );
+    stream.set({ $stream: true });
+    payloads.set([]);
+    await tx.commit();
+
+    const originTx = runtime.edit();
+    originTx.abort("already failed lineage origin");
+    tx = runtime.edit();
+
+    const handler: EventHandler = (handlerTx, event: unknown) => {
+      const current = payloads.withTx(handlerTx).get();
+      payloads.withTx(handlerTx).set([...current, event]);
+    };
+    runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+
+    stream.withTx(originTx).send("dropped origin payload");
+    await waitForSignal(
+      runtime.idle(),
+      "already-failed origin event did not reach idle",
+    );
+
+    expect(payloads.get()).toEqual([]);
+  });
 });
