@@ -37,8 +37,8 @@ export async function resolveSlugTargetCell(
     throw new SlugResolutionError(`Slug "${slug}" not found.`, "missing");
   }
 
-  const targetLink = parseLink(raw, slugCell);
-  if (!targetLink || targetLink.overwrite !== "redirect") {
+  const targetLink = parseSlugRedirect(raw, slugCell);
+  if (!targetLink) {
     throw new SlugResolutionError(
       `Slug "${slug}" does not contain a valid redirect.`,
       "malformed",
@@ -53,4 +53,22 @@ export async function resolveSlugTargetCell(
   });
   await target.sync();
   return target;
+}
+
+/**
+ * Parse a slug document's raw payload into its redirect link, or undefined
+ * when the payload is not a valid redirect. parseLink throws plain TypeErrors
+ * on sigil-SHAPED payloads with broken internals (e.g. a non-array path);
+ * this runtime's own write path rejects such values, but a slug cell can be
+ * written by foreign clients over the memory protocol, so the resolver must
+ * fold a parse throw into the same typed "malformed" outcome as a
+ * structurally-invalid payload. Exported for tests.
+ */
+export function parseSlugRedirect(raw: unknown, base: Cell<unknown>) {
+  try {
+    const link = parseLink(raw, base);
+    return link?.overwrite === "redirect" ? link : undefined;
+  } catch {
+    return undefined;
+  }
 }

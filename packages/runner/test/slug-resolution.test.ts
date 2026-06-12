@@ -5,7 +5,10 @@ import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { slugIdForSpace } from "../src/slugs.ts";
-import { resolveSlugTargetCell } from "../src/slug-resolution.ts";
+import {
+  parseSlugRedirect,
+  resolveSlugTargetCell,
+} from "../src/slug-resolution.ts";
 
 const signer = await Identity.fromPassphrase("runner slug resolution tests");
 const space = signer.did();
@@ -72,5 +75,27 @@ describe("slug resolution", () => {
     await expect(
       resolveSlugTargetCell(runtime, space, "malformed"),
     ).rejects.toThrow(/does not contain a valid redirect/);
+  });
+
+  it("treats parseLink throws as malformed redirects (foreign-written payloads)", () => {
+    // A sigil-SHAPED payload with broken internals (non-array path) makes
+    // parseLink throw a generic TypeError. This runtime's own write path
+    // rejects such values, but foreign clients can persist them over the
+    // memory protocol — the resolver must fold the throw into the typed
+    // "malformed" outcome (SlugResolutionError) instead of leaking a bare
+    // TypeError past callers like the fabric chase's chain wrapping.
+    const base = runtime.getCellFromEntityId(space, {
+      "/": slugIdForSpace(space, "poisoned"),
+    });
+    const poisoned = {
+      "/": {
+        "link@1": { id: "of:abc", path: "not-an-array", overwrite: "redirect" },
+      },
+    };
+    expect(() => parseLink(poisoned, base)).toThrow(); // the hazard is real
+    expect(parseSlugRedirect(poisoned, base)).toBeUndefined();
+    expect(
+      parseSlugRedirect("not a redirect", base),
+    ).toBeUndefined();
   });
 });
