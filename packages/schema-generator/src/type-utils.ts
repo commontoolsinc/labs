@@ -4,6 +4,12 @@ import type { JSONSchemaMutable } from "@commonfabric/api";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { getPropertyNameText } from "./typescript/property-name.ts";
 import type { CellWrapperKind } from "./typescript/cell-brand.ts";
+import {
+  isWrapperSpelling,
+  spellingsWhere,
+  WRAPPER_SPELLING_TO_KIND,
+  type WrapperSpelling,
+} from "./typescript/wrapper-names.ts";
 
 /**
  * Names that should be treated as Cell-like wrapper types.
@@ -15,37 +21,65 @@ import type { CellWrapperKind } from "./typescript/cell-brand.ts";
  * which keys off RESOLVED `CellWrapperKind` values (where `Writable` has already
  * normalized to `Cell` and `OpaqueCell` belongs with the rest).
  */
-const CELL_LIKE_WRAPPER_NAMES = new Set([
-  "Cell",
-  "Writable",
-  "ReadonlyCell",
-  "WriteonlyCell",
-  "ComparableCell",
-]);
-const OPAQUE_WRAPPER_NAMES = new Set(["OpaqueCell"]);
+const CELL_LIKE_WRAPPER_NAMES = spellingsWhere({
+  Cell: true,
+  Writable: true,
+  ReadonlyCell: true,
+  WriteonlyCell: true,
+  ComparableCell: true,
+  OpaqueCell: false, // split into OPAQUE_WRAPPER_NAMES (see NB above)
+  Stream: false, // handled separately at each call site
+  SqliteDb: false, // handled separately at each call site
+  OpaqueRef: false,
+  OpaqueRefMethods: false,
+  CellTypeConstructor: false,
+  ScopedCellTypeConstructor: false,
+});
+const OPAQUE_WRAPPER_NAMES = spellingsWhere({
+  OpaqueCell: true,
+  Cell: false,
+  Writable: false,
+  ReadonlyCell: false,
+  WriteonlyCell: false,
+  ComparableCell: false,
+  Stream: false,
+  SqliteDb: false,
+  OpaqueRef: false,
+  OpaqueRefMethods: false,
+  CellTypeConstructor: false,
+  ScopedCellTypeConstructor: false,
+});
 type NodeWrapperKind = "Default" | CellWrapperKind;
 
 function getEntityNameText(name: ts.EntityName): string {
   return ts.isIdentifier(name) ? name.text : name.right.text;
 }
 
+// Spellings that participate in node-level wrapper detection. OpaqueRef is
+// deliberately excluded: wrapperKindForName has never treated it as a node
+// wrapper, and its callers (Default-literal and type-name resolution) must
+// not start unwrapping it — revisit with the OpaqueRef deprecation.
+const NODE_WRAPPER_SPELLINGS: Readonly<Record<WrapperSpelling, boolean>> = {
+  Cell: true,
+  Writable: true,
+  ReadonlyCell: true,
+  WriteonlyCell: true,
+  ComparableCell: true,
+  OpaqueCell: true,
+  Stream: true,
+  SqliteDb: true,
+  OpaqueRef: false,
+  OpaqueRefMethods: false,
+  CellTypeConstructor: false,
+  ScopedCellTypeConstructor: false,
+};
+
 function wrapperKindForName(name: string): NodeWrapperKind | undefined {
-  switch (name) {
-    case "Default":
-      return "Default";
-    case "Cell":
-    case "Writable":
-      return "Cell";
-    case "ReadonlyCell":
-    case "WriteonlyCell":
-    case "ComparableCell":
-    case "Stream":
-    case "SqliteDb":
-    case "OpaqueCell":
-      return name;
-    default:
-      return undefined;
+  if (name === "Default") return "Default";
+  if (!isWrapperSpelling(name) || !NODE_WRAPPER_SPELLINGS[name]) {
+    return undefined;
   }
+  return WRAPPER_SPELLING_TO_KIND[name];
 }
 
 export { getPropertyNameText };

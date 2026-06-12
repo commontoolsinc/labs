@@ -7,28 +7,46 @@
  * - `as Cell<...>` and other cell-like types: WARNING - prefer proper type annotations
  */
 import ts from "typescript";
+import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 
 /**
  * Cell-like types that should trigger a warning when cast to.
  * These types have special reactive semantics that casts can bypass.
  */
-const CELL_LIKE_TYPE_NAMES = new Set([
-  "Cell",
-  "OpaqueCell",
-  "Stream",
-  "ComparableCell",
-  "ReadonlyCell",
-  "WriteonlyCell",
-  "Writable",
-  "CellTypeConstructor",
-]);
+const CELL_LIKE_TYPE_NAMES = spellingsWhere({
+  Cell: true,
+  OpaqueCell: true,
+  Stream: true,
+  ComparableCell: true,
+  ReadonlyCell: true,
+  WriteonlyCell: true,
+  Writable: true,
+  CellTypeConstructor: true,
+  ScopedCellTypeConstructor: false,
+  SqliteDb: false,
+  OpaqueRef: false, // error, not warning — see FORBIDDEN_CAST_TYPE_NAMES
+  OpaqueRefMethods: false,
+});
 
 /**
  * Types that should trigger an error when cast to.
  * Casting to these types is never allowed.
  */
-const FORBIDDEN_CAST_TYPE_NAMES = new Set(["OpaqueRef"]);
+const FORBIDDEN_CAST_TYPE_NAMES = spellingsWhere({
+  OpaqueRef: true,
+  Cell: false,
+  Writable: false,
+  ReadonlyCell: false,
+  WriteonlyCell: false,
+  ComparableCell: false,
+  OpaqueCell: false,
+  Stream: false,
+  SqliteDb: false,
+  OpaqueRefMethods: false,
+  CellTypeConstructor: false,
+  ScopedCellTypeConstructor: false,
+});
 
 export class CastValidationTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
