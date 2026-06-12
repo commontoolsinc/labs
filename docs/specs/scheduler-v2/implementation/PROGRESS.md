@@ -1989,7 +1989,7 @@ semantics.
 
 ## REVIEWER RESOLUTION — 04/step-5 entity-absent runner plumbing
 
-- [x] pending — runner storage now turns `markCreateOnly` into commit-level
+- [x] c6e33b303 — runner storage now turns `markCreateOnly` into commit-level
   `entity-absent` preconditions independent of surviving operations.
 - Deviations: includes memory server/client error mapping so
   `PreconditionFailedError("receipt-exists")` survives the remote storage
@@ -2008,6 +2008,26 @@ semantics.
     --allow-write=/tmp,/var/folders
     packages/memory/test/v2-commit-preconditions.test.ts`: passed,
     `11 passed`, `0 failed`.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-event-receipts.test.ts`: passed, `1 passed (6 steps)`,
+    `0 failed`.
+
+## 04/step-5
+
+- [x] pending — receipt exactly-once fixtures cover redelivery, launches,
+  transient retry, precondition-only idempotent redelivery, receipt-only
+  handling, and flag-off transitional behavior.
+- Deviations: includes the reviewer-requested idempotent handler fixture where
+  duplicate delivery's semantic writes are elided, leaving the receipt
+  precondition as the only surviving commit guard. Red output for the
+  fixture-first cases is recorded above in the IMPLEMENTER STOP section.
+- Recordings:
+  - `deno fmt packages/runner/test/scheduler-event-receipts.test.ts`: passed
+    (`Checked 1 file`).
+  - `deno lint packages/runner/test/scheduler-event-receipts.test.ts`: passed
+    (`Checked 1 file`).
+  - `deno check packages/runner/test/scheduler-event-receipts.test.ts`: passed.
   - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
     --allow-read --allow-write=/tmp,/var/folders --allow-run=git
     test/scheduler-event-receipts.test.ts`: passed, `1 passed (6 steps)`,
