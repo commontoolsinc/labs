@@ -1998,6 +1998,14 @@ const schemaTypeMatchesValue = (
   });
 };
 
+// Thrown when a policy `$ref` cannot be resolved against its own document, so
+// the value condition cannot be evaluated. It propagates past the matcher's
+// boolean combinators (notably `oneOf`'s exactly-one count, where neither
+// `true` nor `false` reliably biases toward "applies") and is caught at the
+// `wildcardPolicyMatchesValue` boundary, which fails closed by treating the
+// ifc entry as applying — mirroring the unresolvable-LINK branch (audit S17).
+class UnevaluablePolicyRefError extends Error {}
+
 const policySchemaMatchesValue = (
   schema: JSONSchema,
   value: unknown,
@@ -2019,12 +2027,16 @@ const policySchemaMatchesValue = (
       schema,
       schemaRoot,
     );
-    if (resolved === undefined) {
-      return false;
+    // An unresolvable policy ref (missing/dropped `$def`, or a ref that
+    // resolves to itself with no progress) leaves the condition unevaluable.
+    // Unlike S17's author-controlled LINK schema, this schema IS the policy we
+    // enforce, but the same rule holds: an unevaluable condition must never
+    // silently exclude the entry (fail open) — signal it so the boundary fails
+    // closed.
+    if (resolved === undefined || resolved === schema) {
+      throw new UnevaluablePolicyRefError(schema.$ref);
     }
-    return resolved !== schema
-      ? policySchemaMatchesValue(resolved, value, schemaRoot)
-      : false;
+    return policySchemaMatchesValue(resolved, value, schemaRoot);
   }
   if (schema.const !== undefined && !deepEqual(schema.const, value)) {
     return false;
@@ -2089,13 +2101,27 @@ export const wildcardPolicyMatchesValue = (
     return true;
   }
 
+  // An unevaluable policy `$ref` (UnevaluablePolicyRefError) fails closed:
+  // treat the entry as applying rather than letting a broken/poisoned schema
+  // envelope silently exclude its writeAuthorizedBy/maxConfidentiality checks.
+  const matches = (candidate: unknown): boolean => {
+    try {
+      return policySchemaMatchesValue(schema, candidate);
+    } catch (error) {
+      if (error instanceof UnevaluablePolicyRefError) {
+        return true;
+      }
+      throw error;
+    }
+  };
+
   if (!isPrimitiveCellLink(value)) {
-    return policySchemaMatchesValue(schema, value);
+    return matches(value);
   }
 
   const linkedValue = linkedWriteValueForPolicy(tx, target, value);
   if (linkedValue !== undefined) {
-    return policySchemaMatchesValue(schema, linkedValue);
+    return matches(linkedValue);
   }
 
   // The link's target value is unresolvable, so the policy's value condition

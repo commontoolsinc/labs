@@ -375,6 +375,13 @@ const mergeSchemaNode = (
     mergedItems = right.items;
   }
 
+  // `$defs` is not merged: `{...left, ...right}` lets a `right` envelope that
+  // declares its own `$defs` replace `left`'s wholesale, which can leave a
+  // surviving `items`/`properties` `$ref` (e.g. `#/$defs/Element`) pointing at
+  // a dropped def. The merged envelope's ifc (incl. writeAuthorizedBy) still
+  // rides on the node, so the policy matcher must not let the now-unresolvable
+  // value-condition ref exclude the entry — `policySchemaMatchesValue` in
+  // prepare.ts fails closed on unevaluable refs for exactly this reason.
   return {
     ...left,
     ...right,
