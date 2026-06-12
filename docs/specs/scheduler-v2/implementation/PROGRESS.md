@@ -1344,7 +1344,7 @@ Then continue step 3 as written.
 
 ## 03/step-3
 
-- [x] pending — origin-committed commit precondition
+- [x] 8406bda91 — origin-committed commit precondition
 - Deviations: implemented the reviewer verdict by adding the
   `PreconditionFailedError` route through the memory server/client wire path;
   no runner changes were needed. The new test file uses the memory
@@ -1363,3 +1363,23 @@ Then continue step 3 as written.
   - `cd packages/memory && deno test --allow-ffi --allow-env --allow-read
     --allow-write=/tmp,/var/folders test/v2-commit-preconditions.test.ts`:
     passed, `4 passed`, `0 failed`, `26ms`.
+
+## 03/step-4
+
+- [x] pending — speculation lineage registry
+- Deviations: none. Verified the work-order caveat in
+  `extended-storage-transaction.ts`: `commit()` always attaches the storage
+  commit promise to `runCommitCallbacks(result)`, including read-only/no-op
+  commits that still call `this.tx.commit()`, and `rejectCommitBeforeStorage`
+  also invokes `runCommitCallbacks(result)` for pre-storage CFC rejection.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler/lineage.ts
+    packages/runner/test/scheduler-lineage.test.ts`: passed (`Checked 2
+    files`).
+  - `deno lint` on the same two files: passed (`Checked 2 files`).
+  - `deno check packages/runner/src/scheduler/lineage.ts
+    packages/runner/test/scheduler-lineage.test.ts`: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-lineage.test.ts`: passed, `1 passed (6 steps)`,
+    `0 failed`.
