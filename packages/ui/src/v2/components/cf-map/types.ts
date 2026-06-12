@@ -2,7 +2,7 @@
  * Type definitions for the CF Map component
  */
 
-import type { OpaqueRef } from "@commonfabric/api";
+import type { Reactive } from "@commonfabric/api";
 
 /**
  * Represents a geographic coordinate with latitude and longitude
@@ -27,7 +27,7 @@ export interface Bounds {
  *
  * Popup content follows a progressive model:
  * - Simple: Use `title`, `description`, `icon` fields (pure data, rendered by cf-map)
- * - Advanced: Use `popup` field with a Cell/OpaqueRef that has a [UI] property
+ * - Advanced: Use `popup` field with a Cell/Reactive that has a [UI] property
  */
 export interface MapMarker {
   position: LatLng;
@@ -38,7 +38,7 @@ export interface MapMarker {
   icon?: string; // emoji, URL, or icon name
 
   // Advanced popup content (Cell with [UI] property)
-  popup?: OpaqueRef<any>;
+  popup?: Reactive<any>;
 
   // Behavior
   draggable?: boolean;
@@ -61,7 +61,7 @@ export interface MapCircle {
   // Popup (same pattern as markers)
   title?: string;
   description?: string;
-  popup?: OpaqueRef<any>;
+  popup?: Reactive<any>;
 }
 
 /**

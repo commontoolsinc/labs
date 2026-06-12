@@ -509,7 +509,7 @@ interface MapMarker {
   title?: string;
   description?: string;
   icon?: string;        // Emoji or icon name
-  popup?: OpaqueRef<any>; // Advanced: pattern reference for rich popup
+  popup?: Reactive<any>; // Advanced: pattern reference for rich popup
   draggable?: boolean;
 }
 
@@ -521,7 +521,7 @@ interface MapCircle {
   strokeWidth?: number;
   title?: string;
   description?: string;
-  popup?: OpaqueRef<any>;
+  popup?: Reactive<any>;
 }
 
 interface MapPolyline {
