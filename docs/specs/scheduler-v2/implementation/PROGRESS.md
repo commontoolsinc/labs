@@ -2667,7 +2667,7 @@ Verification:
 
 ## 06/step-2+3
 
-- [x] pending — scheduler self-suppression now uses tx-carried object identity
+- [x] a94e779bc — scheduler self-suppression now uses tx-carried object identity
   and the in-flight source bookkeeping is deleted.
 - Deviations: none.
 - Recordings:
@@ -2707,3 +2707,16 @@ Verification:
     the focused test command above.
   - `runSchedulerAction` and `dispatchQueuedEvent` both stamp
     `tx.tx.sourceAction`.
+
+## 06/phase-end
+
+- [x] pending — WO06 exit checklist self-check complete.
+- Deviations: none.
+- Recordings:
+  - `cd packages/runner && deno task test`: passed,
+    `593 passed (3099 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m6s`.
+  - No phase-specific benchmarks are listed for WO06.
+  - Exit checklist greps and inspections are recorded in `06/step-2+3` above;
+    rerun after the commit confirmed `grep -rn "inFlightSources"
+    packages/runner/src` has no matches and suppression remains
+    `notification.source.sourceAction === action`.
