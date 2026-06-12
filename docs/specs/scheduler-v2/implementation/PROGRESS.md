@@ -1138,3 +1138,35 @@ packages/runtime-client/runtime-client.ts:322:      pullMode,
     `0 failed`, `1 ignored`, `18s`.
   - `cd packages/runtime-client && deno task test`: passed,
     `15 passed (61 steps)`, `0 failed`, `628ms`.
+
+## 02/step-4
+
+- [x] pending — permanent-rejection taxonomy; retry paths skip precondition
+  failures
+- Deviations: `deno check` exposed that `PushError` in
+  `src/storage/interface.ts` also needed `IPreconditionFailedError`, because
+  v2 storage `send()` returns `commitOperations(...)` whose error surface is
+  `StorageTransactionRejected`. Added it in the same named file; no extra
+  implementation file was touched.
+- Recordings:
+  - Initial `deno check src/storage/interface.ts src/storage/rejection.ts
+    src/scheduler/events.ts src/scheduler/action-run.ts
+    test/scheduler-rejection-taxonomy.test.ts`: failed with
+    `Type 'IPreconditionFailedError' is not assignable to type 'PushError'`
+    at `src/storage/v2.ts:1068:5`.
+  - `deno fmt packages/runner/src/storage/interface.ts
+    packages/runner/src/storage/rejection.ts
+    packages/runner/src/scheduler/events.ts
+    packages/runner/src/scheduler/action-run.ts
+    packages/runner/test/scheduler-rejection-taxonomy.test.ts`: passed
+    (`Checked 5 files`).
+  - `deno lint` on the same five files: passed (`Checked 5 files`).
+  - `deno check src/storage/interface.ts src/storage/rejection.ts
+    src/scheduler/events.ts src/scheduler/action-run.ts
+    test/scheduler-rejection-taxonomy.test.ts`: passed.
+  - `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-rejection-taxonomy.test.ts`: passed,
+    `1 passed (3 steps)`, `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `588 passed (3074 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m3s`.

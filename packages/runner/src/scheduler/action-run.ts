@@ -8,6 +8,7 @@ import type {
   IMemorySpaceAddress,
   IStorageTransaction,
 } from "../storage/interface.ts";
+import { isPermanentRejection } from "../storage/rejection.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import {
   MAX_ACTION_RUN_TRACE_HISTORY,
@@ -160,7 +161,9 @@ export function watchReactiveActionCommit(state: {
 
       const retries = (state.retries.get(state.action) ?? 0) + 1;
       state.retries.set(state.action, retries);
-      if (retries < MAX_RETRIES_FOR_REACTIVE) {
+      if (
+        retries < MAX_RETRIES_FOR_REACTIVE && !isPermanentRejection(error)
+      ) {
         // Re-schedule the action to run again on conflict failure.
         // Use resubscribe to set up dependencies/triggers from the log,
         // then mark as dirty/pending to ensure it runs again.

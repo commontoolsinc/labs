@@ -11,6 +11,7 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
 } from "../storage/interface.ts";
+import { isPermanentRejection } from "../storage/rejection.ts";
 import type {
   SchedulerActionInfo,
   SchedulerEventPreflightStats,
@@ -544,7 +545,10 @@ export async function dispatchQueuedEvent(state: {
           : {}),
         ...(result.error ? { error: result.error.message } : {}),
       });
-      if (result.error && retriesLeft > 0) {
+      if (
+        result.error && retriesLeft > 0 &&
+        !isPermanentRejection(result.error)
+      ) {
         logger.warn(
           "scheduler",
           `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
@@ -568,7 +572,11 @@ export async function dispatchQueuedEvent(state: {
         logger.error(
           "schedule-error",
           "Event handler transaction failed after exhausting all retries",
-          { error: result.error, handlerId },
+          {
+            error: result.error,
+            handlerId,
+            permanent: isPermanentRejection(result.error),
+          },
         );
       }
     }).catch((error) => {
