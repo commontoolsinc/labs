@@ -864,3 +864,14 @@ comment line in the Step 4 code-commit scope.
   `cell-read-path.bench.ts`, `cell-set-array-shape.bench.ts`,
   `cell-set-nested-array-docs.bench.ts`, `cell-set-shape.bench.ts`) before
   manual interruption during `cell-set.bench.ts` per the work-order allowance.
+
+## REVIEWER RESOLUTION — PR #4087 process amendments
+
+- [x] pending — lint added to G3 and WO01 gains the repo-wide mode-API exit
+  grep.
+- Deviations: none.
+- Recordings:
+  - `00-README.md`: G3 now requires `deno lint <touched files>`.
+  - `01-phase0-remove-push-mode.md`: exit checklist now includes
+    `git grep -n "enablePullMode\|disablePullMode\|isPullModeEnabled" -- ':!docs'`
+    with expected zero matches.

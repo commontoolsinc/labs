@@ -66,6 +66,7 @@ pass for the files you touched:
 
 ```bash
 deno fmt <touched files>            # src/ is formatted; docs/ is excluded
+deno lint <touched files>
 deno check <touched .ts files>
 ```
 
