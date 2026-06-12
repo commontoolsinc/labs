@@ -1141,8 +1141,8 @@ function releaseSharedHashtagResolver(runtime: Runtime, key: string): void {
 // cache tracks the URL each fetch was started for: `setPatternEnvironment`
 // can change the apiUrl while a fetch is in flight, so a launch for a
 // different URL starts a fresh fetch, and a superseded fetch leaves the cache
-// untouched when it settles.
-function createSidecarPatternCache(options: {
+// untouched and resolves to undefined when it settles.
+export function createSidecarPatternCache(options: {
   // File name under `api/patterns/system/`. Also labels errors.
   name: string;
   // Compile with the user's home space as cache context, so the
@@ -1201,8 +1201,8 @@ function createSidecarPatternCache(options: {
     },
     // Memoized fetch for the current environment's URL, started by this call
     // when none is in flight for that URL. When this call starts the fetch,
-    // `onSuccess` runs once it resolves with a pattern, unless a fetch for
-    // another URL superseded it.
+    // `onSuccess` runs once it resolves with a pattern, unless a later fetch
+    // superseded it. A superseded fetch resolves to undefined.
     fetch(
       runtime: Runtime,
       onSuccess?: (pattern: Pattern) => void,
@@ -1211,8 +1211,14 @@ function createSidecarPatternCache(options: {
       if (!fetchPromise || fetchUrl !== url) {
         fetchUrl = url;
         pattern = undefined;
-        fetchPromise = fetchPattern(runtime, url).then((fetched) => {
-          if (fetchUrl !== url) return fetched;
+        const started: Promise<Pattern | undefined> = fetchPattern(
+          runtime,
+          url,
+        ).then((fetched) => {
+          // Only the fetch the cache currently points to records and reports
+          // its result; launches chained on a superseded fetch get undefined
+          // so a stale pattern is never run.
+          if (fetchPromise !== started) return undefined;
           pattern = fetched;
           if (fetched) {
             onSuccess?.(fetched);
@@ -1221,6 +1227,7 @@ function createSidecarPatternCache(options: {
           }
           return fetched;
         });
+        fetchPromise = started;
       }
       return fetchPromise;
     },
