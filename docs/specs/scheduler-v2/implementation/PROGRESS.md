@@ -2342,8 +2342,139 @@ the settled-origin note).
 
 ## REVIEWER RESOLUTION — 05/step-3 declaration-rule docs
 
-- [x] pending — WO05 step 2/3 amended so registration-time `ReactivityLog`
+- [x] 13e6f09a7 — WO05 step 2/3 amended so registration-time `ReactivityLog`
   writes declare the static surface when annotations are absent, while
   resubscribe/run logs never change the surface.
+- Recordings: docs-only commit; no `deno fmt`/`deno lint`/`deno check`
+  required.
+
+## IMPLEMENTER STOP — 05/step-3 declaration-rule implementation residuals
+
+Implemented the reviewer verdict narrowly:
+
+- `subscribePullSchedulerAction` resolves the registration-time surface once:
+  non-empty annotated `action.writes` first, else `immediateLog.writes`, else
+  empty; effects still do not register a scheduling surface.
+- `setSchedulerDependencies` no longer reads `log.writes` or writes to the
+  write index; it refreshes reads and returns the already-registered surface.
+- `rehydrateActionFromObservation` now registers the live annotated surface
+  before resubscribing reads, so persisted `currentKnownWrites` never restores
+  the surface by itself.
+- Named test rewrites stayed confined to `scheduler-ordering.test.ts`,
+  `scheduler-observations.test.ts`, and `scheduler-effects.test.ts`.
+
+Verification:
+
+- `deno fmt packages/runner/src/scheduler/pull-subscriptions.ts
+  packages/runner/src/scheduler/dependency-updates.ts
+  packages/runner/src/scheduler/scheduling-writes.ts
+  packages/runner/src/scheduler/dependency-graph.ts
+  packages/runner/src/scheduler/action-run.ts
+  packages/runner/src/scheduler/subscriptions.ts packages/runner/src/scheduler.ts
+  packages/runner/src/runtime.ts packages/runner/test/experimental-options.test.ts
+  packages/runner/test/scheduler-ordering.test.ts
+  packages/runner/test/scheduler-observations.test.ts
+  packages/runner/test/scheduler-effects.test.ts
+  packages/runner/test/scheduler-static-writes.test.ts`: passed
+  (`Checked 13 files`).
+- `deno lint` on the same 13 files: passed (`Checked 13 files`).
+- `deno check` on the same 13 files: passed.
+- `grep -rn "backfillDependentsForNewWrites\|pruneDependentsForCurrentWrites"
+  packages/runner/src/`: no matches.
+- `grep -rn "schedulerHistoricalMightWrite\|historicalMightWrite" packages
+  --include="*.ts"`: no matches.
+- `grep -rn
+  "buildKnownSchedulingWrites\|historicalMightWrite\|diffSchedulingWrites\|pruneStructuralAncestorWrites"
+  packages/runner/src`: no matches.
+- Focused tests passed:
+  - `test/scheduler-static-writes.test.ts`: `1 passed (2 steps)`.
+  - `test/scheduler-ordering.test.ts`: `2 passed (17 steps)`.
+  - `test/scheduler-observations.test.ts`: `1 passed (22 steps)`.
+  - `test/scheduler-effects.test.ts`: `1 passed (20 steps)`.
+  - `test/experimental-options.test.ts`: `1 passed (11 steps)`.
+
+Full suite failure:
+
+- `cd packages/runner && deno task test`: failed, `588 passed
+  (3091 steps)`, `4 failed (4 steps)`, `0 ignored (10 steps)`, `2m5s`.
+- Per-test classification required by the reviewer verdict:
+  - `test/scheduler-core.test.ts` / `captures exact action runs for one
+    reactive update`: (b) not run-log surface evolution. The action-run trace
+    still expects an effect's `declaredWrites` length to be 1, but effects now
+    have no registered scheduling surface.
+  - `test/scheduler-pull-handlers.test.ts` / `should wait for dynamically
+    created lift before dispatching to downstream handler`: (a) asserts
+    run-log surface evolution/setup. The test seeds the lift surface through
+    `resubscribe(liftAction, log)`, which v2 now forbids.
+  - `test/scheduler-pull.test.ts` / `should not re-run an effect for unrelated
+    pending dependency collection`: (b) not run-log surface evolution. With
+    effects now empty-surface demand roots, a child computation subscribed
+    while the effect runs is demanded and runs once.
+  - `test/scheduler-timing.test.ts` / `should auto-debounce slow writeful
+    effects after threshold runs`: (b) not run-log surface evolution. The test
+    classifies a writeful effect by its old scheduling writes; effects now have
+    an empty scheduling surface and are treated as pull demand roots.
+
+Stopped per the reviewer verdict because three residual failures are class
+(b). No rewrites outside the three named files were attempted.
+
+## REVIEWER VERDICT — 05/step-3 residuals (effect-surface proxy)
+
+Effects being surface-less is CORRECT (spec §4.2: no scheduler-visible
+output) and stays. The three class-(b) residuals are v1's
+"writes==0 ⇒ pull-demand-root" PROXY breaking, not your change being
+wrong. Per-test rulings:
+
+1. `scheduler-core` / "captures exact action runs ...": authorized
+   rewrite (add to named files): an effect's `declaredWrites` in the
+   action-run trace is now 0 — that is the v2 truth, the test encoded
+   the v1 run-learned surface.
+2. `scheduler-pull-handlers` / dynamic-lift seeding: your class-(a)
+   call is right — authorized rewrite, minimal form: seed the lift's
+   surface through subscribe-with-log (the declaration channel) or an
+   annotation, not post-run `resubscribe`.
+3. `scheduler-pull` / "unrelated pending dependency collection": the
+   new behavior IS spec §5.3 arriving early — a computation created
+   during any LIVE node's run (every effect is live) gets one
+   provisional first run. Authorized rewrite of this single test to the
+   v2 expectation, with this comment above the changed assertion:
+   `// v2 (spec §5.3): children created during a live effect's run get`
+   `// provisional first-run demand; the v1 writeful-effect exception`
+   `// keyed on run-learned writes, which no longer exist.`
+4. `scheduler-timing` / auto-debounce: NO test rewrite — the mechanism
+   must be fixed, or every ordinary sink loses auto-debounce (violates
+   spec §8.2). Two edits:
+   - `cell.ts` `pull()`: subscribe its ephemeral effect with
+     `noDebounce: true` (the pull-root protection becomes EXPLICIT
+     instead of riding the writes proxy);
+   - the auto-debounce eligibility gate (`canAutomaticallyDebounce` in
+     delay-control): drop the `isPullDemandRootEffect` exemption,
+     keeping effect-only + `noDebounce` opt-out + thresholds.
+   Keep `isPullDemandRootEffect` itself and its OTHER call sites
+   (demand context, snapshot) unchanged in this phase — with effects
+   surface-less it now returns true for all effects, which matches the
+   §5.3 semantics accepted in (3); the predicate dissolves entirely in
+   phase 3b.
+   The failing timing test must then pass AS WRITTEN. If any other
+   timing/throttle test fails after this (e.g. one asserting pull
+   roots never debounce via the proxy), STOP with the name.
+
+Bookkeeping: named-rewrite list for this work order now reads:
+ordering, observations, effects, core (trace expectation), pull
+(single §5.3 test), pull-handlers (seeding form). Docs amendment —
+`docs(specs): scheduler-v2 WO05 — effect surfaces, pull-root opt-out, §5.3 early`
+— before the code commit. Deferred spec notes now three: immediate-log
+declaration channel (P4), settled-origin rule (§7.6), and §8.2's
+exemption being noDebounce/pull-root-by-option rather than a writes
+proxy.
+
+Then: full suite green → commit step 2+3 (one commit, message from
+step 3), then steps 4-6 as written.
+
+## REVIEWER RESOLUTION — 05/step-3 residual-rule docs
+
+- [x] pending — WO05 step 3 amended for effect-empty-surface trace
+  expectations, subscribe-time seeding of dynamic lifts, early §5.3 provisional
+  child demand, and explicit `noDebounce` pull-root auto-debounce opt-out.
 - Recordings: docs-only commit; no `deno fmt`/`deno lint`/`deno check`
   required.

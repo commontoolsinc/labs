@@ -187,9 +187,31 @@ justification: "asserted v1 write-set learning; v2 surface is static"):
   surface.
 - `test/scheduler-effects.test.ts:451-459` — membership-style check;
   likely passes unchanged; verify.
+- `test/scheduler-core.test.ts` / action-run trace expectation — effects now
+  have no scheduler-visible output, so trace `declaredWrites` is empty for
+  effects.
+- `test/scheduler-pull-handlers.test.ts` / dynamic lift seeding — seed the
+  computation's static surface through subscribe-with-log (the registration
+  declaration channel) or an annotation, not post-run `resubscribe`.
+- `test/scheduler-pull.test.ts` / unrelated pending dependency collection —
+  v2 §5.3 arrives early here: computations created during a live effect's run
+  get provisional first-run demand; the v1 exception keyed on run-learned
+  effect writes no longer exists.
+
+Auto-debounce cleanup in the same commit:
+
+1. `src/cell.ts` `pull()`: subscribe the ephemeral pull-root effect with
+   `noDebounce: true`. Pull-root debounce protection is explicit rather than
+   inferred from a write-surface proxy.
+2. The auto-debounce eligibility gate (`canAutomaticallyDebounce` in
+   delay-control): remove the `isPullDemandRootEffect` exemption. Keep the
+   effect-only requirement, explicit `noDebounce` opt-out, and existing timing
+   thresholds. Keep `isPullDemandRootEffect` itself and its other call sites
+   unchanged in this phase.
 
 Failures in ANY other file: apply the decision tree in step 4 if they are
-ordering-related; otherwise STOP.
+ordering-related. If timing/throttle tests fail after the auto-debounce cleanup,
+STOP and list the failing names. Otherwise STOP.
 
 Commit: `refactor(runner): scheduling writes are the static declared surface (scheduler-v2 phase 1)`
 
@@ -248,6 +270,8 @@ better; regressions >10%: STOP).
 - [ ] Observation payload still carries both write fields (compat), equal
       to the surface.
 - [ ] Fixtures A/B green; behavior change (if any) documented.
-- [ ] Test rewrites confined to the three named files (or decision-tree
-      fallback applied and marked).
+- [ ] Test rewrites confined to the named files: ordering, observations,
+      effects, core trace expectation, pull single §5.3 test, and
+      pull-handlers seeding form (or decision-tree fallback applied and
+      marked).
 - [ ] Bench deltas recorded; none worse than 10%.
