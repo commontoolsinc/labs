@@ -14,7 +14,6 @@ export const favoriteEntrySchema = {
     tag: { type: "string", default: "" },
     userTags: { type: "array", items: { type: "string" }, default: [] },
     spaceName: { type: "string" },
-    spaceDid: { type: "string" },
   },
   required: ["cell"],
 } as const satisfies JSONSchema;
