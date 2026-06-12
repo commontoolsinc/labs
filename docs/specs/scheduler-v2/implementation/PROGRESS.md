@@ -933,7 +933,7 @@ that Step 3 declares.
 
 ## 02/step-3
 
-- [x] pending — dispatchedEventId transaction field
+- [x] e28a7782e — dispatchedEventId transaction field
 - Deviations: executed before Step 2 per reviewer verdict; no concrete class
   property was required.
 - Recordings:
@@ -941,6 +941,46 @@ that Step 3 declares.
     (`Checked 1 file`).
   - `deno check src/storage/interface.ts
     src/storage/extended-storage-transaction.ts`: passed.
+
+## 02/step-2
+
+- [x] pending — thread event ids and origin tx through the event queue
+- Deviations: executed after Step 3 per reviewer verdict. Caller sweep included
+  non-test benchmark callers; none forwards events between schedulers.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler/types.ts
+    packages/runner/src/scheduler.ts packages/runner/src/scheduler/events.ts
+    packages/runner/src/cell.ts
+    packages/runner/test/scheduler-event-identity.test.ts`: passed
+    (`Checked 5 files`).
+  - `deno check src/scheduler.ts src/scheduler/events.ts
+    src/scheduler/types.ts src/cell.ts
+    test/scheduler-event-identity.test.ts`: passed.
+  - `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-event-identity.test.ts`: passed, `1 passed (4 steps)`,
+    `0 failed`.
+  - Caller sweep:
+
+```text
+$ cd packages/runner
+$ grep -rn "queueEvent(" ../../packages --include="*.ts" | grep -v "\.test\.ts"
+../../packages/runner/test/scheduler-demand-roots.bench.ts:197:          graph.env.runtime.scheduler.queueEvent(
+../../packages/runner/test/scheduler-demand-roots.bench.ts:253:          graph.env.runtime.scheduler.queueEvent(
+../../packages/runner/test/default-app-note-create.bench.ts:214:  env.runtime.scheduler.queueEvent(link, { kind: "create" });
+../../packages/runner/test/default-app-note-create.bench.ts:216:    env.runtime.scheduler.queueEvent(link, { kind: "remove" });
+../../packages/runner/test/scheduler-event-preflight.bench.ts:184:        graph.env.runtime.scheduler.queueEvent(
+../../packages/runner/test/scheduler-event-preflight.bench.ts:212:        graph.env.runtime.scheduler.queueEvent(
+../../packages/runner/test/scheduler-event-preflight.bench.ts:274:            graph.env.runtime.scheduler.queueEvent(
+../../packages/runner/test/scheduler-event-preflight.bench.ts:406:        runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 1);
+../../packages/runner/src/scheduler.ts:944:  queueEvent(
+../../packages/runner/src/scheduler.ts:2114:        this.queueEvent(
+../../packages/runner/src/scheduler/events.ts:161:        state.queueEvent(
+../../packages/runner/src/cell.ts:1167:      this.runtime.scheduler.queueEvent(
+```
+
+  - `cd packages/runner && deno task test`: passed,
+    `587 passed (3071 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m3s`.
 
 ## REVIEWER VERDICT — PR #4087 CI failures (review feedback, stacked-PR protocol)
 
