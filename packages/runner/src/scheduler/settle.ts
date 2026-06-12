@@ -9,7 +9,6 @@ import {
 import { readsOverlapWrites } from "./scheduling-writes.ts";
 import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
 import {
-  collectPendingDependencyActions,
   isDirtyPullActionRunnable,
   isPendingPullActionRunnable,
   planBudgetBackoff,
@@ -423,7 +422,6 @@ export async function runPullSchedulerSettleLoop(
   for (let settleIter = 0; settleIter < maxSettleIterations; settleIter++) {
     const iterStart = settleIterStats ? performance.now() : 0;
 
-    collectPullSettlePreRunDependencies(state);
     const iteration = preparePullSettleIteration(
       state,
       initialSeeds,
@@ -499,30 +497,6 @@ export async function runPullSchedulerSettleLoop(
     ...(backoffUntil !== undefined ? { backoffUntil } : {}),
     ...(settleStats ? { settleStats } : {}),
   };
-}
-
-function collectPullSettlePreRunDependencies(
-  state: SchedulerSettleLoopState,
-): void {
-  // Process any newly subscribed actions from previous iteration.
-  // This sets up their dependencies before work-set construction.
-  if (state.pendingDependencyCollection.size === 0) {
-    return;
-  }
-
-  collectPendingDependencyActions({
-    pendingDependencyCollection: state.pendingDependencyCollection,
-    populateDependenciesCallbacks: state.populateDependenciesCallbacks,
-    effects: state.effects,
-    getSchedulingWrites: state.getSchedulingWrites,
-    collectDependenciesForAction: (action, populateDependencies) =>
-      state.collectDependenciesForAction(action, populateDependencies, {
-        errorLogLabel: "schedule-dep-error-pre-run",
-        errorMessage: (target, error) =>
-          `Error collecting deps for ${state.getActionId(target)}: ${error}`,
-        useRawReadsForTriggers: true,
-      }),
-  });
 }
 
 function preparePullSettleIteration(

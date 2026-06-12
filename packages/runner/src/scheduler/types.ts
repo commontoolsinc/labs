@@ -57,16 +57,6 @@ export type EventHandler =
 export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
 
 /**
- * Callback to populate a transaction with an action's read dependencies.
- * Called by the scheduler to discover what cells the action will read.
- * The callback should read all cells (using .get({ traverseCells: true })) that
- * the action will access, so the transaction captures all dependencies.
- * The transaction will be aborted after this callback returns, so it's safe
- * to simulate writes.
- */
-export type PopulateDependencies = (tx: IExtendedStorageTransaction) => void;
-
-/**
  * Reactivity log.
  *
  * Used to log reads and writes to docs. Used by scheduler to keep track of
@@ -78,8 +68,6 @@ export type ReactivityLog = {
   shallowReads: IMemorySpaceAddress[];
   writes: IMemorySpaceAddress[];
 };
-
-export type PopulateDependenciesEntry = PopulateDependencies | ReactivityLog;
 
 export type EventPreflightTraceContext = SchedulerEventPreflightStats & {
   depth: number;

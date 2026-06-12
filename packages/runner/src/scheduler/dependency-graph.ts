@@ -410,35 +410,3 @@ function isRegisteredNode(
   return state.nodes.isEffect(node.action) ||
     state.nodes.isComputation(node.action);
 }
-
-export function pendingDependencyCollectionMightAffect(
-  state: {
-    readonly pendingDependencyCollection: ReadonlySet<Action>;
-    readonly effects: ReadonlySet<Action>;
-    readonly isThrottled: (action: Action) => boolean;
-    readonly getSchedulingWrites: (
-      action: Action,
-    ) => readonly IMemorySpaceAddress[] | undefined;
-    readonly hasDependentPath: (from: Action, to: Action) => boolean;
-  },
-  action: Action,
-  reads: readonly IMemorySpaceAddress[],
-  shallowReads: readonly IMemorySpaceAddress[],
-): boolean {
-  if (reads.length === 0 && shallowReads.length === 0) return false;
-
-  for (const pendingAction of state.pendingDependencyCollection) {
-    if (pendingAction === action) continue;
-    if (state.effects.has(pendingAction)) continue;
-    if (state.isThrottled(pendingAction)) continue;
-
-    const writes = state.getSchedulingWrites(pendingAction);
-    if (!writes || writes.length === 0) return true;
-    if (state.hasDependentPath(pendingAction, action)) return true;
-    if (readsOverlapWrites(reads, shallowReads, writes)) {
-      return true;
-    }
-  }
-
-  return false;
-}

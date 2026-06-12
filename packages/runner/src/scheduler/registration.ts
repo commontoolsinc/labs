@@ -8,7 +8,6 @@ import {
   type DependencyGraphState,
   isLive,
   notifyNodeLivenessChange,
-  pendingDependencyCollectionMightAffect,
   setNodeProvisionalDemand,
   unregisterDependentEdge,
 } from "./dependency-graph.ts";
@@ -34,8 +33,6 @@ import {
 import { entityKey } from "./keys.ts";
 import type {
   Action,
-  PopulateDependencies,
-  PopulateDependenciesEntry,
   ReactivityLog,
   SpaceScopeAndURI,
   TelemetryAnnotations,
@@ -87,20 +84,6 @@ export interface SchedulerSubscribeActionState {
   readonly subscriptionState: SchedulerSubscriptionState;
   readonly dependencyUpdateState: DependencyUpdateState;
   readonly triggerSubscriptionState: TriggerSubscriptionState;
-  readonly pendingDependencyCollectionState: {
-    readonly pendingDependencyCollection: ReadonlySet<Action>;
-    readonly effects: ReadonlySet<Action>;
-    readonly isThrottled: (action: Action) => boolean;
-    readonly getSchedulingWrites: (
-      action: Action,
-    ) => readonly IMemorySpaceAddress[] | undefined;
-    readonly hasDependentPath: (from: Action, to: Action) => boolean;
-  };
-  readonly populateDependenciesCallbacks: WeakMap<
-    Action,
-    PopulateDependenciesEntry
-  >;
-  readonly pendingDependencyCollection: Set<Action>;
   readonly markProvisionalDemand: (node: SchedulerNode) => void;
   readonly pending: Set<Action>;
   readonly effects: ReadonlySet<Action>;
@@ -135,17 +118,9 @@ export interface SchedulerSubscribeActionState {
 export function subscribePullSchedulerAction(
   state: SchedulerSubscribeActionState,
   action: Action,
-  populateDependencies: PopulateDependencies | ReactivityLog | undefined,
+  immediateLog: ReactivityLog | undefined,
   options: SchedulerSubscribeOptions = {},
 ): Cancel {
-  let populateDependenciesEntry: PopulateDependenciesEntry | undefined;
-  let immediateLog: ReactivityLog | undefined;
-  if (typeof populateDependencies === "function") {
-    populateDependenciesEntry = populateDependencies;
-  } else if (populateDependencies !== undefined) {
-    immediateLog = populateDependencies;
-    populateDependenciesEntry = immediateLog;
-  }
   const {
     isEffect = false,
     debounce,
@@ -207,14 +182,12 @@ export function subscribePullSchedulerAction(
     ],
   );
 
-  if (populateDependenciesEntry !== undefined) {
-    state.populateDependenciesCallbacks.set(action, populateDependenciesEntry);
-  }
-
   const surface = resolveRegistrationSurface(action, immediateLog);
   if (!actionIsEffect && surface.length > 0) {
     state.writeIndex.setSurface(action, surface);
     state.registerWriterDependents(action, surface);
+  } else if (!actionIsEffect && !deferInitialExecution && !immediateLog) {
+    state.pending.add(action);
   }
 
   if (immediateLog) {
@@ -234,8 +207,6 @@ export function subscribePullSchedulerAction(
       state.triggerSubscriptionState,
       action,
     );
-  } else if (!deferInitialExecution) {
-    state.pendingDependencyCollection.add(action);
   }
 
   if (!deferInitialExecution) {
@@ -356,13 +327,12 @@ export function markEffectDirtyIfStaleInputs(
     return;
   }
 
-  const shouldMarkDirty = pendingDependencyCollectionMightAffect(
-    state.pendingDependencyCollectionState,
+  const shouldMarkDirty = hasInvalidWriterForEffectReads(
+    state,
     action,
     reads,
     shallowReads,
-  ) ||
-    hasInvalidWriterForEffectReads(state, action, reads, shallowReads);
+  );
 
   if (shouldMarkDirty && !state.isInvalid(action)) {
     state.markInvalid(action);
@@ -498,11 +468,6 @@ export interface SchedulerUnsubscribeActionState {
   readonly dependencyGraphState: DependencyGraphState;
   readonly nodes: NodeRegistry;
   readonly writeIndex: WriterIndexState;
-  readonly populateDependenciesCallbacks: WeakMap<
-    Action,
-    PopulateDependenciesEntry
-  >;
-  readonly pendingDependencyCollection: Set<Action>;
   readonly getActionId: (action: Action) => string;
   readonly clearInvalid: (action: Action) => void;
   readonly cancelDebounceTimer: (action: Action) => void;
@@ -532,7 +497,6 @@ export function unsubscribeSchedulerAction(
   // when parent is re-running). They'll be cleaned up when parent is
   // garbage collected (WeakMap).
   clearActionDelayState(state, action);
-  clearDependencyCollectionState(state, action);
 }
 
 function cancelActionSubscription(
@@ -616,12 +580,4 @@ function clearActionDelayState(
 ): void {
   state.cancelDebounceTimer(action);
   state.clearComputationDebounceState(action, { cancelTimer: false });
-}
-
-function clearDependencyCollectionState(
-  state: SchedulerUnsubscribeActionState,
-  action: Action,
-): void {
-  state.populateDependenciesCallbacks.delete(action);
-  state.pendingDependencyCollection.delete(action);
 }

@@ -146,7 +146,7 @@ describe("pull-based scheduling", () => {
     expect(computationRuns).toBe(1);
   });
 
-  it("should preserve writes when collecting dependencies from ReactivityLog", async () => {
+  it("should preserve writes from immediate ReactivityLog", async () => {
     const target = runtime.getCell<number>(
       space,
       "reactivity-log-writes-target",
@@ -175,19 +175,13 @@ describe("pull-based scheduling", () => {
 
     await runtime.scheduler.idle();
     expect(writerRuns).toBe(0);
-
-    // Force dependency collection to run against the stored ReactivityLog entry.
-    const schedulerInternal = runtime.scheduler as unknown as {
-      pendingDependencyCollection: Set<Action>;
-    };
-    schedulerInternal.pendingDependencyCollection.add(writer);
-    runtime.scheduler.queueExecution();
-    await runtime.scheduler.idle();
-
+    expect(runtime.scheduler.getMightWrite(writer)).toEqual([
+      toMemorySpaceAddress(target.getAsNormalizedFullLink()),
+    ]);
     expect(writerRuns).toBe(0);
   });
 
-  it("should not re-run an effect for unrelated pending dependency collection", async () => {
+  it("should not re-run an effect for an unrelated child subscription", async () => {
     const observed = runtime.getCell<number>(
       space,
       "pending-dep-unrelated-observed",
@@ -228,6 +222,7 @@ describe("pull-based scheduling", () => {
         (unrelatedSource.withTx(actionTx).get() ?? 0) + 1,
       );
     }) as Action & Partial<TelemetryAnnotations>;
+    unrelatedComputation.reads = [unrelatedSource.getAsNormalizedFullLink()];
     unrelatedComputation.writes = [unrelatedResult.getAsNormalizedFullLink()];
 
     const effect: Action = (actionTx) => {
@@ -239,9 +234,6 @@ describe("pull-based scheduling", () => {
       if (effectRuns === 1) {
         runtime.scheduler.subscribe(
           unrelatedComputation,
-          (depTx) => {
-            unrelatedSource.withTx(depTx).get();
-          },
           {},
         );
       }
@@ -267,7 +259,7 @@ describe("pull-based scheduling", () => {
     expect(unrelatedRuns).toBe(1);
   });
 
-  it("should re-run an effect for transitively related pending dependency collection", async () => {
+  it("should re-run an effect for a transitively related child subscription", async () => {
     const source = runtime.getCell<number>(
       space,
       "pending-dep-transitive-source",
@@ -309,6 +301,7 @@ describe("pull-based scheduling", () => {
         (source.withTx(actionTx).get() ?? 0) * 10,
       );
     }) as Action & Partial<TelemetryAnnotations>;
+    childComputation.reads = [source.getAsNormalizedFullLink()];
     childComputation.writes = [childResult.getAsNormalizedFullLink()];
 
     const parentComputation = ((actionTx: IExtendedStorageTransaction) => {
@@ -318,9 +311,6 @@ describe("pull-based scheduling", () => {
         childSubscribed = true;
         runtime.scheduler.subscribe(
           childComputation,
-          (depTx) => {
-            source.withTx(depTx).get();
-          },
           {},
         );
       }
@@ -329,6 +319,7 @@ describe("pull-based scheduling", () => {
         (childResult.withTx(actionTx).get() ?? 0) + 1,
       );
     }) as Action & Partial<TelemetryAnnotations>;
+    parentComputation.reads = [childResult.getAsNormalizedFullLink()];
     parentComputation.writes = [parentResult.getAsNormalizedFullLink()];
 
     const effect: Action = (actionTx) => {
@@ -340,9 +331,6 @@ describe("pull-based scheduling", () => {
 
     runtime.scheduler.subscribe(
       parentComputation,
-      (depTx) => {
-        childResult.withTx(depTx).get();
-      },
       {},
     );
 

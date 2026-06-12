@@ -4826,3 +4826,92 @@ $ rg -n "scheduler\.subscribe\(" packages --glob '!packages/runner/**'
   - Expected noisy passing logs remain: scheduler write-surface warnings,
     deliberate event/retry error logs, createRef no-cause warnings, and
     traversal warnings.
+
+## 08/4.2-delete-collection-machinery
+
+- [x] pending — deleted scheduler-side dependency collection and narrowed
+  registration to static/immediate dependency logs while preserving handler
+  event preflight populate.
+- Reviewer poll:
+  - No new reviewer verdict was present after the latest `IMPLEMENTER STOP` at
+    the start of this heartbeat.
+- Fix shape:
+  - Deleted `scheduler/dependency-collection.ts` and removed collection state
+    from scheduler facade, registration, execution, settle loop, dependency
+    graph, and stale test helpers.
+  - Removed scheduler-side populate callback storage and collection helpers:
+    subscribe/register now accept options or an immediate `ReactivityLog`.
+  - Kept `handler.populateDependencies`, `addEventHandler`'s third parameter,
+    and event preflight dependency population intact.
+  - Removed raw builtin `populateDependencies`; raw builtins can now provide an
+    immediate dependency log, and `navigateTo` uses declared reads as its static
+    dependency log.
+  - Preserved the output-less/no-callback first-run path through the existing
+    pending work set, and kept static-log no-write computations dormant until
+    demanded.
+  - Updated stale callback-argument tests to pass explicit `ReactivityLog`
+    dependencies instead of the deleted collection callback slot.
+- Debug notes:
+  - The first full-suite attempt after the deletion failed during type-check on
+    `scheduler-pull-idempotency.test.ts`; those tests still passed callback
+    arguments to `scheduler.subscribe`. Replacing the callbacks with explicit
+    read/write logs fixed the suite.
+  - `navigateTo` releases navigation from the transaction commit callback and
+    requeues scheduler execution after writing its result so idle observes the
+    commit-gated navigation release without relying on prefetch timing.
+- Exit greps:
+  - Deleted collection names returned no matches:
+
+```text
+$ rg -n "populateDependenciesCallbacks|pendingDependencyCollection|dependency-collection" packages/runner/src packages/runner/test
+```
+
+  - `populateDependencies` matches only handler/event paths:
+
+```text
+$ rg -n "populateDependencies" packages/runner/src packages/runner/test
+packages/runner/src/runner.ts:3093:    const populateDependencies = reads.length > 0
+packages/runner/src/runner.ts:3125:        populateDependencies,
+packages/runner/src/scheduler/facade.ts:951:    populateDependencies?: (
+packages/runner/src/scheduler/facade.ts:961:      populateDependencies,
+packages/runner/src/scheduler/events.ts:196:  readonly populateDependencies?: (
+packages/runner/src/scheduler/events.ts:201:  if (args.populateDependencies) {
+packages/runner/src/scheduler/events.ts:202:    args.handler.populateDependencies = args.populateDependencies;
+packages/runner/src/scheduler/events.ts:299:  depTx.setReadOnly?.("scheduler.populateDependencies()");
+packages/runner/src/scheduler/events.ts:308:    handler.populateDependencies?.(depTx, eventValue);
+packages/runner/src/scheduler/events.ts:343:  // after populateDependencies errors so the transaction is closed.
+packages/runner/src/scheduler/events.ts:491:  if (handler.populateDependencies) {
+packages/runner/src/scheduler/types.ts:43:    populateDependencies?: (
+```
+
+  - Deleted helper/type names only remain in event preflight telemetry labels:
+
+```text
+$ rg -n "collectInitialExecuteDependencies|collectPostEventDependencies|collectPendingDependencyActions|collectPullSettlePreRunDependencies|PopulateDependencies" packages/runner/src packages/runner/test
+packages/runner/src/scheduler/events.ts:305:    "pullPopulateDependencies",
+packages/runner/src/scheduler/events.ts:318:      "pullPopulateDependencies",
+packages/runner/test/scheduler-bench-helpers.ts:62:  ["event/populate", "scheduler/execute/event/pullPopulateDependencies"],
+```
+
+- Recordings:
+  - `deno fmt packages/runner/test/scheduler-pull-idempotency.test.ts`:
+    passed (`Checked 1 file`) after the stale test fix.
+  - `deno lint` on the touched source/test files: passed (`Checked 19 files`).
+  - `deno check` on the touched source/test files: passed.
+  - Focused idempotency regression:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull-idempotency.test.ts`: passed,
+    `1 passed (5 steps)`, `0 failed`, `75ms`.
+  - Touched bench:
+    `cd packages/runner && deno bench --no-check --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-materializer-fanout.bench.ts`: passed on Apple M3 Max /
+    Deno 2.8.1. Results: 100 readers `22.0ms`, 1000 readers `64.2ms`,
+    static declared write control `14.9ms`.
+  - `git diff --check`: passed.
+  - `cd packages/runner && deno task test`: passed,
+    `595 passed (3102 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m2s`.
+  - Expected noisy passing logs remain: scheduler write-surface warnings,
+    deliberate event/retry/preflight error logs, createRef no-cause warnings,
+    and traversal warnings.

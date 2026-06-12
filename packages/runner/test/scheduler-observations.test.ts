@@ -631,7 +631,7 @@ describe("persistent scheduler observations", () => {
     }
   });
 
-  it("does not populate dependencies while initial rehydration is pending", async () => {
+  it("does not run while initial rehydration is pending", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const { runtime } = testRuntime;
@@ -649,14 +649,14 @@ describe("persistent scheduler observations", () => {
           resolveSnapshots = resolve;
         });
 
-      let populateCalls = 0;
+      let runs = 0;
       const rehydratingAction = Object.assign(
-        function rehydratingAction() {},
+        function rehydratingAction() {
+          runs++;
+        },
         { writes: [writeLink] },
       );
-      runtime.scheduler.subscribe(rehydratingAction, () => {
-        populateCalls++;
-      }, {
+      runtime.scheduler.subscribe(rehydratingAction, {
         rehydrateFromStorage: {
           space,
           pieceId: "space:pending-rehydrate-process",
@@ -673,7 +673,7 @@ describe("persistent scheduler observations", () => {
 
       await (runtime.scheduler as unknown as { execute(): Promise<void> })
         .execute();
-      const populateCallsBeforeRehydrate = populateCalls;
+      const runsBeforeRehydrate = runs;
 
       resolveSnapshots?.({
         serverSeq: 5,
@@ -706,8 +706,8 @@ describe("persistent scheduler observations", () => {
       });
       await runtime.idle();
 
-      expect(populateCallsBeforeRehydrate).toBe(0);
-      expect(populateCalls).toBe(0);
+      expect(runsBeforeRehydrate).toBe(0);
+      expect(runs).toBe(0);
       expect(runtime.scheduler.isDirty(rehydratingAction)).toBe(false);
       expect(runtime.scheduler.getMightWrite(rehydratingAction)).toEqual([
         writeAddress,
