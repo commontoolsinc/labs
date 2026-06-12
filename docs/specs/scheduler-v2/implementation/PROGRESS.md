@@ -5223,3 +5223,45 @@ packages/runner/src/scheduler/run.ts:655:  const throttleMs = state.getThrottle(
     `595 passed (3104 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m7s`.
   - Expected noisy passing logs remain: scheduler event/preflight/retry/error
     logs and write-surface warnings in wish fixtures.
+
+## 08/7.1-piece-level-resume
+
+- [x] pending — resumed pieces now preload scheduler snapshots with one
+  piece-scoped query and apply them synchronously during node registration.
+- Reviewer poll:
+  - No new reviewer verdict was present after the latest Phase 5 progress
+    markers at the start of this heartbeat.
+- Shape:
+  - `@commonfabric/memory/v2` already accepts
+    `listSchedulerActionSnapshots({ pieceId, processGeneration })` without an
+    `actionId`, so no memory API extension was needed for this step.
+  - The resumed `runtime.start(...)` path now awaits the existing
+    `syncCellsForRunningPattern(...)` call, loads all persisted scheduler
+    snapshots for the piece, and passes them into `startCore(...)` as a map by
+    `actionId`.
+  - Scheduler registration applies a matching preloaded observation
+    synchronously. Missing, invalid, or fingerprint-mismatched entries fall
+    back to the normal initial run.
+  - The older async per-action rehydration path remains for non-resume
+    registration paths and will be deleted in Phase 7.2.
+  - `reload-rehydration.test.ts` now restarts runtime B via
+    `runtime.start(resultCell)` and asserts exactly one snapshot query shaped
+    as `{ ownerSpace, pieceId, processGeneration }`, with no `actionId`.
+  - `scheduler-observations.test.ts` adds a unit guard proving preloaded
+    snapshots do not call the storage provider again during registration.
+- Recordings:
+  - `deno fmt` on the touched runner source/test files: passed (`Checked 4
+    files`).
+  - `deno lint` on the touched runner source/test files: passed (`Checked 4
+    files`).
+  - `deno check` on the touched runner source/test files: passed.
+  - `git diff --check`: passed.
+  - Phase 7.1 focused persistence pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts test/scheduler-observations.test.ts`:
+    passed, `2 passed (23 steps)`, `0 failed`, `912ms`.
+  - Expected noisy passing logs remain: experimental flag override messages,
+    the reload fixture's transient `TypeError: Cannot read properties of
+    undefined (reading 'length')` log while passing, and the intentional
+    rehydration timeout warning in the timeout fallback fixture.

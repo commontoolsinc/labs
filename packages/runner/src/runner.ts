@@ -3,7 +3,10 @@ import {
   type FabricValue,
   nativeFromFabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
+import {
+  getPersistentSchedulerStateConfig,
+  type SchedulerActionSnapshotCursor,
+} from "@commonfabric/memory/v2";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   toCompactDebugString,
@@ -33,6 +36,10 @@ import {
 } from "./builder/pattern.ts";
 import { type Cell, createCell, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
+import {
+  isSchedulerActionObservation,
+  type PersistedSchedulerObservationSnapshot,
+} from "./scheduler/persistent-observation.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import {
   findAllWriteRedirectCells,
@@ -509,6 +516,10 @@ type SchedulerRehydrationSubscriptionOptions = {
     space: MemorySpace;
     pieceId: string;
     processGeneration: number;
+    snapshotsByActionId?: ReadonlyMap<
+      string,
+      PersistedSchedulerObservationSnapshot
+    >;
     awaitSync?: boolean;
   };
 };
@@ -1113,6 +1124,7 @@ export class Runner {
       givenPattern?: Pattern;
       doNotUpdateOnPatternChange?: boolean;
       rehydrateSchedulerFromStorage?: boolean;
+      schedulerRehydration?: SchedulerRehydrationSubscriptionOptions;
       // Resumed-from-synced-state: hold each action's initial rehydration/run
       // until the space has finished syncing, so consumers don't race the data.
       awaitSyncBeforeInitialRun?: boolean;
@@ -1151,13 +1163,13 @@ export class Runner {
       // Instantiate nodes
       const actualTx = useTx ?? this.runtime.edit();
       const shouldCommit = !useTx;
-      const schedulerRehydration = options.rehydrateSchedulerFromStorage ===
-          false
-        ? {}
-        : this.schedulerRehydrationOptions(
-          resultCell,
-          options.awaitSyncBeforeInitialRun,
-        );
+      const schedulerRehydration = options.schedulerRehydration ??
+        (options.rehydrateSchedulerFromStorage === false
+          ? {}
+          : this.schedulerRehydrationOptions(
+            resultCell,
+            options.awaitSyncBeforeInitialRun,
+          ));
       try {
         for (const node of pattern.nodes) {
           const baseCell = resultCell.withTx(actualTx);
@@ -1407,7 +1419,8 @@ export class Runner {
     // scheduler back up in a fresh runtime. Without this, resumed pieces can
     // observe the last persisted result but miss subsequent input updates.
     return this.syncCellsForRunningPattern(rootCell, resolvedPattern)
-      .then(() => {
+      .then(() => this.loadSchedulerRehydrationSnapshots(rootCell))
+      .then((snapshotsByActionId) => {
         // we may already be in the midst of starting this, so don't start again
         if (this.cancels.has(this.getDocKey(rootCell))) {
           return true;
@@ -1416,6 +1429,11 @@ export class Runner {
         try {
           this.startCore(rootCell, {
             givenPattern: resolvedPattern,
+            schedulerRehydration: this.schedulerRehydrationOptions(
+              rootCell,
+              true,
+              snapshotsByActionId,
+            ),
             // This pattern is resumed from a synced state (it just awaited
             // syncCellsForRunningPattern): hold each action's initial run until
             // the space finishes syncing so we don't race the data (e.g. maps
@@ -1744,6 +1762,10 @@ export class Runner {
   private schedulerRehydrationOptions(
     resultCell: Cell<any>,
     awaitSync?: boolean,
+    snapshotsByActionId?: ReadonlyMap<
+      string,
+      PersistedSchedulerObservationSnapshot
+    >,
   ): SchedulerRehydrationSubscriptionOptions {
     if (!getPersistentSchedulerStateConfig()) {
       return {};
@@ -1754,9 +1776,60 @@ export class Runner {
         space,
         pieceId: `${scope}:${id}`,
         processGeneration: 0,
+        ...(snapshotsByActionId !== undefined ? { snapshotsByActionId } : {}),
         ...(awaitSync ? { awaitSync: true } : {}),
       },
     };
+  }
+
+  private async loadSchedulerRehydrationSnapshots(
+    resultCell: Cell<any>,
+  ): Promise<
+    | ReadonlyMap<string, PersistedSchedulerObservationSnapshot>
+    | undefined
+  > {
+    if (!getPersistentSchedulerStateConfig()) {
+      return undefined;
+    }
+
+    const { space, id, scope } = resultCell.getAsNormalizedFullLink();
+    const provider = this.runtime.storageManager.open(space);
+    const listSnapshots = provider.listSchedulerActionSnapshots;
+    if (!listSnapshots) {
+      return undefined;
+    }
+
+    const snapshotsByActionId = new Map<
+      string,
+      PersistedSchedulerObservationSnapshot
+    >();
+    let cursor: SchedulerActionSnapshotCursor | undefined;
+    do {
+      const page = await listSnapshots.call(provider, {
+        ownerSpace: space,
+        pieceId: `${scope}:${id}`,
+        processGeneration: 0,
+        ...(cursor ? { cursor } : {}),
+      });
+      for (const snapshot of page.snapshots) {
+        if (!isSchedulerActionObservation(snapshot.observation)) continue;
+        snapshotsByActionId.set(snapshot.observation.actionId, {
+          observation: snapshot.observation,
+          ...(snapshot.directDirtySeq !== undefined
+            ? { directDirtySeq: snapshot.directDirtySeq }
+            : {}),
+          ...(snapshot.staleSeq !== undefined
+            ? { staleSeq: snapshot.staleSeq }
+            : {}),
+          ...(snapshot.unknownReason !== undefined
+            ? { unknownReason: snapshot.unknownReason }
+            : {}),
+        });
+      }
+      cursor = page.nextCursor;
+    } while (cursor !== undefined);
+
+    return snapshotsByActionId;
   }
 
   private async syncCellsForRunningPattern(

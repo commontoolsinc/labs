@@ -631,6 +631,84 @@ describe("persistent scheduler observations", () => {
     }
   });
 
+  it("auto-rehydrates subscribed actions from preloaded piece snapshots", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      let runs = 0;
+      const preloadedPersistedAction = Object.assign(
+        function preloadedPersistedAction() {
+          runs++;
+        },
+        { writes: [writeLink] },
+      );
+      const actionId = "preloadedPersistedAction";
+      const provider = testRuntime.runtime.storageManager.open(space) as {
+        listSchedulerActionSnapshots?: (
+          query?: unknown,
+        ) => Promise<{
+          serverSeq: number;
+          snapshots: unknown[];
+        }>;
+      };
+      let queryCount = 0;
+      provider.listSchedulerActionSnapshots = () => {
+        queryCount++;
+        return Promise.resolve({ serverSeq: 5, snapshots: [] });
+      };
+
+      const observation = buildSchedulerActionObservation({
+        actionId,
+        actionKind: "computation",
+        branch: "",
+        pieceId: "space:preloaded-process",
+        processGeneration: 1,
+        implementationFingerprint: schedulerImplementationFingerprint(
+          preloadedPersistedAction,
+          actionId,
+          undefined,
+        ),
+        runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
+        observedAtSeq: 5,
+        transactionKind: "action-run",
+        transactionLog: {
+          reads: [readAddress],
+          shallowReads: [],
+          writes: [],
+        },
+        currentKnownWrites: [writeAddress],
+      });
+
+      testRuntime.runtime.scheduler.subscribe(preloadedPersistedAction, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:preloaded-process",
+          processGeneration: 1,
+          snapshotsByActionId: new Map([[
+            actionId,
+            { observation },
+          ]]),
+        },
+      });
+
+      await testRuntime.runtime.idle();
+
+      expect(runs).toBe(0);
+      expect(queryCount).toBe(0);
+      expect(testRuntime.runtime.scheduler.isDirty(preloadedPersistedAction))
+        .toBe(false);
+      expect(
+        testRuntime.runtime.scheduler.getMightWrite(preloadedPersistedAction),
+      )
+        .toEqual([writeAddress]);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
   it("does not run while initial rehydration is pending", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {

@@ -168,6 +168,10 @@ type SchedulerStorageRehydrationOptions =
   & SchedulerObservationIdentity
   & {
     space: MemorySpace;
+    snapshotsByActionId?: ReadonlyMap<
+      string,
+      PersistedSchedulerObservationSnapshot
+    >;
     timeoutMs?: number;
     // When the pattern is (re)started from a synced/resumed state, wait for the
     // space's storage to finish syncing before attempting rehydration / the
@@ -490,7 +494,12 @@ export class Scheduler {
       dependencies,
       subscribeOptions,
     );
-    if (rehydrateFromStorage) {
+    if (rehydrateFromStorage?.snapshotsByActionId) {
+      this.applyPreloadedInitialActionRehydration(
+        action,
+        rehydrateFromStorage.snapshotsByActionId,
+      );
+    } else if (rehydrateFromStorage) {
       this.queueInitialActionRehydration(action, rehydrateFromStorage);
     }
     return cancel;
@@ -660,6 +669,28 @@ export class Scheduler {
         ? { unknownReason: snapshot.unknownReason }
         : {}),
     });
+  }
+
+  private applyPreloadedInitialActionRehydration(
+    action: Action,
+    snapshotsByActionId: ReadonlyMap<
+      string,
+      PersistedSchedulerObservationSnapshot
+    >,
+  ): void {
+    const snapshot = snapshotsByActionId.get(this.getActionId(action));
+    if (
+      snapshot &&
+      isSchedulerActionObservation(snapshot.observation) &&
+      this.observationMatchesCurrentAction(action, snapshot.observation) &&
+      this.rehydrateActionFromObservation(action, snapshot)
+    ) {
+      logger.debug("rehydrate/ok", () => []);
+      return;
+    }
+
+    logger.debug("rehydrate/fallback-run/no-match", () => []);
+    this.scheduleInitialActionRun(action);
   }
 
   private observationMatchesCurrentAction(
