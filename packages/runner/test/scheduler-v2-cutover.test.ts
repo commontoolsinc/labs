@@ -15,6 +15,7 @@ import type {
   IExtendedStorageTransaction,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
+import { PASS_RUN_BUDGET } from "../src/scheduler/constants.ts";
 import { NodeRegistry } from "../src/scheduler/node-record.ts";
 import {
   type DependencyGraphState,
@@ -463,9 +464,8 @@ describe("scheduler v2 cutover fixtures", () => {
     try {
       await expectSchedulerIdle(runtime);
       expect(runCountA + runCountB).toBeGreaterThan(0);
-      // 3pre keeps the v1-compatible cycle-break bound; 3c.iv tightens this
-      // fixture to the v2 PASS_RUN_BUDGET backoff rule.
-      expect(runCountA + runCountB).toBeLessThan(500);
+      expect(runCountA).toBeLessThanOrEqual(PASS_RUN_BUDGET);
+      expect(runCountB).toBeLessThanOrEqual(PASS_RUN_BUDGET);
       expect(unrelatedValues[unrelatedValues.length - 1]).toBe(70);
     } finally {
       cancelA();
@@ -626,7 +626,7 @@ describe("scheduler v2 cutover fixtures", () => {
         childCancel = runtime.scheduler.subscribe(
           child,
           { reads: [sourceAddress], shallowReads: [], writes: [outputAddress] },
-          { debounce: 40 },
+          { debounce: 200 },
         );
       }
     };
@@ -642,12 +642,9 @@ describe("scheduler v2 cutover fixtures", () => {
     );
 
     try {
+      const idleStart = performance.now();
       await runtime.scheduler.idle();
-      expect(childRuns).toBe(0);
-      expect(output.get()).toBe(0);
-
-      await new Promise((resolve) => setTimeout(resolve, 80));
-      await runtime.scheduler.idle();
+      expect(performance.now() - idleStart).toBeGreaterThanOrEqual(180);
       expect(childRuns).toBe(1);
       expect(output.get()).toBe(30);
     } finally {

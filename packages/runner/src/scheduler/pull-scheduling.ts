@@ -29,6 +29,7 @@ export interface PullSchedulingState {
     DirtyPullRunnableStateWithDebounce;
   readonly isLiveAction: (action: Action) => boolean;
   readonly hasActiveDebounceTimer: (action: Action) => boolean;
+  readonly getNextEligibleRunTime: (action: Action) => number | undefined;
 }
 
 /**
@@ -160,12 +161,14 @@ function isIdleMaterializerRunnable(
 export function hasDeferredDirtyEffectWork(
   state: PullSchedulingState,
 ): boolean {
+  const now = performance.now();
   for (const record of state.nodes.nodes("effect")) {
     if (
       isInvalidOrNeverRan(record) &&
       (
         state.hasActiveDebounceTimer(record.action) ||
-        state.dirtyPullRunnableStateWithDebounce.isThrottled(record.action)
+        state.dirtyPullRunnableStateWithDebounce.isThrottled(record.action) ||
+        isTimeGated(state, record.action, now)
       )
     ) {
       return true;
@@ -179,9 +182,11 @@ export function isRunnableSchedulingSeed(
   record: SchedulerNode,
 ): boolean {
   const action = record.action;
+  const now = performance.now();
   return isInvalidOrNeverRan(record) &&
     (state.isLiveAction(action) || state.pending.has(action)) &&
     !state.dirtyPullRunnableStateWithDebounce.isThrottled(action) &&
+    !isTimeGated(state, action, now) &&
     !state.hasActiveDebounceTimer(action) &&
     state.dirtyPullRunnableStateWithDebounce
         .isDebouncedComputationWaiting(action) !== true;
@@ -189,4 +194,13 @@ export function isRunnableSchedulingSeed(
 
 export function isInvalidOrNeverRan(record: SchedulerNode): boolean {
   return record.status === "invalid" || record.status === "never-ran";
+}
+
+function isTimeGated(
+  state: PullSchedulingState,
+  action: Action,
+  now: number,
+): boolean {
+  const nextEligibleAt = state.getNextEligibleRunTime(action);
+  return nextEligibleAt !== undefined && nextEligibleAt > now;
 }

@@ -4333,3 +4333,56 @@ $ rg -n "stale\b" packages/runner/src/scheduler packages/runner/src/scheduler.ts
     `does not apply async initial rehydration after an action becomes dirty`.
     The final rerun passed: `594 passed (3106 steps)`, `0 failed`,
     `0 ignored (10 steps)`, `2m6s`.
+
+## 07/3c.iv-budgets-backoff
+
+- [x] pending — replaced cycle breaking/adaptive cycle debounce with v2 pass
+  budgets and exponential backoff.
+- Fix shape:
+  - `constants.ts` now owns `MAX_ITERS = 10`, `PASS_RUN_BUDGET = 5`, and
+    the 250ms/2000ms backoff bounds; the old `MAX_ITERATIONS_PER_RUN`,
+    `loopCounter`, and cycle-debounce constants are gone.
+  - Node records now carry `backoffUntil` and consecutive
+    `backoffFailures`; settle execution applies exponential backoff when an
+    iteration cap or pass-budget exhaustion leaves runnable invalid work.
+  - Pass-budget backoff keys off any action reaching the run budget, then
+    defers the currently runnable invalid nodes. This fixes alternating cycles
+    where the action that trips the budget is clean by the time planning runs.
+  - Continuation and run gating now use combined throttle/backoff eligibility,
+    so delayed work schedules through the existing event-wake path rather than
+    immediate requeueing.
+  - `scheduler.non-settling` telemetry is emitted once per backoff episode via
+    the existing settling tracker.
+  - Deleted `pull-cycle-break.ts`, `planPullCycleBreak`,
+    `planPullAdaptiveCycleDebounce`, adaptive cycle-debounce application, and
+    the remaining effect re-dirty cycle-skip paths.
+  - Updated scheduler convergence/timing/cutover/core tests to assert bounded
+    backoff semantics instead of the removed hard loop cap and cycle debounce.
+- Recordings:
+  - Deletion grep returned no matches:
+
+```text
+$ rg -n "runsThisExecute|loopCounter|executeStartTime|CYCLE_DEBOUNCE|MAX_ITERATIONS_PER_RUN|PullCycleBreakState|breakPullCyclesIfNeeded|planPullCycleBreak|planPullAdaptiveCycleDebounce|schedule-cycle-debounce|schedule-cycle|dirtyEffectsToRun|earlyIterationComputations|getLoopCounter|pull-cycle-break|cycle-break|cycle-aware debounce|cycle debounce" packages/runner/src packages/runner/test
+```
+
+  - `deno fmt` on the touched source/test files: passed.
+  - `deno lint` on the touched source/test files: passed (`Checked 11 files`).
+  - `deno check` on the touched source/test files: passed.
+  - `git diff --check`: passed.
+  - Core regression check:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-core.test.ts`: passed, `1 passed (25 steps)`, `0 failed`.
+  - 3c.iv gate pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts test/scheduler-convergence.test.ts
+    test/scheduler-timing.test.ts test/scheduler-throttle.test.ts`: passed,
+    `4 passed (49 steps)`, `0 failed`.
+  - First `cd packages/runner && deno task test` attempt failed the legacy
+    `scheduler-core.test.ts` loop-cap assertion after the hard loop cap was
+    removed. The final rerun passed: `594 passed (3099 steps)`, `0 failed`,
+    `0 ignored (10 steps)`, `2m8s`.
+  - Expected noisy passing logs remain: deliberate scheduler errors in
+    convergence/core/stack-trace tests, reload-rehydration's expected
+    `TypeError`, and existing write-surface/wish warnings.
