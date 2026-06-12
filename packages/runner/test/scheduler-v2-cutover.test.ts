@@ -24,12 +24,7 @@ import {
   registerDependentEdge,
   unregisterDependentEdge,
 } from "../src/scheduler/dependency-graph.ts";
-import { SchedulerDelays } from "../src/scheduler/delays.ts";
-import {
-  getNextDebounceRunTime,
-  isDebouncedComputationWaiting,
-  type SchedulerDelayControlState,
-} from "../src/scheduler/delay-control.ts";
+import { SchedulerGates } from "../src/scheduler/gates.ts";
 
 async function expectSchedulerIdle(runtime: Runtime): Promise<void> {
   const result = await Promise.race([
@@ -1139,14 +1134,18 @@ describe("scheduler v2 cutover fixtures", () => {
     // The waiting check and the wake-time planner must agree on the
     // first-run debounce gate: if one schedules a debounce the other must
     // report its ready time, or planners spin without a wake.
-    const delays = new SchedulerDelays({
+    const nodes = new NodeRegistry();
+    const action: Action = function debouncedFirstRun() {};
+    nodes.register(action, "computation");
+    const gates = new SchedulerGates({
+      nodes,
       actionStats: new Map(),
       getActionId: () => "debounced-first-run",
+      isDisposed: () => false,
+      queueExecution: () => {},
     });
-    const action: Action = function debouncedFirstRun() {};
-    delays.setDebounce(action, 50);
-    const state: SchedulerDelayControlState = {
-      delays,
+    gates.setDebounce(action, 50);
+    const context = {
       computations: new Set([action]),
       effects: new Set<Action>(),
       isInvalid: () => true,
@@ -1157,10 +1156,10 @@ describe("scheduler v2 cutover fixtures", () => {
     };
 
     try {
-      expect(isDebouncedComputationWaiting(state, action)).toBe(true);
-      expect(getNextDebounceRunTime(state, action)).toBeDefined();
+      expect(gates.isDebouncedComputationWaiting(action, context)).toBe(true);
+      expect(gates.getNextDebounceRunTime(action, context)).toBeDefined();
     } finally {
-      delays.clearActiveDebounceTimers();
+      gates.cancelWake();
     }
   });
 

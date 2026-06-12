@@ -23,7 +23,6 @@ interface DebouncedComputationContext {
 
 export class SchedulerGates {
   private readonly stagedGates = new WeakMap<Action, SchedulerGateState>();
-  readonly computationDebounceFlushSeeds = new Set<Action>();
   private wakeTimer: ReturnType<typeof setTimeout> | null = null;
   private wakeAt: number | null = null;
 
@@ -163,7 +162,6 @@ export class SchedulerGates {
   ): void {
     const gate = this.gate(action);
     if (gate) delete gate.debounceReadyAt;
-    this.computationDebounceFlushSeeds.delete(action);
     if (options.cancelTimer ?? true) {
       this.cancelDebounceTimer(action);
     }
