@@ -8,7 +8,6 @@ import {
   type StorageNotificationState,
 } from "../src/scheduler/notifications.ts";
 import { processPullStorageNotification } from "../src/scheduler/pull-notifications.ts";
-import { processPushStorageNotification } from "../src/scheduler/push-notifications.ts";
 import { watchReactiveActionCommit } from "../src/scheduler/action-run.ts";
 import { MAX_RETRIES_FOR_REACTIVE } from "../src/scheduler/constants.ts";
 import type { Action } from "../src/scheduler/types.ts";
@@ -153,7 +152,6 @@ describe("trigger reads follow the scheduling decision", () => {
   for (
     const [mode, process] of [
       ["pull", processPullStorageNotification],
-      ["push", processPushStorageNotification],
     ] as const
   ) {
     it(`${mode}: skip-own-commit-source records no trigger read`, () => {
