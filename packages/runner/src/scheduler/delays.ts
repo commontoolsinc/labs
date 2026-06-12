@@ -13,6 +13,7 @@ interface DebouncedComputationContext {
   readonly pending: Set<Action>;
   readonly queueExecution: () => void;
   readonly logDebounce: (message: string) => void;
+  readonly shouldDebounceFirstRun?: (action: Action) => boolean;
 }
 
 export class SchedulerDelays {
@@ -300,12 +301,14 @@ export class SchedulerDelays {
     context: {
       readonly computations: ReadonlySet<Action>;
       readonly effects: ReadonlySet<Action>;
+      readonly shouldDebounceFirstRun?: (action: Action) => boolean;
     },
   ): boolean {
     const debounceMs = this.actionDebounce.get(action);
     return context.computations.has(action) &&
       !context.effects.has(action) &&
-      this.actionHasRun.has(action) &&
+      (this.actionHasRun.has(action) ||
+        context.shouldDebounceFirstRun?.(action) === true) &&
       debounceMs !== undefined &&
       debounceMs > 0;
   }

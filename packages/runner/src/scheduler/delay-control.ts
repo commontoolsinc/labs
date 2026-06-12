@@ -9,6 +9,7 @@ export interface SchedulerDelayControlState {
   readonly pending: Set<Action>;
   readonly queueExecution: () => void;
   readonly logDebounce: (message: string) => void;
+  readonly shouldDebounceFirstRun?: (action: Action) => boolean;
 }
 
 export function canAutomaticallyDebounce(
@@ -93,5 +94,6 @@ function debouncedComputationContext(state: SchedulerDelayControlState) {
     pending: state.pending,
     queueExecution: state.queueExecution,
     logDebounce: state.logDebounce,
+    shouldDebounceFirstRun: state.shouldDebounceFirstRun,
   };
 }

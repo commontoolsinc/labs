@@ -3801,3 +3801,64 @@ CT-1316, and the differing value is exact (registry `none` vs WeakMap
     `1 passed (5 steps)`, `0 failed`.
   - `cd packages/runner && deno task test`: passed,
     `594 passed (3107 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m7s`.
+
+## 07/3b-provisional-demand
+
+- [x] 07/3b.2 — pending — moved parent-created first-run demand to
+  `SchedulerNode.provisionalDemand` and added pass/finalize expiry.
+- Red:
+  - Added `expires provisional demand after a parent-created child runs`
+    before the expiry rewrite.
+  - Initial focused run failed because the old parent-context demand stayed
+    permanently live after the child completed:
+    `AssertionError: Values are not equal: actual 2, expected 1`
+    at `test/scheduler-v2-cutover.test.ts:643`.
+- Fix shape:
+  - `subscribePullSchedulerAction` now marks a parent-created computation
+    provisional only when its parent record is live.
+  - Provisional demand is stored on the node with a creating pass id and flows
+    through the liveness transition helper.
+  - Pass-end cleanup clears provisional demand for nodes created in that pass
+    once they have completed at least one run.
+  - Run-finalize cleanup clears provisional demand for gated nodes whose first
+    completed run occurs after their creating pass.
+  - First-run debounce remains immediate for ordinary computations; only
+    provisionally-demanded, never-ran computations are eligible for a
+    pre-first-run debounce gate.
+- Fixtures:
+  - Added `expires provisional demand after a parent-created child runs`.
+  - Added `keeps provisional demand for a debounced child until the gate
+    opens`.
+- Scope note:
+  - This commit implements 3b.2 only. `demand.ts` consumers and the remaining
+    `activePullDemandActions`, `pullDemandedFirstRunComputations`, and
+    `pullDemandedContinuationComputations` sets remain for 3b.3.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/action-run.ts
+    packages/runner/src/scheduler/demand.ts
+    packages/runner/src/scheduler/dependency-graph.ts
+    packages/runner/src/scheduler/node-record.ts
+    packages/runner/src/scheduler/pull-subscriptions.ts
+    packages/runner/src/scheduler/subscriptions.ts
+    packages/runner/src/scheduler/delays.ts
+    packages/runner/src/scheduler/delay-control.ts
+    packages/runner/test/scheduler-v2-cutover.test.ts`: passed
+    (`Checked 10 files`).
+  - `deno lint` on the same 10 files: passed (`Checked 10 files`).
+  - `deno check` on the same 10 files: passed.
+  - Focused scheduler + CT-1316 gate:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-effects.test.ts test/scheduler-pull.test.ts
+    test/scheduler-ordering.test.ts test/scheduler-timing.test.ts
+    test/scheduler-v2-cutover.test.ts
+    test/patterns-derive-return-pattern.test.ts`: passed,
+    `7 passed (99 steps)`, `0 failed`.
+  - Pull family gate:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull*.test.ts`: passed, `5 passed (59 steps)`,
+    `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3109 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m7s`.

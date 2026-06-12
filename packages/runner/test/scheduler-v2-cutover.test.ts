@@ -565,6 +565,167 @@ describe("scheduler v2 cutover fixtures", () => {
     }
   });
 
+  it("keeps provisional demand for a debounced child until the gate opens", async () => {
+    const trigger = runtime.getCell<number>(
+      space,
+      "v2-cutover-provisional-gated-trigger",
+      undefined,
+      tx,
+    );
+    const source = runtime.getCell<number>(
+      space,
+      "v2-cutover-provisional-gated-source",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "v2-cutover-provisional-gated-output",
+      undefined,
+      tx,
+    );
+    trigger.set(0);
+    source.set(3);
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let childRuns = 0;
+    let childCancel: (() => void) | undefined;
+    const outputLink = output.getAsNormalizedFullLink();
+    const outputAddress = toMemorySpaceAddress(outputLink);
+    const sourceAddress = toMemorySpaceAddress(
+      source.getAsNormalizedFullLink(),
+    );
+
+    const child = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        childRuns++;
+        output.withTx(actionTx).send(source.withTx(actionTx).get() * 10);
+      }) as Action,
+      {
+        writes: [outputLink],
+      },
+    );
+
+    const parent: Action = (actionTx) => {
+      trigger.withTx(actionTx).get();
+      if (!childCancel) {
+        childCancel = runtime.scheduler.subscribe(
+          child,
+          { reads: [sourceAddress], shallowReads: [], writes: [outputAddress] },
+          { debounce: 40 },
+        );
+      }
+    };
+
+    const parentCancel = runtime.scheduler.subscribe(
+      parent,
+      {
+        reads: [toMemorySpaceAddress(trigger.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [],
+      },
+      { isEffect: true },
+    );
+
+    try {
+      await runtime.scheduler.idle();
+      expect(childRuns).toBe(0);
+      expect(output.get()).toBe(0);
+
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      await runtime.scheduler.idle();
+      expect(childRuns).toBe(1);
+      expect(output.get()).toBe(30);
+    } finally {
+      parentCancel();
+      childCancel?.();
+    }
+  });
+
+  it("expires provisional demand after a parent-created child runs", async () => {
+    const trigger = runtime.getCell<number>(
+      space,
+      "v2-cutover-provisional-expiry-trigger",
+      undefined,
+      tx,
+    );
+    const source = runtime.getCell<number>(
+      space,
+      "v2-cutover-provisional-expiry-source",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "v2-cutover-provisional-expiry-output",
+      undefined,
+      tx,
+    );
+    trigger.set(0);
+    source.set(3);
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let childRuns = 0;
+    let childCancel: (() => void) | undefined;
+    const outputLink = output.getAsNormalizedFullLink();
+    const outputAddress = toMemorySpaceAddress(outputLink);
+    const sourceAddress = toMemorySpaceAddress(
+      source.getAsNormalizedFullLink(),
+    );
+
+    const child = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        childRuns++;
+        output.withTx(actionTx).send(source.withTx(actionTx).get() * 10);
+      }) as Action,
+      {
+        writes: [outputLink],
+      },
+    );
+
+    const parent: Action = (actionTx) => {
+      trigger.withTx(actionTx).get();
+      if (!childCancel) {
+        childCancel = runtime.scheduler.subscribe(
+          child,
+          { reads: [sourceAddress], shallowReads: [], writes: [outputAddress] },
+          {},
+        );
+      }
+    };
+
+    const parentCancel = runtime.scheduler.subscribe(
+      parent,
+      {
+        reads: [toMemorySpaceAddress(trigger.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [],
+      },
+      { isEffect: true },
+    );
+
+    try {
+      await runtime.scheduler.idle();
+      expect(childRuns).toBe(1);
+      expect(output.get()).toBe(30);
+
+      source.withTx(tx).send(4);
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.scheduler.idle();
+
+      expect(childRuns).toBe(1);
+      expect(output.get()).toBe(30);
+    } finally {
+      parentCancel();
+      childCancel?.();
+    }
+  });
+
   it("keeps a declared writer dormant while its output has no demand", async () => {
     const source = runtime.getCell<number>(
       space,

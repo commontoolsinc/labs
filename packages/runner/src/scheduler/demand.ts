@@ -129,6 +129,8 @@ function hasDemandedParentContext(
   action: Action,
   visited = new Set<Action>(),
 ): boolean {
+  if (state.nodes.get(action)?.provisionalDemand !== true) return false;
+
   const parent = state.nodes.parentOf(action)?.action;
   if (!parent) return false;
 

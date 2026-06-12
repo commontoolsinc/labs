@@ -4,6 +4,7 @@ import type { Cancel } from "../cancel.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import { setSchedulerDependencies } from "./dependency-updates.ts";
+import { isLive } from "./dependency-graph.ts";
 import { filterIgnoredAddresses } from "./reactivity.ts";
 import {
   replaceActionTriggerPaths,
@@ -86,13 +87,15 @@ export function subscribePullSchedulerAction(
 
   // Track parent-child relationship if action is created during another action's execution
   registerParentChildAction(state.subscriptionState, action);
-  const parent = state.subscriptionState.nodes.parentOf(action)?.action;
+  const record = state.subscriptionState.nodes.get(action);
+  const parentRecord = state.subscriptionState.nodes.parentOf(action);
   if (
     !actionIsEffect &&
-    parent &&
-    state.activePullDemandActions.has(parent)
+    record &&
+    parentRecord &&
+    isLive(state.subscriptionState.dependencyGraphState, parentRecord)
   ) {
-    state.pullDemandedFirstRunComputations.add(action);
+    state.markProvisionalDemand(record);
     if (!deferInitialExecution) {
       state.queueExecution();
     }
