@@ -642,8 +642,6 @@ export type KeyResultTypeOpaque<
 /**
  * Cells that support key() for property access - OpaqueCell variant.
  * OpaqueCell is "sticky" and always returns OpaqueCell<>.
- *
- * Note: And for now it always returns an OpaqueRef<>, until we clean this up.
  */
 export interface IKeyableOpaque<T> {
   /**
@@ -821,7 +819,7 @@ export interface IEquatable {
 
 /**
  * Cells that allow deriving new cells from existing cells via array methods:
- * direct helpers mirror supported Array methods and return OpaqueRef results.
+ * direct helpers mirror supported Array methods and return Reactive results.
  * The WithPattern variants accept pre-defined patterns for per-element
  * operations.
  */
@@ -829,16 +827,16 @@ export interface IDerivable<T> {
   map<S>(
     this: IsThisObject,
     fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T>,
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
     ) => Opaque<S>,
-  ): OpaqueRef<S[]>;
+  ): Reactive<S[]>;
   mapWithPattern<S>(
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
-  ): OpaqueRef<S[]>;
+  ): Reactive<S[]>;
   reduce<S>(
     this: IsThisObject,
     fn: (
@@ -848,7 +846,7 @@ export interface IDerivable<T> {
       array: (T extends Array<infer U> ? U : T)[],
     ) => S,
     initialValue: S,
-  ): OpaqueRef<S>;
+  ): Reactive<S>;
   findIndex(
     this: IsThisObject,
     fn: (
@@ -856,33 +854,33 @@ export interface IDerivable<T> {
       index: number,
       array: (T extends Array<infer U> ? U : T)[],
     ) => boolean,
-  ): OpaqueRef<number>;
+  ): Reactive<number>;
   filter(
     this: IsThisObject,
     fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T>,
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
     ) => Opaque<boolean>,
-  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]>;
+  ): Reactive<(T extends Array<infer U> ? U : T)[]>;
   filterWithPattern<S>(
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
-  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]>;
+  ): Reactive<(T extends Array<infer U> ? U : T)[]>;
   flatMap<S>(
     this: IsThisObject,
     fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T>,
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
     ) => Opaque<S[]>,
-  ): OpaqueRef<S[]>;
+  ): Reactive<S[]>;
   flatMapWithPattern<S>(
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,
     params: Record<string, any>,
-  ): OpaqueRef<S[]>;
+  ): Reactive<S[]>;
 }
 
 export interface IOpaquable<T> {
@@ -1158,17 +1156,19 @@ export interface WriteonlyCell<T>
 export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
 
 // ============================================================================
-// OpaqueRef - Proxy-based variant of OpaqueCell
+// Reactive - annotation for reactively-tracked values
 // ============================================================================
 
 /**
- * OpaqueRef is a variant of OpaqueCell with recursive proxy behavior.
- * Each key access returns another OpaqueRef, allowing chained property access.
- * This is temporary until AST transformation handles .key() automatically.
- *
- * OpaqueRef<Cell<T>> unwraps to Cell<T>.
+ * Reactive<T> marks a value as reactively tracked by the pattern runtime.
+ * It is purely an annotation: at the type level it IS `T` (an identity
+ * alias), and the transformers detect the spelling to classify reactive
+ * positions before erasure. There is no runtime wrapper behind it.
  */
-export type OpaqueRef<T> = T;
+export type Reactive<T> = T;
+
+/** @deprecated Use {@link Reactive}. */
+export type OpaqueRef<T> = Reactive<T>;
 
 // Helper type for OpaqueRef's inner property/array mapping
 // Handles nullable types by extracting the non-null part for mapping
@@ -1248,11 +1248,9 @@ type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - i
 /**
  * Opaque accepts T or any cell wrapping T, recursively at any nesting level.
  * Used in APIs that accept inputs from developers - can be static values
- * or wrapped in cells (OpaqueRef, Cell, etc).
+ * or wrapped in cells (Cell, OpaqueCell, etc).
  *
- * Conceptually: T | AnyCell<T> at any nesting level, but we use OpaqueRef
- * for backward compatibility since it has the recursive proxy behavior that
- * allows property access (e.g., Opaque<{foo: string}> includes {foo: Opaque<string>}).
+ * Conceptually: T | AnyCell<T> at any nesting level.
  *
  * Special cases for JSX:
  * - Opaque<VNode> also accepts JSXElement
@@ -1262,7 +1260,6 @@ export type Opaque<T> =
   | T
   // We have to list them explicitly so Typescript can unwrap them. Doesn't seem
   // to work if we just say AnyBrandedCell<T>
-  | OpaqueRef<T>
   | AnyCell<T>
   | AnyBrandedCell<T>
   | OpaqueCell<T>
