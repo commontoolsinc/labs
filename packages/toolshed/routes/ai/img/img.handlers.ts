@@ -16,11 +16,23 @@ const CACHE_DIR = `${env.CACHE_DIR}/ai-img`;
 export const generateImage: AppRouteHandler<GenerateImageRoute> = async (c) => {
   const logger = c.get("logger");
   const { prompt } = c.req.query();
+  const width = Number(c.req.query("width"));
+  const height = Number(c.req.query("height"));
+  const customSize = Number.isInteger(width) && Number.isInteger(height)
+    ? { width, height }
+    : undefined;
 
-  const promptSha = await sha256(prompt);
+  const cacheKey = JSON.stringify({
+    prompt,
+    image_size: customSize ?? "square",
+  });
+  const promptSha = await sha256(cacheKey);
   const cachePath = `${CACHE_DIR}/${promptSha}.webp`;
 
-  logger.info({ prompt, promptSha }, "Starting image generation");
+  logger.info(
+    { prompt, promptSha, image_size: customSize ?? "square" },
+    "Starting image generation",
+  );
 
   // Check cache first
   try {
@@ -47,7 +59,7 @@ export const generateImage: AppRouteHandler<GenerateImageRoute> = async (c) => {
     const result = await fal.subscribe("fal-ai/flux/schnell", {
       input: {
         prompt,
-        image_size: "square",
+        image_size: customSize ?? "square",
         num_images: 1,
       },
       logs: true,

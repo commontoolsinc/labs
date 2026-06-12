@@ -86,6 +86,10 @@ export const generateImage = createRoute({
         .openapi({
           example: "cat with a hat",
         }),
+      width: z.coerce.number().int().min(64).max(1024).optional()
+        .describe("Optional generated image width in pixels"),
+      height: z.coerce.number().int().min(64).max(1024).optional()
+        .describe("Optional generated image height in pixels"),
     }),
   },
   responses: {
