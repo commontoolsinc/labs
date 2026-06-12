@@ -867,9 +867,115 @@ comment line in the Step 4 code-commit scope.
 
 ## 02/step-1
 
-- [x] pending — event-id minting helper
+- [x] 722bd082f — event-id minting helper
 - Deviations: none.
 - Recordings:
   - `deno fmt packages/runner/src/scheduler/event-identity.ts`: passed
     (`Checked 1 file`).
   - `deno check src/scheduler/event-identity.ts`: passed.
+
+## IMPLEMENTER STOP — 02/step-2 transaction-field sequencing
+
+Applied the Step 2 event-id threading edits through `QueuedEvent`,
+`Scheduler.queueEvent`, `queueSchedulerEvent`, the event requeue sites, and
+the `Cell.set` stream-send origin option. Formatting passed:
+
+```text
+$ deno fmt packages/runner/src/scheduler/types.ts \
+  packages/runner/src/scheduler.ts \
+  packages/runner/src/scheduler/events.ts packages/runner/src/cell.ts
+Checked 4 files
+```
+
+The Step 2 instruction also says to set `tx.dispatchedEventId =
+queuedEvent.id` in `dispatchQueuedEvent`, but the field is introduced only in
+Step 3. The Step 2 compile check therefore fails before the Step 2 test file
+can be added or the full suite can run:
+
+```text
+$ cd packages/runner
+$ deno check src/scheduler.ts src/scheduler/events.ts src/scheduler/types.ts src/cell.ts
+Check src/scheduler.ts
+Check src/scheduler/events.ts
+Check src/scheduler/types.ts
+Check src/cell.ts
+TS2339 [ERROR]: Property 'dispatchedEventId' does not exist on type 'IExtendedStorageTransaction'.
+  tx.dispatchedEventId = queuedEvent.id;
+     ~~~~~~~~~~~~~~~~~
+    at file:///.../packages/runner/src/scheduler/events.ts:456:6
+
+error: Type checking failed.
+```
+
+No Step 3 transaction-interface edit was pulled forward, and no workaround cast
+was added.
+
+## REVIEWER VERDICT — 02/step-2 field-before-declaration
+
+Correct stop; work-order sequencing flaw (step 2 uses
+`tx.dispatchedEventId`, step 3 declares it). Resolution: execute step 3
+BEFORE step 2 — it is small and standalone. Order becomes 1 → 3 → 2 → 4.
+
+1. Do step 3 now exactly as written (interface field on
+   `IExtendedStorageTransaction` with its doc comment; plain optional
+   property on any concrete class deno check requires), commit with
+   step 3's message.
+2. Then finish step 2 (your current tree) including its test file and
+   full-suite verification, commit with step 2's message.
+3. Amend the work order in-branch to note the execution reorder — own
+   docs commit before the step-3 commit:
+   `docs(specs): scheduler-v2 WO02 — step 3 precedes step 2 (field before use)`.
+4. Continue with step 4.
+
+Implementer resolution: updated work order 02 to record the execution
+correction: Step 3 precedes Step 2 because Step 2 assigns the transaction field
+that Step 3 declares.
+
+## REVIEWER VERDICT — PR #4087 CI failures (review feedback, stacked-PR protocol)
+
+PR #4087's diff and exit contracts verified good (I re-ran the greps at
+the PR head independently). CI surfaced four misses that were OUTSIDE
+every sweep the work order ordered — two are work-order gaps, none are
+judgment errors of yours. Handle per the stacked-PR protocol: finish
+your current WO02 stop-7 sequence first (docs reorder commit, step-3
+commit, step-2 commit — clean tree), THEN fix on
+`scheduler-v2/01-phase0`, push, merge 01 forward into 02, continue.
+
+Fixes on the 01 branch, one commit
+(`fix(runner,cli,piece): phase-0 leftovers outside the runner sweep`):
+
+1. `packages/runner/src/runner.ts` lint (the Check job): remove the
+   now-unused `internalVerifierRead` import (line 69 — confirm single
+   use first) and remove the now-unused `schedulerRehydration`
+   PARAMETER from `handleJavaScriptHandlerResult`'s signature and its
+   single call site (grep to confirm exactly one caller).
+2. `packages/piece/test/pull-materialization.test.ts:138`: delete the
+   `enablePullMode()` line (rule E no-op).
+3. `packages/cli`: the cf test runner exposes a `schedulerMode` option
+   whose "push" arm calls the deleted API (test-runner.ts:884-888).
+   Remove the option END-TO-END: run the untruncated inventory
+   `grep -rn "schedulerMode\|scheduler-mode" packages/cli` and delete
+   the option type, the if/else branch, the CLI flag parsing/help, and
+   any multi-user-runner passthrough it shows. Pull is the only
+   behavior. STOP only if the inventory shows a use that is not mode
+   selection.
+4. Closing contract for the commit:
+   `git grep -n "enablePullMode\|disablePullMode\|isPullModeEnabled" -- ':!docs'`
+   → zero matches.
+
+Verification for the commit: `deno lint` + `deno check` on every
+touched file; run `packages/piece` tests and the cli test-runner's own
+test task; runner suite unchanged (not required again). Push 01 —
+PR #4087 reruns; Check / Test / runtime-client / Pattern-Reload /
+Pattern-Integration should clear. Pattern Unit Tests 3/5+4/5 may still
+fail: known PRE-EXISTING main breakage (profile-create.tsx :8000
+connection refused) — record, do not chase.
+
+Process amendments (docs commit on 01, before the fix commit):
+- 00-README G3 gains `deno lint <touched files>` alongside fmt/check.
+- WO01 exit checklist gains the repo-wide mode-API grep from item 4
+  (scoped `':!docs'`).
+Message: `docs(specs): scheduler-v2 — lint in G3; repo-wide mode-API exit grep`.
+
+Then `git merge scheduler-v2/01-phase0` into `scheduler-v2/02-e0`
+(merge, never rebase), push both, and continue WO02 step 4.
