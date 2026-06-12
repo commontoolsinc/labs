@@ -5139,3 +5139,45 @@ packages/runner/src/scheduler/diagnostics.ts:253:  return setTimeout(fn, 0);
     `0 failed`, `607ms`.
   - Expected noisy passing logs remain: scheduler event/preflight/retry/error
     logs.
+
+## 08/5.4-persistence-accessors
+
+- [x] pending — verified persisted scheduler action options still flow from
+  gate config into observations.
+- Shape:
+  - No behavioral code change was needed in this step. The observation
+    accessor source had already moved to `SchedulerGates` in 5.1, and
+    `schedulerActionOptions` in `run.ts` still receives
+    `debounceMs`/`noDebounce`/`throttleMs` through the action-run state.
+- Recordings:
+  - Accessor/path inventory:
+
+```text
+$ rg -n "schedulerActionOptions|getDebounce|getNoDebounce|getThrottle|debounceMs|noDebounce|throttleMs|actionOptions" packages/runner/src/scheduler packages/runner/test/scheduler-observations.test.ts
+packages/runner/test/scheduler-observations.test.ts:163:      actionOptions: {
+packages/runner/test/scheduler-observations.test.ts:164:        debounceMs: 25,
+packages/runner/test/scheduler-observations.test.ts:180:        actionOptions: { debounceMs: 25 },
+packages/runner/src/scheduler/facade.ts:578:    const { actionOptions } = observation;
+packages/runner/src/scheduler/facade.ts:579:    if (actionOptions?.debounceMs !== undefined) {
+packages/runner/src/scheduler/facade.ts:580:      this.gates.setDebounce(action, actionOptions.debounceMs);
+packages/runner/src/scheduler/facade.ts:582:    if (actionOptions?.noDebounce !== undefined) {
+packages/runner/src/scheduler/facade.ts:583:      this.gates.setNoDebounce(action, actionOptions.noDebounce);
+packages/runner/src/scheduler/facade.ts:585:    if (actionOptions?.throttleMs !== undefined) {
+packages/runner/src/scheduler/facade.ts:586:      this.gates.setThrottle(action, actionOptions.throttleMs);
+packages/runner/src/scheduler/facade.ts:1900:      getDebounce: (target) => this.gates.getDebounce(target),
+packages/runner/src/scheduler/facade.ts:1901:      getNoDebounce: (target) => this.gates.getNoDebounce(target),
+packages/runner/src/scheduler/facade.ts:1902:      getThrottle: (target) => this.gates.getThrottle(target),
+packages/runner/src/scheduler/run.ts:552:  const actionOptions = schedulerActionOptions(state, args.action);
+packages/runner/src/scheduler/run.ts:649:function schedulerActionOptions(
+packages/runner/src/scheduler/run.ts:653:  const debounceMs = state.getDebounce(action);
+packages/runner/src/scheduler/run.ts:654:  const noDebounce = state.getNoDebounce(action);
+packages/runner/src/scheduler/run.ts:655:  const throttleMs = state.getThrottle(action);
+```
+
+  - Observation compatibility:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-observations.test.ts`: passed, `1 passed (22 steps)`,
+    `0 failed`, `242ms`.
+  - Expected noisy passing logs remain: experimental flag override messages
+    and the rehydration timeout warning in the timeout fallback fixture.
