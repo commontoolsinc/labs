@@ -717,7 +717,7 @@ test run and direct push-module grep in that commit's verification.
 
 ## IMPLEMENTER RESOLUTION — 01/steps-2-3 final
 
-- [x] pending — remove push scheduler mode and pullMode branches
+- [x] 30ea32193 — remove push scheduler mode and pullMode branches
 - Deviations: per reviewer verdicts, this single compile-unit commit includes
   the Step 2 push-module deletions, Step 3 `scheduler.ts` mode collapse, the
   four `src/runner.ts` mode-API call-site edits, and the
@@ -740,3 +740,64 @@ test run and direct push-module grep in that commit's verification.
   - `ls src/scheduler | grep push`: no matches.
   - `grep -rn "scheduler/push-\|processPush\|PushScheduler" src/ test/`: no
     matches.
+
+## IMPLEMENTER STOP — 01/step-4 mode.change grep contract
+
+Before editing `src/telemetry.ts`, ran the required Step 4 inventories.
+`isPullModeEnabled` has no remaining callers:
+
+```text
+$ cd packages/runner
+$ grep -rn "isPullModeEnabled" ../../packages --include="*.ts"
+<no matches>
+```
+
+However, the Step 4 `mode.change` grep does not match the work order's
+"type definition only" expectation:
+
+```text
+$ grep -rn "mode.change" ../../packages --include="*.ts"
+../../packages/shell/src/lib/debugger-controller.ts:293:        //   latestMarker?.type === "scheduler.mode.change" ||
+../../packages/runner/test/fetch-data-mutex.test.ts:386:  it("should handle mode changes (text vs json)", async () => {
+../../packages/runner/src/telemetry.ts:231:  type: "scheduler.mode.change";
+```
+
+No Step 4 code edit was made. The shell match is a commented
+`scheduler.mode.change` consumer outside Step 4's named file, and the
+`fetch-data-mutex.test.ts` match is an unrelated false positive caused by the
+unescaped `.` in the required grep pattern. Per G6, stopped for reviewer
+direction instead of deleting or widening scope.
+
+## REVIEWER VERDICT — 01/step-4 mode.change grep
+
+Three rulings, then step 4 proceeds:
+
+1. `src/telemetry.ts:231` — delete the `scheduler.mode.change` type
+   member as step 4 already specifies.
+2. `test/fetch-data-mutex.test.ts:386` — false positive from the
+   unescaped dot in MY grep pattern ("mode changes (text vs json)").
+   No edit. The contract grep is corrected to
+   `grep -rn "scheduler\.mode\.change" ../../packages --include="*.ts"`.
+3. `shell/src/lib/debugger-controller.ts:293` — G4 exception granted
+   for exactly one line: delete the commented
+   `//   latestMarker?.type === "scheduler.mode.change" ||` line from
+   the dead auto-refresh block. It references a type that will no
+   longer exist; the surrounding commented example stays coherent with
+   the four remaining marker types. Do not touch anything else in the
+   file. Include in the step-4 commit.
+
+Corrected step-4 contract after edits: the escaped grep above → zero
+matches repo-wide.
+
+Then: amend the work order in-branch (escaped grep + the shell comment
+in scope), own docs commit first —
+`docs(specs): scheduler-v2 WO01 — escape the mode.change grep; shell stale comment in scope`
+— then the step-4 commit (original message), step 5 docs touch-up, exit
+checklist, and the 00-README phase-end protocol: push
+`scheduler-v2/01-phase0`, open the stacked PR (base `main` — the spec
+PR is merged), include the PROGRESS excerpt, and continue immediately
+into work order 02 on `scheduler-v2/02-e0`.
+
+Implementer resolution: updated the work order's Step 4 text to use the
+escaped `scheduler\.mode\.change` grep and to include exactly the stale shell
+comment line in the Step 4 code-commit scope.
