@@ -172,17 +172,6 @@ const CPUPROFILE_DIR = (() => {
     return "/tmp";
   }
 })();
-const SCHEDULER_PULL_MODE = (() => {
-  try {
-    const raw = Deno.env.get("CF_SCHEDULER_PULL_MODE");
-    if (raw === "1" || raw === "true" || raw === "pull") return true;
-    if (raw === "0" || raw === "false" || raw === "push") return false;
-  } catch {
-    // Ignore unavailable env in browser-like runners.
-  }
-  return undefined;
-})();
-
 type NoteCreateTimingEntry = {
   noteIndex: number;
   noteTitle: string;
@@ -248,15 +237,6 @@ describe("default-app flow test", () => {
       view: { spaceName },
       identity,
     });
-
-    if (SCHEDULER_PULL_MODE !== undefined) {
-      console.log(
-        `Set scheduler mode: ${SCHEDULER_PULL_MODE ? "pull" : "push"}...`,
-      );
-      await waitFor(async () => {
-        return await setSchedulerPullMode(page, SCHEDULER_PULL_MODE);
-      });
-    }
 
     if (CAPTURE_TRIGGER_TRACE) {
       console.log("Enable trigger trace...");
@@ -691,9 +671,9 @@ describe("default-app flow test", () => {
       identity,
     });
 
-    console.log("Set scheduler mode: pull for notebook regression...");
+    console.log("Await runtime idle for notebook regression...");
     await waitFor(async () => {
-      return await setSchedulerPullMode(page, true);
+      return await awaitRuntimeIdle(page);
     });
 
     try {
@@ -775,10 +755,10 @@ describe("default-app flow test", () => {
       assertEquals(summary.argumentNotesLength, noteCreates);
       assertEquals(summary.noteCount, noteCreates);
     } finally {
-      await waitFor(async () => await setSchedulerPullMode(page, false)).catch(
+      await waitFor(async () => await awaitRuntimeIdle(page)).catch(
         (error) =>
           console.warn(
-            "Failed to restore scheduler push mode after notebook regression",
+            "Failed to await runtime idle after notebook regression",
             error,
           ),
       );
@@ -796,20 +776,13 @@ async function armTriggerTrace(page: Page): Promise<boolean> {
   });
 }
 
-async function setSchedulerPullMode(
-  page: Page,
-  pullMode: boolean,
-): Promise<boolean> {
-  return await page.evaluate<Promise<boolean>, [boolean]>(
-    async (pullMode) => {
-      const rt = globalThis.commonfabric?.rt;
-      if (!rt?.setPullMode || !rt?.idle) return false;
-      await rt.setPullMode(pullMode);
-      await rt.idle();
-      return true;
-    },
-    { args: [pullMode] },
-  );
+async function awaitRuntimeIdle(page: Page): Promise<boolean> {
+  return await page.evaluate(async () => {
+    const rt = globalThis.commonfabric?.rt;
+    if (!rt?.idle) return false;
+    await rt.idle();
+    return true;
+  });
 }
 
 async function armWriteTrace(page: Page): Promise<boolean> {

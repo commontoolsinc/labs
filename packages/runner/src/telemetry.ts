@@ -228,9 +228,6 @@ export type RuntimeTelemetryMarker = {
   type: "scheduler.graph.snapshot";
   graph: SchedulerGraphSnapshot;
 } | {
-  type: "scheduler.mode.change";
-  pullMode: boolean;
-} | {
   type: "scheduler.subscribe";
   actionId: string;
   isEffect: boolean;

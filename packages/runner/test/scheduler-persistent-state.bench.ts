@@ -61,7 +61,7 @@ for (const actionCount of ACTION_COUNTS) {
       await runWithSchedulerTiming(
         `persistent clean rehydrate: ${actionCount} actions`,
         async (resetMeasuredTiming) => {
-          const env = createSchedulerBenchEnv(true);
+          const env = createSchedulerBenchEnv();
           const actions = Array.from(
             { length: actionCount },
             (_, index) => createAction(index),
@@ -95,7 +95,7 @@ for (const actionCount of ACTION_COUNTS) {
       await runWithSchedulerTiming(
         `persistent targeted dirty rehydrate: ${actionCount} actions`,
         async (resetMeasuredTiming) => {
-          const env = createSchedulerBenchEnv(true);
+          const env = createSchedulerBenchEnv();
           const actions = Array.from(
             { length: actionCount },
             (_, index) => createAction(index),

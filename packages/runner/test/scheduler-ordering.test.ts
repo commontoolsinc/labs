@@ -405,7 +405,6 @@ describe("push-triggered filtering", () => {
   });
 
   it("should allow first run even without pushTriggered (default scheduling)", async () => {
-    runtime.scheduler.enablePullMode();
     runtime.scheduler.resetFilterStats();
 
     const cell = runtime.getCell<number>(
@@ -443,8 +442,6 @@ describe("push-triggered filtering", () => {
   });
 
   it("should use pushTriggered to track storage-triggered actions", async () => {
-    runtime.scheduler.enablePullMode();
-
     const cell = runtime.getCell<number>(
       space,
       "push-triggered-test",
@@ -492,8 +489,6 @@ describe("push-triggered filtering", () => {
   });
 
   it("should not filter actions scheduled with default scheduling", async () => {
-    runtime.scheduler.enablePullMode();
-
     const cell = runtime.getCell<number>(
       space,
       "schedule-immed-filter",
@@ -558,7 +553,6 @@ describe("parent-child action ordering", () => {
   beforeEach(() => {
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
       import.meta.url,
-      { pullMode: "disabled" },
     ));
   });
 

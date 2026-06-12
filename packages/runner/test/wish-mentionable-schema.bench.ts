@@ -82,7 +82,6 @@ async function setupMentionableWishBench(
     apiUrl: new URL(import.meta.url),
     storageManager,
   });
-  runtime.scheduler.enablePullMode();
 
   const tx = runtime.edit();
   const spaceCell = runtime.getCell(space, space, undefined, tx).withTx(tx);

@@ -87,7 +87,6 @@ import {
   type SetBreakpointsRequest,
   type SetLoggerEnabledRequest,
   type SetLoggerLevelRequest,
-  type SetPullModeRequest,
   type SetSettleStatsEnabledRequest,
   type SetTelemetryEnabledRequest,
   type SettleStatsHistoryResponse,
@@ -1017,14 +1016,6 @@ export class RuntimeProcessor {
     return { snapshot: this.runtime.scheduler.getGraphSnapshot() };
   }
 
-  setPullMode(request: SetPullModeRequest): void {
-    if (request.pullMode) {
-      this.runtime.scheduler.enablePullMode();
-    } else {
-      this.runtime.scheduler.disablePullMode();
-    }
-  }
-
   getLoggerCounts(_: GetLoggerCountsRequest): LoggerCountsResponse {
     const counts = getLoggerCountsBreakdown();
     const metadata = this.#getLoggerMetadata();
@@ -1316,8 +1307,6 @@ export class RuntimeProcessor {
         return this.handleRegisterSpaceHost(request);
       case RequestType.GetGraphSnapshot:
         return this.getGraphSnapshot(request);
-      case RequestType.SetPullMode:
-        return this.setPullMode(request);
       case RequestType.GetLoggerCounts:
         return this.getLoggerCounts(request);
       case RequestType.SetLoggerLevel:

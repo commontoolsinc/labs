@@ -31,7 +31,6 @@ describe("handler dependency pulling", () => {
   beforeEach(() => {
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
       import.meta.url,
-      { pullMode: "enabled" },
     ));
   });
 
@@ -170,7 +169,6 @@ describe("handler dependency pulling", () => {
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
       import.meta.url,
       {
-        pullMode: "enabled",
         cfcEnforcementMode: "enforce-explicit",
         storageManager,
       },
@@ -592,8 +590,6 @@ describe("handler dependency pulling", () => {
   });
 
   it("should park a head event until a throttled dependency becomes runnable", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "handler-throttle-source",
@@ -686,8 +682,6 @@ describe("handler dependency pulling", () => {
   });
 
   it("should keep parked event wake when unrelated work queues execution", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "handler-throttle-wake-source",
@@ -794,8 +788,6 @@ describe("handler dependency pulling", () => {
   });
 
   it("should report preflight dependency errors without wedging the scheduler", async () => {
-    runtime.scheduler.enablePullMode();
-
     const eventStream = runtime.getCell<number>(
       space,
       "handler-preflight-error-events",
@@ -856,8 +848,6 @@ describe("handler dependency pulling", () => {
   });
 
   it("should not emit event preflight telemetry unless enabled", async () => {
-    runtime.scheduler.enablePullMode();
-
     const preflights: EventPreflightMarker[] = [];
     const listener = (event: Event) => {
       const marker = (event as CustomEvent<{ marker: RuntimeTelemetryMarker }>)
@@ -910,8 +900,6 @@ describe("handler dependency pulling", () => {
   });
 
   it("should preserve FIFO order while the head event is parked", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "handler-throttle-fifo-source",

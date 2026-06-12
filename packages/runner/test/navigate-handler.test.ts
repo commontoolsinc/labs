@@ -9,10 +9,7 @@ import { navigateTo as rawNavigateTo } from "../src/builtins/navigate-to.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-async function runNavigateHandlerTest(
-  pullMode: boolean,
-  conditional: boolean,
-): Promise<void> {
+async function runNavigateHandlerTest(conditional: boolean): Promise<void> {
   const storageManager = StorageManager.emulate({ as: signer });
   const navigations: string[] = [];
   const runtime = new Runtime({
@@ -26,9 +23,6 @@ async function runNavigateHandlerTest(
   const tx: IExtendedStorageTransaction = runtime.edit();
 
   try {
-    if (pullMode) runtime.scheduler.enablePullMode();
-    else runtime.scheduler.disablePullMode();
-
     const { commonfabric } = createTrustedBuilder(runtime);
     const {
       NAME,
@@ -79,7 +73,6 @@ async function runNavigateHandlerTest(
       {
         navigateHandler: {
           conditional,
-          pullMode,
         },
       },
       undefined,
@@ -102,23 +95,13 @@ async function runNavigateHandlerTest(
   }
 }
 
-for (const pullMode of [false, true]) {
-  const mode = pullMode ? "pull" : "push";
+Deno.test("handler can update local state and still navigate", async () => {
+  await runNavigateHandlerTest(false);
+});
 
-  Deno.test(
-    `handler can update local state and still navigate (${mode} mode)`,
-    async () => {
-      await runNavigateHandlerTest(pullMode, false);
-    },
-  );
-
-  Deno.test(
-    `conditional handler still navigates after it hides itself (${mode} mode)`,
-    async () => {
-      await runNavigateHandlerTest(pullMode, true);
-    },
-  );
-}
+Deno.test("conditional handler still navigates after it hides itself", async () => {
+  await runNavigateHandlerTest(true);
+});
 
 Deno.test("navigateTo is idempotent for one result cell", async () => {
   const storageManager = StorageManager.emulate({ as: signer });

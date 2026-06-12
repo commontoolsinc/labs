@@ -45,7 +45,6 @@ async function setupSharedSeedGraph(effectCount: number) {
     apiUrl: new URL(import.meta.url),
     storageManager,
   });
-  runtime.scheduler.enablePullMode();
 
   const tx = runtime.edit();
   const source = runtime.getCell<number>(

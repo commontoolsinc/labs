@@ -69,7 +69,6 @@ Deno.test(
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-    runtime.scheduler.enablePullMode();
 
     try {
       const tx = runtime.edit();
@@ -148,7 +147,6 @@ Deno.test(
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-    runtime.scheduler.enablePullMode();
 
     try {
       const tx = runtime.edit();

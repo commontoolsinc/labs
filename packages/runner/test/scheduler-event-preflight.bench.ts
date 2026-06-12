@@ -45,7 +45,7 @@ async function setupBroadGraph(
   prefix: string,
   fanout = BROAD_FANOUT,
 ): Promise<BroadGraph> {
-  const env = createSchedulerBenchEnv(true);
+  const env = createSchedulerBenchEnv();
   const { runtime } = env;
   const tx = runtime.edit();
 
@@ -293,7 +293,7 @@ Deno.bench(
     await runWithSchedulerTiming(
       "event preflight: deep read-populated handler",
       async (resetMeasuredTiming) => {
-        const env = createSchedulerBenchEnv(true);
+        const env = createSchedulerBenchEnv();
         const { runtime } = env;
         const tx = runtime.edit();
         const shared = runtime.getCell<number>(

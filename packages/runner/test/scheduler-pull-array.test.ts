@@ -40,7 +40,6 @@ describe("pull mode array reactivity", () => {
   beforeEach(() => {
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
       import.meta.url,
-      { pullMode: "enabled" },
     ));
   });
 
@@ -87,8 +86,6 @@ describe("pull mode array reactivity", () => {
   });
 
   it("should record schema array sinks as shallow structural reads", async () => {
-    runtime.scheduler.enablePullMode();
-
     const arrayCell = runtime.getCell<string[]>(
       space,
       "schema-array-structural-sink",

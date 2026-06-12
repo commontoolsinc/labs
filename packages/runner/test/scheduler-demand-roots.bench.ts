@@ -29,7 +29,7 @@ async function setupDemandGraph(
   prefix: string,
   effectCount = 0,
 ): Promise<DemandGraph> {
-  const env = createSchedulerBenchEnv(true);
+  const env = createSchedulerBenchEnv();
   const { runtime } = env;
   const tx = runtime.edit();
   const source = runtime.getCell<number>(
@@ -273,7 +273,7 @@ Deno.bench(
     await runWithSchedulerTiming(
       "demand roots: parent clears generated children",
       async (resetMeasuredTiming) => {
-        const env = createSchedulerBenchEnv(true);
+        const env = createSchedulerBenchEnv();
         const { runtime } = env;
         const tx = runtime.edit();
         const source = runtime.getCell<number>(

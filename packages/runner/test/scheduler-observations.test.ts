@@ -206,9 +206,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("rehydrates clean scheduler observations without rerun pressure", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const persistedAction = () => {};
       testRuntime.runtime.scheduler.subscribe(persistedAction, {
@@ -254,9 +252,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("persists the post-run scheduling writes when an action write path changes", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const { runtime, tx } = testRuntime;
       const selector = runtime.getCell<boolean>(
@@ -348,9 +344,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("rehydrates failed scheduler observations as runnable work", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const failedPersistedAction = () => {};
       testRuntime.runtime.scheduler.subscribe(failedPersistedAction, {
@@ -392,9 +386,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("rehydrates dirty scheduler observations as runnable work", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const dirtyPersistedAction = () => {};
       testRuntime.runtime.scheduler.subscribe(dirtyPersistedAction, {
@@ -436,9 +428,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("reports unavailable storage-backed rehydration without mutating", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const storageBackedAction = () => {};
       testRuntime.runtime.scheduler.subscribe(storageBackedAction, {
@@ -462,9 +452,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("auto-rehydrates subscribed actions before first execution", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       let runs = 0;
       const autoPersistedAction = () => {
@@ -544,9 +532,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("does not populate dependencies while initial rehydration is pending", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const { runtime } = testRuntime;
       const provider = runtime.storageManager.open(space) as {
@@ -629,9 +615,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("falls back to an initial run when storage rehydration times out", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const { runtime } = testRuntime;
       const provider = runtime.storageManager.open(space) as {
@@ -671,9 +655,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("persists no-op cross-space observations in the owner space", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const { runtime, tx } = testRuntime;
       const ownerSpace = space;
@@ -738,9 +720,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("reruns an inactive cross-space reader dirtied through its read-space mirror", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const { runtime, tx } = testRuntime;
       const ownerSpace = space;
@@ -800,9 +780,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("rehydrates only the dirty nodes when an inactive piece reads another piece's computed data", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const { runtime, tx } = testRuntime;
       const { commonfabric } = createTrustedBuilder(runtime);
@@ -906,9 +884,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("marks inactive readers dirty when another piece only changes data from an event", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const { runtime, tx } = testRuntime;
       const { commonfabric } = createTrustedBuilder(runtime);
@@ -1003,9 +979,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("rehydrates only newly dirty persisted actions after another piece runs", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const { runtime, tx } = testRuntime;
       const source = runtime.getCell<number>(
@@ -1164,9 +1138,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("persists dirty state for an inactive materializer that can eagerly write other cells", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const { runtime, tx } = testRuntime;
       const source = runtime.getCell<number>(
@@ -1295,9 +1267,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("backfills dependents when rehydrated currentKnownWrites restore a no-op writer", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const { runtime } = testRuntime;
       const persistedReader = () => {};
@@ -1375,9 +1345,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("does not reattach an action when async initial rehydration resolves after unsubscribe", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const { runtime } = testRuntime;
       const provider = runtime.storageManager.open(space) as {
@@ -1453,9 +1421,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("does not apply async initial rehydration after an action becomes dirty", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const { runtime } = testRuntime;
       const provider = runtime.storageManager.open(space) as {
@@ -1530,9 +1496,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("falls back to the normal first run when fingerprints mismatch", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const provider = testRuntime.runtime.storageManager.open(space) as {
         listSchedulerActionSnapshots?: () => Promise<{
@@ -1596,9 +1560,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("falls back to the normal first run when auto-rehydration misses", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const provider = testRuntime.runtime.storageManager.open(space) as {
         listSchedulerActionSnapshots?: () => Promise<{
@@ -1641,9 +1603,7 @@ describe("persistent scheduler observations", () => {
   });
 
   it("uses persisted observations when a runner restarts a clean piece", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {
-      pullMode: "enabled",
-    });
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       const { runtime, tx } = testRuntime;
       const { commonfabric } = createTrustedBuilder(runtime);

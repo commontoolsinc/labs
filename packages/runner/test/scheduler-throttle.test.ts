@@ -185,8 +185,6 @@ describe("throttle - staleness tolerance", () => {
   });
 
   it("should keep action dirty when throttled in pull mode", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "throttle-dirty-source",
@@ -241,8 +239,6 @@ describe("throttle - staleness tolerance", () => {
   });
 
   it("should run throttled effect after throttle expires", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "throttle-pull-source",
@@ -307,8 +303,6 @@ describe("throttle - staleness tolerance", () => {
   });
 
   it("should park throttled dirty effects instead of immediately requeueing", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       "throttle-effect-park-source",

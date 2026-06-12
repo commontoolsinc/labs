@@ -58,7 +58,6 @@ describe("scheduler", () => {
   beforeEach(() => {
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
       import.meta.url,
-      { pullMode: "disabled" },
     ));
   });
 
@@ -101,7 +100,7 @@ describe("scheduler", () => {
       reads: [],
       shallowReads: [],
       writes: [],
-    }, {});
+    }, { isEffect: true });
     await c.pull();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
@@ -162,33 +161,6 @@ describe("scheduler", () => {
     expect(c.get()).toBe(4);
   });
 
-  it("records push-mode settle work-set size before actions mutate pending", async () => {
-    runtime.scheduler.enableSettleStats();
-
-    let runCount = 0;
-    const actionA: Action = () => {
-      runCount++;
-    };
-    const actionB: Action = () => {
-      runCount++;
-    };
-
-    const emptyLog = {
-      reads: [],
-      shallowReads: [],
-      writes: [],
-    };
-    runtime.scheduler.subscribe(actionA, emptyLog);
-    runtime.scheduler.subscribe(actionB, emptyLog);
-
-    await runtime.scheduler.idle();
-
-    const stats = runtime.scheduler.getSettleStats();
-    expect(runCount).toBe(2);
-    expect(stats?.iterations[0]?.workSetSize).toBe(2);
-    expect(stats?.iterations[0]?.actionsRun).toBe(2);
-  });
-
   it("normalizes non-Error action throws before error handlers", async () => {
     const errors: Error[] = [];
     runtime.scheduler.onError((error) => {
@@ -203,7 +175,7 @@ describe("scheduler", () => {
       reads: [],
       shallowReads: [],
       writes: [],
-    });
+    }, { isEffect: true });
 
     await runtime.scheduler.idle();
 
@@ -278,8 +250,6 @@ describe("scheduler", () => {
   });
 
   it("captures trigger trace for a change and downstream scheduled effects", async () => {
-    runtime.scheduler.enablePullMode();
-
     const a = runtime.getCell<number>(
       space,
       "captures trigger trace source",
@@ -370,8 +340,6 @@ describe("scheduler", () => {
   });
 
   it("rechecks downstream readers after delayed computation commits", async () => {
-    runtime.scheduler.enablePullMode();
-
     const a = runtime.getCell<number>(
       space,
       "delayed computation commit source",
@@ -449,8 +417,6 @@ describe("scheduler", () => {
   });
 
   it("captures exact action runs for one reactive update", async () => {
-    runtime.scheduler.enablePullMode();
-
     const a = runtime.getCell<number>(
       space,
       "captures action run trace source",
@@ -582,7 +548,7 @@ describe("scheduler", () => {
       reads: [],
       shallowReads: [],
       writes: [],
-    }, {});
+    }, { isEffect: true });
     await c.pull();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
@@ -714,13 +680,13 @@ describe("scheduler", () => {
       reads: [],
       shallowReads: [],
       writes: [],
-    }, {});
+    }, { isEffect: true });
     await e.pull();
     runtime.scheduler.subscribe(adder2, {
       reads: [],
       shallowReads: [],
       writes: [],
-    }, {});
+    }, { isEffect: true });
     await e.pull();
     expect(runs.join(",")).toBe("adder1,adder2");
     expect(c.get()).toBe(3);
@@ -809,19 +775,19 @@ describe("scheduler", () => {
       reads: [],
       shallowReads: [],
       writes: [],
-    }, {});
+    }, { isEffect: true });
     await e.pull();
     runtime.scheduler.subscribe(adder2, {
       reads: [],
       shallowReads: [],
       writes: [],
-    }, {});
+    }, { isEffect: true });
     await e.pull();
     runtime.scheduler.subscribe(adder3, {
       reads: [],
       shallowReads: [],
       writes: [],
-    }, {});
+    }, { isEffect: true });
     await e.pull();
 
     await e.pull();
@@ -862,7 +828,7 @@ describe("scheduler", () => {
       reads: [],
       shallowReads: [],
       writes: [],
-    }, {});
+    }, { isEffect: true });
     await counter.pull();
     expect(counter.get()).toBe(1);
     await counter.pull();
@@ -987,7 +953,7 @@ describe("scheduler", () => {
     runtime.scheduler.subscribe(
       ignoredReadAction,
       { reads: [], shallowReads: [], writes: [] },
-      {},
+      { isEffect: true },
     );
     await resultCell.pull();
     expect(actionRunCount).toBe(1);
@@ -1057,7 +1023,7 @@ describe("scheduler", () => {
     runtime.scheduler.subscribe(
       cfcMetadataReadAction,
       { reads: [], shallowReads: [], writes: [] },
-      {},
+      { isEffect: true },
     );
     await resultCell.pull();
 
@@ -1143,7 +1109,7 @@ describe("scheduler", () => {
     runtime.scheduler.subscribe(
       directCfcReadAction,
       { reads: [], shallowReads: [], writes: [] },
-      {},
+      { isEffect: true },
     );
     await resultCell.pull();
 
@@ -1411,7 +1377,7 @@ describe("scheduler", () => {
       reads: [],
       shallowReads: [],
       writes: [],
-    }, {});
+    }, { isEffect: true });
     await resultCell.pull();
     expect(actionRunCount).toBe(1);
     expect(resultCell.get()).toEqual({ count: 1, lastRead: undefined });
@@ -1505,7 +1471,7 @@ describe("scheduler", () => {
       reads: [],
       shallowReads: [],
       writes: [],
-    }, {});
+    }, { isEffect: true });
     await resultCell.pull();
     expect(runCount).toBe(1);
 
@@ -1575,7 +1541,7 @@ describe("scheduler", () => {
       reads: [],
       shallowReads: [],
       writes: [],
-    }, {});
+    }, { isEffect: true });
     await resultCell.pull();
     expect(runCount).toBe(1);
 

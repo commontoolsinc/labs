@@ -17,9 +17,958 @@ Format:
 
 ## Baseline (fill in before work order 01)
 
-- Branch + base commit:
+- Branch + base commit: `scheduler-v2/01-phase0` from
+  `origin/main` at `cd1da3d4edaf3679da18dbbb1709e02716be35cc`.
 - Full runner suite result (`cd packages/runner && deno task test`):
+  passed, `588 passed (3074 steps)`, `0 failed`, `0 ignored (10 steps)`,
+  `2m8s`.
 - Bench baseline (commands from 05/step-0, plus
   `scheduler-event-preflight.bench.ts`, `scheduler-materializer-fanout.bench.ts`,
   `scheduler-persistent-state.bench.ts`, `scheduler-pull-seeds.bench.ts`):
-- `reload-rehydration.test.ts` rehydrate-miss counts:
+  - `test/scheduler.bench.ts`:
+    - `Scheduler - 100 computations, shared entity reads`: 37.4 ms
+    - `Scheduler - wide graph (1 source, 100 readers)`: 34.9 ms
+    - `Scheduler - 100 entities, sparse deps`: 20.6 ms
+    - `Scheduler - deep chain (50 levels)`: 20.6 ms
+    - `Scheduler - diamond pattern (10 diamonds)`: 14.6 ms
+    - `Scheduler - repeated dirty marking`: 13.1 ms
+    - `Scheduler - subscribe/unsubscribe cycle (100x)`: 5.8 ms
+    - `Scheduler - pull with resubscribe (50 pulls)`: 276.1 ms
+    - `Overhead - setup/teardown only`: 4.0 ms
+    - `Overhead - create 100 cells (getCell + set)`: 16.8 ms
+    - `Overhead - 100x getCell only (no set)`: 3.8 ms
+    - `Overhead - 100x set on existing cells`: 16.6 ms
+    - `Overhead - runtime.idle() empty`: 3.9 ms
+    - `Overhead - commit after 100 sets`: 16.7 ms
+    - `Overhead - empty commit`: 3.8 ms
+    - `Overhead - 100 raw tx.write + commit`: 8.5 ms
+    - `Utility - sortAndCompactPaths (100 paths)`: 21.9 us
+    - `Utility - sortAndCompactPaths (1000 paths)`: 285.7 us
+    - `Utility - addressesToPathByEntity (100 paths)`: 12.0 us
+    - `Utility - addressesToPathByEntity (1000 paths)`: 125.9 us
+    - `Scheduler - bare subscribe (100x)`: 3.6 ms
+    - `Scheduler - subscribe 100 actions reading same entity`: 3.8 ms
+    - `Scheduler - resubscribe cycle (100x)`: 4.1 ms
+  - `test/scheduler-demand-roots.bench.ts`:
+    - `Scheduler demand roots - effect demand root`: 145.5 ms
+    - `Scheduler demand roots - event demand root`: 127.4 ms
+    - `Scheduler demand roots - mixed effect and event roots`: 171.8 ms
+    - `Scheduler demand roots - parent clears generated children`: 77.2 ms
+  - `test/scheduler-stale-propagation.bench.ts`:
+    - `Scheduler stale propagation - chain`: 94.8 ms
+    - `Scheduler stale propagation - diamond`: 94.3 ms
+    - `Scheduler stale propagation - wide fanout`: 238.7 ms
+    - `Scheduler stale propagation - dynamic deps`: 71.0 ms
+    - `Scheduler stale propagation - unchanged recompute`: 70.1 ms
+  - `test/scheduler-event-preflight.bench.ts`:
+    - `Scheduler event preflight - clean event over broad graph`: 282.2 ms
+    - `Scheduler event preflight - event waits on transitive stale writer`:
+      20.3 ms
+    - `Scheduler event preflight - note-shaped 30x7 clean events`: 970.2 ms
+    - `Scheduler event preflight - deep read-populated handler`: 592.0 ms
+  - `test/scheduler-materializer-fanout.bench.ts`:
+    - `Scheduler materializer fanout - broad side write with 100 readers`:
+      25.2 ms
+    - `Scheduler materializer fanout - broad side write with 1000 readers`:
+      84.5 ms
+    - `Scheduler materializer fanout - static declared write control`:
+      11.5 ms
+  - `test/scheduler-persistent-state.bench.ts`:
+    - `Scheduler persistent state - clean rehydrate 100 actions`: 4.2 ms
+    - `Scheduler persistent state - targeted dirty rehydrate 100 actions`:
+      4.6 ms
+    - `Scheduler persistent state - clean rehydrate 1000 actions`: 9.9 ms
+    - `Scheduler persistent state - targeted dirty rehydrate 1000 actions`:
+      9.4 ms
+  - `test/scheduler-pull-seeds.bench.ts`:
+    - `Scheduler pull - shared dirty dependency fanout (50 effects, 20 reschedules)`:
+      78.1 ms
+    - `Scheduler pull - shared dirty dependency fanout (200 effects, 10 reschedules)`:
+      110.7 ms
+    - `Scheduler pull - shared clean dependency collect (200 effects, 20 scans)`:
+      85.8 ms
+    - `Scheduler pull - shared dirty dependency collect (200 effects, 20 scans)`:
+      85.0 ms
+- `reload-rehydration.test.ts` rehydrate-miss counts: focused run passed;
+  the test asserts `rehydrate/ok > 0` and
+  `rehydrate/miss/no-snapshot = 0`.
+
+## 01/step-1
+
+- [x] 5e70065ac — remove push-mode usage from tests, helpers, and benches
+- Deviations: STOP events below; applied reviewer-approved effect ports and
+  event-reader duplicate-count adjustment.
+- Recordings: authoritative pre-edit grep:
+
+```text
+$ cd packages/runner
+$ grep -rn "enablePullMode\|disablePullMode\|isPullModeEnabled\|pullMode" test/
+test/scheduler-pull.test.ts:44:    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
+test/scheduler-pull.test.ts:48:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:88:  it("should have unchanged behavior with pullMode = false", async () => {
+test/scheduler-pull.test.ts:90:    runtime.scheduler.disablePullMode();
+test/scheduler-pull.test.ts:91:    expect(runtime.scheduler.isPullModeEnabled()).toBe(false);
+test/scheduler-pull.test.ts:140:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:141:    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
+test/scheduler-pull.test.ts:206:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:207:    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
+test/scheduler-pull.test.ts:250:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:251:    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
+test/scheduler-pull.test.ts:330:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:331:    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
+test/scheduler-pull.test.ts:430:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:431:    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
+test/scheduler-pull.test.ts:522:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:605:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:691:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:749:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:850:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:912:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:960:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:1022:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:1155:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:1260:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:1377:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:1414:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:1500:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:1576:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:1677:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:1764:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:1864:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:2001:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:2096:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:2162:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:2239:    runtime.scheduler.enablePullMode();
+test/scheduler-pull.test.ts:2240:    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
+test/scheduler-pull.test.ts:2242:    runtime.scheduler.disablePullMode();
+test/scheduler-pull.test.ts:2243:    expect(runtime.scheduler.isPullModeEnabled()).toBe(false);
+test/scheduler-timing.test.ts:99:    runtime.scheduler.enablePullMode();
+test/scheduler-timing.test.ts:187:    runtime.scheduler.enablePullMode();
+test/scheduler-timing.test.ts:382:    runtime.scheduler.enablePullMode();
+test/scheduler-timing.test.ts:454:    runtime.scheduler.enablePullMode();
+test/scheduler-timing.test.ts:667:    runtime.scheduler.enablePullMode();
+test/scheduler-effects.test.ts:248:    runtime.scheduler.enablePullMode();
+test/scheduler-effects.test.ts:316:    runtime.scheduler.enablePullMode();
+test/scheduler-effects.test.ts:355:    runtime.scheduler.enablePullMode();
+test/scheduler-effects.test.ts:406:    runtime.scheduler.enablePullMode();
+test/scheduler-effects.test.ts:466:    runtime.scheduler.enablePullMode();
+test/scheduler-effects.test.ts:516:    runtime.scheduler.enablePullMode();
+test/scheduler-effects.test.ts:555:    runtime.scheduler.enablePullMode();
+test/scheduler-effects.test.ts:609:    runtime.scheduler.enablePullMode();
+test/scheduler-effects.test.ts:704:    runtime.scheduler.enablePullMode();
+test/scheduler-effects.test.ts:761:    runtime.scheduler.enablePullMode();
+test/scheduler-effects.test.ts:815:    runtime.scheduler.enablePullMode();
+test/scheduler-effects.test.ts:882:    runtime.scheduler.enablePullMode();
+test/scheduler-effects.test.ts:948:    runtime.scheduler.enablePullMode();
+test/scheduler-effects.test.ts:1014:    runtime.scheduler.enablePullMode();
+test/scheduler-effects.test.ts:1055:    runtime.scheduler.disablePullMode();
+test/patterns-derive-return-pattern.test.ts:246:    runtime.scheduler.enablePullMode();
+test/scheduler-convergence.test.ts:31:      { pullMode: "disabled" },
+test/scheduler-convergence.test.ts:126:    runtime.scheduler.enablePullMode();
+test/scheduler-convergence.test.ts:227:    runtime.scheduler.enablePullMode();
+test/scheduler-convergence.test.ts:290:    runtime.scheduler.enablePullMode();
+test/scheduler-convergence.test.ts:392:    runtime.scheduler.enablePullMode();
+test/scheduler-convergence.test.ts:439:    runtime.scheduler.enablePullMode();
+test/scheduler-convergence.test.ts:502:    runtime.scheduler.enablePullMode();
+test/scheduler-convergence.test.ts:664:    runtime.scheduler.enablePullMode();
+test/scheduler-convergence.test.ts:720:    runtime.scheduler.enablePullMode();
+test/scheduler-convergence.test.ts:819:    runtime.scheduler.enablePullMode();
+test/patterns-lift.test.ts:432:    runtime.scheduler.enablePullMode();
+test/default-app-note-create.bench.ts:107:  pullMode: boolean,
+test/default-app-note-create.bench.ts:110:  const env = createSchedulerBenchEnv(pullMode);
+test/default-app-note-create.bench.ts:222:for (const pullMode of [true, false]) {
+test/default-app-note-create.bench.ts:223:  const mode = pullMode ? "pull" : "push";
+test/default-app-note-create.bench.ts:227:      pullMode,
+test/oncommit-race.test.ts:29:    runtime.scheduler.disablePullMode();
+test/scheduler-events.test.ts:56:      { pullMode: "disabled" },
+test/scheduler-events.test.ts:285:    runtime.scheduler.enablePullMode();
+test/scheduler-events.test.ts:431:    runtime.scheduler.enablePullMode();
+test/scheduler-events.test.ts:482:    runtime.scheduler.enablePullMode();
+test/scheduler-events.test.ts:556:    runtime.scheduler.enablePullMode();
+test/scheduler.bench.ts:31:  runtime.scheduler.disablePullMode();
+test/scheduler.bench.ts:500:    runtime.scheduler.enablePullMode();
+test/navigate-handler.test.ts:13:  pullMode: boolean,
+test/navigate-handler.test.ts:29:    if (pullMode) runtime.scheduler.enablePullMode();
+test/navigate-handler.test.ts:30:    else runtime.scheduler.disablePullMode();
+test/navigate-handler.test.ts:82:          pullMode,
+test/navigate-handler.test.ts:105:for (const pullMode of [false, true]) {
+test/navigate-handler.test.ts:106:  const mode = pullMode ? "pull" : "push";
+test/navigate-handler.test.ts:111:      await runNavigateHandlerTest(pullMode, false);
+test/navigate-handler.test.ts:118:      await runNavigateHandlerTest(pullMode, true);
+test/scheduler-bench-helpers.ts:91:export function createSchedulerBenchEnv(pullMode = true): SchedulerBenchEnv {
+test/scheduler-bench-helpers.ts:100:  if (pullMode) {
+test/scheduler-bench-helpers.ts:101:    runtime.scheduler.enablePullMode();
+test/scheduler-bench-helpers.ts:103:    runtime.scheduler.disablePullMode();
+test/wish-mentionable-schema.bench.ts:85:  runtime.scheduler.enablePullMode();
+test/scheduler-observations.test.ts:210:      pullMode: "enabled",
+test/scheduler-observations.test.ts:258:      pullMode: "enabled",
+test/scheduler-observations.test.ts:352:      pullMode: "enabled",
+test/scheduler-observations.test.ts:396:      pullMode: "enabled",
+test/scheduler-observations.test.ts:440:      pullMode: "enabled",
+test/scheduler-observations.test.ts:466:      pullMode: "enabled",
+test/scheduler-observations.test.ts:548:      pullMode: "enabled",
+test/scheduler-observations.test.ts:633:      pullMode: "enabled",
+test/scheduler-observations.test.ts:675:      pullMode: "enabled",
+test/scheduler-observations.test.ts:742:      pullMode: "enabled",
+test/scheduler-observations.test.ts:804:      pullMode: "enabled",
+test/scheduler-observations.test.ts:910:      pullMode: "enabled",
+test/scheduler-observations.test.ts:1007:      pullMode: "enabled",
+test/scheduler-observations.test.ts:1168:      pullMode: "enabled",
+test/scheduler-observations.test.ts:1299:      pullMode: "enabled",
+test/scheduler-observations.test.ts:1379:      pullMode: "enabled",
+test/scheduler-observations.test.ts:1457:      pullMode: "enabled",
+test/scheduler-observations.test.ts:1534:      pullMode: "enabled",
+test/scheduler-observations.test.ts:1600:      pullMode: "enabled",
+test/scheduler-observations.test.ts:1645:      pullMode: "enabled",
+test/scheduler-pull-handlers.test.ts:34:      { pullMode: "enabled" },
+test/scheduler-pull-handlers.test.ts:173:        pullMode: "enabled",
+test/scheduler-pull-handlers.test.ts:595:    runtime.scheduler.enablePullMode();
+test/scheduler-pull-handlers.test.ts:689:    runtime.scheduler.enablePullMode();
+test/scheduler-pull-handlers.test.ts:797:    runtime.scheduler.enablePullMode();
+test/scheduler-pull-handlers.test.ts:859:    runtime.scheduler.enablePullMode();
+test/scheduler-pull-handlers.test.ts:913:    runtime.scheduler.enablePullMode();
+test/push-pull-patterns.bench.ts:342:function createEnv(pullMode: boolean): BenchEnv {
+test/push-pull-patterns.bench.ts:351:  if (pullMode) runtime.scheduler.enablePullMode();
+test/push-pull-patterns.bench.ts:352:  else runtime.scheduler.disablePullMode();
+test/push-pull-patterns.bench.ts:805:    pullMode: boolean;
+test/push-pull-patterns.bench.ts:812:  const env = createEnv(options.pullMode);
+test/push-pull-patterns.bench.ts:841:    pullMode: boolean;
+test/push-pull-patterns.bench.ts:848:  const env = createEnv(options.pullMode);
+test/push-pull-patterns.bench.ts:883:    pullMode: boolean;
+test/push-pull-patterns.bench.ts:890:  const env = createEnv(options.pullMode);
+test/push-pull-patterns.bench.ts:941:for (const pullMode of [false, true]) {
+test/push-pull-patterns.bench.ts:942:  const mode = pullMode ? "pull" : "push";
+test/push-pull-patterns.bench.ts:946:    benchOptions("pattern-map-pull", !pullMode),
+test/push-pull-patterns.bench.ts:949:        pullMode,
+test/push-pull-patterns.bench.ts:959:    benchOptions("pattern-filter-pull", !pullMode),
+test/push-pull-patterns.bench.ts:962:        pullMode,
+test/push-pull-patterns.bench.ts:972:    benchOptions("pattern-flatmap-pull", !pullMode),
+test/push-pull-patterns.bench.ts:975:        pullMode,
+test/push-pull-patterns.bench.ts:985:    benchOptions("pattern-map-sink", !pullMode),
+test/push-pull-patterns.bench.ts:988:        pullMode,
+test/push-pull-patterns.bench.ts:998:    benchOptions("pattern-map-object-pull", !pullMode),
+test/push-pull-patterns.bench.ts:1001:        pullMode,
+test/push-pull-patterns.bench.ts:1011:    benchOptions("pattern-filter-object-pull", !pullMode),
+test/push-pull-patterns.bench.ts:1014:        pullMode,
+test/push-pull-patterns.bench.ts:1024:    benchOptions("pattern-flatmap-object-pull", !pullMode),
+test/push-pull-patterns.bench.ts:1027:        pullMode,
+test/push-pull-patterns.bench.ts:1037:    benchOptions("pattern-map-object-sink", !pullMode),
+test/push-pull-patterns.bench.ts:1040:        pullMode,
+test/push-pull-patterns.bench.ts:1050:    benchOptions("pattern-fanout-pull-sparse", !pullMode),
+test/push-pull-patterns.bench.ts:1053:        pullMode,
+test/push-pull-patterns.bench.ts:1063:    benchOptions("pattern-fanout-pull-wide", !pullMode),
+test/push-pull-patterns.bench.ts:1066:        pullMode,
+test/push-pull-patterns.bench.ts:1076:    benchOptions("pattern-fanout-sinks", !pullMode),
+test/push-pull-patterns.bench.ts:1079:        pullMode,
+test/push-pull-patterns.bench.ts:1089:    benchOptions("pattern-fanout-mixed", !pullMode),
+test/push-pull-patterns.bench.ts:1092:        pullMode,
+test/scheduler-pull-seeds.bench.ts:48:  runtime.scheduler.enablePullMode();
+test/scheduler-pull-references.test.ts:30:      { pullMode: "enabled" },
+test/scheduler-retries.test.ts:29:      { pullMode: "disabled" },
+test/scheduler-core.test.ts:61:      { pullMode: "disabled" },
+test/scheduler-core.test.ts:281:    runtime.scheduler.enablePullMode();
+test/scheduler-core.test.ts:373:    runtime.scheduler.enablePullMode();
+test/scheduler-core.test.ts:452:    runtime.scheduler.enablePullMode();
+test/patterns-handlers.test.ts:211:    runtime.scheduler.enablePullMode();
+test/scheduler-throttle.test.ts:188:    runtime.scheduler.enablePullMode();
+test/scheduler-throttle.test.ts:244:    runtime.scheduler.enablePullMode();
+test/scheduler-throttle.test.ts:310:    runtime.scheduler.enablePullMode();
+test/cell-callbacks.test.ts:1353:      runtime.scheduler.enablePullMode();
+test/cell-callbacks.test.ts:1374:      runtime.scheduler.disablePullMode();
+test/cell-callbacks.test.ts:1414:      runtime.scheduler.enablePullMode();
+test/cell-callbacks.test.ts:1486:      runtime.scheduler.disablePullMode();
+test/scheduler-test-utils.ts:58:    pullMode?: SchedulerPullMode;
+test/scheduler-test-utils.ts:75:  if (options.pullMode === "enabled") {
+test/scheduler-test-utils.ts:76:    runtime.scheduler.enablePullMode();
+test/scheduler-test-utils.ts:77:  } else if (options.pullMode === "disabled") {
+test/scheduler-test-utils.ts:78:    runtime.scheduler.disablePullMode();
+test/memory-v2-pull-reactivity.test.ts:78:    runtime.scheduler.enablePullMode();
+test/memory-v2-pull-reactivity.test.ts:142:    runtime.scheduler.enablePullMode();
+test/scheduler-pull-array.test.ts:43:      { pullMode: "enabled" },
+test/scheduler-pull-array.test.ts:90:    runtime.scheduler.enablePullMode();
+test/storage.bench.ts:36:  runtime.scheduler.disablePullMode();
+test/wish-shared-hashtag.test.ts:72:    runtime.scheduler.enablePullMode();
+test/wish-shared-hashtag.test.ts:151:    runtime.scheduler.enablePullMode();
+test/scheduler-ordering.test.ts:408:    runtime.scheduler.enablePullMode();
+test/scheduler-ordering.test.ts:446:    runtime.scheduler.enablePullMode();
+test/scheduler-ordering.test.ts:495:    runtime.scheduler.enablePullMode();
+test/scheduler-ordering.test.ts:561:      { pullMode: "disabled" },
+```
+
+- Step-1 edit verification:
+  - `grep -rn "enablePullMode\|disablePullMode\|isPullModeEnabled\|pullMode" test/`:
+    no matches.
+  - `deno fmt <touched test/bench files>`: passed.
+  - `deno check <touched test/bench files>`: passed after making the
+    `push-pull-patterns.bench.ts` local `benchOptions` helper default its
+    `baseline` argument.
+  - `cd packages/runner && deno task test`: failed, STOP per work-order
+    rule D for push-pinned tests that went red after the pin was removed.
+    Summary: `583 passed (3053 steps)`, `3 failed (18 steps)`,
+    `0 ignored (10 steps)`, `2m0s`.
+- STOP event:
+  - `test/scheduler-convergence.test.ts` / `cycle-aware convergence` failed
+    under pull mode:
+    - `should track action execution time`
+    - `should accumulate action stats across multiple runs`
+    - `should record stats even when action throws`
+    - `should correctly calculate average time`
+  - `test/scheduler-core.test.ts` / `scheduler` failed under pull mode:
+    - `should run actions when cells change`
+    - `records push-mode settle work-set size before actions mutate pending`
+    - `normalizes non-Error action throws before error handlers`
+    - `should remove actions`
+    - `should run actions in topological order`
+    - `should stop eventually when encountering infinite loops`
+    - `should not loop on r/w changes on its own output`
+    - `should not create dependencies when using getRaw with ignoreReadForScheduling`
+    - `should react to stored CFC metadata updates read through verifier helpers`
+    - `should react to direct reads of stored CFC metadata when the cfc field changes`
+    - `should track read without load for scheduling and still trigger on writes`
+    - `non-recursive read through link chain does not re-trigger on value update`
+    - `cell.get on docA inside action does not add recursive scheduling deps for docC`
+  - `test/scheduler-events.test.ts` / `event handling` failed under pull
+    mode:
+    - `should trigger recomputation of dependent cells`
+  - Representative assertion shape from the failures: expected one action/run
+    but observed zero (`Actual 0 / Expected 1`) after the push-mode pin was
+    removed. No local fix was attempted; reviewer needs to decide delete vs
+    port for these push-only semantics.
+
+## REVIEWER VERDICT — 01/step-1 STOP (rule D.2 red tests)
+
+Diagnosis confirmed by reading the tests: every red test subscribes a
+BARE COMPUTATION (immediate/empty log, no `isEffect`) and expects it to
+run unprompted — push-era semantics. Under pull these are dormant by
+design (spec I2). The tests' subjects (stats, triggering, ordering, CFC
+metadata reactivity, loop protection) are all mode-independent; the
+registration style is what's outdated. Rulings:
+
+1. DELETE exactly one test:
+   `scheduler-core.test.ts` → "records push-mode settle work-set size
+   before actions mutate pending" (push-named, asserts push settle-stats
+   internals; no pull equivalent exists by construction).
+
+2. PORT everything else by registering the observed action(s) as
+   effects: add `{ isEffect: true }` to the `subscribe(...)` options
+   (merge into the existing options object where one exists, e.g. the
+   events test passes `{}` at scheduler-events.test.ts:716). For
+   multi-action tests (topological order, infinite loop, self-output
+   loop) mark ALL subscribed actions as effects. Run-count assertions
+   should hold unchanged: push ran a subscribed action once at
+   subscribe; a pull effect is also scheduled once at subscribe.
+
+3. Two allowances, each requiring a PROGRESS.md note if used:
+   - "should stop eventually when encountering infinite loops": if the
+     terminal run-count differs under pull's cycle handling, adjust the
+     numeric bound to the observed pull bound — the subject is "stops
+     eventually", not the exact count.
+   - If any ported test trips effect auto-debounce (only possible if an
+     action averages >50ms over 3+ runs), set `noDebounce: true` in that
+     subscription rather than restructuring the test.
+
+4. Do NOT add demand via extra `sink()`/`pull()` plumbing where
+   `isEffect: true` suffices — smallest faithful port wins.
+
+5. No new code comments in the test files (G4); rationale lives here
+   and in the commit message.
+
+Then: finish step 1 (full suite green), commit per the step's message,
+and continue the work order without further stops for this class — this
+verdict covers all remaining D.2 reds of the same bare-subscribe shape.
+If a red of a DIFFERENT shape appears, STOP as usual.
+
+## IMPLEMENTER STOP — 01/step-1 reviewer verdict follow-up
+
+Applied the verdict narrowly:
+
+- Deleted exactly one test: `scheduler-core.test.ts` / "records push-mode
+  settle work-set size before actions mutate pending".
+- Added `{ isEffect: true }` to the listed bare-subscribe red tests in
+  `scheduler-convergence.test.ts`, `scheduler-core.test.ts`, and
+  `scheduler-events.test.ts`; for the multi-action core tests, all subscribed
+  actions were marked as effects.
+- `deno fmt packages/runner/test/scheduler-convergence.test.ts
+  packages/runner/test/scheduler-core.test.ts
+  packages/runner/test/scheduler-events.test.ts`: passed.
+- `deno check packages/runner/test/scheduler-convergence.test.ts
+  packages/runner/test/scheduler-core.test.ts
+  packages/runner/test/scheduler-events.test.ts`: passed.
+
+Focused rerun:
+
+```bash
+cd packages/runner
+ENV=test deno test --allow-ffi --allow-env --allow-read \
+  --allow-write=/tmp,/var/folders --allow-run=git test/scheduler-events.test.ts
+```
+
+Result: `test/scheduler-events.test.ts` still fails in "should trigger
+recomputation of dependent cells", but now in the opposite direction from the
+original push-pin failure. The reviewer verdict said run-count assertions
+should hold unchanged; they do not for this event/effect path.
+
+Current failure excerpt:
+
+```text
+event handling ... should trigger recomputation of dependent cells ... FAILED
+
+error: AssertionError: Values are not strictly equal.
+
+    [Diff] Actual / Expected
+
+-   3
++   2
+
+at test/scheduler-events.test.ts:732:25
+
+FAILED | 0 passed (13 steps) | 1 failed (1 step) (303ms)
+```
+
+No assertion adjustment was kept because that was not one of the reviewer
+allowances. Current tree reflects the approved edit shape for this test:
+`runtime.scheduler.subscribe(..., { isEffect: true })` and the original
+`await eventResultCell.pull()` waits remain.
+
+## REVIEWER VERDICT — 01/step-1 follow-up STOP (events count 3 vs 2)
+
+Correct stop; the deviation is real and DIAGNOSED, not noise. Root
+cause, verified in code: pull mode double-schedules event-reader
+effects — the synchronous commit notification schedules the effect once
+(run happens), then the commit promise's ack callback fires
+`onEventCommitWrites` (`events.ts:516-518`) → `markReadersDirtyForChangedWrites`
+→ schedules the same effect AGAIN (second run). Push mode gated this
+second channel off, which is why the push pin hid it. This is exactly
+the duplicate propagation channel documented in the spec (inventory §4,
+channel #2) and deleted in phase 3c.ii — this test just became its
+empirical witness.
+
+Ruling:
+
+1. Adjust THIS test's `actionCount` assertions to the observed
+   pull-mode values: expected 3 after the first event and 5 after the
+   second (1 initial + 2 per event). Run the file to confirm those are
+   stable before committing; if observed values differ from 3/5, STOP
+   again with the numbers.
+2. G4 exception granted — add exactly this comment above the first
+   adjusted assertion:
+
+   // Pull mode currently runs event-reader effects twice per event
+   // commit: once from the synchronous commit notification and once
+   // from the post-ack onEventCommitWrites path (scheduler-v2
+   // inventory §4, channel #2). These counts drop back to 2/3 when
+   // phase 3c.ii deletes the duplicate channel — tighten them then.
+
+3. `lastEventSeen` and `eventCount` assertions stay as-is.
+4. This closes the step-1 reds. Finish step 1 (full suite green),
+   commit, continue the work order. Same-shape +1-per-event count
+   adjustments in OTHER event-reader tests, if any appear, are covered
+   by this verdict (same comment, PROGRESS note); anything else stops.
+
+## IMPLEMENTER RESOLUTION — 01/step-1 final
+
+Applied the follow-up verdict:
+
+- `scheduler-events.test.ts` / "should trigger recomputation of dependent
+  cells" now expects `actionCount` 3 after the first event and 5 after the
+  second, with the reviewer-approved comment.
+- Focused event-file rerun passed:
+  `ENV=test deno test --allow-ffi --allow-env --allow-read
+  --allow-write=/tmp,/var/folders --allow-run=git
+  test/scheduler-events.test.ts` → `1 passed (14 steps)`, `0 failed`,
+  `309ms`.
+- Full runner suite passed:
+  `cd packages/runner && deno task test` → `586 passed (3070 steps)`,
+  `0 failed`, `0 ignored (10 steps)`, `2m4s`.
+- Step exit grep passed:
+  `grep -rn "enablePullMode\|disablePullMode\|isPullModeEnabled\|pullMode"
+  test/` → no matches.
+
+## IMPLEMENTER STOP — 01/steps-2-3 instruction conflict
+
+Started the sanctioned combined steps 2+3 and collapsed `scheduler.ts` mode
+branches to the pull path. Before deleting the push modules or committing,
+the Step 3 grep contract conflicts with Step 3.17:
+
+- Step 3.17 explicitly says `createGraphSnapshotState()` should use the
+  literal `pullMode: true` property, and not remove `pullMode` from the graph
+  snapshot telemetry shape.
+- The Step 3 grep contract says:
+  `grep -n "pullMode\|PushScheduler\|push-" src/scheduler.ts`
+  expected no matches.
+
+Current grep output:
+
+```text
+$ grep -n "pullMode\|PushScheduler\|push-" packages/runner/src/scheduler.ts
+2275:      pullMode: true,
+```
+
+No workaround was attempted. The remaining match is the exact property Step
+3.17 requires. Push modules have not been deleted yet in this working tree.
+
+## REVIEWER VERDICT — 01/steps-2-3 grep-contract conflict
+
+Correct stop; the work order contradicts itself and the GREP CONTRACT is
+the wrong side. Step 3.17 (keep the snapshot's `pullMode: true` literal
+and the telemetry type field) stands — the field is a frozen reporting
+surface for external snapshot consumers; removing it is out of phase-0
+scope. Precedence rule from here on: a reviewer verdict in this file
+overrides conflicting work-order text.
+
+Corrected contracts:
+
+1. Step-3 grep: `grep -n "pullMode\|PushScheduler\|push-" src/scheduler.ts`
+   → expected EXACTLY ONE match: the `pullMode: true` literal in
+   `createGraphSnapshotState()` (your current output is already
+   correct). Zero matches for `PushScheduler` and `push-` once the push
+   modules are deleted.
+2. Exit-checklist grep: `grep -rn "pullMode\|enablePullMode\|disablePullMode\|isPullModeEnabled" src/ test/`
+   → expected residual matches are ONLY the frozen snapshot field:
+   - `src/scheduler.ts`: the `pullMode: true` literal;
+   - `src/scheduler/graph-snapshot.ts`: the state-interface member and
+     its read in the snapshot builder;
+   - `src/telemetry.ts`: the `SchedulerGraphSnapshot` type's `pullMode`
+     field (and doc comments on those lines).
+   `enablePullMode` / `disablePullMode` / `isPullModeEnabled` /
+   `PushScheduler` / `push-` must be zero everywhere. Anything else:
+   STOP.
+3. Amend the work order in YOUR branch so the text matches this ruling —
+   edit `docs/specs/scheduler-v2/implementation/01-phase0-remove-push-mode.md`
+   (the step-3 grep contract and the exit checklist) as its own commit
+   BEFORE the steps-2+3 commit, message:
+   `docs(specs): scheduler-v2 WO01 — graph-snapshot pullMode survives phase 0`
+4. Then proceed: delete the push modules, finish steps 2+3 as one commit
+   per the sanctioned merge, and continue the work order.
+
+Implementer resolution: updated the work order's Step 3 grep contract and exit
+checklist to preserve the frozen graph-snapshot `pullMode` field as the only
+residual mode term.
+
+## IMPLEMENTER STOP — 01/steps-2-3 verification blocked by step-4 callers
+
+Applied the corrected Step 3 contract and deleted the five Step 2 push modules.
+The corrected Step 3 grep is satisfied:
+
+```text
+$ grep -n "pullMode\|PushScheduler\|push-" packages/runner/src/scheduler.ts
+2275:      pullMode: true,
+```
+
+`ls packages/runner/src/scheduler/ | grep push` is empty.
+
+However, the required Step 3 verification command fails because removing
+`Scheduler.isPullModeEnabled()` exposes the Step 4 runner call sites before
+Step 4 is allowed to run:
+
+```text
+$ deno check packages/runner/src/scheduler.ts
+Check packages/runner/src/scheduler.ts
+TS2339 [ERROR]: Property 'isPullModeEnabled' does not exist on type 'Scheduler'.
+    if (!this.runtime.scheduler.isPullModeEnabled()) {
+                                ~~~~~~~~~~~~~~~~~
+    at file:///.../packages/runner/src/runner.ts:2589:33
+
+TS2339 [ERROR]: Property 'isPullModeEnabled' does not exist on type 'Scheduler'.
+    if (!this.runtime.scheduler.isPullModeEnabled() || !pattern) {
+                                ~~~~~~~~~~~~~~~~~
+    at file:///.../packages/runner/src/runner.ts:2700:33
+
+TS2339 [ERROR]: Property 'isPullModeEnabled' does not exist on type 'Scheduler'.
+    if (!this.runtime.scheduler.isPullModeEnabled()) {
+                                ~~~~~~~~~~~~~~~~~
+    at file:///.../packages/runner/src/runner.ts:2715:33
+
+TS2339 [ERROR]: Property 'isPullModeEnabled' does not exist on type 'Scheduler'.
+    if (!this.runtime.scheduler.isPullModeEnabled()) {
+                                ~~~~~~~~~~~~~~~~~
+    at file:///.../packages/runner/src/runner.ts:2728:33
+```
+
+Confirmed grep:
+
+```text
+$ grep -rn "isPullModeEnabled" packages/runner/src packages/runner/test --include="*.ts"
+packages/runner/src/runner.ts:2589:    if (!this.runtime.scheduler.isPullModeEnabled()) {
+packages/runner/src/runner.ts:2700:    if (!this.runtime.scheduler.isPullModeEnabled() || !pattern) {
+packages/runner/src/runner.ts:2715:    if (!this.runtime.scheduler.isPullModeEnabled()) {
+packages/runner/src/runner.ts:2728:    if (!this.runtime.scheduler.isPullModeEnabled()) {
+```
+
+These are exactly the Step 4 sites, but Step 3 requires a green
+`deno check src/scheduler.ts` before the Step 2+3 commit. No Step 4 edits were
+made and no workaround shim was added.
+
+## REVIEWER VERDICT — 01/steps-2-3 compile coupling with step-4 call sites
+
+Correct stop; another work-order sequencing flaw. Deleting the public
+mode API from `scheduler.ts` breaks `runner.ts` compilation, so the
+step-2/3 verification can never pass without the step-4 call-site
+edits — they are one atomic compile unit. The sanctioned merge widens:
+
+1. Fold INTO the steps-2+3 commit exactly the four `runner.ts`
+   call-site edits from step 4 (your grep's four sites), applied as
+   step 4 already specifies them:
+   - `handleJavaScriptHandlerResult` (~2589): delete the entire
+     `if (!isPullModeEnabled()) { ... }` push branch, keeping only
+     `addCancel(() => this.stop(resultCell));` (the lost
+     on-commit-error cleanup note in the work order still applies — no
+     substitute here, it comes in work order 03).
+   - `patternNeedsOneShotPull` (~2700): condition becomes
+     `if (!pattern)`.
+   - `pullCellOnceAfterSuccessfulCommit` (~2715) and
+     `pullCellOnceInPullMode` (~2728): delete each guard, keep bodies.
+   No other `runner.ts` changes in this commit.
+2. Verification for the merged commit: `deno check src/scheduler.ts
+   src/runner.ts`, then the FULL runner suite, then the corrected
+   step-3 grep (one `pullMode: true` match) and
+   `ls src/scheduler | grep push` empty.
+3. Commit message stays the steps-2+3 one:
+   `refactor(runner): remove push scheduler mode and pullMode branches (scheduler-v2 phase 0)`.
+4. Step 4's REMAINING scope (its own commit, original message): the
+   `scheduler.mode.change` telemetry type removal, the repo-wide
+   `isPullModeEnabled` grep (now expected zero everywhere), and the
+   cross-package `mode.change` grep.
+5. As before, amend the work order in your branch to record the wider
+   merge — own docs commit before the code commit, message:
+   `docs(specs): scheduler-v2 WO01 — steps 2-4 runner call sites are one compile unit`.
+6. Then continue (step 4 remainder, step 5 docs, exit checklist with
+   the corrected residual-match list).
+
+Implementer resolution: updated the work order to fold exactly the four
+`src/runner.ts` mode-API call-site edits into the steps 2+3 compile-unit
+commit, leaving Step 4's own commit for `scheduler.mode.change` telemetry type
+removal and repo-wide greps.
+
+## IMPLEMENTER STOP — 01/steps-2-3 deleted push module imported by test
+
+Applied the widened compile-unit edits exactly:
+
+- Removed the four `src/runner.ts` `isPullModeEnabled` call sites.
+- `deno fmt packages/runner/src/scheduler.ts packages/runner/src/runner.ts`:
+  passed.
+- `grep -rn "isPullModeEnabled" packages/runner/src packages/runner/test --include="*.ts"`:
+  no matches.
+- Corrected Step 3 grep remains exactly the allowed snapshot match:
+  `packages/runner/src/scheduler.ts:2275:      pullMode: true,`.
+- `deno check src/scheduler.ts src/runner.ts` from `packages/runner`:
+  passed.
+
+The full runner suite then failed during type-check because
+`test/scheduler-cfc-trigger-reads.test.ts` imports the deleted push module:
+
+```text
+$ cd packages/runner && deno task test
+Task test ENV=test deno test --allow-ffi --allow-env --allow-read --allow-write=/tmp,/var/folders --allow-run=git test/*.test.ts
+...
+TS2307 [ERROR]: Cannot find module 'file:///.../packages/runner/src/scheduler/push-notifications.ts'.
+    at file:///.../packages/runner/test/scheduler-cfc-trigger-reads.test.ts:11:48
+
+error: Type checking failed.
+```
+
+Confirmed direct push-module references:
+
+```text
+$ grep -rn "scheduler/push-\|processPush\|PushScheduler\|push-notifications" packages/runner/src packages/runner/test --include="*.ts"
+packages/runner/test/scheduler-cfc-trigger-reads.test.ts:11:import { processPushStorageNotification } from "../src/scheduler/push-notifications.ts";
+packages/runner/test/scheduler-cfc-trigger-reads.test.ts:156:      ["push", processPushStorageNotification],
+```
+
+No test edit was attempted because `scheduler-cfc-trigger-reads.test.ts` was
+not listed in the widened steps-2+3 scope.
+
+## REVIEWER VERDICT — 01/steps-2-3 cfc-trigger-reads push arm
+
+Correct stop. The file escaped the step-1 sweep because it imports the
+push notification processor directly instead of using mode APIs — your
+grep confirms it is the only such file. It is squarely phase-0 scope: a
+push/pull parameterization of CFC trigger-read recording, and the push
+arm is exactly the comparison class rule D.1 deletes. The pull arm is
+real coverage and must survive unchanged.
+
+1. Fold into the steps-2+3 compile-unit commit (same justification as
+   the runner.ts sites — the suite cannot type-check without it) this
+   single test-file edit:
+   - delete the `processPushStorageNotification` import (line 11);
+   - delete the `["push", processPushStorageNotification]` entry from
+     the parameterization (line 156) and any assertions/branches that
+     exist only for the push mode string;
+   - smallest edit wins: keep the loop/parameterization structure even
+     if it now has one entry; do not restructure the test.
+2. Post-edit contract (add to the compile-unit verification):
+   `grep -rn "scheduler/push-\|processPush\|PushScheduler" src/ test/`
+   → zero matches.
+3. Run the file alone first
+   (`... deno test ... test/scheduler-cfc-trigger-reads.test.ts` — G3's
+   known `--no-check` note applies to scheduler-events only, not here),
+   then the full suite. The pull arm's assertions must pass UNCHANGED —
+   if any pull-arm assertion goes red, STOP: that would be a real
+   regression signal, not a porting question.
+4. Amend the work order in-branch as before, own docs commit first:
+   `docs(specs): scheduler-v2 WO01 — cfc-trigger-reads push arm is part of the compile unit`.
+5. Then commit the compile unit and continue (step 4 remainder, step 5,
+   exit checklist).
+
+Implementer resolution: updated the work order to fold the
+`scheduler-cfc-trigger-reads.test.ts` direct push-notification import and push
+parameterization arm into the steps 2+3 compile-unit commit, with a focused
+test run and direct push-module grep in that commit's verification.
+
+## IMPLEMENTER RESOLUTION — 01/steps-2-3 final
+
+- [x] 30ea32193 — remove push scheduler mode and pullMode branches
+- Deviations: per reviewer verdicts, this single compile-unit commit includes
+  the Step 2 push-module deletions, Step 3 `scheduler.ts` mode collapse, the
+  four `src/runner.ts` mode-API call-site edits, and the
+  `scheduler-cfc-trigger-reads.test.ts` direct push-notification arm removal.
+- Recordings:
+  - `deno fmt packages/runner/test/scheduler-cfc-trigger-reads.test.ts
+    packages/runner/src/scheduler.ts packages/runner/src/runner.ts`: passed
+    (`Checked 3 files`).
+  - `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-cfc-trigger-reads.test.ts`: passed,
+    `4 passed (8 steps)`, `0 failed`, `21ms`.
+  - `deno check src/scheduler.ts src/runner.ts`: passed.
+  - `cd packages/runner && deno task test`: passed,
+    `586 passed (3067 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m2s`.
+  - Corrected Step 3 grep:
+    `grep -n "pullMode\|PushScheduler\|push-" src/scheduler.ts` → exactly
+    one allowed match:
+    `2275:      pullMode: true,`.
+  - `ls src/scheduler | grep push`: no matches.
+  - `grep -rn "scheduler/push-\|processPush\|PushScheduler" src/ test/`: no
+    matches.
+
+## IMPLEMENTER STOP — 01/step-4 mode.change grep contract
+
+Before editing `src/telemetry.ts`, ran the required Step 4 inventories.
+`isPullModeEnabled` has no remaining callers:
+
+```text
+$ cd packages/runner
+$ grep -rn "isPullModeEnabled" ../../packages --include="*.ts"
+<no matches>
+```
+
+However, the Step 4 `mode.change` grep does not match the work order's
+"type definition only" expectation:
+
+```text
+$ grep -rn "mode.change" ../../packages --include="*.ts"
+../../packages/shell/src/lib/debugger-controller.ts:293:        //   latestMarker?.type === "scheduler.mode.change" ||
+../../packages/runner/test/fetch-data-mutex.test.ts:386:  it("should handle mode changes (text vs json)", async () => {
+../../packages/runner/src/telemetry.ts:231:  type: "scheduler.mode.change";
+```
+
+No Step 4 code edit was made. The shell match is a commented
+`scheduler.mode.change` consumer outside Step 4's named file, and the
+`fetch-data-mutex.test.ts` match is an unrelated false positive caused by the
+unescaped `.` in the required grep pattern. Per G6, stopped for reviewer
+direction instead of deleting or widening scope.
+
+## REVIEWER VERDICT — 01/step-4 mode.change grep
+
+Three rulings, then step 4 proceeds:
+
+1. `src/telemetry.ts:231` — delete the `scheduler.mode.change` type
+   member as step 4 already specifies.
+2. `test/fetch-data-mutex.test.ts:386` — false positive from the
+   unescaped dot in MY grep pattern ("mode changes (text vs json)").
+   No edit. The contract grep is corrected to
+   `grep -rn "scheduler\.mode\.change" ../../packages --include="*.ts"`.
+3. `shell/src/lib/debugger-controller.ts:293` — G4 exception granted
+   for exactly one line: delete the commented
+   `//   latestMarker?.type === "scheduler.mode.change" ||` line from
+   the dead auto-refresh block. It references a type that will no
+   longer exist; the surrounding commented example stays coherent with
+   the four remaining marker types. Do not touch anything else in the
+   file. Include in the step-4 commit.
+
+Corrected step-4 contract after edits: the escaped grep above → zero
+matches repo-wide.
+
+Then: amend the work order in-branch (escaped grep + the shell comment
+in scope), own docs commit first —
+`docs(specs): scheduler-v2 WO01 — escape the mode.change grep; shell stale comment in scope`
+— then the step-4 commit (original message), step 5 docs touch-up, exit
+checklist, and the 00-README phase-end protocol: push
+`scheduler-v2/01-phase0`, open the stacked PR (base `main` — the spec
+PR is merged), include the PROGRESS excerpt, and continue immediately
+into work order 02 on `scheduler-v2/02-e0`.
+
+Implementer resolution: updated the work order's Step 4 text to use the
+escaped `scheduler\.mode\.change` grep and to include exactly the stale shell
+comment line in the Step 4 code-commit scope.
+
+## IMPLEMENTER RESOLUTION — 01/step-4 final
+
+- [x] 2d9053c46 — drop push-mode branches from runner and telemetry
+- Deviations: per reviewer verdict, the Step 4 code commit also deletes the
+  single stale `scheduler.mode.change` commented line in
+  `packages/shell/src/lib/debugger-controller.ts`.
+- Recordings:
+  - `grep -rn "isPullModeEnabled" ../../packages --include="*.ts"`: no
+    matches.
+  - `deno fmt packages/runner/src/telemetry.ts
+    packages/shell/src/lib/debugger-controller.ts`: passed
+    (`Checked 2 files`).
+  - `deno check src/runner.ts src/telemetry.ts`: passed.
+  - `deno check packages/shell/src/lib/debugger-controller.ts`: passed.
+  - `grep -rn "scheduler\.mode\.change" ../../packages --include="*.ts"`: no
+    matches.
+  - Telemetry type import scan found no `packages/html` or `packages/ui`
+    imports requiring additional package checks; only runner and shell telemetry
+    uses matched.
+  - `cd packages/runner && deno task test`: passed,
+    `586 passed (3067 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m3s`.
+
+## IMPLEMENTER RESOLUTION — 01/step-5 final
+
+- [x] 46c31b308 — pull-based scheduler docs reflect push-mode removal
+- Deviations: none.
+- Recordings:
+  - Updated the header sentence to state push mode has been removed and point
+    forward-looking design readers at `docs/specs/scheduler-v2/`.
+  - Deleted the "Mode Control" subsection under "Current Behavior Reference".
+  - Deleted the mode-control API entries and the diagnostic
+    `scheduler.isPullModeEnabled()` listing.
+  - `grep -n "enablePullMode\|disablePullMode\|isPullModeEnabled"
+    docs/specs/pull-based-scheduler/README.md`: no matches.
+  - `grep -n "### Mode Control"
+    docs/specs/pull-based-scheduler/README.md`: no matches.
+
+## 01/phase-end self-check
+
+- Full runner suite:
+  `cd packages/runner && deno task test` → `586 passed (3067 steps)`,
+  `0 failed`, `0 ignored (10 steps)`, `2m3s`.
+- Exit checklist greps:
+  - `ls src/scheduler/ | grep push`: no matches.
+  - `grep -rn "pullMode\|enablePullMode\|disablePullMode\|isPullModeEnabled"
+    src/ test/`: exactly the allowed frozen graph snapshot residuals:
+    `src/scheduler.ts:2275`, `src/scheduler/graph-snapshot.ts:14`,
+    `src/scheduler/graph-snapshot.ts:208`, `src/telemetry.ts:59`.
+  - `grep -rn "enablePullMode\|disablePullMode\|isPullModeEnabled\|pullMode"
+    test/scheduler-pull.test.ts`: no matches.
+  - `grep -rn "schedulerRuntimeFingerprint" src/ test/` shows
+    `schedulerRuntimeFingerprint("pull")` call sites and the unchanged
+    implementation `return \`runner:scheduler:${mode}\`;`.
+- Diff shape: `git diff --summary origin/main...HEAD` shows only the five
+  deleted push scheduler modules; no added files or renames. Overall diff is
+  delete-dominated.
+- Benchmark smoke:
+  `cd packages/runner && deno task bench` started successfully and completed
+  multiple benchmark files (`cell-immutable.bench.ts`,
+  `cell-read-path.bench.ts`, `cell-set-array-shape.bench.ts`,
+  `cell-set-nested-array-docs.bench.ts`, `cell-set-shape.bench.ts`) before
+  manual interruption during `cell-set.bench.ts` per the work-order allowance.
+
+## REVIEWER RESOLUTION — PR #4087 process amendments
+
+- [x] ecde3d4cb — lint added to G3 and WO01 gains the repo-wide mode-API exit
+  grep.
+- Deviations: none.
+- Recordings:
+  - `00-README.md`: G3 now requires `deno lint <touched files>`.
+  - `01-phase0-remove-push-mode.md`: exit checklist now includes
+    `git grep -n "enablePullMode\|disablePullMode\|isPullModeEnabled" -- ':!docs'`
+    with expected zero matches.
+
+## REVIEWER RESOLUTION — PR #4087 CI fix
+
+- [x] pending — phase-0 leftovers outside the runner sweep
+- Deviations: the new repo-wide mode-API closing contract also found the
+  runtime-client `setPullMode` protocol surface. Removed it end-to-end because
+  it was the same obsolete mode-control API and was required for the closing
+  grep to reach zero.
+- Recordings:
+  - Runner inventory:
+
+```text
+$ grep -rn "internalVerifierRead\|schedulerRehydration\|handleJavaScriptHandlerResult" packages/runner/src/runner.ts
+packages/runner/src/runner.ts:69:import { internalVerifierRead } from "./storage/reactivity-log.ts";
+packages/runner/src/runner.ts:505:  schedulerRehydration: SchedulerRehydrationSubscriptionOptions;
+packages/runner/src/runner.ts:1159:      const schedulerRehydration = options.rehydrateSchedulerFromStorage ===
+packages/runner/src/runner.ts:1162:        : this.schedulerRehydrationOptions(
+packages/runner/src/runner.ts:1177:            schedulerRehydration,
+packages/runner/src/runner.ts:1743:  private schedulerRehydrationOptions(
+packages/runner/src/runner.ts:1871:    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
+packages/runner/src/runner.ts:1893:            schedulerRehydration,
+packages/runner/src/runner.ts:1908:            schedulerRehydration,
+packages/runner/src/runner.ts:1921:            schedulerRehydration,
+packages/runner/src/runner.ts:1945:            schedulerRehydration,
+packages/runner/src/runner.ts:2491:  private handleJavaScriptHandlerResult(
+packages/runner/src/runner.ts:2499:    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
+packages/runner/src/runner.ts:2830:      schedulerRehydration,
+packages/runner/src/runner.ts:2940:            return this.handleJavaScriptHandlerResult(
+packages/runner/src/runner.ts:2948:              schedulerRehydration,
+packages/runner/src/runner.ts:3106:      schedulerRehydration,
+packages/runner/src/runner.ts:3372:        ...schedulerRehydration,
+packages/runner/src/runner.ts:3386:    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
+packages/runner/src/runner.ts:3405:      schedulerRehydration,
+packages/runner/src/runner.ts:3582:    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
+packages/runner/src/runner.ts:3723:          ...(schedulerRehydration.rehydrateFromStorage?.awaitSync
+packages/runner/src/runner.ts:3862:        ...schedulerRehydration,
+packages/runner/src/runner.ts:3910:    schedulerRehydration: SchedulerRehydrationSubscriptionOptions = {},
+packages/runner/src/runner.ts:4048:      awaitSyncBeforeInitialRun: schedulerRehydration.rehydrateFromStorage
+```
+
+  - CLI scheduler-mode inventory:
+
+```text
+$ grep -rn "schedulerMode\|scheduler-mode" packages/cli
+packages/cli/lib/test-runner.ts:220:  schedulerMode?: "default" | "push" | "pull";
+packages/cli/lib/test-runner.ts:884:  if (options.schedulerMode === "push") {
+packages/cli/lib/test-runner.ts:886:  } else if (options.schedulerMode === "pull") {
+packages/cli/commands/test.ts:7:const schedulerModes = ["default", "push", "pull"] as const;
+packages/cli/commands/test.ts:62:    "--scheduler-mode <mode:string>",
+packages/cli/commands/test.ts:139:    const schedulerMode = schedulerModes.find((mode) =>
+packages/cli/commands/test.ts:140:      mode === options.schedulerMode
+packages/cli/commands/test.ts:142:    if (!schedulerMode) {
+packages/cli/commands/test.ts:144:        "Error: --scheduler-mode must be one of: default, push, pull",
+packages/cli/commands/test.ts:157:      schedulerMode,
+```
+
+  - Runtime-client mode-control inventory from the repo-wide closing grep:
+
+```text
+$ grep -rn "SetPullMode\|setPullMode\|pullMode" packages/runtime-client --include="*.ts"
+packages/runtime-client/backends/runtime-processor.ts:89:  type SetPullModeRequest,
+packages/runtime-client/backends/runtime-processor.ts:911:  setPullMode(request: SetPullModeRequest): void {
+packages/runtime-client/backends/runtime-processor.ts:912:    if (request.pullMode) {
+packages/runtime-client/backends/runtime-processor.ts:1208:      case RequestType.SetPullMode:
+packages/runtime-client/backends/runtime-processor.ts:1209:        return this.setPullMode(request);
+packages/runtime-client/protocol/types.ts:55:  SetPullMode = "runtime:setPullMode",
+packages/runtime-client/protocol/types.ts:255:export interface SetPullModeRequest extends BaseRequest {
+packages/runtime-client/protocol/types.ts:256:  type: RequestType.SetPullMode;
+packages/runtime-client/protocol/types.ts:257:  pullMode: boolean;
+packages/runtime-client/protocol/types.ts:623:  | SetPullModeRequest
+packages/runtime-client/protocol/types.ts:835:  [RequestType.SetPullMode]: {
+packages/runtime-client/protocol/types.ts:836:    request: SetPullModeRequest;
+packages/runtime-client/runtime-client.ts:319:  async setPullMode(pullMode: boolean): Promise<void> {
+packages/runtime-client/runtime-client.ts:320:    await this.#conn.request<RequestType.SetPullMode>({
+packages/runtime-client/runtime-client.ts:321:      type: RequestType.SetPullMode,
+packages/runtime-client/runtime-client.ts:322:      pullMode,
+```
+
+  - `deno fmt packages/runner/src/runner.ts
+    packages/piece/test/pull-materialization.test.ts
+    packages/cli/lib/test-runner.ts packages/cli/commands/test.ts
+    packages/runtime-client/backends/runtime-processor.ts
+    packages/runtime-client/protocol/types.ts
+    packages/runtime-client/runtime-client.ts`: passed (`Checked 7 files`).
+  - `deno lint` on the same seven files: passed (`Checked 7 files`).
+  - `deno check` on the same seven files: passed.
+  - `grep -rn "schedulerMode\|scheduler-mode" packages/cli`: no matches.
+  - `grep -rn "SetPullMode\|setPullMode\|pullMode" packages/runtime-client --include="*.ts"`:
+    no matches.
+  - `git grep -n "enablePullMode\|disablePullMode\|isPullModeEnabled" -- ':!docs'`:
+    no matches.
+  - `cd packages/piece && deno task test`: passed, `10 passed (46 steps)`,
+    `0 failed`, `3s`.
+  - `cd packages/cli && deno task test`: passed, `44 passed (195 steps)`,
+    `0 failed`, `1 ignored`, `18s`.
+  - `cd packages/runtime-client && deno task test`: passed,
+    `15 passed (61 steps)`, `0 failed`, `628ms`.

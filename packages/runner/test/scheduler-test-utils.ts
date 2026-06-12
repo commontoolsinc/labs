@@ -42,8 +42,6 @@ import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-type SchedulerPullMode = "default" | "enabled" | "disabled";
-
 type SchedulerTestRuntime = {
   storageManager: ReturnType<typeof StorageManager.emulate>;
   runtime: Runtime;
@@ -55,7 +53,6 @@ type SchedulerTestStorageManager = SchedulerTestRuntime["storageManager"];
 function createSchedulerTestRuntime(
   apiUrl: string | URL,
   options: {
-    pullMode?: SchedulerPullMode;
     experimental?: ExperimentalOptions;
     cfcEnforcementMode?: RuntimeOptions["cfcEnforcementMode"];
     storageManager?: SchedulerTestStorageManager;
@@ -71,12 +68,6 @@ function createSchedulerTestRuntime(
       ? { cfcEnforcementMode: options.cfcEnforcementMode }
       : {}),
   });
-
-  if (options.pullMode === "enabled") {
-    runtime.scheduler.enablePullMode();
-  } else if (options.pullMode === "disabled") {
-    runtime.scheduler.disablePullMode();
-  }
 
   return { storageManager, runtime, tx: runtime.edit() };
 }

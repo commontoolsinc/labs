@@ -1094,9 +1094,6 @@ export class XSchedulerGraph extends LitElement {
   private accessor triggeredNodes = new Map<string, number>(); // id -> timestamp
 
   @state()
-  private accessor isPullMode = false;
-
-  @state()
   private accessor zoomLevel = 1.0;
 
   @state()
@@ -1512,18 +1509,6 @@ export class XSchedulerGraph extends LitElement {
     this.debuggerController?.setSchedulerBaselineStats(newBaseline);
   }
 
-  private async handleModeToggle(pullMode: boolean): Promise<void> {
-    const runtime = this.debuggerController?.getRuntime();
-    if (!runtime) return;
-
-    const rt = runtime.runtime();
-    if (!rt) return;
-
-    await rt.setPullMode(pullMode);
-    this.isPullMode = pullMode;
-    this.debuggerController?.requestGraphSnapshot();
-  }
-
   private handleEdgeClick(e: MouseEvent, edge: LayoutEdge): void {
     e.stopPropagation();
 
@@ -1840,25 +1825,6 @@ export class XSchedulerGraph extends LitElement {
             title="View pattern source code with action heat map"
           >
             Source
-          </button>
-        </div>
-
-        <div class="toggle-group">
-          <button
-            type="button"
-            class="toggle-button ${this.isPullMode ? "active" : ""}"
-            @click="${() => this.handleModeToggle(true)}"
-            title="Pull mode: computations run on-demand"
-          >
-            Pull
-          </button>
-          <button
-            type="button"
-            class="toggle-button ${!this.isPullMode ? "active" : ""}"
-            @click="${() => this.handleModeToggle(false)}"
-            title="Push mode: all triggered actions run immediately"
-          >
-            Push
           </button>
         </div>
 

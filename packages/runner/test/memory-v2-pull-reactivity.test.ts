@@ -75,8 +75,6 @@ describe("Memory v2 pull reactivity", () => {
   });
 
   it("marks pull-mode computations dirty after remote integrate and recomputes on pull", async () => {
-    runtime.scheduler.enablePullMode();
-
     const source = runtime.getCell<number>(
       space,
       `memory-v2-pull-source-${Date.now()}`,
@@ -139,7 +137,6 @@ describe("Memory v2 pull reactivity", () => {
   });
 
   it("marks pull-mode graph computations dirty when a 64-node frontier expands", async () => {
-    runtime.scheduler.enablePullMode();
     const fixture = createGraphFixture(space);
     const expandedChildId = "of:test-node-33" as URI;
     const expandedChildValue = structuredClone(

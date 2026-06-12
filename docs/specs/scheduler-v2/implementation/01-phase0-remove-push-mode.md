@@ -98,6 +98,12 @@ it; steps 2+3 are still **separate commits** — commit this one with the
 build red is NOT allowed, so: do steps 2 and 3 in your working tree
 together, but keep the deletion list above as the authoritative scope of
 this step and commit both steps as ONE commit with the step-3 message.
+(Correction: steps 2+3 also include exactly the four `src/runner.ts`
+mode-API call-site edits listed in step 4. Removing the scheduler mode API
+otherwise leaves `src/runner.ts` unable to compile.)
+(Correction: steps 2+3 also include the `scheduler-cfc-trigger-reads.test.ts`
+push-arm deletion because that test imports the deleted push notification
+module directly.)
 (This is the single sanctioned two-step merge in this work order.)
 
 ## Step 3 — Remove `pullMode` and all mode branches from `scheduler.ts`
@@ -169,11 +175,43 @@ Grep contract after the edit:
 grep -n "pullMode\|PushScheduler\|push-" src/scheduler.ts
 ```
 
-Expected: no matches (comments included — if a comment mentions push mode,
-delete the sentence, keeping the rest of the comment intact).
+Expected: exactly one match: the literal `pullMode: true` property in
+`createGraphSnapshotState()`. `PushScheduler` and `push-` must have no
+matches (comments included — if a comment mentions push mode, delete the
+sentence, keeping the rest of the comment intact).
 
 Verify: `deno check src/scheduler.ts`, then the full runner suite
 (`deno task test`).
+
+Because the public mode API is removed here, include exactly these
+`src/runner.ts` call-site edits in the same commit:
+
+- `handleJavaScriptHandlerResult`: delete the entire
+  `if (!this.runtime.scheduler.isPullModeEnabled()) { ... }` push branch,
+  keeping only `addCancel(() => this.stop(resultCell));`. The deleted branch
+  contained on-commit-error cancel+stop cleanup; its pull-mode replacement is
+  built in work order 03 (phase E1). Add no substitute here.
+- `patternNeedsOneShotPull`: change
+  `if (!this.runtime.scheduler.isPullModeEnabled() || !pattern)` to
+  `if (!pattern)`.
+- `pullCellOnceAfterSuccessfulCommit` and `pullCellOnceInPullMode`: delete
+  the `if (!this.runtime.scheduler.isPullModeEnabled()) { return; }` guard in
+  each, keeping the bodies.
+
+Also include exactly this test-file edit:
+
+- `test/scheduler-cfc-trigger-reads.test.ts`: delete the
+  `processPushStorageNotification` import, delete the
+  `["push", processPushStorageNotification]` parameterization entry, and keep
+  the pull arm's assertions unchanged. Keep the loop/parameterization shape
+  even though it has one entry.
+
+Merged verification for this commit:
+`deno check src/scheduler.ts src/runner.ts`, then the focused
+`test/scheduler-cfc-trigger-reads.test.ts` run, then the full runner suite
+(`deno task test`), then the corrected Step 3 grep,
+`ls src/scheduler | grep push`, and
+`grep -rn "scheduler/push-\|processPush\|PushScheduler" src/ test/`.
 
 Commit (covers steps 2+3):
 `refactor(runner): remove push scheduler mode and pullMode branches (scheduler-v2 phase 0)`
@@ -184,38 +222,23 @@ Commit (covers steps 2+3):
    ```bash
    grep -rn "isPullModeEnabled" ../../packages --include="*.ts"
    ```
-   Expected sites (verified, untruncated): four in `src/runner.ts` —
-   `2702` (`handleJavaScriptHandlerResult`), `2813`
-   (`patternNeedsOneShotPull`), `2828`
-   (`pullCellOnceAfterSuccessfulCommit`), `2841`
-   (`pullCellOnceInPullMode`) — plus test sites already removed in
-   step 1. Anything else: STOP and report.
-2. `src/runner.ts` `handleJavaScriptHandlerResult` (~2702-2736): the block
-   `if (!this.runtime.scheduler.isPullModeEnabled()) { ... } else { addCancel(() => this.stop(resultCell)); }`
-   — delete the entire push branch (the `readResultAction` subscription,
-   its commit callback, and its addCancel), keeping only
-   `addCancel(() => this.stop(resultCell));`. NOTE for the reviewer log:
-   the deleted push branch contained on-commit-error cancel+stop cleanup;
-   its pull-mode replacement is built in work order 03 (phase E1). Add no
-   substitute here.
-3. `patternNeedsOneShotPull` (~2813): change
-   `if (!this.runtime.scheduler.isPullModeEnabled() || !pattern)` to
-   `if (!pattern)`.
-4. `pullCellOnceAfterSuccessfulCommit` (~2828) and
-   `pullCellOnceInPullMode` (~2841): delete the
-   `if (!this.runtime.scheduler.isPullModeEnabled()) { return; }` guard in
-   each, keeping the bodies. (The `InPullMode` name is cleaned up in
-   phase 3f, not here.)
-5. Telemetry: in `src/telemetry.ts`, locate the `scheduler.mode.change`
-   event type member and delete it (grep `mode.change` — expected: the
-   type definition only, since the emit sites died with
-   enable/disablePullMode; any other site: STOP).
+   Expected: no matches. The former four `src/runner.ts` sites were folded
+   into the steps 2+3 compile-unit commit. Anything else: STOP and report.
+2. Telemetry: in `src/telemetry.ts`, locate the `scheduler.mode.change`
+   event type member and delete it. Use the corrected grep
+   `scheduler\.mode\.change` — expected pre-edit matches are the type
+   definition and the stale shell comment line listed below; anything else:
+   STOP.
+3. Shell stale comment: in
+   `../../packages/shell/src/lib/debugger-controller.ts`, delete exactly the
+   commented `latestMarker?.type === "scheduler.mode.change" ||` line from the
+   dead auto-refresh block. Do not touch anything else in that file.
 
 Verify: `deno check src/runner.ts src/telemetry.ts`; full runner suite;
 additionally run the html/ui package checks if telemetry types are imported
 there:
 ```bash
-grep -rn "mode.change" ../../packages --include="*.ts"
+grep -rn "scheduler\.mode\.change" ../../packages --include="*.ts"
 ```
 Expected: no matches.
 
@@ -239,7 +262,13 @@ Commit: `docs: pull-based-scheduler reflects push-mode removal`
 ## Exit checklist (reviewer)
 
 - [ ] `ls src/scheduler/ | grep push` → empty.
-- [ ] `grep -rn "pullMode\|enablePullMode\|disablePullMode\|isPullModeEnabled" src/ test/` → no matches.
+- [ ] `grep -rn "pullMode\|enablePullMode\|disablePullMode\|isPullModeEnabled" src/ test/` →
+      residual matches only for the frozen scheduler graph snapshot
+      `pullMode` field (`src/scheduler.ts`, `src/scheduler/graph-snapshot.ts`,
+      `src/telemetry.ts`). No `enablePullMode` / `disablePullMode` /
+      `isPullModeEnabled` matches.
+- [ ] `git grep -n "enablePullMode\|disablePullMode\|isPullModeEnabled" -- ':!docs'` →
+      no matches.
 - [ ] `schedulerRuntimeFingerprint` still emits `runner:scheduler:pull`
       (grep shows the function unchanged).
 - [ ] Full runner suite green; `scheduler-pull.test.ts` runs with no mode
