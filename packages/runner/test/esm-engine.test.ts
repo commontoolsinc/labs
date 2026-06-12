@@ -78,6 +78,26 @@ describe("Engine.compileToRecordGraph", () => {
     expect((main as { total(): number }).total()).toBe(42);
   });
 
+  it("evaluates a program with an authored .js module", async () => {
+    // Authored `.js` sources flow through the same pipeline: the pretransform
+    // injects a JS-syntax helper statement (the TS-annotated variant is a parse
+    // error in .js files) and the compiler emits the module under its own name
+    // (suppressed input-overwrite veto; the virtual FS separates reads/writes).
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        { name: "/math.js", contents: "export const add = (x, y) => x + y;" },
+        {
+          name: "/main.tsx",
+          contents:
+            `import { add } from "./math.js";\nexport const total = () => add(20, 22);\nexport default total;`,
+        },
+      ],
+    };
+    const { main } = await engine.compileAndEvaluateModules(program);
+    expect((main as { total(): number }).total()).toBe(42);
+  });
+
   it("rejects a program whose module contains disallowed top-level code", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",

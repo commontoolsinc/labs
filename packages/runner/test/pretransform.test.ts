@@ -39,3 +39,35 @@ Deno.test("transformInjectHelperModule transforms by default and respects cf-dis
   );
   assertNotMatch(plain.contents, /cf-disable-transform/);
 });
+
+Deno.test("transformInjectHelperModule injects JS-syntax helpers into .js sources", () => {
+  const program: RuntimeProgram = {
+    main: "/main.tsx",
+    files: [
+      {
+        name: "/main.tsx",
+        contents: "export default 42;",
+      },
+      {
+        name: "/helper.js",
+        contents: "export const add = (x, y) => x + y;",
+      },
+    ],
+  };
+
+  const transformed = transformInjectHelperModule(program);
+  const main = transformed.files.find((file) => file.name === "/main.tsx")!;
+  const helper = transformed.files.find((file) => file.name === "/helper.js")!;
+
+  // Both get the helper import...
+  assertMatch(main.contents, /import \{ __cfHelpers \} from "commonfabric";/);
+  assertMatch(
+    helper.contents,
+    /import \{ __cfHelpers \} from "commonfabric";/,
+  );
+  // ...but the `h` shim in the .js file must not carry a TS type annotation
+  // ("Type annotations can only be used in TypeScript files").
+  assertMatch(main.contents, /function h\(\.\.\.args: any\[\]\)/);
+  assertMatch(helper.contents, /function h\(\.\.\.args\)/);
+  assertNotMatch(helper.contents, /any\[\]/);
+});

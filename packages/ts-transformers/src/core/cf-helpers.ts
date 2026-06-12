@@ -18,6 +18,13 @@ const ${CF_DATA_HELPER_KEEP_IDENTIFIER} = ${CF_DATA_HELPER_IDENTIFIER};
 const HELPERS_USED_STMT = `// @ts-ignore: Internals
 function h(...args: any[]) { return ${CF_HELPERS_IDENTIFIER}.h.apply(null, args); }
 `;
+// Syntax-neutral variant injected into authored `.js`/`.jsx` sources, where the
+// `: any[]` annotation above would be a parse error ("Type annotations can only
+// be used in TypeScript files"). Keep both statements line-for-line identical
+// so injection shifts source lines the same way regardless of file kind.
+const HELPERS_USED_STMT_JS = `// @ts-ignore: Internals
+function h(...args) { return ${CF_HELPERS_IDENTIFIER}.h.apply(null, args); }
+`;
 
 export class CFHelpers {
   #sourceFile: ts.SourceFile;
@@ -165,6 +172,9 @@ const CF_DISABLE_TRANSFORM_DIRECTIVE_RE =
 // This injected statement enables subsequent transformations.
 export function transformCfDirective(
   source: string,
+  // Authored file name; when it has a JavaScript extension the injected
+  // helper statement uses JS-only syntax. Defaults to TypeScript syntax.
+  fileName?: string,
 ): string {
   checkCFHelperVar(source);
 
@@ -182,15 +192,20 @@ export function transformCfDirective(
     ].join("\n");
   }
 
-  return injectCfHelpers(source);
+  return injectCfHelpers(source, fileName);
 }
 
-export function injectCfHelpers(source: string): string {
+const JS_FILE_RE = /\.(js|jsx|mjs|cjs)$/;
+
+export function injectCfHelpers(source: string, fileName?: string): string {
   checkCFHelperVar(source);
+  const usedStmt = fileName !== undefined && JS_FILE_RE.test(fileName)
+    ? HELPERS_USED_STMT_JS
+    : HELPERS_USED_STMT;
   return [
     HELPERS_STMT,
     source,
-    HELPERS_USED_STMT,
+    usedStmt,
   ].join("\n");
 }
 
