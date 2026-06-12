@@ -146,10 +146,15 @@ File: `packages/memory/v2/engine.ts`.
    `localSeq`. If none exists, reject the whole commit with an error whose
    wire shape reaches the client as
    `{ name: "PreconditionFailedError", precondition: "origin-committed", message: ... }`
-   — trace how the conflict error's `name` reaches
-   `StorageTransactionRejected` on the client and make this error take
-   the same route. If the existing route normalizes names, STOP and
-   report the route before inventing a new one.
+   — the existing route normalizes errors, so extend it end to end:
+   add an `Engine.PreconditionFailedError` sibling to `Engine.ConflictError`
+   with `precondition: "origin-committed" | "receipt-exists"`, map it in
+   `packages/memory/v2/server.ts` before the `TransactionError` catch-all,
+   add optional `precondition?: string` to `V2Error`, and copy that property
+   onto the reconstructed client `Error` in `packages/memory/v2/client.ts`.
+   Do not encode this through `ConflictError` or `TransactionError`; the
+   runner's permanent-rejection taxonomy is name-keyed and already recognizes
+   `PreconditionFailedError`.
 3. Same-session ordering note (add as a comment at the check): commits
    from one session are applied in order, so the origin's fate is decided
    when the follow-up arrives; an absent origin means it was rejected.
