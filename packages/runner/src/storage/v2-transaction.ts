@@ -839,6 +839,13 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (ready.error) {
       throw ready.error;
     }
+    // Claim `space` as a write target (sets #writeSpace, enforces single-space
+    // write isolation) so a precondition-only commit is still sent and
+    // validated instead of resolving ok without a write space.
+    const claimed = this.claimWriteSpace(space);
+    if (claimed.error) {
+      throw claimed.error;
+    }
     const preconditions = this.#commitPreconditions.get(space);
     if (preconditions) {
       preconditions.push(precondition);

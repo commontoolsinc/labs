@@ -596,13 +596,20 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     precondition: CommitPrecondition,
   ): void {
     this.assertWritable("addCommitPrecondition");
+    // Fail closed: a precondition is a commit gate, so silently ignoring it
+    // on storage that cannot enforce it would let the gated commit through.
+    if (!this.tx.addCommitPrecondition) {
+      throw new Error(
+        "storage transaction does not support addCommitPrecondition()",
+      );
+    }
     const preconditions = this.commitPreconditions.get(space);
     if (preconditions) {
       preconditions.push(precondition);
     } else {
       this.commitPreconditions.set(space, [precondition]);
     }
-    this.tx.addCommitPrecondition?.(space, precondition);
+    this.tx.addCommitPrecondition(space, precondition);
   }
 
   getCommitPreconditions(
@@ -1169,7 +1176,14 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     space: MemorySpace,
     precondition: CommitPrecondition,
   ): void {
-    this.wrapped.addCommitPrecondition?.(space, precondition);
+    // Fail closed, like ExtendedStorageTransaction: a precondition is a
+    // commit gate and must not be silently dropped.
+    if (!this.wrapped.addCommitPrecondition) {
+      throw new Error(
+        "storage transaction does not support addCommitPrecondition()",
+      );
+    }
+    this.wrapped.addCommitPrecondition(space, precondition);
   }
 
   getCommitPreconditions(
