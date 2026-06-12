@@ -32,7 +32,7 @@ Deno.bench(
     await runWithSchedulerTiming(
       "stale propagation: chain",
       async (resetMeasuredTiming) => {
-        const env = createSchedulerBenchEnv(true);
+        const env = createSchedulerBenchEnv();
         const { runtime } = env;
         const tx = runtime.edit();
         const source = runtime.getCell<number>(
@@ -143,7 +143,7 @@ Deno.bench(
     await runWithSchedulerTiming(
       "stale propagation: diamond",
       async (resetMeasuredTiming) => {
-        const env = createSchedulerBenchEnv(true);
+        const env = createSchedulerBenchEnv();
         const { runtime } = env;
         const tx = runtime.edit();
         const source = runtime.getCell<number>(
@@ -260,7 +260,7 @@ Deno.bench(
     await runWithSchedulerTiming(
       "stale propagation: wide fanout",
       async (resetMeasuredTiming) => {
-        const env = createSchedulerBenchEnv(true);
+        const env = createSchedulerBenchEnv();
         const { runtime } = env;
         const tx = runtime.edit();
         const source = runtime.getCell<number>(
@@ -367,7 +367,7 @@ Deno.bench(
     await runWithSchedulerTiming(
       "stale propagation: dynamic deps",
       async (resetMeasuredTiming) => {
-        const env = createSchedulerBenchEnv(true);
+        const env = createSchedulerBenchEnv();
         const { runtime } = env;
         const tx = runtime.edit();
         const selector = runtime.getCell<number>(
@@ -463,7 +463,7 @@ Deno.bench(
     await runWithSchedulerTiming(
       "stale propagation: unchanged recompute",
       async (resetMeasuredTiming) => {
-        const env = createSchedulerBenchEnv(true);
+        const env = createSchedulerBenchEnv();
         const { runtime } = env;
         const tx = runtime.edit();
         const source = runtime.getCell<number>(

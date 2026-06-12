@@ -34,7 +34,7 @@ async function setupMaterializerFanoutGraph(
   prefix: string,
   fanout: number,
 ): Promise<MaterializerFanoutGraph> {
-  const env = createSchedulerBenchEnv(true);
+  const env = createSchedulerBenchEnv();
   const { runtime } = env;
   const tx = runtime.edit();
 
@@ -114,7 +114,7 @@ type StaticWriteGraph = {
 async function setupStaticWriteGraph(
   prefix: string,
 ): Promise<StaticWriteGraph> {
-  const env = createSchedulerBenchEnv(true);
+  const env = createSchedulerBenchEnv();
   const { runtime } = env;
   const tx = runtime.edit();
   const source = runtime.getCell<number>(
