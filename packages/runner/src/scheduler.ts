@@ -950,6 +950,7 @@ export class Scheduler {
     // effects. Use the post-commit outbox for success-only effect release.
     onCommit?: (tx: IExtendedStorageTransaction) => void,
     doNotLoadPieceIfNotRunning: boolean = false,
+    opts: { eventId?: string; originTx?: IExtendedStorageTransaction } = {},
   ): void {
     queueSchedulerEvent(this.eventQueueState, {
       eventLink,
@@ -957,6 +958,8 @@ export class Scheduler {
       retries,
       onCommit,
       doNotLoadPieceIfNotRunning,
+      eventId: opts.eventId,
+      originTx: opts.originTx,
     });
   }
 
@@ -2106,6 +2109,7 @@ export class Scheduler {
         targetRetries,
         targetOnCommit,
         targetDoNotLoad,
+        targetOpts,
       ) =>
         this.queueEvent(
           targetEventLink,
@@ -2113,6 +2117,7 @@ export class Scheduler {
           targetRetries,
           targetOnCommit,
           targetDoNotLoad,
+          targetOpts,
         ),
     };
   }

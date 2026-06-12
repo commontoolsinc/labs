@@ -188,6 +188,10 @@ export interface TriggerTraceEntry {
 }
 
 export type QueuedEvent = {
+  /** Durable event id minted at send (spec §7.5). */
+  readonly id: string;
+  /** The transaction whose handler sent this event, when transactional. */
+  readonly originTx?: IExtendedStorageTransaction;
   eventLink: NormalizedFullLink;
   action: Action;
   handler: EventHandler;

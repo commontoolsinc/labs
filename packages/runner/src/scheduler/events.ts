@@ -8,10 +8,16 @@ import {
 } from "../link-utils.ts";
 import type { Runtime } from "../runtime.ts";
 import type {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+} from "../storage/interface.ts";
+import { isPermanentRejection } from "../storage/rejection.ts";
+import type {
   SchedulerActionInfo,
   SchedulerEventPreflightStats,
 } from "../telemetry.ts";
 import { createDirtyDependencyTraceContext } from "./diagnostics.ts";
+import { mintEventId } from "./event-identity.ts";
 import { planEventDirtyDependencyScheduling } from "./execution.ts";
 import { RetryImmediately } from "./retry-immediately.ts";
 import {
@@ -27,7 +33,6 @@ import type {
   QueuedEvent,
   ReactivityLog,
 } from "./types.ts";
-import type { IMemorySpaceAddress } from "../storage/interface.ts";
 
 const logger = getLogger("scheduler", {
   enabled: true,
@@ -113,6 +118,7 @@ export interface SchedulerEventQueueState {
     retries: number,
     onCommit: QueuedEvent["onCommit"] | undefined,
     doNotLoadPieceIfNotRunning: boolean,
+    opts?: { eventId?: string; originTx?: IExtendedStorageTransaction },
   ) => void;
 }
 
@@ -122,7 +128,10 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly retries: number;
   readonly onCommit?: QueuedEvent["onCommit"];
   readonly doNotLoadPieceIfNotRunning: boolean;
+  readonly eventId?: string;
+  readonly originTx?: IExtendedStorageTransaction;
 }): void {
+  const id = args.eventId ?? mintEventId(args.eventLink, args.originTx);
   let handlerFound = false;
 
   for (const [link, handler] of state.eventHandlers) {
@@ -130,6 +139,8 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
       handlerFound = true;
       state.queueExecution();
       state.eventQueue.push({
+        id,
+        originTx: args.originTx,
         eventLink: args.eventLink,
         action: (tx) => handler(tx, args.event),
         handler,
@@ -154,6 +165,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           args.retries,
           args.onCommit,
           true,
+          { eventId: id, originTx: args.originTx },
         );
       }
     })();
@@ -442,6 +454,7 @@ export async function dispatchQueuedEvent(state: {
   }
 
   const tx = state.runtime.edit();
+  tx.dispatchedEventId = queuedEvent.id;
   tx.tx.immediate = true;
   const actionId = state.getActionId(action);
   const runFinalCommitCallback = () => {
@@ -470,6 +483,8 @@ export async function dispatchQueuedEvent(state: {
       }
       if (retriesLeft > 0) {
         state.eventQueue.unshift({
+          id: queuedEvent.id,
+          originTx: queuedEvent.originTx,
           action,
           eventLink: queuedEvent.eventLink,
           handler,
@@ -530,13 +545,18 @@ export async function dispatchQueuedEvent(state: {
           : {}),
         ...(result.error ? { error: result.error.message } : {}),
       });
-      if (result.error && retriesLeft > 0) {
+      if (
+        result.error && retriesLeft > 0 &&
+        !isPermanentRejection(result.error)
+      ) {
         logger.warn(
           "scheduler",
           `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
           { error: result.error, handlerId },
         );
         state.eventQueue.unshift({
+          id: queuedEvent.id,
+          originTx: queuedEvent.originTx,
           action,
           eventLink: queuedEvent.eventLink,
           handler,
@@ -552,7 +572,11 @@ export async function dispatchQueuedEvent(state: {
         logger.error(
           "schedule-error",
           "Event handler transaction failed after exhausting all retries",
-          { error: result.error, handlerId },
+          {
+            error: result.error,
+            handlerId,
+            permanent: isPermanentRejection(result.error),
+          },
         );
       }
     }).catch((error) => {
