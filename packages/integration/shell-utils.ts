@@ -285,7 +285,10 @@ export class ShellIntegration {
         !this.#config.allowedConsoleErrors.some((pattern) =>
           typeof pattern === "string"
             ? msg.includes(pattern)
-            : pattern.test(msg)
+            // Clone without g/y: a sticky/global regex advances lastIndex
+            // across .test() calls, making repeated checks order-dependent.
+            : new RegExp(pattern.source, pattern.flags.replace(/[gy]/g, ""))
+              .test(msg)
         )
       );
       if (offending.length > 0) {

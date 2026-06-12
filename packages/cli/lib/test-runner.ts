@@ -857,6 +857,12 @@ export async function runTestPattern(
   // deltas).  Both are populated during the run phase only (after compile).
   const consoleErrors: string[] = [];
   const consoleWarnings: string[] = [];
+  // Both channels cover the RUN phase only: the channel-1 handler is
+  // registered at runtime setup (the scheduler accepts one handler), but it
+  // stays inert until this flips at the same post-compile point where the
+  // channel-2 snapshot is taken — compile/module-evaluation output is
+  // infrastructure noise, not the test's behavior.
+  let consoleCaptureActive = false;
 
   // 1. Create emulated runtime (same as piece step)
   const identity = await withPhase(
@@ -917,6 +923,9 @@ export async function runTestPattern(
   // return args unchanged so the call still appears in the host console.
   runtime.scheduler.onConsole(
     (({ method, args }) => {
+      if (!consoleCaptureActive) {
+        return args;
+      }
       if (method === ConsoleMethod.Error) {
         const text = args.map((a) => String(a)).join(" ");
         consoleErrors.push(`[console.error] ${text}`);
@@ -1011,6 +1020,7 @@ export async function runTestPattern(
     // while capturing everything the pattern's own handlers log at error/warn
     // level through the runtime logger.
     const loggerCountsBeforeRun = snapshotLoggerErrorWarnCounts();
+    consoleCaptureActive = true;
 
     // 4. Instantiate the test pattern using runtime.run() for proper space context
     const patternResult = await withPhase(

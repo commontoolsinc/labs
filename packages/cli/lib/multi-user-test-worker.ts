@@ -76,6 +76,10 @@ const runtimeErrors: string[] = [];
 /** Channel 1: console.error/warn captured via the harness console event. */
 const consoleErrors: string[] = [];
 const consoleWarnings: string[] = [];
+// Run-phase gate for channel 1 (mirrors test-runner.ts): flips true at the
+// post-compile point where the channel-2 snapshot is taken, so compile-time
+// module-evaluation console output does not fail tests.
+let consoleCaptureActive = false;
 /** Channel 2: logger error/warn count snapshot taken after compile, before run. */
 let loggerCountsBeforeRun: LoggerErrorWarnSnapshot = new Map();
 
@@ -175,6 +179,9 @@ const handlers: Record<
     // Channel 1: capture pattern-code console.error / console.warn calls.
     runtime.scheduler.onConsole(
       (({ method, args }) => {
+        if (!consoleCaptureActive) {
+          return args;
+        }
         if (method === ConsoleMethod.Error) {
           consoleErrors.push(
             `[console.error] ${args.map((a) => String(a)).join(" ")}`,
@@ -201,6 +208,7 @@ const handlers: Record<
     const { main } = await engine.compileAndEvaluateModules(program);
     // Channel 2: snapshot logger counts AFTER compile, before the run phase.
     loggerCountsBeforeRun = snapshotLoggerErrorWarnCounts();
+    consoleCaptureActive = true;
     const descriptor = (main?.default ?? {}) as {
       setup?: Pattern;
       participants?: Record<string, Pattern | { pattern: Pattern }>;
