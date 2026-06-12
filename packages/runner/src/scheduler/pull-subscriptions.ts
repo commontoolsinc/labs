@@ -1,7 +1,10 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { toMemorySpaceAddress } from "../link-utils.ts";
 import type { Cancel } from "../cancel.ts";
+import { sortAndCompactPaths } from "../reactive-dependencies.ts";
+import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import { setSchedulerDependencies } from "./dependency-updates.ts";
+import { filterIgnoredAddresses } from "./reactivity.ts";
 import {
   replaceActionTriggerPaths,
   setCancelForTriggerEntities,
@@ -107,23 +110,15 @@ export function subscribePullSchedulerAction(
   // Store the populateDependencies callback for use in execute()
   state.populateDependenciesCallbacks.set(action, populateDependenciesEntry);
 
-  // Newly subscribed computations can be the replacement for an already-running
-  // child graph (for example after a $TYPE change). Seed any statically
-  // declared writes immediately so existing effects can discover the new writer
-  // before the first execute() cycle.
-  if (!actionIsEffect && !immediateLog) {
-    const declaredWrites = (action as Partial<TelemetryAnnotations>).writes;
-    if (declaredWrites && declaredWrites.length > 0) {
-      setSchedulerDependencies(
-        state.dependencyUpdateState,
-        action,
-        {
-          reads: [],
-          shallowReads: [],
-          writes: declaredWrites.map(toMemorySpaceAddress),
-        },
-      );
-    }
+  // Static write surface (spec scheduler-v2 P4): the action's writes are
+  // fixed at registration — declared outputs plus statically resolved
+  // redirect targets, already computed by the runner, or a registration-time
+  // ReactivityLog supplied by direct scheduler callers. Nothing about the
+  // surface is learned from runs.
+  const surface = resolveRegistrationSurface(action, immediateLog);
+  if (!actionIsEffect && surface.length > 0) {
+    state.writeIndex.setSurface(action, surface);
+    state.registerWriterDependents(action, surface);
   }
 
   // If a ReactivityLog was provided directly, set up dependencies immediately.
@@ -179,6 +174,20 @@ export function subscribePullSchedulerAction(
   });
 
   return () => state.unsubscribe(action);
+}
+
+export function resolveRegistrationSurface(
+  action: Action,
+  immediateLog: ReactivityLog | undefined,
+): IMemorySpaceAddress[] {
+  const annotated = action as Partial<TelemetryAnnotations>;
+  const annotatedSurface = annotated.writes ?? [];
+  const surface = annotatedSurface.length > 0
+    ? annotatedSurface.map(toMemorySpaceAddress)
+    : (immediateLog?.writes ?? []);
+  return sortAndCompactPaths(
+    filterIgnoredAddresses(surface, annotated.ignoredSchedulingWrites ?? []),
+  );
 }
 
 export function resubscribePullSchedulerAction(

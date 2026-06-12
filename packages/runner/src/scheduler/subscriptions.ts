@@ -94,6 +94,10 @@ export interface SchedulerSubscribeActionState {
   readonly markDirectDirty: (action: Action) => void;
   readonly markEffectConditionallyScheduled: (action: Action) => void;
   readonly updateDependents: (action: Action, log: ReactivityLog) => void;
+  readonly registerWriterDependents: (
+    action: Action,
+    writes: readonly IMemorySpaceAddress[],
+  ) => void;
   readonly scheduleAffectedEffects: (action: Action) => void;
   readonly queueExecution: () => void;
   readonly getActionId: (action: Action) => string;

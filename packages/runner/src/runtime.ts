@@ -188,8 +188,6 @@ export interface ExperimentalOptions {
   persistentSchedulerState?: boolean | undefined;
   /** Attach origin-committed preconditions to scheduler-v2 lineage commits. */
   commitPreconditions?: boolean | undefined;
-  /** Preserve cumulative scheduler write history instead of using current-known writes. */
-  schedulerHistoricalMightWrite?: boolean | undefined;
 }
 
 export interface RuntimeOptions {
@@ -356,7 +354,6 @@ export class Runtime {
       modernCellRep: undefined,
       persistentSchedulerState: undefined,
       commitPreconditions: undefined,
-      schedulerHistoricalMightWrite: undefined,
       ...options.experimental,
     };
 

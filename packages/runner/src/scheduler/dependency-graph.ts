@@ -198,6 +198,24 @@ export function registerDependentEdge(
   }
 }
 
+export function registerDependentsForWriterSurface(
+  state: DependencyGraphState,
+  writer: Action,
+  writes: readonly IMemorySpaceAddress[],
+): void {
+  const readers = new Set<Action>();
+  for (const write of writes) {
+    for (const action of state.triggerIndex.collectReadersForWrite(write)) {
+      readers.add(action);
+    }
+  }
+  readers.delete(writer);
+
+  for (const action of readers) {
+    registerDependentEdge(state, writer, action);
+  }
+}
+
 export function unregisterDependentEdge(
   state: DependencyGraphState,
   writer: Action,
@@ -217,49 +235,6 @@ export function unregisterDependentEdge(
 
   if (hadDependent) {
     state.staleness.removeStaleUpstream(writer, dependent);
-  }
-}
-
-export function backfillDependentsForNewWrites(
-  state: DependencyGraphState,
-  writer: Action,
-  writes: readonly IMemorySpaceAddress[],
-): void {
-  // Caller must ensure writes is non-empty.
-  if (writes.length === 0) {
-    throw new Error("backfillDependentsForNewWrites requires non-empty writes");
-  }
-  const readers = new Set<Action>();
-  for (const write of writes) {
-    for (const action of state.triggerIndex.collectReadersForWrite(write)) {
-      readers.add(action);
-    }
-  }
-  readers.delete(writer);
-
-  for (const action of readers) {
-    registerDependentEdge(state, writer, action);
-  }
-}
-
-export function pruneDependentsForCurrentWrites(
-  state: DependencyGraphState,
-  writer: Action,
-  writes: readonly IMemorySpaceAddress[],
-): void {
-  const dependents = state.dependents.get(writer);
-  if (!dependents) return;
-
-  for (const dependent of [...dependents]) {
-    const log = state.dependencies.get(dependent);
-    if (
-      log &&
-      readsOverlapWrites(log.reads, log.shallowReads, writes)
-    ) {
-      continue;
-    }
-
-    unregisterDependentEdge(state, writer, dependent);
   }
 }
 

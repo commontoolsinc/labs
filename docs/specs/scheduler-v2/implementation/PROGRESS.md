@@ -2473,8 +2473,112 @@ step 3), then steps 4-6 as written.
 
 ## REVIEWER RESOLUTION — 05/step-3 residual-rule docs
 
-- [x] pending — WO05 step 3 amended for effect-empty-surface trace
+- [x] 315a34866 — WO05 step 3 amended for effect-empty-surface trace
   expectations, subscribe-time seeding of dynamic lifts, early §5.3 provisional
   child demand, and explicit `noDebounce` pull-root auto-debounce opt-out.
 - Recordings: docs-only commit; no `deno fmt`/`deno lint`/`deno check`
   required.
+
+## IMPLEMENTER STOP — 05/step-3 residual-rule timing proxy follow-up
+
+Applied the reviewer verdict narrowly:
+
+- `cell.ts` `pull()` subscribes its ephemeral effect with `noDebounce: true`.
+- Auto-debounce eligibility no longer exempts `isPullDemandRootEffect`; it keeps
+  effect-only eligibility and explicit `noDebounce` opt-out.
+- `scheduler-core.test.ts` action-run trace now expects effect
+  `declaredWrites` to be empty while preserving the actual write assertion.
+- `scheduler-pull-handlers.test.ts` seeds the dynamic lift surface through
+  `subscribe(..., ReactivityLog)` rather than `resubscribe(...)`.
+- `scheduler-pull.test.ts` rewrites the single §5.3 provisional child-demand
+  expectation with the reviewer-specified comment.
+
+Verification before STOP:
+
+- `deno fmt` on the 20 touched TS/test files: passed (`Checked 20 files`).
+- `deno lint` on the same 20 files: passed (`Checked 20 files`).
+- `deno check` on the same 20 files: passed.
+- Focused residual reruns:
+  - `test/scheduler-core.test.ts`: `1 passed (25 steps)`.
+  - `test/scheduler-pull-handlers.test.ts`: `1 passed (11 steps)`.
+  - `test/scheduler-pull.test.ts`: `1 passed (26 steps)`.
+  - `test/scheduler-timing.test.ts`: failed, `0 passed (20 steps)`,
+    `1 failed (1 step)`.
+
+STOP condition from reviewer verdict:
+
+- `test/scheduler-timing.test.ts` / `should not auto-debounce write-less pull
+  demand root effects` still asserts the old proxy behavior. After removing the
+  `isPullDemandRootEffect` auto-debounce exemption, it observes debounce `100`
+  instead of `undefined` at `scheduler-timing.test.ts:396`.
+
+No rewrite was attempted because the reviewer explicitly said to STOP if any
+other timing/throttle test fails after the auto-debounce cleanup.
+
+## REVIEWER VERDICT — 05/step-3 timing-proxy companion test
+
+Correct stop; this is the companion assertion of the same dead proxy,
+from the other side. "Write-less effect" no longer means "pull root" —
+it means an ordinary read-only sink, which is precisely what §8.2 wants
+auto-debounced when slow. The pull-root protection is now the explicit
+`noDebounce: true` that `pull()` sets.
+
+Authorized rewrite of this single test (added to the named list):
+
+1. Rename `should not auto-debounce write-less pull demand root effects`
+   → `auto-debounces slow write-less effects; pull roots opt out via noDebounce`.
+2. Flip the main assertion: after threshold runs, the bare write-less
+   slow effect HAS debounce 100 (the value your run already observed).
+3. In the same test (or a sibling `it` if cleaner), assert the
+   protected case explicitly: an identical slow effect subscribed with
+   `noDebounce: true` keeps debounce `undefined` after the same number
+   of runs. Skip this half only if an existing test in the file already
+   covers the `noDebounce` opt-out for effects — check first and note
+   which.
+4. Comment above the flipped assertion:
+   `// v2 (spec §8.2): the auto-debounce exemption is the explicit`
+   `// noDebounce opt-out (pull() sets it); v1 exempted any write-less`
+   `// effect via the demand-root writes proxy, which no longer exists.`
+
+Then full suite; if green, proceed with the commit sequence from the
+prior verdict (steps 2+3 commit, then 4-6). Any further failure of any
+shape: STOP as usual.
+
+## IMPLEMENTER RESOLUTION — 05/step-3 timing companion rewrite
+
+Applied the verdict:
+
+- `scheduler-timing.test.ts` renamed the write-less effect test and now asserts
+  that a bare slow write-less effect gets auto-debounce `100`.
+- The same test asserts an identical slow effect subscribed with
+  `noDebounce: true` keeps debounce `undefined`.
+- Existing `noDebounce` coverage in this file was cycle-aware debounce only, so
+  the explicit effect auto-debounce opt-out assertion was added here.
+
+Verification:
+
+- `deno fmt` on the 20 touched TS/test files: passed (`Checked 20 files`).
+- `deno lint` on the same 20 files: passed (`Checked 20 files`).
+- `deno check` on the same 20 files: passed.
+- Contract greps:
+  - `grep -rn "backfillDependentsForNewWrites\|pruneDependentsForCurrentWrites"
+    packages/runner/src/`: no matches.
+  - `grep -rn "schedulerHistoricalMightWrite\|historicalMightWrite" packages
+    --include="*.ts"`: no matches.
+  - `grep -rn
+    "buildKnownSchedulingWrites\|historicalMightWrite\|diffSchedulingWrites\|pruneStructuralAncestorWrites"
+    packages/runner/src`: no matches.
+- Focused named rewrites passed:
+  - `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-static-writes.test.ts test/scheduler-ordering.test.ts
+    test/scheduler-observations.test.ts test/scheduler-effects.test.ts
+    test/experimental-options.test.ts`: `6 passed (72 steps)`,
+    `0 failed`.
+  - `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-core.test.ts test/scheduler-pull-handlers.test.ts
+    test/scheduler-pull.test.ts test/scheduler-timing.test.ts`:
+    `4 passed (83 steps)`, `0 failed`.
+- `cd packages/runner && deno task test`: `ok | 592 passed (3095 steps) |
+  0 failed | 0 ignored (10 steps) (2m4s)`.

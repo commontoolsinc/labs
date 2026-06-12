@@ -17,11 +17,6 @@ import type {
   IExtendedStorageTransaction,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
-import {
-  buildKnownSchedulingWrites,
-  deriveDeclaredAncestorWrites,
-  deriveDynamicCollectionParentWrites,
-} from "../src/scheduler/scheduling-writes.ts";
 import { topologicalSort } from "../src/scheduler/topology.ts";
 import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
 
@@ -55,7 +50,7 @@ describe("push-triggered filtering", () => {
     await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
   });
 
-  it("should track mightWrite from actual writes", async () => {
+  it("should track mightWrite from the static surface at subscribe", async () => {
     const cell = runtime.getCell<number>(
       space,
       "mightwrite-test",
@@ -66,32 +61,33 @@ describe("push-triggered filtering", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    const action: Action = (actionTx) => {
-      cell.withTx(actionTx).send(42);
-    };
+    const declaredWrite = cell.getAsNormalizedFullLink();
+    const action = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        cell.withTx(actionTx).send(42);
+      }) as Action,
+      {
+        writes: [declaredWrite],
+      },
+    );
 
-    // Initially no mightWrite
     expect(runtime.scheduler.getMightWrite(action)).toBeUndefined();
-
-    // Run action
     runtime.scheduler.subscribe(
       action,
       {
         reads: [],
         shallowReads: [],
-        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
+        writes: [toMemorySpaceAddress(declaredWrite)],
       },
       {},
     );
-    await cell.pull();
 
-    // mightWrite should now include the cell
-    const mightWrite = runtime.scheduler.getMightWrite(action);
-    expect(mightWrite).toBeDefined();
-    expect(mightWrite!.length).toBeGreaterThan(0);
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([
+      toMemorySpaceAddress(declaredWrite),
+    ]);
   });
 
-  it("should replace current-known writes over multiple resubscriptions by default", async () => {
+  it("should keep the static surface over multiple resubscriptions", async () => {
     const cell1 = runtime.getCell<number>(space, "mw-accum-1", undefined, tx);
     const cell2 = runtime.getCell<number>(space, "mw-accum-2", undefined, tx);
     cell1.set(0);
@@ -99,19 +95,22 @@ describe("push-triggered filtering", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    const action: Action = () => {};
+    const declaredWrite = cell1.getAsNormalizedFullLink();
+    const action = Object.assign((() => {}) as Action, {
+      writes: [declaredWrite],
+    });
     runtime.scheduler.subscribe(
       action,
       {
         reads: [],
         shallowReads: [],
-        writes: [toMemorySpaceAddress(cell1.getAsNormalizedFullLink())],
+        writes: [toMemorySpaceAddress(declaredWrite)],
       },
       {},
     );
 
     expect(runtime.scheduler.getMightWrite(action)).toEqual([
-      toMemorySpaceAddress(cell1.getAsNormalizedFullLink()),
+      toMemorySpaceAddress(declaredWrite),
     ]);
 
     runtime.scheduler.resubscribe(action, {
@@ -121,67 +120,8 @@ describe("push-triggered filtering", () => {
     });
 
     expect(runtime.scheduler.getMightWrite(action)).toEqual([
-      toMemorySpaceAddress(cell2.getAsNormalizedFullLink()),
+      toMemorySpaceAddress(declaredWrite),
     ]);
-  });
-
-  it("should preserve historical mightWrite behind the experimental flag", async () => {
-    await runtime.dispose();
-    await storageManager.close();
-
-    /*
-     * This one test opts into the legacy cumulative write-history flag after
-     * the default fixture has already been disposed.
-     */
-    ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
-      import.meta.url,
-      {
-        experimental: {
-          schedulerHistoricalMightWrite: true,
-        },
-      },
-    ));
-
-    const cell1 = runtime.getCell<number>(
-      space,
-      "mw-experimental-1",
-      undefined,
-      tx,
-    );
-    const cell2 = runtime.getCell<number>(
-      space,
-      "mw-experimental-2",
-      undefined,
-      tx,
-    );
-    cell1.set(0);
-    cell2.set(0);
-    await tx.commit();
-    tx = runtime.edit();
-
-    const action: Action = () => {};
-    runtime.scheduler.subscribe(
-      action,
-      {
-        reads: [],
-        shallowReads: [],
-        writes: [toMemorySpaceAddress(cell1.getAsNormalizedFullLink())],
-      },
-      {},
-    );
-
-    runtime.scheduler.resubscribe(action, {
-      reads: [],
-      shallowReads: [],
-      writes: [toMemorySpaceAddress(cell2.getAsNormalizedFullLink())],
-    });
-
-    expect(
-      runtime.scheduler.getMightWrite(action)?.map((write) => write.id).sort(),
-    ).toEqual([
-      cell1.getAsNormalizedFullLink().id,
-      cell2.getAsNormalizedFullLink().id,
-    ].sort());
   });
 
   it("should keep declared writes in current-known writes after empty resubscribe", async () => {
@@ -221,34 +161,53 @@ describe("push-triggered filtering", () => {
     ]);
   });
 
-  it("should keep declared writes when a run only writes metadata", () => {
-    const declaredWrite = scopedAddress("user", [
-      "value",
-      "currentUserIsAdmin",
+  it("should keep the declared surface when a run only writes metadata", async () => {
+    const declared = runtime.getCell<number>(
+      space,
+      "mw-declared-surface-output",
+      undefined,
+      tx,
+    );
+    const metadata = runtime.getCell<number>(
+      space,
+      "mw-observed-metadata-write",
+      undefined,
+      tx,
+    );
+    declared.set(0);
+    metadata.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const declaredWrite = declared.getAsNormalizedFullLink();
+    const metadataWrite = metadata.getAsNormalizedFullLink();
+    const action = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        metadata.withTx(actionTx).set(1);
+      }) as Action,
+      {
+        writes: [declaredWrite],
+      },
+    );
+
+    runtime.scheduler.subscribe(
+      action,
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(declaredWrite)],
+      },
+      {},
+    );
+
+    await runtime.scheduler.run(action);
+
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([
+      toMemorySpaceAddress(declaredWrite),
     ]);
-    const metadataWrite = scopedAddress("user", ["cfc"]);
-
-    const { newCurrentKnownWrites } = buildKnownSchedulingWrites({
-      writes: [metadataWrite],
-      declaredWrites: [declaredWrite],
-      existingCurrentWrites: [],
-      existingHistoricalWrites: [],
-    });
-
-    expect(
-      newCurrentKnownWrites.some((write) =>
-        write.scope === declaredWrite.scope &&
-        write.id === declaredWrite.id &&
-        write.path.join("/") === declaredWrite.path.join("/")
-      ),
-    ).toBe(true);
-    expect(
-      newCurrentKnownWrites.some((write) =>
-        write.scope === metadataWrite.scope &&
-        write.id === metadataWrite.id &&
-        write.path.join("/") === metadataWrite.path.join("/")
-      ),
-    ).toBe(true);
+    expect(runtime.scheduler.getMightWrite(action)).not.toEqual([
+      toMemorySpaceAddress(metadataWrite),
+    ]);
   });
 
   it("should not broaden current-known writes to structural parent paths", async () => {
@@ -333,24 +292,6 @@ describe("push-triggered filtering", () => {
     ]);
   });
 
-  it("should not derive declared ancestor writes across scopes", () => {
-    const spaceAncestor = scopedAddress("space", ["items"]);
-    const sessionChild = scopedAddress("session", ["items", "details"]);
-
-    expect(
-      deriveDeclaredAncestorWrites([sessionChild], [spaceAncestor]),
-    ).toEqual([]);
-  });
-
-  it("should not derive dynamic collection parent writes across scopes", () => {
-    const spaceCollection = scopedAddress("space", ["items"]);
-    const sessionItem = scopedAddress("session", ["items", "0"]);
-
-    expect(
-      deriveDynamicCollectionParentWrites([sessionItem], [spaceCollection]),
-    ).toEqual([]);
-  });
-
   it("should not order materializer writes before readers in other scopes", () => {
     const materializer: Action = () => {};
     const reader: Action = () => {};
@@ -418,10 +359,16 @@ describe("push-triggered filtering", () => {
     tx = runtime.edit();
 
     let runCount = 0;
-    const action: Action = (actionTx) => {
-      runCount++;
-      cell.withTx(actionTx).send(runCount);
-    };
+    const cellLink = cell.getAsNormalizedFullLink();
+    const action = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        runCount++;
+        cell.withTx(actionTx).send(runCount);
+      }) as Action,
+      {
+        writes: [cellLink],
+      },
+    );
 
     // First run with default scheduling should work
     runtime.scheduler.subscribe(
@@ -429,7 +376,7 @@ describe("push-triggered filtering", () => {
       {
         reads: [],
         shallowReads: [],
-        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
+        writes: [toMemorySpaceAddress(cellLink)],
       },
       {},
     );
@@ -500,10 +447,16 @@ describe("push-triggered filtering", () => {
     tx = runtime.edit();
 
     let runCount = 0;
-    const action: Action = (actionTx) => {
-      runCount++;
-      cell.withTx(actionTx).send(runCount);
-    };
+    const cellLink = cell.getAsNormalizedFullLink();
+    const action = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        runCount++;
+        cell.withTx(actionTx).send(runCount);
+      }) as Action,
+      {
+        writes: [cellLink],
+      },
+    );
 
     // Run once to establish mightWrite
     runtime.scheduler.subscribe(
@@ -511,7 +464,7 @@ describe("push-triggered filtering", () => {
       {
         reads: [],
         shallowReads: [],
-        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
+        writes: [toMemorySpaceAddress(cellLink)],
       },
       {},
     );
@@ -526,7 +479,7 @@ describe("push-triggered filtering", () => {
       {
         reads: [],
         shallowReads: [],
-        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
+        writes: [toMemorySpaceAddress(cellLink)],
       },
       {},
     );

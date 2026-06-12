@@ -494,19 +494,17 @@ describe("scheduler", () => {
     expect(computeRuns.at(-1)?.actionType).toBe("computation");
     expect(effectRuns.at(-1)?.actionType).toBe("effect");
     expect(computeRuns.at(-1)?.declaredWrites.length).toBe(1);
-    expect(effectRuns.at(-1)?.declaredWrites.length).toBe(1);
+    expect(effectRuns.at(-1)?.declaredWrites.length).toBe(0);
     expect(computeRuns.at(-1)?.actualWrites).toEqual(
       computeRuns.at(-1)?.declaredWrites,
     );
-    expect(effectRuns.at(-1)?.actualWrites).toEqual(
-      effectRuns.at(-1)?.declaredWrites,
-    );
+    expect(effectRuns.at(-1)?.actualWrites.length).toBe(1);
     expect(computeRuns.at(-1)?.declaredWrites[0]).toMatchObject({
       space,
       entityId: expect.stringMatching(/^of:/),
       path: ["value"],
     });
-    expect(effectRuns.at(-1)?.declaredWrites[0]).toMatchObject({
+    expect(effectRuns.at(-1)?.actualWrites[0]).toMatchObject({
       space,
       entityId: expect.stringMatching(/^of:/),
       path: ["value"],
