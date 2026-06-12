@@ -826,7 +826,7 @@ comment line in the Step 4 code-commit scope.
 
 ## IMPLEMENTER RESOLUTION — 01/step-5 final
 
-- [x] pending — pull-based scheduler docs reflect push-mode removal
+- [x] 46c31b308 — pull-based scheduler docs reflect push-mode removal
 - Deviations: none.
 - Recordings:
   - Updated the header sentence to state push mode has been removed and point
@@ -838,3 +838,29 @@ comment line in the Step 4 code-commit scope.
     docs/specs/pull-based-scheduler/README.md`: no matches.
   - `grep -n "### Mode Control"
     docs/specs/pull-based-scheduler/README.md`: no matches.
+
+## 01/phase-end self-check
+
+- Full runner suite:
+  `cd packages/runner && deno task test` → `586 passed (3067 steps)`,
+  `0 failed`, `0 ignored (10 steps)`, `2m3s`.
+- Exit checklist greps:
+  - `ls src/scheduler/ | grep push`: no matches.
+  - `grep -rn "pullMode\|enablePullMode\|disablePullMode\|isPullModeEnabled"
+    src/ test/`: exactly the allowed frozen graph snapshot residuals:
+    `src/scheduler.ts:2275`, `src/scheduler/graph-snapshot.ts:14`,
+    `src/scheduler/graph-snapshot.ts:208`, `src/telemetry.ts:59`.
+  - `grep -rn "enablePullMode\|disablePullMode\|isPullModeEnabled\|pullMode"
+    test/scheduler-pull.test.ts`: no matches.
+  - `grep -rn "schedulerRuntimeFingerprint" src/ test/` shows
+    `schedulerRuntimeFingerprint("pull")` call sites and the unchanged
+    implementation `return \`runner:scheduler:${mode}\`;`.
+- Diff shape: `git diff --summary origin/main...HEAD` shows only the five
+  deleted push scheduler modules; no added files or renames. Overall diff is
+  delete-dominated.
+- Benchmark smoke:
+  `cd packages/runner && deno task bench` started successfully and completed
+  multiple benchmark files (`cell-immutable.bench.ts`,
+  `cell-read-path.bench.ts`, `cell-set-array-shape.bench.ts`,
+  `cell-set-nested-array-docs.bench.ts`, `cell-set-shape.bench.ts`) before
+  manual interruption during `cell-set.bench.ts` per the work-order allowance.
