@@ -656,7 +656,7 @@ describe("pull-based scheduling", () => {
       derived.withTx(actionTx).get();
     };
     const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
-    schedulerInternal.isEffectAction.set(effect, true);
+    schedulerInternal.registerEffect(effect);
     const { log } = schedulerInternal.setDependencies(effect, {
       reads: [toMemorySpaceAddress(derived.getAsNormalizedFullLink())],
       shallowReads: [],

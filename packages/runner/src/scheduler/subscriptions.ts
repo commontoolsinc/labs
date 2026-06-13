@@ -8,6 +8,7 @@ import {
   readsOverlapWrites,
   type WriterIndexState,
 } from "./scheduling-writes.ts";
+import { type NodeKind, NodeRegistry } from "./node-record.ts";
 import { type TriggerSubscriptionState } from "./trigger-index.ts";
 import { entityKey } from "./keys.ts";
 import type {
@@ -18,9 +19,7 @@ import type {
 } from "./types.ts";
 
 type SchedulerActionTypeState = {
-  readonly isEffectAction: WeakMap<Action, boolean>;
-  readonly effects: Set<Action>;
-  readonly computations: Set<Action>;
+  readonly nodes: NodeRegistry;
   readonly getIdempotencyCheckMode: () => boolean;
   readonly queueExecution: () => void;
 };
@@ -33,8 +32,7 @@ type SchedulerActionChangeGroupState = {
 
 type SchedulerParentChildState = {
   readonly getExecutingAction: () => Action | null;
-  readonly actionParent: WeakMap<Action, Action>;
-  readonly actionChildren: WeakMap<Action, Set<Action>>;
+  readonly nodes: NodeRegistry;
 };
 
 export type SchedulerSubscriptionState =
@@ -76,7 +74,6 @@ export interface SchedulerSubscribeActionState {
   readonly pendingDependencyCollection: Set<Action>;
   readonly activePullDemandActions: WeakSet<Action>;
   readonly pullDemandedFirstRunComputations: WeakSet<Action>;
-  readonly actionParent: WeakMap<Action, Action>;
   readonly pending: Set<Action>;
   readonly scheduledFirstTime: Set<Action>;
   readonly effects: ReadonlySet<Action>;
@@ -122,7 +119,8 @@ export function markEffectDirtyIfStaleInputs(
   // computations write to what it reads. If so, mark the effect dirty so it can
   // pull those computations and see fresh data.
   // Skip throttled computations - they'll trigger via storage changes when unthrottled.
-  // Use isEffectAction instead of effects because unsubscribe() clears effects before run()
+  // Use the returned action kind instead of active effects because
+  // unsubscribe() clears active membership before run().
   if (!actionIsEffect || state.stale.size === 0) {
     return;
   }
@@ -191,21 +189,18 @@ export function updateSchedulerActionType(
   isEffect: boolean | undefined,
   options: { queueExecution?: boolean; queueComputation?: boolean } = {},
 ): boolean {
-  if (isEffect) {
-    state.isEffectAction.set(action, true);
-  }
-
-  const actionIsEffect = state.isEffectAction.get(action) ?? false;
+  const kind: NodeKind = isEffect === true ||
+      state.nodes.isKnownEffect(action)
+    ? "effect"
+    : "computation";
+  state.nodes.register(action, kind);
+  const actionIsEffect = kind === "effect";
 
   if (actionIsEffect) {
-    state.effects.add(action);
-    state.computations.delete(action);
     if (options.queueExecution) {
       state.queueExecution();
     }
   } else {
-    state.computations.add(action);
-    state.effects.delete(action);
     if (
       options.queueExecution &&
       (options.queueComputation ?? true)
@@ -250,17 +245,11 @@ export function registerParentChildAction(
 ): void {
   const { allowExisting = true } = options;
   const parent = state.getExecutingAction();
-  if (!parent || parent === action) return;
-  if (!allowExisting && state.actionParent.has(action)) return;
-
-  state.actionParent.set(action, parent);
-
-  let children = state.actionChildren.get(parent);
-  if (!children) {
-    children = new Set();
-    state.actionChildren.set(parent, children);
-  }
-  children.add(action);
+  state.nodes.linkParent(
+    action,
+    parent && parent !== action ? parent : undefined,
+    { allowExisting },
+  );
 }
 
 export interface SchedulerUnsubscribeActionState {
@@ -275,8 +264,7 @@ export interface SchedulerUnsubscribeActionState {
   readonly conditionallyScheduledEffects: Map<Action, number>;
   readonly reverseDependencies: WeakMap<Action, Set<Action>>;
   readonly dependents: WeakMap<Action, Set<Action>>;
-  readonly effects: Set<Action>;
-  readonly computations: Set<Action>;
+  readonly nodes: NodeRegistry;
   readonly pullDemandedFirstRunComputations: WeakSet<Action>;
   readonly pullDemandedContinuationComputations: WeakSet<Action>;
   readonly writeIndex: WriterIndexState;
@@ -379,8 +367,7 @@ function clearActionTypeTracking(
   state: SchedulerUnsubscribeActionState,
   action: Action,
 ): void {
-  state.effects.delete(action);
-  state.computations.delete(action);
+  state.nodes.remove(action);
   state.pullDemandedFirstRunComputations.delete(action);
   state.pullDemandedContinuationComputations.delete(action);
 }

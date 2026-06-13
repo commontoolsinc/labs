@@ -1,4 +1,5 @@
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
+import type { NodeRegistry } from "./node-record.ts";
 import type { Action, ReactivityLog } from "./types.ts";
 
 export interface PullDemandState {
@@ -6,8 +7,7 @@ export interface PullDemandState {
   readonly effects: ReadonlySet<Action>;
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
-  readonly actionParent: WeakMap<Action, Action>;
-  readonly isEffectAction: WeakMap<Action, boolean>;
+  readonly nodes: NodeRegistry;
   readonly pullDemandedFirstRunComputations: WeakSet<Action>;
   readonly pullDemandedContinuationComputations: WeakSet<Action>;
   readonly hasActionRun: (action: Action) => boolean;
@@ -58,7 +58,7 @@ export function isDemandedPullComputation(
 export function isLiveEffect(
   state: Pick<
     PullDemandState,
-    "effects" | "isEffectAction" | "dependencies"
+    "effects" | "nodes" | "dependencies"
   >,
   action: Action,
 ): boolean {
@@ -67,7 +67,7 @@ export function isLiveEffect(
   // During resubscribe, dependencies can be registered before all effect
   // bookkeeping is restored. Treat only dependency-bearing historical effects
   // as live so unsubscribed effects do not keep old pull graphs demanded.
-  return (state.isEffectAction.get(action) ?? false) &&
+  return state.nodes.isKnownEffect(action) &&
     state.dependencies.has(action);
 }
 
@@ -129,7 +129,7 @@ function hasDemandedParentContext(
   action: Action,
   visited = new Set<Action>(),
 ): boolean {
-  const parent = state.actionParent.get(action);
+  const parent = state.nodes.parentActionOf(action);
   if (!parent) return false;
 
   if (isLiveEffect(state, parent)) {

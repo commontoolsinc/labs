@@ -257,7 +257,7 @@ function orderPullWorkSet(
     workSet,
     state.dependencies,
     state.getSchedulingWritesMap(),
-    state.actionParent,
+    state.nodes,
     state.dependents,
     (action) => state.materializerIndex.getMaterializerWriteEnvelopes(action),
   );

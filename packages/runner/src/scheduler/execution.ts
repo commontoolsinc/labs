@@ -8,6 +8,7 @@ import {
   MAX_ITERATIONS_PER_RUN,
 } from "./constants.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
+import type { NodeRegistry } from "./node-record.ts";
 import type {
   Action,
   PopulateDependenciesEntry,
@@ -310,7 +311,7 @@ export interface SchedulerSettleLoopState {
   readonly pending: Set<Action>;
   readonly dirty: ReadonlySet<Action>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
-  readonly actionParent: WeakMap<Action, Action>;
+  readonly nodes: NodeRegistry;
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly conditionallyScheduledEffects: Map<Action, number>;
   readonly filterStats: { filtered: number; executed: number };
