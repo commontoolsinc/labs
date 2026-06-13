@@ -37,7 +37,7 @@ const directScenario: PatternIntegrationScenario = {
 // is laundered toward empties and on the undefined-preserving runtime is
 // rejected (the whole structure reads as `undefined`). Either way this is
 // wrong. Un-ignore when the transformer tracks Map values (or conservatively
-// widens on untracked escapes). See the schema-narrowing transformer issue.
+// widens on untracked escapes). See CT-1739.
 const mapRoundtripScenario: PatternIntegrationScenario = {
   name:
     "schema-narrow: fields read only via a Map round-trip are dropped (transformer regression)",

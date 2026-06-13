@@ -277,8 +277,7 @@ export const scenarios = [libraryCheckoutSystemScenario];
 //     `undefined` element fails schema validation and `availability` reads
 //     as `undefined` entirely.
 // Either way these assertions fail. Marked `ignore` until the
-// capability-analysis fix lands; un-ignore then. See the schema-narrowing
-// transformer issue.
+// capability-analysis fix lands; un-ignore then. See CT-1739.
 const libraryCheckoutMemberListsScenario: PatternIntegrationScenario = {
   name:
     "library checkout reports loan/hold member lists (transformer regression)",
