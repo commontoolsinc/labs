@@ -2,6 +2,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
 import type { Runtime } from "../runtime.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
+import { normalizeCellScope } from "../scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -23,10 +24,6 @@ import { RetryImmediately } from "./retry-immediately.ts";
 import { toActionRunTraceAddress } from "./diagnostics.ts";
 import { buildSchedulerActionObservation } from "./persistent-observation.ts";
 import { filterIgnoredAddresses, txToReactivityLog } from "./reactivity.ts";
-import {
-  buildKnownSchedulingWrites,
-  pruneStructuralAncestorWrites,
-} from "./scheduling-writes.ts";
 import { type ActionTimingState, recordActionTime } from "./timing.ts";
 import type {
   Action,
@@ -277,12 +274,6 @@ export interface SchedulerActionRunState {
   readonly getSchedulingWrites: (
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;
-  readonly getCurrentKnownSchedulingWrites: (
-    action: Action,
-  ) => readonly IMemorySpaceAddress[] | undefined;
-  readonly getHistoricalMightWrite: (
-    action: Action,
-  ) => readonly IMemorySpaceAddress[] | undefined;
   readonly getMaterializerWriteEnvelopes: (
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;
@@ -498,6 +489,7 @@ function finalizeReactiveActionCommit(
   }, {
     beforeCommit: () => {
       log = txToReactivityLog(args.tx);
+      warnOnWriteSurfaceViolations(state, args, log);
       attachSchedulerActionObservation(state, args, log);
     },
   });
@@ -557,6 +549,57 @@ function finalizeReactiveActionCommit(
   args.resolve(args.result);
 }
 
+function warnOnWriteSurfaceViolations(
+  state: SchedulerActionRunState,
+  args: {
+    readonly action: Action;
+    readonly actionId: string;
+  },
+  log: ReactivityLog,
+): void {
+  if (state.isEffectAction.get(args.action)) return;
+  if ((state.getMaterializerWriteEnvelopes(args.action) ?? []).length > 0) {
+    return;
+  }
+
+  const surface = state.getSchedulingWrites(args.action) ?? [];
+  for (const write of log.writes) {
+    // Per-user/per-session slots are runtime-mediated writes (scope-default
+    // initialization, UI state) that authored surfaces do not declare —
+    // exempt them so this declaration-gap diagnostic tracks authored
+    // space-scoped writes only.
+    // WATCH(scheduler-v2): re-include once scoped-slot writes are declared.
+    if (normalizeCellScope(write.scope) !== "space") {
+      continue;
+    }
+    if (
+      surface.some((surfaceWrite) => surfaceCoversWrite(surfaceWrite, write))
+    ) {
+      continue;
+    }
+    // Declaration-gap diagnostics, not enforcement (work order 05 step 5) —
+    // debug level because known gaps remain (builtins minting cause-keyed
+    // internal docs inside their run, e.g. ifElse/unless/fetchData) and
+    // cf test fails tests on console warnings. Counted regardless of level:
+    // assert via getLoggerCountsBreakdown().scheduler["write-surface-violation"].
+    logger.debug("write-surface-violation", () => [
+      `Action ${args.actionId} wrote outside its declared surface`,
+      write,
+    ]);
+  }
+}
+
+function surfaceCoversWrite(
+  surface: IMemorySpaceAddress,
+  write: IMemorySpaceAddress,
+): boolean {
+  return surface.space === write.space &&
+    surface.id === write.id &&
+    normalizeCellScope(surface.scope) === normalizeCellScope(write.scope) &&
+    surface.path.length <= write.path.length &&
+    surface.path.every((segment, index) => segment === write.path[index]);
+}
+
 function attachSchedulerActionObservation(
   state: SchedulerActionRunState,
   args: {
@@ -584,23 +627,6 @@ function attachSchedulerActionObservation(
     (annotated.writes ?? []).map(toMemorySpaceAddress),
     ignoredSchedulingWrites,
   ));
-  const { newCurrentKnownWrites } = buildKnownSchedulingWrites({
-    writes: pruneStructuralAncestorWrites(
-      sortAndCompactPaths(
-        filterIgnoredAddresses(log.writes, ignoredSchedulingWrites),
-        false,
-      ),
-    ),
-    declaredWrites,
-    existingCurrentWrites: filterIgnoredAddresses(
-      state.getCurrentKnownSchedulingWrites(args.action) ?? [],
-      ignoredSchedulingWrites,
-    ),
-    existingHistoricalWrites: filterIgnoredAddresses(
-      state.getHistoricalMightWrite(args.action) ?? [],
-      ignoredSchedulingWrites,
-    ),
-  });
   const telemetry = state.getActionTelemetryInfo(args.action);
   const actionOptions = schedulerActionOptions(state, args.action);
   const observationIdentity = annotated.schedulerObservationIdentity;
@@ -626,7 +652,11 @@ function attachSchedulerActionObservation(
     observedAtSeq: 0,
     transactionKind: "action-run",
     transactionLog: log,
-    currentKnownWrites: newCurrentKnownWrites,
+    // The live registered surface — for actions without a `.writes`
+    // annotation it came from subscribe's ReactivityLog, which
+    // declaredWrites (annotation-only) does not capture.
+    currentKnownWrites: state.getSchedulingWrites(args.action) ??
+      declaredWrites,
     declaredWrites,
     materializerWriteEnvelopes:
       state.getMaterializerWriteEnvelopes(args.action) ?? [],

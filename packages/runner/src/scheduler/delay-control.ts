@@ -7,7 +7,6 @@ export interface SchedulerDelayControlState {
   readonly effects: ReadonlySet<Action>;
   readonly dirty: ReadonlySet<Action>;
   readonly pending: Set<Action>;
-  readonly isPullDemandRootEffect: (action: Action) => boolean;
   readonly queueExecution: () => void;
   readonly logDebounce: (message: string) => void;
 }
@@ -18,7 +17,6 @@ export function canAutomaticallyDebounce(
 ): boolean {
   return state.delays.canAutomaticallyDebounce(action, {
     effects: state.effects,
-    isPullDemandRootEffect: state.isPullDemandRootEffect,
   });
 }
 

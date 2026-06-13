@@ -2035,7 +2035,7 @@ semantics.
 
 ## 04/phase-end self-check
 
-- [x] pending — work order 04 phase-end verification recorded.
+- [x] a49811102 — work order 04 phase-end verification recorded.
 - Deviations: work order 04 lists no phase-specific benchmarks beyond the
   full suites and exit-checklist greps. The flag-on runner pass used a
   temporary local edit to `packages/runner/test/scheduler-test-utils.ts` to
@@ -2137,4 +2137,590 @@ packages/runner/src/scheduler/events.ts:654:            permanent: isPermanentRe
   commit replays unsafe, so the generic same-session replay check is hoisted
   ABOVE precondition validation (still before the observation fast paths,
   which keep their own replay table and never hit the generic check).
+- Deviations: none.
+
+## 05/step-0
+
+- [x] no commit — phase 1 benchmark baseline captured before static write
+  surface changes.
+- Deviations: none.
+- Recordings:
+  - `cd packages/runner && deno bench --allow-read --allow-write
+    --allow-net --allow-ffi --allow-env --no-check test/scheduler.bench.ts
+    test/scheduler-demand-roots.bench.ts
+    test/scheduler-stale-propagation.bench.ts`: passed.
+  - `test/scheduler.bench.ts`:
+    - `Scheduler - 100 computations, shared entity reads`: 19.4 ms
+    - `Scheduler - wide graph (1 source, 100 readers)`: 17.9 ms
+    - `Scheduler - 100 entities, sparse deps`: 17.3 ms
+    - `Scheduler - deep chain (50 levels)`: 11.5 ms
+    - `Scheduler - diamond pattern (10 diamonds)`: 9.6 ms
+    - `Scheduler - repeated dirty marking`: 7.7 ms
+    - `Scheduler - subscribe/unsubscribe cycle (100x)`: 5.8 ms
+    - `Scheduler - pull with resubscribe (50 pulls)`: 291.3 ms
+    - `Overhead - setup/teardown only`: 1.3 ms
+    - `Overhead - create 100 cells (getCell + set)`: 15.4 ms
+    - `Overhead - 100x getCell only (no set)`: 1.6 ms
+    - `Overhead - 100x set on existing cells`: 15.7 ms
+    - `Overhead - runtime.idle() empty`: 1.3 ms
+    - `Overhead - commit after 100 sets`: 15.9 ms
+    - `Overhead - empty commit`: 1.3 ms
+    - `Overhead - 100 raw tx.write + commit`: 7.1 ms
+    - `Utility - sortAndCompactPaths (100 paths)`: 21.7 us
+    - `Utility - sortAndCompactPaths (1000 paths)`: 280.5 us
+    - `Utility - addressesToPathByEntity (100 paths)`: 14.9 us
+    - `Utility - addressesToPathByEntity (1000 paths)`: 150.3 us
+    - `Scheduler - bare subscribe (100x)`: 1.7 ms
+    - `Scheduler - subscribe 100 actions reading same entity`: 1.7 ms
+    - `Scheduler - resubscribe cycle (100x)`: 1.4 ms
+  - `test/scheduler-demand-roots.bench.ts`:
+    - `Scheduler demand roots - effect demand root`: 147.1 ms
+    - `Scheduler demand roots - event demand root`: 131.8 ms
+    - `Scheduler demand roots - mixed effect and event roots`: 169.0 ms
+    - `Scheduler demand roots - parent clears generated children`: 81.3 ms
+  - `test/scheduler-stale-propagation.bench.ts`:
+    - `Scheduler stale propagation - chain`: 105.5 ms
+    - `Scheduler stale propagation - diamond`: 94.7 ms
+    - `Scheduler stale propagation - wide fanout`: 244.0 ms
+    - `Scheduler stale propagation - dynamic deps`: 82.9 ms
+    - `Scheduler stale propagation - unchanged recompute`: 74.7 ms
+
+## 05/step-1
+
+- [x] ca77bc16e — static write surface demand fixtures added.
+- Deviations: both fixtures already pass on current code, so they pin existing
+  behavior; no behavior-change red case was observed.
+- Recordings:
+  - `deno fmt packages/runner/test/scheduler-static-writes.test.ts`: passed
+    (`Checked 1 file`).
+  - `deno lint packages/runner/test/scheduler-static-writes.test.ts`: passed
+    (`Checked 1 file`).
+  - `deno check packages/runner/test/scheduler-static-writes.test.ts`: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-static-writes.test.ts`: passed, `1 passed (2 steps)`,
+    `0 failed`.
+
+## IMPLEMENTER STOP — 05/step-3 static write surface sweep
+
+Stopped after implementing the step 2/3 static-surface rewrite locally because
+the full runner suite produced failures outside the three work-order-named
+rewrite files. Continuing would require either changing public scheduler API
+compatibility for direct `subscribe(..., ReactivityLog)` callers, or widening
+test rewrites beyond the allowed files.
+
+Local changes currently include:
+
+- `pull-subscriptions.ts`: unconditional static surface registration from
+  action annotations before `immediateLog` setup.
+- `dependency-updates.ts`: scheduling writes are derived only from the
+  annotated static surface, never `log.writes`.
+- `scheduling-writes.ts`: deleted dynamic write discovery helpers and
+  historical might-write mode; `SchedulerWriteIndex` now stores the current
+  static surface.
+- `dependency-graph.ts`/`subscriptions.ts`/`scheduler.ts`: added static
+  registration-time dependent edge attachment so existing readers can see a
+  newly registered static writer without resurrecting dynamic write-growth
+  diffing.
+- `action-run.ts`: persisted observations keep both write fields populated
+  from the static surface.
+- `runtime.ts` and experimental-option tests: removed
+  `schedulerHistoricalMightWrite`.
+- Named test rewrites in `scheduler-ordering.test.ts`,
+  `scheduler-observations.test.ts`, and `scheduler-effects.test.ts` assert
+  static surfaces instead of v1 write-set learning. The step-1 fixture was
+  also corrected to express declared writes through `action.writes`, because
+  v2 ignores direct `log.writes` as scheduler surface.
+
+Verification before the full-suite STOP:
+
+- `deno fmt packages/runner/src/scheduler/pull-subscriptions.ts
+  packages/runner/src/scheduler/dependency-updates.ts
+  packages/runner/src/scheduler/scheduling-writes.ts
+  packages/runner/src/scheduler/dependency-graph.ts
+  packages/runner/src/scheduler/action-run.ts
+  packages/runner/src/scheduler/subscriptions.ts packages/runner/src/scheduler.ts
+  packages/runner/src/runtime.ts packages/runner/test/experimental-options.test.ts
+  packages/runner/test/scheduler-ordering.test.ts
+  packages/runner/test/scheduler-observations.test.ts
+  packages/runner/test/scheduler-effects.test.ts
+  packages/runner/test/scheduler-static-writes.test.ts`: passed
+  (`Checked 13 files`).
+- `deno lint` on the same 13 files: passed (`Checked 13 files`).
+- `deno check` on the same 13 files: passed.
+- `grep -rn "backfillDependentsForNewWrites\|pruneDependentsForCurrentWrites"
+  packages/runner/src/`: no matches.
+- `grep -rn "schedulerHistoricalMightWrite\|historicalMightWrite" packages
+  --include="*.ts"`: no matches.
+- `grep -rn
+  "buildKnownSchedulingWrites\|historicalMightWrite\|diffSchedulingWrites\|pruneStructuralAncestorWrites"
+  packages/runner/src`: no matches.
+- Focused tests passed:
+  - `test/scheduler-static-writes.test.ts`: `1 passed (2 steps)`.
+  - `test/scheduler-ordering.test.ts`: `2 passed (17 steps)`.
+  - `test/scheduler-observations.test.ts`: `1 passed (22 steps)`.
+  - `test/scheduler-effects.test.ts`: `1 passed (20 steps)`.
+  - `test/experimental-options.test.ts`: `1 passed (11 steps)`.
+
+Full suite failure:
+
+- `cd packages/runner && deno task test`: failed, `580 passed
+  (3032 steps)`, `12 failed (63 steps)`, `0 ignored (10 steps)`, `2m5s`.
+- Failure groups:
+  - `test/cell-callbacks.test.ts`: persistent effect after `pull()` cleanup.
+  - `test/memory-v2-pull-reactivity.test.ts`: 2 pull reactivity failures.
+  - `test/scheduler-convergence.test.ts`: 6 convergence/cycle/stat failures.
+  - `test/scheduler-core.test.ts`: 5 scheduler core/trace/cancel failures.
+  - `test/scheduler-events.test.ts`: 2 event recomputation/in-flight demand
+    failures.
+  - `test/scheduler-pull-array.test.ts`: 7 array/demand/navigation failures.
+  - `test/scheduler-pull-handlers.test.ts`: 7 handler dependency pulling
+    failures.
+  - `test/scheduler-pull-references.test.ts`: reference propagation failure.
+  - `test/scheduler-pull.test.ts`: broad pull scheduling/staleness failures,
+    including the explicit legacy assertion
+    `should preserve writes when collecting dependencies from ReactivityLog`.
+  - `test/scheduler-retries.test.ts`: retry dependency preservation failure.
+  - `test/scheduler-throttle.test.ts`: 4 throttle/staleness failures.
+  - `test/scheduler-timing.test.ts`: 7 debounce/auto-debounce/cycle-debounce
+    failures.
+
+Reviewer question: should the scheduler keep a compatibility path where a
+direct `ReactivityLog` passed to `subscribe`/`resubscribe` seeds a static
+surface for unannotated actions, or should the work order explicitly authorize
+widening rewrites/annotations across the additional direct-scheduler tests?
+
+## REVIEWER VERDICT — 05/step-3 subscribe-time logs are declarations
+
+Keep the compatibility path — and not as a concession: it is the
+P4-correct reading. A `ReactivityLog` passed to `subscribe(...)` is a
+REGISTRATION-TIME declaration (the caller saying "this action reads X,
+writes Y"), the same rank as runner annotations. What P4 forbids is the
+surface changing from RUN logs. Do NOT widen test rewrites beyond the
+three named files.
+
+The rule:
+
+1. Surface resolution at REGISTRATION, in priority order:
+   annotated `action.writes` (non-empty) → else `immediateLog.writes`
+   (subscribe-with-log path) → else empty. Applied once.
+2. `resubscribe(action, runLog)` NEVER touches the surface — for
+   annotated and unannotated actions alike. This is the only intended
+   v1→v2 semantic change, and the three named files' rewrites already
+   express it.
+3. Architectural placement: move surface registration OUT of
+   `setSchedulerDependencies` entirely — registration sites own it
+   (`subscribePullSchedulerAction` for both the annotation and
+   immediate-log cases; the rehydration path keeps using the annotation
+   as you already have it). `setSchedulerDependencies` becomes
+   reads/edges only and never writes to the write index. This matches
+   the v2 component split (registration owns the surface) and makes the
+   resubscribe path structurally unable to clobber it.
+4. Populate-callback subscribers with no log and no annotation (e.g.
+   `cell.pull()`'s ephemeral effect) keep an empty surface — correct,
+   they are effects.
+
+Expected effect: the direct-subscribe test population (the 12 failing
+files) declares writes in their initial logs, so their surfaces, writer
+edges, demand, and ordering come back without any test edits —
+including the explicitly-legacy
+`should preserve writes when collecting dependencies from ReactivityLog`
+(subscribe-time, so it must pass unchanged) and the retry-preservation
+test (retry resubscribes with the captured log; surface stays the
+registration-time one).
+
+After implementing: run the full suite. If failures remain, list them
+per-test in PROGRESS with a one-line classification — (a) asserts
+run-log surface EVOLUTION (rewrite authorized, name it), (b) anything
+else (STOP with the failure). Do not bulk-rewrite.
+
+Docs: amend WO05 step 2/3 with the declaration rule — own commit:
+`docs(specs): scheduler-v2 WO05 — subscribe-time logs declare the surface`.
+Deferred spec note recorded: P4's text should gain one sentence naming
+the immediate-log declaration channel (rides the later docs change with
+the settled-origin note).
+
+## REVIEWER RESOLUTION — 05/step-3 declaration-rule docs
+
+- [x] 13e6f09a7 — WO05 step 2/3 amended so registration-time `ReactivityLog`
+  writes declare the static surface when annotations are absent, while
+  resubscribe/run logs never change the surface.
+- Recordings: docs-only commit; no `deno fmt`/`deno lint`/`deno check`
+  required.
+
+## IMPLEMENTER STOP — 05/step-3 declaration-rule implementation residuals
+
+Implemented the reviewer verdict narrowly:
+
+- `subscribePullSchedulerAction` resolves the registration-time surface once:
+  non-empty annotated `action.writes` first, else `immediateLog.writes`, else
+  empty; effects still do not register a scheduling surface.
+- `setSchedulerDependencies` no longer reads `log.writes` or writes to the
+  write index; it refreshes reads and returns the already-registered surface.
+- `rehydrateActionFromObservation` now registers the live annotated surface
+  before resubscribing reads, so persisted `currentKnownWrites` never restores
+  the surface by itself.
+- Named test rewrites stayed confined to `scheduler-ordering.test.ts`,
+  `scheduler-observations.test.ts`, and `scheduler-effects.test.ts`.
+
+Verification:
+
+- `deno fmt packages/runner/src/scheduler/pull-subscriptions.ts
+  packages/runner/src/scheduler/dependency-updates.ts
+  packages/runner/src/scheduler/scheduling-writes.ts
+  packages/runner/src/scheduler/dependency-graph.ts
+  packages/runner/src/scheduler/action-run.ts
+  packages/runner/src/scheduler/subscriptions.ts packages/runner/src/scheduler.ts
+  packages/runner/src/runtime.ts packages/runner/test/experimental-options.test.ts
+  packages/runner/test/scheduler-ordering.test.ts
+  packages/runner/test/scheduler-observations.test.ts
+  packages/runner/test/scheduler-effects.test.ts
+  packages/runner/test/scheduler-static-writes.test.ts`: passed
+  (`Checked 13 files`).
+- `deno lint` on the same 13 files: passed (`Checked 13 files`).
+- `deno check` on the same 13 files: passed.
+- `grep -rn "backfillDependentsForNewWrites\|pruneDependentsForCurrentWrites"
+  packages/runner/src/`: no matches.
+- `grep -rn "schedulerHistoricalMightWrite\|historicalMightWrite" packages
+  --include="*.ts"`: no matches.
+- `grep -rn
+  "buildKnownSchedulingWrites\|historicalMightWrite\|diffSchedulingWrites\|pruneStructuralAncestorWrites"
+  packages/runner/src`: no matches.
+- Focused tests passed:
+  - `test/scheduler-static-writes.test.ts`: `1 passed (2 steps)`.
+  - `test/scheduler-ordering.test.ts`: `2 passed (17 steps)`.
+  - `test/scheduler-observations.test.ts`: `1 passed (22 steps)`.
+  - `test/scheduler-effects.test.ts`: `1 passed (20 steps)`.
+  - `test/experimental-options.test.ts`: `1 passed (11 steps)`.
+
+Full suite failure:
+
+- `cd packages/runner && deno task test`: failed, `588 passed
+  (3091 steps)`, `4 failed (4 steps)`, `0 ignored (10 steps)`, `2m5s`.
+- Per-test classification required by the reviewer verdict:
+  - `test/scheduler-core.test.ts` / `captures exact action runs for one
+    reactive update`: (b) not run-log surface evolution. The action-run trace
+    still expects an effect's `declaredWrites` length to be 1, but effects now
+    have no registered scheduling surface.
+  - `test/scheduler-pull-handlers.test.ts` / `should wait for dynamically
+    created lift before dispatching to downstream handler`: (a) asserts
+    run-log surface evolution/setup. The test seeds the lift surface through
+    `resubscribe(liftAction, log)`, which v2 now forbids.
+  - `test/scheduler-pull.test.ts` / `should not re-run an effect for unrelated
+    pending dependency collection`: (b) not run-log surface evolution. With
+    effects now empty-surface demand roots, a child computation subscribed
+    while the effect runs is demanded and runs once.
+  - `test/scheduler-timing.test.ts` / `should auto-debounce slow writeful
+    effects after threshold runs`: (b) not run-log surface evolution. The test
+    classifies a writeful effect by its old scheduling writes; effects now have
+    an empty scheduling surface and are treated as pull demand roots.
+
+Stopped per the reviewer verdict because three residual failures are class
+(b). No rewrites outside the three named files were attempted.
+
+## REVIEWER VERDICT — 05/step-3 residuals (effect-surface proxy)
+
+Effects being surface-less is CORRECT (spec §4.2: no scheduler-visible
+output) and stays. The three class-(b) residuals are v1's
+"writes==0 ⇒ pull-demand-root" PROXY breaking, not your change being
+wrong. Per-test rulings:
+
+1. `scheduler-core` / "captures exact action runs ...": authorized
+   rewrite (add to named files): an effect's `declaredWrites` in the
+   action-run trace is now 0 — that is the v2 truth, the test encoded
+   the v1 run-learned surface.
+2. `scheduler-pull-handlers` / dynamic-lift seeding: your class-(a)
+   call is right — authorized rewrite, minimal form: seed the lift's
+   surface through subscribe-with-log (the declaration channel) or an
+   annotation, not post-run `resubscribe`.
+3. `scheduler-pull` / "unrelated pending dependency collection": the
+   new behavior IS spec §5.3 arriving early — a computation created
+   during any LIVE node's run (every effect is live) gets one
+   provisional first run. Authorized rewrite of this single test to the
+   v2 expectation, with this comment above the changed assertion:
+   `// v2 (spec §5.3): children created during a live effect's run get`
+   `// provisional first-run demand; the v1 writeful-effect exception`
+   `// keyed on run-learned writes, which no longer exist.`
+4. `scheduler-timing` / auto-debounce: NO test rewrite — the mechanism
+   must be fixed, or every ordinary sink loses auto-debounce (violates
+   spec §8.2). Two edits:
+   - `cell.ts` `pull()`: subscribe its ephemeral effect with
+     `noDebounce: true` (the pull-root protection becomes EXPLICIT
+     instead of riding the writes proxy);
+   - the auto-debounce eligibility gate (`canAutomaticallyDebounce` in
+     delay-control): drop the `isPullDemandRootEffect` exemption,
+     keeping effect-only + `noDebounce` opt-out + thresholds.
+   Keep `isPullDemandRootEffect` itself and its OTHER call sites
+   (demand context, snapshot) unchanged in this phase — with effects
+   surface-less it now returns true for all effects, which matches the
+   §5.3 semantics accepted in (3); the predicate dissolves entirely in
+   phase 3b.
+   The failing timing test must then pass AS WRITTEN. If any other
+   timing/throttle test fails after this (e.g. one asserting pull
+   roots never debounce via the proxy), STOP with the name.
+
+Bookkeeping: named-rewrite list for this work order now reads:
+ordering, observations, effects, core (trace expectation), pull
+(single §5.3 test), pull-handlers (seeding form). Docs amendment —
+`docs(specs): scheduler-v2 WO05 — effect surfaces, pull-root opt-out, §5.3 early`
+— before the code commit. Deferred spec notes now three: immediate-log
+declaration channel (P4), settled-origin rule (§7.6), and §8.2's
+exemption being noDebounce/pull-root-by-option rather than a writes
+proxy.
+
+Then: full suite green → commit step 2+3 (one commit, message from
+step 3), then steps 4-6 as written.
+
+## REVIEWER RESOLUTION — 05/step-3 residual-rule docs
+
+- [x] 315a34866 — WO05 step 3 amended for effect-empty-surface trace
+  expectations, subscribe-time seeding of dynamic lifts, early §5.3 provisional
+  child demand, and explicit `noDebounce` pull-root auto-debounce opt-out.
+- Recordings: docs-only commit; no `deno fmt`/`deno lint`/`deno check`
+  required.
+
+## IMPLEMENTER STOP — 05/step-3 residual-rule timing proxy follow-up
+
+Applied the reviewer verdict narrowly:
+
+- `cell.ts` `pull()` subscribes its ephemeral effect with `noDebounce: true`.
+- Auto-debounce eligibility no longer exempts `isPullDemandRootEffect`; it keeps
+  effect-only eligibility and explicit `noDebounce` opt-out.
+- `scheduler-core.test.ts` action-run trace now expects effect
+  `declaredWrites` to be empty while preserving the actual write assertion.
+- `scheduler-pull-handlers.test.ts` seeds the dynamic lift surface through
+  `subscribe(..., ReactivityLog)` rather than `resubscribe(...)`.
+- `scheduler-pull.test.ts` rewrites the single §5.3 provisional child-demand
+  expectation with the reviewer-specified comment.
+
+Verification before STOP:
+
+- `deno fmt` on the 20 touched TS/test files: passed (`Checked 20 files`).
+- `deno lint` on the same 20 files: passed (`Checked 20 files`).
+- `deno check` on the same 20 files: passed.
+- Focused residual reruns:
+  - `test/scheduler-core.test.ts`: `1 passed (25 steps)`.
+  - `test/scheduler-pull-handlers.test.ts`: `1 passed (11 steps)`.
+  - `test/scheduler-pull.test.ts`: `1 passed (26 steps)`.
+  - `test/scheduler-timing.test.ts`: failed, `0 passed (20 steps)`,
+    `1 failed (1 step)`.
+
+STOP condition from reviewer verdict:
+
+- `test/scheduler-timing.test.ts` / `should not auto-debounce write-less pull
+  demand root effects` still asserts the old proxy behavior. After removing the
+  `isPullDemandRootEffect` auto-debounce exemption, it observes debounce `100`
+  instead of `undefined` at `scheduler-timing.test.ts:396`.
+
+No rewrite was attempted because the reviewer explicitly said to STOP if any
+other timing/throttle test fails after the auto-debounce cleanup.
+
+## REVIEWER VERDICT — 05/step-3 timing-proxy companion test
+
+Correct stop; this is the companion assertion of the same dead proxy,
+from the other side. "Write-less effect" no longer means "pull root" —
+it means an ordinary read-only sink, which is precisely what §8.2 wants
+auto-debounced when slow. The pull-root protection is now the explicit
+`noDebounce: true` that `pull()` sets.
+
+Authorized rewrite of this single test (added to the named list):
+
+1. Rename `should not auto-debounce write-less pull demand root effects`
+   → `auto-debounces slow write-less effects; pull roots opt out via noDebounce`.
+2. Flip the main assertion: after threshold runs, the bare write-less
+   slow effect HAS debounce 100 (the value your run already observed).
+3. In the same test (or a sibling `it` if cleaner), assert the
+   protected case explicitly: an identical slow effect subscribed with
+   `noDebounce: true` keeps debounce `undefined` after the same number
+   of runs. Skip this half only if an existing test in the file already
+   covers the `noDebounce` opt-out for effects — check first and note
+   which.
+4. Comment above the flipped assertion:
+   `// v2 (spec §8.2): the auto-debounce exemption is the explicit`
+   `// noDebounce opt-out (pull() sets it); v1 exempted any write-less`
+   `// effect via the demand-root writes proxy, which no longer exists.`
+
+Then full suite; if green, proceed with the commit sequence from the
+prior verdict (steps 2+3 commit, then 4-6). Any further failure of any
+shape: STOP as usual.
+
+## IMPLEMENTER RESOLUTION — 05/step-3 timing companion rewrite
+
+Applied the verdict:
+
+- `scheduler-timing.test.ts` renamed the write-less effect test and now asserts
+  that a bare slow write-less effect gets auto-debounce `100`.
+- The same test asserts an identical slow effect subscribed with
+  `noDebounce: true` keeps debounce `undefined`.
+- Existing `noDebounce` coverage in this file was cycle-aware debounce only, so
+  the explicit effect auto-debounce opt-out assertion was added here.
+
+Verification:
+
+- `deno fmt` on the 20 touched TS/test files: passed (`Checked 20 files`).
+- `deno lint` on the same 20 files: passed (`Checked 20 files`).
+- `deno check` on the same 20 files: passed.
+- Contract greps:
+  - `grep -rn "backfillDependentsForNewWrites\|pruneDependentsForCurrentWrites"
+    packages/runner/src/`: no matches.
+  - `grep -rn "schedulerHistoricalMightWrite\|historicalMightWrite" packages
+    --include="*.ts"`: no matches.
+  - `grep -rn
+    "buildKnownSchedulingWrites\|historicalMightWrite\|diffSchedulingWrites\|pruneStructuralAncestorWrites"
+    packages/runner/src`: no matches.
+- Focused named rewrites passed:
+  - `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-static-writes.test.ts test/scheduler-ordering.test.ts
+    test/scheduler-observations.test.ts test/scheduler-effects.test.ts
+    test/experimental-options.test.ts`: `6 passed (72 steps)`,
+    `0 failed`.
+  - `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-core.test.ts test/scheduler-pull-handlers.test.ts
+    test/scheduler-pull.test.ts test/scheduler-timing.test.ts`:
+    `4 passed (83 steps)`, `0 failed`.
+- `cd packages/runner && deno task test`: `ok | 592 passed (3095 steps) |
+  0 failed | 0 ignored (10 steps) (2m4s)`.
+
+## 05/step-2+3
+
+- [x] 6a9377bbe — scheduling writes are static declared surfaces registered at
+  subscribe time.
+- Deviations: reviewer-authorized residual rewrites documented above; effects
+  have no scheduler-visible write surface, and pull-root debounce protection is
+  the explicit `noDebounce` opt-out.
+- Recordings: see the `IMPLEMENTER RESOLUTION — 05/step-3 timing companion
+  rewrite` verification above.
+
+## 05/step-4
+
+- [x] no commit — clean removal held; no ordering-only effect write fallback
+  was needed.
+- Deviations: none.
+- Recordings:
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-ordering.test.ts test/scheduler-convergence.test.ts`:
+    passed, `3 passed (32 steps)`, `0 failed`.
+
+## 05/step-5
+
+- [x] 088100973 — added a dev warning for computation writes outside the
+  declared static surface.
+- Deviations: none.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler/action-run.ts
+    packages/runner/test/scheduler-static-writes.test.ts`: passed
+    (`Checked 2 files`).
+  - `deno lint packages/runner/src/scheduler/action-run.ts
+    packages/runner/test/scheduler-static-writes.test.ts`: passed
+    (`Checked 2 files`).
+  - `deno check packages/runner/src/scheduler/action-run.ts
+    packages/runner/test/scheduler-static-writes.test.ts`: passed.
+  - `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-static-writes.test.ts`: passed, `1 passed (3 steps)`,
+    `0 failed`.
+
+## 05/phase-end
+
+- [x] pending — WO05 exit checklist self-check complete.
+- Deviations: none.
+- Recordings:
+  - `cd packages/runner && deno task test`: passed,
+    `592 passed (3096 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m4s`.
+  - Phase benchmark command passed:
+    `cd packages/runner && deno bench --allow-read --allow-write --allow-net
+    --allow-ffi --allow-env --no-check test/scheduler.bench.ts
+    test/scheduler-demand-roots.bench.ts
+    test/scheduler-stale-propagation.bench.ts`.
+  - Benchmark deltas vs 05/step-0 baseline:
+    - `test/scheduler.bench.ts`:
+      - `Scheduler - 100 computations, shared entity reads`: 19.4 ms -> 19.7
+        ms (+1.5%).
+      - `Scheduler - wide graph (1 source, 100 readers)`: 17.9 ms -> 17.3 ms
+        (-3.4%).
+      - `Scheduler - 100 entities, sparse deps`: 17.3 ms -> 17.7 ms (+2.3%).
+      - `Scheduler - deep chain (50 levels)`: 11.5 ms -> 11.2 ms (-2.6%).
+      - `Scheduler - diamond pattern (10 diamonds)`: 9.6 ms -> 9.7 ms
+        (+1.0%).
+      - `Scheduler - repeated dirty marking`: 7.7 ms -> 7.7 ms (+0.0%).
+      - `Scheduler - subscribe/unsubscribe cycle (100x)`: 5.8 ms -> 5.6 ms
+        (-3.4%).
+      - `Scheduler - pull with resubscribe (50 pulls)`: 291.3 ms -> 288.4 ms
+        (-1.0%).
+      - `Overhead - setup/teardown only`: 1.3 ms -> 1.4 ms (+7.7%).
+      - `Overhead - create 100 cells (getCell + set)`: 15.4 ms -> 15.5 ms
+        (+0.6%).
+      - `Overhead - 100x getCell only (no set)`: 1.6 ms -> 1.6 ms (+0.0%).
+      - `Overhead - 100x set on existing cells`: 15.7 ms -> 15.5 ms (-1.3%).
+      - `Overhead - runtime.idle() empty`: 1.3 ms -> 1.2 ms (-7.7%).
+      - `Overhead - commit after 100 sets`: 15.9 ms -> 16.1 ms (+1.3%).
+      - `Overhead - empty commit`: 1.3 ms -> 1.2 ms (-7.7%).
+      - `Overhead - 100 raw tx.write + commit`: 7.1 ms -> 7.6 ms (+7.0%).
+      - `Utility - sortAndCompactPaths (100 paths)`: 21.7 us -> 21.1 us
+        (-2.8%).
+      - `Utility - sortAndCompactPaths (1000 paths)`: 280.5 us -> 281.3 us
+        (+0.3%).
+      - `Utility - addressesToPathByEntity (100 paths)`: 14.9 us -> 14.8 us
+        (-0.7%).
+      - `Utility - addressesToPathByEntity (1000 paths)`: 150.3 us -> 152.1
+        us (+1.2%).
+      - `Scheduler - bare subscribe (100x)`: 1.7 ms -> 1.6 ms (-5.9%).
+      - `Scheduler - subscribe 100 actions reading same entity`: 1.7 ms -> 1.6
+        ms (-5.9%).
+      - `Scheduler - resubscribe cycle (100x)`: 1.4 ms -> 1.3 ms (-7.1%).
+    - `test/scheduler-demand-roots.bench.ts`:
+      - `Scheduler demand roots - effect demand root`: 147.1 ms -> 144.1 ms
+        (-2.0%).
+      - `Scheduler demand roots - event demand root`: 131.8 ms -> 129.4 ms
+        (-1.8%).
+      - `Scheduler demand roots - mixed effect and event roots`: 169.0 ms ->
+        172.8 ms (+2.2%).
+      - `Scheduler demand roots - parent clears generated children`: 81.3 ms ->
+        82.6 ms (+1.6%).
+    - `test/scheduler-stale-propagation.bench.ts`:
+      - `Scheduler stale propagation - chain`: 105.5 ms -> 97.3 ms (-7.8%).
+      - `Scheduler stale propagation - diamond`: 94.7 ms -> 89.4 ms (-5.6%).
+      - `Scheduler stale propagation - wide fanout`: 244.0 ms -> 248.0 ms
+        (+1.6%).
+      - `Scheduler stale propagation - dynamic deps`: 82.9 ms -> 74.7 ms
+        (-9.9%).
+      - `Scheduler stale propagation - unchanged recompute`: 74.7 ms -> 73.2
+        ms (-2.0%).
+  - No benchmark regression exceeded 10%.
+- Exit checklist:
+  - `grep -rn
+    "buildKnownSchedulingWrites\|historicalMightWrite\|diffSchedulingWrites\|pruneStructuralAncestorWrites"
+    packages/runner/src`: no matches.
+  - `grep -rn "log\.writes"
+    packages/runner/src/scheduler/dependency-updates.ts`: no matches;
+    inspection confirms `setSchedulerDependencies` reads only `log.reads` and
+    `log.shallowReads`, and returns `state.writeIndex.getSchedulingWrites`.
+  - Observation payload compatibility held: `attachSchedulerActionObservation`
+    still sets both `currentKnownWrites` and `declaredWrites` to the registered
+    static surface.
+  - Static write fixtures A/B and the new surface-violation fixture are green:
+    `test/scheduler-static-writes.test.ts` passed, `1 passed (3 steps)`,
+    `0 failed`.
+  - Test rewrites were confined to the reviewer-approved named files; step 4
+    clean removal held without the decision-tree fallback.
+
+## REVIEWER RESOLUTION — PR #4098 review findings
+
+- [x] pending — immediate-log write surfaces survive persistence and
+  rehydration.
+- Findings addressed (Codex/cubic review on PR #4098), red-first:
+  - Actions whose static surface came from `subscribe(action,
+    ReactivityLog)` (no `.writes` annotation) persisted
+    `currentKnownWrites: []` (annotation-only `declaredWrites`), and
+    `rehydrateActionFromObservation` resolved the surface with no
+    immediate log, so a restored action read as writing nothing.
+    Observations now persist the live registered surface
+    (`getSchedulingWrites(action) ?? declaredWrites`) and rehydration
+    resolves through `resolveRegistrationSurface(action, { writes:
+    observation.currentKnownWrites })`, mirroring registration
+    (`test/scheduler-observations.test.ts` "persists and rehydrates
+    immediate-log write surfaces").
 - Deviations: none.

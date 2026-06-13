@@ -260,7 +260,10 @@ describe("pull-based scheduling", () => {
 
     expect(effectRuns).toBe(1);
     expect(effectResult.get()).toBe(1);
-    expect(unrelatedRuns).toBe(0);
+    // v2 (spec §5.3): children created during a live effect's run get
+    // provisional first-run demand; the v1 writeful-effect exception
+    // keyed on run-learned writes, which no longer exist.
+    expect(unrelatedRuns).toBe(1);
   });
 
   it("should re-run an effect for transitively related pending dependency collection", async () => {

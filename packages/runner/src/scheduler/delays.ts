@@ -74,12 +74,10 @@ export class SchedulerDelays {
     action: Action,
     context: {
       readonly effects: ReadonlySet<Action>;
-      readonly isPullDemandRootEffect: (action: Action) => boolean;
     },
   ): boolean {
     if (this.noDebounce.get(action)) return false;
-    if (!context.effects.has(action)) return false;
-    return !context.isPullDemandRootEffect(action);
+    return context.effects.has(action);
   }
 
   maybeAutoDebounce(

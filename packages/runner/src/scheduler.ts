@@ -51,8 +51,8 @@ import {
   stopSchedulerDiagnosis,
 } from "./scheduler/diagnosis.ts";
 import {
-  backfillDependentsForNewWrites,
   type DependencyGraphState,
+  registerDependentsForWriterSurface,
   updateDependentEdgesForLog,
 } from "./scheduler/dependency-graph.ts";
 import { SchedulerMaterializers } from "./scheduler/materializers.ts";
@@ -162,6 +162,7 @@ import {
   type WritePropagationState,
 } from "./scheduler/write-propagation.ts";
 import {
+  resolveRegistrationSurface,
   resubscribePullSchedulerAction,
   subscribePullSchedulerAction,
 } from "./scheduler/pull-subscriptions.ts";
@@ -596,9 +597,27 @@ export class Scheduler {
       return false;
     }
 
+    // Annotation first; otherwise restore the persisted live surface —
+    // mirroring registration, where subscribe's ReactivityLog supplies the
+    // surface for annotation-less actions.
+    const surface = resolveRegistrationSurface(action, {
+      reads: [],
+      shallowReads: [],
+      writes: observation.currentKnownWrites,
+    });
+    if (observation.actionKind !== "effect" && surface.length > 0) {
+      this.writeIndex.setSurface(action, surface);
+      registerDependentsForWriterSurface(
+        this.dependencyGraphState,
+        action,
+        surface,
+      );
+    }
+
     this.resubscribe(action, {
       reads: observation.reads,
       shallowReads: observation.shallowReads,
+      // Static dependency setup ignores this in favor of the live annotation.
       writes: observation.currentKnownWrites,
     }, {
       isEffect: observation.actionKind === "effect",
@@ -1152,9 +1171,7 @@ export class Scheduler {
   // ============================================================
 
   /**
-   * Returns the active scheduling write set for an action. By default this is
-   * the current-known write set; experimental historical mode returns the
-   * cumulative legacy view instead.
+   * Returns the action's static write surface.
    */
   getMightWrite(action: Action): IMemorySpaceAddress[] | undefined {
     return this.writeIndex.getSchedulingWrites(action);
@@ -1660,10 +1677,7 @@ export class Scheduler {
   }
 
   private createWriteIndex(): SchedulerWriteIndex {
-    return new SchedulerWriteIndex({
-      useHistoricalMightWrite: () =>
-        this.runtime.experimental.schedulerHistoricalMightWrite === true,
-    });
+    return new SchedulerWriteIndex();
   }
 
   private createPullDemandState(): PullDemandState {
@@ -1690,7 +1704,6 @@ export class Scheduler {
       effects: this.effects,
       dirty: this.staleness.dirty,
       pending: this.pending,
-      isPullDemandRootEffect: (action) => this.isPullDemandRootEffect(action),
       queueExecution: () => this.queueExecution(),
       logDebounce: (message) =>
         logger.debug("schedule-debounce", () => [message]),
@@ -1737,14 +1750,6 @@ export class Scheduler {
     return {
       writeIndex: this.writeIndex,
       dependencies: this.dependencies,
-      dependencyGraph: this.dependencyGraphState,
-      backfillDependentsForNewWrites: (action, addedWrites) => {
-        backfillDependentsForNewWrites(
-          this.dependencyGraphState,
-          action,
-          addedWrites,
-        );
-      },
     };
   }
 
@@ -1953,6 +1958,12 @@ export class Scheduler {
       markEffectConditionallyScheduled: (action) =>
         this.markEffectConditionallyScheduled(action),
       updateDependents: (action, log) => this.updateDependents(action, log),
+      registerWriterDependents: (action, writes) =>
+        registerDependentsForWriterSurface(
+          this.dependencyGraphState,
+          action,
+          writes,
+        ),
       scheduleAffectedEffects: (action) => this.scheduleAffectedEffects(action),
       queueExecution: () => this.queueExecution(),
       getActionId: (action) => this.getActionId(action),
@@ -2256,10 +2267,6 @@ export class Scheduler {
         getSchedulerActionTelemetryInfo(target),
       getSchedulingWrites: (target) =>
         this.writeIndex.getSchedulingWrites(target),
-      getCurrentKnownSchedulingWrites: (target) =>
-        this.writeIndex.currentKnownWrites.get(target),
-      getHistoricalMightWrite: (target) =>
-        this.writeIndex.historicalMightWrite.get(target),
       getMaterializerWriteEnvelopes: (target) =>
         this.materializers.getMaterializerWriteEnvelopes(target),
       getDebounce: (target) => this.delays.getDebounce(target),

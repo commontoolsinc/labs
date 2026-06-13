@@ -374,7 +374,7 @@ describe("debounce and throttling", () => {
     expect(runtime.scheduler.getDebounce(effect)).toBe(100);
   });
 
-  it("should not auto-debounce write-less pull demand root effects", () => {
+  it("auto-debounces slow write-less effects; pull roots opt out via noDebounce", () => {
     const effect: Action = () => {};
     runtime.scheduler.subscribe(effect, {
       reads: [],
@@ -393,7 +393,29 @@ describe("debounce and throttling", () => {
 
     scheduler.maybeAutoDebounce(effect);
 
-    expect(runtime.scheduler.getDebounce(effect)).toBeUndefined();
+    // v2 (spec §8.2): the auto-debounce exemption is the explicit
+    // noDebounce opt-out (pull() sets it); v1 exempted any write-less
+    // effect via the demand-root writes proxy, which no longer exists.
+    expect(runtime.scheduler.getDebounce(effect)).toBe(100);
+
+    const protectedEffect: Action = () => {};
+    runtime.scheduler.subscribe(protectedEffect, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, { isEffect: true, noDebounce: true });
+
+    scheduler.actionStats.set(scheduler.getActionId(protectedEffect), {
+      runCount: 3,
+      totalTime: 180,
+      averageTime: 60,
+      lastRunTime: 60,
+      lastRunTimestamp: performance.now(),
+    });
+
+    scheduler.maybeAutoDebounce(protectedEffect);
+
+    expect(runtime.scheduler.getDebounce(protectedEffect)).toBeUndefined();
   });
 
   it("should not auto-debounce fast actions", async () => {

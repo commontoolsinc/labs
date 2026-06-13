@@ -1048,10 +1048,9 @@ describe("handler dependency pulling", () => {
       liftOutput.withTx(actionTx).send(input * 2);
     };
 
-    // Resubscribe the lift - NOT scheduled immediately
+    // Subscribe the lift with a registration-time surface - NOT scheduled immediately
     // This tests that the lift is pulled when handler B needs it
-    // Use resubscribe to set up triggers without scheduling immediate execution
-    runtime.scheduler.resubscribe(liftAction, {
+    runtime.scheduler.subscribe(liftAction, {
       reads: [toMemorySpaceAddress(liftInput.getAsNormalizedFullLink())],
       shallowReads: [],
       writes: [toMemorySpaceAddress(liftOutput.getAsNormalizedFullLink())],
