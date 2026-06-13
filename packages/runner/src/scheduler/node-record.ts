@@ -6,7 +6,9 @@ export type NodeStatus = "never-ran" | "clean" | "invalid";
 
 export interface SchedulerNode {
   readonly action: Action;
-  readonly kind: NodeKind;
+  // Mutable for the one sanctioned transition: computation → effect
+  // promotion on re-registration ("once an effect, stays an effect").
+  kind: NodeKind;
   parentAction?: Action;
   children?: Set<Action>;
   status: NodeStatus;
@@ -35,9 +37,16 @@ export class NodeRegistry {
     const existing = this.records.get(action);
     if (existing) {
       if (existing.kind !== kind) {
-        throw new Error(
-          `Scheduler action re-registered as ${kind}; was ${existing.kind}`,
-        );
+        // v1 parity: a computation re-subscribed with `isEffect: true` is
+        // promoted ("once an effect, stays an effect"). Demotion has no
+        // sanctioned caller and stays an error.
+        if (existing.kind === "computation" && kind === "effect") {
+          existing.kind = "effect";
+        } else {
+          throw new Error(
+            `Scheduler action re-registered as ${kind}; was ${existing.kind}`,
+          );
+        }
       }
       this.activate(existing);
       return existing;
@@ -102,6 +111,16 @@ export class NodeRegistry {
   parentOf(action: Action): SchedulerNode | undefined {
     const parentAction = this.records.get(action)?.parentAction;
     return parentAction ? this.records.get(parentAction) : undefined;
+  }
+
+  /**
+   * The captured parent ACTION, independent of whether the parent's record
+   * is (still/already) registered — exact parity with the v1 parent WeakMap.
+   * Demand and trace checks key off action objects, so they must see the
+   * parent through registration churn windows where parentOf() is undefined.
+   */
+  parentActionOf(action: Action): Action | undefined {
+    return this.records.get(action)?.parentAction;
   }
 
   childrenOf(action: Action): ReadonlySet<SchedulerNode> | undefined {

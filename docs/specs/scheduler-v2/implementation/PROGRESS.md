@@ -3826,3 +3826,23 @@ CT-1316, and the differing value is exact (registry `none` vs WeakMap
     `1 passed (5 steps)`, `0 failed`.
   - `cd packages/runner && deno task test`: passed,
     `594 passed (3107 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m6s`.
+
+## REVIEWER RESOLUTION — PR #4101 review findings
+
+- [x] pending — computation→effect promotion + raw parent-action access.
+- Findings addressed (Codex/cubic review on PR #4101), red-first:
+  1. Strict kind re-registration threw when an action first subscribed as a
+     computation was re-subscribed with `isEffect: true`. v1's latch allowed
+     that promotion ("once an effect, stays an effect");
+     `NodeRegistry.register` now promotes computation→effect in place and
+     still throws on demotion (cutover fixture "promotes a computation to an
+     effect on re-registration").
+  2. `parentOf(x)?.action` collapsed to undefined while the parent's record
+     was unregistered (registration churn), but demand/trace checks key off
+     action objects (v1 WeakMap parity). Added `parentActionOf()` raw
+     accessor and switched the consumer call sites (demand, action-run
+     trace, graph-snapshot, topology, pull-subscriptions); `parentOf()`
+     record resolution is unchanged for callers that need the record
+     (cutover fixture "keeps captured parent actions reachable before the
+     parent registers").
+- Deviations: none.

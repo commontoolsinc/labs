@@ -792,4 +792,69 @@ describe("scheduler v2 cutover fixtures", () => {
     for (const cancel of stickyCancels) cancel();
     for (const cancel of parentRSubscribeCancels) cancel();
   });
+
+  it("promotes a computation to an effect on re-registration", async () => {
+    // v1 parity: updateSchedulerActionType allowed an action first seen as a
+    // computation to be promoted by a later `isEffect: true` subscription
+    // ("once an effect, stays an effect"). Strict kind re-registration must
+    // not throw on that path.
+    const registry = new NodeRegistry();
+    const promoted: Action = function promotedAction() {};
+    registry.register(promoted, "computation");
+    expect(registry.isComputation(promoted)).toBe(true);
+
+    const record = registry.register(promoted, "effect");
+    expect(record.kind).toBe("effect");
+    expect(registry.isEffect(promoted)).toBe(true);
+    expect(registry.isComputation(promoted)).toBe(false);
+
+    // End-to-end: a live re-subscription with isEffect must not throw.
+    const source = runtime.getCell<number>(
+      space,
+      "cutover-promotion-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+    const sourceAddress = toMemorySpaceAddress(
+      source.getAsNormalizedFullLink(),
+    );
+
+    const reader: Action = function promotionReader(actionTx) {
+      source.withTx(actionTx).get();
+    };
+    const firstCancel = runtime.scheduler.subscribe(reader, {
+      reads: [sourceAddress],
+      shallowReads: [],
+      writes: [],
+    });
+    const promoteCancel = runtime.scheduler.subscribe(reader, {
+      reads: [sourceAddress],
+      shallowReads: [],
+      writes: [],
+    }, { isEffect: true });
+    await runtime.scheduler.idle();
+    firstCancel();
+    promoteCancel();
+  });
+
+  it("keeps captured parent actions reachable before the parent registers", () => {
+    // v1 parity: the parent edge was a WeakMap keyed by action objects, so
+    // demand checks could consult the parent action even when its record was
+    // not (yet) registered. parentActionOf() preserves that raw access.
+    const registry = new NodeRegistry();
+    const lazyParent: Action = function lazyParent() {};
+    const lazyChild: Action = function lazyChild() {};
+    registry.register(lazyChild, "computation");
+    registry.linkParent(lazyChild, lazyParent);
+
+    expect(registry.parentOf(lazyChild)).toBeUndefined();
+    expect(registry.parentActionOf(lazyChild)).toBe(lazyParent);
+
+    registry.register(lazyParent, "effect");
+    expect(registry.parentOf(lazyChild)?.action).toBe(lazyParent);
+    expect(registry.parentActionOf(lazyChild)).toBe(lazyParent);
+  });
 });

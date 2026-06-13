@@ -50,7 +50,7 @@ export function topologicalSort(
   actions: Set<Action>,
   dependencies: WeakMap<Action, ReactivityLog>,
   mightWrite: WeakMap<Action, IMemorySpaceAddress[]>,
-  nodes?: Pick<NodeRegistry, "parentOf">,
+  nodes?: Pick<NodeRegistry, "parentActionOf">,
   dependents?: WeakMap<Action, Set<Action>>,
   getAdditionalWrites?: (
     action: Action,
@@ -126,7 +126,7 @@ export function topologicalSort(
   // should win once a parent actually reads a child's result.
   if (nodes) {
     for (const child of actions) {
-      const parent = nodes.parentOf(child)?.action;
+      const parent = nodes.parentActionOf(child);
       if (parent && actions.has(parent)) {
         const graphParent = graph.get(parent)!;
         const graphChild = graph.get(child)!;
@@ -160,8 +160,8 @@ export function topologicalSort(
 
       // Sort by: prefer no unvisited parent, then by in-degree
       unvisited.sort((a, b) => {
-        const aParent = nodes?.parentOf(a)?.action;
-        const bParent = nodes?.parentOf(b)?.action;
+        const aParent = nodes?.parentActionOf(a);
+        const bParent = nodes?.parentActionOf(b);
         const aHasUnvisitedParent = aParent && !visited.has(aParent) &&
           actions.has(aParent);
         const bHasUnvisitedParent = bParent && !visited.has(bParent) &&

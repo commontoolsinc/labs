@@ -52,7 +52,7 @@ export function buildSchedulerGraphSnapshot(
     actionById.set(id, action);
 
     // Get parent-child relationships
-    const parent = state.nodes.parentOf(action)?.action;
+    const parent = state.nodes.parentActionOf(action);
     const parentId = parent ? state.getActionId(parent) : undefined;
     const children = state.nodes.childrenOf(action);
     const childCount = children ? children.size : undefined;
@@ -172,7 +172,7 @@ export function buildSchedulerGraphSnapshot(
 
   // Add parent-child edges
   for (const action of actions) {
-    const parent = state.nodes.parentOf(action)?.action;
+    const parent = state.nodes.parentActionOf(action);
     if (!parent) continue;
 
     const parentId = state.getActionId(parent);

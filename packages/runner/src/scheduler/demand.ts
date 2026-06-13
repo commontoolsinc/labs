@@ -129,7 +129,7 @@ function hasDemandedParentContext(
   action: Action,
   visited = new Set<Action>(),
 ): boolean {
-  const parent = state.nodes.parentOf(action)?.action;
+  const parent = state.nodes.parentActionOf(action);
   if (!parent) return false;
 
   if (isLiveEffect(state, parent)) {

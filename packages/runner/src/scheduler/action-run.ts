@@ -169,7 +169,7 @@ export function appendActionRunTrace(state: {
   readonly recordedAt?: number;
   readonly maxHistory?: number;
 }): void {
-  const parentAction = state.nodes.parentOf(args.action)?.action;
+  const parentAction = state.nodes.parentActionOf(args.action);
   const declaredWrites = (state.getSchedulingWrites(args.action) ?? []).map(
     toActionRunTraceAddress,
   );
