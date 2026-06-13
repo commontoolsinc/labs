@@ -83,7 +83,6 @@ describe("recordCfcTriggerRead dedup keys", () => {
 function makeNotificationState(args: {
   action: Action;
   triggerIndex: SchedulerTriggerIndex;
-  inFlightSources?: WeakMap<Action, Set<IStorageTransaction>>;
   actionChangeGroups?: WeakMap<Action, ChangeGroup>;
 }): StorageNotificationState {
   return {
@@ -97,7 +96,6 @@ function makeNotificationState(args: {
     effects: new Set([args.action]),
     pending: new Set(),
     dirty: new Set(),
-    inFlightSources: args.inFlightSources ?? new WeakMap(),
     conditionallyScheduledEffects: new Map(),
     getActionId: () => "test-action",
     recordCellUpdate: () => {},
@@ -156,13 +154,10 @@ describe("trigger reads follow the scheduling decision", () => {
   ) {
     it(`${mode}: skip-own-commit-source records no trigger read`, () => {
       const action: Action = () => {};
-      const sourceTx = {} as IStorageTransaction;
-      const inFlightSources = new WeakMap<Action, Set<IStorageTransaction>>();
-      inFlightSources.set(action, new Set([sourceTx]));
+      const sourceTx = { sourceAction: action } as IStorageTransaction;
       const state = makeNotificationState({
         action,
         triggerIndex: makeTriggerIndexFor(action),
-        inFlightSources,
       });
 
       process(state, makeCommitNotification(sourceTx));
@@ -216,25 +211,24 @@ describe("trigger reads survive failed runs", () => {
   }): Promise<void> {
     const action: Action = () => {};
     const tx = { tx: {} } as IExtendedStorageTransaction;
-    return new Promise((resolve) => {
-      watchReactiveActionCommit({
-        action,
-        tx,
-        log: { reads: [], shallowReads: [], writes: [] },
-        retries: args.retries ?? new WeakMap(),
-        pending: new Set(),
-        commitPromise: Promise.resolve(
-          { error: args.error } as Awaited<
-            ReturnType<IExtendedStorageTransaction["commit"]>
-          >,
-        ),
-        resubscribe: () => {},
-        markDirectDirty: () => {},
-        queueExecution: () => {},
-        removeInFlightSource: () => resolve(),
-        restoreCfcTriggerReads: args.onRestore,
-      });
+    const commitPromise = Promise.resolve(
+      { error: args.error } as Awaited<
+        ReturnType<IExtendedStorageTransaction["commit"]>
+      >,
+    );
+    watchReactiveActionCommit({
+      action,
+      tx,
+      log: { reads: [], shallowReads: [], writes: [] },
+      retries: args.retries ?? new WeakMap(),
+      pending: new Set(),
+      commitPromise,
+      resubscribe: () => {},
+      markDirectDirty: () => {},
+      queueExecution: () => {},
+      restoreCfcTriggerReads: args.onRestore,
     });
+    return commitPromise.then(() => undefined);
   }
 
   it("restores consumed trigger reads when a commit conflict re-runs", async () => {

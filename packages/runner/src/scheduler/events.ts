@@ -509,6 +509,7 @@ export async function dispatchQueuedEvent(state: {
   const tx = state.runtime.edit();
   tx.dispatchedEventId = queuedEvent.id;
   tx.tx.immediate = true;
+  tx.tx.sourceAction = action;
   if (queuedEvent.originTx !== undefined) {
     const originLocalSeq = state.getOriginLocalSeq(
       queuedEvent.originTx,
