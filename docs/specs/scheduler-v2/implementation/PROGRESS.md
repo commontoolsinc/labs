@@ -3846,3 +3846,209 @@ CT-1316, and the differing value is exact (registry `none` vs WeakMap
      (cutover fixture "keeps captured parent actions reachable before the
      parent registers").
 - Deviations: none.
+
+## 07/3b-liveness-refcounts
+
+- [x] 07/3b.1 — pending — introduced scheduler-v2 liveness refcount
+  maintenance in the dependency graph.
+- Fix shape:
+  - `DependencyGraphState` now carries `NodeRegistry` and the materializer
+    index so the graph layer can evaluate `isLive(record)`.
+  - `isLive(record)` is true for registered effects, positive `liveRefs`,
+    provisional demand, or materializer computations.
+  - New dependent edges add an upstream live ref when the reader is live;
+    removed edges drop that ref symmetrically.
+  - Node liveness transitions cascade upstream through writer edges, firing
+    only on whole-node live/non-live transitions rather than on raw
+    `liveRefs` 0/1 changes alone.
+  - `unsubscribe()` now removes graph edges before clearing materializer
+    registration, so materializer-driven live refs are dropped while the
+    action is still considered live.
+- Direction convention recorded in code:
+  - `dependents` is writer -> readers.
+  - `reverseDependencies` is reader -> writers.
+  - Liveness propagates from a live reader upstream through
+    `reverseDependencies`.
+- Scope note:
+  - This commit is the graph-layer refcount infrastructure from 3b.1. The
+    provisional-demand rewrite, `demand.ts` consumer replacement, and benchmark
+    gate remain pending for later 3b commits.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/dependency-graph.ts
+    packages/runner/src/scheduler/subscriptions.ts`: passed
+    (`Checked 3 files`, formatted `subscriptions.ts`).
+  - `deno lint` on the same 3 files: passed (`Checked 3 files`).
+  - `deno check` on the same 3 files: passed.
+  - Focused scheduler tests:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-effects.test.ts test/scheduler-pull.test.ts
+    test/scheduler-ordering.test.ts test/scheduler-v2-cutover.test.ts`:
+    passed, `5 passed (71 steps)`, `0 failed`.
+  - CT-1316:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/patterns-derive-return-pattern.test.ts`: passed,
+    `1 passed (5 steps)`, `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3107 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m7s`.
+
+## 07/3b-provisional-demand
+
+- [x] 07/3b.2 — pending — moved parent-created first-run demand to
+  `SchedulerNode.provisionalDemand` and added pass/finalize expiry.
+- Red:
+  - Added `expires provisional demand after a parent-created child runs`
+    before the expiry rewrite.
+  - Initial focused run failed because the old parent-context demand stayed
+    permanently live after the child completed:
+    `AssertionError: Values are not equal: actual 2, expected 1`
+    at `test/scheduler-v2-cutover.test.ts:643`.
+- Fix shape:
+  - `subscribePullSchedulerAction` now marks a parent-created computation
+    provisional only when its parent record is live.
+  - Provisional demand is stored on the node with a creating pass id and flows
+    through the liveness transition helper.
+  - Pass-end cleanup clears provisional demand for nodes created in that pass
+    once they have completed at least one run.
+  - Run-finalize cleanup clears provisional demand for gated nodes whose first
+    completed run occurs after their creating pass.
+  - First-run debounce remains immediate for ordinary computations; only
+    provisionally-demanded, never-ran computations are eligible for a
+    pre-first-run debounce gate.
+- Fixtures:
+  - Added `expires provisional demand after a parent-created child runs`.
+  - Added `keeps provisional demand for a debounced child until the gate
+    opens`.
+- Scope note:
+  - This commit implements 3b.2 only. `demand.ts` consumers and the remaining
+    `activePullDemandActions`, `pullDemandedFirstRunComputations`, and
+    `pullDemandedContinuationComputations` sets remain for 3b.3.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/action-run.ts
+    packages/runner/src/scheduler/demand.ts
+    packages/runner/src/scheduler/dependency-graph.ts
+    packages/runner/src/scheduler/node-record.ts
+    packages/runner/src/scheduler/pull-subscriptions.ts
+    packages/runner/src/scheduler/subscriptions.ts
+    packages/runner/src/scheduler/delays.ts
+    packages/runner/src/scheduler/delay-control.ts
+    packages/runner/test/scheduler-v2-cutover.test.ts`: passed
+    (`Checked 10 files`).
+  - `deno lint` on the same 10 files: passed (`Checked 10 files`).
+  - `deno check` on the same 10 files: passed.
+  - Focused scheduler + CT-1316 gate:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-effects.test.ts test/scheduler-pull.test.ts
+    test/scheduler-ordering.test.ts test/scheduler-timing.test.ts
+    test/scheduler-v2-cutover.test.ts
+    test/patterns-derive-return-pattern.test.ts`: passed,
+    `7 passed (99 steps)`, `0 failed`.
+  - Pull family gate:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull*.test.ts`: passed, `5 passed (59 steps)`,
+    `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3109 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m7s`.
+
+## 07/3b-demand-consumers
+
+- [x] 07/3b.3 — pending — replaced `demand.ts` consumers with node-record
+  liveness lookups and deleted the old demand module/sets.
+- Fix shape:
+  - `isDemandedPullComputation` now resolves to
+    `record.kind === "computation" && isLive(record)`.
+  - `isLiveEffect` now resolves to `record.kind === "effect"`.
+  - `isPullDemandRootEffect` now resolves to an effect record with an empty
+    static scheduling surface.
+  - First-run demand context now resolves to
+    `record.status === "never-ran" && record.provisionalDemand`.
+  - Deleted `activePullDemandActions`,
+    `pullDemandedFirstRunComputations`, and
+    `pullDemandedContinuationComputations`.
+  - Deleted `packages/runner/src/scheduler/demand.ts`.
+  - Moved `hasDependentPath` to `dependency-graph.ts` because it is graph
+    traversal, not demand state.
+  - Kept the transitional `markPullDemandContinuation` hook required until 3c,
+    but it now sets node provisional demand through the liveness helper.
+  - Unsubscribe clears provisional demand before removing the node so
+    re-subscribing the same action object cannot inherit stale demand.
+- Test fallout:
+  - Initial focused gate failed at type-check because
+    `test/scheduler-test-utils.ts` still imported deleted
+    `scheduler/demand.ts`.
+  - Updated the test utility to call the scheduler's liveness-backed internal
+    demand helper and updated the continuation-unsubscribe test to use the 3b.3
+    provisional-demand alias.
+- Contract greps:
+  - `rg -n "demand\\.ts" packages/runner/src`: no matches.
+  - `rg -n
+    "activePullDemandActions|pullDemandedFirstRunComputations|pullDemandedContinuationComputations|PullDemandState|pullDemandState"
+    packages/runner/src packages/runner/test`: no matches.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/action-run.ts
+    packages/runner/src/scheduler/dependency-graph.ts
+    packages/runner/src/scheduler/execution.ts
+    packages/runner/src/scheduler/pull-execution.ts
+    packages/runner/src/scheduler/staleness.ts
+    packages/runner/src/scheduler/subscriptions.ts
+    packages/runner/src/scheduler/write-propagation.ts
+    packages/runner/test/scheduler-test-utils.ts
+    packages/runner/test/scheduler-pull.test.ts`: passed
+    (`Checked 10 files`).
+  - `deno lint` on the same 10 files: passed (`Checked 10 files`).
+  - `deno check` on the same 10 files: passed.
+  - Focused scheduler gate:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull*.test.ts test/scheduler-v2-cutover.test.ts
+    test/scheduler-effects.test.ts test/scheduler-ordering.test.ts
+    test/scheduler-timing.test.ts
+    test/patterns-derive-return-pattern.test.ts`: passed,
+    `11 passed (132 steps)`, `0 failed`.
+  - `deno bench --allow-read --allow-write --allow-net --allow-ffi
+    --allow-env --no-check test/scheduler-demand-roots.bench.ts`: passed.
+    Compared with the latest recorded baseline in this document:
+    - `Scheduler demand roots - effect demand root`: 142.0 ms -> 138.3 ms
+      (-2.6%).
+    - `Scheduler demand roots - event demand root`: 138.0 ms -> 130.7 ms
+      (-5.3%).
+    - `Scheduler demand roots - mixed effect and event roots`: 167.5 ms ->
+      175.1 ms (+4.5%).
+    - `Scheduler demand roots - parent clears generated children`: 79.4 ms ->
+      80.0 ms (+0.8%).
+    - No case exceeded the >10% regression STOP threshold.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3109 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m7s`.
+
+## REVIEWER RESOLUTION — PR #4102 review findings
+
+- [x] pending — liveness cycle guard + first-run debounce planning context.
+- Findings addressed (Codex/cubic review on PR #4102), red-first:
+  1. `addLiveRef`/`dropLiveRef` lacked the spec §5.2 visited-set guard on
+     the update itself, so a cycle's back edge double-counted its origin
+     (A=2/B=1) and unsubscribing the only live root left the cycle live
+     forever. The guard now lives at the per-node update entry; the origin
+     is marked before propagation (cutover fixture "releases liveness
+     through dependency cycles"). CAVEAT recorded: per-pass dedup
+     undercounts multi-path (diamond) graphs relative to per-edge
+     accounting when an individual edge is later unregistered while its
+     reader stays live — flagged for the implementer to weigh in 3c/3d.
+  2. `getNextDebounceRunTime` (delay-control) built its context without
+     `shouldDebounceFirstRun` while the waiting/schedule paths included
+     it, so a scheduled first-run debounce had no wake time for planners
+     (cutover fixture "plans wake times for first-run debounced
+     computations").
+- Finding NOT changed: cubic's P2 on `setNodeProvisionalDemand`
+  re-asserts without a passId (continuation grants) intentionally clear
+  the creating-pass boundary — that is the continuation semantics
+  (survive `clearProvisionalDemandAtPassEnd`, expire via the
+  `provisionalDemandPass === undefined` arm of `markNodeHasRun` after the
+  node runs). Changing it to preserve the old pass would expire
+  continuation demand at pass end before the continued run.
+- Deviations: none.

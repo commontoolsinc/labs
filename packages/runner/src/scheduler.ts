@@ -51,13 +51,17 @@ import {
 } from "./scheduler/diagnosis.ts";
 import {
   type DependencyGraphState,
+  hasDependentPath,
+  isLive,
+  notifyNodeLivenessChange,
   registerDependentsForWriterSurface,
+  setNodeProvisionalDemand,
   updateDependentEdgesForLog,
 } from "./scheduler/dependency-graph.ts";
 import { SchedulerMaterializers } from "./scheduler/materializers.ts";
 import { type DependencyUpdateState } from "./scheduler/dependency-updates.ts";
 import { SchedulerWriteIndex } from "./scheduler/scheduling-writes.ts";
-import { NodeRegistry } from "./scheduler/node-record.ts";
+import { NodeRegistry, type SchedulerNode } from "./scheduler/node-record.ts";
 import {
   SchedulerTriggerIndex,
   SchedulerTriggerSubscriptions,
@@ -128,14 +132,6 @@ import {
   scheduleWithDebounce as scheduleWithDebounceState,
 } from "./scheduler/delay-control.ts";
 import { SchedulerDelays } from "./scheduler/delays.ts";
-import {
-  hasDependentPath,
-  isDemandedPullComputation,
-  isLiveEffect,
-  isPullDemandRootEffect,
-  type PullDemandState,
-  shouldRunFirstPullComputationInDemandContext,
-} from "./scheduler/demand.ts";
 import {
   addCfcTriggerRead,
   type StorageNotificationState,
@@ -289,9 +285,9 @@ export class Scheduler {
   private nodes = new NodeRegistry();
   private dependents = new WeakMap<Action, Set<Action>>();
   private reverseDependencies = new WeakMap<Action, Set<Action>>();
-  private activePullDemandActions = new WeakSet<Action>();
-  private pullDemandedFirstRunComputations = new WeakSet<Action>();
-  private pullDemandedContinuationComputations = new WeakSet<Action>();
+  private passCounter = 0;
+  private activePassId: number | undefined;
+  private provisionalDemandThisPass = new Set<SchedulerNode>();
   // In pull mode, `dirty` means direct dirty. `stale` additionally includes
   // actions with dirty upstream computations.
   private staleness = new SchedulerStaleness({
@@ -387,7 +383,6 @@ export class Scheduler {
   // When a child action is created during parent execution, parent must run first
   private executingAction: Action | null = null;
   currentActionId?: string;
-  private pullDemandState!: PullDemandState;
   private dependencyGraphState!: DependencyGraphState;
   private dependencyUpdateState!: DependencyUpdateState;
   private triggerSubscriptionState!: TriggerSubscriptionState;
@@ -903,8 +898,8 @@ export class Scheduler {
     action: Action,
     options: { preserveChangeGroup?: boolean } = {},
   ): void {
-    this.materializers.clearAction(action);
     unsubscribeSchedulerAction(this.unsubscribeState, action, options);
+    this.materializers.clearAction(action);
   }
 
   async run(action: Action): Promise<any> {
@@ -1388,6 +1383,8 @@ export class Scheduler {
     // Track timing for cycle-aware debounce
     this.executeStartTime = performance.now();
     this.runsThisExecute.clear();
+    this.activePassId = ++this.passCounter;
+    this.provisionalDemandThisPass.clear();
 
     // Non-settling heuristic: record execute() start
     markExecuteStart(this.settlingTracker);
@@ -1477,6 +1474,9 @@ export class Scheduler {
         MAX_SETTLE_STATS_HISTORY,
       );
     }
+
+    this.clearProvisionalDemandAtPassEnd();
+    this.activePassId = undefined;
 
     return settleResult;
   }
@@ -1595,7 +1595,6 @@ export class Scheduler {
     this.diagnosisControlState = this.createDiagnosisControlState();
     this.eventQueueWakeState = this.createEventQueueWakeState();
     this.writeIndex = this.createWriteIndex();
-    this.pullDemandState = this.createPullDemandState();
     this.delayControlState = this.createDelayControlState();
     this.dirtyDependencyCollectionState = this
       .createDirtyDependencyCollectionState();
@@ -1673,22 +1672,6 @@ export class Scheduler {
     return new SchedulerWriteIndex();
   }
 
-  private createPullDemandState(): PullDemandState {
-    return {
-      computations: this.nodes.computations,
-      effects: this.nodes.effects,
-      dependents: this.dependents,
-      dependencies: this.dependencies,
-      nodes: this.nodes,
-      pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
-      pullDemandedContinuationComputations: this
-        .pullDemandedContinuationComputations,
-      hasActionRun: (action) => this.delays.hasActionRun(action),
-      getSchedulingWrites: (action) =>
-        this.writeIndex.getSchedulingWrites(action),
-    };
-  }
-
   private createDelayControlState(): SchedulerDelayControlState {
     return {
       delays: this.delays,
@@ -1699,6 +1682,11 @@ export class Scheduler {
       queueExecution: () => this.queueExecution(),
       logDebounce: (message) =>
         logger.debug("schedule-debounce", () => [message]),
+      shouldDebounceFirstRun: (action) => {
+        const record = this.nodes.get(action);
+        return record?.provisionalDemand === true &&
+          record.status === "never-ran";
+      },
     };
   }
 
@@ -1729,11 +1717,11 @@ export class Scheduler {
       dependents: this.dependents,
       reverseDependencies: this.reverseDependencies,
       staleness: this.staleness,
+      nodes: this.nodes,
+      materializerIndex: this.materializers,
       getSchedulingWrites: (action) =>
         this.writeIndex.getSchedulingWrites(action),
       isStale: (action) => this.staleness.isStale(action),
-      isDemandedPullComputation: (action) =>
-        this.isDemandedPullComputation(action),
       queueExecution: () => this.queueExecution(),
     };
   }
@@ -1767,8 +1755,7 @@ export class Scheduler {
         this.scheduleComputationDebounce(action),
       clearComputationDebounceState: (action) =>
         this.delays.clearComputationDebounceState(action),
-      isDemandedPullComputation: (action) =>
-        this.isDemandedPullComputation(action),
+      isLiveComputation: (action) => this.isDemandedPullComputation(action),
       materializerIndex: this.materializers,
       queueExecution: () => this.queueExecution(),
     };
@@ -1879,7 +1866,7 @@ export class Scheduler {
       nodes: this.nodes,
       pending: this.pending,
       markPullDemandContinuation: (action) =>
-        this.pullDemandedContinuationComputations.add(action),
+        this.markPullDemandContinuation(action),
       scheduleWithDebounce: (action) => this.scheduleWithDebounce(action),
       markDirty: (action) =>
         markSchedulerDirty(this.dirtySchedulingState, action),
@@ -1896,6 +1883,7 @@ export class Scheduler {
       actionChangeGroups: this.actionChangeGroups,
       changeGroupToActionId: this.changeGroupToActionId,
       nodes: this.nodes,
+      dependencyGraphState: this.dependencyGraphState,
       getIdempotencyCheckMode: () => this.idempotencyCheckMode,
       queueExecution: () => this.queueExecution(),
       getActionId: (target) => this.getActionId(target),
@@ -1911,7 +1899,7 @@ export class Scheduler {
       getSchedulingWrites: (action) =>
         this.writeIndex.getSchedulingWrites(action),
       hasDependentPath: (from, to) =>
-        hasDependentPath(this.pullDemandState, from, to),
+        hasDependentPath(this.dependents, from, to),
     };
   }
 
@@ -1923,8 +1911,7 @@ export class Scheduler {
       pendingDependencyCollectionState: this.pendingDependencyCollectionState,
       populateDependenciesCallbacks: this.populateDependenciesCallbacks,
       pendingDependencyCollection: this.pendingDependencyCollection,
-      activePullDemandActions: this.activePullDemandActions,
-      pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
+      markProvisionalDemand: (record) => this.markProvisionalDemand(record),
       pending: this.pending,
       scheduledFirstTime: this.scheduledFirstTime,
       effects: this.nodes.effects,
@@ -1971,10 +1958,8 @@ export class Scheduler {
       conditionallyScheduledEffects: this.conditionallyScheduledEffects,
       reverseDependencies: this.reverseDependencies,
       dependents: this.dependents,
+      dependencyGraphState: this.dependencyGraphState,
       nodes: this.nodes,
-      pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
-      pullDemandedContinuationComputations: this
-        .pullDemandedContinuationComputations,
       writeIndex: this.writeIndex,
       populateDependenciesCallbacks: this.populateDependenciesCallbacks,
       pendingDependencyCollection: this.pendingDependencyCollection,
@@ -2022,7 +2007,6 @@ export class Scheduler {
       filterStats: this.filterStats,
       getLoopCounter: () => this.loopCounter,
       runsThisExecute: this.runsThisExecute,
-      activePullDemandActions: this.activePullDemandActions,
       materializerIndex: this.materializers,
       getSchedulingWrites: (action) =>
         this.writeIndex.getSchedulingWrites(action),
@@ -2058,7 +2042,6 @@ export class Scheduler {
         this.delays.clearComputationDebounceState(action),
       conditionalEffectHasChangedInputs: (action) =>
         this.conditionalEffectHasChangedInputs(action),
-      isPullDemandRootEffect: (action) => this.isPullDemandRootEffect(action),
       handleError: (error, action) => this.handleError(error, action),
       runAction: (action) => this.run(action),
     };
@@ -2227,9 +2210,6 @@ export class Scheduler {
       },
       actionChangeGroups: this.actionChangeGroups,
       actionTimingState: this.actionTimingState,
-      pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
-      pullDemandedContinuationComputations: this
-        .pullDemandedContinuationComputations,
       retries: this.retries,
       pending: this.pending,
       actionRunTrace: this.actionRunTrace,
@@ -2260,6 +2240,7 @@ export class Scheduler {
         this.delays.markActionHasRun(target);
         this.initialRehydrationTokens.delete(target);
       },
+      markNodeHasRun: (target) => this.markNodeHasRun(target),
       handleError: (error, target) => this.handleError(error, target),
       resubscribe: (target, log) => this.resubscribe(target, log),
       markDirectDirty: (target) => this.staleness.markDirectDirty(target),
@@ -2316,7 +2297,7 @@ export class Scheduler {
         this.delays.getNextEligibleRunTime(action),
       isDemandedPullComputation: (action) =>
         this.isDemandedPullComputation(action),
-      isLiveEffect: (action) => isLiveEffect(this.pullDemandState, action),
+      isLiveEffect: (action) => this.isLiveEffect(action),
       isPullDemandRootEffect: (action) => this.isPullDemandRootEffect(action),
       getPatternId: (action) => {
         const annotated = action as Partial<TelemetryAnnotations>;
@@ -2341,20 +2322,28 @@ export class Scheduler {
   }
 
   private isDemandedPullComputation(action: Action): boolean {
-    return isDemandedPullComputation(this.pullDemandState, action);
+    const record = this.nodes.get(action);
+    return record?.kind === "computation" &&
+      isLive(this.dependencyGraphState, record);
   }
 
   private shouldRunFirstPullComputationInDemandContext(
     action: Action,
   ): boolean {
-    return shouldRunFirstPullComputationInDemandContext(
-      this.pullDemandState,
-      action,
-    );
+    const record = this.nodes.get(action);
+    return record?.kind === "computation" &&
+      record.status === "never-ran" &&
+      record.provisionalDemand;
+  }
+
+  private isLiveEffect(action: Action): boolean {
+    return this.nodes.get(action)?.kind === "effect";
   }
 
   private isPullDemandRootEffect(action: Action): boolean {
-    return isPullDemandRootEffect(this.pullDemandState, action);
+    const record = this.nodes.get(action);
+    return record?.kind === "effect" &&
+      (this.writeIndex.getSchedulingWrites(action)?.length ?? 0) === 0;
   }
 
   /**
@@ -2446,10 +2435,64 @@ export class Scheduler {
   }
 
   private updateMaterializerRegistration(action: Action): void {
+    const record = this.nodes.get(action);
+    const wasLive = record ? isLive(this.dependencyGraphState, record) : false;
     this.materializers.register(
       action,
       (action as Partial<TelemetryAnnotations>).materializerWriteEnvelopes,
     );
+    notifyNodeLivenessChange(this.dependencyGraphState, action, wasLive);
+  }
+
+  private markProvisionalDemand(record: SchedulerNode): void {
+    setNodeProvisionalDemand(
+      this.dependencyGraphState,
+      record,
+      true,
+      this.activePassId,
+    );
+    if (this.activePassId !== undefined) {
+      this.provisionalDemandThisPass.add(record);
+    }
+  }
+
+  private markPullDemandContinuation(action: Action): void {
+    const record = this.nodes.get(action);
+    if (!record) return;
+    setNodeProvisionalDemand(this.dependencyGraphState, record, true);
+  }
+
+  private markNodeHasRun(action: Action): void {
+    const record = this.nodes.get(action);
+    if (!record) return;
+
+    if (record.status === "never-ran") {
+      record.status = "clean";
+    }
+
+    if (
+      record.provisionalDemand &&
+      (record.provisionalDemandPass === undefined ||
+        this.passCounter > record.provisionalDemandPass)
+    ) {
+      setNodeProvisionalDemand(this.dependencyGraphState, record, false);
+    }
+  }
+
+  private clearProvisionalDemandAtPassEnd(): void {
+    const passId = this.activePassId;
+    if (passId === undefined) return;
+
+    for (const record of this.provisionalDemandThisPass) {
+      if (
+        record.provisionalDemand &&
+        record.provisionalDemandPass === passId &&
+        record.status !== "never-ran"
+      ) {
+        setNodeProvisionalDemand(this.dependencyGraphState, record, false);
+      }
+    }
+    this.provisionalDemandThisPass.clear();
   }
 
   private getNextDebounceRunTime(action: Action): number | undefined {

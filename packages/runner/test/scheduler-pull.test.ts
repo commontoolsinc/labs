@@ -833,7 +833,7 @@ describe("pull-based scheduling", () => {
     expect(childRuns).toBe(1);
   });
 
-  it("should clear pull continuation demand when unsubscribing", async () => {
+  it("should clear provisional continuation demand when unsubscribing", async () => {
     const source = runtime.getCell<number>(
       space,
       "pull-continuation-unsubscribe-source",
@@ -867,9 +867,9 @@ describe("pull-based scheduling", () => {
     expect(runs).toBe(0);
 
     const schedulerInternals = runtime.scheduler as unknown as {
-      pullDemandedContinuationComputations: WeakSet<Action>;
+      markPullDemandContinuation: (action: Action) => void;
     };
-    schedulerInternals.pullDemandedContinuationComputations.add(action);
+    schedulerInternals.markPullDemandContinuation(action);
 
     runtime.scheduler.unsubscribe(action);
     runtime.scheduler.subscribe(action, log);

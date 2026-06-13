@@ -15,6 +15,7 @@ export interface SchedulerNode {
   invalidCauses: IMemorySpaceAddress[];
   liveRefs: number;
   provisionalDemand: boolean;
+  provisionalDemandPass?: number;
   passRuns: number;
   retries: number;
 }

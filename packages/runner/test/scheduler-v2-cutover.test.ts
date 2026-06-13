@@ -16,6 +16,18 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { NodeRegistry } from "../src/scheduler/node-record.ts";
+import {
+  type DependencyGraphState,
+  isLive,
+  registerDependentEdge,
+  unregisterDependentEdge,
+} from "../src/scheduler/dependency-graph.ts";
+import { SchedulerDelays } from "../src/scheduler/delays.ts";
+import {
+  getNextDebounceRunTime,
+  isDebouncedComputationWaiting,
+  type SchedulerDelayControlState,
+} from "../src/scheduler/delay-control.ts";
 
 async function expectSchedulerIdle(runtime: Runtime): Promise<void> {
   const result = await Promise.race([
@@ -565,6 +577,167 @@ describe("scheduler v2 cutover fixtures", () => {
     }
   });
 
+  it("keeps provisional demand for a debounced child until the gate opens", async () => {
+    const trigger = runtime.getCell<number>(
+      space,
+      "v2-cutover-provisional-gated-trigger",
+      undefined,
+      tx,
+    );
+    const source = runtime.getCell<number>(
+      space,
+      "v2-cutover-provisional-gated-source",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "v2-cutover-provisional-gated-output",
+      undefined,
+      tx,
+    );
+    trigger.set(0);
+    source.set(3);
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let childRuns = 0;
+    let childCancel: (() => void) | undefined;
+    const outputLink = output.getAsNormalizedFullLink();
+    const outputAddress = toMemorySpaceAddress(outputLink);
+    const sourceAddress = toMemorySpaceAddress(
+      source.getAsNormalizedFullLink(),
+    );
+
+    const child = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        childRuns++;
+        output.withTx(actionTx).send(source.withTx(actionTx).get() * 10);
+      }) as Action,
+      {
+        writes: [outputLink],
+      },
+    );
+
+    const parent: Action = (actionTx) => {
+      trigger.withTx(actionTx).get();
+      if (!childCancel) {
+        childCancel = runtime.scheduler.subscribe(
+          child,
+          { reads: [sourceAddress], shallowReads: [], writes: [outputAddress] },
+          { debounce: 40 },
+        );
+      }
+    };
+
+    const parentCancel = runtime.scheduler.subscribe(
+      parent,
+      {
+        reads: [toMemorySpaceAddress(trigger.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [],
+      },
+      { isEffect: true },
+    );
+
+    try {
+      await runtime.scheduler.idle();
+      expect(childRuns).toBe(0);
+      expect(output.get()).toBe(0);
+
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      await runtime.scheduler.idle();
+      expect(childRuns).toBe(1);
+      expect(output.get()).toBe(30);
+    } finally {
+      parentCancel();
+      childCancel?.();
+    }
+  });
+
+  it("expires provisional demand after a parent-created child runs", async () => {
+    const trigger = runtime.getCell<number>(
+      space,
+      "v2-cutover-provisional-expiry-trigger",
+      undefined,
+      tx,
+    );
+    const source = runtime.getCell<number>(
+      space,
+      "v2-cutover-provisional-expiry-source",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "v2-cutover-provisional-expiry-output",
+      undefined,
+      tx,
+    );
+    trigger.set(0);
+    source.set(3);
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let childRuns = 0;
+    let childCancel: (() => void) | undefined;
+    const outputLink = output.getAsNormalizedFullLink();
+    const outputAddress = toMemorySpaceAddress(outputLink);
+    const sourceAddress = toMemorySpaceAddress(
+      source.getAsNormalizedFullLink(),
+    );
+
+    const child = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        childRuns++;
+        output.withTx(actionTx).send(source.withTx(actionTx).get() * 10);
+      }) as Action,
+      {
+        writes: [outputLink],
+      },
+    );
+
+    const parent: Action = (actionTx) => {
+      trigger.withTx(actionTx).get();
+      if (!childCancel) {
+        childCancel = runtime.scheduler.subscribe(
+          child,
+          { reads: [sourceAddress], shallowReads: [], writes: [outputAddress] },
+          {},
+        );
+      }
+    };
+
+    const parentCancel = runtime.scheduler.subscribe(
+      parent,
+      {
+        reads: [toMemorySpaceAddress(trigger.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [],
+      },
+      { isEffect: true },
+    );
+
+    try {
+      await runtime.scheduler.idle();
+      expect(childRuns).toBe(1);
+      expect(output.get()).toBe(30);
+
+      source.withTx(tx).send(4);
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.scheduler.idle();
+
+      expect(childRuns).toBe(1);
+      expect(output.get()).toBe(30);
+    } finally {
+      parentCancel();
+      childCancel?.();
+    }
+  });
+
   it("keeps a declared writer dormant while its output has no demand", async () => {
     const source = runtime.getCell<number>(
       space,
@@ -856,5 +1029,75 @@ describe("scheduler v2 cutover fixtures", () => {
     registry.register(lazyParent, "effect");
     expect(registry.parentOf(lazyChild)?.action).toBe(lazyParent);
     expect(registry.parentActionOf(lazyChild)).toBe(lazyParent);
+  });
+
+  it("releases liveness through dependency cycles", () => {
+    // Spec §5.2: edge updates propagate refcount deltas with a visited-set
+    // cycle guard. Without the guard on the increment itself, a cycle's back
+    // edge double-counts the origin (A=2), and unsubscribing the only live
+    // root drops just one ref — the cycle stays live forever.
+    const nodes = new NodeRegistry();
+    const state = {
+      nodes,
+      dependents: new WeakMap<Action, Set<Action>>(),
+      reverseDependencies: new WeakMap<Action, Set<Action>>(),
+      materializerIndex: { isMaterializer: () => false },
+      staleness: {
+        addStaleUpstream: () => {},
+        removeStaleUpstream: () => {},
+      },
+      isStale: () => false,
+      queueExecution: () => {},
+      getSchedulingWrites: () => undefined,
+    } as unknown as DependencyGraphState;
+
+    const liveRoot: Action = function liveRoot() {};
+    const cycleA: Action = function cycleA() {};
+    const cycleB: Action = function cycleB() {};
+    nodes.register(liveRoot, "effect");
+    nodes.register(cycleA, "computation");
+    nodes.register(cycleB, "computation");
+
+    // A and B read each other; the effect reads A.
+    registerDependentEdge(state, cycleB, cycleA);
+    registerDependentEdge(state, cycleA, cycleB);
+    registerDependentEdge(state, cycleA, liveRoot);
+
+    expect(isLive(state, nodes.get(cycleA)!)).toBe(true);
+    expect(isLive(state, nodes.get(cycleB)!)).toBe(true);
+
+    unregisterDependentEdge(state, cycleA, liveRoot);
+
+    expect(isLive(state, nodes.get(cycleA)!)).toBe(false);
+    expect(isLive(state, nodes.get(cycleB)!)).toBe(false);
+  });
+
+  it("plans wake times for first-run debounced computations", () => {
+    // The waiting check and the wake-time planner must agree on the
+    // first-run debounce gate: if one schedules a debounce the other must
+    // report its ready time, or planners spin without a wake.
+    const delays = new SchedulerDelays({
+      actionStats: new Map(),
+      getActionId: () => "debounced-first-run",
+    });
+    const action: Action = function debouncedFirstRun() {};
+    delays.setDebounce(action, 50);
+    const state: SchedulerDelayControlState = {
+      delays,
+      computations: new Set([action]),
+      effects: new Set<Action>(),
+      dirty: new Set([action]),
+      pending: new Set<Action>(),
+      queueExecution: () => {},
+      logDebounce: () => {},
+      shouldDebounceFirstRun: () => true,
+    };
+
+    try {
+      expect(isDebouncedComputationWaiting(state, action)).toBe(true);
+      expect(getNextDebounceRunTime(state, action)).toBeDefined();
+    } finally {
+      delays.clearActiveDebounceTimers();
+    }
   });
 });

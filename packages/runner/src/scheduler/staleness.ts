@@ -120,7 +120,7 @@ export interface DirtySchedulingState {
   readonly computations: ReadonlySet<Action>;
   readonly scheduleComputationDebounce: (action: Action) => void;
   readonly clearComputationDebounceState: (action: Action) => void;
-  readonly isDemandedPullComputation: (action: Action) => boolean;
+  readonly isLiveComputation: (action: Action) => boolean;
   readonly materializerIndex: MaterializerIndexState;
   readonly queueExecution: () => void;
 }
@@ -153,7 +153,7 @@ export function markSchedulerDirty(
   state.staleness.markDirectDirty(action);
   state.scheduleComputationDebounce(action);
   if (
-    state.isDemandedPullComputation(action) ||
+    state.isLiveComputation(action) ||
     state.materializerIndex.isMaterializer(action)
   ) {
     state.queueExecution();

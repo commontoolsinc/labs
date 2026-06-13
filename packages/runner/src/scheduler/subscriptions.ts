@@ -2,13 +2,24 @@ import type { Cancel } from "../cancel.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import type { ChangeGroup } from "../storage/interface.ts";
 import type { StorageNotificationState } from "./notifications.ts";
-import { pendingDependencyCollectionMightAffect } from "./dependency-graph.ts";
+import {
+  type DependencyGraphState,
+  isLive,
+  notifyNodeLivenessChange,
+  pendingDependencyCollectionMightAffect,
+  setNodeProvisionalDemand,
+  unregisterDependentEdge,
+} from "./dependency-graph.ts";
 import { type DependencyUpdateState } from "./dependency-updates.ts";
 import {
   readsOverlapWrites,
   type WriterIndexState,
 } from "./scheduling-writes.ts";
-import { type NodeKind, NodeRegistry } from "./node-record.ts";
+import {
+  type NodeKind,
+  NodeRegistry,
+  type SchedulerNode,
+} from "./node-record.ts";
 import { type TriggerSubscriptionState } from "./trigger-index.ts";
 import { entityKey } from "./keys.ts";
 import type {
@@ -20,6 +31,7 @@ import type {
 
 type SchedulerActionTypeState = {
   readonly nodes: NodeRegistry;
+  readonly dependencyGraphState: DependencyGraphState;
   readonly getIdempotencyCheckMode: () => boolean;
   readonly queueExecution: () => void;
 };
@@ -72,8 +84,7 @@ export interface SchedulerSubscribeActionState {
     PopulateDependenciesEntry
   >;
   readonly pendingDependencyCollection: Set<Action>;
-  readonly activePullDemandActions: WeakSet<Action>;
-  readonly pullDemandedFirstRunComputations: WeakSet<Action>;
+  readonly markProvisionalDemand: (node: SchedulerNode) => void;
   readonly pending: Set<Action>;
   readonly scheduledFirstTime: Set<Action>;
   readonly effects: ReadonlySet<Action>;
@@ -193,7 +204,12 @@ export function updateSchedulerActionType(
       state.nodes.isKnownEffect(action)
     ? "effect"
     : "computation";
+  const existing = state.nodes.get(action);
+  const wasLive = existing
+    ? isLive(state.dependencyGraphState, existing)
+    : false;
   state.nodes.register(action, kind);
+  notifyNodeLivenessChange(state.dependencyGraphState, action, wasLive);
   const actionIsEffect = kind === "effect";
 
   if (actionIsEffect) {
@@ -264,9 +280,8 @@ export interface SchedulerUnsubscribeActionState {
   readonly conditionallyScheduledEffects: Map<Action, number>;
   readonly reverseDependencies: WeakMap<Action, Set<Action>>;
   readonly dependents: WeakMap<Action, Set<Action>>;
+  readonly dependencyGraphState: DependencyGraphState;
   readonly nodes: NodeRegistry;
-  readonly pullDemandedFirstRunComputations: WeakSet<Action>;
-  readonly pullDemandedContinuationComputations: WeakSet<Action>;
   readonly writeIndex: WriterIndexState;
   readonly populateDependenciesCallbacks: WeakMap<
     Action,
@@ -351,25 +366,28 @@ function removeReverseDependencyEdges(
 ): void {
   const dependencies = state.reverseDependencies.get(action);
   if (dependencies) {
-    for (const dependency of dependencies) {
-      const dependents = state.dependents.get(dependency);
-      dependents?.delete(action);
-      if (dependents && dependents.size === 0) {
-        state.dependents.delete(dependency);
-      }
+    for (const dependency of [...dependencies]) {
+      unregisterDependentEdge(state.dependencyGraphState, dependency, action);
     }
-    state.reverseDependencies.delete(action);
   }
-  state.dependents.delete(action);
+
+  const dependents = state.dependents.get(action);
+  if (dependents) {
+    for (const dependent of [...dependents]) {
+      unregisterDependentEdge(state.dependencyGraphState, action, dependent);
+    }
+  }
 }
 
 function clearActionTypeTracking(
   state: SchedulerUnsubscribeActionState,
   action: Action,
 ): void {
+  const record = state.nodes.get(action);
+  if (record?.provisionalDemand) {
+    setNodeProvisionalDemand(state.dependencyGraphState, record, false);
+  }
   state.nodes.remove(action);
-  state.pullDemandedFirstRunComputations.delete(action);
-  state.pullDemandedContinuationComputations.delete(action);
 }
 
 function removeActionWriteIndexes(
