@@ -260,10 +260,58 @@ export const libraryCheckoutSystemScenario: PatternIntegrationScenario = {
 
 export const scenarios = [libraryCheckoutSystemScenario];
 
+// Regression scenario for a transformer bug: usage-based schema narrowing in
+// capability-analysis drops `LoanRecord.memberId` / `HoldRecord.memberId` from
+// `liftAvailabilityRaw`'s INPUT schema, because `computeAvailability` only
+// reads those fields after the records round-trip through a local `Map`
+// (`loansByItem.get(...).map((loan) => loan.memberId)`), which the analysis
+// can't trace. The narrowed argument arrives without `memberId`, so
+// `loanMembers` / `holdMembers` are computed from `undefined`.
+//
+// The main scenario above never asserts the member lists (its
+// `availabilitySignals` are built from id/status/copies/holds only), which is
+// why this has been silently wrong on `main` for a long time:
+//   - on `main` the bad `[undefined]` is laundered to `[]` by the old
+//     undefined-deletes behavior, so `loanMembers` reads as `[]`;
+//   - with undefined preserved as a real value, the array with an
+//     `undefined` element fails schema validation and `availability` reads
+//     as `undefined` entirely.
+// Either way these assertions fail. Marked `ignore` until the
+// capability-analysis fix lands; un-ignore then. See the schema-narrowing
+// transformer issue.
+const libraryCheckoutMemberListsScenario: PatternIntegrationScenario = {
+  name:
+    "library checkout reports loan/hold member lists (transformer regression)",
+  module: new URL(
+    "./library-checkout-system.pattern.ts",
+    import.meta.url,
+  ),
+  exportName: "libraryCheckoutSystem",
+  steps: [
+    {
+      expect: [
+        // atlas-of-dawn: loaned by member-alba, no holds
+        { path: "availability.0.loanMembers", value: ["member-alba"] },
+        { path: "availability.0.holdMembers", value: [] },
+        // modular-thoughts: loaned by member-luis, hold by member-jade
+        { path: "availability.1.loanMembers", value: ["member-luis"] },
+        { path: "availability.1.holdMembers", value: ["member-jade"] },
+        // synthesis-primer: no loans or holds
+        { path: "availability.2.loanMembers", value: [] },
+        { path: "availability.2.holdMembers", value: [] },
+      ],
+    },
+  ],
+};
+
 describe("library-checkout-system", () => {
   for (const scenario of scenarios) {
     it(scenario.name, async () => {
       await runPatternScenario(scenario);
     });
   }
+
+  it.ignore(libraryCheckoutMemberListsScenario.name, async () => {
+    await runPatternScenario(libraryCheckoutMemberListsScenario);
+  });
 });
