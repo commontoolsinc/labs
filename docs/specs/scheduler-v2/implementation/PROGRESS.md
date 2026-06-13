@@ -2782,7 +2782,7 @@ Verification:
 
 ## 06/phase-end
 
-- [x] pending — WO06 exit checklist self-check complete.
+- [x] 66bdd2b12 — WO06 exit checklist self-check complete.
 - Deviations: none.
 - Recordings:
   - `cd packages/runner && deno task test`: passed,
@@ -2792,3 +2792,27 @@ Verification:
     rerun after the commit confirmed `grep -rn "inFlightSources"
     packages/runner/src` has no matches and suppression remains
     `notification.source.sourceAction === action`.
+
+## 07/3pre
+
+- [x] pending — added the scheduler-v2 cutover fixture pack.
+- Deviations:
+  - The cycle-backoff fixture is green on the current v1 cycle-break path with
+    a loose bounded-termination assertion (`runCountA + runCountB < 500`) and
+    unrelated-subgraph convergence. The focused run emits the expected current
+    `Too many iterations: 101` scheduler errors for the cycling actions. The
+    fixture comment records that 3c.iv tightens this to the v2
+    `PASS_RUN_BUDGET` backoff rule.
+- Recordings:
+  - `deno fmt packages/runner/test/scheduler-v2-cutover.test.ts`: passed
+    (`Checked 1 file`).
+  - `deno lint packages/runner/test/scheduler-v2-cutover.test.ts`: passed
+    (`Checked 1 file`).
+  - `deno check packages/runner/test/scheduler-v2-cutover.test.ts`: passed.
+  - Focused fixture pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts`: passed, `1 passed (7 steps)`,
+    `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3106 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m6s`.

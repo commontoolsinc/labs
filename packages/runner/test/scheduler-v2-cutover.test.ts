@@ -1,0 +1,615 @@
+import {
+  afterEach,
+  beforeEach,
+  createSchedulerTestRuntime,
+  describe,
+  disposeSchedulerTestRuntime,
+  expect,
+  it,
+  Runtime,
+  space,
+  toMemorySpaceAddress,
+} from "./scheduler-test-utils.ts";
+import type {
+  Action,
+  IExtendedStorageTransaction,
+  SchedulerTestStorageManager,
+} from "./scheduler-test-utils.ts";
+
+async function expectSchedulerIdle(runtime: Runtime): Promise<void> {
+  const result = await Promise.race([
+    runtime.scheduler.idle().then(() => "idle" as const),
+    new Promise<"timeout">((resolve) =>
+      setTimeout(() => resolve("timeout"), 2_000)
+    ),
+  ]);
+  expect(result).toBe("idle");
+}
+
+describe("scheduler v2 cutover fixtures", () => {
+  let storageManager: SchedulerTestStorageManager;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
+      import.meta.url,
+    ));
+  });
+
+  afterEach(async () => {
+    await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
+  });
+
+  it("rewires conditional reads when the active branch changes", async () => {
+    const condition = runtime.getCell<boolean>(
+      space,
+      "v2-cutover-ifelse-condition",
+      undefined,
+      tx,
+    );
+    const left = runtime.getCell<number>(
+      space,
+      "v2-cutover-ifelse-left",
+      undefined,
+      tx,
+    );
+    const right = runtime.getCell<number>(
+      space,
+      "v2-cutover-ifelse-right",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "v2-cutover-ifelse-output",
+      undefined,
+      tx,
+    );
+    condition.set(true);
+    left.set(10);
+    right.set(20);
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runs = 0;
+    const outputLink = output.getAsNormalizedFullLink();
+    const chooser = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        runs++;
+        const active = condition.withTx(actionTx).get()
+          ? left.withTx(actionTx).get()
+          : right.withTx(actionTx).get();
+        output.withTx(actionTx).send(active);
+      }) as Action,
+      {
+        writes: [outputLink],
+      },
+    );
+
+    runtime.scheduler.subscribe(
+      chooser,
+      {
+        reads: [
+          toMemorySpaceAddress(condition.getAsNormalizedFullLink()),
+          toMemorySpaceAddress(left.getAsNormalizedFullLink()),
+        ],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(outputLink)],
+      },
+      {},
+    );
+
+    expect(await output.pull()).toBe(10);
+    expect(runs).toBe(1);
+
+    condition.withTx(tx).send(false);
+    await tx.commit();
+    tx = runtime.edit();
+    expect(await output.pull()).toBe(20);
+    expect(runs).toBe(2);
+
+    left.withTx(tx).send(11);
+    await tx.commit();
+    tx = runtime.edit();
+    expect(await output.pull()).toBe(20);
+    expect(runs).toBe(2);
+
+    right.withTx(tx).send(21);
+    await tx.commit();
+    tx = runtime.edit();
+    expect(await output.pull()).toBe(21);
+    expect(runs).toBe(3);
+  });
+
+  it("continues a parent when its created child updates a sampled value", async () => {
+    const item = runtime.getCell<number>(
+      space,
+      "v2-cutover-parent-continuation-item",
+      undefined,
+      tx,
+    );
+    item.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const samples: number[] = [];
+    let childRuns = 0;
+    let childCancel: (() => void) | undefined;
+    const itemLink = item.getAsNormalizedFullLink();
+    const itemAddress = toMemorySpaceAddress(itemLink);
+
+    const child = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        childRuns++;
+        item.withTx(actionTx).send(2);
+      }) as Action,
+      {
+        writes: [itemLink],
+      },
+    );
+
+    const parent: Action = (actionTx) => {
+      samples.push(item.withTx(actionTx).get());
+      if (!childCancel) {
+        childCancel = runtime.scheduler.subscribe(
+          child,
+          { reads: [], shallowReads: [], writes: [itemAddress] },
+          {},
+        );
+      }
+    };
+
+    const parentCancel = runtime.scheduler.subscribe(
+      parent,
+      { reads: [itemAddress], shallowReads: [], writes: [] },
+      { isEffect: true },
+    );
+
+    try {
+      await runtime.scheduler.idle();
+      expect(samples).toEqual([1, 2]);
+      expect(childRuns).toBe(1);
+    } finally {
+      parentCancel();
+      childCancel?.();
+    }
+  });
+
+  it("does not run an effect when its upstream output is unchanged", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "v2-cutover-noop-source",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "v2-cutover-noop-output",
+      undefined,
+      tx,
+    );
+    source.set(0);
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computeRuns = 0;
+    let effectRuns = 0;
+    const outputLink = output.getAsNormalizedFullLink();
+    const compute = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        computeRuns++;
+        const next = Math.floor(source.withTx(actionTx).get() / 10);
+        output.withTx(actionTx).send(next);
+      }) as Action,
+      {
+        writes: [outputLink],
+      },
+    );
+    const effect: Action = (actionTx) => {
+      output.withTx(actionTx).get();
+      effectRuns++;
+    };
+
+    const computeCancel = runtime.scheduler.subscribe(
+      compute,
+      {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(outputLink)],
+      },
+      {},
+    );
+    const effectCancel = runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [toMemorySpaceAddress(outputLink)],
+        shallowReads: [],
+        writes: [],
+      },
+      { isEffect: true },
+    );
+
+    try {
+      await runtime.scheduler.idle();
+      computeRuns = 0;
+      effectRuns = 0;
+
+      for (const value of [1, 2, 3]) {
+        source.withTx(tx).send(value);
+        await tx.commit();
+        tx = runtime.edit();
+        await runtime.scheduler.idle();
+      }
+
+      expect(computeRuns).toBe(3);
+      expect(effectRuns).toBe(0);
+      expect(output.get()).toBe(0);
+    } finally {
+      computeCancel();
+      effectCancel();
+    }
+  });
+
+  it("runs an effect once per changed upstream output", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "v2-cutover-changed-source",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "v2-cutover-changed-output",
+      undefined,
+      tx,
+    );
+    source.set(0);
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let effectRuns = 0;
+    const outputLink = output.getAsNormalizedFullLink();
+    const compute = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        output.withTx(actionTx).send(source.withTx(actionTx).get() * 10);
+      }) as Action,
+      {
+        writes: [outputLink],
+      },
+    );
+    const effect: Action = (actionTx) => {
+      output.withTx(actionTx).get();
+      effectRuns++;
+    };
+
+    const computeCancel = runtime.scheduler.subscribe(
+      compute,
+      {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(outputLink)],
+      },
+      {},
+    );
+    const effectCancel = runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [toMemorySpaceAddress(outputLink)],
+        shallowReads: [],
+        writes: [],
+      },
+      { isEffect: true },
+    );
+
+    try {
+      await runtime.scheduler.idle();
+      effectRuns = 0;
+
+      for (const [index, value] of [1, 2, 3].entries()) {
+        source.withTx(tx).send(value);
+        await tx.commit();
+        tx = runtime.edit();
+        await runtime.scheduler.idle();
+        expect(output.get()).toBe(value * 10);
+        expect(effectRuns).toBe(index + 1);
+      }
+    } finally {
+      computeCancel();
+      effectCancel();
+    }
+  });
+
+  it("bounds a cycling subgraph without blocking an unrelated subgraph", async () => {
+    const cycleA = runtime.getCell<number>(
+      space,
+      "v2-cutover-cycle-a",
+      undefined,
+      tx,
+    );
+    const cycleB = runtime.getCell<number>(
+      space,
+      "v2-cutover-cycle-b",
+      undefined,
+      tx,
+    );
+    const unrelatedSource = runtime.getCell<number>(
+      space,
+      "v2-cutover-cycle-unrelated-source",
+      undefined,
+      tx,
+    );
+    const unrelatedOutput = runtime.getCell<number>(
+      space,
+      "v2-cutover-cycle-unrelated-output",
+      undefined,
+      tx,
+    );
+    cycleA.set(0);
+    cycleB.set(0);
+    unrelatedSource.set(7);
+    unrelatedOutput.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runCountA = 0;
+    let runCountB = 0;
+    const unrelatedValues: number[] = [];
+
+    const actionA = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        runCountA++;
+        cycleA.withTx(actionTx).send(cycleB.withTx(actionTx).get() + 1);
+      }) as Action,
+      {
+        writes: [cycleA.getAsNormalizedFullLink()],
+      },
+    );
+    const actionB = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        runCountB++;
+        cycleB.withTx(actionTx).send(cycleA.withTx(actionTx).get() + 1);
+      }) as Action,
+      {
+        writes: [cycleB.getAsNormalizedFullLink()],
+      },
+    );
+    const cycleEffect: Action = (actionTx) => {
+      cycleB.withTx(actionTx).get();
+    };
+
+    const unrelatedWriter = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        unrelatedOutput.withTx(actionTx).send(
+          unrelatedSource.withTx(actionTx).get() * 10,
+        );
+      }) as Action,
+      {
+        writes: [unrelatedOutput.getAsNormalizedFullLink()],
+      },
+    );
+    const unrelatedEffect: Action = (actionTx) => {
+      unrelatedValues.push(unrelatedOutput.withTx(actionTx).get());
+    };
+
+    const cancelA = runtime.scheduler.subscribe(
+      actionA,
+      {
+        reads: [toMemorySpaceAddress(cycleB.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(cycleA.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    const cancelB = runtime.scheduler.subscribe(
+      actionB,
+      {
+        reads: [toMemorySpaceAddress(cycleA.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(cycleB.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    const cancelCycleEffect = runtime.scheduler.subscribe(
+      cycleEffect,
+      {
+        reads: [toMemorySpaceAddress(cycleB.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [],
+      },
+      { isEffect: true },
+    );
+    const cancelUnrelatedWriter = runtime.scheduler.subscribe(
+      unrelatedWriter,
+      {
+        reads: [
+          toMemorySpaceAddress(unrelatedSource.getAsNormalizedFullLink()),
+        ],
+        shallowReads: [],
+        writes: [
+          toMemorySpaceAddress(unrelatedOutput.getAsNormalizedFullLink()),
+        ],
+      },
+      {},
+    );
+    const cancelUnrelatedEffect = runtime.scheduler.subscribe(
+      unrelatedEffect,
+      {
+        reads: [
+          toMemorySpaceAddress(unrelatedOutput.getAsNormalizedFullLink()),
+        ],
+        shallowReads: [],
+        writes: [],
+      },
+      { isEffect: true },
+    );
+
+    try {
+      await expectSchedulerIdle(runtime);
+      expect(runCountA + runCountB).toBeGreaterThan(0);
+      // 3pre keeps the v1-compatible cycle-break bound; 3c.iv tightens this
+      // fixture to the v2 PASS_RUN_BUDGET backoff rule.
+      expect(runCountA + runCountB).toBeLessThan(500);
+      expect(unrelatedValues[unrelatedValues.length - 1]).toBe(70);
+    } finally {
+      cancelA();
+      cancelB();
+      cancelCycleEffect();
+      cancelUnrelatedWriter();
+      cancelUnrelatedEffect();
+    }
+  });
+
+  it("keeps provisional demand until parent-created readers can demand a child", async () => {
+    const trigger = runtime.getCell<number>(
+      space,
+      "v2-cutover-provisional-trigger",
+      undefined,
+      tx,
+    );
+    const childSource = runtime.getCell<number>(
+      space,
+      "v2-cutover-provisional-child-source",
+      undefined,
+      tx,
+    );
+    const childOutput = runtime.getCell<number>(
+      space,
+      "v2-cutover-provisional-child-output",
+      undefined,
+      tx,
+    );
+    trigger.set(0);
+    childSource.set(1);
+    childOutput.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let childARuns = 0;
+    const childBValues: number[] = [];
+    let childACancel: (() => void) | undefined;
+    let childBCancel: (() => void) | undefined;
+    const childOutputLink = childOutput.getAsNormalizedFullLink();
+    const childOutputAddress = toMemorySpaceAddress(childOutputLink);
+
+    const childA = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        childARuns++;
+        childOutput.withTx(actionTx).send(
+          childSource.withTx(actionTx).get() * 10,
+        );
+      }) as Action,
+      {
+        writes: [childOutputLink],
+      },
+    );
+    const childB: Action = (actionTx) => {
+      childBValues.push(childOutput.withTx(actionTx).get());
+    };
+
+    const parent: Action = (actionTx) => {
+      trigger.withTx(actionTx).get();
+      if (!childACancel) {
+        childACancel = runtime.scheduler.subscribe(
+          childA,
+          {
+            reads: [
+              toMemorySpaceAddress(childSource.getAsNormalizedFullLink()),
+            ],
+            shallowReads: [],
+            writes: [childOutputAddress],
+          },
+          {},
+        );
+      }
+      if (!childBCancel) {
+        childBCancel = runtime.scheduler.subscribe(
+          childB,
+          { reads: [childOutputAddress], shallowReads: [], writes: [] },
+          { isEffect: true },
+        );
+      }
+    };
+
+    const parentCancel = runtime.scheduler.subscribe(
+      parent,
+      {
+        reads: [toMemorySpaceAddress(trigger.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [],
+      },
+      { isEffect: true },
+    );
+
+    try {
+      await runtime.scheduler.idle();
+      expect(childARuns).toBe(1);
+      expect(childBValues.includes(10)).toBe(true);
+
+      childBValues.length = 0;
+      childSource.withTx(tx).send(2);
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.scheduler.idle();
+
+      expect(childARuns).toBe(2);
+      expect(childBValues.includes(20)).toBe(true);
+    } finally {
+      parentCancel();
+      childACancel?.();
+      childBCancel?.();
+    }
+  });
+
+  it("keeps a declared writer dormant while its output has no demand", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "v2-cutover-dormant-source",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "v2-cutover-dormant-output",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runs = 0;
+    const outputLink = output.getAsNormalizedFullLink();
+    const writer = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        runs++;
+        output.withTx(actionTx).send(source.withTx(actionTx).get() * 10);
+      }) as Action,
+      {
+        writes: [outputLink],
+      },
+    );
+
+    runtime.scheduler.subscribe(
+      writer,
+      {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(outputLink)],
+      },
+      {},
+    );
+
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.scheduler.idle();
+
+    expect(runs).toBe(0);
+    expect(output.get()).toBe(0);
+  });
+});
