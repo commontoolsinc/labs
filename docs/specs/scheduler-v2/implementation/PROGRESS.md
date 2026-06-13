@@ -4025,3 +4025,30 @@ CT-1316, and the differing value is exact (registry `none` vs WeakMap
     - No case exceeded the >10% regression STOP threshold.
   - `cd packages/runner && deno task test`: passed,
     `594 passed (3109 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m7s`.
+
+## REVIEWER RESOLUTION — PR #4102 review findings
+
+- [x] pending — liveness cycle guard + first-run debounce planning context.
+- Findings addressed (Codex/cubic review on PR #4102), red-first:
+  1. `addLiveRef`/`dropLiveRef` lacked the spec §5.2 visited-set guard on
+     the update itself, so a cycle's back edge double-counted its origin
+     (A=2/B=1) and unsubscribing the only live root left the cycle live
+     forever. The guard now lives at the per-node update entry; the origin
+     is marked before propagation (cutover fixture "releases liveness
+     through dependency cycles"). CAVEAT recorded: per-pass dedup
+     undercounts multi-path (diamond) graphs relative to per-edge
+     accounting when an individual edge is later unregistered while its
+     reader stays live — flagged for the implementer to weigh in 3c/3d.
+  2. `getNextDebounceRunTime` (delay-control) built its context without
+     `shouldDebounceFirstRun` while the waiting/schedule paths included
+     it, so a scheduled first-run debounce had no wake time for planners
+     (cutover fixture "plans wake times for first-run debounced
+     computations").
+- Finding NOT changed: cubic's P2 on `setNodeProvisionalDemand`
+  re-asserts without a passId (continuation grants) intentionally clear
+  the creating-pass boundary — that is the continuation semantics
+  (survive `clearProvisionalDemandAtPassEnd`, expire via the
+  `provisionalDemandPass === undefined` arm of `markNodeHasRun` after the
+  node runs). Changing it to preserve the old pass would expire
+  continuation demand at pass end before the continued run.
+- Deviations: none.

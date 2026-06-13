@@ -332,11 +332,22 @@ export function unregisterDependentEdge(
   }
 }
 
+// Spec §5.2: refcount deltas propagate upstream with a visited-set cycle
+// guard — each node is updated AT MOST ONCE per propagation pass. Guarding
+// the increment itself (not just the recursion) keeps a cycle's back edge
+// from double-counting its origin, which would leave the cycle live forever
+// once its only root unsubscribes. Caveat (recorded in PROGRESS.md): this
+// per-pass dedup undercounts multi-path (diamond) graphs relative to
+// per-edge accounting when an individual edge is later unregistered while
+// its reader stays live.
 function addLiveRef(
   state: SchedulerLivenessState,
   action: Action,
   visited: Set<Action>,
 ): void {
+  if (visited.has(action)) return;
+  visited.add(action);
+
   const node = state.nodes.get(action);
   if (!node || !isRegisteredNode(state, node)) return;
 
@@ -352,6 +363,9 @@ function dropLiveRef(
   action: Action,
   visited: Set<Action>,
 ): void {
+  if (visited.has(action)) return;
+  visited.add(action);
+
   const node = state.nodes.get(action);
   if (!node || !isRegisteredNode(state, node) || node.liveRefs === 0) {
     return;
@@ -392,8 +406,9 @@ function updateLiveRefsFromWriters(
 ): void {
   // Direction convention: `dependents` is writer -> readers, and
   // `reverseDependencies` is reader -> writers. Liveness therefore propagates
-  // from a live reader upstream through `reverseDependencies`.
-  if (visited.has(node.action)) return;
+  // from a live reader upstream through `reverseDependencies`. Mark the
+  // origin so cyclic back edges cannot update it again this pass; the
+  // per-node guard lives in addLiveRef/dropLiveRef.
   visited.add(node.action);
 
   const writers = state.reverseDependencies.get(node.action);

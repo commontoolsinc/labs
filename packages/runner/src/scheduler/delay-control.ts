@@ -25,13 +25,12 @@ export function getNextDebounceRunTime(
   state: SchedulerDelayControlState,
   action: Action,
 ): number | undefined {
+  // Same context as the waiting/schedule paths — the planner must agree
+  // with them on the first-run debounce gate, or a scheduled debounce has
+  // no wake time.
   return state.delays.getNextDebounceRunTime(
     action,
-    {
-      computations: state.computations,
-      effects: state.effects,
-      dirty: state.dirty,
-    },
+    debouncedComputationContext(state),
   );
 }
 

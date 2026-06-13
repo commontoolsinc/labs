@@ -156,6 +156,7 @@ export class SchedulerDelays {
       readonly computations: ReadonlySet<Action>;
       readonly effects: ReadonlySet<Action>;
       readonly dirty: ReadonlySet<Action>;
+      readonly shouldDebounceFirstRun?: (action: Action) => boolean;
     },
   ): number | undefined {
     if (!this.shouldDebouncePullComputation(action, context)) {
