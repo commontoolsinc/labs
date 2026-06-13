@@ -577,7 +577,12 @@ function warnOnWriteSurfaceViolations(
     ) {
       continue;
     }
-    logger.warn("write-surface-violation", () => [
+    // Declaration-gap diagnostics, not enforcement (work order 05 step 5) —
+    // debug level because known gaps remain (builtins minting cause-keyed
+    // internal docs inside their run, e.g. ifElse/unless/fetchData) and
+    // cf test fails tests on console warnings. Counted regardless of level:
+    // assert via getLoggerCountsBreakdown().scheduler["write-surface-violation"].
+    logger.debug("write-surface-violation", () => [
       `Action ${args.actionId} wrote outside its declared surface`,
       write,
     ]);

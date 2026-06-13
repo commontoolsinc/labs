@@ -209,7 +209,7 @@ describe("static write surface demand", () => {
       expect(runs).toBe(1);
       expect(
         getLoggerCountsBreakdown().scheduler?.["write-surface-violation"]
-          ?.warn ?? 0,
+          ?.debug ?? 0,
       ).toBe(0);
     } finally {
       cancel();
@@ -277,7 +277,7 @@ describe("static write surface demand", () => {
       expect(undeclared.get()).toBe(2);
       expect(
         getLoggerCountsBreakdown().scheduler?.["write-surface-violation"]
-          ?.warn,
+          ?.debug,
       ).toBe(1);
     } finally {
       cancel();
