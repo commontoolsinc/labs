@@ -1,5 +1,6 @@
 import { assert } from "@std/assert";
 import { join } from "@std/path";
+import { runDenoCheckWithTemporaryConfig } from "@commonfabric/test-support/isolated-deno";
 
 const ROOT = join(import.meta.dirname!, "..", "..", "..");
 
@@ -22,20 +23,12 @@ Deno.test("shell entrypoint type-checks under standard decorators", async () => 
     ...(packageConfig.imports ?? {}),
   };
 
-  const tempConfig = join(
-    ROOT,
-    ".deno.standard-decorators.shell-entrypoint.json",
-  );
-  await Deno.writeTextFile(tempConfig, JSON.stringify(rootConfig, null, 2));
-
-  const output = await new Deno.Command(Deno.execPath(), {
-    cwd: ROOT,
-    args: ["check", "--config", tempConfig, "packages/shell/src/index.ts"],
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
-
-  await Deno.remove(tempConfig);
+  const output = await runDenoCheckWithTemporaryConfig({
+    root: ROOT,
+    config: rootConfig,
+    files: ["packages/shell/src/index.ts"],
+    tempConfigPrefix: "deno.standard-decorators.shell-entrypoint",
+  });
 
   if (!output.success) {
     console.error(decode(output.stdout));

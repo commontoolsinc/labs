@@ -1,5 +1,6 @@
 import { assert } from "@std/assert";
 import { join } from "@std/path";
+import { runDenoCheckWithTemporaryConfig } from "@commonfabric/test-support/isolated-deno";
 
 const ROOT = join(import.meta.dirname!, "..", "..", "..");
 
@@ -13,9 +14,6 @@ Deno.test("secondary transitive ui slice type-checks under standard decorators",
 
   rootConfig.compilerOptions ??= {};
   rootConfig.compilerOptions.experimentalDecorators = false;
-
-  const tempConfig = join(ROOT, ".deno.standard-decorators.ui-phase5.json");
-  await Deno.writeTextFile(tempConfig, JSON.stringify(rootConfig, null, 2));
 
   const files = [
     "packages/ui/src/v2/components/cf-cell-link/cf-cell-link.ts",
@@ -33,14 +31,12 @@ Deno.test("secondary transitive ui slice type-checks under standard decorators",
     "packages/ui/src/v2/components/cf-tool-call/cf-tool-call.ts",
   ];
 
-  const output = await new Deno.Command(Deno.execPath(), {
-    cwd: ROOT,
-    args: ["check", "--config", tempConfig, ...files],
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
-
-  await Deno.remove(tempConfig);
+  const output = await runDenoCheckWithTemporaryConfig({
+    root: ROOT,
+    config: rootConfig,
+    files,
+    tempConfigPrefix: "deno.standard-decorators.ui-phase5",
+  });
 
   if (!output.success) {
     console.error(decode(output.stdout));

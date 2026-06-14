@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "exports": {
     ".": "./src/mod.ts",
-    "./fixture-runner": "./src/fixture-runner.ts"
+    "./fixture-runner": "./src/fixture-runner.ts",
+    "./isolated-deno": "./src/isolated-deno.ts"
   },
   "imports": {
     "typescript": "npm:typescript"

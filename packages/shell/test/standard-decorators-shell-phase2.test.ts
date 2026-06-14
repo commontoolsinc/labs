@@ -1,5 +1,6 @@
 import { assert } from "@std/assert";
 import { join } from "@std/path";
+import { runDenoCheckWithTemporaryConfig } from "@commonfabric/test-support/isolated-deno";
 
 const ROOT = join(import.meta.dirname!, "..", "..", "..");
 
@@ -14,9 +15,6 @@ Deno.test("shell component slice type-checks under standard decorators", async (
   rootConfig.compilerOptions ??= {};
   rootConfig.compilerOptions.experimentalDecorators = false;
 
-  const tempConfig = join(ROOT, ".deno.standard-decorators.shell-phase2.json");
-  await Deno.writeTextFile(tempConfig, JSON.stringify(rootConfig, null, 2));
-
   const files = [
     "packages/shell/src/components/Button.ts",
     "packages/shell/src/components/CFLogo.ts",
@@ -27,14 +25,12 @@ Deno.test("shell component slice type-checks under standard decorators", async (
     "packages/shell/src/components/PieceList.ts",
   ];
 
-  const output = await new Deno.Command(Deno.execPath(), {
-    cwd: ROOT,
-    args: ["check", "--config", tempConfig, ...files],
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
-
-  await Deno.remove(tempConfig);
+  const output = await runDenoCheckWithTemporaryConfig({
+    root: ROOT,
+    config: rootConfig,
+    files,
+    tempConfigPrefix: "deno.standard-decorators.shell-phase2",
+  });
 
   if (!output.success) {
     console.error(decode(output.stdout));
