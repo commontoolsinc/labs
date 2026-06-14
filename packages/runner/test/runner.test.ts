@@ -1160,6 +1160,86 @@ describe("setup/start", () => {
     expect(cellValue).toEqual({ output: 1 });
   });
 
+  it("reports a missing stream marker when a handler's $event reads undefined", async () => {
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [
+        {
+          module: { type: "javascript", implementation: () => undefined },
+          inputs: {
+            $event: { $alias: { cell: "argument", path: ["missingStream"] } },
+          },
+          outputs: {},
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(
+      space,
+      "handler $event reads undefined",
+    );
+    setupTrusted(runtime, undefined, pattern, {}, resultCell);
+
+    // The node is authored as a handler but its stream marker location was
+    // never written (e.g. state persisted in an older format). The error must
+    // say the marker is missing, not that it was overwritten.
+    await expect(runtime.start(resultCell)).rejects.toThrow(
+      "was never written",
+    );
+  });
+
+  it("reports an overwritten stream marker when $event resolves to data", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: { ev: { type: "number" } },
+      },
+      resultSchema: {},
+      result: {},
+      nodes: [
+        {
+          module: { type: "javascript", implementation: () => undefined },
+          inputs: { $event: { $alias: { cell: "argument", path: ["ev"] } } },
+          outputs: {},
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(
+      space,
+      "handler $event resolves to data",
+    );
+    setupTrusted(runtime, undefined, pattern, { ev: 7 }, resultCell);
+
+    await expect(runtime.start(resultCell)).rejects.toThrow(
+      "was overwritten (found: 7)",
+    );
+  });
+
+  it("reports a non-link $event input on a handler node", async () => {
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [
+        {
+          module: { type: "javascript", implementation: () => undefined },
+          inputs: { $event: 42 },
+          outputs: {},
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(space, "handler $event is not a link");
+    setupTrusted(runtime, undefined, pattern, {}, resultCell);
+
+    await expect(runtime.start(resultCell)).rejects.toThrow(
+      "is not a stream reference",
+    );
+  });
+
   it("setup ignores exhausted retry errors and still resolves", async () => {
     const pattern: Pattern = {
       argumentSchema: {
