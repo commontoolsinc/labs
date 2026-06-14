@@ -180,14 +180,64 @@ function shouldWrapTopLevelExpression(
     return hasNamedTarget(expr.expression, CF_DATA_CONSTRUCTOR_NAMES);
   }
 
-  if (
-    expr.kind === ts.SyntaxKind.RegularExpressionLiteral ||
-    ts.isObjectLiteralExpression(expr) ||
-    ts.isArrayLiteralExpression(expr)
-  ) {
+  if (expr.kind === ts.SyntaxKind.RegularExpressionLiteral) {
     return true;
   }
 
+  if (ts.isObjectLiteralExpression(expr) || ts.isArrayLiteralExpression(expr)) {
+    // A literal that (syntactically) carries a function is not plain data:
+    // `__cf_data` is `freezeVerifiedPlainData`, which rejects functions at any
+    // depth, so wrapping such a value only ever turns a working module-scope
+    // namespace (e.g. `const cfcAtom = { caveat() {...}, builtin() {...} }`,
+    // shared CFC atom helpers) into a load-time `PlainDataValidationError`.
+    // Leave it unwrapped — it is used as ordinary trusted module code.
+    return !literalContainsFunctionLike(expr);
+  }
+
+  return false;
+}
+
+/**
+ * True when an object/array literal stores a function as a member VALUE, visible
+ * in the source (a shorthand method, or a property/element whose value is an
+ * arrow/function/class expression — recursively through nested literals). Such a
+ * literal can never be valid `__cf_data` (the plain-data validator rejects
+ * function values at any depth), so wrapping it only ever produces a load-time
+ * crash.
+ *
+ * Get/set accessors are deliberately NOT treated as function-like: an accessor's
+ * property VALUE is whatever the getter returns (read and validated by
+ * `freezeVerifiedPlainData`), so an accessor-backed data snapshot is valid plain
+ * data and must still be wrapped. Bindings reached via shorthand (`{ foo }`) or
+ * spread (`{ ...x }`) are not inspected — their value is not syntactically
+ * present here — so they keep the prior wrap-and-validate behavior.
+ */
+function literalContainsFunctionLike(node: ts.Expression): boolean {
+  const expr = unwrapExpression(node);
+  if (
+    ts.isArrowFunction(expr) ||
+    ts.isFunctionExpression(expr) ||
+    ts.isClassExpression(expr)
+  ) {
+    return true;
+  }
+  if (ts.isObjectLiteralExpression(expr)) {
+    return expr.properties.some((property) => {
+      if (ts.isMethodDeclaration(property)) {
+        return true;
+      }
+      if (ts.isPropertyAssignment(property)) {
+        return literalContainsFunctionLike(property.initializer);
+      }
+      return false;
+    });
+  }
+  if (ts.isArrayLiteralExpression(expr)) {
+    return expr.elements.some((element) =>
+      !ts.isSpreadElement(element) && !ts.isOmittedExpression(element) &&
+      literalContainsFunctionLike(element)
+    );
+  }
   return false;
 }
 

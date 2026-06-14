@@ -6,44 +6,28 @@
  * and diagnostics in downstream packages.
  */
 
+// Imported for local use by the `cfcAtom` factory and atom types below, and
+// re-exported on the public surface (see below). Defined in a namespace-free
+// leaf module so pattern code can import them without dragging in `cfcAtom`.
+import {
+  CFC_ATOM_BASE,
+  CFC_ATOM_TYPE,
+  CFC_CONCEPT_KIND,
+  type CfcAtom,
+  type CfcAtomObject,
+  type CfcJsonArray,
+  type CfcJsonValue,
+} from "./cfc-atom-kinds.ts";
+
 export type Cfc<T, Meta> = T & {
   readonly __ct_cfc__?: Meta;
 };
 
-export type CfcJsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | CfcJsonArray
-  | CfcAtomObject;
+export type { CfcAtom, CfcAtomObject, CfcJsonArray, CfcJsonValue };
 
-export interface CfcJsonArray extends ReadonlyArray<CfcJsonValue> {}
-
-export interface CfcAtomObject extends Readonly<Record<string, CfcJsonValue>> {}
-
-export type CfcAtom = CfcJsonValue;
-
-export const CFC_ATOM_BASE = "https://commonfabric.org/cfc/atom/" as const;
-
-export const CFC_ATOM_TYPE = {
-  Builtin: `${CFC_ATOM_BASE}Builtin`,
-  Caveat: `${CFC_ATOM_BASE}Caveat`,
-  InjectionSafe: `${CFC_ATOM_BASE}InjectionSafe`,
-  LinkReference: `${CFC_ATOM_BASE}LinkReference`,
-  Origin: `${CFC_ATOM_BASE}Origin`,
-  // Hereditary certification (spec §15.1.1 / §3.1.6.1): survives combination
-  // via the class-aware meet — present on an output only when present on
-  // every input.
-  PolicyCertified: `${CFC_ATOM_BASE}PolicyCertified`,
-  PromptSlotBound: `${CFC_ATOM_BASE}PromptSlotBound`,
-  PromptSlotInfluence: `${CFC_ATOM_BASE}PromptSlotInfluence`,
-  Resource: `${CFC_ATOM_BASE}Resource`,
-  // Runtime-minted derivation provenance (spec §8.9.3): which implementation
-  // produced this value. Evidence — not authorable in schemas.
-  TransformedBy: `${CFC_ATOM_BASE}TransformedBy`,
-  UserSurfaceInput: `${CFC_ATOM_BASE}UserSurfaceInput`,
-} as const;
+// Re-export the namespace-free atom-kind constants on the public surface so
+// `@commonfabric/api/cfc` is unchanged for runtime/host callers.
+export { CFC_ATOM_BASE, CFC_ATOM_TYPE, CFC_CONCEPT_KIND };
 
 export const CFC_RUNTIME_SUBJECT = "did:web:commonfabric.org#runtime";
 
@@ -68,12 +52,6 @@ export const CFC_COMPILED_BY_ATOM_PREFIX = "cf-compiled-by:" as const;
  */
 export const CFC_COMPILED_BY_ATOM =
   `${CFC_COMPILED_BY_ATOM_PREFIX}cf-compiler` as const;
-
-export const CFC_CONCEPT_KIND = {
-  PromptInfluence: "https://commonfabric.org/cfc/concepts/prompt-influence",
-  PromptInjectionRiskUnscreened:
-    "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
-} as const;
 
 export const CFC_FUSE_ATOM_CLASS = {
   ProjectionMetadataIncomplete: "CommonFabricFuseProjectionMetadataIncomplete",

@@ -577,6 +577,75 @@ export { model, lookup, days, matcher, scopes, years, tags, proxied, passthrough
     );
   });
 
+  it("does not __cf_data-wrap a module-scope object/array literal that carries functions", async () => {
+    // A methods-namespace (e.g. the shared `cfcAtom` CFC helper) is not plain
+    // data: `__cf_data` is `freezeVerifiedPlainData`, which throws on functions
+    // at any depth, so wrapping it only ever turns a working module-scope
+    // namespace into a load-time crash. The transformer must leave such a
+    // literal unwrapped; genuine data objects beside it still get wrapped.
+    const source = `
+const helpers = {
+  caveat(kind: string, source: string) {
+    return { kind, source };
+  },
+  builtin: (name: string) => ({ name }),
+};
+
+const nestedFns = {
+  group: {
+    run() {
+      return 1;
+    },
+  },
+};
+
+const fnArray = [() => 1, () => 2];
+
+const data = { kind: "Caveat", base: "https://example.org/" };
+
+const dataArray = ["a", "b", "c"];
+
+const accessorData = { get open() { return "Open"; } };
+
+export { helpers, nestedFns, fnArray, data, dataArray, accessorData };
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    });
+    const main = output["/main.ts"]!;
+
+    assert(
+      !main.includes("__cf_data(helpers") &&
+        !main.includes("__cfHelpers.__cf_data({\n  caveat") &&
+        !/__cf_data\(\{[^)]*caveat/.test(main),
+      "a methods-bearing object literal must not be wrapped",
+    );
+    assert(
+      !/__cf_data\(\{[^)]*group/.test(main),
+      "an object literal with a nested method must not be wrapped",
+    );
+    assert(
+      !/__cf_data\(\[\(\) =>/.test(main),
+      "an array literal of functions must not be wrapped",
+    );
+    // Genuine plain data alongside it is still wrapped.
+    assertStringIncludes(
+      main,
+      'const data = __cfHelpers.__cf_data({ kind: "Caveat", base: "https://example.org/" });',
+    );
+    assertStringIncludes(
+      main,
+      'const dataArray = __cfHelpers.__cf_data(["a", "b", "c"]);',
+    );
+    // An accessor's value is what the getter returns (read + validated at
+    // runtime), so an accessor-backed snapshot is data and stays wrapped.
+    assertStringIncludes(
+      main,
+      "const accessorData = __cfHelpers.__cf_data({ get open() { return ",
+    );
+  });
+
   it("hardens direct top-level functions with a canonical helper", async () => {
     const source = `
 const step = (value: number) => value + 1;
