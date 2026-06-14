@@ -1,6 +1,46 @@
 # Annotation Primitive — Prototype Implementation Plan (labs-4)
 
-Status: **planning → building** · Branch: `proto/annotation-primitive`
+Status: **under review — altitude in question** · Branch: `proto/annotation-primitive`
+
+> **⚠️ Adversarial review outcome (2026-06-14).** Three independent critics
+> reviewed this plan and the Phase-0 spike. Headline findings (detail in the PR
+> description):
+>
+> - **Altitude is likely wrong for a prototype.** Phase 0 put the reverse index
+>   in the memory engine — the hardest, least-reversible layer — to retire the
+>   *easy* risk (walk JSON, write rows), while **Phase 2 (reactive delivery) —
+>   the genuinely hard part — is not credible as written.** The scheduler
+>   trigger index keys only on concrete `space/scope/id`; a committed annotation
+>   doc `D` never writes its target `X`, so the change-notification path carries
+>   `D`'s id only and a reader watching `X` is never woken. Making
+>   `annotationsOf` reactive would require a cross-layer change-notification
+>   protocol extension (memory-server + runner-storage + scheduler) this plan
+>   does not scope or budget.
+> - **`wish()` already solves the analogous problem** (reactive over a changing
+>   set of entities) by reading a *concrete materialized index cell* and riding
+>   the ordinary trigger index — no synthetic subscription. **Recommended
+>   pivot:** build `annotationsOf` as a `computed` over
+>   `wish({ query: "#annotation" })` filtered by the `about` target — zero engine
+>   code, reactive on day one, exercises every ergonomic question and both
+>   migrations. Only if that demonstrably doesn't scale, promote the index to a
+>   concrete commit-written cell (the wish model) — never a SQLite side-table
+>   plus a net-new synthetic-subscription protocol.
+> - **Two correctness blockers in the Phase-0 spike** (were the engine path
+>   kept): (1) **branch inheritance** — the reverse read misses every annotation
+>   committed on a parent branch before a fork; `scheduler_read_index` is an
+>   *anti*-precedent (it is branch-local because it tracks live ephemeral
+>   readers, not inheritable content). (2) **scope encoding** — `to_scope` stores
+>   the raw `LinkScope` token (`"user"`/`"session"`/`"inherit"`) while a target's
+>   real identity is a *resolved* `scope_key` (`"user:<principal>"`, …); they
+>   coincide only for `"space"`, so non-space targets silently return nothing.
+>   Plus a reconcile bug: borrowing `reconcileSchedulerIndexRows` freezes
+>   `seq`/`op_index` on converging re-sets, which would silently defeat the very
+>   Phase-2 invalidation the engine path exists to enable.
+>
+> The Phase-0 engine spike below is retained as a **reference artifact** proving
+> the commit-boundary mechanism *works mechanically*, not as the recommended
+> path. The §2 claim that `scheduler_read_index` is an "exact precedent" is
+> **withdrawn**.
 
 This document plans a labs-4 prototype of the annotation primitive proposed in
 loom **PR #2707** (`docs/development/connectors/annotations-*.md` in the loom

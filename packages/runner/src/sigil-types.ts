@@ -25,6 +25,12 @@ export type LinkV1Inner = {
   scope?: LinkScope;
   schema?: JSONSchema;
   overwrite?: "redirect" | "this"; // default is "this"
+  // Annotation primitive (prototype): marks this link as an annotation's
+  // about-edge. When present, the memory engine indexes the link in
+  // `link_index` at the commit boundary so `annotationsOf(target)` can find
+  // incoming edges. Persisted on the stored sigil (link-semantics, not
+  // cell-semantics). See docs/development/connectors/annotations-prototype-plan.md
+  linkRole?: string;
 };
 
 export type LinkV1 = {
