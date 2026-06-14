@@ -4,13 +4,13 @@ import {
   env,
   Page,
   pipeConsole,
-} from "@commontools/integration";
+} from "@commonfabric/integration";
 import {
   Identity,
   InsecureCryptoKeyPair,
   serializeKeyPairRaw,
   TransferrableInsecureCryptoKeyPair,
-} from "@commontools/identity";
+} from "@commonfabric/identity";
 import { afterAll, afterEach, beforeAll, beforeEach } from "@std/testing/bdd";
 import {
   AppState,
@@ -18,7 +18,7 @@ import {
   appViewToUrlPath,
   deserialize,
   isAppViewEqual,
-} from "@commontools/shell/shared";
+} from "@commonfabric/shell/shared";
 import { waitFor } from "./utils.ts";
 import { ConsoleEvent, PageErrorEvent } from "@astral/astral";
 
@@ -43,19 +43,92 @@ export async function login(page: Page, identity: Identity): Promise<void> {
 
   await page!.evaluate<
     Promise<void>,
-    [TransferrableInsecureCryptoKeyPair]
+    [TransferrableInsecureCryptoKeyPair, string]
   >(
-    async (rawId) => {
+    async (rawId, nextDID) => {
+      const currentIdentity = globalThis.app.state().identity;
+      if (currentIdentity && currentIdentity.did() !== nextDID) {
+        await globalThis.app.apply({
+          type: "set-identity",
+          identity: undefined,
+        });
+        await new Promise<void>((resolve, reject) => {
+          const startedAt = performance.now();
+          const check = () => {
+            if (!globalThis.commonfabric?.rt) {
+              resolve();
+              return;
+            }
+            if (performance.now() - startedAt > 30_000) {
+              reject(new Error("Timed out waiting for runtime logout"));
+              return;
+            }
+            setTimeout(check, 50);
+          };
+          check();
+        });
+      }
       await globalThis.app.setIdentity(rawId);
+      await new Promise<void>((resolve, reject) => {
+        const startedAt = performance.now();
+        const check = async () => {
+          try {
+            const rt = globalThis.commonfabric?.rt;
+            const home = await rt?.getHomeSpaceCell?.();
+            const ref = home?.ref?.();
+            if (ref?.space === nextDID) {
+              await rt?.idle?.();
+              resolve();
+              return;
+            }
+          } catch {
+            // Runtime is still initializing; retry until the deadline.
+          }
+          if (performance.now() - startedAt > 30_000) {
+            reject(new Error("Timed out waiting for runtime login"));
+            return;
+          }
+          setTimeout(check, 50);
+        };
+        void check();
+      });
     },
     {
-      args: [transferrableId],
+      args: [transferrableId, identity.did()],
     },
   );
 }
 
 export interface ShellIntegrationConfig {
   pipeConsole?: boolean;
+  /**
+   * When `true` (the default), `afterEach` throws if any browser
+   * `console.error` message was collected during the test.
+   *
+   * Set to `false` only to opt an entire suite out of the check when
+   * you have strong reason to believe every error is benign AND cannot
+   * be narrowly allowlisted.
+   */
+  failOnConsoleError?: boolean;
+  /**
+   * Strings or RegExps that match console error messages that are known-
+   * benign for this suite.  A collected error is suppressed (does not
+   * cause `afterEach` to throw) when it matches ANY entry in this list.
+   *
+   * Prefer narrow patterns (exact substring or anchored regex) so that
+   * genuinely unexpected errors still surface.
+   *
+   * Example:
+   * ```ts
+   * new ShellIntegration({
+   *   allowedConsoleErrors: [
+   *     "Expected cross-origin rejection",
+   *     /^ResizeObserver loop/,
+   *   ],
+   * })
+   * ```
+   */
+  allowedConsoleErrors?: (string | RegExp)[];
 }
 
 export class ShellIntegration {
@@ -63,11 +136,13 @@ export class ShellIntegration {
   #page?: Page;
   #exceptions: Array<string> = [];
   #errorLogs: Array<string> = [];
-  #config: ShellIntegrationConfig;
+  #config: Required<ShellIntegrationConfig>;
 
   constructor(config: ShellIntegrationConfig = {}) {
     this.#config = {
       pipeConsole: config.pipeConsole ?? env.PIPE_CONSOLE,
+      failOnConsoleError: config.failOnConsoleError ?? true,
+      allowedConsoleErrors: config.allowedConsoleErrors ?? [],
     };
   }
 
@@ -83,6 +158,20 @@ export class ShellIntegration {
     return this.#page!;
   }
 
+  // Browser-level CDP websocket endpoint, for attaching a second CDP client
+  // (e.g. `CdpWorkerProfiler`).
+  wsEndpoint(): string {
+    this.checkIsOk();
+    return this.#browser!.wsEndpoint();
+  }
+
+  async newPage(url?: string): Promise<Page> {
+    this.checkIsOk();
+    const page = await this.#browser!.newPage(url);
+    this.#attachPage(page);
+    return page;
+  }
+
   async state(): Promise<AppState | undefined> {
     this.checkIsOk();
     const page = this.page();
@@ -95,6 +184,10 @@ export class ShellIntegration {
   // Login to the initialized app with provided identity.
   async login(identity: Identity): Promise<void> {
     await login(this.page(), identity);
+  }
+
+  async disposeRuntime(): Promise<void> {
+    await this.#disposePageRuntime();
   }
 
   // Wait for the app state to match all properties
@@ -168,19 +261,7 @@ export class ShellIntegration {
   #beforeAll = async () => {
     this.#browser = await Browser.launch({ headless: env.HEADLESS });
     this.#page = await this.#browser.newPage();
-    this.#page.addEventListener("console", (e: ConsoleEvent) => {
-      if (e.detail.type === "error") {
-        this.#errorLogs.push(e.detail.text);
-      }
-      if (this.#config.pipeConsole) {
-        pipeConsole(e);
-      }
-    });
-    this.#page.addEventListener("dialog", dismissDialogs);
-    this.#page.addEventListener("pageerror", (e: PageErrorEvent) => {
-      console.error("Browser Page Error:", e.detail.message);
-      this.#exceptions.push(e.detail.message);
-    });
+    this.#attachPage(this.#page);
   };
 
   #beforeEach = () => {
@@ -189,21 +270,75 @@ export class ShellIntegration {
   };
 
   #afterEach = () => {
+    // Uncaught page exceptions always fail the test, regardless of
+    // `failOnConsoleError`.  They indicate a JavaScript crash, not a
+    // deliberate console.error call.
     if (this.#exceptions.length > 0) {
-      throw new Error(`Exceptions recorded: \n${this.#exceptions.join("\n")}`);
+      throw new Error(
+        `Uncaught browser exception(s):\n${
+          this.#exceptions.map((m) => `  ${m}`).join("\n")
+        }`,
+      );
     }
-    // TODO(CT-840)
-    // if (this.#errorLogs.length > 0) {
-    //  throw new Error(`Errors logged: \n${this.#errorLogs.join("\n")}`);
-    // }
+    if (this.#config.failOnConsoleError) {
+      const offending = this.#errorLogs.filter((msg) =>
+        !this.#config.allowedConsoleErrors.some((pattern) =>
+          typeof pattern === "string"
+            ? msg.includes(pattern)
+            // Clone without g/y: a sticky/global regex advances lastIndex
+            // across .test() calls, making repeated checks order-dependent.
+            : new RegExp(pattern.source, pattern.flags.replace(/[gy]/g, ""))
+              .test(msg)
+        )
+      );
+      if (offending.length > 0) {
+        throw new Error(
+          `Browser console error(s) recorded during test:\n${
+            offending.map((m) => `  ${m}`).join("\n")
+          }`,
+        );
+      }
+    }
   };
 
   #afterAll = async () => {
+    await this.#disposePageRuntime();
     await this.#page?.close();
     await this.#browser?.close();
   };
 
   private checkIsOk() {
     if (!this.#page) throw new Error("Page not initialized.");
+  }
+
+  async #disposePageRuntime(): Promise<void> {
+    const page = this.#page;
+    if (!page) return;
+    try {
+      await page.evaluate(async () => {
+        await globalThis.commonfabric?.rt?.dispose();
+        if (globalThis.commonfabric) {
+          globalThis.commonfabric.rt = undefined;
+        }
+      });
+    } catch (error) {
+      console.warn("Failed to dispose shell page runtime:", error);
+    }
+  }
+
+  #attachPage(page: Page) {
+    page.addEventListener("console", (e: ConsoleEvent) => {
+      if (e.detail.type === "error") {
+        this.#errorLogs.push(e.detail.text);
+      }
+      if (this.#config.pipeConsole) {
+        pipeConsole(e);
+      }
+    });
+    page.addEventListener("dialog", dismissDialogs);
+    page.addEventListener("pageerror", (e: PageErrorEvent) => {
+      console.error("Browser Page Error:", e.detail.message);
+      this.#exceptions.push(e.detail.message);
+    });
   }
 }

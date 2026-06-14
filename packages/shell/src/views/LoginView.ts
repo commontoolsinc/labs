@@ -1,14 +1,16 @@
 import { css, html } from "lit";
 import { state } from "lit/decorators.js";
 
-import { Identity, KeyStore, PassKey } from "@commontools/identity";
+import { Identity, KeyStore, PassKey } from "@commonfabric/identity";
 
 import { BaseView } from "./BaseView.ts";
 import {
+  AUTH_METHOD_KEYFILE,
   AUTH_METHOD_PASSKEY,
   AUTH_METHOD_PASSPHRASE,
   type AuthMethod,
   clearStoredCredential,
+  createKeyFileCredential,
   createPasskeyCredential,
   createPassphraseCredential,
   getPublicKeyCredentialDescriptor,
@@ -60,7 +62,7 @@ export class XLoginView extends BaseView {
       width: 100%;
       max-width: 600px;
       padding: 2rem;
-      background: white;
+      background: var(--shell-surface);
       border: var(--border-width, 2px) solid var(--border-color, #000);
     }
 
@@ -88,8 +90,9 @@ export class XLoginView extends BaseView {
       margin-bottom: 0.5rem;
       font-family: var(--font-primary);
       font-size: 1rem;
+      color: var(--font-color);
       border: var(--border-width, 2px) solid var(--border-color, #000);
-      background: white;
+      background: var(--shell-surface);
       box-sizing: border-box;
     }
 
@@ -180,23 +183,24 @@ export class XLoginView extends BaseView {
   `;
 
   @state()
-  private flow: AuthFlow | null = null;
+  private accessor flow: AuthFlow | null = null;
   @state()
-  private method: AuthMethod | null = null;
+  private accessor method: AuthMethod | null = null;
   @state()
-  private error: string | null = null;
+  private accessor error: string | null = null;
   @state()
-  private mnemonic: string | null = null;
+  private accessor mnemonic: string | null = null;
   @state()
-  private isProcessing = false;
+  private accessor isProcessing = false;
   @state()
-  private registrationSuccess = false;
+  private accessor registrationSuccess = false;
   @state()
-  private storedCredential: StoredCredential | null = getStoredCredential();
+  private accessor storedCredential: StoredCredential | null =
+    getStoredCredential();
   @state()
-  private copied = false;
+  private accessor copied = false;
   @state()
-  private keyStore?: KeyStore;
+  private accessor keyStore: KeyStore | undefined = undefined;
 
   private availableMethods: AuthMethod[] = [];
 
@@ -222,8 +226,9 @@ export class XLoginView extends BaseView {
       methods.push(AUTH_METHOD_PASSKEY);
     }
 
-    // Passphrase always available
+    // Passphrase and key files are always available.
     methods.push(AUTH_METHOD_PASSPHRASE);
+    methods.push(AUTH_METHOD_KEYFILE);
 
     this.availableMethods = methods;
 
@@ -299,8 +304,8 @@ export class XLoginView extends BaseView {
 
     try {
       const passkey = await PassKey.create(
-        "Common Tools User",
-        "commontoolsuser",
+        "Common Fabric User",
+        "commonfabricuser",
       );
       const identity = await passkey.createRootKey();
 
@@ -407,6 +412,33 @@ export class XLoginView extends BaseView {
     }
   }
 
+  private async handleKeyFileImport(file: File) {
+    this.isProcessing = true;
+    this.error = null;
+
+    try {
+      const identity = await Identity.fromPkcs8(
+        new Uint8Array(await file.arrayBuffer()),
+      );
+
+      const keyStore = this.getKeyStore();
+      if (keyStore) {
+        await keyStore.set(ROOT_KEY, identity);
+      }
+
+      const credential = createKeyFileCredential(identity.did());
+      saveCredential(credential);
+      this.storedCredential = credential;
+
+      this.command({ type: "set-identity", identity });
+    } catch (e) {
+      console.error("[LoginView] Key file import error:", e);
+      this.error = e instanceof Error ? e.message : "Could not import key file";
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+
   private handleClearStoredCredential() {
     clearStoredCredential();
     this.storedCredential = null;
@@ -415,7 +447,7 @@ export class XLoginView extends BaseView {
   private handleRegister() {
     if (this.method === AUTH_METHOD_PASSKEY) {
       this.dispatchAuthEvent("passkey-register");
-    } else {
+    } else if (this.method === AUTH_METHOD_PASSPHRASE) {
       this.dispatchAuthEvent("passphrase-generate");
     }
   }
@@ -451,9 +483,15 @@ export class XLoginView extends BaseView {
     if (this.storedCredential) {
       const isPassphrase =
         this.storedCredential.method === AUTH_METHOD_PASSPHRASE;
+      const isKeyFile = this.storedCredential.method === AUTH_METHOD_KEYFILE;
       const isPasskeyAvailable = this.availableMethods.includes(
         AUTH_METHOD_PASSKEY,
       );
+      const storedLabel = isPassphrase
+        ? "Passphrase"
+        : isKeyFile
+        ? `Imported Key (${this.storedCredential.id.slice(-8)})`
+        : `Passkey (${this.storedCredential.id.slice(-4)})`;
 
       return html`
         ${!isPassphrase
@@ -463,7 +501,7 @@ export class XLoginView extends BaseView {
                 variant="primary"
                 @click="${() => this.handleQuickUnlock()}"
               >
-                🔒 Login with Passkey (${this.storedCredential.id.slice(-4)})
+                🔒 Login with ${storedLabel}
               </x-button>
               <x-button
                 class="delete-button"
@@ -481,7 +519,7 @@ export class XLoginView extends BaseView {
               variant="primary"
               @click="${() => this.handleQuickUnlock()}"
             >
-              🔒 Login with Passphrase
+              🔒 Login with ${storedLabel}
             </x-button>
           `} ${isPassphrase && isPasskeyAvailable
           ? html`
@@ -490,7 +528,7 @@ export class XLoginView extends BaseView {
               this.method = AUTH_METHOD_PASSKEY;
               this.handleLogin();
             }}">
-              " 🔑 Login w/ Passkey
+              🔑 Login w/ Passkey
             </x-button>
           `
           : !isPassphrase
@@ -522,7 +560,7 @@ export class XLoginView extends BaseView {
     `;
   }
 
-  private handleQuickUnlock() {
+  private async handleQuickUnlock() {
     if (!this.storedCredential) return;
 
     this.method = this.storedCredential.method;
@@ -530,6 +568,30 @@ export class XLoginView extends BaseView {
 
     if (this.storedCredential.method === AUTH_METHOD_PASSKEY) {
       this.handleLogin();
+    } else if (this.storedCredential.method === AUTH_METHOD_KEYFILE) {
+      this.isProcessing = true;
+      this.error = null;
+
+      try {
+        const identity = await this.getKeyStore().get(ROOT_KEY);
+        if (!identity) {
+          this.handleClearStoredCredential();
+          this.flow = null;
+          this.method = null;
+          this.error =
+            "Stored key file is no longer available. Please re-import it.";
+          return;
+        }
+
+        this.command({ type: "set-identity", identity });
+      } catch (e) {
+        console.error("[LoginView] Key file unlock error:", e);
+        this.error = e instanceof Error
+          ? e.message
+          : "Could not unlock stored key file";
+      } finally {
+        this.isProcessing = false;
+      }
     }
   }
 
@@ -539,10 +601,19 @@ export class XLoginView extends BaseView {
       <div class="method-list">
         ${this.availableMethods.map((method) =>
           html`
-            <x-button @click="${() => this.handleMethodSelect(method)}">
+            <x-button
+              test-id="${method === AUTH_METHOD_PASSKEY
+                ? "use-passkey"
+                : method === AUTH_METHOD_PASSPHRASE
+                ? "use-passphrase"
+                : "import-cli-key"}"
+              @click="${() => this.handleMethodSelect(method)}"
+            >
               ${method === AUTH_METHOD_PASSKEY
                 ? "🔑 Use Passkey"
-                : "📝 Use Passphrase"}
+                : method === AUTH_METHOD_PASSPHRASE
+                ? "📝 Use Passphrase"
+                : "📁 Import CLI Key"}
             </x-button>
           `
         )}
@@ -558,7 +629,10 @@ export class XLoginView extends BaseView {
 
   private handleMethodSelect(method: AuthMethod) {
     this.method = method;
-    if (this.flow === "register") {
+    if (method === AUTH_METHOD_KEYFILE) {
+      return;
+    }
+    if (this.flow === "register" && method === AUTH_METHOD_PASSKEY) {
       this.handleRegister();
     } else if (this.flow === "login" && method === AUTH_METHOD_PASSKEY) {
       this.handleLogin();
@@ -614,6 +688,43 @@ export class XLoginView extends BaseView {
     this.handleLogin(passphrase);
   };
 
+  private renderKeyFileImport() {
+    return html`
+      <form @submit="${this.handleKeyFileSubmit}">
+        <input
+          type="file"
+          name="keyfile"
+          accept=".key, .pem, text/plain, application/x-pem-file"
+          required
+        />
+        <p class="info-text">
+          Select a PKCS8/PEM key generated by the cf CLI. Importing stores this
+          private key in this browser's IndexedDB.
+        </p>
+        <x-button type="submit" variant="primary">
+          📁 Import Key
+        </x-button>
+      </form>
+      <x-button @click="${() => {
+        this.flow = null;
+        this.method = null;
+      }}">
+        ← Back
+      </x-button>
+    `;
+  }
+
+  private handleKeyFileSubmit = (e: Event) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const file = new FormData(form).get("keyfile");
+    if (!(file instanceof File) || file.size === 0) {
+      this.error = "Select a key file to import.";
+      return;
+    }
+    void this.handleKeyFileImport(file);
+  };
+
   private renderMnemonicDisplay() {
     return html`
       <div class="message success">
@@ -655,6 +766,8 @@ export class XLoginView extends BaseView {
       <div class="success">
         <p>✓ ${this.method === AUTH_METHOD_PASSKEY
           ? "Passkey"
+          : this.method === AUTH_METHOD_KEYFILE
+          ? "Key file"
           : "Passphrase"} successfully registered!</p>
       </div>
       <x-button
@@ -673,12 +786,12 @@ export class XLoginView extends BaseView {
     return html`
       <div class="login-container">
         <div class="logo-container">
-          <ct-logo
+          <cf-logo
             background-color="black"
             shape-color="white"
             width="100"
             height="100"
-          ></ct-logo>
+          ></cf-logo>
         </div>
 
         <div class="auth-action-container">
@@ -704,6 +817,8 @@ export class XLoginView extends BaseView {
             ? this.renderMethodSelection()
             : this.method === AUTH_METHOD_PASSPHRASE
             ? this.renderPassphraseAuth()
+            : this.method === AUTH_METHOD_KEYFILE
+            ? this.renderKeyFileImport()
             : this.method === AUTH_METHOD_PASSKEY
             ? html`
               <div class="loading">

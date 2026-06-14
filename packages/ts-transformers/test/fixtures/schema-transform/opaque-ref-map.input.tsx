@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { pattern } from "commontools";
+import { pattern } from "commonfabric";
 
 interface TodoItem {
   title: string;

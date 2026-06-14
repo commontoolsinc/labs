@@ -2,11 +2,11 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import "@commontools/utils/equal-ignoring-symbols";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import "@commonfabric/utils/equal-ignoring-symbols";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Cell, isCell } from "../src/cell.ts";
-import type { StorableValue } from "@commontools/memory/interface";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -257,6 +257,68 @@ describe("Schema - AnyOf Support", () => {
       expect(resultArray.mixed).toEqualIgnoringSymbols(["bar", "baz"]);
     });
 
+    describe("AnyOf with type: unknown", () => {
+      it("object schema before unknown: property value is fully preserved", () => {
+        const c = runtime.getCell<{ item: { name: string } }>(
+          space,
+          "anyOf object-then-unknown preserves property 1",
+          undefined,
+          tx,
+        );
+        c.set({ item: { name: "Alice" } });
+        const schema = {
+          type: "object",
+          properties: {
+            item: {
+              anyOf: [
+                {
+                  type: "object",
+                  properties: { name: { type: "string" } },
+                },
+                { type: "unknown" },
+              ],
+            },
+          },
+        } as const satisfies JSONSchema;
+
+        const cell = c.asSchema(schema);
+        const result = cell.get();
+        // Object schema matches first; mergeAnyOfMatches returns matches[0]
+        // which is the resolved object, so the full property value is present.
+        expect((result.item as { name: string }).name).toBe("Alice");
+      });
+
+      it("unknown before object schema: property value is fully preserved", () => {
+        const c = runtime.getCell<{ item: { name: string } }>(
+          space,
+          "anyOf unknown-then-object returns undefined 1",
+          undefined,
+          tx,
+        );
+        c.set({ item: { name: "Alice" } });
+        const schema = {
+          type: "object",
+          properties: {
+            item: {
+              anyOf: [
+                { type: "unknown" },
+                {
+                  type: "object",
+                  properties: { name: { type: "string" } },
+                },
+              ],
+            },
+          },
+        } as const satisfies JSONSchema;
+
+        const cell = c.asSchema(schema);
+        const result = cell.get();
+        // unknown matches first; mergeAnyOfMatches returns matches[1]
+        // which is the resolved object, so the full property value is present.
+        expect((result.item as { name: string }).name).toBe("Alice");
+      });
+    });
+
     describe("Array anyOf Support", () => {
       it("should handle multiple array type options in anyOf", () => {
         const c = runtime.getCell<{ data: number[] }>(
@@ -465,7 +527,7 @@ describe("Schema - AnyOf Support", () => {
             childrenArrayCell.getAsLink(),
             "or just text",
           ],
-        } as unknown as StorableValue);
+        } as unknown as FabricValue);
 
         const vdomSchema = {
           $ref: "#/$defs/VDom",
@@ -478,23 +540,23 @@ describe("Schema - AnyOf Support", () => {
                 value: { type: "string" },
                 props: {
                   type: "object",
-                  additionalProperties: { asCell: true },
+                  additionalProperties: { asCell: ["cell"] },
                 },
                 children: {
                   type: "array",
                   items: {
                     anyOf: [
-                      { $ref: "#/$defs/VDom", asCell: true },
-                      { type: "string", asCell: true },
-                      { type: "number", asCell: true },
-                      { type: "boolean", asCell: true },
+                      { $ref: "#/$defs/VDom", asCell: ["cell"] },
+                      { type: "string", asCell: ["cell"] },
+                      { type: "number", asCell: ["cell"] },
+                      { type: "boolean", asCell: ["cell"] },
                       {
                         type: "array",
-                        items: { $ref: "#/$defs/VDom", asCell: true },
+                        items: { $ref: "#/$defs/VDom", asCell: ["cell"] },
                       },
                     ],
                   },
-                  asCell: true,
+                  asCell: ["cell"],
                 },
               },
               required: ["type"],

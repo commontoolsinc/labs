@@ -1,6 +1,6 @@
-import { deepEqual } from "@commontools/utils/deep-equal";
-import { normalizeFact, unclaimed } from "@commontools/memory/fact";
-import { storableFromNativeValue } from "@commontools/memory/storable-value";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { normalizeFact, unclaimed } from "@commonfabric/memory/fact";
 import type {
   Assertion,
   IAttestation,
@@ -13,14 +13,12 @@ import type {
   ITransaction,
   ITypeMismatchError,
   IUnsupportedMediaTypeError,
+  IWriteOptions,
   MemorySpace,
   Result,
   State,
 } from "../interface.ts";
-import type {
-  StorableDatum,
-  StorableValue,
-} from "@commontools/memory/interface";
+import type { FabricValue } from "@commonfabric/memory/interface";
 import * as Address from "./address.ts";
 import {
   attest,
@@ -31,10 +29,92 @@ import {
   read,
   TypeMismatchError,
   UnsupportedMediaTypeError,
-  write,
 } from "./attestation.ts";
-import { refer } from "@commontools/memory/reference";
+import { applyMutablePathWrite } from "./mutable-path-write.ts";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import * as Edit from "./edit.ts";
+
+/**
+ * Mutating-write wrapper around `applyMutablePathWrite()` that mirrors
+ * the signature of the legacy `Attestation.write`: take a source
+ * `IAttestation`, apply a write at `address` with `value`, and return
+ * the new attestation.
+ *
+ * Differences from the legacy `Attestation.write`:
+ *
+ * - When the write path traverses through a missing intermediate
+ *   (parent of an intermediate doesn't exist), this version
+ *   auto-creates the intermediates (via `cloneForMutation({
+ *   createMissing: true })`) rather than returning a `NotFoundError`.
+ *   The v2-transaction write path already auto-creates; bringing
+ *   Chronicle in line removes a divergence between the two stacks.
+ *   The "non-existent doc + nested write" case is still guarded by an
+ *   explicit pre-check inside `Chronicle.write`.
+ * - Mutates `source.value` in place when the helper can do so safely
+ *   (already-mutable spine). Callers that need an isolated snapshot
+ *   are responsible for cloning before calling.
+ */
+const applyWriteToAttestation = (
+  source: IAttestation,
+  address: IMemoryAddress,
+  value: FabricValue | undefined,
+  options?: IWriteOptions,
+): Result<IAttestation, INotFoundError | ITypeMismatchError> => {
+  const relativePath = address.path.slice(source.address.path.length);
+
+  // Root write: pure replacement; bypass `applyMutablePathWrite` to
+  // avoid forcing a deep-equal comparison (we know nothing here is
+  // structurally equal to the new root unless it's literally the
+  // same reference). A root delete retracts (root becomes undefined).
+  if (relativePath.length === 0) {
+    const nextValue = options?.delete === true ? undefined : value;
+    if (source.value === nextValue) return { ok: source };
+    return { ok: { ...source, value: nextValue } };
+  }
+
+  if (source.value === undefined) {
+    return {
+      error: NotFound(source, address, source.address.path),
+    };
+  }
+
+  const relativeAddress = { ...address, path: relativePath };
+  const result = applyMutablePathWrite(
+    source.value,
+    relativeAddress,
+    value,
+    options,
+  );
+  if (result.error) {
+    return { error: result.error };
+  }
+  if (!result.ok.changed) {
+    return { ok: source };
+  }
+  return { ok: { ...source, value: result.ok.root } };
+};
+
+const isEmptyRecord = (
+  value: FabricValue | undefined,
+): value is Record<string, never> =>
+  value !== null &&
+  value !== undefined &&
+  typeof value === "object" &&
+  !Array.isArray(value) &&
+  Object.keys(value).length === 0;
+
+const alignRootWriteWithLoadedShape = (
+  _loaded: FabricValue | undefined,
+  merged: FabricValue | undefined,
+  options: {
+    isV2JsonRoot: boolean;
+  },
+): FabricValue | undefined => {
+  if (options.isV2JsonRoot) {
+    return isEmptyRecord(merged) ? undefined : merged;
+  }
+  return merged;
+};
 
 export const open = (replica: ISpaceReplica) => new Chronicle(replica);
 
@@ -84,10 +164,11 @@ export class Chronicle {
    * such fact exists yet.
    */
   load(address: Omit<IMemoryAddress, "path">): State {
+    const type = address.type ?? "application/json";
     // If we have not read nor written into overlapping memory address,
     // we'll read it from the local replica.
     return this.#replica.get(address) ??
-      unclaimed({ of: address.id, the: address.type });
+      unclaimed({ of: address.id, the: type });
   }
 
   /**
@@ -124,7 +205,8 @@ export class Chronicle {
    */
   write(
     address: IMemoryAddress,
-    value?: StorableDatum,
+    value?: FabricValue,
+    options?: IWriteOptions,
   ): Result<
     IAttestation,
     | IStorageTransactionInconsistent
@@ -142,7 +224,10 @@ export class Chronicle {
 
     // Initialize working copy from replica if needed (only happens once per document)
     if (!changes.getWorkingCopy()) {
-      const state = this.load({ id: address.id, type: address.type });
+      const state = this.load({
+        id: address.id,
+        type: address.type ?? "application/json",
+      });
       const loaded = attest(state);
       changes.initFromReplica(loaded);
     }
@@ -163,7 +248,7 @@ export class Chronicle {
     }
 
     // Apply the write directly to the working copy - O(1) instead of O(N)
-    return changes.applyWrite(address, value);
+    return changes.applyWrite(address, value, options);
   }
 
   read(
@@ -268,24 +353,33 @@ export class Chronicle {
         edit.claim(loaded);
       } else {
         // Normalize both values for comparison and potential storage.
-        const normalizedMerged = storableFromNativeValue(merged.value);
-        const normalizedLoaded = storableFromNativeValue(loaded.is);
+        const normalizedMerged = fabricFromNativeValue(merged.value);
+        const normalizedLoaded = fabricFromNativeValue(loaded.is);
 
-        if (deepEqual(normalizedMerged, normalizedLoaded)) {
+        const alignedMerged = alignRootWriteWithLoadedShape(
+          normalizedLoaded,
+          normalizedMerged,
+          {
+            isV2JsonRoot: "getDocument" in replica &&
+              typeof replica.getDocument === "function",
+          },
+        );
+
+        if (deepEqual(alignedMerged, normalizedLoaded)) {
           // Values are deeply equal after normalization - no change needed.
           edit.claim(loaded);
-        } else if (normalizedMerged === undefined) {
+        } else if (alignedMerged === undefined) {
           // If the normalized value is `undefined`, retract the fact.
           edit.retract(loaded as Assertion);
         } else {
           // Create an assertion referring to the loaded fact in a causal
           // reference.
           const factToRefer = loaded.cause ? normalizeFact(loaded) : loaded;
-          const causeRef = refer(factToRefer);
+          const causeRef = hashOf(factToRefer);
 
           edit.assert({
             ...loaded,
-            is: normalizedMerged as StorableDatum,
+            is: alignedMerged as FabricValue,
             cause: causeRef,
           });
         }
@@ -384,7 +478,7 @@ class Novelty {
   }
 
   edit(address: IMemoryAddress) {
-    const key = `${address.id}/${address.type}`;
+    const key = address.id;
     const changes = this.#model.get(key);
     if (changes) {
       return changes;
@@ -396,52 +490,6 @@ class Novelty {
   }
   get(address: IMemoryAddress) {
     return this.select(address)?.get(address.path);
-  }
-
-  /**
-   * Claims a new write invariant, merging it with existing parent invariants
-   * when possible instead of keeping both parent and child separately.
-   */
-  claim(
-    invariant: IAttestation,
-  ): Result<
-    IAttestation,
-    IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
-  > {
-    const candidates = this.edit(invariant.address);
-
-    for (const candidate of candidates) {
-      // If the candidate is a parent of the new invariant, merge the new invariant
-      // into the existing parent invariant.
-      if (Address.includes(candidate.address, invariant.address)) {
-        const { error, ok: merged } = write(
-          candidate,
-          invariant.address,
-          invariant.value,
-        );
-
-        if (error) {
-          return { error };
-        } else {
-          candidates.put(merged);
-          return { ok: merged };
-        }
-      }
-    }
-
-    // If we did not find any parents we may have some children
-    // that will be replaced by this invariant
-    // Since we are altering the collection, we iterate over a copy.
-    for (const candidate of [...candidates]) {
-      if (Address.includes(invariant.address, candidate.address)) {
-        candidates.delete(candidate);
-      }
-    }
-
-    // Store this invariant
-    candidates.put(invariant);
-
-    return { ok: invariant };
   }
 
   [Symbol.iterator]() {
@@ -466,7 +514,7 @@ class Novelty {
    * Returns changes for the fact at the provided address.
    */
   select(address: IMemoryAddress) {
-    return this.#model.get(`${address.id}/${address.type}`);
+    return this.#model.get(address.id);
   }
 }
 
@@ -524,7 +572,8 @@ class Changes {
    */
   applyWrite(
     address: IMemoryAddress,
-    value: StorableValue,
+    value: FabricValue,
+    options?: IWriteOptions,
   ): Result<
     IAttestation,
     IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
@@ -547,41 +596,23 @@ class Changes {
       };
     }
 
-    const result = write(this.#workingCopy, address, value);
+    const result = applyWriteToAttestation(
+      this.#workingCopy,
+      address,
+      value,
+      options,
+    );
     if (result.ok) {
       this.#workingCopy = result.ok;
-      // Store individual path attestation for novelty() iterator
+      // Store individual path attestation for novelty() iterator. A delete
+      // records `undefined` at the path, matching the post-write state.
       const pathKey = JSON.stringify(address.path);
-      this.#pathAttestations.set(pathKey, { address, value });
+      this.#pathAttestations.set(pathKey, {
+        address,
+        value: options?.delete === true ? undefined : value,
+      });
     }
     return result;
-  }
-
-  /** Legacy put() for compatibility - applies write to working copy */
-  put(invariant: IAttestation) {
-    if (!this.#workingCopy) {
-      // First write initializes the working copy
-      this.#workingCopy = invariant;
-    } else {
-      // Apply write to working copy
-      const result = write(
-        this.#workingCopy,
-        invariant.address,
-        invariant.value,
-      );
-      if (result.ok) {
-        this.#workingCopy = result.ok;
-      }
-    }
-    // Store individual path attestation for novelty() iterator
-    const pathKey = JSON.stringify(invariant.address.path);
-    this.#pathAttestations.set(pathKey, invariant);
-  }
-
-  /** Legacy delete() - removes from path attestations */
-  delete(invariant: IAttestation) {
-    const pathKey = JSON.stringify(invariant.address.path);
-    this.#pathAttestations.delete(pathKey);
   }
 
   /**

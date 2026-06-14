@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { computed, NAME, pattern, UI } from "commontools";
+import { NAME, pattern, toIndentedDebugString, UI } from "commonfabric";
 
 interface Node {
   label: string;
@@ -27,7 +26,7 @@ function toMentionable(node: Node): any {
   return {
     [NAME]: node.label,
     [UI]: <div>{node.label}</div>,
-    mentionable: computed(() => node.children.map(toMentionable)),
+    mentionable: node.children.map(toMentionable),
   };
 }
 
@@ -39,9 +38,9 @@ export default pattern<Record<string, never>>((_) => {
     [UI]: (
       <div>
         <p>This pattern exports a recursive mentionable tree:</p>
-        <pre>{JSON.stringify(TREE, null, 2)}</pre>
+        <pre>{toIndentedDebugString(TREE)}</pre>
       </div>
     ),
-    mentionable: computed(() => mentionables),
+    mentionable: mentionables,
   };
 });

@@ -14,7 +14,8 @@ Every path must resolve to a valid `stat` result:
 | Scalar value file | `-rw-rw-r--` (0664) | byte length of string repr |
 | `.json` file | `-rw-rw-r--` (0664) | byte length of JSON |
 | `meta.json` | `-r--r--r--` (0444) | byte length |
-| `.handler` file | `--w--w----` (0220) | 0 |
+| `.handler` file | `-rw-r--r--` (0644) | byte length of shebang text |
+| `.tool` file | `-r--r--r--` (0444) | byte length of shebang text |
 | Symlink (cell ref) | `lrwxrwxrwx` | target path length |
 
 **Timestamps**: `mtime` reflects the cell's last modification time (from the
@@ -34,16 +35,31 @@ Always includes `.` and `..`.
 For object values: keys become entries, plus any `.json` siblings.
 For array values: indices become entries, plus `.json` sibling.
 
-Piece directories always contain: `input.json`, `input/`, `result.json`,
-`result/`, `meta.json`. Stream cells appear as `*.handler` files in `result/`.
+Piece directories always contain `input.json`, `input/`, and `meta.json`.
+For pieces without `[FS]`, they also contain `result.json` and `result/`;
+callable files appear under `result/`. For pieces with `[FS]`, `result/` is
+replaced by `index.md` or `index.json`, and callable files appear at the
+piece root. All pieces have a `.handlers` file at the piece root.
 
 ### `read`
 
 1. Resolve the path to a cell reference + JSON path.
 2. `cell.get()` (or `cell.sample()` if reading from cache).
 3. Navigate the JSON path.
-4. Serialize the value (string repr for scalars, JSON for `.json` files).
+4. Serialize the value:
+   - string repr for scalars
+   - JSON for `.json` files
+   - synthetic shebang text for `.handler` / `.tool` files
 5. Return the requested byte range (offset + size from the read call).
+
+Mounted callable reads return synthetic text whose first line is:
+
+```text
+#!<stable-cf-shim> exec
+```
+
+This is display-only for this change. The supported execution contract is
+`cf exec <mounted-callable-file> ...`.
 
 Reads are served from a cache. The cache is populated eagerly for subscribed
 cells and lazily for others.
@@ -79,8 +95,14 @@ target path parsing rules and examples.
    [JSON Mapping](./3-json-mapping.md#type-preservation-on-write)).
 3. Construct a cell write: navigate to the parent object/array, set the
    key/index to the new value.
-4. Execute via `cell.set()` or `cell.update()`.
-5. Wait for the write to be acknowledged before returning from `flush`.
+4. Validate deterministic local policy first. Invalid sizes, invalid JSON, and
+   CFC/writeback denials fail immediately.
+5. Return success from `flush` only after the Common Fabric mutation has reached
+   the operation's configured commit/acceptance boundary. For the default
+   POSIX-like contract, backend rejection, transport failure, timeout, or CFC
+   denial is returned to the caller as a normal filesystem error. Local-ack or
+   queued-offline behavior is a non-default compatibility mode and must be
+   surfaced through mount status and operation diagnostics.
 
 ### `write` to `.json` File
 
@@ -88,14 +110,66 @@ target path parsing rules and examples.
 2. On flush: parse the buffer as JSON.
 3. If the path is `result.json`, replace the entire result cell.
 4. If the path is `result/items/0.json`, replace just that subtree.
-5. Execute via `cell.set()` at the appropriate path.
+5. Apply `cell.set()` at the appropriate path using the same commit-confirmed
+   acknowledgement contract as scalar writes.
 
 ### `write` to `.handler` File
 
 1. Buffer writes until `flush` or `release`.
 2. On flush: parse the buffer as JSON (the event payload).
-3. Send via `stream.send(payload)`.
-4. Return success (fire-and-forget; handler execution is async).
+3. Route the payload to the same top-level piece property path used by mounted
+   handler writes elsewhere in FUSE.
+4. Deduplicate `flush`/`release` so one buffered write triggers one handler
+   invocation.
+5. Return success only after the runtime has accepted the invocation and the
+   configured sync/idle boundary has completed. Handler rejection, runtime
+   timeout, transport failure, or CFC denial is returned as a normal filesystem
+   error. Because handler invocations are non-idempotent, the filesystem must
+   not auto-retry a timed-out handler write unless a future idempotency-key
+   contract exists.
+
+Runtime handoff alone is not a success boundary for mounted handler writes.
+Downstream reactive effects may continue after the write returns successfully,
+but known handler rejection, sync/idle timeout, and timed-out-unknown outcomes
+must be visible as errno plus `.status`/diagnostic state.
+
+Handlers remain writable so legacy flows like
+`echo '{"message":"hi"}' > result/addItem.handler` keep working.
+
+### `write` to `index.md` or `index.json` (`[FS]` Projection)
+
+When a piece uses the `[FS]` projection, writing to `index.md` or
+`index.json` parses the content and writes back to the corresponding cells:
+
+**`index.md`**: The file is parsed as YAML frontmatter + markdown body.
+- Each frontmatter key (except `entityId`, which is read-only) is written to
+  its corresponding cell via the `$FS.frontmatter.<key>` path.
+- The body is written to the `$FS.content` cell.
+- Invalid YAML frontmatter is silently skipped.
+
+**`index.json`**: Parsed as a JSON object.
+- Each key (except `entityId`) is written to `$FS.content.<key>`.
+- Keys present in the cell but absent from the file are removed (deleted keys
+  are cleared).
+- Invalid JSON returns `EINVAL`.
+
+`entityId` is always read-only and cannot be changed by writing to either
+file.
+
+### `read` from `.handlers`
+
+`.handlers` is a read-only dot file at the piece root. It is generated
+automatically when the piece is loaded and updated when the result cell
+changes. Writing to `.handlers` fails with `EACCES`.
+
+### `write` to `.tool` File
+
+Mounted `.tool` files are read-only. Writes fail with `EACCES`. Execute them
+through `cf exec <mounted-tool-file> [run] [flags]` instead.
+
+Mounted handler and tool files are both accepted by `cf exec` from either the
+`pieces/` or `entities/` view. Top-level `cf exec <file> --help` always prints
+callable help; after the verb, schema-derived flags own the namespace.
 
 ### `create` (New File)
 
@@ -149,7 +223,9 @@ Cross-cell renames (moving between `input/` and `result/`) are rejected with
 ### `truncate`
 
 Truncating a file to 0 bytes sets the value to an empty string (`""`).
-Truncating a `.json` file to 0 is an error (`EINVAL`).
+Truncating a `.json` file to 0 is an error (`EINVAL`). Path-based truncate
+without a file handle must either queue the same writeback as handle-based
+truncate or fail immediately; it must not be memory-only.
 
 ## Atomicity
 
@@ -169,8 +245,12 @@ updates, write to the appropriate `.json` file instead.
 | Permission denied | `EACCES` |
 | Write to read-only cell | `EROFS` |
 | Invalid JSON on write | `EINVAL` |
+| Invalid offset/size | `EINVAL` |
+| Exceeds virtual file size limit | `EFBIG` |
 | Cross-cell rename | `EXDEV` |
-| Network/timeout | `EIO` |
+| Backend/transport failure | `EIO` |
+| Backend timeout | `ETIMEDOUT` |
+| Stale projection or CFC generation | `ESTALE` |
 | Space not available | `ENOENT` |
 
 ---

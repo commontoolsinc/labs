@@ -1,80 +1,25 @@
-import * as MemoryProvider from "@commontools/memory/provider";
-import * as Consumer from "@commontools/memory/consumer";
-import {
+export * from "@commonfabric/memory/interface";
+import * as V2Storage from "./v2.ts";
+import { EmulatedStorageManager } from "./v2-emulate.ts";
+
+export { EmulatedStorageManager } from "./v2-emulate.ts";
+export { EmulatedStorageManager as StorageManagerEmulator } from "./v2-emulate.ts";
+export { SelectorTracker } from "./selector-tracker.ts";
+export {
+  defaultSettings,
   type Options,
-  Provider,
-  StorageManager as BaseStorageManager,
-} from "./cache.ts";
-import * as StorageSubscription from "./subscription.ts";
-import type { MemorySpace } from "@commontools/memory/interface";
-import type { IStorageSubscription } from "./interface.ts";
-export * from "./cache.ts";
+  type SessionFactory,
+  watchIdForEntry,
+} from "./v2.ts";
 
-export class StorageManagerEmulator extends BaseStorageManager {
-  #session?: Consumer.MemoryConsumer<MemorySpace>;
-  #subscription = StorageSubscription.create();
-  #memoryProvider?: ReturnType<typeof MemoryProvider.emulate>;
-
-  #providers: Map<string, Provider> = new Map();
-
-  session() {
-    if (!this.#session) {
-      this.#memoryProvider = MemoryProvider.emulate({
-        serviceDid: this.as.did(),
-      });
-      this.#session = Consumer.open({
-        as: this.as,
-        session: this.#memoryProvider.session(),
-      });
-    }
-    return this.#session;
-  }
-  override connect(space: MemorySpace) {
-    return Provider.open({
-      space,
-      session: this.session(),
-      subscription: this.#subscription,
-    });
+export class StorageManager extends V2Storage.StorageManager {
+  static override open(options: V2Storage.Options): V2Storage.StorageManager {
+    return V2Storage.StorageManager.open(options);
   }
 
-  mount(space: MemorySpace) {
-    return this.session().mount(space);
-  }
-
-  /**
-   * Subscribes to changes in the storage.
-   */
-  override subscribe(subscription: IStorageSubscription): void {
-    this.#subscription.subscribe(subscription);
-  }
-
-  override async close() {
-    await super.close();
-    // Dispose provider sessions to clear pending schema flush timers,
-    // without closing the ReadableStream pipe (which would prevent
-    // runtime.dispose() → scheduler.idle() from settling).
-    this.#memoryProvider?.disposeSessions();
-    if (this.#session) {
-      this.#session.close();
-      await this.#session.closed;
-    }
-  }
-}
-
-export class StorageManager extends BaseStorageManager {
-  static override open(options: Options) {
-    if (options.address.protocol === "memory:") {
-      return this.emulate(options);
-    } else {
-      return new this(options);
-    }
-  }
   static emulate(
-    options: Omit<Options, "address">,
-  ) {
-    return new StorageManagerEmulator({
-      ...options,
-      address: new URL("memory://"),
-    });
+    options: Omit<V2Storage.Options, "memoryHost" | "spaceHostMap">,
+  ): EmulatedStorageManager {
+    return EmulatedStorageManager.emulate(options);
   }
 }

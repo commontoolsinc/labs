@@ -14,7 +14,7 @@ describe("Address Module", () => {
 
       const result = Address.toString(address);
 
-      expect(result).toBe("/user:1/application/json/[]");
+      expect(result).toBe("/space/user:1/[]");
     });
 
     it("should convert address with single path element to string", () => {
@@ -26,7 +26,7 @@ describe("Address Module", () => {
 
       const result = Address.toString(address);
 
-      expect(result).toBe('/user:1/application/json/["profile"]');
+      expect(result).toBe('/space/user:1/["profile"]');
     });
 
     it("should convert address with nested path to string", () => {
@@ -39,7 +39,7 @@ describe("Address Module", () => {
       const result = Address.toString(address);
 
       expect(result).toBe(
-        '/user:1/application/json/["profile","settings","theme"]',
+        '/space/user:1/["profile","settings","theme"]',
       );
     });
 
@@ -52,7 +52,7 @@ describe("Address Module", () => {
 
       const result = Address.toString(address);
 
-      expect(result).toBe('/array:1/application/json/["items","0","name"]');
+      expect(result).toBe('/space/array:1/["items","0","name"]');
     });
 
     it("should handle address with special characters in id", () => {
@@ -65,11 +65,11 @@ describe("Address Module", () => {
       const result = Address.toString(address);
 
       expect(result).toBe(
-        '/user:special-chars_123/application/json/["data"]',
+        '/space/user:special-chars_123/["data"]',
       );
     });
 
-    it("should handle different content types", () => {
+    it("should ignore type when stringifying document addresses", () => {
       const address = {
         id: "document:1",
         type: "text/plain",
@@ -78,7 +78,7 @@ describe("Address Module", () => {
 
       const result = Address.toString(address);
 
-      expect(result).toBe('/document:1/text/plain/["metadata","title"]');
+      expect(result).toBe('/space/document:1/["metadata","title"]');
     });
   });
 
@@ -167,7 +167,7 @@ describe("Address Module", () => {
       expect(result).toBe(false);
     });
 
-    it("should return false when addresses have different types", () => {
+    it("should ignore type when checking intersections", () => {
       const source = {
         id: "user:1",
         type: "application/json",
@@ -177,12 +177,12 @@ describe("Address Module", () => {
       const candidate = {
         id: "user:1",
         type: "text/plain",
-        path: ["profile"],
+        path: ["profile", "name"],
       } as const;
 
       const result = Address.includes(source, candidate);
 
-      expect(result).toBe(false);
+      expect(result).toBe(true);
     });
 
     it("should return false when paths are completely different", () => {
@@ -344,7 +344,7 @@ describe("Address Module", () => {
       expect(result).toBe(false);
     });
 
-    it("should return false when addresses have different types", () => {
+    it("should ignore type when checking intersections", () => {
       const source = {
         id: "user:1",
         type: "application/json",
@@ -359,7 +359,7 @@ describe("Address Module", () => {
 
       const result = Address.intersects(source, candidate);
 
-      expect(result).toBe(false);
+      expect(result).toBe(true);
     });
 
     it("should return false when paths are completely disjoint", () => {
@@ -600,7 +600,7 @@ describe("Address Module", () => {
         path: [],
       } as const;
 
-      expect(Address.toString(address1)).toBe("/user:1/application/json/[]");
+      expect(Address.toString(address1)).toBe("/space/user:1/[]");
       expect(Address.includes(address1, address2)).toBe(true);
       expect(Address.intersects(address1, address2)).toBe(true);
     });
@@ -615,7 +615,7 @@ describe("Address Module", () => {
       const result = Address.toString(address);
 
       expect(result).toBe(
-        '/namespace:complex-id-with-dashes_and_underscores.123/application/vnd.api+json/["data","attributes","nested-property"]',
+        '/space/namespace:complex-id-with-dashes_and_underscores.123/["data","attributes","nested-property"]',
       );
     });
 

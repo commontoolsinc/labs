@@ -14,7 +14,8 @@ export function isSafeEventHandlerCall(node: ts.CallExpression): boolean {
 /**
  * Check if a type is a function type that looks like an event handler.
  *
- * In Common Tools JSX, any function passed to an element is treated as an action/handler.
+ * In Common Fabric JSX, any function passed to an element is treated as an
+ * action/handler.
  * We check that handlers have 0 or 1 parameters to distinguish them from data-transformer
  * functions (which typically take multiple parameters).
  */

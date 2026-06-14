@@ -50,7 +50,7 @@ Deno.test("schemaToTypeString marks required fields without ?", () => {
 Deno.test("schemaToTypeString converts Stream to function syntax", () => {
   const schema: any = {
     type: "object",
-    asStream: true,
+    asCell: ["stream"],
     properties: {
       value: { type: "string" },
     },
@@ -64,7 +64,7 @@ Deno.test("schemaToTypeString converts Stream to function syntax", () => {
 Deno.test("schemaToTypeString converts Cell to Cell<T> syntax", () => {
   const schema: any = {
     type: "object",
-    asCell: true,
+    asCell: ["cell"],
     properties: {
       count: { type: "number" },
     },
@@ -72,6 +72,40 @@ Deno.test("schemaToTypeString converts Cell to Cell<T> syntax", () => {
   const result = schemaToTypeString(schema);
   assert(result.startsWith("Cell<"), "Cell should use Cell<> syntax");
   assert(result.includes("count"), "Cell contents should be included");
+});
+
+Deno.test('schemaToTypeString formats asCell: ["stream", "cell"] as Stream<Cell<T>>', () => {
+  const schema: any = {
+    type: "number",
+    asCell: ["stream", "cell"],
+  };
+
+  const result = schemaToTypeString(schema);
+  assertEquals(result, "(Cell<number>) => void");
+});
+
+Deno.test("schemaToTypeString restores scope wrappers", () => {
+  assertEquals(
+    schemaToTypeString({
+      type: "string",
+      scope: "user",
+    } as any),
+    "PerUser<string>",
+  );
+  assertEquals(
+    schemaToTypeString({
+      type: "string",
+      scope: "any",
+    } as any),
+    "PerAny<string>",
+  );
+  assertEquals(
+    schemaToTypeString({
+      type: "string",
+      asCell: [{ kind: "cell", scope: "session" }],
+    } as any),
+    "PerSession<Cell<string>>",
+  );
 });
 
 Deno.test("schemaToTypeString handles enums as union literals", () => {
@@ -178,14 +212,14 @@ Deno.test("schemaToTypeString produces compact output for complex schema", () =>
       },
       doAnAction: {
         type: "object",
-        asStream: true,
+        asCell: ["stream"],
         properties: {
           parameter: { type: "number" },
         },
       },
       aCell: {
         type: "object",
-        asCell: true,
+        asCell: ["cell"],
         properties: {
           subfield: { type: "string" },
         },
@@ -280,4 +314,54 @@ Deno.test("schemaToTypeString handles nested PatternToolResult in object", () =>
   assert(result.includes("grep?:"), "should have grep property");
   assert(result.includes("translate?:"), "should have translate property");
   assert(result.includes("void"), "handlers should return void");
+});
+
+Deno.test("schemaToTypeString formats fixture-style PatternToolResult without leaking internals", () => {
+  const schema: any = {
+    type: "object",
+    properties: {
+      search: {
+        type: "object",
+        properties: {
+          pattern: {
+            type: "object",
+            properties: {
+              argumentSchema: {
+                type: "object",
+                properties: {
+                  query: { type: "string" },
+                  help: { type: "string" },
+                  source: { type: "string" },
+                },
+              },
+              resultSchema: {
+                type: "object",
+                properties: {
+                  summary: { type: "string" },
+                },
+              },
+              nodes: { type: "array", items: { type: "object" } },
+            },
+            asCell: ["cell"],
+          },
+          extraParams: {
+            type: "object",
+            properties: {
+              source: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+  };
+
+  const result = schemaToTypeString(schema);
+
+  assert(result.includes("search?:"), "should include the tool key");
+  assert(result.includes("source"), "should describe the bound extraParams");
+  assert(!/\bpattern\??:/.test(result), "pattern internals should stay hidden");
+  assert(
+    !/\bextraParams\??:/.test(result),
+    "extraParams internals should stay hidden",
+  );
 });

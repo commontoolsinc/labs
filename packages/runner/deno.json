@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/runner",
+  "name": "@commonfabric/runner",
   "tasks": {
     "test": "ENV=test deno test --allow-ffi --allow-env --allow-read --allow-write=/tmp,/var/folders --allow-run=git test/*.test.ts",
     "bench": {
@@ -8,15 +8,22 @@
     },
     "integration": "LOG_LEVEL=warn deno test -A $INTEGRATION_TEST_FLAGS ./integration/*.test.ts"
   },
+  "imports": {
+    "ses": "npm:ses@^1.15.0",
+    "typescript": "npm:typescript"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared.ts",
+    "./slugs": "./src/slugs.ts",
     "./schemas": "./src/schemas.ts",
     "./storage/inspector": "./src/storage/inspector.ts",
     "./storage/telemetry": "./src/storage/telemetry.ts",
+    "./storage/write-stack-trace": "./src/storage/write-stack-trace.ts",
     "./traverse": "./src/traverse.ts",
     "./storage/cache": "./src/storage/cache.ts",
     "./storage/cache.deno": "./src/storage/cache.deno.ts",
-    "./compilation-cache": "./src/compilation-cache/mod.ts"
+    "./cfc": "./src/cfc/mod.ts",
+    "./cfc/label-view-core": "./src/cfc/label-view-core.ts"
   }
 }

@@ -3,12 +3,12 @@
 // compiled through the full CTS transformer pipeline.
 //
 // These tests exercise the production compilation path:
-// source string → transformCtDirective → TypeScript + CTS transformers
+// source string → transformCfDirective → TypeScript + CTS transformers
 // → source maps → eval → error → parseStack → original line numbers.
 
 import { assertEquals, assertMatch } from "@std/assert";
 import { Runtime } from "../src/runtime.ts";
-import { Identity } from "@commontools/identity";
+import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
@@ -33,8 +33,7 @@ Deno.test("lift error through CTS pipeline has correct source line", async () =>
   // Source maps correctly point to the original throw location.
   const THROW_LINE = 5;
   const source = [
-    "/// <cts-enable />", //                                  line 1
-    'import { lift, pattern } from "commontools";', //        line 2
+    'import { lift, pattern } from "commonfabric";', //        line 2
     "const double = lift((val: number) => {", //              line 3
     "  if (val > 10) {", //                                   line 4
     "    throw new Error('lift value too large');", //         line 5
@@ -47,7 +46,9 @@ Deno.test("lift error through CTS pipeline has correct source line", async () =>
     "});", //                                                 line 12
   ].join("\n");
 
-  const patternFn = await runtime.harness.run(makeProgram(source));
+  const program = makeProgram(source);
+  const { main } = await runtime.harness.compileAndEvaluateModules(program);
+  const patternFn = main!["default"];
 
   let capturedError: Error | null = null;
   const errorHandlers = (runtime.scheduler as any).errorHandlers;
@@ -68,6 +69,7 @@ Deno.test("lift error through CTS pipeline has correct source line", async () =>
   const tx = runtime.edit();
   argumentCell.withTx(tx).set({ input: 20 });
   await tx.commit();
+  await resultCell.pull();
   await runtime.scheduler.idle();
 
   assertEquals(capturedError !== null, true, "error should have been caught");
@@ -75,6 +77,15 @@ Deno.test("lift error through CTS pipeline has correct source line", async () =>
 
   const stack = capturedError!.stack ?? "";
   assertEquals(stack.split("\n")[0], "Error: lift value too large");
+  assertEquals(
+    stack.includes("<CF_INTERNAL>"),
+    false,
+    `stack should preserve runner internal frames by default:\n${stack}`,
+  );
+  assertMatch(
+    stack,
+    /packages\/runner\/src\/(?:sandbox\/ses-runtime|harness\/engine|scheduler)\.ts/,
+  );
 
   // First frame must point to the throw location in main.tsx
   const frames = stack.split("\n").filter((l) => l.trim().startsWith("at "));
@@ -99,8 +110,7 @@ Deno.test("handler error through CTS pipeline has correct source line", async ()
   // Source maps correctly point to the original throw location.
   const THROW_LINE = 6;
   const source = [
-    "/// <cts-enable />", //                                          line 1
-    'import { type Cell, handler, pattern } from "commontools";', //  line 2
+    'import { type Cell, handler, pattern } from "commonfabric";', //  line 2
     "const clickHandler = handler(", //                               line 3
     "  (event: { action: string }, state: { status: Cell<string> }) => {", // line 4
     '    if (event.action === "crash") {', //                         line 5
@@ -114,7 +124,9 @@ Deno.test("handler error through CTS pipeline has correct source line", async ()
     "});", //                                                         line 13
   ].join("\n");
 
-  const patternFn = await runtime.harness.run(makeProgram(source));
+  const program = makeProgram(source);
+  const { main } = await runtime.harness.compileAndEvaluateModules(program);
+  const patternFn = main!["default"];
 
   let capturedError: Error | null = null;
   const errorHandlers = (runtime.scheduler as any).errorHandlers;
@@ -148,6 +160,15 @@ Deno.test("handler error through CTS pipeline has correct source line", async ()
 
   const stack = capturedError!.stack ?? "";
   assertEquals(stack.split("\n")[0], "Error: handler crash on purpose");
+  assertEquals(
+    stack.includes("<CF_INTERNAL>"),
+    false,
+    `stack should preserve runner internal frames by default:\n${stack}`,
+  );
+  assertMatch(
+    stack,
+    /packages\/runner\/src\/(?:sandbox\/ses-runtime|harness\/engine|scheduler)\.ts/,
+  );
 
   // First frame must point to the throw location in main.tsx
   const frames = stack.split("\n").filter((l) => l.trim().startsWith("at "));
@@ -172,8 +193,7 @@ Deno.test("lift error stack has multiple frames with correct source line", async
   // Source maps correctly point to the original throw location.
   const THROW_LINE = 4;
   const source = [
-    "/// <cts-enable />", //                                  line 1
-    'import { lift, pattern } from "commontools";', //        line 2
+    'import { lift, pattern } from "commonfabric";', //        line 2
     "const double = lift((x: number) => {", //                line 3
     "  if (x < 0) throw new Error('negative not supported');", // line 4
     "  return x * 2;", //                                     line 5
@@ -184,7 +204,9 @@ Deno.test("lift error stack has multiple frames with correct source line", async
     "});", //                                                  line 10
   ].join("\n");
 
-  const patternFn = await runtime.harness.run(makeProgram(source));
+  const program = makeProgram(source);
+  const { main } = await runtime.harness.compileAndEvaluateModules(program);
+  const patternFn = main!["default"];
 
   let capturedError: Error | null = null;
   const errorHandlers = (runtime.scheduler as any).errorHandlers;
@@ -203,6 +225,7 @@ Deno.test("lift error stack has multiple frames with correct source line", async
   const tx = runtime.edit();
   argumentCell.withTx(tx).set({ n: -5 });
   await tx.commit();
+  await resultCell.pull();
   await runtime.scheduler.idle();
 
   assertEquals(capturedError !== null, true, "error should have been caught");
@@ -223,6 +246,72 @@ Deno.test("lift error stack has multiple frames with correct source line", async
     frames.length > 1,
     true,
     `should have multiple frames, got ${frames.length}:\n${stack}`,
+  );
+
+  await runtime.dispose();
+  await storageManager.close();
+});
+
+Deno.test("mapWithPattern synthetic pattern callsite keeps authored source lines", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL("http://localhost"),
+    storageManager,
+  });
+
+  const MAP_LINE = 6;
+  const THROW_LINE = 7;
+  const source = [
+    'import { pattern, UI } from "commonfabric";',
+    "interface Item { id: string; }",
+    "interface State { items: Item[]; }",
+    "export default pattern<State>((state) => ({",
+    "  [UI]: <div>{state.items.map((item) => {",
+    "    throw new Error('map boom');",
+    "  })}</div>,",
+    "}));",
+  ].join("\n");
+
+  const program = makeProgram(source);
+  let capturedError: Error | null = null;
+  try {
+    await runtime.harness.compileAndEvaluateModules(program);
+  } catch (error) {
+    if (error instanceof Error) {
+      capturedError = error;
+    } else {
+      throw error;
+    }
+  }
+
+  assertEquals(capturedError !== null, true, "error should have been caught");
+  assertEquals(capturedError!.message, "map boom");
+
+  // The stack is already source-mapped when compileAndEvaluateModules
+  // surfaces a module-evaluation error (re-parsing a mapped stack would
+  // corrupt it — the per-module maps are keyed by the mapped source paths).
+  const stack = capturedError!.stack ?? "";
+  const frames = stack.split("\n").filter((l) => l.trim().startsWith("at "));
+  const sourceFrames = frames.filter((line) => line.includes("main.tsx"));
+
+  assertMatch(
+    sourceFrames[0] ?? "",
+    new RegExp(`main\\.tsx:${THROW_LINE}:\\d+`),
+    `first source frame should reference main.tsx:${THROW_LINE}, got:\n${
+      sourceFrames[0]
+    }`,
+  );
+  assertMatch(
+    sourceFrames[1] ?? "",
+    new RegExp(`main\\.tsx:${MAP_LINE}:\\d+`),
+    `map helper callsite should reference main.tsx:${MAP_LINE}, got:\n${
+      sourceFrames[1]
+    }`,
+  );
+  assertEquals(
+    sourceFrames.some((line) => line.includes("main.tsx:1:23")),
+    false,
+    `stack should not collapse to main.tsx:1:23:\n${stack}`,
   );
 
   await runtime.dispose();

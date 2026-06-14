@@ -1,9 +1,7 @@
-/// <cts-enable />
 import {
   type BuiltInLLMMessage,
   computed,
   handler,
-  ifElse,
   llmDialog,
   NAME,
   pattern,
@@ -14,13 +12,13 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { type MentionablePiece } from "./backlinks-index.tsx";
 import {
   searchPattern as summarySearchPattern,
   type SummaryIndexEntry,
 } from "./summary-index.tsx";
-import { listMentionable, listRecent } from "./common-tools.tsx";
+import { listMentionable, listRecent } from "./common-fabric.tsx";
 
 // ===== Types =====
 
@@ -34,7 +32,7 @@ type SpaceOverviewResult = {
 
 type SpaceOverviewInput = Record<string, never>;
 
-interface SpaceOverviewOutput {
+export interface SpaceOverviewOutput {
   [NAME]: string;
   [UI]: VNode;
   summary: string;
@@ -66,8 +64,8 @@ export default pattern<SpaceOverviewInput, SpaceOverviewOutput>(() => {
   const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
   const { entries: summaryEntries } = wish<{ entries: SummaryIndexEntry[] }>({
     query: "#summaryIndex",
-  }).result;
-  const profileWish = wish<string>({ query: "#profile" });
+  }).result!;
+  const profileWish = wish<string>({ query: "#learnedSummary" });
   const profileText = computed(() => profileWish.result ?? "");
 
   const systemPrompt = computed(() => {
@@ -101,7 +99,7 @@ Conventions:
 Be concise and insightful. Focus on patterns and connections, not just listing things. Reference actual piece names.${profileSection}`;
   });
 
-  const messages = Writable.of<BuiltInLLMMessage[]>([]);
+  const messages = new Writable<BuiltInLLMMessage[]>([]);
 
   const llmTools = {
     searchSpace: patternTool(summarySearchPattern, {
@@ -129,151 +127,153 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
   return {
     [NAME]: "Space Overview",
     [UI]: (
-      <ct-screen>
-        <ct-toolbar slot="header" sticky>
+      <cf-screen>
+        <cf-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Space Overview</h2>
-        </ct-toolbar>
+        </cf-toolbar>
 
-        <ct-autostart onstart={triggerAnalysis({ addMessage })} />
+        <cf-autostart onstart={triggerAnalysis({ addMessage })} />
 
-        <ct-vscroll flex showScrollbar fadeEdges>
-          <ct-vstack gap="3" style="padding: 1rem;">
-            <ct-message-beads
+        <cf-vscroll flex showScrollbar fadeEdges>
+          <cf-vstack gap="3" style="padding: 1rem;">
+            <cf-message-beads
               label="overview"
               $messages={messages}
               pending={pending}
             />
 
-            {ifElse(
-              hasResult,
-              <ct-vstack gap="4">
-                <p
-                  style={{
-                    fontSize: "18px",
-                    fontWeight: "600",
-                    margin: 0,
-                    lineHeight: "1.3",
-                  }}
-                >
-                  {overview?.headline}
-                </p>
-
-                <ct-vstack gap="2">
-                  <h3
+            {hasResult
+              ? (
+                <cf-vstack gap="4">
+                  <p
                     style={{
+                      fontSize: "18px",
+                      fontWeight: "600",
                       margin: 0,
-                      fontSize: "14px",
-                      color: "var(--ct-color-gray-500)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
+                      lineHeight: "1.3",
                     }}
                   >
-                    Themes
-                  </h3>
-                  {overview?.themes.map((theme) => (
-                    <ct-vstack
-                      gap="1"
-                      style={{
-                        padding: "0.75rem",
-                        borderRadius: "8px",
-                        background: "var(--ct-color-gray-50)",
-                      }}
-                    >
-                      <strong style={{ fontSize: "14px" }}>{theme.name}</strong>
-                      <p
-                        style={{
-                          margin: 0,
-                          fontSize: "13px",
-                          color: "var(--ct-color-gray-600)",
-                        }}
-                      >
-                        {theme.description}
-                      </p>
-                    </ct-vstack>
-                  ))}
-                </ct-vstack>
-
-                <ct-vstack gap="1">
-                  <h3
-                    style={{
-                      margin: 0,
-                      fontSize: "14px",
-                      color: "var(--ct-color-gray-500)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
-                    }}
-                  >
-                    Recent Activity
-                  </h3>
-                  <p style={{ margin: 0, fontSize: "14px", lineHeight: "1.5" }}>
-                    {overview?.recentActivity}
+                    {overview?.headline}
                   </p>
-                </ct-vstack>
 
-                {ifElse(
-                  computed(() => (overview?.connections?.length ?? 0) > 0),
-                  <ct-vstack gap="1">
+                  <cf-vstack gap="2">
                     <h3
                       style={{
                         margin: 0,
                         fontSize: "14px",
-                        color: "var(--ct-color-gray-500)",
+                        color: "var(--cf-colors-gray-500)",
                         textTransform: "uppercase",
                         letterSpacing: "0.05em",
                       }}
                     >
-                      Connections
+                      Themes
                     </h3>
-                    {overview?.connections.map((conn) => (
-                      <p
+                    {overview?.themes.map((theme) => (
+                      <cf-vstack
+                        gap="1"
                         style={{
-                          margin: 0,
-                          fontSize: "13px",
-                          lineHeight: "1.4",
+                          padding: "0.75rem",
+                          borderRadius: "8px",
+                          background: "var(--cf-colors-gray-50)",
                         }}
                       >
-                        {conn.description}
-                      </p>
+                        <strong style={{ fontSize: "14px" }}>
+                          {theme.name}
+                        </strong>
+                        <p
+                          style={{
+                            margin: 0,
+                            fontSize: "13px",
+                            color: "var(--cf-colors-gray-600)",
+                          }}
+                        >
+                          {theme.description}
+                        </p>
+                      </cf-vstack>
                     ))}
-                  </ct-vstack>,
-                  <span />,
-                )}
+                  </cf-vstack>
 
-                <ct-vstack gap="1">
-                  <h3
-                    style={{
-                      margin: 0,
-                      fontSize: "14px",
-                      color: "var(--ct-color-gray-500)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
-                    }}
-                  >
-                    Explore Next
-                  </h3>
-                  <ul
-                    style={{
-                      margin: 0,
-                      paddingLeft: "1.2rem",
-                      fontSize: "14px",
-                      lineHeight: "1.6",
-                    }}
-                  >
-                    {overview?.suggestions.map((s) => <li>{s}</li>)}
-                  </ul>
-                </ct-vstack>
-              </ct-vstack>,
-              <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
-                {ifElse(
-                  pending,
-                  <span>Exploring the space...</span>,
-                  <span />,
-                )}
-              </div>,
-            )}
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+                  <cf-vstack gap="1">
+                    <h3
+                      style={{
+                        margin: 0,
+                        fontSize: "14px",
+                        color: "var(--cf-colors-gray-500)",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                      }}
+                    >
+                      Recent Activity
+                    </h3>
+                    <p
+                      style={{ margin: 0, fontSize: "14px", lineHeight: "1.5" }}
+                    >
+                      {overview?.recentActivity}
+                    </p>
+                  </cf-vstack>
+
+                  {computed(() => (overview?.connections?.length ?? 0) > 0)
+                    ? (
+                      <cf-vstack gap="1">
+                        <h3
+                          style={{
+                            margin: 0,
+                            fontSize: "14px",
+                            color: "var(--cf-colors-gray-500)",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.05em",
+                          }}
+                        >
+                          Connections
+                        </h3>
+                        {overview?.connections.map((conn) => (
+                          <p
+                            style={{
+                              margin: 0,
+                              fontSize: "13px",
+                              lineHeight: "1.4",
+                            }}
+                          >
+                            {conn.description}
+                          </p>
+                        ))}
+                      </cf-vstack>
+                    )
+                    : <span />}
+
+                  <cf-vstack gap="1">
+                    <h3
+                      style={{
+                        margin: 0,
+                        fontSize: "14px",
+                        color: "var(--cf-colors-gray-500)",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                      }}
+                    >
+                      Explore Next
+                    </h3>
+                    <ul
+                      style={{
+                        margin: 0,
+                        paddingLeft: "1.2rem",
+                        fontSize: "14px",
+                        lineHeight: "1.6",
+                      }}
+                    >
+                      {overview?.suggestions.map((s) => <li>{s}</li>)}
+                    </ul>
+                  </cf-vstack>
+                </cf-vstack>
+              )
+              : (
+                <div style="text-align: center; color: var(--cf-colors-gray-500); padding: 2rem;">
+                  {pending ? <span>Exploring the space...</span> : <span />}
+                </div>
+              )}
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
     summary,
   };

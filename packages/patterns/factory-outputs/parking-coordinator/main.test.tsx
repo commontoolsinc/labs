@@ -1,0 +1,1092 @@
+/**
+ * Parking Coordinator Pattern Tests
+ *
+ * Tests core functionality:
+ * - Initial state (pre-seeded spots, no people, no requests)
+ * - Adding / removing people (admin actions)
+ * - Priority reordering (movePersonUp / movePersonDown)
+ * - Adding / removing spots (admin actions)
+ * - Spot request submission with auto-allocation (default spot, preferences, any remaining)
+ * - Denied allocation when all spots are taken
+ * - Duplicate request prevention
+ * - Request cancellation
+ * - Admin override (manual assignment, autoAllocated: false)
+ *
+ * NOTE: Uses .filter(() => true).length for array lengths per reactivity tracking note.
+ */
+import { action, computed, pattern, safeDateNow, UI } from "commonfabric";
+import {
+  findNodeById,
+  findNodeByProp,
+  nodeIncludesText,
+  propValue,
+} from "../../test-ui-helpers.ts";
+import ParkingCoordinator, { DEFAULT_SPOTS } from "./main.tsx";
+import type { ParkingSpot, Person, SpotRequest, Vehicle } from "./main.tsx";
+
+const len = <T,>(arr: T[]): number => arr.filter(() => true).length;
+
+const toLocalDateStr = (d: Date): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${
+    String(d.getDate()).padStart(2, "0")
+  }`;
+
+function addDays(timestamp: number, days: number): string {
+  const d = new Date(timestamp);
+  d.setDate(d.getDate() + days);
+  return toLocalDateStr(d);
+}
+
+export default pattern(() => {
+  const now = safeDateNow();
+  const today = toLocalDateStr(new Date(now));
+  const tomorrow = addDays(now, 1);
+
+  // ============================================================
+  // Subject 1: People Management
+  // ============================================================
+  const s1 = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [],
+    requests: [],
+  });
+
+  const action_enable_s1_admin_manager = action(() =>
+    s1.enableAdminManager.send()
+  );
+
+  const assert_s1_manager_can_start_people_flow = computed(() =>
+    s1.currentUserCanManageAdmins === true &&
+    nodeIncludesText(
+      findNodeById(s1[UI], "parking-admin-add-person-open"),
+      "+ Add Person",
+    )
+  );
+
+  const action_add_alice = action(() => {
+    s1.addPerson.send({
+      name: "Alice",
+      email: "alice@co.com",
+      commuteMode: "drive",
+      priorityRank: 1,
+      defaultSpot: "5",
+      preferences: "5, 1",
+    });
+  });
+
+  const action_add_bob = action(() => {
+    s1.addPerson.send({
+      name: "Bob",
+      email: "bob@co.com",
+      commuteMode: "transit",
+      priorityRank: 2,
+      defaultSpot: "",
+      preferences: "12",
+    });
+  });
+
+  const action_add_alice_duplicate = action(() => {
+    s1.addPerson.send({
+      name: "Alice",
+      email: "alice2@co.com",
+      commuteMode: "wfh",
+      priorityRank: 5,
+      defaultSpot: "",
+      preferences: "",
+    });
+  });
+
+  const action_remove_bob = action(() => {
+    s1.removePerson.send({ name: "Bob" });
+  });
+
+  const action_edit_person_no_payload = action(() => {
+    s1.editPerson.send(undefined as never);
+  });
+
+  // Initial state
+  const assert_s1_no_people = computed(() => len(s1.people) === 0);
+  const assert_s1_three_spots = computed(() => len(s1.spots) === 3);
+
+  // After adding Alice
+  const assert_s1_alice_exists = computed(() =>
+    s1.people.some((p: Person) => p.name === "Alice")
+  );
+  const assert_s1_alice_default_spot = computed(() => {
+    const alice = s1.people.find((p: Person) => p.name === "Alice");
+    return alice?.defaultSpot === "5";
+  });
+  const assert_s1_alice_preferences = computed(() => {
+    const alice = s1.people.find((p: Person) => p.name === "Alice");
+    return alice?.spotPreferences.some((s) => s === "5") &&
+      alice?.spotPreferences.some((s) => s === "1");
+  });
+  const assert_s1_one_person = computed(() => len(s1.people) === 1);
+  const assert_s1_alice_unchanged = computed(() => {
+    const alice = s1.people.find((p: Person) => p.name === "Alice");
+    return len(s1.people) === 1 && alice?.email === "alice@co.com";
+  });
+
+  // After adding Bob
+  const assert_s1_two_people = computed(() => len(s1.people) === 2);
+  const assert_s1_bob_preferences = computed(() => {
+    const bob = s1.people.find((p: Person) => p.name === "Bob");
+    return bob?.spotPreferences.some((s) => s === "12") === true;
+  });
+
+  // Duplicate rejected
+  const assert_s1_still_two = computed(() => len(s1.people) === 2);
+
+  // After removing Bob
+  const assert_s1_one_after_remove = computed(() => len(s1.people) === 1);
+  const assert_s1_bob_gone = computed(() =>
+    !s1.people.some((p: Person) => p.name === "Bob")
+  );
+
+  // ============================================================
+  // Subject 2: Priority Reordering
+  // ============================================================
+  const s2 = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [
+      {
+        name: "Alice",
+        email: "a@co.com",
+        commuteMode: "drive",
+        spotPreferences: [],
+        defaultSpot: "",
+        priorityRank: 1,
+      },
+      {
+        name: "Bob",
+        email: "b@co.com",
+        commuteMode: "transit",
+        spotPreferences: [],
+        defaultSpot: "",
+        priorityRank: 2,
+      },
+      {
+        name: "Carol",
+        email: "c@co.com",
+        commuteMode: "bike",
+        spotPreferences: [],
+        defaultSpot: "",
+        priorityRank: 3,
+      },
+    ],
+    requests: [],
+  });
+
+  const action_move_carol_up = action(() =>
+    s2.movePersonUp.send({ name: "Carol" })
+  );
+  const action_move_alice_down = action(() =>
+    s2.movePersonDown.send({ name: "Alice" })
+  );
+
+  const assert_s2_alice_rank1 = computed(() => {
+    return s2.people.find((p: Person) => p.name === "Alice")?.priorityRank ===
+      1;
+  });
+  const assert_s2_carol_rank3 = computed(() => {
+    return s2.people.find((p: Person) => p.name === "Carol")?.priorityRank ===
+      3;
+  });
+  // After moving Carol up (should swap Carol rank 3 with Bob rank 2)
+  const assert_s2_carol_rank2 = computed(() => {
+    return s2.people.find((p: Person) => p.name === "Carol")?.priorityRank ===
+      2;
+  });
+  const assert_s2_bob_rank3 = computed(() => {
+    return s2.people.find((p: Person) => p.name === "Bob")?.priorityRank === 3;
+  });
+  // After moving Alice down (rank 1 should swap with rank 2 = Carol now)
+  const assert_s2_alice_rank2 = computed(() => {
+    return s2.people.find((p: Person) => p.name === "Alice")?.priorityRank ===
+      2;
+  });
+
+  // ============================================================
+  // Subject 3: Spot Management
+  // ============================================================
+  const adminAlice3: Person = {
+    name: "Alice",
+    email: "alice@co.com",
+    commuteMode: "drive",
+    spotPreferences: [],
+    defaultSpot: "",
+    priorityRank: 1,
+  };
+  const s3 = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [adminAlice3],
+    requests: [],
+  });
+
+  const action_add_spot7_without_admin = action(() =>
+    s3.addSpot.send({ spotNumber: "7", label: "Level 2", notes: "Covered" })
+  );
+  const action_enable_s3_admin_manager = action(() =>
+    s3.enableAdminManager.send()
+  );
+  const action_make_alice_spot_admin = action(() =>
+    s3.togglePersonAdmin.send({ name: "Alice" })
+  );
+  const action_add_spot7 = action(() =>
+    s3.addSpot.send({ spotNumber: "7", label: "Level 2", notes: "Covered" })
+  );
+  const action_add_spot1_dup = action(() =>
+    s3.addSpot.send({ spotNumber: "1", label: "Dup", notes: "" })
+  );
+  const action_remove_spot5 = action(() =>
+    s3.removeSpot.send({ spotNumber: "5" })
+  );
+  const action_edit_spot_no_payload = action(() => {
+    s3.editSpot.send(undefined as never);
+  });
+
+  const assert_s3_three_spots = computed(() => len(s3.spots) === 3);
+  const assert_s3_non_admin_spot_blocked = computed(() => len(s3.spots) === 3);
+  const assert_s3_can_manage_admins = computed(() =>
+    s3.currentUserCanManageAdmins === true
+  );
+  const assert_s3_alice_is_admin = computed(() =>
+    s3.currentPersonIsAdmin === true
+  );
+  const assert_s3_four_spots = computed(() => len(s3.spots) === 4);
+  const assert_s3_spot7_label = computed(() => {
+    const s = s3.spots.find((sp: ParkingSpot) => sp.spotNumber === "7");
+    return s?.label === "Level 2" && s?.active === true;
+  });
+  const assert_s3_spot7_unchanged = computed(() => {
+    const s = s3.spots.find((sp: ParkingSpot) => sp.spotNumber === "7");
+    return len(s3.spots) === 4 && s?.label === "Level 2" && s?.active === true;
+  });
+  const assert_s3_still_four = computed(() => len(s3.spots) === 4); // dup rejected
+  const assert_s3_three_after_remove = computed(() => len(s3.spots) === 3);
+  const assert_s3_spot5_gone = computed(() =>
+    !s3.spots.some((sp: ParkingSpot) => sp.spotNumber === "5")
+  );
+
+  // ============================================================
+  // Subject 4: Request Submission (Allocation)
+  // ============================================================
+
+  // Alice with defaultSpot "5" → should get spot 5
+  const alice4: Person = {
+    name: "Alice",
+    email: "a@co.com",
+    commuteMode: "drive",
+    spotPreferences: ["1"],
+    defaultSpot: "5",
+    priorityRank: 1,
+  };
+  const bob4: Person = {
+    name: "Bob",
+    email: "b@co.com",
+    commuteMode: "transit",
+    spotPreferences: ["1", "12"],
+    defaultSpot: "",
+    priorityRank: 2,
+  };
+  const carol4: Person = {
+    name: "Carol",
+    email: "c@co.com",
+    commuteMode: "bike",
+    spotPreferences: [],
+    defaultSpot: "",
+    priorityRank: 3,
+  };
+
+  const s4 = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [alice4, bob4, carol4],
+    requests: [],
+  });
+
+  // Alice requests today → gets default spot "5"
+  const action_alice_request = action(() => {
+    s4.submitRequest.send({ personName: "Alice", date: today });
+  });
+
+  // Bob requests today → spot "5" taken by Alice, tries prefs "1", "12" → gets "1"
+  const action_bob_request = action(() => {
+    s4.submitRequest.send({ personName: "Bob", date: today });
+  });
+
+  // Carol requests today → no prefs, no default → gets "12" (last remaining)
+  const action_carol_request = action(() => {
+    s4.submitRequest.send({ personName: "Carol", date: today });
+  });
+
+  // Alice duplicate request for today → rejected
+  const action_alice_dupe = action(() => {
+    s4.submitRequest.send({ personName: "Alice", date: today });
+  });
+
+  // Alice requests tomorrow (no conflicts)
+  const action_alice_tomorrow = action(() => {
+    s4.submitRequest.send({ personName: "Alice", date: tomorrow });
+  });
+
+  const assert_s4_no_requests = computed(() => len(s4.requests) === 0);
+
+  // After Alice requests today
+  const assert_s4_alice_allocated = computed(() => {
+    const req = s4.requests.find((r: SpotRequest) =>
+      r.personName === "Alice" && r.date === today
+    );
+    return req?.status === "allocated" && req?.assignedSpot === "5" &&
+      req?.autoAllocated === true;
+  });
+
+  // After Bob requests today
+  const assert_s4_bob_allocated_pref = computed(() => {
+    const req = s4.requests.find((r: SpotRequest) =>
+      r.personName === "Bob" && r.date === today
+    );
+    return req?.status === "allocated" && req?.assignedSpot === "1";
+  });
+
+  // After Carol requests today (only "12" left)
+  const assert_s4_carol_allocated = computed(() => {
+    const req = s4.requests.find((r: SpotRequest) =>
+      r.personName === "Carol" && r.date === today
+    );
+    return req?.status === "allocated" && req?.assignedSpot === "12";
+  });
+
+  // Alice dupe: still only one Alice request for today (no new one added)
+  const assert_s4_alice_still_one_today = computed(() => {
+    const aliceToday = s4.requests.filter((r: SpotRequest) =>
+      r.personName === "Alice" && r.date === today
+    );
+    return len(aliceToday) === 1;
+  });
+
+  // Duplicate shows in result message
+  const assert_s4_dupe_result = computed(() =>
+    s4.requestResult.toLowerCase().includes("already")
+  );
+
+  // Alice tomorrow gets allocated (any spot)
+  const assert_s4_alice_tomorrow_allocated = computed(() => {
+    const req = s4.requests.find((r: SpotRequest) =>
+      r.personName === "Alice" && r.date === tomorrow
+    );
+    return req?.status === "allocated" && req?.assignedSpot !== "";
+  });
+
+  // ============================================================
+  // Subject 5: Full booking → denied
+  // ============================================================
+  const dave5: Person = {
+    name: "Dave",
+    email: "d@co.com",
+    commuteMode: "other",
+    spotPreferences: [],
+    defaultSpot: "",
+    priorityRank: 4,
+  };
+
+  const s5 = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [alice4, bob4, carol4, dave5],
+    requests: [
+      {
+        id: "r1",
+        personName: "Alice",
+        date: today,
+        status: "allocated",
+        assignedSpot: "1",
+        autoAllocated: true,
+      },
+      {
+        id: "r2",
+        personName: "Bob",
+        date: today,
+        status: "allocated",
+        assignedSpot: "5",
+        autoAllocated: true,
+      },
+      {
+        id: "r3",
+        personName: "Carol",
+        date: today,
+        status: "allocated",
+        assignedSpot: "12",
+        autoAllocated: true,
+      },
+    ],
+  });
+
+  const action_dave_request_denied = action(() => {
+    s5.submitRequest.send({ personName: "Dave", date: today });
+  });
+
+  const assert_s5_dave_denied = computed(() => {
+    const req = s5.requests.find((r: SpotRequest) =>
+      r.personName === "Dave" && r.date === today
+    );
+    return req?.status === "denied" && req?.assignedSpot === "";
+  });
+
+  // ============================================================
+  // Subject 6: Cancellation
+  // ============================================================
+  const s6 = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [alice4],
+    requests: [
+      {
+        id: "rx1",
+        personName: "Alice",
+        date: today,
+        status: "allocated",
+        assignedSpot: "5",
+        autoAllocated: true,
+      },
+    ],
+  });
+
+  const action_cancel_alice = action(() =>
+    s6.cancelRequest.send({ requestId: "rx1" })
+  );
+
+  const assert_s6_allocated = computed(() => {
+    return s6.requests.find((r: SpotRequest) => r.id === "rx1")?.status ===
+      "allocated";
+  });
+  const assert_s6_cancelled = computed(() => {
+    return s6.requests.find((r: SpotRequest) => r.id === "rx1")?.status ===
+      "cancelled";
+  });
+
+  // ============================================================
+  // Subject 7: Admin Override
+  // ============================================================
+  const s7 = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [alice4, bob4],
+    requests: [],
+  });
+
+  const action_try_admin_override_without_admin = action(() => {
+    s7.adminOverride.send({ spotNumber: "5", date: today, personName: "Bob" });
+  });
+  const action_enable_s7_admin_manager = action(() =>
+    s7.enableAdminManager.send()
+  );
+  const action_make_alice_override_admin = action(() =>
+    s7.togglePersonAdmin.send({ name: "Alice" })
+  );
+  const action_admin_override_bob_spot5 = action(() => {
+    s7.adminOverride.send({ spotNumber: "5", date: today, personName: "Bob" });
+  });
+
+  const assert_s7_non_admin_override_blocked = computed(() =>
+    len(s7.requests) === 0
+  );
+  const assert_s7_can_manage_admins = computed(() =>
+    s7.currentUserCanManageAdmins === true
+  );
+  const assert_s7_alice_is_admin = computed(() =>
+    s7.currentPersonIsAdmin === true
+  );
+  const assert_s7_bob_override = computed(() => {
+    return s7.requests.some(
+      (r: SpotRequest) =>
+        r.personName === "Bob" && r.date === today && r.assignedSpot === "5" &&
+        r.autoAllocated === false && r.status === "allocated",
+    );
+  });
+
+  // Override with conflict: assign spot 5 to Alice (Bob already has it)
+  const action_admin_override_alice_spot5 = action(() => {
+    s7.adminOverride.send({
+      spotNumber: "5",
+      date: today,
+      personName: "Alice",
+    });
+  });
+
+  const assert_s7_alice_has_spot5 = computed(() => {
+    return s7.requests.some(
+      (r: SpotRequest) =>
+        r.personName === "Alice" && r.assignedSpot === "5" &&
+        r.status === "allocated",
+    );
+  });
+
+  const assert_s7_bob_spot5_cancelled = computed(() => {
+    // Bob's original spot 5 allocation should be cancelled
+    return s7.requests.some(
+      (r: SpotRequest) =>
+        r.personName === "Bob" && r.assignedSpot === "5" &&
+        r.status === "cancelled",
+    );
+  });
+
+  // ============================================================
+  // Subject 8: Admin mode toggle
+  // ============================================================
+  const s8 = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [alice4],
+    requests: [],
+  });
+
+  const action_toggle_admin = action(() => s8.toggleAdminMode.send());
+  const action_enable_s8_admin_manager = action(() =>
+    s8.enableAdminManager.send()
+  );
+  const action_make_alice_mode_admin = action(() =>
+    s8.togglePersonAdmin.send({ name: "Alice" })
+  );
+
+  const assert_s8_admin_off = computed(() => s8.adminMode === false);
+  const assert_s8_admin_view_locked = computed(() => {
+    const adminAccess = findNodeById(s8[UI], "parking-admin-access");
+    const enableManager = findNodeById(
+      s8[UI],
+      "parking-enable-admin-manager",
+    );
+    const adminToggle = findNodeById(s8[UI], "parking-admin-mode-toggle");
+    const aliceAdminToggle = findNodeByProp(
+      s8[UI],
+      "data-parking-admin-toggle",
+      "Alice",
+    );
+    return nodeIncludesText(adminAccess, "Cannot manage admins") &&
+      nodeIncludesText(aliceAdminToggle, "Make admin") &&
+      propValue(enableManager, "disabled") === false &&
+      propValue(aliceAdminToggle, "disabled") === true &&
+      propValue(adminToggle, "disabled") === true &&
+      findNodeById(s8[UI], "parking-admin-people-section") === undefined;
+  });
+  const assert_s8_can_manage_admins = computed(() =>
+    s8.currentUserCanManageAdmins === true
+  );
+  const assert_s8_admin_view_manager_enabled = computed(() => {
+    const adminAccess = findNodeById(s8[UI], "parking-admin-access");
+    const enableManager = findNodeById(
+      s8[UI],
+      "parking-enable-admin-manager",
+    );
+    const aliceAdminToggle = findNodeByProp(
+      s8[UI],
+      "data-parking-admin-toggle",
+      "Alice",
+    );
+    return nodeIncludesText(adminAccess, "Can manage admins") &&
+      nodeIncludesText(aliceAdminToggle, "Make admin") &&
+      propValue(enableManager, "disabled") === true &&
+      propValue(aliceAdminToggle, "disabled") === false;
+  });
+  const assert_s8_alice_is_admin = computed(() =>
+    s8.currentPersonIsAdmin === true
+  );
+  const assert_s8_admin_view_alice_admin = computed(() => {
+    const adminToggle = findNodeById(s8[UI], "parking-admin-mode-toggle");
+    const aliceRow = findNodeByProp(
+      s8[UI],
+      "data-parking-admin-row",
+      "Alice",
+    );
+    const aliceAdminToggle = findNodeByProp(
+      s8[UI],
+      "data-parking-admin-toggle",
+      "Alice",
+    );
+    return nodeIncludesText(aliceRow, "Admin") &&
+      nodeIncludesText(aliceAdminToggle, "Remove admin") &&
+      propValue(adminToggle, "disabled") === false &&
+      nodeIncludesText(adminToggle, "Admin: OFF");
+  });
+  const assert_s8_admin_on = computed(() => s8.adminMode === true);
+  const assert_s8_admin_view_admin_mode_visible = computed(() =>
+    nodeIncludesText(
+      findNodeById(s8[UI], "parking-admin-mode-toggle"),
+      "Admin: ON",
+    ) &&
+    nodeIncludesText(
+      findNodeById(s8[UI], "parking-admin-people-section"),
+      "People",
+    ) &&
+    nodeIncludesText(
+      findNodeById(s8[UI], "parking-admin-add-person-open"),
+      "+ Add Person",
+    )
+  );
+
+  // ============================================================
+  // Subject 9: Vehicle data on people
+  // ============================================================
+
+  // 9a: addPerson WITH vehicles — plateId normalized, plateState defaulted
+  const s9a = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [],
+    requests: [],
+  });
+
+  const action_s9a_add_with_vehicles = action(() => {
+    s9a.addPerson.send({
+      name: "Zara",
+      email: "zara@co.com",
+      commuteMode: "drive",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+      vehicles: [
+        // plateId should be normalized: lowercase + special chars stripped
+        {
+          plateId: "7abc-123!",
+          plateState: "",
+          color: "Red",
+          make: "Toyota",
+          model: "Camry",
+        },
+        // blank plateState → defaults to "CA"
+        { plateId: "XYZ999", plateState: "", color: "", make: "", model: "" },
+      ],
+    });
+  });
+
+  const assert_s9a_zara_has_vehicles = computed(() => {
+    const zara = s9a.people.find((p: Person) => p.name === "Zara");
+    const vs: Vehicle[] = zara?.vehicles ?? [];
+    return (
+      len(vs) === 2 &&
+      vs[0].plateId === "7ABC123" && // normalized
+      vs[0].plateState === "CA" && // defaulted from blank
+      vs[0].color === "Red" &&
+      vs[1].plateId === "XYZ999" &&
+      vs[1].plateState === "CA"
+    );
+  });
+
+  // 9b: addPerson with a vehicle whose plateId is blank after normalization → dropped
+  const s9b = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [],
+    requests: [],
+  });
+
+  const action_s9b_add_blank_plate = action(() => {
+    s9b.addPerson.send({
+      name: "Ben",
+      email: "ben@co.com",
+      commuteMode: "drive",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+      vehicles: [
+        // plateId with only special chars → normalizes to "" → dropped
+        { plateId: "---", plateState: "CA", color: "", make: "", model: "" },
+        // valid one stays
+        { plateId: "ABC123", plateState: "NY", color: "", make: "", model: "" },
+      ],
+    });
+  });
+
+  const assert_s9b_blank_plate_dropped = computed(() => {
+    const ben = s9b.people.find((p: Person) => p.name === "Ben");
+    const vs: Vehicle[] = ben?.vehicles ?? [];
+    return len(vs) === 1 && vs[0].plateId === "ABC123" &&
+      vs[0].plateState === "NY";
+  });
+
+  // 9c: existing callers that don't pass vehicles → default [] (backward-compat)
+  const s9c = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [],
+    requests: [],
+  });
+
+  const action_s9c_add_no_vehicles = action(() => {
+    s9c.addPerson.send({
+      name: "Carol",
+      email: "carol@co.com",
+      commuteMode: "bike",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+    });
+  });
+
+  const assert_s9c_no_vehicles_default = computed(() => {
+    const carol = s9c.people.find((p: Person) => p.name === "Carol");
+    const vs: Vehicle[] = carol?.vehicles ?? [];
+    return len(vs) === 0;
+  });
+
+  // 9e: addPerson with invalid make+model combo → model dropped, make preserved
+  const s9e = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [],
+    requests: [],
+  });
+
+  const action_s9e_add_invalid_combo = action(() => {
+    s9e.addPerson.send({
+      name: "Eve",
+      email: "eve@co.com",
+      commuteMode: "drive",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+      vehicles: [
+        // Honda does not have Camry — model must be dropped
+        {
+          plateId: "EVE001",
+          plateState: "CA",
+          color: "",
+          make: "Honda",
+          model: "Camry",
+        },
+      ],
+    });
+  });
+
+  const assert_s9e_model_dropped = computed(() => {
+    const eve = s9e.people.find((p: Person) => p.name === "Eve");
+    const vs: Vehicle[] = eve?.vehicles ?? [];
+    return len(vs) === 1 && vs[0].make === "Honda" && vs[0].model === "";
+  });
+
+  // 9f: addPerson with valid make+model combo → both kept
+  const s9f = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [],
+    requests: [],
+  });
+
+  const action_s9f_add_valid_combo = action(() => {
+    s9f.addPerson.send({
+      name: "Frank",
+      email: "frank@co.com",
+      commuteMode: "drive",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+      vehicles: [
+        {
+          plateId: "FRK001",
+          plateState: "CA",
+          color: "",
+          make: "Honda",
+          model: "Civic",
+        },
+      ],
+    });
+  });
+
+  const assert_s9f_valid_combo_kept = computed(() => {
+    const frank = s9f.people.find((p: Person) => p.name === "Frank");
+    const vs: Vehicle[] = frank?.vehicles ?? [];
+    return len(vs) === 1 && vs[0].make === "Honda" && vs[0].model === "Civic";
+  });
+
+  // 9g: addPerson with two vehicles sharing same plateId+state → deduped to one
+  const s9g = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [],
+    requests: [],
+  });
+
+  const action_s9g_add_dupes = action(() => {
+    s9g.addPerson.send({
+      name: "Grace",
+      email: "grace@co.com",
+      commuteMode: "drive",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+      vehicles: [
+        {
+          plateId: "DUP001",
+          plateState: "CA",
+          color: "Red",
+          make: "",
+          model: "",
+        },
+        {
+          plateId: "DUP001",
+          plateState: "CA",
+          color: "Blue",
+          make: "",
+          model: "",
+        },
+      ],
+    });
+  });
+
+  const assert_s9g_deduped = computed(() => {
+    const grace = s9g.people.find((p: Person) => p.name === "Grace");
+    const vs: Vehicle[] = grace?.vehicles ?? [];
+    // First occurrence kept, second dropped
+    return len(vs) === 1 && vs[0].plateId === "DUP001" && vs[0].color === "Red";
+  });
+
+  // 9h: addPerson with invalid color → stored as ""
+  const s9h = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [],
+    requests: [],
+  });
+
+  const action_s9h_add_invalid_color = action(() => {
+    s9h.addPerson.send({
+      name: "Hank",
+      email: "hank@co.com",
+      commuteMode: "drive",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+      vehicles: [
+        {
+          plateId: "HNK001",
+          plateState: "CA",
+          color: "Chartreuse",
+          make: "",
+          model: "",
+        },
+      ],
+    });
+  });
+
+  const assert_s9h_invalid_color_cleared = computed(() => {
+    const hank = s9h.people.find((p: Person) => p.name === "Hank");
+    const vs: Vehicle[] = hank?.vehicles ?? [];
+    return len(vs) === 1 && vs[0].color === "";
+  });
+
+  // 9d: editPerson WITH vehicles replaces them; WITHOUT vehicles preserves them
+  const personWithVehicle: Person = {
+    name: "Dana",
+    email: "dana@co.com",
+    commuteMode: "drive",
+    spotPreferences: [],
+    defaultSpot: "",
+    priorityRank: 1,
+    vehicles: [{
+      plateId: "OLD001",
+      plateState: "CA",
+      color: "Blue",
+      make: "Honda",
+      model: "Civic",
+    }],
+  };
+
+  const s9d = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [personWithVehicle],
+    requests: [],
+  });
+
+  // Edit WITH new vehicles → replaces
+  const action_s9d_edit_with_vehicles = action(() => {
+    s9d.editPerson.send({
+      originalName: "Dana",
+      name: "Dana",
+      email: "dana@co.com",
+      commuteMode: "drive",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+      vehicles: [
+        {
+          plateId: "new-456",
+          plateState: "WA",
+          color: "Black",
+          make: "Ford",
+          model: "F-150",
+        },
+      ],
+    });
+  });
+
+  const assert_s9d_vehicles_replaced = computed(() => {
+    const dana = s9d.people.find((p: Person) => p.name === "Dana");
+    const vs: Vehicle[] = dana?.vehicles ?? [];
+    return len(vs) === 1 && vs[0].plateId === "NEW456" &&
+      vs[0].plateState === "WA";
+  });
+
+  // Edit WITHOUT vehicles → preserves existing
+  const action_s9d_edit_no_vehicles = action(() => {
+    s9d.editPerson.send({
+      originalName: "Dana",
+      name: "Dana",
+      email: "dana2@co.com", // change email only
+      commuteMode: "drive",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+      // vehicles omitted
+    });
+  });
+
+  const assert_s9d_vehicles_preserved = computed(() => {
+    const dana = s9d.people.find((p: Person) => p.name === "Dana");
+    const vs: Vehicle[] = dana?.vehicles ?? [];
+    // vehicles from previous edit still present, email changed
+    return (
+      len(vs) === 1 &&
+      vs[0].plateId === "NEW456" &&
+      dana?.email === "dana2@co.com"
+    );
+  });
+
+  // ============================================================
+  // Test sequence
+  // ============================================================
+
+  return {
+    tests: [
+      // People management
+      { assertion: assert_s1_no_people },
+      { assertion: assert_s1_three_spots },
+      { action: action_enable_s1_admin_manager },
+      { assertion: assert_s1_manager_can_start_people_flow },
+      { action: action_add_alice },
+      { assertion: assert_s1_alice_exists },
+      { assertion: assert_s1_alice_default_spot },
+      { assertion: assert_s1_alice_preferences },
+      { assertion: assert_s1_one_person },
+      { action: action_edit_person_no_payload },
+      { assertion: assert_s1_alice_unchanged },
+      { action: action_add_bob },
+      { assertion: assert_s1_two_people },
+      { assertion: assert_s1_bob_preferences },
+      { action: action_add_alice_duplicate },
+      { assertion: assert_s1_still_two },
+      { action: action_remove_bob },
+      { assertion: assert_s1_one_after_remove },
+      { assertion: assert_s1_bob_gone },
+
+      // Priority reordering
+      { assertion: assert_s2_alice_rank1 },
+      { assertion: assert_s2_carol_rank3 },
+      { action: action_move_carol_up },
+      { assertion: assert_s2_carol_rank2 },
+      { assertion: assert_s2_bob_rank3 },
+      { action: action_move_alice_down },
+      { assertion: assert_s2_alice_rank2 },
+
+      // Spot management
+      { assertion: assert_s3_three_spots },
+      { action: action_add_spot7_without_admin },
+      { assertion: assert_s3_non_admin_spot_blocked },
+      { action: action_enable_s3_admin_manager },
+      { assertion: assert_s3_can_manage_admins },
+      { action: action_make_alice_spot_admin },
+      { assertion: assert_s3_alice_is_admin },
+      { action: action_add_spot7 },
+      { assertion: assert_s3_four_spots },
+      { assertion: assert_s3_spot7_label },
+      { action: action_edit_spot_no_payload },
+      { assertion: assert_s3_spot7_unchanged },
+      { action: action_add_spot1_dup },
+      { assertion: assert_s3_still_four },
+      { action: action_remove_spot5 },
+      { assertion: assert_s3_three_after_remove },
+      { assertion: assert_s3_spot5_gone },
+
+      // Request allocation
+      { assertion: assert_s4_no_requests },
+      { action: action_alice_request },
+      { assertion: assert_s4_alice_allocated },
+      { action: action_bob_request },
+      { assertion: assert_s4_bob_allocated_pref },
+      { action: action_carol_request },
+      { assertion: assert_s4_carol_allocated },
+      { action: action_alice_dupe },
+      { assertion: assert_s4_alice_still_one_today },
+      { assertion: assert_s4_dupe_result },
+      { action: action_alice_tomorrow },
+      { assertion: assert_s4_alice_tomorrow_allocated },
+
+      // Denied when full
+      { action: action_dave_request_denied },
+      { assertion: assert_s5_dave_denied },
+
+      // Cancellation
+      { assertion: assert_s6_allocated },
+      { action: action_cancel_alice },
+      { assertion: assert_s6_cancelled },
+
+      // Admin override
+      { action: action_try_admin_override_without_admin },
+      { assertion: assert_s7_non_admin_override_blocked },
+      { action: action_enable_s7_admin_manager },
+      { assertion: assert_s7_can_manage_admins },
+      { action: action_make_alice_override_admin },
+      { assertion: assert_s7_alice_is_admin },
+      { action: action_admin_override_bob_spot5 },
+      { assertion: assert_s7_bob_override },
+      { action: action_admin_override_alice_spot5 },
+      { assertion: assert_s7_alice_has_spot5 },
+      { assertion: assert_s7_bob_spot5_cancelled },
+
+      // Admin mode toggle
+      { assertion: assert_s8_admin_off },
+      { assertion: assert_s8_admin_view_locked },
+      { action: action_toggle_admin },
+      { assertion: assert_s8_admin_off },
+      { action: action_enable_s8_admin_manager },
+      { assertion: assert_s8_can_manage_admins },
+      { assertion: assert_s8_admin_view_manager_enabled },
+      { action: action_make_alice_mode_admin },
+      { assertion: assert_s8_alice_is_admin },
+      { assertion: assert_s8_admin_view_alice_admin },
+      { action: action_toggle_admin },
+      { assertion: assert_s8_admin_on },
+      { assertion: assert_s8_admin_view_admin_mode_visible },
+      { action: action_toggle_admin },
+      { assertion: assert_s8_admin_off },
+
+      // Vehicle data on people
+      { action: action_s9a_add_with_vehicles },
+      { assertion: assert_s9a_zara_has_vehicles },
+      { action: action_s9b_add_blank_plate },
+      { assertion: assert_s9b_blank_plate_dropped },
+      { action: action_s9c_add_no_vehicles },
+      { assertion: assert_s9c_no_vehicles_default },
+      { action: action_s9d_edit_with_vehicles },
+      { assertion: assert_s9d_vehicles_replaced },
+      { action: action_s9d_edit_no_vehicles },
+      { assertion: assert_s9d_vehicles_preserved },
+      // Extended boundary tests
+      { action: action_s9e_add_invalid_combo },
+      { assertion: assert_s9e_model_dropped },
+      { action: action_s9f_add_valid_combo },
+      { assertion: assert_s9f_valid_combo_kept },
+      { action: action_s9g_add_dupes },
+      { assertion: assert_s9g_deduped },
+      { action: action_s9h_add_invalid_color },
+      { assertion: assert_s9h_invalid_color_cleared },
+    ],
+    s1,
+    s2,
+    s3,
+    s4,
+    s5,
+    s6,
+    s7,
+    s8,
+    s9a,
+    s9b,
+    s9c,
+    s9d,
+    s9e,
+    s9f,
+    s9g,
+    s9h,
+    // TODO(cfc-schema-ref): the CFC schema-ref resolver warns about
+    // unsupported/unresolved $ref(s) in this pattern's schemas (logger "cfc",
+    // fail-closed). Fix the schema(s), then drop this opt-out.
+    allowConsoleWarnings: true,
+  };
+});

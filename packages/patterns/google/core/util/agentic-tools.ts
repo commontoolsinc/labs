@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Agentic Tools - Elegant utilities for creating LLM tool handlers
  *
@@ -34,7 +33,13 @@
  * }
  * ```
  */
-import { handler, JSONSchema, Writable } from "commontools";
+import {
+  handler,
+  JSONSchema,
+  nonPrivateRandom,
+  safeDateNow,
+  Writable,
+} from "commonfabric";
 
 // =============================================================================
 // SCHEMA UTILITIES
@@ -66,7 +71,7 @@ export interface TypedSchema<Fields extends string> {
  * Defines an item schema for LLM tools.
  *
  * Automatically adds:
- * - `result: { type: "object", asCell: true }` for tool response
+ * - `result: { type: "object", asCell: ["cell"] }` for tool response
  *
  * The returned schema preserves field names for type-safe listTool usage.
  *
@@ -83,7 +88,7 @@ export function defineItemSchema<T extends Record<string, PropertyDef>>(
     properties: {
       ...fields,
       // Automatically add result cell for tool response
-      result: { type: "object", asCell: true },
+      result: { type: "object", asCell: ["cell"] },
     },
     required: required as string[],
   } as TypedSchema<Extract<keyof T, string>>;
@@ -113,7 +118,7 @@ export interface ListToolConfig<Fields extends string> {
 const LIST_TOOL_STATE_SCHEMA = {
   type: "object",
   properties: {
-    items: { type: "array", items: {}, asCell: true },
+    items: { type: "array", items: {}, asCell: ["cell"] },
     dedupeFields: { type: "array", items: { type: "string" } },
     idPrefix: { type: "string" },
     timestampField: { type: "string" },
@@ -175,13 +180,13 @@ export function listTool<Fields extends string>(
       if (existingKeys.has(dedupeKey)) {
         resultMessage = `Duplicate: ${dedupeKey} already saved`;
       } else {
-        const id = `${state.idPrefix}-${Date.now()}-${
-          Math.random().toString(36).slice(2, 8)
+        const id = `${state.idPrefix}-${safeDateNow()}-${
+          nonPrivateRandom().toString(36).slice(2, 8)
         }`;
         const newRecord = {
           ...input,
           id,
-          [state.timestampField]: Date.now(),
+          [state.timestampField]: safeDateNow(),
         };
         delete newRecord.result; // Don't save the result cell
 

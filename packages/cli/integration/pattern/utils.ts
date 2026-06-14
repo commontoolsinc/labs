@@ -1,12 +1,12 @@
-import { handler, schema } from "commontools";
-import "commontools/schema";
+import { handler, schema } from "commonfabric";
+import "commonfabric/schema";
 
 // Different way to define the same schema, using 'schema' helper function,
 // let's as leave off `as const satisfies JSONSchema`.
 export const model = schema({
   type: "object",
   properties: {
-    value: { type: "number", default: 0, asCell: true },
+    value: { type: "number", default: 0, asCell: ["cell"] },
     // For integreation test:
     stringField: { type: "string" },
     numberField: { type: "number" },

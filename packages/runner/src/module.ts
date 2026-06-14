@@ -9,6 +9,7 @@ import type {
 import type { AddCancel } from "./cancel.ts";
 import type { Runtime } from "./runtime.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import type { NormalizedFullLink } from "./link-types.ts";
 
 /**
  * Result returned by a raw builtin implementation.
@@ -18,11 +19,15 @@ import type { IExtendedStorageTransaction } from "./storage/interface.ts";
  * - populateDependencies: Customizes what cells this action depends on for its initial run.
  *   If not provided, dependencies are automatically discovered from input bindings.
  *   Can be a ReactivityLog (static) or a PopulateDependencies function (dynamic).
+ * - debounce/throttle/noDebounce: Optional scheduler timing controls.
  */
 export interface RawBuiltinResult {
   action: Action;
   isEffect?: boolean;
   populateDependencies?: PopulateDependencies | ReactivityLog;
+  debounce?: number;
+  noDebounce?: boolean;
+  throttle?: number;
 }
 
 /**
@@ -55,7 +60,14 @@ export class ModuleRegistry {
   }
 
   addModuleByRef(ref: string, module: Module): void {
-    this.moduleMap.set(ref, module);
+    const target = Object.isExtensible(module)
+      ? module
+      : cloneModuleRecord(module);
+    Object.defineProperty(target, "debugName", {
+      value: ref,
+      configurable: true,
+    });
+    this.moduleMap.set(ref, target);
   }
 
   getModule(ref: string): Module {
@@ -70,9 +82,27 @@ export class ModuleRegistry {
   }
 }
 
+function cloneModuleRecord(module: Module): Module {
+  const clone: Record<PropertyKey, unknown> = {};
+  for (const key of Reflect.ownKeys(module as object)) {
+    const descriptor = Object.getOwnPropertyDescriptor(module as object, key);
+    if (!descriptor) {
+      continue;
+    }
+    Object.defineProperty(clone, key, descriptor);
+  }
+  return clone as unknown as Module;
+}
+
 export interface RawModuleOptions {
   /** If true, this module is an effect (side-effectful) rather than a computation */
   isEffect?: boolean;
+  /** Optional scheduler debounce delay in milliseconds */
+  debounce?: number;
+  /** Opt out of scheduler auto-debounce */
+  noDebounce?: boolean;
+  /** Optional scheduler throttle period in milliseconds */
+  throttle?: number;
 }
 
 // This corresponds to the node factory factories in common-builder:module.ts.
@@ -86,6 +116,14 @@ export function raw<T, R>(
     cause: any,
     parentCell: Cell<any>,
     runtime: Runtime,
+    // Fully-resolved normalized link of the output spot this node writes
+    // through (a write redirect at the top, always present for a real node).
+    // Carries the binding's declared `scope` (folded from the result schema /
+    // `.asScope()` default) and `schema`, so a builtin can mint its result
+    // container at the author-declared scope. Replaces the scope-less
+    // `cause.outputSpot` for scope-aware builtins; `cause.outputSpot` stays for
+    // identity (it is hashed into result-cell causes and must not churn).
+    outputBinding?: NormalizedFullLink,
   ) => RawBuiltinReturnType,
   options?: RawModuleOptions,
 ): ModuleFactory<T, R> {
@@ -93,5 +131,8 @@ export function raw<T, R>(
     type: "raw",
     implementation,
     isEffect: options?.isEffect,
+    debounce: options?.debounce,
+    noDebounce: options?.noDebounce,
+    throttle: options?.throttle,
   });
 }

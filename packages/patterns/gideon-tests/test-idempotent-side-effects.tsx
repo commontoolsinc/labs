@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: Idempotent Side Effects in computed()
  *
@@ -31,16 +30,18 @@ import {
   ifElse,
   NAME,
   pattern,
+  safeDateNow,
+  toIndentedDebugString,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface TestInput {
   // Trigger value that we can change to force re-computation
-  triggerCount: Default<number, 0>;
+  triggerCount: number | Default<0>;
 }
 
-interface TestOutput {
+export interface TestOutput {
   // Note: Output types describe the inner value type, not the cell wrapper
   // The pattern returns OpaqueCell<number>, so the output is `number`
   triggerCount: number;
@@ -58,11 +59,11 @@ const incrementTrigger = handler<unknown, { triggerCount: Writable<number> }>(
 
 export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
   // Shared state for tracking
-  const nonIdempotentArray = Writable.of<unknown[]>([]);
-  const nonIdempotentCounter = Writable.of(0);
+  const nonIdempotentArray = new Writable<unknown[]>([]);
+  const nonIdempotentCounter = new Writable(0);
 
-  const idempotentMap = Writable.of<Record<string, unknown>>({});
-  const idempotentCounter = Writable.of(0);
+  const idempotentMap = new Writable<Record<string, unknown>>({});
+  const idempotentCounter = new Writable(0);
 
   // Computed values for conditional rendering
   const isThrashing = computed(() => nonIdempotentCounter.get() > 10);
@@ -84,7 +85,10 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
     if (trigger > 0) {
       // NON-IDEMPOTENT SIDE EFFECT: Always append
       const current = nonIdempotentArray.get();
-      nonIdempotentArray.set([...current, { trigger, timestamp: Date.now() }]);
+      nonIdempotentArray.set([...current, {
+        trigger,
+        timestamp: safeDateNow(),
+      }]);
 
       // Increment counter to show how many times this ran
       nonIdempotentCounter.set(nonIdempotentCounter.get() + 1);
@@ -112,7 +116,7 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
       if (!(key in current)) {
         idempotentMap.set({
           ...current,
-          [key]: { trigger, timestamp: Date.now() },
+          [key]: { trigger, timestamp: safeDateNow() },
         });
       }
 
@@ -142,12 +146,12 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
           <p>
             <strong>Trigger Count:</strong> {triggerCount}
           </p>
-          <ct-button
+          <cf-button
             onClick={incrementTrigger({ triggerCount })}
             style={{ padding: "10px 20px", fontSize: "16px" }}
           >
             Trigger Re-computation
-          </ct-button>
+          </cf-button>
         </div>
 
         <div
@@ -189,7 +193,7 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
             >
               <strong>Data (keeps growing):</strong>
               <pre style={{ fontSize: "11px", margin: "5px 0" }}>
-                {JSON.stringify(nonIdempotentArray.get(), null, 2)}
+                {toIndentedDebugString(nonIdempotentArray.get())}
               </pre>
             </div>
 
@@ -242,7 +246,7 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
             >
               <strong>Data (stable):</strong>
               <pre style={{ fontSize: "11px", margin: "5px 0" }}>
-                {JSON.stringify(idempotentMap.get(), null, 2)}
+                {toIndentedDebugString(idempotentMap.get())}
               </pre>
             </div>
 

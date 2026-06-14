@@ -1,16 +1,14 @@
-/// <cts-enable />
 import {
   computed,
   equals,
   handler,
-  ifElse,
   NAME,
   navigateTo,
   pattern,
   patternTool,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import { default as Note } from "../notes/note.tsx";
 
@@ -30,6 +28,9 @@ import DoList from "../do-list/do-list.tsx";
 import Notebook from "../notes/notebook.tsx";
 import DailyJournal from "../notes/daily-journal.tsx";
 import PieceGrid from "./piece-grid.tsx";
+import SuggestionHistory, {
+  type SuggestionHistoryEntry,
+} from "./suggestion-history.tsx";
 
 type MinimalPiece = {
   [NAME]?: string;
@@ -39,12 +40,12 @@ type MinimalPiece = {
 type PiecesListInput = void;
 
 // Pattern returns only UI, no data outputs (only symbol properties)
-interface PiecesListOutput {
+export interface PiecesListOutput {
   [key: string]: unknown;
   backlinksIndex: {
-    mentionable: MentionablePiece[];
+    mentionable: MentionablePiece[] | undefined;
   };
-  sidebarUI: unknown;
+  sidebarUI?: unknown;
   fabUI: unknown;
 }
 
@@ -183,6 +184,14 @@ const trackRecent = handler<
   recentPieces.set(updated);
 });
 
+const recordSuggestion = handler<
+  SuggestionHistoryEntry,
+  { suggestionHistory: Writable<SuggestionHistoryEntry[]> }
+>(({ result, messages, timestamp }, { suggestionHistory }) => {
+  const current = suggestionHistory.get() ?? [];
+  suggestionHistory.set([...current, { result, messages, timestamp }]);
+});
+
 /** Read current do list items */
 const readDoList = pattern<
   { items: Array<{ title: string; done: boolean; indent: number }> },
@@ -205,11 +214,13 @@ Knowledge graph:
 
 export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // OWN the data cells (not from wish)
-  const allPieces = Writable.of<MentionablePiece[]>([]);
-  const recentPieces = Writable.of<MentionablePiece[]>([]);
+  const allPieces = new Writable<MentionablePiece[]>([]);
+  const recentPieces = new Writable<MentionablePiece[]>([]);
+  const suggestionHistory = new Writable<SuggestionHistoryEntry[]>([]);
+  const suggestionHistoryViewer = SuggestionHistory({});
 
   // Dropdown menu state
-  const menuOpen = Writable.of(false);
+  const menuOpen = new Writable(false);
 
   // Filter out hidden pieces and pieces without resolved NAME
   // (prevents transient hash-only pills during reactive updates)
@@ -223,7 +234,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     })
   );
 
-  const doListItems = Writable.of<any[]>([]);
+  const doListItems = new Writable<any[]>([]);
   const doList = DoList({ items: doListItems });
 
   // Combine user-managed allPieces with system pieces (like doList) so
@@ -286,63 +297,75 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     quickCapture,
     [NAME]: computed(() => `Ben's Space (${visiblePieces.length})`),
     [UI]: (
-      <ct-screen>
-        <ct-keybind
+      <cf-screen>
+        <cf-keybind
           code="KeyO"
           meta
           preventDefault
-          onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
+          oncf-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
         />
-        <ct-keybind
+        <cf-keybind
           code="KeyO"
           ctrl
           preventDefault
-          onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
+          oncf-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
         />
 
-        <ct-toolbar slot="header" sticky>
+        <cf-toolbar slot="header" sticky>
           <div slot="start">
             <h2 style={{ margin: 0, fontSize: "20px" }}>Patterns</h2>
           </div>
-          <ct-cell-link
+          <cf-cell-link
             $cell={index}
             slot="end"
             style={{
               fontSize: "14px",
               padding: "6px 12px",
               textDecoration: "none",
-              color: "var(--ct-color-text-secondary)",
+              color: "var(--cf-theme-color-text-secondary)",
             }}
           >
             Mentions
-          </ct-cell-link>
-          <ct-cell-link
+          </cf-cell-link>
+          <cf-cell-link
             $cell={summaryIdx}
             slot="end"
             style={{
               fontSize: "14px",
               padding: "6px 12px",
               textDecoration: "none",
-              color: "var(--ct-color-text-secondary)",
+              color: "var(--cf-theme-color-text-secondary)",
             }}
           >
             Search
-          </ct-cell-link>
-          <ct-cell-link
+          </cf-cell-link>
+          <cf-cell-link
             $cell={knowledgeGraph}
             slot="end"
             style={{
               fontSize: "14px",
               padding: "6px 12px",
               textDecoration: "none",
-              color: "var(--ct-color-text-secondary)",
+              color: "var(--cf-theme-color-text-secondary)",
             }}
           >
             Graph
-          </ct-cell-link>
+          </cf-cell-link>
+          <cf-cell-link
+            $cell={suggestionHistoryViewer}
+            slot="end"
+            style={{
+              fontSize: "14px",
+              padding: "6px 12px",
+              textDecoration: "none",
+              color: "var(--cf-theme-color-text-secondary)",
+            }}
+          >
+            History
+          </cf-cell-link>
 
           <div slot="end">
-            <ct-button
+            <cf-button
               variant="ghost"
               onClick={toggleMenu({ menuOpen })}
               style={{
@@ -352,7 +375,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
               }}
             >
               Notes ▾
-            </ct-button>
+            </cf-button>
 
             {/* Backdrop to close menu when clicking outside */}
             <div
@@ -366,15 +389,15 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
             />
 
             {/* Dropdown Menu */}
-            <ct-vstack
+            <cf-vstack
               gap="0"
               style={{
                 display: computed(() => (menuOpen.get() ? "flex" : "none")),
                 position: "fixed",
                 top: "112px",
                 right: "16px",
-                background: "var(--ct-color-bg, white)",
-                border: "1px solid var(--ct-color-border, #e5e5e7)",
+                background: "var(--cf-theme-color-background, white)",
+                border: "1px solid var(--cf-theme-color-border, #e5e5e7)",
                 borderRadius: "12px",
                 boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
                 minWidth: "160px",
@@ -382,87 +405,87 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                 padding: "4px",
               }}
             >
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={menuNewNote({ menuOpen })}
                 style={{ justifyContent: "flex-start" }}
               >
                 {"\u00A0\u00A0"}📝 New Note
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="ghost"
                 onClick={menuNewNotebook({ menuOpen })}
                 style={{ justifyContent: "flex-start" }}
               >
                 {"\u00A0\u00A0"}📓 New Notebook
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="ghost"
                 onClick={menuQuickCapture({ menuOpen, quickCapture })}
                 style={{ justifyContent: "flex-start" }}
               >
                 {"\u00A0\u00A0"}⚡ Quick Capture
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="ghost"
                 onClick={menuDailyJournal({ menuOpen, allPieces })}
                 style={{ justifyContent: "flex-start" }}
               >
                 {"\u00A0\u00A0"}📅 Daily Journal
-              </ct-button>
+              </cf-button>
               <div
                 style={{
                   height: "1px",
-                  background: "var(--ct-color-border, #e5e5e7)",
+                  background: "var(--cf-theme-color-border, #e5e5e7)",
                   margin: "4px 8px",
                 }}
               />
-            </ct-vstack>
+            </cf-vstack>
           </div>
-        </ct-toolbar>
+        </cf-toolbar>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-hstack gap="6" padding="6" align="start">
+        <cf-vscroll flex showScrollbar>
+          <cf-hstack gap="6" padding="6" align="start">
             <div style={{ flex: "1", minWidth: "0" }}>
-              <ct-vstack gap="4">
+              <cf-vstack gap="4">
                 <h3 style={{ margin: "0", fontSize: "16px" }}>Do List</h3>
-                <ct-cell-link $cell={doList} />
+                <cf-cell-link $cell={doList} />
                 {doList.compactUI}
-              </ct-vstack>
+              </cf-vstack>
             </div>
 
             <div style={{ flex: "1", minWidth: "0" }}>
-              {ifElse(
-                computed(() => recentPieces.get().length > 0),
-                <ct-vstack gap="4" style={{ marginBottom: "16px" }}>
-                  <ct-hstack gap="2" align="center">
-                    <h3 style={{ margin: "0", fontSize: "16px" }}>Recent</h3>
-                    <ct-cell-link $cell={recentGridView} />
-                  </ct-hstack>
-                  <ct-table full-width hover>
-                    <tbody>
-                      {recentPieces.map((piece: any) => (
-                        <tr>
-                          <td>
-                            <ct-cell-context $cell={piece}>
-                              <ct-cell-link $cell={piece} />
-                            </ct-cell-context>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </ct-table>
-                </ct-vstack>,
-                undefined,
-              )}
+              {computed(() => recentPieces.get().length > 0)
+                ? (
+                  <cf-vstack gap="4" style={{ marginBottom: "16px" }}>
+                    <cf-hstack gap="2" align="center">
+                      <h3 style={{ margin: "0", fontSize: "16px" }}>Recent</h3>
+                      <cf-cell-link $cell={recentGridView} />
+                    </cf-hstack>
+                    <cf-table full-width hover>
+                      <tbody>
+                        {recentPieces.map((piece: any) => (
+                          <tr>
+                            <td>
+                              <cf-cell-context $cell={piece}>
+                                <cf-cell-link $cell={piece} />
+                              </cf-cell-context>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </cf-table>
+                  </cf-vstack>
+                )
+                : undefined}
 
-              <ct-vstack gap="4">
-                <ct-hstack gap="2" align="center">
+              <cf-vstack gap="4">
+                <cf-hstack gap="2" align="center">
                   <h3 style={{ margin: "0", fontSize: "16px" }}>Pieces</h3>
-                  <ct-cell-link $cell={gridView} />
-                </ct-hstack>
+                  <cf-cell-link $cell={gridView} />
+                </cf-hstack>
 
-                <ct-table full-width hover>
+                <cf-table full-width hover>
                   <tbody>
                     {visiblePieces.map((piece) => {
                       const isNotebook = computed(() => {
@@ -473,59 +496,60 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                       });
 
                       const link = (
-                        <ct-drag-source $cell={piece} type="note">
-                          <ct-cell-context $cell={piece}>
-                            <ct-cell-link $cell={piece} />
-                          </ct-cell-context>
-                        </ct-drag-source>
+                        <cf-drag-source $cell={piece} type="note">
+                          <cf-cell-context $cell={piece}>
+                            <cf-cell-link $cell={piece} />
+                          </cf-cell-context>
+                        </cf-drag-source>
                       );
 
                       return (
                         <tr>
                           <td>
-                            {ifElse(
-                              isNotebook,
-                              <ct-drop-zone
-                                accept="note"
-                                onct-drop={dropOntoNotebook({
-                                  notebook: piece as any,
-                                })}
-                              >
-                                {link}
-                              </ct-drop-zone>,
-                              link,
-                            )}
+                            {isNotebook
+                              ? (
+                                <cf-drop-zone
+                                  accept="note"
+                                  oncf-drop={dropOntoNotebook({
+                                    notebook: piece as any,
+                                  })}
+                                >
+                                  {link}
+                                </cf-drop-zone>
+                              )
+                              : link}
                           </td>
                           <td>
-                            <ct-button
+                            <cf-button
                               size="sm"
                               variant="ghost"
                               onClick={removePiece({ piece, allPieces })}
                             >
                               🗑️
-                            </ct-button>
+                            </cf-button>
                           </td>
                         </tr>
                       );
                     })}
                   </tbody>
-                </ct-table>
-              </ct-vstack>
+                </cf-table>
+              </cf-vstack>
             </div>
-          </ct-hstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-hstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
-    sidebarUI: undefined,
     fabUI: fab[UI],
 
     // Exported data
     allPieces,
     recentPieces,
+    suggestionHistory,
 
     // Exported handlers (bound to state cells for external callers)
     addPiece: addPiece({ allPieces }),
     trackRecent: trackRecent({ recentPieces }),
+    recordSuggestion: recordSuggestion({ suggestionHistory }),
     pinToChat: fab.pinToChat,
   };
 });

@@ -1,0 +1,345 @@
+/**
+ * Declaration-only mirror of `packages/api/cfc.ts` for the in-memory pattern
+ * compiler. This file must not emit runtime JavaScript.
+ */
+
+export type Cfc<T, Meta> = T & {
+  readonly __ct_cfc__?: Meta;
+};
+
+export type CfcJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | CfcJsonArray
+  | CfcAtomObject;
+
+export interface CfcJsonArray extends ReadonlyArray<CfcJsonValue> {}
+
+export interface CfcAtomObject extends Readonly<Record<string, CfcJsonValue>> {}
+
+export type CfcAtom = CfcJsonValue;
+
+export declare const CFC_ATOM_BASE: "https://commonfabric.org/cfc/atom/";
+
+export declare const CFC_ATOM_TYPE: {
+  readonly Builtin: "https://commonfabric.org/cfc/atom/Builtin";
+  readonly Caveat: "https://commonfabric.org/cfc/atom/Caveat";
+  readonly InjectionSafe: "https://commonfabric.org/cfc/atom/InjectionSafe";
+  readonly LinkReference: "https://commonfabric.org/cfc/atom/LinkReference";
+  readonly Origin: "https://commonfabric.org/cfc/atom/Origin";
+  readonly PromptSlotBound: "https://commonfabric.org/cfc/atom/PromptSlotBound";
+  readonly PromptSlotInfluence:
+    "https://commonfabric.org/cfc/atom/PromptSlotInfluence";
+  readonly Resource: "https://commonfabric.org/cfc/atom/Resource";
+  readonly UserSurfaceInput:
+    "https://commonfabric.org/cfc/atom/UserSurfaceInput";
+};
+
+export declare const CFC_RUNTIME_SUBJECT: "did:web:commonfabric.org#runtime";
+
+export declare const CFC_CONCEPT_KIND: {
+  readonly PromptInfluence:
+    "https://commonfabric.org/cfc/concepts/prompt-influence";
+  readonly PromptInjectionRiskUnscreened:
+    "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened";
+};
+
+export declare const CFC_FUSE_ATOM_CLASS: {
+  readonly ProjectionMetadataIncomplete:
+    "CommonFabricFuseProjectionMetadataIncomplete";
+  readonly SymlinkTarget: "CommonFabricFuseSymlinkTarget";
+  readonly TopologyObservation: "FilesystemTopologyObservation";
+};
+
+export type CfcResourceAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.Resource;
+  readonly class: string;
+  readonly subject: string;
+  readonly scope?: CfcAtom;
+};
+
+export type CfcCaveatAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.Caveat;
+  readonly kind: string;
+  readonly source: CfcAtom;
+  readonly by?: CfcAtom;
+};
+
+export type CfcBuiltinAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.Builtin;
+  readonly name: string;
+};
+
+export type CfcInjectionSafeAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.InjectionSafe;
+};
+
+export type CfcUserSurfaceInputAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.UserSurfaceInput;
+  readonly user: string;
+  readonly surface: string;
+  readonly valueDigest: string;
+};
+
+export type CfcPromptSlotBoundAtom<
+  Source extends CfcAtom = CfcAtom,
+  Role extends string = string,
+> = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.PromptSlotBound;
+  readonly source: Source;
+  readonly role: Role;
+  readonly kernelName: string;
+  readonly surface: string;
+  readonly subject?: string;
+  readonly renderRef?: CfcAtom;
+  readonly eventId?: string;
+  readonly valueDigest?: string;
+  readonly slotDigest?: string;
+  readonly snapshotDigest?: string;
+  readonly targetPath?: string;
+};
+
+export type CfcPromptSlotRunManifest = CfcAtomObject & {
+  readonly source?: string;
+  readonly wishId?: string;
+  readonly dispatchClass?: string;
+};
+
+export type CfcPromptSlotInfluenceAtom<Role extends string = string> =
+  CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.PromptSlotInfluence;
+  readonly version: 1;
+  readonly role: Role;
+  readonly kernelName: string;
+  readonly surface: string;
+  readonly subject?: string;
+  readonly eventId?: string;
+  readonly valueDigest?: string;
+  readonly slotDigest?: string;
+  readonly snapshotDigest?: string;
+  readonly targetPath?: string;
+  readonly runManifest?: CfcPromptSlotRunManifest;
+};
+
+export declare const cfcAtom: {
+  readonly resource: (
+    className: string,
+    subject?: string,
+    scope?: CfcAtom,
+  ) => CfcResourceAtom;
+  readonly caveat: (
+    kind: string,
+    source: CfcAtom,
+    by?: CfcAtom,
+  ) => CfcCaveatAtom;
+  readonly builtin: (name: string) => CfcBuiltinAtom;
+  readonly injectionSafe: () => CfcInjectionSafeAtom;
+  readonly userSurfaceInput: (
+    user: string,
+    surface: string,
+    valueDigest: string,
+  ) => CfcUserSurfaceInputAtom;
+  readonly promptSlotBound: <Source extends CfcAtom, Role extends string>(
+    source: Source,
+    role: Role,
+    kernelName: string,
+    subject: string,
+    surface: string,
+    valueDigest: string,
+  ) => CfcPromptSlotBoundAtom<Source, Role>;
+};
+
+export declare const CFC_CANONICAL_ALIAS_NAMES: readonly [
+  "Cfc",
+  "Confidential",
+  "Integrity",
+  "AddIntegrity",
+  "RepresentsCurrentUser",
+  "AuthoredByCurrentUser",
+  "RequiresIntegrity",
+  "MaxConfidentiality",
+  "OpaqueInput",
+  "WriteAuthorizedBy",
+  "TrustedActionWriteWithIntegrity",
+  "TrustedActionWrite",
+  "TrustedActionUiContract",
+  "ExactCopy",
+  "ProjectionPath",
+  "ProjectionOf",
+  "Projection",
+  "LengthPreservedFrom",
+  "FilteredFrom",
+  "SubsetOf",
+  "PermutationOf",
+];
+
+export type CfcCanonicalAliasName = typeof CFC_CANONICAL_ALIAS_NAMES[number];
+
+export type Ref<Root, Path extends readonly string[]> = {
+  readonly __ct_ref_root__?: Root;
+  readonly __ct_ref_path__?: Path;
+};
+
+export type PathValue<Root, Path extends readonly string[]> = unknown;
+export type RefValue<SourceRef> = unknown;
+
+type EscapePointerSegment<Segment extends string> = Segment extends
+  `${infer Head}~${infer Tail}` ? `${Head}~0${EscapePointerSegment<Tail>}`
+  : Segment extends `${infer Head}/${infer Tail}`
+    ? `${Head}~1${EscapePointerSegment<Tail>}`
+  : Segment;
+
+type JoinPointerPath<Path extends readonly string[]> = Path extends readonly []
+  ? ""
+  : Path extends readonly [
+    infer First extends string,
+    ...infer Rest extends readonly string[],
+  ] ? `${EscapePointerSegment<First>}${Rest extends readonly [] ? ""
+      : `/${JoinPointerPath<Rest>}`}`
+  : never;
+
+export type CanonicalPointer<Path extends readonly string[]> = Path extends
+  readonly [] ? "/" : `/${JoinPointerPath<Path>}`;
+
+export type Confidential<T, X extends readonly unknown[]> = Cfc<T, {
+  confidentiality: X;
+}>;
+
+export type Integrity<T, X extends readonly unknown[]> = Cfc<T, {
+  integrity: X;
+}>;
+
+export type AddIntegrity<T, X extends readonly unknown[]> = Cfc<T, {
+  addIntegrity: X;
+}>;
+
+export type RepresentsCurrentUser<T> = Cfc<T, {
+  addIntegrity: readonly [{
+    readonly kind: "represents-principal";
+    readonly subject: { readonly __ctCurrentPrincipal: true };
+  }];
+}>;
+
+export type AuthoredByCurrentUser<T> = Cfc<T, {
+  addIntegrity: readonly [{
+    readonly kind: "authored-by";
+    readonly subject: { readonly __ctCurrentPrincipal: true };
+  }];
+}>;
+
+export type RequiresIntegrity<T, X extends readonly unknown[]> = Cfc<T, {
+  requiredIntegrity: X;
+}>;
+
+export type MaxConfidentiality<T, X extends readonly unknown[]> = Cfc<T, {
+  maxConfidentiality: X;
+}>;
+
+export type ExactCopy<T, P extends readonly string[]> = Cfc<T, {
+  exactCopyOf: P;
+}>;
+
+export type LengthPreservedFrom<T, P extends readonly string[]> = Cfc<T, {
+  collection: {
+    sourceCollection: P;
+    lengthPreserved: true;
+  };
+}>;
+
+export type FilteredFrom<T, P extends readonly string[]> = Cfc<T, {
+  collection: {
+    filteredFrom: P;
+  };
+}>;
+
+export type SubsetOf<T, P extends readonly string[]> = Cfc<T, {
+  collection: {
+    subsetOf: P;
+  };
+}>;
+
+export type PermutationOf<T, P extends readonly string[]> = Cfc<T, {
+  collection: {
+    permutationOf: P;
+  };
+}>;
+
+export type OpaqueInput<
+  T,
+  Spec extends
+    | true
+    | {
+      schema?: unknown;
+      allowPassThrough?: boolean;
+    } = true,
+> = Cfc<T, { opaque: Spec }>;
+
+export type ProjectionPath<
+  T,
+  From extends string,
+  Path extends readonly string[],
+> = Cfc<T, {
+  projection: {
+    from: From;
+    path: CanonicalPointer<Path>;
+  };
+}>;
+
+export type ProjectionOf<
+  Root,
+  PathTuple extends readonly string[],
+> = ProjectionPath<Root, "/", PathTuple>;
+
+export type Projection<SourceRef> = SourceRef extends Ref<
+  infer Root,
+  infer Path extends readonly string[]
+> ? ProjectionOf<Root, Path>
+  : never;
+
+export type WriteAuthorizedBy<T, Binding> = Cfc<T, {
+  writeAuthorizedBy: Binding;
+}>;
+
+export type TrustedActionWriteWithIntegrity<
+  T,
+  Binding,
+  Action extends string,
+  Pattern extends string,
+  Integrity extends readonly [string, ...string[]],
+> = Cfc<
+  WriteAuthorizedBy<T, Binding>,
+  {
+    uiContract: {
+      helper: "UiAction";
+      action: Action;
+      trustedPattern: Pattern;
+      requiredEventIntegrity: Integrity;
+    };
+  }
+>;
+
+export type TrustedActionWrite<
+  T,
+  Binding,
+  Action extends string,
+  Pattern extends string,
+> = TrustedActionWriteWithIntegrity<T, Binding, Action, Pattern, [Pattern]>;
+
+export type TrustedActionUiContract<
+  T,
+  Action extends string,
+  Pattern extends string,
+  Integrity extends readonly [string, ...string[]] = [Pattern],
+> = Cfc<
+  T,
+  {
+    uiContract: {
+      helper: "UiAction";
+      action: Action;
+      trustedPattern: Pattern;
+      requiredEventIntegrity: Integrity;
+    };
+  }
+>;

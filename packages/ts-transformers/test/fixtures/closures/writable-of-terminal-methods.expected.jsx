@@ -1,57 +1,69 @@
-import * as __ctHelpers from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 /**
- * Writable.of() result accessed via .get()/.set() in action
+ * new Writable() result accessed via .get()/.set() in action
  * callbacks. These are terminal methods handled correctly regardless
- * of opaque classification — Writable.of() is an opaque origin and
+ * of opaque classification — new Writable() is an opaque origin and
  * .get()/.set() are terminal methods.
  */
-import { action, pattern, UI, Writable } from "commontools";
+import { action, pattern, UI, Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     title: string;
 }
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        counter: {
+            type: "number",
+            asCell: ["writeonly"]
+        },
+        label: {
+            type: "string",
+            asCell: ["writeonly"]
+        }
+    },
+    required: ["counter", "label"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { counter, label }) => {
+    counter.set(0);
+    label.set("Count");
+});
 // FIXTURE: writable-of-terminal-methods
-// Verifies: Writable.of() gets schema annotation, and action() with .set() becomes handler()
-//   Writable.of(0) → Writable.of(0, { type: "number" })
+// Verifies: new Writable() gets schema annotation, and action() with .set() becomes handler()
+//   new Writable(0) → new Writable(0, { type: "number" })
 //   action(() => { counter.set(0); label.set("Count"); }) → handler(false, captureSchema, (_, { counter, label }) => ...)
-//   ({ title }) → (__ct_pattern_input) => { title = __ct_pattern_input.key("title"); }
-// Context: Writable.of() produces opaque cells. The .set() calls inside
+//   ({ title }) → (__cf_pattern_input) => { title = __cf_pattern_input.key("title"); }
+// Context: new Writable() produces opaque cells. The .set() calls inside
 //   action() are terminal methods that require the action to be rewritten as a
 //   handler with captured cell references (counter, label) in its schema.
-export default pattern((__ct_pattern_input) => {
-    const title = __ct_pattern_input.key("title");
-    const counter = Writable.of(0, {
+export default pattern((__cf_pattern_input) => {
+    const title = __cf_pattern_input.key("title");
+    const counter = new Writable(0, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
-    const label = Writable.of("Count", {
+    } as const satisfies __cfHelpers.JSONSchema).for("counter", true);
+    const label = new Writable("Count", {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema);
-    const reset = __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            counter: {
-                type: "number",
-                asCell: true
-            },
-            label: {
-                type: "string",
-                asCell: true
-            }
-        },
-        required: ["counter", "label"]
-    } as const satisfies __ctHelpers.JSONSchema, (_, { counter, label }) => {
-        counter.set(0);
-        label.set("Count");
-    })({
+    } as const satisfies __cfHelpers.JSONSchema).for("label", true);
+    const reset = __cfHandler_1({
         counter: counter,
         label: label
-    });
+    }).for({ stream: "reset" }, true);
     return {
         [UI]: (<div>
         <span>{title} {label}: {counter}</span>
-        <ct-button onClick={reset}>Reset</ct-button>
+        <cf-button onClick={reset}>Reset</cf-button>
       </div>),
-        counter,
-        label,
+        counter: counter.for(["__patternResult", "counter"], true),
+        label: label.for(["__patternResult", "label"], true)
     };
 }, {
     type: "object",
@@ -61,7 +73,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["title"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -69,11 +81,11 @@ export default pattern((__ct_pattern_input) => {
         },
         counter: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         },
         label: {
             type: "string",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["$UI", "counter", "label"],
@@ -82,11 +94,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -99,8 +110,10 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfHandler_1
+});

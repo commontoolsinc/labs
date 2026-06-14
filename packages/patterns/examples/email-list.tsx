@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   computed,
   NAME,
@@ -7,7 +6,7 @@ import {
   VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { Email } from "../google/core/gmail-importer.tsx";
 import { Contact } from "../contacts/contact-detail.tsx";
 
@@ -29,13 +28,13 @@ export default pattern<Record<string, never>>((_) => {
   });
 
   const people = peopleResult.candidates;
-  const selectedPerson = Writable.of<Contact | null>(null);
+  const selectedPerson = new Writable<Contact | null>(null);
 
   return {
     [NAME]: computed(() => "Email list (" + emails.length + ")"),
     [UI]: (
       <div>
-        <ct-select
+        <cf-select
           items={people.map((p) => ({
             label: p[NAME],
             value: p,

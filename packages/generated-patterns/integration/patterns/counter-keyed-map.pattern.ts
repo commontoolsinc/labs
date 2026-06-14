@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { Cell, Default, handler, lift, pattern, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commonfabric";
 
 interface KeyedMapArgs {
   counters: Default<Record<string, number>, { [key: string]: number }>;

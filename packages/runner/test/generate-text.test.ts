@@ -1,14 +1,16 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   addMockResponse,
   clearMockResponses,
   enableMockMode,
-} from "@commontools/llm/client";
-import type { BuiltInLLMMessage } from "@commontools/api";
+} from "@commonfabric/llm/client";
+import { LLMClient } from "@commonfabric/llm";
+import type { BuiltInLLMMessage } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type Cell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -23,10 +25,10 @@ describe("generateText", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let generateText: ReturnType<
     typeof createBuilder
-  >["commontools"]["generateText"];
+  >["commonfabric"]["generateText"];
 
   let dummyPattern: any;
 
@@ -39,8 +41,8 @@ describe("generateText", () => {
     });
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
-    ({ pattern, generateText } = commontools);
+    const { commonfabric } = createTrustedBuilder(runtime);
+    ({ pattern, generateText } = commonfabric);
     dummyPattern = pattern(() => ({}), { type: "object" });
   });
 
@@ -88,6 +90,61 @@ describe("generateText", () => {
 
     expect(result.key("pending").get()).toBe(false);
     expect(result.key("result").get()).toBe(expectedResponse);
+  });
+
+  it("starts the LLM request only after the transaction commits", async () => {
+    const testPrompt = "post-commit-gated-generateText";
+
+    addMockResponse(
+      (req) =>
+        req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(testPrompt)
+        ),
+      {
+        role: "assistant",
+        content: "gated response",
+        id: "mock-post-commit",
+      },
+    );
+
+    const originalSendRequest = LLMClient.prototype.sendRequest;
+    const sendRequestCalls: number[] = [];
+    LLMClient.prototype.sendRequest = async function (...args: unknown[]) {
+      sendRequestCalls.push(Date.now());
+      return await originalSendRequest.apply(this, args as never);
+    };
+
+    try {
+      const testPattern = pattern(() => {
+        return generateText({
+          prompt: testPrompt,
+        });
+      });
+
+      const resultCell = runtime.getCell(
+        space,
+        "generateText-post-commit-gated-test",
+        testPattern.resultSchema,
+        tx,
+      );
+
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+
+      expect(sendRequestCalls).toEqual([]);
+
+      const commitPromise = tx.commit();
+      expect(sendRequestCalls).toEqual([]);
+
+      await commitPromise;
+      await expect(waitForPendingToBecomeFalse(result)).resolves
+        .toBeUndefined();
+      await runtime.idle();
+
+      expect(sendRequestCalls.length).toBeGreaterThan(0);
+      expect(result.key("result").get()).toBe("gated response");
+    } finally {
+      LLMClient.prototype.sendRequest = originalSendRequest;
+    }
   });
 
   it("should generate text from messages", async () => {
@@ -243,6 +300,152 @@ describe("generateText", () => {
 
     expect(result.key("pending").get()).toBe(false);
     expect(result.key("result").get()).toBe(expectedResponse);
+  });
+});
+
+describe("generateText with queue", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+  let generateText: ReturnType<
+    typeof createBuilder
+  >["commonfabric"]["generateText"];
+
+  beforeEach(() => {
+    clearMockResponses();
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+
+    const { commonfabric } = createTrustedBuilder(runtime);
+    ({ pattern, generateText } = commonfabric);
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime.idle();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should work with a queue parameter", async () => {
+    const testPrompt = "Queued hello";
+    const expectedResponse = "Queued world!";
+
+    addMockResponse(
+      (req) =>
+        req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(testPrompt)
+        ),
+      {
+        role: "assistant",
+        content: expectedResponse,
+        id: "mock-queued",
+      },
+    );
+
+    const testPattern = pattern(() => {
+      return generateText({
+        prompt: testPrompt,
+        queue: "test-queue",
+      });
+    });
+
+    const resultCell = runtime.getCell(
+      space,
+      "generateText-queue-test",
+      testPattern.resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
+    await runtime.idle();
+
+    expect(result.key("pending").get()).toBe(false);
+    expect(result.key("result").get()).toBe(expectedResponse);
+  });
+
+  it("should create the named queue in the runtime", async () => {
+    addMockResponse(
+      () => true,
+      {
+        role: "assistant",
+        content: "response",
+        id: "mock-queue-creation",
+      },
+    );
+
+    const testPattern = pattern(() => {
+      return generateText({
+        prompt: "test",
+        queue: "my-named-queue",
+      });
+    });
+
+    const resultCell = runtime.getCell(
+      space,
+      "generateText-queue-creation-test",
+      testPattern.resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
+    await runtime.idle();
+
+    // Verify the queue was created in the runtime registry
+    const queue = runtime.getOrCreateQueue("my-named-queue");
+    expect(queue.stats.completed).toBeGreaterThanOrEqual(1);
+  });
+
+  it("should allow pre-configuring queue concurrency", async () => {
+    // Pre-configure the queue before any patterns use it
+    runtime.configureQueue("pre-configured", { maxConcurrency: 5 });
+
+    addMockResponse(
+      () => true,
+      {
+        role: "assistant",
+        content: "response",
+        id: "mock-preconfigured",
+      },
+    );
+
+    const testPattern = pattern(() => {
+      return generateText({
+        prompt: "test",
+        queue: "pre-configured",
+      });
+    });
+
+    const resultCell = runtime.getCell(
+      space,
+      "generateText-preconfigured-test",
+      testPattern.resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
+    await runtime.idle();
+
+    expect(result.key("pending").get()).toBe(false);
+    expect(result.key("result").get()).toBe("response");
+
+    // Verify configureQueue actually applied the concurrency limit.
+    const queue = runtime.getOrCreateQueue("pre-configured");
+    expect(queue.maxConcurrency).toBe(5);
   });
 });
 

@@ -1,7 +1,9 @@
 {
   "properties": {
     "cellOfDefault": {
-      "asCell": true,
+      "asCell": [
+        "cell"
+      ],
       "default": "d",
       "type": "string"
     },

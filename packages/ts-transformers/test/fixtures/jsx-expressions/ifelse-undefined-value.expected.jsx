@@ -1,99 +1,114 @@
-import * as __ctHelpers from "commontools";
-import { computed, fetchData, ifElse, pattern, UI } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { computed, fetchData, ifElse, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    pending: boolean;
+    result: unknown;
+}, boolean>(({ pending, result }) => pending || !result, {
+    type: "object",
+    properties: {
+        pending: {
+            type: "boolean"
+        },
+        result: {
+            type: "unknown"
+        }
+    },
+    required: ["pending", "result"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_2 = __cfHelpers.lift<{
+    result: unknown;
+}, boolean>(({ result }) => !!result, {
+    type: "object",
+    properties: {
+        result: {
+            type: "unknown"
+        }
+    },
+    required: ["result"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
 // Tests ifElse where ifTrue is explicitly undefined
 // This pattern is common: ifElse(pending, undefined, { result })
 // The transformer must handle this correctly - the undefined is a VALUE, not a missing argument
 // FIXTURE: ifelse-undefined-value
 // Verifies: ifElse with explicit undefined as ifTrue or ifFalse branch is handled correctly
-//   ifElse(cond, undefined, {result}) → ifElse(schema, schema, schema, schema, derive(...), undefined, {result})
-//   ifElse(cond, {data}, undefined)   → ifElse(schema, schema, schema, schema, derive(...), {data}, undefined)
+//   ifElse(cond, undefined, {result}) → ifElse(schema, schema, schema, schema, lift(...)(...), undefined, {result})
+//   ifElse(cond, {data}, undefined)   → ifElse(schema, schema, schema, schema, lift(...)(...), {data}, undefined)
 // Context: undefined is a VALUE argument, not a missing argument
 export default pattern(() => {
-    const { pending, result } = fetchData({
+    const __cf_destructure_1 = fetchData({
         url: "/api/data",
         mode: "text",
-    });
+    }), pending = __cf_destructure_1.key("pending").for("pending", true), result = __cf_destructure_1.key("result").for("result", true);
     // Pattern 1: undefined as ifTrue (waiting state returns nothing)
     const output1 = ifElse({
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "undefined"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             result: {
-                asOpaque: true
+                type: "unknown"
             }
         },
         required: ["result"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         anyOf: [{
-                type: "undefined"
-            }, {
                 type: "object",
                 properties: {
                     result: {
-                        asOpaque: true
+                        type: "unknown"
                     }
                 },
                 required: ["result"]
-            }],
-        asOpaque: true
-    } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-        type: "object",
-        properties: {
-            pending: {
-                type: "boolean",
-                asOpaque: true
-            },
-            result: {
-                asOpaque: true
-            }
-        },
-        required: ["pending", "result"]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
+            }, {
+                type: "undefined"
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({
         pending: pending,
         result: result
-    }, ({ pending, result }) => pending || !result), undefined, { result });
+    }).for(["output1", 4], true), undefined, { result }).for("output1", true);
     // Pattern 2: undefined as ifFalse (error state returns nothing)
     const output2 = ifElse({
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             data: {
-                asOpaque: true
+                type: "unknown"
             }
         },
         required: ["data"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "undefined"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         anyOf: [{
-                type: "undefined"
-            }, {
                 type: "object",
                 properties: {
                     data: {
-                        asOpaque: true
+                        type: "unknown"
                     }
                 },
                 required: ["data"]
-            }],
-        asOpaque: true
-    } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-        type: "object",
-        properties: {
-            result: {
-                asOpaque: true
-            }
-        },
-        required: ["result"]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, { result: result }, ({ result }) => !!result), { data: result }, undefined);
+            }, {
+                type: "undefined"
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ result: result }).for(["output2", 4], true), { data: result }, undefined).for("output2", true);
     return {
         [UI]: (<div>
         <span>{output1}</span>
@@ -104,7 +119,7 @@ export default pattern(() => {
     type: "object",
     properties: {},
     additionalProperties: false
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -117,11 +132,10 @@ export default pattern(() => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -134,8 +148,11 @@ export default pattern(() => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2
+});

@@ -13,19 +13,19 @@ import {
   AsStream,
   AsWriteonlyCell,
   AuthSchema,
+  FS,
   ID,
   ID_FIELD,
-  isPattern,
   NAME,
-  schema,
+  schema as schemaIdentity,
   SELF,
   TYPE,
   UI,
   WebhookConfigSchema,
 } from "./types.ts";
-import { h } from "@commontools/html";
+import { h, UiAction, UiDisclosure, UiPromptSlot } from "@commonfabric/html";
 import { pattern } from "./pattern.ts";
-import { action, byRef, computed, derive, handler, lift } from "./module.ts";
+import { action, byRef, computed, handler, lift } from "./module.ts";
 import {
   compileAndRun,
   fetchData,
@@ -37,115 +37,241 @@ import {
   llmDialog,
   navigateTo,
   patternTool,
+  sqliteDatabase,
+  sqliteQuery,
   str,
   streamData,
   unless,
   when,
   wish,
 } from "./built-in.ts";
+import { cfLink, table } from "@commonfabric/memory/sqlite/schema";
+import {
+  all as rowLabelAll,
+  any as rowLabelAny,
+  authoredBy as rowLabelAuthoredBy,
+  constant as rowLabelConstant,
+  dbOwner as rowLabelDbOwner,
+  endorsedBy as rowLabelEndorsedBy,
+  intersect as rowLabelIntersect,
+  match as rowLabelMatch,
+  principal as rowLabelPrincipal,
+  whenMatches as rowLabelWhenMatches,
+} from "@commonfabric/memory/sqlite/row-label";
 import { cellConstructorFactory } from "../cell.ts";
 import { getEntityId } from "../create-ref.ts";
 import { getPatternEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
+import { isTrustedPattern, setPatternProgram } from "./pattern-metadata.ts";
+import {
+  FabricInstance,
+  FabricPrimitive,
+} from "@commonfabric/data-model/fabric-value";
+import {
+  FabricEpochDays,
+  FabricEpochNsec,
+  FabricHash,
+} from "@commonfabric/data-model/fabric-primitives";
+import {
+  toCompactDebugString,
+  toIndentedDebugString,
+} from "@commonfabric/data-model/value-debug";
+import { freezeVerifiedPlainData } from "../sandbox/plain-data.ts";
+import { nonPrivateRandom, safeDateNow } from "./safe-builtins.ts";
+import {
+  registerUnsafeHostTrustedValue,
+  type UnsafeHostTrust,
+} from "../unsafe-host-trust.ts";
 
 // Runtime implementation of toSchema - this should never be called
 // The TypeScript transformer should replace all calls at compile time
 const toSchema: ToSchemaFunction = (_options?) => {
   throw new Error(
     "toSchema() must be transformed at compile time - transformer not running\n" +
-      "help: enable CTS with /// <cts-enable /> directive, ensure using correct build process",
+      "help: CTS transforms are enabled by default; remove /// <cf-disable-transform /> if present, or ensure you are using the Common Fabric build process",
   );
 };
 
+const runtimeSchema = freezeVerifiedPlainData as typeof schemaIdentity;
+
+export interface CreateBuilderOptions {
+  unsafeHostTrust?: UnsafeHostTrust;
+}
+
 /**
  * Creates a set of builder functions with the given runtime
- * @param runtime - The runtime instance to use for cell creation
  * @returns An object containing all builder functions
  */
-export const createBuilder = (): {
-  commontools: BuilderFunctionsAndConstants;
+export const createBuilder = (options: CreateBuilderOptions = {}): {
+  commonfabric: BuilderFunctionsAndConstants;
   exportsCallback: (exports: Map<any, RuntimeProgram>) => void;
 } => {
+  const trustValue = <T>(value: T): T => {
+    registerUnsafeHostTrustedValue(options.unsafeHostTrust, value);
+    return value;
+  };
+
+  const trustedPattern = ((...args: any[]) =>
+    trustValue(
+      (pattern as (...args: any[]) => unknown)(...args),
+    )) as typeof pattern;
+  const trustedLift = ((...args: any[]) =>
+    trustValue(
+      (lift as (...args: any[]) => unknown)(...args),
+    )) as typeof lift;
+  const trustedHandler = ((...args: any[]) =>
+    trustValue(
+      (handler as (...args: any[]) => unknown)(...args),
+    )) as typeof handler;
+  const trustedComputed = ((...args: any[]) =>
+    trustValue(
+      (computed as (...args: any[]) => unknown)(...args),
+    )) as typeof computed;
+  const trustedStr =
+    ((strings: TemplateStringsArray, ...values: unknown[]) =>
+      trustValue(str(strings, ...values))) as typeof str;
+  const trustedPatternTool = ((...args: any[]) =>
+    trustValue(
+      (patternTool as (...args: any[]) => unknown)(...args),
+    )) as typeof patternTool;
+
   // Associate runtime programs with patterns after compilation and initial eval
   // and before compilation returns, so before any e.g. pattern would be
   // instantiated. This way they get saved with a way to rehydrate them.
   const exportsCallback = (exports: Map<any, RuntimeProgram>) => {
     for (const [value, program] of exports) {
-      if (isPattern(value)) {
-        // This will associate the program with the pattern
-        value.program = program;
+      // `isTrustedPattern` (not the structural `isPattern`): only a value the
+      // trusted builder produced may acquire a rehydration program, so a
+      // `__cf_data`-forged pattern-shaped export cannot launder trust metadata.
+      if (isTrustedPattern(value)) {
+        // Associate the program with the pattern via the side-table so it works
+        // even when the exported pattern has been frozen by the loader.
+        setPatternProgram(value, program);
       }
     }
   };
 
-  return {
-    commontools: {
-      // Pattern creation
-      pattern,
-      patternTool,
+  const commonfabric = {
+    // Pattern creation
+    pattern: trustedPattern,
+    patternTool: trustedPatternTool,
 
-      // Module creation
-      lift,
-      handler,
-      action,
-      derive,
-      computed,
+    // Module creation
+    lift: trustedLift,
+    handler: trustedHandler,
+    action,
+    computed: trustedComputed,
 
-      // Built-in modules
-      str,
-      ifElse,
-      when,
-      unless,
-      llm,
-      llmDialog,
-      generateObject,
-      generateText,
-      fetchData,
-      fetchProgram,
-      streamData,
-      compileAndRun,
-      navigateTo,
-      wish,
-
-      // Cell creation
-      cell: cellConstructorFactory<AsCell>("cell").of,
-      equals: cellConstructorFactory<AsCell>("cell").equals,
-
-      // Cell constructors with static methods
-      Cell: cellConstructorFactory<AsCell>("cell"),
-      Writable: cellConstructorFactory<AsCell>("cell"), // Alias for Cell with clearer semantics
-      OpaqueCell: cellConstructorFactory<AsOpaqueCell>("opaque"),
-      Stream: cellConstructorFactory<AsStream>("stream"),
-      ComparableCell: cellConstructorFactory<AsComparableCell>("comparable"),
-      ReadonlyCell: cellConstructorFactory<AsReadonlyCell>("readonly"),
-      WriteonlyCell: cellConstructorFactory<AsWriteonlyCell>("writeonly"),
-
-      // Utility
-      byRef,
-
-      // Environment
-      getPatternEnvironment,
-
-      // Entity utilities
-      getEntityId,
-
-      // Constants
-      ID,
-      ID_FIELD,
-      SELF,
-      TYPE,
-      NAME,
-      UI,
-
-      // Schema utilities
-      schema,
-      toSchema,
-      AuthSchema,
-      WebhookConfigSchema,
-
-      // Render utils
-      h,
+    // Built-in modules
+    str: trustedStr,
+    ifElse,
+    when,
+    unless,
+    llm,
+    llmDialog,
+    generateObject,
+    generateText,
+    fetchData,
+    fetchProgram,
+    streamData,
+    compileAndRun,
+    sqliteDatabase,
+    sqliteQuery,
+    table,
+    cfLink,
+    // The SQLite helper namespace — one import for the growing vocabulary:
+    // `const { table, all, principal, match, … } = cfSqlite`. The row-label
+    // helpers (CFC Phase 3) live only here. There is deliberately no bare
+    // `when`/`matches`: the builder's control-flow `when` lowering matches by
+    // NAME and would mangle a local so named — the fused `whenMatches` avoids
+    // the collision class entirely.
+    cfSqlite: {
+      table,
+      cfLink,
+      match: rowLabelMatch,
+      principal: rowLabelPrincipal,
+      all: rowLabelAll,
+      any: rowLabelAny,
+      intersect: rowLabelIntersect,
+      whenMatches: rowLabelWhenMatches,
+      dbOwner: rowLabelDbOwner,
+      endorsedBy: rowLabelEndorsedBy,
+      authoredBy: rowLabelAuthoredBy,
+      constant: rowLabelConstant,
     },
+    navigateTo,
+    wish,
+
+    // Multi-user test descriptor tag (see api MultiUserTestDescriptor):
+    // identity at runtime; the call expression keeps the descriptor's pattern
+    // factories out of module-level plain-data hardening.
+    multiUserTest: <T>(descriptor: T): T => descriptor,
+
+    // Cell creation
+    cell: cellConstructorFactory<AsCell>("cell").of,
+    equals: cellConstructorFactory<AsCell>("cell").equals,
+
+    // Cell constructors with static methods
+    Cell: cellConstructorFactory<AsCell>("cell"),
+    Writable: cellConstructorFactory<AsCell>("cell"), // Alias for Cell with clearer semantics
+    OpaqueCell: cellConstructorFactory<AsOpaqueCell>("opaque"),
+    Stream: cellConstructorFactory<AsStream>("stream"),
+    ComparableCell: cellConstructorFactory<AsComparableCell>("comparable"),
+    ReadonlyCell: cellConstructorFactory<AsReadonlyCell>("readonly"),
+    WriteonlyCell: cellConstructorFactory<AsWriteonlyCell>("writeonly"),
+
+    // Utility
+    byRef,
+
+    // Environment
+    getPatternEnvironment,
+    nonPrivateRandom,
+    safeDateNow,
+
+    // Entity utilities
+    getEntityId,
+
+    // Constants
+    ID,
+    ID_FIELD,
+    SELF,
+    TYPE,
+    NAME,
+    UI,
+    FS,
+
+    // Schema utilities
+    schema: runtimeSchema,
+    toSchema,
+    __cf_data: freezeVerifiedPlainData,
+    AuthSchema,
+    WebhookConfigSchema,
+
+    // Render utils
+    h,
+    UiAction,
+    UiPromptSlot,
+    UiDisclosure,
+
+    // Fabric value classes -- runtime values backing the type declarations
+    // in api/index.ts. Enables `new FabricEpochNsec(...)` and `instanceof`
+    // checks in patterns.
+    FabricInstance,
+    FabricPrimitive,
+    FabricEpochNsec,
+    FabricEpochDays,
+    FabricHash,
+
+    // Debug stringifiers (helpers exposed for pattern code)
+    toCompactDebugString,
+    toIndentedDebugString,
+  } as BuilderFunctionsAndConstants & {
+    __cfHelpers?: BuilderFunctionsAndConstants;
+  };
+  commonfabric.__cfHelpers = commonfabric;
+
+  return {
+    commonfabric,
     exportsCallback,
   };
 };

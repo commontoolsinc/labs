@@ -1,15 +1,13 @@
-/// <cts-enable />
 import {
   type Cell,
   cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
   str,
-  toSchema,
-} from "commontools";
+  type Writable,
+} from "commonfabric";
 
 interface RangeSliderArgs {
   min: Default<number, 0>;
@@ -161,33 +159,27 @@ const nudgeSlider = handler(
   },
 );
 
-const liftSliderState = lift(
-  toSchema<
-    { min: Cell<number>; max: Cell<number>; value: Cell<number> }
-  >(),
-  toSchema<
-    { min: number; max: number; span: number; value: number }
-  >(),
-  ({ min, max, value }) => {
-    const rawMin = min.get();
-    const rawMax = max.get();
-    const minValue = toFiniteNumber(rawMin, 0);
-    const maxCandidate = toFiniteNumber(rawMax, minValue + 100);
-    const maxValue = maxCandidate > minValue ? maxCandidate : minValue + 100;
-    const current = clampNumber(
-      toFiniteNumber(value.get(), minValue),
-      minValue,
-      maxValue,
-    );
-    const span = maxValue - minValue;
-    return {
-      min: minValue,
-      max: maxValue,
-      span: span > 0 ? span : 1,
-      value: current,
-    };
-  },
-);
+const liftSliderState = lift<
+  { min: Writable<number>; max: Writable<number>; value: Writable<number> }
+>(({ min, max, value }) => {
+  const rawMin = min.get();
+  const rawMax = max.get();
+  const minValue = toFiniteNumber(rawMin, 0);
+  const maxCandidate = toFiniteNumber(rawMax, minValue + 100);
+  const maxValue = maxCandidate > minValue ? maxCandidate : minValue + 100;
+  const current = clampNumber(
+    toFiniteNumber(value.get(), minValue),
+    minValue,
+    maxValue,
+  );
+  const span = maxValue - minValue;
+  return {
+    min: minValue,
+    max: maxValue,
+    span: span > 0 ? span : 1,
+    value: current,
+  };
+});
 
 const liftStepSize = lift((raw: number | undefined) => {
   const normalized = toFiniteNumber(raw, 1);
@@ -207,12 +199,13 @@ export const counterRangeSliderSimulation = pattern<RangeSliderArgs>(
 
     const sliderState = liftSliderState({ min, max, value });
 
-    const currentValue = derive(sliderState, (state) => state.value);
-    const minView = derive(sliderState, (state) => state.min);
-    const maxView = derive(sliderState, (state) => state.max);
-    const percentage = derive(
-      sliderState,
-      (state) => computePercentage(state.value, state.min, state.max),
+    const currentValue = sliderState.value;
+    const minView = sliderState.min;
+    const maxView = sliderState.max;
+    const percentage = computePercentage(
+      sliderState.value,
+      sliderState.min,
+      sliderState.max,
     );
 
     const stepSize = liftStepSize(step);

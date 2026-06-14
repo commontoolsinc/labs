@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   type Cell,
   computed,
@@ -7,7 +6,7 @@ import {
   ifElse,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface ConditionalIfElseArgs {
   value: Default<number, 0>;

@@ -1,7 +1,7 @@
 /**
  * Tests for the JSX development runtime
  *
- * These tests verify that @commontools/html provides a development runtime
+ * These tests verify that @commonfabric/html provides a development runtime
  * compatible with TypeScript's "jsx": "react-jsxdev" configuration.
  */
 
@@ -85,7 +85,7 @@ describe("JSX development runtime", () => {
     });
   });
 
-  it("Fragment creates a ct-fragment element", () => {
+  it("Fragment creates a cf-fragment element", () => {
     const fragment = Fragment({
       children: [
         jsxDEV("p", { children: "Paragraph 1" }),
@@ -95,7 +95,7 @@ describe("JSX development runtime", () => {
 
     assert.matchObject(fragment, {
       type: "vnode",
-      name: "ct-fragment",
+      name: "cf-fragment",
       children: [
         {
           type: "vnode",

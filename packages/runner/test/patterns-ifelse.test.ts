@@ -1,13 +1,14 @@
-// Conditional logic: ifElse branching, interaction with derive, and patterns
-// where control flow determines which values propagate.
+// Conditional logic: ifElse branching, interaction with lifted values, and
+// patterns where control flow determines which values propagate.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type JSONSchema, type Schema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { isCell, isStream } from "../src/cell.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -19,10 +20,10 @@ describe("Pattern Runner - ifElse", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let derive: ReturnType<typeof createBuilder>["commontools"]["derive"];
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
-  let handler: ReturnType<typeof createBuilder>["commontools"]["handler"];
-  let ifElse: ReturnType<typeof createBuilder>["commontools"]["ifElse"];
+  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+  let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
+  let ifElse: ReturnType<typeof createBuilder>["commonfabric"]["ifElse"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -33,13 +34,13 @@ describe("Pattern Runner - ifElse", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({
-      derive,
+      lift,
       pattern,
       handler,
       ifElse,
-    } = commontools);
+    } = commonfabric);
   });
 
   afterEach(async () => {
@@ -48,7 +49,7 @@ describe("Pattern Runner - ifElse", () => {
     await storageManager?.close();
   });
 
-  it("correctly handles the ifElse values with nested derives", async () => {
+  it("correctly handles the ifElse values with nested lifts", async () => {
     const InputSchema = {
       "type": "object",
       "properties": {
@@ -62,7 +63,7 @@ describe("Pattern Runner - ifElse", () => {
         "expandChat": { "type": "boolean" },
         "text": { "type": "string" },
       },
-      "asCell": true,
+      "asCell": ["cell"],
     } as const satisfies JSONSchema;
     const expandHandler = handler(
       InputSchema,
@@ -74,8 +75,8 @@ describe("Pattern Runner - ifElse", () => {
 
     const ifElsePattern = pattern<{ expandChat: boolean }>(
       ({ expandChat }) => {
-        const optionA = derive(expandChat, (t) => t ? "A" : "a");
-        const optionB = derive(expandChat, (t) => t ? "B" : "b");
+        const optionA = lift((t: boolean) => t ? "A" : "a")(expandChat);
+        const optionB = lift((t: boolean) => t ? "B" : "b")(expandChat);
 
         return {
           expandChat,
@@ -202,7 +203,7 @@ describe("Pattern Runner - ifElse", () => {
           type: "array",
           items: InnerSchema,
           default: [],
-          asCell: true,
+          asCell: ["cell"],
         },
       },
       required: ["list"],
@@ -215,7 +216,7 @@ describe("Pattern Runner - ifElse", () => {
           type: "array",
           items: InnerSchema,
           default: [],
-          asCell: true,
+          asCell: ["cell"],
         },
       },
       required: ["list"],
@@ -224,8 +225,8 @@ describe("Pattern Runner - ifElse", () => {
     const OutputWithHandler = {
       type: "object",
       properties: {
-        list: { type: "array", items: InnerSchema, asCell: true },
-        add: { ...InnerSchema, asStream: true },
+        list: { type: "array", items: InnerSchema, asCell: ["cell"] },
+        add: { ...InnerSchema, asCell: ["stream"] },
       },
       required: ["add", "list"],
     } as const satisfies JSONSchema;
@@ -282,5 +283,46 @@ describe("Pattern Runner - ifElse", () => {
     tx = runtime.edit();
     const result2 = pieceCell.withTx(tx).get();
     expect(result2.list.get()).toEqual([{ text: "hello" }]);
+  });
+
+  it("names raw ifElse actions from the builtin ref", async () => {
+    const subscribedActions: Array<{ name?: string; src?: string }> = [];
+    const originalSubscribe = runtime.scheduler.subscribe.bind(
+      runtime.scheduler,
+    );
+    (
+      runtime.scheduler as unknown as {
+        subscribe: typeof originalSubscribe;
+      }
+    ).subscribe = ((action, ...rest) => {
+      subscribedActions.push({
+        name: action.name,
+        src: (action as { src?: string }).src,
+      });
+      return originalSubscribe(action, ...rest);
+    }) as typeof originalSubscribe;
+
+    const ifElsePattern = pattern<{ condition: boolean }>(({ condition }) => ({
+      value: ifElse(condition, "A", "B"),
+    }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "ifElse action naming",
+      ifElsePattern.resultSchema,
+      tx,
+    );
+
+    runtime.run(tx, ifElsePattern, { condition: true }, resultCell);
+    await tx.commit();
+
+    expect(subscribedActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: expect.stringMatching(/^raw:ifElse:/),
+          src: expect.stringMatching(/^raw:ifElse:/),
+        }),
+      ]),
+    );
   });
 });

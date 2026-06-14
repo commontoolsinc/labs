@@ -7,15 +7,27 @@ import {
 } from "../ast/scope-analysis.ts";
 import { groupCapturesByRoot } from "../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../utils/capture-tree.ts";
+import { extractBindingNames } from "../utils/identifiers.ts";
 
 export interface CaptureAnalysis {
   readonly captures: Set<ts.Expression>;
   readonly captureTree: Map<string, CaptureTreeNode>;
 }
 
+export interface CaptureCollectorOptions {
+  readonly captureNonModuleExternalIdentifiers?: boolean;
+  readonly captureNonModuleExternalPropertyAccesses?: boolean;
+  readonly captureModuleScopedIdentifierWhen?: (
+    identifier: ts.Identifier,
+    type: ts.Type,
+    checker: ts.TypeChecker,
+  ) => boolean;
+}
+
 export class CaptureCollector {
   constructor(
     private readonly checker: ts.TypeChecker,
+    private readonly options: CaptureCollectorOptions = {},
   ) {}
 
   analyze(func: ts.FunctionLikeDeclaration): CaptureAnalysis {
@@ -69,7 +81,7 @@ export class CaptureCollector {
       // For nested functions, recursively collect their captures too
       // Even though they have their own scope for parameters, they still
       // close over variables from outer scopes, and we need to know about
-      // all such captures for the derive/handler transformation
+      // all such captures for the lift-applied/handler transformation
       if (node !== func && this.isFunctionLikeDeclaration(node)) {
         const nestedCaptures = this.collectCaptures(node);
         // Filter out captures that are parameters of the current function
@@ -81,7 +93,7 @@ export class CaptureCollector {
         // This prevents spurious name collisions when nested callbacks reference outer parameters.
         const funcParams = new Set<string>(
           func.parameters.flatMap((p: ts.ParameterDeclaration) =>
-            this.extractBindingNames(p.name)
+            extractBindingNames(p.name)
           ),
         );
 
@@ -188,7 +200,8 @@ export class CaptureCollector {
       return undefined;
     }
 
-    // Skip module-scoped declarations
+    // Skip module-scoped declarations; property-access captures are only used
+    // for non-module closure extraction, not for patternTool-style module captures.
     if (
       declarations.some((decl: ts.Declaration) =>
         isModuleScopedDeclaration(decl)
@@ -213,6 +226,9 @@ export class CaptureCollector {
     });
 
     if (hasExternalDeclaration) {
+      if (this.options.captureNonModuleExternalPropertyAccesses === false) {
+        return undefined;
+      }
       // Capture the whole property access expression
       return node;
     }
@@ -271,7 +287,9 @@ export class CaptureCollector {
         if (allDeclaredInside) {
           return undefined;
         }
-        return node;
+        return this.shouldCaptureExternalIdentifier(node, propDeclarations)
+          ? node
+          : undefined;
       }
       // If we can't resolve the shorthand symbol, fall through to normal handling
     }
@@ -308,7 +326,7 @@ export class CaptureCollector {
       // Use extractBindingNames to handle nested destructuring patterns
       const isCallbackParam = func.parameters.some((
         param: ts.ParameterDeclaration,
-      ) => this.extractBindingNames(param.name).includes(node.text));
+      ) => extractBindingNames(param.name).includes(node.text));
 
       if (isCallbackParam) {
         return undefined; // Don't capture - it's just referencing a callback parameter
@@ -345,20 +363,25 @@ export class CaptureCollector {
       return undefined;
     }
 
-    // Skip module-scoped declarations (constants/variables at top level)
-    const isModuleScoped = declarations.some((decl: ts.Declaration) =>
-      isModuleScopedDeclaration(decl)
-    );
-    if (isModuleScoped) {
+    if (!this.shouldCaptureExternalIdentifier(node, declarations)) {
       return undefined;
     }
 
+    // If we got here, at least one declaration is outside the callback
+    // So it's a captured variable
+    return node;
+  }
+
+  private shouldCaptureExternalIdentifier(
+    node: ts.Identifier,
+    declarations: readonly ts.Declaration[],
+  ): boolean {
     // Skip function declarations (can't serialize functions)
     const isFunction = declarations.some((decl: ts.Declaration) =>
       isFunctionDeclaration(decl, this.checker)
     );
     if (isFunction) {
-      return undefined;
+      return false;
     }
 
     // Skip type parameters (generic type parameters like T, U, etc.)
@@ -368,12 +391,22 @@ export class CaptureCollector {
       ts.isTypeParameterDeclaration(decl)
     );
     if (isTypeParameter) {
-      return undefined;
+      return false;
     }
 
-    // If we got here, at least one declaration is outside the callback
-    // So it's a captured variable
-    return node;
+    const isModuleScoped = declarations.some((decl: ts.Declaration) =>
+      isModuleScopedDeclaration(decl)
+    );
+    if (isModuleScoped) {
+      const predicate = this.options.captureModuleScopedIdentifierWhen;
+      if (!predicate) {
+        return false;
+      }
+      const type = this.checker.getTypeAtLocation(node);
+      return predicate(node, type, this.checker);
+    }
+
+    return this.options.captureNonModuleExternalIdentifiers !== false;
   }
 
   /**
@@ -387,33 +420,6 @@ export class CaptureCollector {
       ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) ||
       ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node) ||
       ts.isConstructorDeclaration(node);
-  }
-
-  /**
-   * Recursively extract all binding names from a parameter binding pattern.
-   * Handles identifiers, object destructuring, array destructuring, and nested patterns.
-   */
-  private extractBindingNames(binding: ts.BindingName): string[] {
-    if (ts.isIdentifier(binding)) {
-      return [binding.text];
-    }
-
-    const names: string[] = [];
-
-    if (ts.isObjectBindingPattern(binding)) {
-      for (const element of binding.elements) {
-        names.push(...this.extractBindingNames(element.name));
-      }
-    } else if (ts.isArrayBindingPattern(binding)) {
-      for (const element of binding.elements) {
-        if (ts.isOmittedExpression(element)) {
-          continue; // Skip holes in array patterns like [a, , c]
-        }
-        names.push(...this.extractBindingNames(element.name));
-      }
-    }
-
-    return names;
   }
 
   private isParameterOrLocalVariable(

@@ -3,12 +3,13 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import "@commontools/utils/equal-ignoring-symbols";
+import "@commonfabric/utils/equal-ignoring-symbols";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { type JSONSchema } from "../src/builder/types.ts";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { type JSONSchema, type Opaque } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -19,8 +20,8 @@ describe("Pattern Runner - Core", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -31,15 +32,23 @@ describe("Pattern Runner - Core", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({
       lift,
       pattern,
-    } = commontools);
+    } = commonfabric);
   });
 
+  async function commitTx() {
+    if (tx.status().status !== "ready") {
+      return { ok: undefined, error: undefined };
+    }
+    runtime.prepareTxForCommit(tx);
+    return await tx.commit();
+  }
+
   afterEach(async () => {
-    await tx.commit();
+    await commitTx();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -61,7 +70,7 @@ describe("Pattern Runner - Core", () => {
     const result = runtime.run(tx, simplePattern, {
       value: 5,
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     const value = await result.pull();
     expect(value).toMatchObject({ result: 10 });
@@ -94,7 +103,7 @@ describe("Pattern Runner - Core", () => {
     const result = runtime.run(tx, outerPattern, {
       value: 4,
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     const value = await result.pull();
     expect(value).toEqual({ result: 17 });
@@ -128,7 +137,7 @@ describe("Pattern Runner - Core", () => {
       {},
       resultCell1,
     );
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     const value1 = await result1.pull();
@@ -143,7 +152,7 @@ describe("Pattern Runner - Core", () => {
     const result2 = runtime.run(tx, patternWithDefaults, {
       a: 20,
     }, resultCell2);
-    tx.commit();
+    await commitTx();
 
     const value2 = await result2.pull();
     expect(value2).toMatchObject({ sum: 30 });
@@ -156,9 +165,14 @@ describe("Pattern Runner - Core", () => {
 
     const multipliedArray = pattern<{ values: { x: number }[] }>(
       ({ values }) => {
-        const multiplied = values.map(({ x }, index, array) => {
-          return { multiplied: multiply({ x, index, array }) };
-        });
+        const multiplied = (values as any).mapWithPattern(
+          pattern(({ element, index, array }: Opaque<any>) =>
+            ((({ x }: any, index: any, array: any) => {
+              return { multiplied: multiply({ x, index, array }) };
+            }) as any)(element, index, array)
+          ),
+          {},
+        );
         return { multiplied };
       },
     );
@@ -183,7 +197,7 @@ describe("Pattern Runner - Core", () => {
     const result = runtime.run(tx, multipliedArray, {
       values: [{ x: 1 }, { x: 2 }, { x: 3 }],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     const value = await result.pull();
     expect(value).toMatchObjectIgnoringSymbols({
@@ -196,7 +210,12 @@ describe("Pattern Runner - Core", () => {
 
     const doubleArray = pattern<{ values?: number[] }>(
       ({ values }) => {
-        const doubled = values?.map((x) => double(x)) ?? [];
+        const doubled = (values as any)?.mapWithPattern(
+          pattern(({ element, index, array }: Opaque<any>) =>
+            (((x: any) => double(x)) as any)(element, index, array)
+          ),
+          {},
+        ) ?? [];
         return { doubled };
       },
     );
@@ -213,7 +232,7 @@ describe("Pattern Runner - Core", () => {
     const result = runtime.run(tx, doubleArray, {
       values: undefined,
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     const value = await result.pull();
     expect(value).toMatchObjectIgnoringSymbols({ doubled: [] });
@@ -224,7 +243,12 @@ describe("Pattern Runner - Core", () => {
 
     const doubleArray = pattern<{ values: number[] }>(
       ({ values }) => {
-        const doubled = values.map((x) => double(x));
+        const doubled = (values as any).mapWithPattern(
+          pattern(({ element, index, array }: Opaque<any>) =>
+            (((x: any) => double(x)) as any)(element, index, array)
+          ),
+          {},
+        );
         return { doubled };
       },
     );
@@ -247,7 +271,7 @@ describe("Pattern Runner - Core", () => {
     const result = runtime.run(tx, doubleArray, {
       values: sparseInput,
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     const value = await result.pull();
     const doubled = (value as any).doubled;

@@ -1,24 +1,25 @@
-// Cell success callback tests: verifying that onCommit callbacks fire
-// correctly after cell writes are committed.
+// Cell commit callback tests: verifying that onCommit callbacks fire correctly
+// after cell writes reach a final commit result.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import "@commontools/utils/equal-ignoring-symbols";
+import "@commonfabric/utils/equal-ignoring-symbols";
 
-import { Writable } from "@commontools/api";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Writable } from "@commonfabric/api";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { isCell } from "../src/cell.ts";
 import { JSONSchema } from "../src/builder/types.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { parseLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("Cell success callbacks", () => {
+describe("Cell commit callbacks", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;
@@ -143,6 +144,37 @@ describe("Cell success callbacks", () => {
     expect(callbackCalled).toBe(false);
   });
 
+  it("should call callback when commit returns an error", async () => {
+    await runtime.dispose();
+    await storageManager.close();
+
+    storageManager = StorageManager.emulate({
+      as: signer,
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    tx = runtime.edit();
+
+    const cell = runtime.getCell<number>(
+      space,
+      "callback-commit-error-test",
+      { type: "number", ifc: { confidentiality: ["secret"] } } as JSONSchema,
+      tx,
+    );
+
+    const statuses: string[] = [];
+    cell.set(42, (committedTx) => {
+      statuses.push(committedTx.status().status);
+    });
+
+    const result = await tx.commit();
+    expect(result.error).toBeDefined();
+    expect(statuses).toEqual(["error"]);
+  });
+
   it("should handle errors in callback gracefully", async () => {
     const cell = runtime.getCell<number>(
       space,
@@ -184,7 +216,7 @@ describe("Cell success callbacks", () => {
     expect(cell.get()).toBe(42);
   });
 
-  it("should call onCommit callback even when transaction commit fails", async () => {
+  it("should call onCommit callback when transaction commit fails", async () => {
     const cell = runtime.getCell<number>(
       space,
       "callback-commit-fail-test",
@@ -204,13 +236,21 @@ describe("Cell success callbacks", () => {
     tx.abort("intentional abort for test");
     await tx.commit();
 
-    // Even though aborted, callback should still be called after commit
     expect(callbackCalled).toBe(true);
     expect(receivedTx).toBe(tx);
+    expect(receivedTx?.status().status).toBe("error");
+  });
 
-    // Verify the transaction actually failed
-    const status = tx.status();
-    expect(status.status).toBe("error");
+  it("should still run generic commit callbacks for diagnostics on failure", async () => {
+    const callbackStatuses: string[] = [];
+    tx.addCommitCallback((_committedTx, result) => {
+      callbackStatuses.push(result.error ? "error" : "ok");
+    });
+
+    tx.abort("diagnostic failure");
+    await tx.commit();
+
+    expect(callbackStatuses).toEqual(["error"]);
   });
 
   describe("set operations with arrays", () => {
@@ -236,7 +276,7 @@ describe("Cell success callbacks", () => {
         items: {
           type: "object",
           properties: { name: { type: "string" }, value: { type: "number" } },
-          asCell: true,
+          asCell: ["cell"],
         },
       }).get();
       expect(Array.isArray(result)).toBe(true);
@@ -285,7 +325,7 @@ describe("Cell success callbacks", () => {
         items: {
           type: "object",
           properties: { name: { type: "string" }, value: { type: "number" } },
-          asCell: true,
+          asCell: ["cell"],
         },
       }).get();
       expect(isCell(result[0])).toBe(true);
@@ -341,7 +381,7 @@ describe("Cell success callbacks", () => {
         items: {
           type: "object",
           properties: { name: { type: "string" } },
-          asCell: true,
+          asCell: ["cell"],
         },
       }).get();
       expect(result.length).toBe(3);
@@ -373,7 +413,7 @@ describe("Cell success callbacks", () => {
         items: {
           type: "object",
           properties: { value: { type: "number" } },
-          asCell: true,
+          asCell: ["cell"],
         },
       }).get();
       expect(result.length).toBe(2);
@@ -430,7 +470,7 @@ describe("Cell success callbacks", () => {
           items: {
             type: "object",
             properties: { name: { type: "string" } },
-            asCell: true,
+            asCell: ["cell"],
           },
         },
         tx,
@@ -464,7 +504,7 @@ describe("Cell success callbacks", () => {
           items: {
             type: "object",
             properties: { name: { type: "string" } },
-            asCell: true,
+            asCell: ["cell"],
           },
         },
         tx,
@@ -798,7 +838,7 @@ describe("Cell success callbacks", () => {
           items: {
             type: "object",
             properties: { foo: { type: "number" } },
-            asCell: true,
+            asCell: ["cell"],
           },
         } as const satisfies JSONSchema;
 
@@ -833,7 +873,7 @@ describe("Cell success callbacks", () => {
           items: {
             type: "object",
             properties: { foo: { type: "number" } },
-            asCell: true,
+            asCell: ["cell"],
           },
         } as const satisfies JSONSchema;
 
@@ -1197,34 +1237,59 @@ describe("Cell success callbacks", () => {
       expect(schemaCell.schema).toEqual(schema);
     });
 
-    it("should return schema from pattern resultRef if not present on cell", () => {
-      // 1. Create the target cell (no schema initially)
-      const targetCell = runtime.getCell(space, "target-cell", undefined, tx);
+    it("should recover callable child schemas from linked result metadata", () => {
+      const resultCell = runtime.getCell(space, "linked-result", undefined, tx);
+      // we don't bother setting the pattern cell on the result cell, since
+      // this is just a partial example, and we have no pattern cell.
 
-      // 2. Create the pattern cell
-      const patternCell = runtime.getCell(space, "pattern-cell", undefined, tx);
-
-      // 3. Set patternCell as the source of targetCell
-      targetCell.setSourceCell(patternCell);
-
-      // 4. Create a link to targetCell that includes the desired schema
-      const schemaWeWant: JSONSchema = {
+      const toolSchema: JSONSchema = {
         type: "object",
         properties: {
-          output: { type: "number" },
+          pattern: {
+            type: "object",
+            properties: {
+              argumentSchema: { type: "object" },
+              resultSchema: { type: "object" },
+              nodes: { type: "array", items: { type: "object" } },
+            },
+            asCell: ["cell"],
+          },
+          extraParams: {
+            type: "object",
+            properties: {
+              source: { type: "string" },
+            },
+          },
         },
       };
-      const linkWithSchema = targetCell
-        .asSchema(schemaWeWant)
+      const resultSchema: JSONSchema = {
+        type: "object",
+        properties: {
+          search: toolSchema,
+        },
+      };
+
+      const linkWithSchema = resultCell
+        .asSchema(resultSchema)
         .getAsLink({ includeSchema: true });
 
-      // 5. Set patternCell's resultRef to point to targetCell using the link with schema
-      patternCell.set({ resultRef: linkWithSchema });
-
-      // 6. Verify asSchemaFromLinks picks up the schema from the resultRef link
-      const schemaCell = targetCell.asSchemaFromLinks();
-
-      expect(schemaCell.schema).toEqual(schemaWeWant);
+      const searchCell = resultCell.key("search");
+      expect(searchCell.schema).toBeUndefined();
+      const normalizedLink = parseLink(linkWithSchema);
+      const resolvedSchema = resultCell.asSchema(normalizedLink.schema).key(
+        "search",
+      ).schema as JSONSchema;
+      expect(resolvedSchema).toBeDefined();
+      expect((resolvedSchema as any).type).toBe("object");
+      expect(
+        (resolvedSchema as any).properties?.extraParams?.properties?.source,
+      )
+        .toEqual({ type: "string" });
+      expect((resolvedSchema as any).properties?.pattern?.type).toBe("object");
+      expect(
+        (resolvedSchema as any).properties?.pattern?.properties?.nodes?.type,
+      )
+        .toBe("array");
     });
 
     it("should return undefined schema if neither present nor in pattern", () => {
@@ -1285,8 +1350,6 @@ describe("Cell success callbacks", () => {
     });
 
     it("should work in pull mode", async () => {
-      runtime.scheduler.enablePullMode();
-
       // In pull mode, pull() works the same way - it registers as an effect
       // and waits for the scheduler. The key difference is that pull() ensures
       // the effect mechanism is used, which triggers pull-based execution.
@@ -1305,8 +1368,6 @@ describe("Cell success callbacks", () => {
 
       const value2 = await c.pull();
       expect(value2).toBe(100);
-
-      runtime.scheduler.disablePullMode();
     });
 
     it("should handle multiple sequential pulls", async () => {
@@ -1346,8 +1407,6 @@ describe("Cell success callbacks", () => {
     });
 
     it("should not create a persistent effect after pull completes", async () => {
-      runtime.scheduler.enablePullMode();
-
       // Create source and computed cells
       const source = runtime.getCell<number>(
         space,
@@ -1417,8 +1476,6 @@ describe("Cell success callbacks", () => {
       // If pull() created a persistent effect, the computation would run
       // again when source changes. With correct cleanup, it should NOT run.
       expect(runsAfterSourceChange).toBe(runsAfterFirstPull);
-
-      runtime.scheduler.disablePullMode();
     });
   });
 });

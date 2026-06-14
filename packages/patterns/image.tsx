@@ -1,12 +1,18 @@
-/// <cts-enable />
-import { computed, type Default, ifElse, NAME, pattern, UI } from "commontools";
+import {
+  computed,
+  type Default,
+  ifElse,
+  NAME,
+  pattern,
+  UI,
+} from "commonfabric";
 
 type ImageInput = {
-  url: Default<string, "">;
-  caption: Default<string, "">;
+  url: string | Default<"">;
+  caption: string | Default<"">;
 };
 
-type ImageOutput = {
+export type ImageOutput = {
   [NAME]: unknown;
   [UI]: unknown;
   url: string;
@@ -20,8 +26,8 @@ export default pattern<ImageInput, ImageOutput>(({ url, caption }) => {
   return {
     [NAME]: displayName,
     [UI]: (
-      <ct-screen>
-        <ct-vstack gap="2" style={{ alignItems: "center" }}>
+      <cf-screen>
+        <cf-vstack gap="2" style={{ alignItems: "center" }}>
           <img
             src={url}
             alt={caption || "Image"}
@@ -38,7 +44,7 @@ export default pattern<ImageInput, ImageOutput>(({ url, caption }) => {
             <div
               style={{
                 fontSize: "14px",
-                color: "var(--ct-color-gray-500)",
+                color: "var(--cf-colors-gray-500)",
                 textAlign: "center",
                 padding: "4px 0",
               }}
@@ -47,8 +53,8 @@ export default pattern<ImageInput, ImageOutput>(({ url, caption }) => {
             </div>,
             null,
           )}
-        </ct-vstack>
-      </ct-screen>
+        </cf-vstack>
+      </cf-screen>
     ),
     url,
     caption,

@@ -1,19 +1,20 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Identity } from "@commontools/identity";
-import { isObject } from "@commontools/utils/types";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { isRecord } from "@commonfabric/utils/types";
 
 const signer = await Identity.fromPassphrase("test operator");
 
 describe("OpaqueRef Schema Support", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
-  let cell: ReturnType<typeof createBuilder>["commontools"]["cell"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+  let cell: ReturnType<typeof createBuilder>["commonfabric"]["cell"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -23,8 +24,8 @@ describe("OpaqueRef Schema Support", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-    const { commontools } = createBuilder();
-    ({ pattern, cell } = commontools);
+    const { commonfabric } = createTrustedBuilder(runtime);
+    ({ pattern, cell } = commonfabric);
   });
 
   afterEach(async () => {
@@ -385,8 +386,8 @@ describe("OpaqueRef Schema Support", () => {
       const streetExport = streetRef.export();
 
       // The schema at this level should be the string type
-      expect(isObject(streetExport.schema)).toBe(true);
-      if (isObject(streetExport.schema)) {
+      expect(isRecord(streetExport.schema)).toBe(true);
+      if (isRecord(streetExport.schema)) {
         const { $defs: defs, ...rest } = streetExport.schema;
         // Even at the leaf level, defs should be preserved
         expect(defs).toBeDefined();
@@ -438,8 +439,8 @@ describe("OpaqueRef Schema Support", () => {
       const exported = valueRef.export();
 
       // The schema defs should be preserved all the way down
-      expect(isObject(exported.schema)).toBe(true);
-      if (isObject(exported.schema)) {
+      expect(isRecord(exported.schema)).toBe(true);
+      if (isRecord(exported.schema)) {
         const { $defs: defs, ...rest } = exported.schema;
         expect(defs).toBeDefined();
         expect(defs?.Inner).toBeDefined();

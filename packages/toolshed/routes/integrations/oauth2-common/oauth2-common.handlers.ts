@@ -1,10 +1,10 @@
 import type { Tokens } from "@cmd-johnson/oauth2-client";
 import type { Context } from "@hono/hono";
-import { getLogger } from "@commontools/utils/logger";
-import { setBGCharm } from "@commontools/background-charm";
+import { getLogger } from "@commonfabric/utils/logger";
+import { setBGCharm } from "@commonfabric/background-charm";
 import { runtime } from "@/index.ts";
-import { OAuth2TokenSchema } from "@commontools/runner";
-import type { JSONSchema } from "@commontools/runner";
+import { OAuth2TokenSchema } from "@commonfabric/runner";
+import type { JSONSchema } from "@commonfabric/runner";
 import type {
   CallbackResult,
   OAuth2HandlerOptions,

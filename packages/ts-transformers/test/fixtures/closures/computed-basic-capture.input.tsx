@@ -1,13 +1,12 @@
-/// <cts-enable />
-import { Writable, computed, pattern } from "commontools";
+import { Writable, computed, pattern } from "commonfabric";
 
 // FIXTURE: computed-basic-capture
-// Verifies: computed(() => expr) with two cell captures is closure-extracted into derive()
-//   computed(() => value.get() * multiplier.get()) → derive(captureSchema, resultSchema, { value, multiplier }, ({ value, multiplier }) => value.get() * multiplier.get())
+// Verifies: computed(() => expr) with two cell captures is closure-extracted into a lift-applied computation
+//   computed(() => value.get() * multiplier.get()) → lift(({ value, multiplier }) => value.get() * multiplier.get())({ value, multiplier })
 //   Captured cells are annotated with asCell: true in the capture schema.
 export default pattern(() => {
-  const value = Writable.of(10);
-  const multiplier = Writable.of(2);
+  const value = new Writable(10);
+  const multiplier = new Writable(2);
 
   const result = computed(() => value.get() * multiplier.get());
 

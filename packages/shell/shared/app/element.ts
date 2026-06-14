@@ -1,4 +1,4 @@
-import { DID, KeyStore } from "@commontools/identity";
+import { DID, KeyStore } from "@commonfabric/identity";
 import { Command } from "./commands.ts";
 import { AppState } from "./mod.ts";
 import { PropertyDeclaration } from "lit";

@@ -1,23 +1,86 @@
 import ts from "typescript";
 
-import type { SchemaDefinition } from "./interface.ts";
+import type { JSONSchemaMutable } from "@commonfabric/api";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { getPropertyNameText } from "./typescript/property-name.ts";
+import type { CellWrapperKind } from "./typescript/cell-brand.ts";
+import {
+  isWrapperSpelling,
+  spellingsWhere,
+  WRAPPER_SPELLING_TO_KIND,
+  type WrapperSpelling,
+} from "./typescript/wrapper-names.ts";
 
 /**
  * Names that should be treated as Cell-like wrapper types.
  * "Writable" is an alias for "Cell" that better expresses semantic meaning.
+ *
+ * NB: this keys off raw type-node NAMES (hence `Writable` is listed and
+ * `OpaqueCell` is split into `OPAQUE_WRAPPER_NAMES`). It is intentionally
+ * distinct from `common-fabric-formatter.ts`'s `CELL_CAPABILITY_KIND_MAP`,
+ * which keys off RESOLVED `CellWrapperKind` values (where `Writable` has already
+ * normalized to `Cell` and `OpaqueCell` belongs with the rest).
  */
-const CELL_LIKE_WRAPPER_NAMES = new Set([
-  "Cell",
-  "Writable",
-  "ReadonlyCell",
-  "WriteonlyCell",
-]);
-const OPAQUE_WRAPPER_NAMES = new Set(["OpaqueRef", "OpaqueCell"]);
+const CELL_LIKE_WRAPPER_NAMES = spellingsWhere({
+  Cell: true,
+  Writable: true,
+  ReadonlyCell: true,
+  WriteonlyCell: true,
+  ComparableCell: true,
+  OpaqueCell: false, // split into OPAQUE_WRAPPER_NAMES (see NB above)
+  Stream: false, // handled separately at each call site
+  SqliteDb: false, // handled separately at each call site
+  OpaqueRef: false,
+  Reactive: false,
+  CellTypeConstructor: false,
+  ScopedCellTypeConstructor: false,
+});
+const OPAQUE_WRAPPER_NAMES = spellingsWhere({
+  OpaqueCell: true,
+  Cell: false,
+  Writable: false,
+  ReadonlyCell: false,
+  WriteonlyCell: false,
+  ComparableCell: false,
+  Stream: false,
+  SqliteDb: false,
+  OpaqueRef: false,
+  Reactive: false,
+  CellTypeConstructor: false,
+  ScopedCellTypeConstructor: false,
+});
+type NodeWrapperKind = "Default" | CellWrapperKind;
 
 function getEntityNameText(name: ts.EntityName): string {
   return ts.isIdentifier(name) ? name.text : name.right.text;
+}
+
+// Spellings that participate in node-level wrapper detection. OpaqueRef (and
+// its successor spelling Reactive) is deliberately excluded: wrapperKindForName
+// has never treated it as a node wrapper, and its callers (Default-literal and
+// type-name resolution) must not start unwrapping it — revisit with the
+// OpaqueRef deprecation.
+const NODE_WRAPPER_SPELLINGS: Readonly<Record<WrapperSpelling, boolean>> = {
+  Cell: true,
+  Writable: true,
+  ReadonlyCell: true,
+  WriteonlyCell: true,
+  ComparableCell: true,
+  OpaqueCell: true,
+  Stream: true,
+  SqliteDb: true,
+  OpaqueRef: false,
+  Reactive: false,
+  CellTypeConstructor: false,
+  ScopedCellTypeConstructor: false,
+};
+
+function wrapperKindForName(name: string): NodeWrapperKind | undefined {
+  if (name === "Default") return "Default";
+  if (!isWrapperSpelling(name) || !NODE_WRAPPER_SPELLINGS[name]) {
+    return undefined;
+  }
+  return WRAPPER_SPELLING_TO_KIND[name];
 }
 
 export { getPropertyNameText };
@@ -286,7 +349,7 @@ export function getPrimarySymbol(type: ts.Type): ts.Symbol | undefined {
   return undefined;
 }
 
-export function cloneSchemaDefinition<T extends SchemaDefinition | boolean>(
+export function cloneSchemaDefinition<T extends JSONSchemaMutable>(
   schema: T,
 ): T {
   return (typeof schema === "boolean" ? schema : structuredClone(schema)) as T;
@@ -295,12 +358,12 @@ export function cloneSchemaDefinition<T extends SchemaDefinition | boolean>(
 export function getNativeTypeSchema(
   type: ts.Type,
   checker: ts.TypeChecker,
-): SchemaDefinition | boolean | undefined {
+): JSONSchemaMutable | undefined {
   const visited = new Set<ts.Type>();
 
   const resolve = (
     current: ts.Type,
-  ): SchemaDefinition | boolean | undefined => {
+  ): JSONSchemaMutable | undefined => {
     if (visited.has(current)) return undefined;
     visited.add(current);
 
@@ -364,7 +427,8 @@ export function getNamedTypeKey(
     const nodeTypeName = getEntityNameText(typeNode.typeName);
     if (
       nodeTypeName === "Default" || CELL_LIKE_WRAPPER_NAMES.has(nodeTypeName) ||
-      nodeTypeName === "Stream" || OPAQUE_WRAPPER_NAMES.has(nodeTypeName)
+      nodeTypeName === "Stream" || nodeTypeName === "SqliteDb" ||
+      OPAQUE_WRAPPER_NAMES.has(nodeTypeName)
     ) {
       return undefined;
     }
@@ -374,7 +438,8 @@ export function getNamedTypeKey(
   const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
   if (
     aliasName === "Default" || CELL_LIKE_WRAPPER_NAMES.has(aliasName ?? "") ||
-    aliasName === "Stream" || aliasName === "OpaqueRef"
+    aliasName === "Stream" || aliasName === "SqliteDb" ||
+    aliasName === "OpaqueRef" || aliasName === "Reactive"
   ) {
     return undefined;
   }
@@ -436,7 +501,7 @@ export function getNamedTypeKey(
   if (name === "Array" || name === "ReadonlyArray") return undefined;
   if (
     CELL_LIKE_WRAPPER_NAMES.has(name ?? "") || name === "Stream" ||
-    name === "Default"
+    name === "SqliteDb" || name === "Default"
   ) {
     return undefined;
   }
@@ -717,16 +782,16 @@ export function isDefaultTypeRef(
  * Returns the wrapper kind if detected.
  *
  * This handles:
- * - Direct wrapper types: Default<T, V>, Cell<T>, Stream<T>, OpaqueRef<T>
+ * - Direct wrapper types: Default<T, V>, Cell<T>, Stream<T>, OpaqueCell<T>
  * - Aliases to wrappers: type MyDefault<T> = Default<T, T>
  *
- * Note: This only checks via typeNode. For structural detection of Cell/Stream/OpaqueRef
- * based on type identity, see CommonToolsFormatter.getWrapperTypeInfo().
+ * Note: This only checks via typeNode. For structural detection of Cell/Stream/opaque wrappers
+ * based on type identity, see CommonFabricFormatter.getWrapperTypeInfo().
  */
 export function detectWrapperViaNode(
   typeNode: ts.TypeNode | undefined,
   typeChecker: ts.TypeChecker,
-): "Default" | "Cell" | "Stream" | "OpaqueRef" | undefined {
+): NodeWrapperKind | undefined {
   const result = resolveWrapperNode(typeNode, typeChecker);
   return result?.kind;
 }
@@ -739,7 +804,7 @@ export function resolveWrapperNode(
   typeNode: ts.TypeNode | undefined,
   typeChecker: ts.TypeChecker,
 ): {
-  kind: "Default" | "Cell" | "Stream" | "OpaqueRef";
+  kind: NodeWrapperKind;
   node: ts.TypeReferenceNode;
 } | undefined {
   if (!typeNode || !ts.isTypeReferenceNode(typeNode)) {
@@ -749,18 +814,10 @@ export function resolveWrapperNode(
   const literalName = getEntityNameText(typeNode.typeName);
 
   // Fast path: direct wrapper reference
-  if (
-    literalName === "Default" || CELL_LIKE_WRAPPER_NAMES.has(literalName) ||
-    literalName === "Stream" || OPAQUE_WRAPPER_NAMES.has(literalName)
-  ) {
-    // Normalize "Writable" to "Cell" for internal processing
-    const kind = CELL_LIKE_WRAPPER_NAMES.has(literalName)
-      ? "Cell"
-      : OPAQUE_WRAPPER_NAMES.has(literalName)
-      ? "OpaqueRef"
-      : literalName;
+  const directKind = wrapperKindForName(literalName);
+  if (directKind) {
     return {
-      kind: kind as "Default" | "Cell" | "Stream" | "OpaqueRef",
+      kind: directKind,
       node: typeNode,
     };
   }
@@ -781,11 +838,12 @@ function followAliasToWrapperNode(
   typeChecker: ts.TypeChecker,
   visited: Set<string>,
 ): {
-  kind: "Default" | "Cell" | "Stream" | "OpaqueRef";
+  kind: NodeWrapperKind;
   node: ts.TypeReferenceNode;
 } | undefined {
+  // Caller must ensure typeNode.typeName is an Identifier.
   if (!ts.isIdentifier(typeNode.typeName)) {
-    return undefined;
+    throw new Error("followAliasToWrapperNode requires an Identifier typeName");
   }
 
   const typeName = typeNode.typeName.text;
@@ -800,18 +858,10 @@ function followAliasToWrapperNode(
   visited.add(typeName);
 
   // Check if we've reached a wrapper type
-  if (
-    typeName === "Default" || CELL_LIKE_WRAPPER_NAMES.has(typeName) ||
-    typeName === "Stream" || OPAQUE_WRAPPER_NAMES.has(typeName)
-  ) {
-    // Normalize "Writable" to "Cell" for internal processing
-    const kind = CELL_LIKE_WRAPPER_NAMES.has(typeName)
-      ? "Cell"
-      : OPAQUE_WRAPPER_NAMES.has(typeName)
-      ? "OpaqueRef"
-      : typeName;
+  const directKind = wrapperKindForName(typeName);
+  if (directKind) {
     return {
-      kind: kind as "Default" | "Cell" | "Stream" | "OpaqueRef",
+      kind: directKind,
       node: typeNode,
     };
   }

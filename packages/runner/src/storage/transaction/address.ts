@@ -1,6 +1,9 @@
 import type { IMemoryAddress } from "../interface.ts";
+import { normalizeCellScope } from "../../scope.ts";
 export const toString = (address: IMemoryAddress) =>
-  `/${address.id}/${address.type}/${JSON.stringify(address.path)}`;
+  `/${normalizeCellScope(address.scope)}/${address.id}/${
+    JSON.stringify(address.path)
+  }`;
 
 /**
  * Returns true if `candidate` address references location within the
@@ -10,7 +13,10 @@ export const includes = (
   source: IMemoryAddress,
   candidate: IMemoryAddress,
 ) => {
-  if (source.id !== candidate.id || source.type !== candidate.type) {
+  if (
+    source.id !== candidate.id ||
+    normalizeCellScope(source.scope) !== normalizeCellScope(candidate.scope)
+  ) {
     return false;
   }
 
@@ -33,7 +39,10 @@ export const intersects = (
   source: IMemoryAddress,
   candidate: IMemoryAddress,
 ) => {
-  if (source.id !== candidate.id || source.type !== candidate.type) {
+  if (
+    source.id !== candidate.id ||
+    normalizeCellScope(source.scope) !== normalizeCellScope(candidate.scope)
+  ) {
     return false;
   }
 

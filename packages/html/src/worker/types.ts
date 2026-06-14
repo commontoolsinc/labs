@@ -5,8 +5,8 @@
  * where cells are accessed synchronously via cell.get() and cell.sink().
  */
 
-import type { Cancel, Cell, JSONSchema } from "@commontools/runner";
-import type { CellRef, JSONValue } from "@commontools/runtime-client";
+import type { Cancel, Cell, JSONSchema } from "@commonfabric/runner";
+import type { CellRef, JSONValue } from "@commonfabric/runtime-client";
 
 /**
  * A render node in the worker VDOM tree.
@@ -90,6 +90,42 @@ export interface ChildrenState {
 }
 
 /**
+ * Ambient CFC render policy while walking a VDOM subtree.
+ */
+export interface RenderPolicy {
+  /**
+   * Confidentiality atoms allowed to render in this subtree.
+   * Undefined means no render-time confidentiality bound is active.
+   */
+  maxConfidentiality?: readonly unknown[];
+
+  /**
+   * Caveat kinds admitted by the host's default render ceiling (spec
+   * §8.10.6): a Caveat-type confidentiality atom renders when its `kind` is
+   * listed here even if the atom is not in `maxConfidentiality`. Inherited
+   * unchanged through authored boundaries — narrowing narrows
+   * `maxConfidentiality`, never widens kinds.
+   */
+  caveatKindAllow?: readonly string[];
+
+  /**
+   * Confidentiality atoms this subtree may declassify before applying the max bound.
+   * This is a temporary low-level capability hook for trusted UI experiments.
+   */
+  declassifyConfidentiality: readonly unknown[];
+
+  /**
+   * Integrity required for user-visible text in this subtree.
+   * Undefined means descendant text is not integrity-gated.
+   */
+  textIntegrity?: {
+    requiredIntegrity: readonly unknown[];
+    allowLiteralText: boolean;
+    boundaryNodeId: number;
+  };
+}
+
+/**
  * State tracked for each rendered node in the worker reconciler.
  * This is used to manage subscriptions and track DOM node IDs.
  */
@@ -117,6 +153,21 @@ export interface NodeState {
 
   /** Track child order to optimize inserts */
   childOrder: string[];
+
+  /** Ambient policy that applied to this node itself. */
+  renderPolicy: RenderPolicy;
+
+  /** Policy that should apply to this node's descendants. */
+  childRenderPolicy: RenderPolicy;
+
+  /** Whether this node's own render-policy boundary blocked its children. */
+  childrenBlockedByPolicy: boolean;
+
+  /** Original authored children, before any render-policy placeholder rewrite. */
+  sourceChildren?: WorkerVNode["children"];
+
+  /** Original authored props, used to recompute child render policy. */
+  sourceProps?: WorkerVNode["props"];
 }
 
 /**
@@ -143,6 +194,20 @@ export interface ChildNodeState {
  * Context passed through the reconciliation process.
  */
 export interface ReconcileContext {
+  /**
+   * The space of the cell whose render produced the current subtree.
+   * Changes at cell-follow boundaries (renderCellChild) — including
+   * cross-space transclusion, where a piece renders another piece's UI.
+   */
+  space?: string;
+
+  /**
+   * The space stamped on the nearest ancestor create-element op.
+   * Elements only carry `space` when it differs from this (seefeldb's
+   * elision: leave it off when the parent's space is the same).
+   */
+  emittedSpace?: string;
+
   /** Function to emit VDOM operations */
   emit: (
     ops: import("../vdom-ops.ts").VDomOp[],
@@ -152,16 +217,98 @@ export interface ReconcileContext {
   nextNodeId: () => number;
 
   /** Register an event handler and get its ID */
-  registerHandler: (handler: (event: unknown) => void) => number;
+  registerHandler: (
+    handler: (event: unknown) => void,
+  ) => number;
 
   /** Unregister an event handler by ID */
   unregisterHandler: (handlerId: number) => void;
 
   /** Get handler by ID for event dispatch */
-  getHandler: (handlerId: number) => ((event: unknown) => void) | undefined;
+  getHandler: (
+    handlerId: number,
+  ) => ((event: unknown) => void) | undefined;
 
   /** Optional document for SSR or testing */
   document?: Document;
+}
+
+/**
+ * Whether author-supplied `declassifyConfidentiality` on a
+ * `<cf-cfc-render-boundary>` is honored.
+ *
+ * `declassifyConfidentiality` lets a render boundary release a confidentiality
+ * atom so a labeled cell renders despite the active `maxConfidentiality` bound.
+ * It is read from static/reactive VDOM props, so ANY pattern can declassify ANY
+ * secret it can render — the unguarded-release shape ch. 5 forbids (audit S15).
+ *
+ * - `"allow"` (default): honor it — the current behavior, pending a verified-
+ *   authority design / product decision on the default render policy.
+ * - `"deny"`: ignore author-supplied declassification entirely. A boundary may
+ *   still NARROW the confidentiality bound (`maxConfidentiality`), it just can't
+ *   release a secret upward.
+ *
+ * The narrowing-vs-release asymmetry is the point: `deny` removes only the
+ * fail-open capability, never the fail-closed one.
+ */
+export type RenderDeclassificationPolicy = "allow" | "deny";
+
+/**
+ * Normalize an untrusted render-declassification policy value.
+ *
+ * The policy is a security knob that crosses postMessage seams (e.g.
+ * `InitializationData`) with no runtime validation, so a typo'd host config or
+ * a version-skewed peer could otherwise silently fail OPEN to `"allow"`. A
+ * present-but-unknown value therefore normalizes to `"deny"` (fail closed);
+ * only an absent value keeps the documented `"allow"` default.
+ */
+export function normalizeRenderDeclassificationPolicy(
+  value: unknown,
+): RenderDeclassificationPolicy {
+  if (value === undefined) return "allow";
+  return value === "allow" ? "allow" : "deny";
+}
+
+/**
+ * Host-supplied default render ceiling (spec §8.10.6, S16 phase D): the
+ * confidentiality a display surface admits when no authored boundary
+ * narrows further. `atoms` are admitted by structural equality (the place
+ * for acting-user identity atoms); `caveatKinds` admits Caveat-type atoms
+ * by kind (the display-dischargeable classes). Everything else renders as
+ * the blocked placeholder. Undefined = no default ceiling (today's
+ * behavior); the profile may only be tightened, not loosened, without a
+ * new release judgment.
+ */
+export interface RenderConfidentialityCeiling {
+  atoms?: readonly unknown[];
+  caveatKinds?: readonly string[];
+}
+
+/**
+ * Normalize an untrusted render-confidentiality ceiling.
+ *
+ * Like the declassification policy, the ceiling crosses postMessage seams
+ * (e.g. `InitializationData`) with no runtime validation. Fail-closed here
+ * means a present-but-malformed value becomes the EMPTY ceiling (public-only
+ * rendering) — never a mount crash, and never fail-open to unbounded. Only
+ * an absent value keeps the documented no-ceiling default; malformed fields
+ * inside an otherwise well-formed ceiling drop to empty individually.
+ */
+export function normalizeRenderConfidentialityCeiling(
+  value: unknown,
+): RenderConfidentialityCeiling | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "object" || value === null) return {};
+  const { atoms, caveatKinds } = value as {
+    atoms?: unknown;
+    caveatKinds?: unknown;
+  };
+  return {
+    atoms: Array.isArray(atoms) ? atoms : [],
+    caveatKinds: Array.isArray(caveatKinds)
+      ? caveatKinds.filter((kind): kind is string => typeof kind === "string")
+      : [],
+  };
 }
 
 /**
@@ -175,6 +322,20 @@ export interface WorkerReconcilerOptions {
 
   /** Optional: callback when an error occurs */
   onError?: (error: Error) => void;
+
+  /**
+   * Policy for honoring author-supplied render-boundary declassification.
+   * Defaults to `"allow"` (no behavior change). See
+   * {@link RenderDeclassificationPolicy}.
+   */
+  renderDeclassificationPolicy?: RenderDeclassificationPolicy;
+
+  /**
+   * Default render ceiling applied at the tree root. Defaults to undefined
+   * (no ceiling — today's behavior). See
+   * {@link RenderConfidentialityCeiling}.
+   */
+  renderConfidentialityCeiling?: RenderConfidentialityCeiling;
 }
 
 /**

@@ -4,11 +4,11 @@ _Last updated: 2025-09-23_
 
 ## Overview
 
-`@commontools/ts-transformers` now houses our TypeScript AST transformers. The
+`@commonfabric/ts-transformers` now houses our TypeScript AST transformers. The
 package exposes the modular OpaqueRef rewrite we ship to pattern authors (via
-`createModularOpaqueRefTransformer`), and `@commontools/js-runtime` now consumes
-that implementation directly. This document captures the current implementation,
-outstanding gaps, and the focused roadmap we intend to pursue.
+`createModularOpaqueRefTransformer`), and `@commonfabric/js-runtime` now
+consumes that implementation directly. This document captures the current
+implementation, outstanding gaps, and the focused roadmap we intend to pursue.
 
 ## Current Implementation
 
@@ -37,7 +37,7 @@ outstanding gaps, and the focused roadmap we intend to pursue.
 - **Map callback parity** – parameters annotated as `any`/`number` now derive
   correctly inside `.map` callbacks.
 - **Unary `!`** – predicates like `!flag` wrap into `derive` where necessary.
-- **Docs fixture** – `opaque-ref-cell-map` fixture reproduces the ct-891 case so
+- **Docs fixture** – `opaque-ref-cell-map` fixture reproduces the CT-891 case so
   we keep coverage on the new transformer.
 - **Optional import handling** – the modular path defers import insertion until
   all rules run, preventing duplicate helper imports.
@@ -45,7 +45,7 @@ outstanding gaps, and the focused roadmap we intend to pursue.
   wrapped in additional `derive` calls.
 - **AMD module qualification** – Injected `derive` and `ifElse` calls now
   properly reuse existing import identifiers for correct AMD output.
-- **Import resolver** – New system to find and reuse existing CommonTools
+- **Import resolver** – New system to find and reuse existing Common Fabric
   imports rather than creating bare identifiers.
 - **Normalization refactor** – Implemented explicit dependency tracking with
   `isExplicit` flag, removing text-matching workarounds and fixing parent
@@ -122,13 +122,13 @@ outstanding gaps, and the focused roadmap we intend to pursue.
   architecture to identify candidates and apply appropriate transformations
 - **Import flexibility**: Expand helper resolution so the rewrite pipeline works
   when authors:
-  - Glob-import (`import * as ct from "commontools"`) and access helpers via
+  - Glob-import (`import * as cf from "commonfabric"`) and access helpers via
     namespace members.
   - Rename specific imports
     (`import { derive as ctDerive } from
-    "commontools"`) without breaking
+    "commonfabric"`) without breaking
     helper detection.
-  - Omit any CommonTools import in `cts`-enabled files, by inserting a safe
+  - Omit any Common Fabric import in `cts`-enabled files, by inserting a safe
     namespace import during a preprocessing pass if none is detected.
 
 ## Longer-Term Considerations

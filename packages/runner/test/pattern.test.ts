@@ -6,6 +6,7 @@ import {
   isPattern,
   type JSONSchema,
   type Module,
+  type Opaque,
   type Pattern,
 } from "../src/builder/types.ts";
 import { lift } from "../src/builder/module.ts";
@@ -13,7 +14,7 @@ import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { opaqueRef } from "../src/builder/opaque-ref.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Identity } from "@commontools/identity";
+import { Identity } from "@commonfabric/identity";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -65,14 +66,89 @@ describe("pattern", () => {
     const double = lift(({ x }) => x * 2);
     const doublePattern = pattern<{ x: number }>(() => {
       const x = opaqueRef<number>(1);
-      x.for("x");
+      (x as any).for("x");
       return { double: double({ x }) };
     });
     expect(isPattern(doublePattern)).toBe(true);
     expect(doublePattern.nodes.length).toBe(1);
     expect(doublePattern.nodes[0].inputs).toMatchObject({
-      x: { $alias: { path: ["internal", "x"] } },
+      x: {
+        $alias: {
+          partialCause: "x",
+          path: [],
+          scope: "space",
+        },
+      },
     });
+    expect(doublePattern.derivedInternalCells).toEqual([
+      {
+        partialCause: "double",
+      },
+      {
+        partialCause: "x",
+        schema: { default: 1 },
+      },
+    ]);
+  });
+
+  it("derives numeric partial causes for anonymous internal roots", () => {
+    const increment = lift((x: number) => x + 1);
+    const double = lift((x: number) => x * 2);
+    const testPattern = pattern<{ x: number }>(({ x }) => {
+      const intermediate = increment(x);
+      return { doubled: double(intermediate) };
+    });
+
+    expect(testPattern.derivedInternalCells).toEqual([
+      {
+        partialCause: { $generated: 0 },
+      },
+      {
+        partialCause: "doubled",
+      },
+    ]);
+    expect(testPattern.nodes[0].outputs).toMatchObject({
+      $alias: { partialCause: { $generated: 0 }, path: [] },
+    });
+  });
+
+  it("uniquifies repeated stable internal paths with schemas", () => {
+    const isPositive = lift(
+      (value: number) => value > 0,
+      { type: "number" } as const satisfies JSONSchema,
+      { type: "boolean" } as const satisfies JSONSchema,
+    );
+
+    const testPattern = pattern(() => {
+      const first = (isPositive(1) as any).for("isSelected", true);
+      const second = (isPositive(2) as any).for("isSelected", true);
+      return { first, second };
+    });
+
+    const firstPath = (testPattern.result as any).first.$alias.path;
+    const secondPath = (testPattern.result as any).second.$alias.path;
+    expect((testPattern.result as any).first.$alias.partialCause).toBe(
+      "isSelected",
+    );
+    expect((testPattern.result as any).second.$alias.partialCause).toEqual({
+      name: "isSelected",
+      $generated: 0,
+    });
+    expect(firstPath).toEqual([]);
+    expect(secondPath).toEqual([]);
+    expect(testPattern.derivedInternalCells).toEqual([
+      {
+        partialCause: "isSelected",
+        schema: { type: "boolean" },
+      },
+      {
+        partialCause: {
+          name: "isSelected",
+          $generated: 0,
+        },
+        schema: { type: "boolean" },
+      },
+    ]);
   });
 
   it("complex pattern has correct schema and nodes", () => {
@@ -85,22 +161,34 @@ describe("pattern", () => {
     expect(isPattern(doublePattern)).toBe(true);
     expect(argumentSchema).toBe(true);
     expect(result).toEqual({
-      double: { $alias: { path: ["internal", "double"] } },
+      double: {
+        $alias: {
+          partialCause: "double",
+          path: [],
+          scope: "space",
+        },
+      },
     });
 
     expect(nodes.length).toBe(2);
     expect(isModule(nodes[0].module) && nodes[0].module.type).toBe(
       "javascript",
     );
-    expect(nodes[0].inputs).toEqual({ $alias: { path: ["argument", "x"] } });
+    expect(nodes[0].inputs).toEqual({
+      $alias: { cell: "argument", path: ["x"], scope: "space" },
+    });
     expect(nodes[0].outputs).toEqual({
-      $alias: { path: ["internal", "__#0"] },
+      $alias: { partialCause: { $generated: 0 }, path: [], scope: "space" },
     });
     expect(nodes[1].inputs).toEqual({
-      $alias: { path: ["internal", "__#0"] },
+      $alias: { partialCause: { $generated: 0 }, path: [], scope: "space" },
     });
     expect(nodes[1].outputs).toEqual({
-      $alias: { path: ["internal", "double"] },
+      $alias: {
+        partialCause: "double",
+        path: [],
+        scope: "space",
+      },
     });
   });
 
@@ -136,9 +224,9 @@ describe("pattern", () => {
     } as const satisfies JSONSchema;
 
     const double = lift(
+      (x: number) => x * 2,
       inputSchema,
       outputSchema,
-      (x: number) => x * 2,
     );
 
     const patternInputSchema = {
@@ -175,7 +263,13 @@ describe("pattern", () => {
     expect(isPattern(doublePattern)).toBe(true);
     expect(argumentSchema).toBe(true);
     expect(result).toEqual({
-      double: { $alias: { path: ["internal", "__#1", "doubled"] } },
+      double: {
+        $alias: {
+          partialCause: { $generated: 1 },
+          path: ["doubled"],
+          scope: "space",
+        },
+      },
     });
 
     expect(nodes.length).toBe(2);
@@ -183,31 +277,47 @@ describe("pattern", () => {
       "javascript",
     );
     expect(nodes[0].inputs).toEqual({
-      x: { $alias: { path: ["argument", "x"] } },
+      x: { $alias: { cell: "argument", path: ["x"], scope: "space" } },
     });
     expect(nodes[0].outputs).toEqual({
-      $alias: { path: ["internal", "__#0"] },
+      $alias: { partialCause: { $generated: 0 }, path: [], scope: "space" },
     });
     expect(nodes[1].inputs).toEqual({
-      x: { $alias: { path: ["internal", "__#0", "doubled"] } },
+      x: {
+        $alias: {
+          partialCause: { $generated: 0 },
+          path: ["doubled"],
+          scope: "space",
+        },
+      },
     });
     expect(nodes[1].outputs).toEqual({
-      $alias: { path: ["internal", "__#1"] },
+      $alias: { partialCause: { $generated: 1 }, path: [], scope: "space" },
     });
 
     const json = JSON.stringify(doublePattern);
     const parsed = JSON.parse(json);
     expect(json.length).toBeGreaterThan(200);
-    expect(parsed.nodes[0].module.implementation).toContain("=>");
+    // A test-built (never verified-evaluated) module has no provenance, so
+    // the writer keeps the stringified body as the executable fallback. The
+    // legacy `implementationRef` is runtime-only since the flip (PR E1) —
+    // never serialized.
+    expect(typeof parsed.nodes[0].module.implementation).toBe("string");
+    expect("implementationRef" in parsed.nodes[0].module).toBe(false);
   });
 
   it("pattern with map node serializes correctly", () => {
     const doubleArray = pattern<{ values: { x: number }[] }>(
       ({ values }) => {
-        const doubled = values.map(({ x }) => {
-          const double = lift<number>((x) => x * 2);
-          return { doubled: double(x) };
-        });
+        const doubled = (values as any).mapWithPattern(
+          pattern(({ element, index, array }: Opaque<any>) =>
+            ((({ x }: any) => {
+              const double = lift<number>((x) => x * 2);
+              return { doubled: double(x) };
+            }) as any)(element, index, array)
+          ),
+          {},
+        );
         return { doubled };
       },
     );
@@ -219,7 +329,7 @@ describe("pattern", () => {
 
     const node = doubleArray.nodes[0];
     expect(node.inputs).toMatchObject({
-      list: { $alias: { path: ["argument", "values"] } },
+      list: { $alias: { cell: "argument", path: ["values"] } },
     });
 
     const inputs = doubleArray.nodes[0].inputs as unknown as { op: Pattern };
@@ -230,7 +340,7 @@ describe("pattern", () => {
     expect(typeof innerModule.implementation).toBe("function");
   });
 
-  it("pattern with ifc property has correct classification tracking", () => {
+  it("pattern with ifc property has correct confidentiality tracking", () => {
     const ArgumentSchema = {
       description: "Double a number",
       type: "object",
@@ -238,7 +348,7 @@ describe("pattern", () => {
         x: {
           type: "integer",
           default: 1,
-          ifc: { classification: ["confidential"] },
+          ifc: { confidentiality: ["confidential"] },
         },
       },
       required: ["x"],
@@ -255,12 +365,12 @@ describe("pattern", () => {
       required: ["double"],
     } as const satisfies JSONSchema;
 
-    const double = lift<JSONSchema, JSONSchema>(
-      ArgumentSchema,
-      ResultSchema,
-      ({ x }) => ({
+    const double = lift(
+      ({ x }: { x: number }) => ({
         double: x * 2,
       }),
+      ArgumentSchema,
+      ResultSchema,
     );
 
     const doublePattern = pattern<{ x: number }, { double: number }>(
@@ -282,7 +392,8 @@ describe("pattern", () => {
     expect(result).toMatchObject({
       double: {
         $alias: {
-          path: ["internal", "__#1", "double"],
+          partialCause: { $generated: 1 },
+          path: ["double"],
           schema: {
             ifc: ArgumentSchema.properties.x.ifc,
           },
@@ -297,7 +408,8 @@ describe("pattern", () => {
     expect(nodes[0].inputs).toMatchObject({
       x: {
         $alias: {
-          path: ["argument", "x"],
+          cell: "argument",
+          path: ["x"],
           schema: ArgumentSchema.properties?.x,
         },
       },
@@ -305,14 +417,16 @@ describe("pattern", () => {
     // I don't like that we don't know the other properties of our output here
     expect(nodes[0].outputs).toMatchObject({
       $alias: {
-        path: ["internal", "__#0"],
+        partialCause: { $generated: 0 },
+        path: [],
         schema: { ifc: ArgumentSchema.properties.x.ifc },
       },
     });
     expect(nodes[1].inputs).toMatchObject({
       x: {
         $alias: {
-          path: ["internal", "__#0", "double"],
+          partialCause: { $generated: 0 },
+          path: ["double"],
           schema: {
             ifc: ArgumentSchema.properties.x.ifc,
           },
@@ -321,7 +435,8 @@ describe("pattern", () => {
     });
     expect(nodes[1].outputs).toMatchObject({
       $alias: {
-        path: ["internal", "__#1"],
+        partialCause: { $generated: 1 },
+        path: [],
         schema: {
           ifc: ArgumentSchema.properties.x.ifc,
         },
@@ -329,7 +444,7 @@ describe("pattern", () => {
     });
   });
 
-  it("pattern with mixed ifc properties has correct classification in the schema of the ssn result", () => {
+  it("pattern with mixed ifc properties has correct confidentiality in the schema of the ssn result", () => {
     const ArgumentSchema = {
       description: "Capitalize a word",
       type: "object",
@@ -353,12 +468,14 @@ describe("pattern", () => {
       required: ["capitalized"],
     } as const satisfies JSONSchema;
 
-    const capitalize = lift<JSONSchema, JSONSchema>(
-      ArgumentSchema,
-      ResultSchema,
-      ({ word }) => ({
+    // Input typed loosely (the original used the schema-first overload whose
+    // input was JSONSchema); this lift is applied below with `{ ssn }`.
+    const capitalize = lift(
+      ({ word }: any) => ({
         capitalized: word.charAt(0).toUpperCase() + word.slice(1),
       }),
+      ArgumentSchema,
+      ResultSchema,
     );
 
     const UserSchema = {
@@ -372,7 +489,7 @@ describe("pattern", () => {
         ssn: {
           type: "string",
           default: "123-45-6789",
-          ifc: { classification: ["confidential"] },
+          ifc: { confidentiality: ["confidential"] },
         },
       },
       required: ["word"],
@@ -398,24 +515,26 @@ describe("pattern", () => {
     expect(nodes[0].outputs).toHaveProperty("$alias");
     const nodeOutputAlias = (nodes[0].outputs as any)["$alias"];
     expect(nodeOutputAlias).toMatchObject({
-      path: ["internal", "__#0"],
-      schema: { ifc: { classification: ["confidential"] } },
+      partialCause: { $generated: 0 },
+      path: [],
+      schema: { ifc: { confidentiality: ["confidential"] } },
     });
     expect(result).toMatchObject({
       capitalized: {
         $alias: {
-          path: ["internal", "__#0", "capitalized"],
-          schema: { ifc: { classification: ["confidential"] } },
+          partialCause: { $generated: 0 },
+          path: ["capitalized"],
+          schema: { ifc: { confidentiality: ["confidential"] } },
         },
       },
     });
     expect(resultSchema).toMatchObject({
       ...ResultSchema,
-      ...{ ifc: { classification: ["confidential"] } },
+      ...{ ifc: { confidentiality: ["confidential"] } },
     });
 
     // Perhaps I should handle a similar pattern that only accesses the name
-    // in such a way that it does not end up classified. For now, I've decided
+    // in such a way that it does not end up confidential. For now, I've decided
     // not to do this, since I'm not confident enough that code can't get out.
   });
 

@@ -1,53 +1,39 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern, } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { computed, pattern, } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Input {
     foo: string;
 }
 interface Output extends Input {
     bar: number;
 }
-// FIXTURE: pattern-explicit-types
-// Verifies: explicit Input and Output type parameters generate separate input/output schemas
-//   pattern<Input, Output>() → input schema from Input, output schema from Output (includes inherited fields)
-//   Output extends Input → output schema includes both own (bar) and inherited (foo) properties
-export default pattern((input) => {
-    return __ctHelpers.derive({
-        type: "object",
-        properties: {
-            input: {
-                type: "object",
-                properties: {
-                    foo: {
-                        type: "string"
-                    }
-                },
-                required: ["foo"],
-                asOpaque: true
-            }
-        },
-        required: ["input"]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            bar: {
-                type: "number"
-            },
-            foo: {
-                type: "string",
-                asOpaque: true
-            }
-        },
-        required: ["bar", "foo"]
-    } as const satisfies __ctHelpers.JSONSchema, { input: input }, ({ input: input_1 }) => ({ ...input, bar: 123 }));
-}, {
+const __cfLift_1 = __cfHelpers.lift<{
+    input: { foo: string; } & {} & { [SELF]: Output; };
+}, { bar: number; foo: string; [SELF]: Output; }>(({ input }) => ({ ...input, bar: 123 }), {
     type: "object",
     properties: {
-        foo: {
-            type: "string"
+        input: {
+            type: "object",
+            properties: {
+                foo: {
+                    type: "string"
+                }
+            },
+            required: ["foo"]
         }
     },
-    required: ["foo"]
-} as const satisfies __ctHelpers.JSONSchema, {
+    required: ["input"]
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         bar: {
@@ -58,8 +44,36 @@ export default pattern((input) => {
         }
     },
     required: ["bar", "foo"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
+// FIXTURE: pattern-explicit-types
+// Verifies: explicit Input and Output type parameters generate separate input/output schemas
+//   pattern<Input, Output>() → input schema from Input, output schema from Output (includes inherited fields)
+//   Output extends Input → output schema includes both own (bar) and inherited (foo) properties
+export default pattern((input) => {
+    return __cfLift_1({ input: input }).for("__patternResult", true);
+}, {
+    type: "object",
+    properties: {
+        foo: {
+            type: "string"
+        }
+    },
+    required: ["foo"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        bar: {
+            type: "number"
+        },
+        foo: {
+            type: "string"
+        }
+    },
+    required: ["bar", "foo"]
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

@@ -2,10 +2,145 @@
  * Public interface for the builder package. This module exports only the types
  * and functions that are part of the public pattern API.
  *
- * Workspace code should import these types via `@commontools/builder`.
+ * Workspace code should import these types via `@commonfabric/builder`.
  */
 
-// Runtime constants - defined by @commontools/runner/src/builder/types.ts
+import type { Cfc, WriteAuthorizedBy } from "./cfc.ts";
+
+// ============================================================================
+// Fabric Value Types
+// ============================================================================
+//
+// Pattern-visible declarations for the fabric value type system. Canonical
+// implementations live in data-model submodule files (interface.ts,
+// fabric-primitives/FabricHash.ts, fabric-primitives/FabricEpochNsec.ts, etc.)
+// — these inline declarations mirror the public surface so the pattern compiler
+// can resolve them without relative imports.
+//
+// SYNC NOTE: These declarations must stay in sync with the canonical
+// definitions in the submodule files. If they drift, pattern type-checking
+// will diverge from runtime behavior.
+//
+// Every concrete FabricPrimitive subclass must have an instanceof-capable
+// declaration here (interface + constructor + declare-const with `new`).
+
+/**
+ * Common base class for `FabricInstance` and `FabricPrimitive`. Enables a
+ * single `instanceof` check for any fabric-system value type.
+ */
+// deno-lint-ignore no-empty-interface
+export interface FabricSpecialObject {}
+
+export interface FabricSpecialObjectConstructor {
+  prototype: FabricSpecialObject;
+}
+
+export declare const FabricSpecialObject:
+  & FabricSpecialObjectConstructor
+  & (abstract new (...args: any) => FabricSpecialObject);
+
+/**
+ * Abstract base class for values that participate in the fabric protocol.
+ */
+export interface FabricInstance extends FabricSpecialObject {
+  shallowClone(frozen: boolean): FabricInstance;
+}
+
+export interface FabricInstanceConstructor {
+  prototype: FabricInstance;
+}
+
+export declare const FabricInstance:
+  & FabricInstanceConstructor
+  & (abstract new (...args: any) => FabricInstance);
+
+/** Abstract base class for fabric primitive types. */
+export interface FabricPrimitive extends FabricSpecialObject {}
+
+export interface FabricPrimitiveConstructor {
+  prototype: FabricPrimitive;
+}
+
+export declare const FabricPrimitive:
+  & FabricPrimitiveConstructor
+  & (abstract new (...args: any) => FabricPrimitive);
+
+/**
+ * Temporal type representing nanoseconds from the POSIX Epoch.
+ * Wraps a `bigint` value.
+ */
+export interface FabricEpochNsec extends FabricPrimitive {
+  readonly value: bigint;
+}
+
+export interface FabricEpochNsecConstructor {
+  new (value: bigint): FabricEpochNsec;
+  prototype: FabricEpochNsec;
+}
+
+export declare const FabricEpochNsec: FabricEpochNsecConstructor;
+
+/**
+ * Temporal type representing days from the POSIX Epoch.
+ * Wraps a `bigint` value.
+ */
+export interface FabricEpochDays extends FabricPrimitive {
+  readonly value: bigint;
+}
+
+export interface FabricEpochDaysConstructor {
+  new (value: bigint): FabricEpochDays;
+  prototype: FabricEpochDays;
+}
+
+export declare const FabricEpochDays: FabricEpochDaysConstructor;
+
+/**
+ * A content-addressed identifier: a hash digest paired with an algorithm tag.
+ * Extends `FabricPrimitive` -- treated like a primitive in the fabric type
+ * system (always frozen, passes through conversion unchanged).
+ */
+export interface FabricHash extends FabricPrimitive {
+  readonly tag: string;
+  readonly bytes: Uint8Array;
+  readonly length: number;
+  readonly hashString: string;
+  toString(): string;
+  toJSON(): { "/": string };
+}
+
+export interface FabricHashConstructor {
+  new (hash: Uint8Array, tag: string): FabricHash;
+  prototype: FabricHash;
+}
+
+export declare const FabricHash: FabricHashConstructor;
+
+/**
+ * The full set of values that the fabric storage layer can represent.
+ */
+export type FabricValue =
+  | null
+  | boolean
+  | number
+  | string
+  | bigint
+  | FabricSpecialObject
+  | FabricArray
+  | FabricObject
+  | undefined;
+
+/** An array of fabric values. */
+export interface FabricArray extends ArrayLike<FabricValue> {}
+
+/** An object/record of fabric values. */
+export interface FabricObject extends Record<string, FabricValue> {}
+
+// ============================================================================
+// Runtime Constants
+// ============================================================================
+
+// Runtime constants - defined by @commonfabric/runner/src/builder/types.ts
 // These are ambient declarations since the actual values are provided by the runtime environment
 export declare const ID: unique symbol;
 export declare const ID_FIELD: unique symbol;
@@ -15,6 +150,7 @@ export declare const ID_FIELD: unique symbol;
 export declare const TYPE: "$TYPE";
 export declare const NAME: "$NAME";
 export declare const UI: "$UI";
+export declare const FS: "$FS";
 
 // Symbol for accessing self-reference in patterns
 export declare const SELF: unique symbol;
@@ -32,8 +168,9 @@ export declare const CELL_BRAND: unique symbol;
 
 /**
  * Symbol for phantom property that enables type inference from AnyBrandedCell.
- * This property doesn't exist at runtime - it's purely for TypeScript's benefit.
- * See packages/api/STRIPCELL_TYPE_INFERENCE_FIX.md for details.
+ * This property doesn't exist at runtime - it's purely for TypeScript's benefit:
+ * without a concrete property mentioning T, `AnyBrandedCell<infer U>` cannot
+ * infer U (T would be a phantom parameter and inference produces `unknown`).
  */
 export declare const CELL_INNER_TYPE: unique symbol;
 
@@ -48,7 +185,36 @@ export type CellKind =
   | "stream"
   | "comparable"
   | "readonly"
-  | "writeonly";
+  | "writeonly"
+  | "sqlite";
+
+export type CellScope = "space" | "user" | "session";
+export type SchemaScope = CellScope | "any";
+export type LinkScope = "inherit" | CellScope;
+
+export type AsCellEntry =
+  | CellKind
+  | {
+    readonly kind: CellKind;
+    readonly scope?: SchemaScope;
+  };
+
+export declare const SCOPE_BRAND: unique symbol;
+export type Scoped<T, Scope extends SchemaScope> = T & {
+  readonly [SCOPE_BRAND]?: Scope;
+};
+export type PerSpace<T> = Scoped<T, "space">;
+export type PerUser<T> = Scoped<T, "user">;
+export type PerSession<T> = Scoped<T, "session">;
+export type PerAny<T> = Scoped<T, "any">;
+
+type ScopedConstructorResult<
+  Scope extends CellScope,
+  T,
+> = Scope extends "space" ? PerSpace<T>
+  : Scope extends "user" ? PerUser<T>
+  : Scope extends "session" ? PerSession<T>
+  : never;
 
 // `string` acts as `any`, e.g. when wanting to match any kind of cell
 // The [CELL_INNER_TYPE] property is a phantom property that enables TypeScript
@@ -85,31 +251,93 @@ export type IsThisArray =
  * attaches the internal methods..
  */
 // deno-lint-ignore no-empty-interface
-export interface IAnyCell<T> {
-}
+export interface IAnyCell<T> {}
 
 /**
- * Readable cells can retrieve their current value.
+ * Readable cells provide a view onto stored data.
+ *
+ * **Frozenness contract:** `get()` and `sample()`
+ * return a JS Proxy over the stored value. Writes through the proxy are
+ * rejected with a "read-only" runtime error. The underlying stored
+ * data is additionally a deep-frozen `FabricValue` tree, so callers that
+ * escape the proxy (e.g. via `getRaw()`) see frozen data without an
+ * extra clone.
+ *
+ * Note: `Object.isFrozen(proxy)` reports `false` regardless of the
+ * underlying state — that's a property of how JS Proxy reports
+ * extensibility, not a statement about mutability.
  */
 export interface IReadable<T> {
+  /**
+   * Read the cell's current value as a Proxy view. See the
+   * {@link IReadable} interface docs for the frozenness contract.
+   */
   get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>>;
   /**
    * Read the cell's current value without creating a reactive dependency.
    * Unlike `get()`, calling `sample()` inside a lift won't cause the lift
-   * to re-run when this cell's value changes.
+   * to re-run when this cell's value changes. The same frozenness
+   * contract from {@link IReadable} applies.
    */
   sample(): Readonly<StripDefaultBrand<T>>;
 }
 
+export type MetaLinkField =
+  | "pattern"
+  | "argument"
+  | "result";
+
+/**
+ * The `pattern` field links a result cell to its pattern
+ * The `argument` field links a result cell to its argument cell
+ * The `internal` field contains a manifest with links to derived internal cells.
+ * The `schema` field stores the schema for a result cell
+ * The `result` field lets a result cell link to its parent result cell,
+ * and also lets the argument and derived internal cells link back to the result cell.
+ * The cfc code accesses the `cfc` field directly, but I include it here too.
+ */
+export type MetaField =
+  | MetaLinkField
+  | "patternIdentity" // content-addressed {identity, symbol} pattern reference
+  | "internal"
+  | "schema"
+  | "slug"
+  | "cfc";
+
+export interface IMetaCell {
+  getMetaRaw(metaField: MetaField, options?: unknown): FabricValue;
+  setMetaRaw(metaField: MetaField, value: FabricValue): void;
+}
+
 /**
  * Writable cells can update their value.
+ *
+ * **Frozenness contract:** Values passed into `set()`, `update()`, and `push()`
+ * flow through a write-boundary normalization step that shallowly freezes any
+ * plain unfrozen Object/Array levels it visits. Inputs that are already
+ * deep-frozen valid `FabricValue` trees are accepted identity-preservingly with
+ * no further cloning.
  */
 export interface IWritable<T, C extends AnyBrandedCell<any>> {
+  /**
+   * Set the cell's value. See the {@link IWritable} interface docs for
+   * the frozenness contract on the input.
+   */
   set(value: T | AnyCellWrapping<T>): C;
+  /**
+   * Merge a partial object value into the cell. Implemented as a
+   * per-key `set()`, so the same frozenness contract applies. See
+   * {@link IWritable}.
+   */
   update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
     this: IsThisObject,
     values: V extends object ? AnyCellWrapping<V> : never,
   ): C;
+  /**
+   * Append one or more values to an array cell. See the
+   * {@link IWritable} interface docs for the frozenness contract on the
+   * inputs.
+   */
   push(
     this: IsThisArray,
     ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : never
@@ -414,8 +642,6 @@ export type KeyResultTypeOpaque<
 /**
  * Cells that support key() for property access - OpaqueCell variant.
  * OpaqueCell is "sticky" and always returns OpaqueCell<>.
- *
- * Note: And for now it always returns an OpaqueRef<>, until we clean this up.
  */
 export interface IKeyableOpaque<T> {
   /**
@@ -575,7 +801,7 @@ export interface ICreatable<C extends AnyBrandedCell<any>> {
 /**
  * Cells that can be resolved back to a Cell.
  * Only available on full Cell<T>, not on OpaqueCell or Stream.
- * Note: Schema-typed overload available via "commontools/schema"
+ * Note: Schema-typed overload available via "commonfabric/schema"
  */
 export interface IResolvable<T, C extends AnyBrandedCell<T>> {
   resolveAsCell(): C;
@@ -587,38 +813,30 @@ export interface IResolvable<T, C extends AnyBrandedCell<T>> {
  * Available on comparable and readable cells.
  */
 export interface IEquatable {
-  equals(other: AnyCell<any> | object): boolean;
-  equalLinks(other: AnyCell<any> | object): boolean;
+  equals(other: AnyCell<any> | object | undefined): boolean;
+  equalLinks(other: AnyCell<any> | object | undefined): boolean;
 }
 
 /**
  * Cells that allow deriving new cells from existing cells via array methods:
- * .map() and their WithPattern variants.
- *
- * Note: .filter() and .flatMap() are deliberately omitted from the type
- * interface to avoid conflicting with Array.prototype.filter/flatMap on
- * OpaqueRef<T[]> (which is an intersection of OpaqueCell<T[]> & Array<…>).
- * The runtime methods exist on Cell and are intercepted by the proxy; they
- * just don't have type declarations here until the compiler transform
- * (Phase 3) resolves the ambiguity. This means pattern authors won't get
- * autocomplete for .filter()/.flatMap() — they'll see Array.prototype
- * signatures instead. The proxy intercepts correctly at runtime, but
- * TypeScript won't type-check the reactive return type.
+ * direct helpers mirror supported Array methods and return Reactive results.
+ * The WithPattern variants accept pre-defined patterns for per-element
+ * operations.
  */
 export interface IDerivable<T> {
   map<S>(
     this: IsThisObject,
     fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T>,
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
     ) => Opaque<S>,
-  ): OpaqueRef<S[]>;
+  ): Reactive<S[]>;
   mapWithPattern<S>(
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
-  ): OpaqueRef<S[]>;
+  ): Reactive<S[]>;
   reduce<S>(
     this: IsThisObject,
     fn: (
@@ -628,17 +846,41 @@ export interface IDerivable<T> {
       array: (T extends Array<infer U> ? U : T)[],
     ) => S,
     initialValue: S,
-  ): OpaqueRef<S>;
+  ): Reactive<S>;
+  findIndex(
+    this: IsThisObject,
+    fn: (
+      element: T extends Array<infer U> ? U : T,
+      index: number,
+      array: (T extends Array<infer U> ? U : T)[],
+    ) => boolean,
+  ): Reactive<number>;
+  filter(
+    this: IsThisObject,
+    fn: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
+    ) => Opaque<boolean>,
+  ): Reactive<(T extends Array<infer U> ? U : T)[]>;
   filterWithPattern<S>(
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
-  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]>;
+  ): Reactive<(T extends Array<infer U> ? U : T)[]>;
+  flatMap<S>(
+    this: IsThisObject,
+    fn: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
+    ) => Opaque<S[]>,
+  ): Reactive<S[]>;
   flatMapWithPattern<S>(
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,
     params: Record<string, any>,
-  ): OpaqueRef<S[]>;
+  ): Reactive<S[]>;
 }
 
 export interface IOpaquable<T> {
@@ -657,12 +899,25 @@ export interface CellTypeConstructor<
   Wrap extends HKT,
 > {
   /**
+   * Create a cell with an initial/default value. In a reactive context, this
+   * value will only be set on first call.
+   *
+   * AST transformation adds `.for("foo")` in `const foo = new Cell(value)`.
+   *
+   * Internally it just merges the value into the schema as a default value.
+   *
+   * @param value - The initial/default value to set on the cell
+   * @param schema - Optional JSON schema for the cell
+   * @returns A new cell
+   */
+  new <T>(value?: T, schema?: JSONSchema): Apply<Wrap, T>;
+
+  /**
    * Create a cell with a cause.
    *
-   * Can be chained with .of() or .set():
+   * Can be chained with `new ...(...)` or .set():
    *
    * const foo = Cell.for(cause).set(value); // sets cell to latest value
-   * const bar = Cell.for(cause).of(value); // sets cell to initial value
    *
    * @param cause - The cause to associate with this cell
    * @returns A new cell
@@ -687,13 +942,31 @@ export interface CellTypeConstructor<
   of<T>(value?: T, schema?: JSONSchema): Apply<Wrap, T>;
 
   /**
+   * Scoped constructor view for space-shared cells.
+   */
+  perSpace: ScopedCellTypeConstructor<Wrap, "space">;
+
+  /**
+   * Scoped constructor view for per-user cells.
+   */
+  perUser: ScopedCellTypeConstructor<Wrap, "user">;
+
+  /**
+   * Scoped constructor view for per-session cells.
+   */
+  perSession: ScopedCellTypeConstructor<Wrap, "session">;
+
+  /**
    * Compare two cells or values for equality after resolving, i.e. after
    * following all links in case we have cells pointing to other cells.
    * @param a - First cell or value to compare
    * @param b - Second cell or value to compare
    * @returns true if the values are equal
    */
-  equals(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean;
+  equals(
+    a: AnyCell<any> | object | undefined,
+    b: AnyCell<any> | object | undefined,
+  ): boolean;
 
   /**
    * Compare two cells or values for equality by comparing their underlying
@@ -703,7 +976,36 @@ export interface CellTypeConstructor<
    * @param b - Second cell or value to compare
    * @returns true if the values are equal
    */
-  equalLinks(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean;
+  equalLinks(
+    a: AnyCell<any> | object | undefined,
+    b: AnyCell<any> | object | undefined,
+  ): boolean;
+}
+
+export interface ScopedCellTypeConstructor<
+  Wrap extends HKT,
+  Scope extends CellScope,
+> {
+  /**
+   * Create a scoped cell with an initial/default value.
+   */
+  new <T>(
+    value?: T,
+    schema?: JSONSchema,
+  ): ScopedConstructorResult<Scope, Apply<Wrap, T>>;
+
+  /**
+   * Create a scoped cell with an initial/default value.
+   */
+  of<T>(
+    value?: T,
+    schema?: JSONSchema,
+  ): ScopedConstructorResult<Scope, Apply<Wrap, T>>;
+
+  /**
+   * Create a scoped cell with a cause.
+   */
+  for<T>(cause: unknown): ScopedConstructorResult<Scope, Apply<Wrap, T>>;
 }
 
 // ============================================================================
@@ -760,6 +1062,7 @@ export interface ICell<T>
     IEquatable,
     IKeyable<T, AsCell>,
     IDerivable<T>,
+    IMetaCell,
     IResolvable<T, Cell<T>> {}
 
 export interface Cell<T = unknown> extends BrandedCell<T, "cell">, ICell<T> {}
@@ -853,29 +1156,19 @@ export interface WriteonlyCell<T>
 export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
 
 // ============================================================================
-// OpaqueRef - Proxy-based variant of OpaqueCell
+// Reactive - annotation for reactively-tracked values
 // ============================================================================
 
 /**
- * OpaqueRef is a variant of OpaqueCell with recursive proxy behavior.
- * Each key access returns another OpaqueRef, allowing chained property access.
- * This is temporary until AST transformation handles .key() automatically.
- *
- * OpaqueRef<Cell<T>> unwraps to Cell<T>.
+ * Reactive<T> marks a value as reactively tracked by the pattern runtime.
+ * It is purely an annotation: at the type level it IS `T` (an identity
+ * alias), and the transformers detect the spelling to classify reactive
+ * positions before erasure. There is no runtime wrapper behind it.
  */
-export type OpaqueRef<T> =
-  // Already a branded cell? Return as-is
-  [T] extends [AnyBrandedCell<any>] ? T
-    // Branded cell | undefined? Strip undefined to avoid brand collision
-    // in the OpaqueCell<T> & OpaqueRefInner<T> intersection below.
-    // The proxy never returns undefined at runtime, so this is safe.
-    : [NonNullable<T>] extends [AnyBrandedCell<any>]
-      ? [NonNullable<T>] extends [never] ? OpaqueCell<T> & OpaqueRefInner<T>
-      : NonNullable<T>
-    // Everything else: wrap in OpaqueCell + map inner properties
-    :
-      & OpaqueCell<T>
-      & OpaqueRefInner<T>;
+export type Reactive<T> = T;
+
+/** @deprecated Use {@link Reactive}. */
+export type OpaqueRef<T> = Reactive<T>;
 
 // Helper type for OpaqueRef's inner property/array mapping
 // Handles nullable types by extracting the non-null part for mapping
@@ -906,9 +1199,11 @@ type OpaqueRefInner<T> = [T] extends
  *
  * Note: This is primarily used for type constraints that require a cell.
  */
-export type CellLike<T> = AnyBrandedCell<MaybeCellWrapped<T>> & {
-  [CELL_LIKE]?: unknown;
-};
+export type CellLike<T> =
+  | AnyBrandedCell<MaybeCellWrapped<T>> & {
+    [CELL_LIKE]?: unknown;
+  }
+  | T;
 type MaybeCellWrapped<T> =
   | T
   | AnyBrandedCell<T>
@@ -921,12 +1216,17 @@ export declare const CELL_LIKE: unique symbol;
  * Helper type to transform Cell<T> to Opaque<T> in pattern/lift/handler inputs.
  * Preserves Stream<T> since Streams are callable interfaces (.send()), not data containers.
  *
+ * INPUT-POSITION ONLY: stripping is an acceptance tool — used inside
+ * `Opaque<StripCell<T>>` so callers can pass the data shape with or without
+ * cell wrappers. It must NOT be applied to factory result types: result-type
+ * brands are exported capabilities, and transformer-inferred result schemas
+ * derive `asCell`/`asStream` from them (see the boundary principle on
+ * PatternFunction).
+ *
  * Implementation is non-distributive by default to preserve union types like RenderNode
  * that intentionally contain AnyBrandedCell as a data variant. However, for optional cell
  * properties like `title?: Writable<string>` (which expand to `Writable<string> | undefined`),
  * we extract the cell parts, strip them, and recombine with the non-cell parts.
- *
- * See packages/api/STRIPCELL_TYPE_INFERENCE_FIX.md for details.
  */
 export type StripCell<T> =
   // Handle optional cell properties: "SomeCell | undefined" pattern
@@ -948,11 +1248,9 @@ type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - i
 /**
  * Opaque accepts T or any cell wrapping T, recursively at any nesting level.
  * Used in APIs that accept inputs from developers - can be static values
- * or wrapped in cells (OpaqueRef, Cell, etc).
+ * or wrapped in cells (Cell, OpaqueCell, etc).
  *
- * Conceptually: T | AnyCell<T> at any nesting level, but we use OpaqueRef
- * for backward compatibility since it has the recursive proxy behavior that
- * allows property access (e.g., Opaque<{foo: string}> includes {foo: Opaque<string>}).
+ * Conceptually: T | AnyCell<T> at any nesting level.
  *
  * Special cases for JSX:
  * - Opaque<VNode> also accepts JSXElement
@@ -962,7 +1260,6 @@ export type Opaque<T> =
   | T
   // We have to list them explicitly so Typescript can unwrap them. Doesn't seem
   // to work if we just say AnyBrandedCell<T>
-  | OpaqueRef<T>
   | AnyCell<T>
   | AnyBrandedCell<T>
   | OpaqueCell<T>
@@ -980,36 +1277,9 @@ export type Opaque<T> =
     : T);
 
 /**
- * Helper type to extract the innermost Cell type from any number of OpaqueRef wrappers.
- * UnwrapOpaqueRefLayers<Cell<T>> = Cell<T>
- * UnwrapOpaqueRefLayers<OpaqueRef<Cell<T>>> = Cell<T>
- * UnwrapOpaqueRefLayers<OpaqueRef<OpaqueRef<Cell<T>>>> = Cell<T>
- *
- * Support for nested OpaqueRef layers is limited to 4 levels.
- */
-type UnwrapOpaqueRefLayers4<T> = T extends OpaqueRef<infer U>
-  ? UnwrapOpaqueRefLayers3<U>
-  : T;
-
-type UnwrapOpaqueRefLayers3<T> = T extends OpaqueRef<infer U>
-  ? UnwrapOpaqueRefLayers2<U>
-  : T;
-
-type UnwrapOpaqueRefLayers2<T> = T extends OpaqueRef<infer U>
-  ? UnwrapOpaqueRefLayers1<U>
-  : T;
-
-type UnwrapOpaqueRefLayers1<T> = T extends OpaqueRef<infer U> ? U
-  : T;
-
-/**
  * Matches any non-opaque Cell type (Cell, Stream, ComparableCell, etc.) that may be
  * wrapped in any number of OpaqueRef layers. Excludes OpaqueCell and AnyCell (since OpaqueCell extends AnyCell).
  */
-type AnyCellWrappedInOpaqueRef<T> = UnwrapOpaqueRefLayers4<T> extends
-  BrandedCell<any, "cell"> ? UnwrapOpaqueRefLayers4<T>
-  : never;
-
 /**
  * Recursively unwraps AnyBrandedCell types at any nesting level.
  * UnwrapCell<AnyBrandedCell<AnyBrandedCell<string>>> = string
@@ -1058,9 +1328,11 @@ export type AnyCellWrapping<T> =
 export interface Pattern {
   argumentSchema: JSONSchema;
   resultSchema: JSONSchema;
+  defaultScope?: CellScope;
 }
 export interface Module {
   type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
+  defaultScope?: CellScope;
 }
 
 export type toJSON = {
@@ -1074,17 +1346,27 @@ export type Handler<T = any, R = any> = Module & {
 export type NodeFactory<T, R> =
   & ((inputs: Opaque<T>) => OpaqueRef<R>)
   & (Module | Handler | Pattern)
-  & toJSON;
+  & toJSON
+  & {
+    asScope(scope: CellScope): NodeFactory<T, R>;
+  };
 
 export type PatternFactory<T, R> =
   & ((inputs: Opaque<T>) => OpaqueRef<R>)
   & Pattern
-  & toJSON;
+  & toJSON
+  & {
+    asScope(scope: CellScope): PatternFactory<T, R>;
+    inSpace(space?: string | AnyCell<unknown>): PatternFactory<T, R>;
+  };
 
 export type ModuleFactory<T, R> =
   & ((inputs: Opaque<T>) => OpaqueRef<R>)
   & Module
-  & toJSON;
+  & toJSON
+  & {
+    asScope(scope: CellScope): ModuleFactory<T, R>;
+  };
 
 export type HandlerFactory<T, R> =
   & ((inputs: Opaque<StripCell<T>>) => Stream<R>)
@@ -1112,6 +1394,24 @@ export interface IDFields {
   [ID_FIELD]?: unknown;
 }
 
+/**
+ * Recursively adds `readonly` to all properties of `T`.
+ *
+ * Mirrors the definition in `@commonfabric/utils/types` but is duplicated here
+ * so that `@commonfabric/api` remains dependency-free.
+ */
+type Immutable<T> = T extends ReadonlyArray<infer U>
+  ? ReadonlyArray<Immutable<U>>
+  : T extends object ? ({ readonly [P in keyof T]: Immutable<T[P]> })
+  : T;
+
+/**
+ * Deeply-readonly version of `JSONValue`. Used in `JSONSchemaObj` for fields
+ * like `default`, `const`, `enum`, and `examples` whose values must not be
+ * mutated after construction.
+ */
+export type ImmutableJSONValue = Immutable<JSONValue>;
+
 // Valid values for the "type" property of a JSONSchema
 export type JSONSchemaTypes =
   | "object"
@@ -1124,13 +1424,17 @@ export type JSONSchemaTypes =
   | "undefined" // undefined is a non-standard addition
   | "unknown"; // unknown is a non-standard addition
 
+// We can use a more complex asCell specifier to handle things like
+// `Cell<Cell<T>>` with `{ asCell: ["cell", "cell"] }`.
+// We can also do an `{ asCell: ["stream"] }` or `{ asCell: ["opaque"] }`.
+// While this is currently tightly coupled to the CellKind type, we can restrict it
+// to a subset
+export type AsCellType = AsCellEntry;
+
 // See https://json-schema.org/draft/2020-12/json-schema-core
 // See https://json-schema.org/draft/2020-12/json-schema-validation
 // There is a lot of potential validation that is not handled, but this object
 // is defined to support them, so that generated schemas will still be usable.
-// TODO(@ubik2) When specifying a JSONSchema, you can often use a boolean
-// This is particularly useful for specifying the schema of a property.
-// That will require reworking some things, so for now, I'm not doing it
 export type JSONSchema = JSONSchemaObj | boolean;
 
 export type JSONSchemaObj = {
@@ -1152,7 +1456,7 @@ export type JSONSchemaObj = {
   readonly dependentSchemas?: Readonly<Record<string, JSONSchema>>;
   // Subschema for array
   readonly prefixItems?: readonly (JSONSchema)[]; // not always validated
-  readonly items?: Readonly<JSONSchema>;
+  readonly items?: JSONSchema;
   readonly contains?: JSONSchema; // not validated
   // Subschema for object
   readonly properties?: Readonly<Record<string, JSONSchema>>;
@@ -1162,8 +1466,8 @@ export type JSONSchemaObj = {
 
   // Validation for any
   readonly type?: JSONSchemaTypes | readonly JSONSchemaTypes[];
-  readonly enum?: readonly Readonly<JSONValue>[]; // not validated
-  readonly const?: Readonly<JSONValue>; // not validated
+  readonly enum?: readonly ImmutableJSONValue[]; // not validated
+  readonly const?: ImmutableJSONValue; // not validated
   // Validation for numeric - none applied
   readonly multipleOf?: number;
   readonly maximum?: number;
@@ -1197,24 +1501,126 @@ export type JSONSchemaObj = {
   // Meta-Data
   readonly title?: string;
   readonly description?: string;
-  readonly default?: Readonly<JSONValue>;
+  readonly default?: ImmutableJSONValue;
   readonly readOnly?: boolean;
   readonly writeOnly?: boolean;
-  readonly examples?: readonly Readonly<JSONValue>[];
+  readonly examples?: readonly ImmutableJSONValue[];
   readonly $schema?: string;
   readonly $comment?: string;
 
-  // Common Tools extensions
+  // Common Fabric extensions
   readonly [ID]?: unknown;
   readonly [ID_FIELD]?: unknown;
+  readonly scope?: SchemaScope;
   // makes it so that your handler gets a Cell object for that property. So you can call .set()/.update()/.push()/etc on it.
-  readonly asCell?: boolean;
-  // marks values that are OpaqueRef - tracked reactive references
-  readonly asOpaque?: boolean;
-  // streams are what handler returns. if you pass that to another handler/lift and declare it as asSteam, you can call .send on it
-  readonly asStream?: boolean;
+  readonly asCell?: readonly AsCellType[];
   // temporarily used to assign labels like "confidential"
-  readonly ifc?: { classification?: string[]; integrity?: string[] };
+  readonly ifc?: {
+    readonly confidentiality?: readonly ImmutableJSONValue[];
+    readonly integrity?: readonly ImmutableJSONValue[];
+    readonly addIntegrity?: readonly ImmutableJSONValue[];
+    readonly requiredIntegrity?: readonly ImmutableJSONValue[];
+    readonly maxConfidentiality?: readonly ImmutableJSONValue[];
+    readonly ownerPrincipal?: string | { readonly __ctCurrentPrincipal: true };
+    readonly writeAuthorizedBy?:
+      | readonly string[]
+      | {
+        readonly __ctWriterIdentityOf?: {
+          readonly bundleId?: string;
+          readonly file?: string;
+          readonly path?: readonly string[];
+        };
+      };
+    readonly exactCopyOf?: readonly string[];
+    readonly projection?: readonly string[];
+    readonly collection?: readonly string[];
+    readonly uiContract?: {
+      readonly helper?: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+      readonly action?: string;
+      readonly surface?: string;
+      readonly role?: string;
+      readonly kind?: string;
+      readonly trustedPattern?: string;
+      readonly requiredEventIntegrity?: readonly string[];
+    };
+  };
+};
+
+/**
+ * Recursively removes `readonly` from all properties of `T`.
+ *
+ * Copy of `Mutable` from `@commonfabric/utils/types`. These two definitions
+ * should be unified; see that module for the canonical version.
+ */
+type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
+  : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
+  : T;
+
+/**
+ * A deep-mutable variant of `JSONSchemaObj`. Recursively strips `readonly`
+ * from all properties, making the schema safe to build up incrementally.
+ */
+export type JSONSchemaObjMutable = Mutable<JSONSchemaObj>;
+
+/**
+ * A `JSONSchemaObjMutable` or a boolean. JSON Schema allows `true` (accept any
+ * value) and `false` (reject all values) as valid schemas.
+ */
+export type JSONSchemaMutable = JSONSchemaObjMutable | boolean;
+
+export type * from "./cfc.ts";
+export { CFC_CANONICAL_ALIAS_NAMES } from "./cfc.ts";
+
+export type TrustedActionWriteWithIntegrity<
+  T,
+  Binding,
+  Action extends string,
+  Pattern extends string,
+  Integrity extends readonly [string, ...string[]],
+> = Cfc<
+  WriteAuthorizedBy<T, Binding>,
+  {
+    uiContract: {
+      helper: "UiAction";
+      action: Action;
+      trustedPattern: Pattern;
+      requiredEventIntegrity: Integrity;
+    };
+  }
+>;
+
+export type TrustedActionWrite<
+  T,
+  Binding,
+  Action extends string,
+  Pattern extends string,
+> = TrustedActionWriteWithIntegrity<T, Binding, Action, Pattern, [Pattern]>;
+
+export type TrustedActionUiContract<
+  T,
+  Action extends string,
+  Pattern extends string,
+  Integrity extends readonly [string, ...string[]] = [Pattern],
+> = Cfc<
+  T,
+  {
+    uiContract: {
+      helper: "UiAction";
+      action: Action;
+      trustedPattern: Pattern;
+      requiredEventIntegrity: Integrity;
+    };
+  }
+>;
+
+/**
+ * Selects a sub-path within a document, optionally paired with a schema
+ * that describes the value at that path. Used by the storage/sync layer
+ * to track which slices of a document are being observed.
+ */
+export type SchemaPathSelector = {
+  path: readonly string[];
+  schema?: JSONSchema;
 };
 
 // LLM types matching Vercel AI SDK structure
@@ -1294,9 +1700,24 @@ export interface ImageData {
 export type BuiltInLLMTool =
   & { description?: string }
   & (
-    | { pattern: Pattern; handler?: never; extraParams?: Record<string, any> }
+    | {
+      pattern: Pattern;
+      handler?: never;
+      extraParams?: Record<string, any>;
+      useResultSchemaForObservation?: boolean;
+    }
     | { handler: Stream<any> | OpaqueRef<any>; pattern?: never }
   );
+
+/**
+ * A web source surfaced by a native search/grounding tool (e.g.
+ * `google_search`). Populated on the result state when grounding is requested.
+ */
+export interface BuiltInLLMGroundingSource {
+  url?: string;
+  title?: string;
+  snippet?: string;
+}
 
 // Built-in types
 export interface BuiltInLLMParams {
@@ -1305,6 +1726,8 @@ export interface BuiltInLLMParams {
   system?: string;
   stop?: string;
   maxTokens?: number;
+  builtinTools?: boolean;
+  observationMaxConfidentiality?: readonly ImmutableJSONValue[];
   /**
    * Specifies the mode of operation for the LLM.
    * - `"json"`: Indicates that the LLM should process and return data in JSON format.
@@ -1317,6 +1740,13 @@ export interface BuiltInLLMParams {
    */
   tools?: Record<string, BuiltInLLMTool>;
   /**
+   * Enable Google Search grounding (shorthand for the `google_search` native
+   * model tool). Source URLs are surfaced on the state's `groundingSources`.
+   */
+  search?: boolean;
+  /** Raw native model tool ids to request, e.g. `["google_search"]`. */
+  nativeModelToolIds?: readonly string[];
+  /**
    * Context cells to make available to the LLM.
    * These cells appear in the system prompt with their schemas and current values.
    */
@@ -1327,6 +1757,10 @@ export interface BuiltInLLMParams {
    * dialog state's `result` field. Can be called multiple times (overwrites previous).
    */
   resultSchema?: JSONSchema;
+  /**
+   * Optional named queue to route async operations through.
+   */
+  queue?: string;
 }
 
 export interface BuiltInLLMState {
@@ -1335,14 +1769,21 @@ export interface BuiltInLLMState {
   partial?: string;
   error?: unknown;
   cancelGeneration: Stream<void>;
+  /** Web sources from native search grounding, when `search`/`google_search` was requested. */
+  groundingSources?: readonly BuiltInLLMGroundingSource[];
 }
 
 export interface BuiltInLLMGenerateObjectState<T> {
   pending: boolean;
   result?: T;
+  messages?: BuiltInLLMMessage[];
   partial?: string;
   error?: unknown;
   cancelGeneration: Stream<void>;
+  // NOTE: `generateObject` accepts `search`/`nativeModelToolIds` (grounding can
+  // improve the structured result), but does NOT surface `groundingSources` —
+  // its JSON-mode path returns only the object, not the grounded response. Use
+  // `generateText` when you need the source URLs.
 }
 
 export interface BuiltInLLMDialogState {
@@ -1367,8 +1808,23 @@ export type BuiltInGenerateObjectParams =
     system?: string;
     cache?: boolean;
     maxTokens?: number;
+    observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+    schemaSanitizePromptInjection?: boolean;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
+    /**
+     * Enable Google Search grounding (shorthand for the `google_search`
+     * native model tool). Real, current web results inform the answer, and
+     * the source URLs are surfaced on the result state's `groundingSources`
+     * (generateText / llm only — generateObject does not surface them).
+     */
+    search?: boolean;
+    /**
+     * Raw native model tool ids to request (e.g. `["google_search"]`).
+     * `search: true` is the friendly shorthand for `["google_search"]`.
+     */
+    nativeModelToolIds?: readonly string[];
+    queue?: string;
   }
   | {
     model?: string;
@@ -1379,8 +1835,23 @@ export type BuiltInGenerateObjectParams =
     system?: string;
     cache?: boolean;
     maxTokens?: number;
+    observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+    schemaSanitizePromptInjection?: boolean;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
+    /**
+     * Enable Google Search grounding (shorthand for the `google_search`
+     * native model tool). Real, current web results inform the answer, and
+     * the source URLs are surfaced on the result state's `groundingSources`
+     * (generateText / llm only — generateObject does not surface them).
+     */
+    search?: boolean;
+    /**
+     * Raw native model tool ids to request (e.g. `["google_search"]`).
+     * `search: true` is the friendly shorthand for `["google_search"]`.
+     */
+    nativeModelToolIds?: readonly string[];
+    queue?: string;
   };
 
 export type BuiltInGenerateTextParams =
@@ -1392,6 +1863,19 @@ export type BuiltInGenerateTextParams =
     model?: string;
     maxTokens?: number;
     tools?: Record<string, BuiltInLLMTool>;
+    /**
+     * Enable Google Search grounding (shorthand for the `google_search`
+     * native model tool). Real, current web results inform the answer, and
+     * the source URLs are surfaced on the result state's `groundingSources`
+     * (generateText / llm only — generateObject does not surface them).
+     */
+    search?: boolean;
+    /**
+     * Raw native model tool ids to request (e.g. `["google_search"]`).
+     * `search: true` is the friendly shorthand for `["google_search"]`.
+     */
+    nativeModelToolIds?: readonly string[];
+    queue?: string;
   }
   | {
     prompt?: never;
@@ -1401,6 +1885,19 @@ export type BuiltInGenerateTextParams =
     model?: string;
     maxTokens?: number;
     tools?: Record<string, BuiltInLLMTool>;
+    /**
+     * Enable Google Search grounding (shorthand for the `google_search`
+     * native model tool). Real, current web results inform the answer, and
+     * the source URLs are surfaced on the result state's `groundingSources`
+     * (generateText / llm only — generateObject does not surface them).
+     */
+    search?: boolean;
+    /**
+     * Raw native model tool ids to request (e.g. `["google_search"]`).
+     * `search: true` is the friendly shorthand for `["google_search"]`.
+     */
+    nativeModelToolIds?: readonly string[];
+    queue?: string;
   };
 
 export interface BuiltInGenerateTextState {
@@ -1409,6 +1906,8 @@ export interface BuiltInGenerateTextState {
   error?: unknown;
   partial?: string;
   requestHash?: string;
+  /** Web sources from native search grounding, when `search`/`google_search` was requested. */
+  groundingSources?: readonly BuiltInLLMGroundingSource[];
 }
 
 export interface BuiltInCompileAndRunParams<T> {
@@ -1431,20 +1930,32 @@ export interface BuiltInCompileAndRunState<T> {
 }
 
 // Function type definitions
+//
+// Boundary principle for factory types: factories ACCEPT the stripped data
+// shape — `Opaque<StripCell<T>>` means "this data shape, wrapped however you
+// like" (liberal in what we accept). Factories RETURN exactly what the body
+// returned: `R` unstripped (faithful in what we produce). Cell/Stream brands in
+// a result type are exported capabilities, preserved end-to-end — the brand in
+// the type becomes `asCell`/`asStream` in the generated result schema, which
+// the runtime rematerializes as a live Cell/Stream for consumers. Stripping a
+// result type would not just misreport that; transformer-inferred schemas are
+// derived from these types, so it would silently downgrade live cells to dead
+// values. (`SELF` and the consumer-facing factory result deliberately use the
+// same unstripped `R`.)
 export interface PatternFunction {
   // Function-only overload: T and R inferred from function
   <T, R>(
     fn: (
       input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
     ) => Opaque<R>,
-  ): PatternFactory<StripCell<T>, StripCell<R>>;
+  ): PatternFactory<StripCell<T>, R>;
 
   // Function-only overload: T explicit, R inferred
   <T>(
     fn: (
       input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
     ) => any,
-  ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
+  ): PatternFactory<StripCell<T>, ReturnType<typeof fn>>;
 
   // Function + schema overload: T explicit, R inferred
   <T>(
@@ -1453,7 +1964,7 @@ export interface PatternFunction {
     ) => any,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
-  ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
+  ): PatternFactory<StripCell<T>, ReturnType<typeof fn>>;
 
   // Function + schema overload: T and R explicit
   <T, R>(
@@ -1462,7 +1973,7 @@ export interface PatternFunction {
     ) => Opaque<R>,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
-  ): PatternFactory<StripCell<T>, StripCell<R>>;
+  ): PatternFactory<StripCell<T>, R>;
 }
 
 /**
@@ -1472,42 +1983,51 @@ export interface PatternFunction {
 export interface PatternToolResult<E = Record<PropertyKey, never>> {
   pattern: Pattern;
   extraParams: E;
+  useResultSchemaForObservation?: boolean;
 }
 
 export type PatternToolFunction = <
   T,
   E extends object = Record<PropertyKey, never>,
 >(
-  fnOrPattern:
-    | ((input: OpaqueRef<RequireDefaults<T>>) => any)
-    | PatternFactory<T, any>,
+  // CT-1655: the first argument must be an explicit `pattern(...)`. Passing a
+  // bare callback (and letting the runtime wrap it / a transformer auto-capture
+  // its closure) is no longer supported — wrap it yourself:
+  // `patternTool(pattern(fn), extraParams?)`.
+  pattern: PatternFactory<T, any>,
   // Validate that E (after stripping cells) is a subset of T
   extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,
 ) => PatternToolResult<E>;
 
+// Public (schema-light) surface, matching PatternFunction's index.ts shape: the
+// callback is the only argument and the types come from the callback itself. The
+// schema-bearing, type-materializing overloads (where the callback's input type
+// is derived FROM the supplied JSONSchema) live in `commonfabric/schema`
+// (api/schema.ts) so that schema and type can never contradict each other — the
+// same split pattern already used for pattern()/handler(). Transformer-emitted
+// `__cfHelpers.lift(...)` is untyped (`__cfHelpers: any`), so it does not depend
+// on these overloads; only authored `lift(...)` calls resolve against them.
 export interface LiftFunction {
   <T, R>(
     implementation: (input: T) => R,
-  ): ModuleFactory<StripCell<T>, StripCell<R>>;
+  ): ModuleFactory<StripCell<T>, R>;
 
   <T>(
     implementation: (input: T) => any,
-  ): ModuleFactory<StripCell<T>, StripCell<ReturnType<typeof implementation>>>;
+  ): ModuleFactory<StripCell<T>, ReturnType<typeof implementation>>;
 
   <T extends (...args: any[]) => any>(
     implementation: T,
-  ): ModuleFactory<StripCell<Parameters<T>[0]>, StripCell<ReturnType<T>>>;
-
-  <T, R>(
-    argumentSchema?: JSONSchema,
-    resultSchema?: JSONSchema,
-    implementation?: (input: T) => R,
-  ): ModuleFactory<StripCell<T>, StripCell<R>>;
+  ): ModuleFactory<StripCell<Parameters<T>[0]>, ReturnType<T>>;
 }
 
-// Helper type to make non-Cell and non-Stream properties readonly in handler state
+// Helper type to make non-Cell and non-Stream properties readonly in handler state.
+// Cell/Stream/SqliteDb are passed through whole (they are handle interfaces with
+// methods — `.get()/.set()`, `.send()`, `.exec()/.query()` — not data containers
+// to map over).
 export type HandlerState<T> = T extends Cell<any> ? T
   : T extends Stream<any> ? T
+  : T extends SqliteDb<any> ? T
   : T extends Array<infer U> ? ReadonlyArray<HandlerState<U>>
   : T extends object ? { readonly [K in keyof T]: HandlerState<T[K]> }
   : T;
@@ -1534,12 +2054,13 @@ export interface HandlerFunction {
 /**
  * ActionFunction creates a handler that doesn't use the state parameter.
  *
- * This is to handler as computed is to lift/derive:
+ * This is to handler as computed is to lift:
  * - User writes: action((e) => count.set(e.data))
  * - Transformer rewrites to: handler((e, { count }) => count.set(e.data))({ count })
  *
  * The transformer extracts closures and makes them explicit, just like how
- * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
+ * computed(() => expr) becomes a lift-applied computation with closure
+ * extraction.
  */
 export type ActionFunction = {
   // Overload 1: Zero-parameter callback returns Stream<void>
@@ -1547,48 +2068,6 @@ export type ActionFunction = {
   // Overload 2: Parameterized callback returns Stream<T>
   <T>(fn: (event: T) => void): Stream<T>;
 };
-
-/**
- * DeriveFunction creates a reactive computation that transforms input values.
- *
- * Special overload ordering is critical for correct type inference:
- *
- * 1. Boolean literal overload: Widens `OpaqueRef<true> | OpaqueRef<false>` to `boolean`
- *    - Required because TypeScript infers boolean cells as a union of literal types
- *    - Without this, the callback would get `true | false` instead of `boolean`
- * 2. Cell preservation overload: Keeps Cell types wrapped consistently
- *    - Prevents unwrapping of Cell<T> to T, maintaining consistent behavior
- *    - Whether Cell is passed directly or nested in objects, it stays wrapped
- *    - Example: derive(cell<number>(), (c) => ...) gives c: Cell<number>, not number
- * 3. Generic overload: Handles all other cases, unwrapping Opaque types
- *
- * Note: Schema-based overload is available when importing from "commontools/schema"
- *
- * @deprecated Use compute() instead
- */
-export interface DeriveFunction {
-  // Overload 1: Boolean literal union -> boolean
-  // Fixes: cell<boolean>() returns OpaqueRef<true> | OpaqueRef<false>
-  // Without this, callback gets (input: true | false) instead of (input: boolean)
-  <In extends boolean, Out>(
-    input: OpaqueRef<true> | OpaqueRef<false>,
-    f: (input: In) => Out,
-  ): OpaqueRef<Out>;
-
-  // Overload 2: Preserve Cell types - unwrap OpaqueRef layers but keep Cell
-  // Ensures consistent behavior: Cell<T> stays Cell<T> whether passed directly or in objects
-  // Handles: Cell<T>, OpaqueRef<Cell<T>>, OpaqueRef<OpaqueRef<Cell<T>>>, etc.
-  <In, Out>(
-    input: AnyCellWrappedInOpaqueRef<In>,
-    f: (input: In) => Out,
-  ): OpaqueRef<Out>;
-
-  // Overload 3: Generic fallback - unwraps all Opaque types
-  <In, Out>(
-    input: Opaque<In>,
-    f: (input: In) => Out,
-  ): OpaqueRef<Out>;
-}
 
 export type ComputedFunction = <T>(fn: () => T) => OpaqueRef<T>;
 
@@ -1633,6 +2112,7 @@ export type GenerateTextFunction = (
 export type FetchOptions = {
   body?: JSONValue;
   headers?: Record<string, string>;
+  mutexTimeoutMs?: number;
   cache?:
     | "default"
     | "no-store"
@@ -1646,7 +2126,7 @@ export type FetchOptions = {
 export type FetchDataFunction = <T>(
   params: Opaque<{
     url: string;
-    mode?: "json" | "text";
+    mode?: "json" | "text" | "dataUrl";
     options?: FetchOptions;
     result?: T;
   }>,
@@ -1675,6 +2155,162 @@ export type CompileAndRunFunction = <T = any, S = any>(
   params: Opaque<BuiltInCompileAndRunParams<T>>,
 ) => OpaqueRef<BuiltInCompileAndRunState<S>>;
 
+// --- SQLite builtins (docs/specs/sqlite-builtin) ---
+
+declare const __sqliteDb: unique symbol;
+/**
+ * Opaque database handle. Empty to pattern code; a cell reference to the runtime
+ * via the `toCell` back-pointer. Patterns only ever *forward* it (to sqliteQuery
+ * / sqliteExecute / reactOn), never read it.
+ */
+export type SqliteDatabase = { readonly [__sqliteDb]: true };
+
+/** Imperative write on a SqliteDb handle: records a SQLite write onto the
+ *  current transaction so it commits atomically with surrounding cell writes
+ *  (see docs/specs/sqlite-builtin/plans/sqlitedb-cell-type-exploration.md). */
+export interface ISqliteExecutable {
+  exec(
+    sql: string,
+    params?: ReadonlyArray<unknown> | Record<string, unknown>,
+  ): void;
+}
+
+/** Reactive read on a SqliteDb handle: builds a `sqliteQuery` node. `<Row>` is
+ *  lowered by the transformer to an injected result schema. */
+export interface ISqliteQueryable {
+  query<Row = Record<string, unknown>>(
+    sql: string,
+    options?: {
+      params?: ReadonlyArray<unknown> | Record<string, unknown>;
+      reactOn?: unknown;
+      /** CFC Phase 3: declared output ceiling (see SqliteQueryParams). */
+      maxConfidentiality?: ReadonlyArray<unknown>;
+      /** `"fail"` (default) | `"skip"` when a row exceeds the ceiling. */
+      onExceed?: "fail" | "skip";
+    },
+  ): OpaqueRef<{ pending: boolean; result?: Row[]; error?: any }>;
+}
+
+/**
+ * SqliteDb is a cell variant (kind `"sqlite"`) — a DB handle cell exposing ONLY
+ * the SQLite method surface (`.exec`/`.query`), not the general value-cell
+ * read/write API. In particular it deliberately does **not** extend
+ * `IReadable<T>`: `.get()`/`.sample()` are meaningless on an opaque DB handle
+ * (the handle ref is an internal detail; pattern code reads rows via `.query`),
+ * so omitting them keeps `db.get()` from type-checking. The handle is also not
+ * writable (you can't `.set()` a DB handle). The runtime still reads the raw
+ * handle internally via `getRaw()` to fold writes onto the transaction.
+ */
+export interface ISqliteDb<T = SqliteDatabase>
+  extends IAnyCell<T>, ISqliteExecutable, ISqliteQueryable {}
+
+export interface SqliteDb<T = SqliteDatabase>
+  extends BrandedCell<T, "sqlite">, ISqliteDb<T> {}
+
+/** A map of table name -> one-row JSON Schema (see `table()`). */
+export type SqliteTableSchemas = Record<string, JSONSchema>;
+
+/** Non-default database source. Cell-derived (default) needs no source; on-disk
+ *  databases are injected as a pattern input, not selected here. */
+export type SqliteDatabaseSource = {
+  vm: OpaqueRef<unknown>;
+  path: string;
+};
+
+export type SqliteDatabaseFunction = {
+  (
+    options?: { tables?: SqliteTableSchemas },
+    source?: SqliteDatabaseSource,
+  ): OpaqueRef<SqliteDb>;
+  /** Bind the db (and so its on-disk file) to a scope. The transformer lowers
+   *  `const db: PerUser<SqliteDb> = sqliteDatabase(...)` to `.asScope("user")`;
+   *  call it explicitly for the same effect. */
+  asScope(scope: CellScope): SqliteDatabaseFunction;
+};
+
+export type SqliteQueryParams = {
+  db: Opaque<SqliteDatabase | SqliteDb>;
+  sql: string;
+  params?: ReadonlyArray<unknown> | Record<string, unknown>;
+  reactOn?: unknown;
+  /** CFC Phase 3: the declared output ceiling — the maximum confidentiality
+   *  the RESULT may carry (a consumer contract, not reader clearance).
+   *  Placeholder atoms `{__ctCurrentPrincipal: true}` (the acting user) and
+   *  `{__ctDbOwner: true}` (the db's owner) resolve at prepare time. The
+   *  typed alternative is `MaxConfidentiality<Row, …>` on the Row schema —
+   *  declare the ceiling once, not both ways. */
+  maxConfidentiality?: ReadonlyArray<unknown>;
+  /** What to do when a row's label exceeds the ceiling: `"fail"` (default —
+   *  refuse the whole query) or `"skip"` (drop the offending rows; a declared
+   *  existence release, row-returning queries only — never aggregates). */
+  onExceed?: "fail" | "skip";
+};
+export type SqliteQueryFunction = <Row = Record<string, unknown>>(
+  params: Opaque<SqliteQueryParams>,
+) => OpaqueRef<{ pending: boolean; result?: Row[]; error?: any }>;
+
+// Writes are the imperative SqliteDb.exec method (see ISqliteExecutable), which
+// folds a `sqlite` op into the caller's commit (atomic with cell writes). There
+// is no standalone reactive sqliteExecute builder.
+
+/** Column spec for `table()`: a shorthand SQL type string or a column schema. */
+export type SqliteColumnSpec = string | JSONSchema;
+
+/** A reference to a declared column, handed to a row-label rule as `f.<col>`
+ *  (CFC Phase 3; see `@commonfabric/memory/sqlite/row-label`). */
+export type SqliteRowFieldRef = { readonly field: string };
+
+/** A per-row CFC label rule: a pure declarative projection over the row's
+ *  columns, built from the closed helper set (match/principal/all/whenMatches/
+ *  dbOwner/endorsedBy/…). Validated and serialized at `table()` time;
+ *  evaluated identically at the write gate, server commit, and read. */
+export type SqliteRowLabelRule = (
+  f: Record<string, SqliteRowFieldRef>,
+) => { confidentiality?: unknown; integrity?: unknown };
+
+export type SqliteTableFunction = (
+  columns: Record<string, SqliteColumnSpec>,
+  rule?: SqliteRowLabelRule,
+) => JSONSchema;
+
+/**
+ * The SQLite helper namespace: one import for the table/label vocabulary —
+ * `const { table, all, principal, match, dbOwner } = cfSqlite`. The row-label
+ * helpers (CFC Phase 3) build the declarative per-row rule passed to
+ * `table(columns, rule)`; each returns a serialized AST node. `any(...)`
+ * (one authored OR-clause) errors at `table()` time until the clause-aware
+ * label profile lands. There is deliberately no bare `when`: the builder's
+ * control-flow `when` lowering matches by name, so the gate is the fused
+ * `whenMatches`.
+ */
+export interface CfSqliteHelpers {
+  table: SqliteTableFunction;
+  cfLink: SqliteCfLinkFunction;
+  /** Regex (forced global) over a column ⟹ ordered match list (split+clean). */
+  match(
+    field: SqliteRowFieldRef,
+    re: RegExp,
+    opts?: { group?: number; min?: number },
+  ): unknown;
+  /** `did:<protocol>:<v>` per extracted value (protocol-implied normalization). */
+  principal(protocol: string, of: unknown): unknown;
+  /** Conjunctive clauses — every term an independent requirement. */
+  all(...terms: unknown[]): unknown;
+  /** ONE authored OR-clause (reserved: errors until OR-clause support). */
+  any(...terms: unknown[]): unknown;
+  /** Integrity meet (set ∩). Integrity-only. */
+  intersect(...terms: unknown[]): unknown;
+  /** Include `then` only when the regex tests true against the column. */
+  whenMatches(field: SqliteRowFieldRef, re: RegExp, then: unknown): unknown;
+  /** The db's owner (fixed, from the db ref — never the acting reader). */
+  dbOwner(): unknown;
+  endorsedBy(p: unknown): unknown;
+  authoredBy(p: unknown): unknown;
+  /** A literal atom (escape hatch). */
+  constant(atom: unknown): unknown;
+}
+export type SqliteCfLinkFunction = <_T = unknown>() => JSONSchema;
+
 export type WishTag = `/${string}` | `#${string}`;
 
 export type DID = `did:${string}:${string}`;
@@ -1685,10 +2321,11 @@ export type WishParams = {
   context?: Record<string, any>;
   schema?: JSONSchema;
   /**
-   * Search scope for hashtag queries: "~" = favorites (home), "." = mentionables (current space).
+   * Search scope for hashtag queries: "~" = favorites (home), "." = mentionables (current space),
+   * "profile" = current user's profile elements.
    * Default (undefined) = favorites only for backward compatibility.
    */
-  scope?: (DID | "~" | ".")[];
+  scope?: (DID | "~" | "." | "profile")[];
   /**
    * When true, skip the suggestion/picker UI pattern (suggestion.tsx).
    * Multiple candidates are returned as-is without disambiguation.
@@ -1718,13 +2355,59 @@ export type CreateNodeFactoryFunction = <T = any, R = any>(
 // This is a compile-time-only brand; at runtime Default<> is just T.
 export declare const DEFAULT_MARKER: unique symbol;
 
+type DefaultMarker<T> = { readonly [DEFAULT_MARKER]: T };
+
+// True only for the empty tuple `[]` (a length-0 tuple), false for general
+// arrays like `string[]` (whose `length` is the wide `number`) and non-empty
+// tuples. Used by Default<> to special-case `Default<[]>` (see below).
+type IsEmptyTuple<T> = T extends readonly unknown[]
+  ? number extends T["length"] ? false
+  : T["length"] extends 0 ? true
+  : false
+  : false;
+
 // Default type for specifying default values in type definitions.
 // The DEFAULT_MARKER brand enables RequireDefaults<T> to detect which fields
 // have runtime-provided defaults and make them non-optional in pattern bodies.
 // Detection uses conditional type inference (not keyof) for performance.
-export type Default<T, V extends T = T> =
-  | (T & { readonly [DEFAULT_MARKER]: T })
-  | T;
+// Nullish-only defaults need a standalone marker because `null & Brand` and
+// `undefined & Brand` collapse to `never`.
+//
+// Empty-tuple special case (CT-1640): for `Default<[]>` we keep ONLY the branded
+// arm and drop the bare `| T` arm. Without this, `Default<[]>` would contribute a
+// bare `[]` (i.e. `never[]`) member; in the documented `T[] | Default<[]>` shape
+// that bare member survives `.get()`'s brand-stripping, leaving `T[] | never[]`,
+// and TypeScript intersects parameter-position element types across the union so
+// `.includes(x)`/`.indexOf(x)` collapse their parameter to `never`. Dropping the
+// bare arm lets the sibling `T[]` member supply the value type while the brand is
+// still present for RequireDefaults<> detection. (The lone `Default<[]>` form —
+// no sibling array — is not used in practice; the docs always pair it as
+// `T[] | Default<[]>`.)
+//
+// Why ONLY the empty tuple, and not all tuples: a non-empty literal-tuple default
+// in a union (e.g. `string[] | Default<["seed"]>`) also narrows parameter-position
+// methods — but to the literal element type, which is a legible error, not the
+// confusing `never`. More importantly, the empty tuple is the unique tuple that
+// can never be a legitimate *standalone* field type, so dropping its plain arm is
+// unconditionally safe. Generalizing to all tuples would collapse a standalone
+// tuple default like `Default<[string, number], ["a", 0]>` to `never` (the lone
+// branded arm strips away), breaking that contract. Authors who want an array
+// field with an empty-ish/seed default and a precise element type should use the
+// two-arg form `Default<string[], []>` (T = the array, not the tuple).
+export type Default<T, V extends T = T> = IsEmptyTuple<T> extends true
+  ? T & DefaultMarker<T>
+  :
+    | ([T] extends [null | undefined] ? DefaultMarker<T>
+      : T & DefaultMarker<T>)
+    | T;
+
+/**
+ * Marker for partial, recursive object defaults in `T | DeepDefault<V>` schema
+ * declarations. It is stripped from pattern body types by RequireDefaults<T>;
+ * schema generation reads `V` from the AST and applies it as object/property
+ * defaults.
+ */
+export type DeepDefault<V> = DefaultMarker<V>;
 
 /** Detect if T is `any` (used to avoid false positives in brand detection). */
 type IsAny<T> = 0 extends 1 & T ? true : false;
@@ -1770,6 +2453,34 @@ export type StripDefaultBrand<T> = Exclude<
   { readonly [DEFAULT_MARKER]: any }
 >;
 
+type RemoveRedundantUnionMembers<T, All = T> = T extends any
+  ? [Exclude<All, T>] extends [never] ? T
+  : T extends Exclude<All, T> ? never
+  : T
+  : never;
+
+type StripDefaultUnion<T> = RemoveRedundantUnionMembers<StripDefaultBrand<T>>;
+
+/**
+ * Cell-aware default stripping for pattern input normalization. The public
+ * StripDefaultBrand<T> intentionally stays shallow because it is used by cell
+ * interfaces in variance-sensitive positions.
+ */
+type StripDefaultField<T> = IsAny<T> extends true ? T
+  : StripDefaultFieldInner<StripDefaultUnion<T>>;
+
+type StripDefaultFieldInner<T> = T extends Cell<infer U>
+  ? Cell<StripDefaultUnion<U>>
+  : T extends OpaqueCell<infer U> ? OpaqueCell<StripDefaultUnion<U>>
+  : T extends Stream<infer U> ? Stream<StripDefaultUnion<U>>
+  : T extends ComparableCell<infer U> ? ComparableCell<StripDefaultUnion<U>>
+  : T extends ReadonlyCell<infer U> ? ReadonlyCell<StripDefaultUnion<U>>
+  : T extends WriteonlyCell<infer U> ? WriteonlyCell<StripDefaultUnion<U>>
+  : T extends AnyCell<infer U> ? AnyCell<StripDefaultUnion<U>>
+  : T extends AnyBrandedCell<infer U, infer Kind>
+    ? AnyBrandedCell<StripDefaultUnion<U>, Kind>
+  : T;
+
 /**
  * Maps a type T so that any fields carrying the DEFAULT_MARKER brand become required
  * (removing `?`) and have their brand stripped, while all other fields are left
@@ -1789,7 +2500,7 @@ export type RequireDefaults<T> =
   // `Default<X,V> | undefined`. In a non-distributive conditional context, `boolean extends true`
   // is `false`, but `true extends boolean` is `true` — correctly triggering the true branch.
   & {
-    [K in keyof T]: true extends IsDefaultField<T[K]> ? StripDefaultBrand<T[K]>
+    [K in keyof T]: true extends IsDefaultField<T[K]> ? StripDefaultField<T[K]>
       : T[K];
   }
   // Refinement: remove `?` from keys that carry the Default brand.
@@ -1800,7 +2511,7 @@ export type RequireDefaults<T> =
   // possibly-undefined in the pattern body despite being required.
   & {
     [K in keyof T as true extends IsDefaultField<T[K]> ? K : never]-?:
-      StripDefaultBrand<Exclude<T[K], undefined>>;
+      StripDefaultField<Exclude<T[K], undefined>>;
   };
 
 // Internal-only way to instantiate internal modules
@@ -1835,6 +2546,8 @@ export type SchemaFunction = <T extends JSONSchema>(schema: T) => T;
 // toSchema is a compile-time transformer that converts TypeScript types to JSONSchema
 // The actual implementation is done by the TypeScript transformer
 export type ToSchemaFunction = <T>(options?: Partial<JSONSchema>) => JSONSchema;
+/** Internal compiler-emitted helper for top-level data materialization. */
+export type CfDataFunction = <T>(value: T) => T;
 
 // Pattern environment types
 export interface PatternEnvironment {
@@ -1842,6 +2555,13 @@ export interface PatternEnvironment {
 }
 
 export type GetPatternEnvironmentFunction = () => PatternEnvironment;
+export type NonPrivateRandomFunction = () => number;
+export type SafeDateNowFunction = () => number;
+export type ToCompactDebugStringFunction = (
+  value: unknown,
+  maxLength?: number,
+) => string;
+export type ToIndentedDebugStringFunction = (value: unknown) => string;
 
 /**
  * Compare two cells or values for equality after resolving, i.e. after
@@ -1849,9 +2569,28 @@ export type GetPatternEnvironmentFunction = () => PatternEnvironment;
  * This is a standalone export of the equals function from Cell/Writable.
  */
 export type EqualsFunction = (
-  a: AnyCell<any> | object,
-  b: AnyCell<any> | object,
+  a: AnyCell<any> | object | undefined,
+  b: AnyCell<any> | object | undefined,
 ) => boolean;
+
+/**
+ * Multi-user pattern test descriptor (`cf test`). Export it as the test
+ * file's default export to run each participant pattern in its own isolated
+ * runtime (own identity) against one shared space. The optional `setup`
+ * pattern instantiates shared state once; each participant pattern receives
+ * its result as the `setup` input. Participants coordinate through
+ * `{ label: "name" }` / `{ await: "name" }` entries in their `tests` arrays.
+ * Use `{ pattern, user: "other" }` to run a second session of an existing
+ * user's identity.
+ */
+export interface MultiUserTestDescriptor {
+  setup?: (...args: never[]) => unknown;
+  participants: Record<
+    string,
+    | ((...args: never[]) => unknown)
+    | { pattern: (...args: never[]) => unknown; user?: string }
+  >;
+}
 
 // Re-export all function types as values for destructuring imports
 // These will be implemented by the factory
@@ -1860,8 +2599,6 @@ export declare const patternTool: PatternToolFunction;
 export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
 export declare const action: ActionFunction;
-/** @deprecated Use compute() instead */
-export declare const derive: DeriveFunction;
 export declare const computed: ComputedFunction;
 export declare const str: StrFunction;
 export declare const ifElse: IfElseFunction;
@@ -1876,14 +2613,54 @@ export declare const fetchData: FetchDataFunction;
 export declare const fetchProgram: FetchProgramFunction;
 export declare const streamData: StreamDataFunction;
 export declare const compileAndRun: CompileAndRunFunction;
+export declare const sqliteDatabase: SqliteDatabaseFunction;
+export declare const sqliteQuery: SqliteQueryFunction;
+export declare const table: SqliteTableFunction;
+export declare const cfLink: SqliteCfLinkFunction;
+export declare const cfSqlite: CfSqliteHelpers;
 export declare const navigateTo: NavigateToFunction;
 export declare const wish: WishFunction;
+/**
+ * Tag a multi-user test descriptor for `cf test` (identity at runtime; a
+ * call expression keeps the descriptor's pattern factories out of the
+ * plain-data hardening that module-level data literals receive).
+ */
+export declare const multiUserTest: <T extends MultiUserTestDescriptor>(
+  descriptor: T,
+) => T;
 export declare const createNodeFactory: CreateNodeFactoryFunction;
 /** @deprecated Use Cell.of(defaultValue?) instead */
 export declare const cell: CellTypeConstructor<AsCell>["of"];
 export declare const equals: EqualsFunction;
 export declare const byRef: ByRefFunction;
 export declare const getPatternEnvironment: GetPatternEnvironmentFunction;
+export declare const nonPrivateRandom: NonPrivateRandomFunction;
+export declare const safeDateNow: SafeDateNowFunction;
+export declare const toCompactDebugString: ToCompactDebugStringFunction;
+export declare const toIndentedDebugString: ToIndentedDebugStringFunction;
+
+export interface UiActionProps {
+  readonly as?: string;
+  readonly action: string;
+  readonly children?: RenderNode;
+}
+
+export interface UiPromptSlotProps {
+  readonly as?: string;
+  readonly surface: string;
+  readonly role: string;
+  readonly children?: RenderNode;
+}
+
+export interface UiDisclosureProps {
+  readonly as?: string;
+  readonly kind: string;
+  readonly children?: RenderNode;
+}
+
+export declare function UiAction(props: UiActionProps): JSXElement;
+export declare function UiPromptSlot(props: UiPromptSlotProps): JSXElement;
+export declare function UiDisclosure(props: UiDisclosureProps): JSXElement;
 
 /**
  * Get the entity ID from a cell or value.
@@ -1895,6 +2672,11 @@ export declare const getEntityId: GetEntityIdFunction;
 
 export declare const schema: SchemaFunction;
 export declare const toSchema: ToSchemaFunction;
+export declare const __cf_data: CfDataFunction;
+export declare const __cfHelpers: any;
+export declare namespace __cfHelpers {
+  export type JSONSchema = JSONSchemaObj | boolean;
+}
 
 /**
  * Dynamic properties. Can either be string type (static) or a Mustache
@@ -1952,3 +2734,25 @@ export type VNode = {
   children?: RenderNode | undefined;
   [UI]?: VNode;
 };
+
+/**
+ * Filesystem projection for a pattern result. Used with the [FS] symbol.
+ *
+ * - `type: "text/markdown"` — render as `index.md` with YAML frontmatter +
+ *   markdown body. Primitive frontmatter fields go into YAML; complex values
+ *   (arrays of entities, nested objects) become sibling directories.
+ * - `type: "application/json"` — render as `index.json` with `content`.
+ * - Plain object (no `type` field) — shorthand: the object itself becomes the
+ *   content of `index.json`.
+ */
+export type FsProjection =
+  | {
+    type: "text/markdown";
+    frontmatter?: Record<string, unknown>;
+    content: string;
+  }
+  | {
+    type: "application/json";
+    content: Record<string, unknown>;
+  }
+  | { type?: undefined; [key: string]: unknown };

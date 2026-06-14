@@ -1,6 +1,17 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern, type JSONSchema } from "commontools";
-import "commontools/schema";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { computed, pattern, type JSONSchema } from "commonfabric";
+import "commonfabric/schema";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // Test that pattern with both schemas already present is not transformed
 interface Input {
     count: number;
@@ -8,26 +19,28 @@ interface Input {
 interface Result {
     doubled: number;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    count: number;
+}, number>(({ count }) => count * 2, {
+    type: "object",
+    properties: {
+        count: {
+            type: "number"
+        }
+    },
+    required: ["count"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-two-schemas
 // Verifies: pattern with both input and output schemas already present preserves them
 //   pattern<Input, Result>(fn, inputSchema, outputSchema) → pattern(fn, inputSchema, outputSchema) (schemas kept)
-//   ({ count }) destructuring                              → __ct_pattern_input.key("count")
+//   ({ count }) destructuring                              → __cf_pattern_input.key("count")
 // Context: Schemas are user-provided, not generated; type args are stripped but schemas remain
-export default pattern((__ct_pattern_input) => {
-    const count = __ct_pattern_input.key("count");
+export default pattern((__cf_pattern_input) => {
+    const count = __cf_pattern_input.key("count");
     return {
-        doubled: __ctHelpers.derive({
-            type: "object",
-            properties: {
-                count: {
-                    type: "number",
-                    asOpaque: true
-                }
-            },
-            required: ["count"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count * 2)
+        doubled: __cfLift_1({ count: count }).for(["__patternResult", "doubled"], true)
     };
 }, {
     type: "object",
@@ -37,7 +50,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["count"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         doubled: {
@@ -45,8 +58,10 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["doubled"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

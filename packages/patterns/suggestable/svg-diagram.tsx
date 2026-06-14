@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   computed,
   Default,
@@ -8,16 +7,16 @@ import {
   pattern,
   UI,
   type VNode,
-} from "commontools";
+} from "commonfabric";
 
 // ===== Types =====
 
 type SvgDiagramInput = {
-  topic?: Default<string, "">;
-  context?: Default<Record<string, any>, Record<string, never>>;
+  topic?: string | Default<"">;
+  context?: Record<string, any> | Default<Record<string, never>>;
 };
 
-type SvgDiagramOutput = {
+export type SvgDiagramOutput = {
   [NAME]: string;
   [UI]: VNode;
   topic: string;
@@ -49,23 +48,23 @@ const SvgDiagram = pattern<SvgDiagramInput, SvgDiagramOutput>(
     return {
       [NAME]: computed(() => (topic ? `SVG Diagram: ${topic}` : "SVG Diagram")),
       [UI]: (
-        <ct-screen>
-          <ct-vstack slot="header" gap="1">
-            <ct-heading level={4}>
+        <cf-screen>
+          <cf-vstack slot="header" gap="1">
+            <cf-heading level={4}>
               {computed(() => topic || "SVG Diagram")}
-            </ct-heading>
-          </ct-vstack>
+            </cf-heading>
+          </cf-vstack>
 
-          <ct-vstack gap="3" style="padding: 1.5rem;">
+          <cf-vstack gap="3" style="padding: 1.5rem;">
             {ifElse(
               response.pending,
-              <div style="color: var(--ct-color-text-secondary);">
-                <ct-loader show-elapsed /> Generating diagram...
+              <div style="color: var(--cf-theme-color-text-secondary);">
+                <cf-loader show-elapsed /> Generating diagram...
               </div>,
-              <ct-svg content={response.result} />,
+              <cf-svg content={response.result} />,
             )}
-          </ct-vstack>
-        </ct-screen>
+          </cf-vstack>
+        </cf-screen>
       ),
       topic,
       diagram: computed(() => response.result || ""),

@@ -1,17 +1,17 @@
 # Reusable Handlers
 
-Use `handler()` when you need to define event-handling logic once and bind it to different state at multiple call sites. For most cases, prefer [`action()`](./action.md) which is simpler and closes over pattern state directly.
+Use `handler()` when you need to define event-handling logic once and bind it to different state at multiple call sites. **Default to [`action()`](./action.md)** — see that doc for the full decision guide.
 
 ## When to Use `handler()`
 
 1. **Same logic, different state** - You want to reuse identical handler logic with different state
 2. **Exported streams** - Other patterns need to call your handler via linking
-3. **CLI testing** - You want to test handlers via `ct piece call` before building UI
+3. **CLI testing** - You want to test handlers via `cf piece call` before building UI
 
 ## Basic Structure
 
 ```typescript
-import { handler, Writable } from "commontools";
+import { handler, Writable } from "commonfabric";
 
 // Define at module scope (outside pattern body)
 const increment = handler<EventType, StateType>((event, state) => {
@@ -25,7 +25,7 @@ const increment = handler<EventType, StateType>((event, state) => {
 ## Example: Reusable Counter Logic
 
 ```tsx
-import { handler, pattern, Writable, UI } from "commontools";
+import { handler, pattern, Writable, UI } from "commonfabric";
 
 // Define once at module scope
 const increment = handler<void, { count: Writable<number> }>(
@@ -37,8 +37,8 @@ const decrement = handler<void, { count: Writable<number> }>(
 );
 
 export default pattern(() => {
-  const counterA = Writable.of(0);
-  const counterB = Writable.of(100);
+  const counterA = new Writable(0);
+  const counterB = new Writable(100);
 
   return {
     [UI]: (
@@ -46,13 +46,13 @@ export default pattern(() => {
         {/* Same logic bound to different state */}
         <div>
           Counter A: {counterA}
-          <ct-button onClick={increment({ count: counterA })}>+</ct-button>
-          <ct-button onClick={decrement({ count: counterA })}>-</ct-button>
+          <cf-button onClick={increment({ count: counterA })}>+</cf-button>
+          <cf-button onClick={decrement({ count: counterA })}>-</cf-button>
         </div>
         <div>
           Counter B: {counterB}
-          <ct-button onClick={increment({ count: counterB })}>+</ct-button>
-          <ct-button onClick={decrement({ count: counterB })}>-</ct-button>
+          <cf-button onClick={increment({ count: counterB })}>+</cf-button>
+          <cf-button onClick={decrement({ count: counterB })}>-</cf-button>
         </div>
       </div>
     ),
@@ -71,7 +71,7 @@ const addItem = handler<{ title: string }, { items: Writable<Item[]> }>(
 );
 
 export default pattern(({ items }) => ({
-  [UI]: <ct-button onClick={addItem({ items })}>Add</ct-button>,
+  [UI]: <cf-button onClick={addItem({ items })}>Add</cf-button>,
   items,
 }));
 
@@ -84,12 +84,33 @@ export default pattern(({ items }) => {
 
 **Why:** The CTS transformer processes patterns at compile time and cannot handle closures over pattern-scoped variables in handlers.
 
+Handlers also live on the verified SES module-scope surface. Define them once
+at the top level, then pass any changing state through the binding object
+instead of hiding it in module-scoped mutable variables.
+
+## SES-Friendly Handlers
+
+- Bind changing state explicitly. Avoid top-level mutable caches, counters, or
+  class instances.
+- Keep the handler callback direct and readable. If the body becomes too
+  imperative, push complex logic into a helper and keep the bound state
+  explicit.
+- Use `safeDateNow()` and `nonPrivateRandom()` instead of ambient
+  `Date.now()` and `Math.random()` when a handler needs a timestamp or random
+  ID.
+- Timers are not exposed inside authored modules yet, so do not rely on
+  `setTimeout()` or `setInterval()` in handler code.
+
 ## Exporting Handlers as Streams
 
-Bound handlers become `Stream<T>` and can be exported for other patterns to call:
+Handlers exposed in Output interfaces must be typed as `Stream<T>` — a
+write-only channel that other pieces can trigger via `.send()` when linked.
+Don't try to create streams directly: a bound handler **is** a
+`Stream<EventType>`. Binding state to a module-scope handler produces the
+stream, which you export in the return object:
 
 ```tsx
-import { handler, pattern, Stream, Writable, UI } from "commontools";
+import { handler, pattern, Stream, Writable, UI } from "commonfabric";
 
 interface Output {
   addItem: Stream<{ title: string }>;  // Exported stream
@@ -108,31 +129,19 @@ export default pattern<{}, Output>(({ items }) => ({
 
 Other patterns can then link to this pattern and call `linkedPattern.addItem.send({ title: "New" })`.
 
-## Handlers with Event Data
+## Event Data and Void Handlers
 
-The first parameter receives data passed to `.send()`:
+The first type parameter is the event payload passed to `.send()`; use `void`
+when the handler needs no event data:
 
 ```typescript
-const addItem = handler<{ title: string }, { items: Writable<Item[]> }>(
-  ({ title }, { items }) => {
-    items.push({ title, done: false });
-  }
-);
-
-// Call with event data
+// With event data
 addItem({ items }).send({ title: "My Item" });
-```
 
-## Void Handlers
-
-For handlers that don't need event data, use `void`:
-
-```typescript
+// Void handler - call .send() without arguments
 const clearAll = handler<void, { items: Writable<Item[]> }>(
   (_, { items }) => items.set([])
 );
-
-// Call without arguments
 clearAll({ items }).send();
 ```
 
@@ -142,25 +151,17 @@ Export handlers to test them via CLI during development:
 
 ```bash
 # Call a handler with JSON payload
-deno task ct piece call addItem '{"title": "Test"}' --piece <ID>
+deno task cf piece call addItem '{"title": "Test"}' --piece <ID>
 
 # Step to process
-deno task ct piece step --piece <ID>
+deno task cf piece step --piece <ID>
 
 # Verify state
-deno task ct piece inspect --piece <ID>
+deno task cf piece inspect --piece <ID>
 ```
 
 See [Testing Handlers via CLI](../workflows/handlers-cli-testing.md) for the full workflow.
 
 ## Summary
 
-| Feature | `action()` | `handler()` |
-|---------|------------|-------------|
-| Defined | Inside pattern | Module scope |
-| State access | Closure | Explicit binding |
-| Reusable with different state | No | Yes |
-| Returns Stream | Yes | Yes |
-| Simpler syntax | Yes | No |
-
-Both `action()` and `handler()` return `Stream<T>` and can be exported in the Output type. **Default to `action()`** - only use `handler()` when you need to reuse the same logic with different state bindings.
+**Default to `action()`** — only use `handler()` when you need to reuse the same logic with different state bindings or export it for other patterns. See [Handling Events](./action.md) for the decision table.

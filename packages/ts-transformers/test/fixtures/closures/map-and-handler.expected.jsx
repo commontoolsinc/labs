@@ -1,5 +1,16 @@
-import * as __ctHelpers from "commontools";
-import { Cell, pattern, UI } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { Cell, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     items: Array<{
         price: number;
@@ -7,6 +18,211 @@ interface State {
     discount: number;
     selectedIndex: Cell<number>;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    item: {
+        price: number;
+    };
+    state: {
+        discount: number;
+    };
+}, number>(({ item, state }) => item.price * state.discount, {
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        },
+        state: {
+            type: "object",
+            properties: {
+                discount: {
+                    type: "number"
+                }
+            },
+            required: ["discount"]
+        }
+    },
+    required: ["item", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        index: {
+            type: "number"
+        },
+        state: {
+            type: "object",
+            properties: {
+                selectedIndex: {
+                    type: "number",
+                    asCell: ["writeonly"]
+                }
+            },
+            required: ["selectedIndex"]
+        }
+    },
+    required: ["index", "state"]
+} as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state, index }) => state.selectedIndex.set(index));
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const index = __cf_pattern_input.key("index");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<div>
+            <span>{__cfLift_1({
+        item: {
+            price: item.key("price")
+        },
+        state: {
+            discount: state.key("discount")
+        }
+    })}</span>
+            <button type="button" onClick={__cfHandler_1({
+        state: {
+            selectedIndex: state.key("selectedIndex")
+        },
+        index: index
+    })}>
+              Select
+            </button>
+          </div>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        },
+        index: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        discount: {
+                            type: "number"
+                        },
+                        selectedIndex: {
+                            type: "number",
+                            asCell: ["readonly"]
+                        }
+                    },
+                    required: ["discount", "selectedIndex"]
+                }
+            },
+            required: ["state"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_2 = __cfHelpers.lift<{
+    state: {
+        items: { price: number; }[];
+        selectedIndex: __cfHelpers.Cell<number>;
+    };
+}, number>(({ state }) => state.items[state.selectedIndex.get()]?.price ?? 0, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            price: {
+                                type: "number"
+                            }
+                        },
+                        required: ["price"]
+                    }
+                },
+                selectedIndex: {
+                    type: "number",
+                    asCell: ["cell"]
+                }
+            },
+            required: ["items", "selectedIndex"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_3 = __cfHelpers.lift<{
+    state: {
+        items: { price: number; }[];
+        selectedIndex: __cfHelpers.Cell<number>;
+        discount: number;
+    };
+}, number>(({ state }) => (state.items[state.selectedIndex.get()]?.price ?? 0) * state.discount, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            price: {
+                                type: "number"
+                            }
+                        },
+                        required: ["price"]
+                    }
+                },
+                selectedIndex: {
+                    type: "number",
+                    asCell: ["cell"]
+                },
+                discount: {
+                    type: "number"
+                }
+            },
+            required: ["items", "selectedIndex", "discount"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-and-handler
 // Verifies: .map() in JSX is transformed to .mapWithPattern() and inline handler inside map body is extracted
 //   state.items.map((item, index) => JSX) → state.key("items").mapWithPattern(pattern(...), { state: { discount, selectedIndex } })
@@ -15,212 +231,22 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element");
-                const index = __ct_pattern_input.key("index");
-                const state = __ct_pattern_input.key("params", "state");
-                return (<div>
-            <span>{__ctHelpers.derive({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["price"]
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                discount: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["discount"]
-                        }
-                    },
-                    required: ["item", "state"]
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    item: {
-                        price: item.key("price")
-                    },
-                    state: {
-                        discount: state.key("discount")
-                    }
-                }, ({ item, state }) => item.price * state.discount)}</span>
-            <button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                selectedIndex: {
-                                    type: "number",
-                                    asCell: true
-                                }
-                            },
-                            required: ["selectedIndex"]
-                        },
-                        index: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["state", "index"]
-                } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state, index }) => state.selectedIndex.set(index))({
-                    state: {
-                        selectedIndex: state.key("selectedIndex")
-                    },
-                    index: index
-                })}>
-              Select
-            </button>
-          </div>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number"
-                            }
-                        },
-                        required: ["price"]
-                    },
-                    index: {
-                        type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    discount: {
-                                        type: "number",
-                                        asOpaque: true
-                                    },
-                                    selectedIndex: {
-                                        type: "number",
-                                        asCell: true
-                                    }
-                                },
-                                required: ["discount", "selectedIndex"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {
+        {state.key("items").mapWithPattern(__cfPattern_1, {
                 state: {
                     discount: state.key("discount"),
                     selectedIndex: state.key("selectedIndex")
                 }
             })}
         <div>
-          Selected: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    price: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["price"]
-                            },
-                            asOpaque: true
-                        },
-                        selectedIndex: {
-                            type: "number",
-                            asCell: true
-                        }
-                    },
-                    required: ["items", "selectedIndex"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          Selected: {__cfLift_2({ state: {
                 items: state.key("items"),
                 selectedIndex: state.key("selectedIndex")
-            } }, ({ state }) => state.items[state.selectedIndex.get()]?.price ?? 0)} x {state.key("discount")} ={" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    price: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["price"]
-                            },
-                            asOpaque: true
-                        },
-                        selectedIndex: {
-                            type: "number",
-                            asCell: true
-                        },
-                        discount: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items", "selectedIndex", "discount"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+            } })} x {state.key("discount")} ={" "}
+          {__cfLift_3({ state: {
                 items: state.key("items"),
                 selectedIndex: state.key("selectedIndex"),
                 discount: state.key("discount")
-            } }, ({ state }) => (state.items[state.selectedIndex.get()]?.price ?? 0) * state.discount)}
+            } })}
         </div>
       </div>),
     };
@@ -244,11 +270,11 @@ export default pattern((state) => {
         },
         selectedIndex: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["items", "discount", "selectedIndex"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -261,11 +287,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -278,8 +303,14 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfHandler_1,
+    __cfPattern_1,
+    __cfLift_2,
+    __cfLift_3
+});

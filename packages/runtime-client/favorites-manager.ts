@@ -5,7 +5,7 @@
  * defaultPattern through cell operations, without requiring specialized IPC messages.
  */
 
-import { DID } from "@commontools/identity";
+import { DID } from "@commonfabric/identity";
 import { CellHandle } from "./cell-handle.ts";
 import { RuntimeClient } from "./runtime-client.ts";
 import type { CellRef } from "./protocol/types.ts";
@@ -14,46 +14,44 @@ import {
   favoriteListSchema,
   Home,
   homeSchema,
-} from "@commontools/home-schemas";
+} from "@commonfabric/home-schemas";
 
 type HandlerName = "addFavorite" | "removeFavorite";
 
 export class FavoritesManager {
   #rt: RuntimeClient;
-  #currentSpaceDID: DID;
   #homePatternCell: CellHandle<Home> | null = null;
 
-  constructor(
-    rt: RuntimeClient,
-    currentSpaceDID: DID,
-  ) {
+  constructor(rt: RuntimeClient) {
     this.#rt = rt;
-    this.#currentSpaceDID = currentSpaceDID;
   }
 
   /**
-   * Add a piece to favorites.
+   * Add a piece to favorites (stored in the home space).
+   * @param space - The space the piece lives in (part of its address)
    * @param pieceId - The entity ID of the piece to add
    * @param tag - Optional tag/category for the favorite
    * @param spaceName - Optional human-readable name of the space
    */
   async addFavorite(
+    space: DID,
     pieceId: string,
     tag?: string,
     spaceName?: string,
   ): Promise<void> {
     const handler = await this.#getHandler("addFavorite");
-    const pieceCellRef = this.#createPieceRef(pieceId);
+    const pieceCellRef = this.#createPieceRef(space, pieceId);
     await handler.send({ piece: pieceCellRef, tag: tag || "", spaceName });
   }
 
   /**
    * Remove a piece from favorites.
+   * @param space - The space the piece lives in
    * @param pieceId - The entity ID of the piece to remove
    */
-  async removeFavorite(pieceId: string): Promise<void> {
+  async removeFavorite(space: DID, pieceId: string): Promise<void> {
     const handler = await this.#getHandler("removeFavorite");
-    const pieceCellRef = this.#createPieceRef(pieceId);
+    const pieceCellRef = this.#createPieceRef(space, pieceId);
     await handler.send({ piece: pieceCellRef });
   }
 
@@ -157,7 +155,7 @@ export class FavoritesManager {
     const patternWithSchema = defaultPattern.asSchema({
       type: "object",
       properties: {
-        [handlerName]: { asStream: true },
+        [handlerName]: { asCell: ["stream"] },
       },
       required: [handlerName],
     }) as CellHandle<Record<HandlerName, unknown>>;
@@ -166,15 +164,14 @@ export class FavoritesManager {
   }
 
   /**
-   * Create a CellRef for a piece in the current space.
-   * @param pieceId - The entity ID of the piece
+   * Create a CellRef for a piece — an address of (space, id).
    */
-  #createPieceRef(pieceId: string): CellRef {
+  #createPieceRef(space: DID, pieceId: string): CellRef {
     return {
       id: `of:${pieceId}`,
-      space: this.#currentSpaceDID,
+      space,
+      scope: "space",
       path: [],
-      type: "application/json",
     };
   }
 }

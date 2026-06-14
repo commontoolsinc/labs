@@ -1,11 +1,17 @@
-/// <cts-enable />
 /**
  * Shared types for the Notes pattern family.
  *
  * This file contains types shared across note.tsx, notebook.tsx, and note-md.tsx.
  */
 
-import { type Default, NAME, type Stream, type Writable } from "commontools";
+import {
+  type Default,
+  NAME,
+  nonPrivateRandom,
+  safeDateNow,
+  type Stream,
+  type Writable,
+} from "commonfabric";
 
 // ===== Core Entity Types =====
 //
@@ -46,6 +52,7 @@ export interface NotePiece {
   isHidden?: boolean;
   backlinks?: MentionablePiece[];
   parentNotebook?: NotebookPiece | null;
+  setTitle?: Stream<string>;
 }
 
 /**
@@ -61,7 +68,7 @@ export interface NotebookPiece {
 
   createNote: Stream<{ title: string; content: string; navigate?: boolean }>;
   createNotes: Stream<{ notesData: Array<{ title: string; content: string }> }>;
-  setTitle: Stream<{ newTitle: string }>;
+  setTitle: Stream<string>;
   createNotebook: Stream<{
     title: string;
     notesData?: Array<{ title: string; content: string }>;
@@ -94,30 +101,27 @@ export interface DailyJournalPiece {
 // ===== Input Types =====
 
 export interface NoteInput {
-  title?: Writable<Default<string, "Untitled Note">>;
-  content?: Writable<Default<string, "">>;
-  isHidden?: Default<boolean, false>;
+  title?: Writable<string | Default<"Untitled Note">>;
+  content?: Writable<string | Default<"">>;
+  isHidden?: boolean | Default<false>;
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
-  linkPattern?: Writable<Default<string, "">>;
+  linkPattern?: Writable<string | Default<"">>;
   /** Parent notebook reference. Set at creation, can be updated for moves. */
-  parentNotebook?: Writable<Default<NotebookPiece | null, null>>;
+  parentNotebook?: Writable<NotebookPiece | null | Default<null>>;
 }
 
 export interface NotebookInput {
-  title?: Writable<Default<string, "Notebook">>;
-  notes?: Writable<Default<NotePiece[], []>>;
-  isNotebook?: Default<boolean, true>;
-  isHidden?: Default<boolean, false>;
+  title?: Writable<string | Default<"Notebook">>;
+  notes?: Writable<NotePiece[] | Default<[]>>;
+  isNotebook?: boolean | Default<true>;
+  isHidden?: boolean | Default<false>;
   /** Parent notebook reference. Set at creation, can be updated for moves. */
-  parentNotebook?: Writable<Default<NotebookPiece | null, null>>;
+  parentNotebook?: Writable<NotebookPiece | null | Default<null>>;
 }
 
 export interface NoteMdInput {
   /** Cell reference to note data (title + content + backlinks) */
-  note?: Default<
-    NotePiece,
-    { title: ""; content: ""; backlinks: [] }
-  >;
+  note?: NotePiece | Default<{ title: ""; content: ""; backlinks: [] }>;
   /** Direct reference to source note for Edit navigation */
   sourceNoteRef?: NotePiece;
   /** Writable content cell for checkbox updates */
@@ -131,7 +135,9 @@ export interface NoteMdInput {
  * Note: crypto.randomUUID is not available in the pattern environment.
  */
 export const generateId = (): string =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
+  `${safeDateNow().toString(36)}-${
+    nonPrivateRandom().toString(36).slice(2, 11)
+  }`;
 
 /**
  * Get a comparable name from a piece.

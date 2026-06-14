@@ -1,76 +1,87 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 let keyCounter = 0;
 function nextKey() {
     return `value-${keyCounter++}`;
 }
+__cfHardenFn(nextKey);
 interface State {
     items: Array<Record<string, number>>;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    element: any;
+    __cf_amount_key: any;
+}, number | undefined>(({ element, __cf_amount_key }) => element[__cf_amount_key], {
+    type: "object",
+    properties: {
+        element: true,
+        __cf_amount_key: true
+    },
+    required: ["element", "__cf_amount_key"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["number", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const element = __cf_pattern_input.key("element");
+    const __cf_amount_key = nextKey();
+    const amount = __cfLift_1({
+        element: element,
+        __cf_amount_key: __cf_amount_key
+    }).for("amount", true);
+    return (<span>{amount}</span>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                type: "number"
+            }
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-computed-alias-side-effect
-// Verifies: computed property key with side effects is hoisted and used via derive()
-//   { [nextKey()]: amount } → __ct_amount_key = nextKey(); derive(...element[__ct_amount_key])
+// Verifies: computed property key with side effects is hoisted and used via a lift-applied computation
+//   { [nextKey()]: amount } → __cf_amount_key = nextKey(); lift(...)(...element[__cf_amount_key])
 //   .map(fn) → .mapWithPattern(pattern(...), {})
 // Context: nextKey() has side effects (keyCounter++), so the key expression is evaluated once and cached
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-                const element = __ct_pattern_input.key("element");
-                const __ct_amount_key = nextKey();
-                const amount = __ctHelpers.derive({
-                    type: "object",
-                    properties: {
-                        element: true,
-                        __ct_amount_key: true
-                    },
-                    required: ["element", "__ct_amount_key"]
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    anyOf: [{
-                            type: "undefined"
-                        }, {
-                            type: "number",
-                            asOpaque: true
-                        }]
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    element: element,
-                    __ct_amount_key: __ct_amount_key
-                }, ({ element, __ct_amount_key }) => element[__ct_amount_key]);
-                return (<span>{amount}</span>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {},
-                        additionalProperties: {
-                            type: "number"
-                        }
-                    }
-                },
-                required: ["element"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+        {state.key("items").mapWithPattern(__cfPattern_1, {})}
       </div>),
     };
 }, {
@@ -88,7 +99,7 @@ export default pattern((state) => {
         }
     },
     required: ["items"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -101,11 +112,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -118,8 +128,11 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfPattern_1
+});

@@ -1,8 +1,8 @@
 import { createRouter } from "@/lib/create-app.ts";
 import { cors } from "@hono/hono/cors";
-import { StaticCacheFS } from "@commontools/static";
+import { StaticCacheFS } from "@commonfabric/static";
 import { getMimeType } from "@/lib/mime-type.ts";
-import { compareETags, createCacheHeaders } from "@commontools/static/etag";
+import { compareETags, createCacheHeaders } from "@commonfabric/static/etag";
 
 const router = createRouter();
 

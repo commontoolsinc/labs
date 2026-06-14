@@ -1,9 +1,8 @@
-/// <cts-enable />
 /**
  * Fixture: action closing over SELF requires inputs with defaults so the
  * piece data always satisfies the output schema's required properties.
  */
-import { action, type Default, NAME, pattern, SELF, UI, type VNode, Writable } from "commontools";
+import { action, type Default, NAME, pattern, SELF, UI, type VNode, Writable } from "commonfabric";
 
 interface TestOutput {
   [NAME]: string;
@@ -19,7 +18,7 @@ interface TestOutput {
 // Context: SELF reference requires Default<> inputs so output schema is always satisfied
 export default pattern<{ title: Default<string, ""> }, TestOutput>(
   ({ title, [SELF]: self }) => {
-    const count = Writable.of(0);
+    const count = new Writable(0);
 
     // Action closing over `self` — works because all inputs use Default<>
     const showSelf = action((_: Record<string, never>) => {
@@ -36,8 +35,8 @@ export default pattern<{ title: Default<string, ""> }, TestOutput>(
       [NAME]: "Action SELF Test",
       [UI]: (
         <div>
-          <ct-button onClick={showSelf}>Show Self</ct-button>
-          <ct-button onClick={incrementWithSelf}>Increment with Self</ct-button>
+          <cf-button onClick={showSelf}>Show Self</cf-button>
+          <cf-button onClick={incrementWithSelf}>Increment with Self</cf-button>
         </div>
       ),
       title,

@@ -1,17 +1,16 @@
-/// <cts-enable />
 /**
  * Budget Tracker - Shared Schemas
  *
  * Type definitions used across all budget tracker sub-patterns.
  */
-import { Default } from "commontools";
+import { Default, safeDateNow } from "commonfabric";
 
 // ============ CORE TYPES ============
 
 export interface Expense {
   description: string;
   amount: number;
-  category: Default<string, "Other">;
+  category: string | Default<"Other">;
   date: string; // YYYY-MM-DD
 }
 
@@ -30,6 +29,8 @@ export interface BudgetStatusItem {
 
 // ============ HELPER FUNCTIONS ============
 
+// `new Date()` with no arguments throws in the secure pattern sandbox —
+// derive "today" from safeDateNow() instead.
 export const getTodayDate = (): string => {
-  return new Date().toISOString().split("T")[0];
+  return new Date(safeDateNow()).toISOString().split("T")[0];
 };

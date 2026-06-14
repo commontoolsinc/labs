@@ -1,4 +1,5 @@
 import { exists } from "@std/fs";
+import ports from "@commonfabric/ports" with { type: "json" };
 import * as path from "@std/path";
 import { createRouter } from "@/lib/create-app.ts";
 import { cors } from "@hono/hono/cors";
@@ -8,7 +9,7 @@ import {
   compareETags,
   createCacheHeaders,
   generateETag,
-} from "@commontools/static/etag";
+} from "@commonfabric/static/etag";
 
 // Cache durations for different file types
 
@@ -169,7 +170,7 @@ if (COMPILED) {
   // Development mode without proxy
   router.get("/*", (c) => {
     return c.text(
-      "Shell app not available. Set SHELL_URL=http://localhost:5173 or run the compiled binary",
+      `Shell app not available. Set SHELL_URL=http://localhost:${ports.shell} or run the compiled binary`,
       404,
     );
   });

@@ -1,37 +1,38 @@
 // Cycle-aware convergence tests: verifying that the scheduler correctly
 // detects and handles circular dependencies between reactive computations.
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { expect } from "@std/expect";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { Runtime } from "../src/runtime.ts";
-import { type Action } from "../src/scheduler.ts";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-
-const signer = await Identity.fromPassphrase("test operator");
-const space = signer.did();
+import {
+  afterEach,
+  beforeEach,
+  createSchedulerTestRuntime,
+  describe,
+  disposeSchedulerTestRuntime,
+  expect,
+  getStaleSchedulerInternals,
+  it,
+  Runtime,
+  space,
+  toMemorySpaceAddress,
+} from "./scheduler-test-utils.ts";
+import type {
+  Action,
+  IExtendedStorageTransaction,
+  SchedulerTestStorageManager,
+} from "./scheduler-test-utils.ts";
 
 describe("cycle-aware convergence", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
-    // Use push mode for cycle-aware convergence tests
-    runtime.scheduler.disablePullMode();
-    tx = runtime.edit();
+    ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
+      import.meta.url,
+    ));
   });
 
   afterEach(async () => {
-    await tx.commit();
-    await runtime?.dispose();
-    await storageManager?.close();
+    await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
   });
 
   it("should track action execution time", async () => {
@@ -57,7 +58,7 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], shallowReads: [], writes: [] },
-      {},
+      { isEffect: true },
     );
     runtime.scheduler.queueExecution();
     await runtime.idle();
@@ -97,7 +98,7 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], shallowReads: [], writes: [] },
-      {},
+      { isEffect: true },
     );
     await output.pull();
 
@@ -121,7 +122,6 @@ describe("cycle-aware convergence", () => {
 
   it("should handle cycles implicitly via re-dirtying detection", async () => {
     // Test that cycles are detected implicitly when actions re-dirty processed actions
-    runtime.scheduler.enablePullMode();
 
     // Create cells for a simple converging cycle: A → B → A
     const cellA = runtime.getCell<number>(
@@ -180,9 +180,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       actionA,
       {
-        reads: [cellA.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cellA.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cellB.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cellB.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -190,9 +190,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       actionB,
       {
-        reads: [cellB.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cellB.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cellA.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cellA.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -201,9 +201,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [cellB.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cellB.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [output.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -222,7 +222,6 @@ describe("cycle-aware convergence", () => {
   it("should run fast cycle convergence method", async () => {
     // This test verifies the fast cycle convergence logic by directly
     // testing with default scheduling (which bypasses pull mode complexity)
-    runtime.scheduler.enablePullMode();
 
     // Create a simple dependency chain
     const counter = runtime.getCell<number>(
@@ -252,9 +251,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [counter.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(counter.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [doubled.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(doubled.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -272,9 +271,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [counter.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(counter.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [doubled.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(doubled.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -285,8 +284,6 @@ describe("cycle-aware convergence", () => {
   });
 
   it("should enforce iteration limit for non-converging cycles", async () => {
-    runtime.scheduler.enablePullMode();
-
     // Create a non-converging cycle (always increments)
     const cellA = runtime.getCell<number>(
       space,
@@ -339,9 +336,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       actionA,
       {
-        reads: [cellB.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cellB.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cellA.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cellA.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -349,9 +346,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       actionB,
       {
-        reads: [cellA.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cellA.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cellB.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cellB.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -360,9 +357,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       effect,
       {
-        reads: [cellB.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cellB.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [output.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -386,9 +383,52 @@ describe("cycle-aware convergence", () => {
     expect(runCountA + runCountB).toBeGreaterThan(0);
   });
 
-  it("should not create infinite loops in collectDirtyDependencies", async () => {
-    runtime.scheduler.enablePullMode();
+  it("should snapshot dirty effects when breaking a pull-mode cycle", async () => {
+    const schedulerInternal = runtime.scheduler as unknown as {
+      execute: () => Promise<void>;
+      pendingQueueTaskTimer: number | null;
+      scheduled: boolean;
+    };
+    const staleSchedulerInternal = getStaleSchedulerInternals(
+      runtime.scheduler,
+    );
+    let effectRuns = 0;
+    const reDirtyLimit = 25;
 
+    const selfDirtyingEffect: Action = () => {
+      effectRuns++;
+      if (effectRuns <= reDirtyLimit) {
+        staleSchedulerInternal.markDirectDirty(selfDirtyingEffect);
+      }
+    };
+
+    runtime.scheduler.subscribe(
+      selfDirtyingEffect,
+      { reads: [], shallowReads: [], writes: [] },
+      { isEffect: true },
+    );
+
+    if (schedulerInternal.pendingQueueTaskTimer !== null) {
+      clearTimeout(schedulerInternal.pendingQueueTaskTimer);
+      schedulerInternal.pendingQueueTaskTimer = null;
+    }
+
+    await schedulerInternal.execute();
+
+    if (schedulerInternal.pendingQueueTaskTimer !== null) {
+      clearTimeout(schedulerInternal.pendingQueueTaskTimer);
+      schedulerInternal.pendingQueueTaskTimer = null;
+      schedulerInternal.scheduled = false;
+    }
+
+    // The settle loop runs the dirty effect for each bounded iteration, then
+    // cycle-break gets one snapshot entry. A live Set iteration would revisit
+    // the effect as it re-subscribes and re-dirties itself.
+    expect(effectRuns).toBe(11);
+    expect(runtime.scheduler.isDirty(selfDirtyingEffect)).toBe(true);
+  });
+
+  it("should not create infinite loops in collectDirtyDependencies", async () => {
     // Create a simple dependency structure
     const source = runtime.getCell<number>(
       space,
@@ -415,9 +455,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [result.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(result.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -435,9 +475,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       computation,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [result.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(result.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -450,8 +490,6 @@ describe("cycle-aware convergence", () => {
   });
 
   it("should handle cycles during dependency collection without infinite recursion", async () => {
-    runtime.scheduler.enablePullMode();
-
     // Create cells that form a cycle
     const cellA = runtime.getCell<number>(
       space,
@@ -499,9 +537,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       actionA,
       {
-        reads: [cellC.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cellC.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cellA.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cellA.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -510,9 +548,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       actionB,
       {
-        reads: [cellA.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cellA.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cellB.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cellB.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -521,9 +559,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       actionC,
       {
-        reads: [cellB.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cellB.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cellC.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cellC.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -557,7 +595,7 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       errorAction,
       { reads: [], shallowReads: [], writes: [] },
-      {},
+      { isEffect: true },
     );
 
     runtime.scheduler.queueExecution();
@@ -595,7 +633,7 @@ describe("cycle-aware convergence", () => {
       runtime.scheduler.subscribe(
         action,
         { reads: [], shallowReads: [], writes: [] },
-        {},
+        { isEffect: true },
       );
       await cell.pull();
     }
@@ -612,8 +650,6 @@ describe("cycle-aware convergence", () => {
   // ============================================================
 
   it("should handle larger cycles without hanging", async () => {
-    runtime.scheduler.enablePullMode();
-
     const cellA = runtime.getCell<number>(space, "4cycle-A", undefined, tx);
     cellA.set(1);
     const cellB = runtime.getCell<number>(space, "4cycle-B", undefined, tx);
@@ -668,8 +704,6 @@ describe("cycle-aware convergence", () => {
   });
 
   it("should handle self-referential action without infinite loop", async () => {
-    runtime.scheduler.enablePullMode();
-
     const counter = runtime.getCell<number>(
       space,
       "self-ref-counter",
@@ -729,9 +763,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       action,
       {
-        reads: [cell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cell.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -749,9 +783,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       action,
       {
-        reads: [cell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cell.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -767,8 +801,6 @@ describe("cycle-aware convergence", () => {
   });
 
   it("should handle mixed cyclic and acyclic actions without hanging", async () => {
-    runtime.scheduler.enablePullMode();
-
     // Acyclic: source → computed
     const source = runtime.getCell<number>(
       space,
@@ -826,9 +858,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       acyclicAction,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [computed.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(computed.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -837,9 +869,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       cycleActionA,
       {
-        reads: [cycleA.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cycleA.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cycleB.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cycleB.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -848,9 +880,9 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       cycleActionB,
       {
-        reads: [cycleB.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cycleB.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cycleA.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cycleA.getAsNormalizedFullLink())],
       },
       {},
     );

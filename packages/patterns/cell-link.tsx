@@ -1,8 +1,7 @@
-/// <cts-enable />
-import { Default, NAME, pattern, UI } from "commontools";
+import { Default, NAME, pattern, UI } from "commonfabric";
 import Note from "./notes/note.tsx";
 
-export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
+export default pattern<{ title: string | Default<"Suggestion Tester"> }>(
   ({ title }) => {
     const note = Note({
       title: "Demo",
@@ -13,8 +12,8 @@ export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
       [NAME]: title,
       [UI]: (
         <div>
-          <h1>ct-cell-link test</h1>
-          <ct-cell-link $cell={note} />
+          <h1>cf-cell-link test</h1>
+          <cf-cell-link $cell={note} />
         </div>
       ),
     };

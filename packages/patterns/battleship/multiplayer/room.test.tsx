@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: Battleship Multiplayer Room
  *
@@ -10,9 +9,9 @@
  * - Cannot fire when game is finished
  * - Win detection when all ships sunk
  *
- * Run: deno task ct test packages/patterns/battleship/multiplayer/room.test.tsx --root packages/patterns/battleship --verbose
+ * Run: deno task cf test packages/patterns/battleship/multiplayer/room.test.tsx --root packages/patterns/battleship --verbose
  */
-import { action, computed, pattern, Writable } from "commontools";
+import { action, computed, pattern, safeDateNow, Writable } from "commonfabric";
 import BattleshipRoom from "./room.tsx";
 import {
   createInitialShots,
@@ -48,7 +47,7 @@ function createTestPlayer(name: string, playerNum: 1 | 2): PlayerData {
     name,
     ships: createTestShips(),
     color: playerNum === 1 ? "#3b82f6" : "#ef4444",
-    joinedAt: Date.now(),
+    joinedAt: safeDateNow(),
   };
 }
 
@@ -58,19 +57,21 @@ function createTestPlayer(name: string, playerNum: 1 | 2): PlayerData {
 
 export default pattern(() => {
   // Setup shared state cells (simulating what lobby would create)
-  const player1Cell = Writable.of<PlayerData | null>(
+  const player1Cell = new Writable<PlayerData | null>(
     createTestPlayer("Alice", 1),
   );
-  const player2Cell = Writable.of<PlayerData | null>(
+  const player2Cell = new Writable<PlayerData | null>(
     createTestPlayer("Bob", 2),
   );
-  const shotsCell = Writable.of<ShotsState>(createInitialShots());
-  const gameStateCell = Writable.of<GameState>({
+  const shotsCell = new Writable<ShotsState>(createInitialShots());
+  const gameStateCell = new Writable<GameState>({
     phase: "playing",
     currentTurn: 1,
     winner: null,
     lastMessage: "Alice's turn - fire at the enemy fleet!",
   });
+  const myNameCell = new Writable("Alice");
+  const myPlayerNumberCell = new Writable<1 | 2 | null>(1);
 
   // Create room as Player 1 (Alice)
   const room = BattleshipRoom({
@@ -79,8 +80,8 @@ export default pattern(() => {
     player2: player2Cell,
     shots: shotsCell,
     gameState: gameStateCell,
-    myName: "Alice",
-    myPlayerNumber: 1,
+    myName: myNameCell,
+    myPlayerNumber: myPlayerNumberCell,
   });
 
   // ==========================================================================

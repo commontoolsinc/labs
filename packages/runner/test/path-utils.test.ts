@@ -63,13 +63,35 @@ describe("Path operations", () => {
     });
   });
 
-  describe("hasValueAtPath for default values", () => {
+  describe("hasValueAtPath for undefined values", () => {
     const store = {
       defaultValue: undefined,
     };
 
-    it("should return false if the default value is undefined", () => {
-      expect(hasValueAtPath(store, ["defaultValue"])).toBe(false);
+    it("should return true for a present key whose value is undefined", () => {
+      expect(hasValueAtPath(store, ["defaultValue"])).toBe(true);
+    });
+
+    it("should return false for an absent key", () => {
+      expect(hasValueAtPath(store, ["missing"])).toBe(false);
+    });
+  });
+
+  describe("setValueAtPath with undefined", () => {
+    it("should store undefined as a value, keeping the key present", () => {
+      const obj: Record<string, unknown> = { a: 1, b: 2 };
+      setValueAtPath(obj, ["a"], undefined);
+      expect("a" in obj).toBe(true);
+      expect(obj.a).toBeUndefined();
+      expect(Object.keys(obj)).toEqual(["a", "b"]);
+    });
+
+    it("should not truncate arrays when setting undefined", () => {
+      const obj: { list: unknown[] } = { list: [1, 2, 3] };
+      setValueAtPath(obj, ["list", 2], undefined);
+      expect(obj.list.length).toBe(3);
+      expect(2 in obj.list).toBe(true);
+      expect(obj.list[2]).toBeUndefined();
     });
   });
 });

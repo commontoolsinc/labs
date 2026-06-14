@@ -1,26 +1,39 @@
-import { getLogger } from "@commontools/utils/logger";
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   DEFAULT_GENERATE_OBJECT_MODELS,
   DEFAULT_MODEL_NAME,
   extractTextFromLLMResponse,
+  GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
   LLMClient,
   LLMGenerateObjectRequest,
+  type LLMNativeModelToolId,
   LLMRequest,
   LLMResponse,
-} from "@commontools/llm";
+} from "@commonfabric/llm";
 import {
   BuiltInGenerateObjectParams,
   BuiltInGenerateTextParams,
   BuiltInLLMMessage,
   BuiltInLLMParams,
-} from "@commontools/api";
-import type { Schema } from "@commontools/api/schema";
-import { refer } from "@commontools/memory/reference";
-import { type Cell } from "../cell.ts";
+  JSONSchema,
+} from "@commonfabric/api";
+import type { Schema } from "@commonfabric/api/schema";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { cfcLabelViewForCellFailClosed } from "../cfc/label-view.ts";
+import {
+  schemaWithInjectionSafeAnnotations,
+  validateAgainstSchema,
+} from "../cfc/schema-sanitization.ts";
+import { uniqueCfcAtoms } from "../cfc/observation.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { type Cell, isCell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { CellScope } from "../builder/types.ts";
 import { llmToolExecutionHelpers } from "./llm-dialog.ts";
+import { scopedCell } from "./scope-policy.ts";
 import {
   GenerateObjectParamsSchema,
   GenerateObjectResultSchema,
@@ -30,7 +43,11 @@ import {
   LLMResultSchema,
   LLMToolSchema,
 } from "./llm-schemas.ts";
-import { isObject } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commonfabric/utils/types";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
 
 const logger = getLogger("llm", {
   enabled: true,
@@ -44,6 +61,53 @@ const client = new LLMClient();
 
 /** Batch interval for partial streaming updates (~15fps). */
 const PARTIAL_BATCH_MS = 66;
+
+function logGenerateObject(stage: string, details: Record<string, unknown>) {
+  console.warn("[generateObject]", stage, details);
+}
+
+function summarizeGenerateObjectRequest(details: {
+  hash: string;
+  path: "direct" | "tools";
+  model?: string;
+  hasTools: boolean;
+  toolNames?: string[];
+  messageCount: number;
+  contextKeys?: string[];
+  queueName?: string;
+}) {
+  return {
+    hash: details.hash.slice(0, 12),
+    path: details.path,
+    model: details.model,
+    hasTools: details.hasTools,
+    toolNames: details.toolNames ?? [],
+    messageCount: details.messageCount,
+    contextKeys: details.contextKeys ?? [],
+    queueName: details.queueName,
+  };
+}
+
+function collectCellConfidentiality(cell: Cell<any>): readonly unknown[] {
+  const labelView = cfcLabelViewForCellFailClosed(cell.resolveAsCell());
+  if (labelView === undefined) {
+    return [];
+  }
+
+  return uniqueCfcAtoms(
+    labelView.entries.flatMap((entry) => entry.label.confidentiality ?? []),
+  );
+}
+
+function collectGenerateObjectPromptConfidentiality(
+  inputs: Cell<any>,
+): readonly unknown[] {
+  return uniqueCfcAtoms([
+    ...collectCellConfidentiality(inputs.key("prompt")),
+    ...collectCellConfidentiality(inputs.key("messages")),
+    ...collectCellConfidentiality(inputs.key("system")),
+  ]);
+}
 
 /**
  * Creates an updatePartial callback that safely updates the partial cell
@@ -124,7 +188,11 @@ function createUpdatePartialCallback(
 async function executeWithToolsLoop(params: {
   initialMessages: readonly BuiltInLLMMessage[];
   llmParams: LLMRequest;
-  toolCatalog: ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>;
+  toolCatalog?:
+    | ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>
+    | undefined;
+  initialObservedConfidentiality?: readonly unknown[];
+  observationMaxConfidentiality?: readonly unknown[];
   updatePartial: (text: string) => void;
   runtime: Runtime;
   space: any;
@@ -135,6 +203,8 @@ async function executeWithToolsLoop(params: {
   const {
     llmParams,
     toolCatalog,
+    initialObservedConfidentiality = [],
+    observationMaxConfidentiality,
     updatePartial,
     runtime,
     space,
@@ -145,16 +215,33 @@ async function executeWithToolsLoop(params: {
 
   const executeRecursive = async (
     currentMessages: readonly BuiltInLLMMessage[],
+    observedConfidentiality: readonly unknown[],
   ): Promise<void> => {
     if (thisRun !== getCurrentRun()) return;
 
     const requestParams: LLMRequest = {
       ...llmParams,
       messages: currentMessages,
-      tools: toolCatalog?.llmTools,
     };
+    if (toolCatalog && requestParams.tools === undefined) {
+      requestParams.tools = toolCatalog.llmTools;
+    }
 
-    const llmResult = await client.sendRequest(requestParams, updatePartial);
+    // Route the call to the executing space's host when the space is
+    // host-mapped (one runtime spans hosts; an LLM call belongs to the
+    // space whose pattern made it). An UNMAPPED space keeps the
+    // module-level default endpoint — like fetch-data, hostForSpace's
+    // apiUrl fallback is NOT used, because deployments may split the
+    // pattern-facing api host from the runtime's memory host.
+    const mappedLlmHost = runtime.mappedHostFor(space);
+    const llmResult = await client.sendRequest(
+      requestParams,
+      updatePartial,
+      undefined,
+      mappedLlmHost
+        ? { endpoint: new URL("/api/ai/llm", mappedLlmHost) }
+        : undefined,
+    );
 
     if (thisRun !== getCurrentRun()) return;
 
@@ -174,6 +261,9 @@ async function executeWithToolsLoop(params: {
         space,
         toolCatalog,
         toolCallParts,
+        undefined,
+        observedConfidentiality,
+        observationMaxConfidentiality,
       );
 
       const toolResultMessages = llmToolExecutionHelpers
@@ -185,14 +275,24 @@ async function executeWithToolsLoop(params: {
         ...toolResultMessages,
       ];
 
-      await executeRecursive(updatedMessages);
+      const nextObservedConfidentiality = uniqueCfcAtoms([
+        ...observedConfidentiality,
+        ...toolResults.flatMap((result) =>
+          result.observedConfidentiality ?? []
+        ),
+      ]);
+
+      await executeRecursive(updatedMessages, nextObservedConfidentiality);
     } else {
       // No more tool calls, finish
       await onComplete(llmResult);
     }
   };
 
-  await executeRecursive(params.initialMessages);
+  await executeRecursive(
+    params.initialMessages,
+    initialObservedConfidentiality,
+  );
 }
 
 /**
@@ -247,9 +347,15 @@ function buildContextDocumentation(
   runtime: Runtime,
   space: any,
   tx: IExtendedStorageTransaction,
-): string {
+  sink: string,
+): { docs: string; observedConfidentiality: readonly unknown[] } {
   const context = inputs.key("context").withTx(tx).get();
-  if (!context) return "";
+  if (!context) {
+    return {
+      docs: "",
+      observedConfidentiality: [],
+    };
+  }
 
   // Create empty pinned cells array with proper schema
   const pinnedCellsSchema = {
@@ -264,18 +370,83 @@ function buildContextDocumentation(
     },
   } as const;
 
-  return llmToolExecutionHelpers.buildAvailableCellsDocumentation(
-    runtime,
-    space,
-    context,
-    // LLM builtins don't have pinned cells (only llmDialog does)
-    runtime.getCell(
+  return llmToolExecutionHelpers
+    .buildAvailableCellsDocumentationWithObservation(
+      runtime,
       space,
-      { llm: { pinnedCells: [] } },
-      pinnedCellsSchema,
-      tx,
-    ),
+      context,
+      // LLM builtins don't have pinned cells (only llmDialog does)
+      runtime.getCell(
+        space,
+        { llm: { pinnedCells: [] } },
+        pinnedCellsSchema,
+        tx,
+      ),
+      // Bound the pattern-supplied ceiling by the deployment ceiling for this
+      // sink so neither the context docs nor the tool loop observe past it
+      // (#3993 review).
+      llmToolExecutionHelpers.effectiveObservationCeiling(
+        runtime,
+        sink,
+        inputs.key("observationMaxConfidentiality").withTx(tx).get() as
+          | readonly unknown[]
+          | undefined,
+      ),
+    );
+}
+
+function enqueuePostCommitLLMWork(
+  tx: IExtendedStorageTransaction,
+  sink: string,
+  id: string,
+  kind: string,
+  request: any,
+  start: () => void,
+): void {
+  enqueueSinkRequestPostCommitEffect(
+    tx,
+    sink,
+    id,
+    request,
+    kind,
+    () => {
+      start();
+    },
   );
+}
+
+function markRequestHashPendingCommit(
+  tx: IExtendedStorageTransaction,
+  hash: string,
+  getPreviousCallHash: () => string | undefined,
+  setPreviousCallHash: (hash: string | undefined) => void,
+): void {
+  const previousCallHash = getPreviousCallHash();
+  setPreviousCallHash(hash);
+  tx.addCommitCallback((_committedTx, commitResult) => {
+    if (commitResult.error && getPreviousCallHash() === hash) {
+      setPreviousCallHash(previousCallHash);
+    }
+  });
+}
+
+async function pullContextCells(
+  context: Record<string, unknown> | undefined,
+) {
+  for (const value of Object.values(context ?? {})) {
+    try {
+      const resolved = isCellResultForDereferencing(value)
+        ? getCellOrThrow(value).resolveAsCell()
+        : isCell(value)
+        ? value.resolveAsCell()
+        : isRecord(value) && typeof value.resolveAsCell === "function"
+        ? value.resolveAsCell()
+        : undefined;
+      await resolved?.pull?.();
+    } catch {
+      // Ignore unresolved context cells and let request construction continue.
+    }
+  }
 }
 
 /**
@@ -311,18 +482,49 @@ export function llm(
   let previousCallHash: string | undefined = undefined;
   let cellsInitialized = false;
   let resultCell: Cell<Schema<typeof LLMResultSchema>>;
+  let cellScope: CellScope | undefined;
 
   return (tx: IExtendedStorageTransaction) => {
-    if (!cellsInitialized) {
-      resultCell = runtime.getCell(
+    tx.resetNarrowestReadScope();
+    const {
+      system,
+      messages,
+      stop,
+      maxTokens,
+      model,
+      search,
+      nativeModelToolIds,
+    } = inputs.withTx(tx).get();
+    const effectiveNativeModelToolIds = resolveNativeModelToolIds(
+      search,
+      nativeModelToolIds,
+    );
+
+    // Build context documentation from context cells and append to system prompt
+    const contextDocs = buildContextDocumentation(
+      inputs,
+      runtime,
+      parentCell.space,
+      tx,
+      "llm",
+    );
+    const outputScope = tx.getNarrowestReadScope();
+
+    if (!cellsInitialized || cellScope !== outputScope) {
+      if (cellsInitialized && cellScope !== outputScope) {
+        previousCallHash = undefined;
+      }
+      const baseResultCell = runtime.getCell(
         parentCell.space,
         { llm: { result: cause } },
         LLMResultSchema,
         tx,
       );
+      resultCell = scopedCell(runtime, tx, baseResultCell, outputScope);
       resultCell.sync();
       sendResult(tx, resultCell);
       cellsInitialized = true;
+      cellScope = outputScope;
     }
 
     const thisRun = ++currentRun;
@@ -332,19 +534,9 @@ export function llm(
     const partialWithLog = resultCell.key("partial").withTx(tx);
     const requestHashWithLog = resultCell.key("requestHash").withTx(tx);
 
-    const { system, messages, stop, maxTokens, model } = inputs.withTx(tx)
-      .get();
-
-    // Build context documentation from context cells and append to system prompt
-    const contextDocs = buildContextDocumentation(
-      inputs,
-      runtime,
-      parentCell.space,
-      tx,
-    );
-
     const llmParams: LLMRequest = {
-      system: (system ?? "") + contextDocs,
+      system: ((system ?? "") + contextDocs.docs).trim() ||
+        "You are a helpful assistant.",
       messages: (messages as unknown as readonly BuiltInLLMMessage[]) ?? [],
       stop: stop ?? "",
       maxTokens: maxTokens ?? 4096,
@@ -356,16 +548,31 @@ export function llm(
         context: "piece",
       },
       cache: true,
+      ...(effectiveNativeModelToolIds
+        ? { nativeModelToolIds: effectiveNativeModelToolIds }
+        : {}),
       // tools will be added below if present
     };
 
-    const hash = refer(llmParams).toString();
+    const toolsCell = inputs.key("tools").asSchema({
+      type: "object",
+      additionalProperties: LLMToolSchema,
+    });
+    const toolCatalog = toolsCell
+      ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
+      : undefined;
+    const requestSnapshot = createFrozenRequestSnapshot(
+      toolCatalog ? { ...llmParams, tools: toolCatalog.llmTools } : llmParams,
+    );
+    const hash = hashOf(requestSnapshot).toString();
+    const queueName = inputs.key("queue").withTx(tx).get() as unknown as
+      | string
+      | undefined;
 
     // Return if the same request is being made again, either concurrently (same
     // as previousCallHash) or when rehydrated from storage (same as the
     // contents of the requestHash doc).
     if (hash === previousCallHash || hash === requestHashWithLog.get()) return;
-    previousCallHash = hash;
 
     if (!Array.isArray(messages) || messages.length === 0) {
       resultWithLog.set(undefined);
@@ -375,75 +582,118 @@ export function llm(
       return;
     }
 
+    markRequestHashPendingCommit(
+      tx,
+      hash,
+      () => previousCallHash,
+      (next) => {
+        previousCallHash = next;
+      },
+    );
+
     resultWithLog.set(undefined);
     errorWithLog.set(undefined);
     partialWithLog.set(undefined);
     pendingWithLog.set(true);
 
+    // When queued, disable run cancellation — the queue manages lifecycle.
+    const getRunForCancellation = queueName ? () => thisRun : () => currentRun;
+
     const { callback: updatePartial, cleanup: cleanupPartial } =
       createUpdatePartialCallback(
         resultCell,
         runtime,
-        () => currentRun,
+        getRunForCancellation,
         thisRun,
       );
 
-    // Build tool catalog if tools are present, then start execution
-    const resultPromise = (async () => {
-      try {
-        const toolsCell = inputs.key("tools").asSchema({
-          type: "object",
-          additionalProperties: LLMToolSchema,
-        });
-        const toolCatalog = toolsCell
-          ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
-          : undefined;
+    // Build tool catalog if tools are present, then start execution after the
+    // transaction commits.
+    enqueuePostCommitLLMWork(
+      tx,
+      "llm",
+      `llm:${hash}`,
+      "llm-start",
+      requestSnapshot,
+      () => {
+        const resultPromise = (async () => {
+          try {
+            const doWork = () =>
+              executeWithToolsLoop({
+                initialMessages:
+                  (messages as unknown as readonly BuiltInLLMMessage[]) ??
+                    [],
+                llmParams: requestSnapshot,
+                toolCatalog,
+                initialObservedConfidentiality:
+                  contextDocs.observedConfidentiality,
+                // Deployment-bounded so post-commit tool reads can't exceed the
+                // llm sink ceiling (#3993 review).
+                observationMaxConfidentiality: llmToolExecutionHelpers
+                  .effectiveObservationCeiling(
+                    runtime,
+                    "llm",
+                    inputs.key("observationMaxConfidentiality").get() as
+                      | readonly unknown[]
+                      | undefined,
+                  ),
+                updatePartial,
+                runtime,
+                space: parentCell.space,
+                getCurrentRun: getRunForCancellation,
+                thisRun,
+                onComplete: async (llmResult) => {
+                  // Skip if a newer request has already superseded this one.
+                  if (hash !== previousCallHash) return;
 
-        await executeWithToolsLoop({
-          initialMessages:
-            (messages as unknown as readonly BuiltInLLMMessage[]) ?? [],
-          llmParams,
-          toolCatalog: toolCatalog!,
-          updatePartial,
-          runtime,
-          space: parentCell.space,
-          getCurrentRun: () => currentRun,
-          thisRun,
-          onComplete: async (llmResult) => {
-            await runtime.idle();
+                  await runtime.idle();
+                  const groundingSources = extractGroundingSources(llmResult);
 
-            await runtime.editWithRetry((tx) => {
-              resultCell.key("pending").withTx(tx).set(false);
-              resultCell.key("result").withTx(tx).set(llmResult.content);
-              resultCell.key("error").withTx(tx).set(undefined);
-              resultCell.key("partial").withTx(tx).set(
-                extractTextFromLLMResponse(llmResult),
-              );
-              resultCell.key("requestHash").withTx(tx).set(hash);
-            });
-          },
-        });
-      } finally {
-        cleanupPartial();
-      }
-    })();
+                  await runtime.editWithRetry((tx) => {
+                    resultCell.key("pending").withTx(tx).set(false);
+                    resultCell.key("result").withTx(tx).set(llmResult.content);
+                    resultCell.key("error").withTx(tx).set(undefined);
+                    resultCell.key("partial").withTx(tx).set(
+                      extractTextFromLLMResponse(llmResult),
+                    );
+                    resultCell.key("requestHash").withTx(tx).set(hash);
+                    resultCell.key("groundingSources").withTx(tx).set(
+                      groundingSources,
+                    );
+                  });
+                },
+              });
 
-    resultPromise.catch((e) =>
-      handleLLMError(
-        e,
-        runtime,
-        resultCell.key("pending"),
-        resultCell.key("result"),
-        resultCell.key("error"),
-        resultCell.key("partial"),
-        resultCell.key("requestHash"),
-        hash,
-        () => currentRun,
-        thisRun,
-        () => {
-          previousCallHash = undefined;
-        },
-      )
+            if (queueName) {
+              await runtime.getOrCreateQueue(queueName).enqueue(doWork);
+            } else {
+              await doWork();
+            }
+          } finally {
+            cleanupPartial();
+          }
+        })();
+
+        resultPromise.catch((e) =>
+          handleLLMError(
+            e,
+            runtime,
+            resultCell.key("pending"),
+            resultCell.key("result"),
+            resultCell.key("error"),
+            resultCell.key("partial"),
+            resultCell.key("requestHash"),
+            hash,
+            getRunForCancellation,
+            thisRun,
+            () => {
+              // Only clear if this is still the current request; a newer request
+              // may have already set previousCallHash to its own hash.
+              if (hash === previousCallHash) previousCallHash = undefined;
+            },
+          )
+        );
+      },
     );
   };
 }
@@ -467,6 +717,61 @@ export function llm(
  *   As individual docs, representing `pending` state, final `result` and
  *   incrementally updating `partial` result.
  */
+/**
+ * Resolve the effective native-model-tool ids for a request from the friendly
+ * `search` flag (shorthand for Google Search grounding) plus any explicit
+ * `nativeModelToolIds`. Returns undefined when none are requested.
+ */
+function resolveNativeModelToolIds(
+  search: unknown,
+  nativeModelToolIds: unknown,
+): readonly LLMNativeModelToolId[] | undefined {
+  const ids: string[] = [];
+  if (search === true) ids.push(GOOGLE_SEARCH_NATIVE_MODEL_TOOL);
+  if (Array.isArray(nativeModelToolIds)) {
+    for (const id of nativeModelToolIds) {
+      if (typeof id === "string" && !ids.includes(id)) ids.push(id);
+    }
+  }
+  return ids.length > 0 ? (ids as readonly LLMNativeModelToolId[]) : undefined;
+}
+
+/**
+ * Flatten grounding/source URLs out of an LLM response's
+ * `nativeModelToolResults[].sources` (e.g. from `google_search`) into the
+ * compact `{ url, title, snippet }[]` shape surfaced on builtin result state.
+ */
+function extractGroundingSources(
+  llmResult: LLMResponse,
+): Array<{ url?: string; title?: string; snippet?: string }> | undefined {
+  const results =
+    (llmResult as { nativeModelToolResults?: readonly { sources?: unknown }[] })
+      .nativeModelToolResults;
+  if (!Array.isArray(results) || results.length === 0) return undefined;
+  const out: Array<{ url?: string; title?: string; snippet?: string }> = [];
+  const seen = new Set<string>();
+  for (const r of results) {
+    const sources = r?.sources;
+    if (!Array.isArray(sources)) continue;
+    for (const s of sources) {
+      if (!s || typeof s !== "object") continue;
+      const rec = s as Record<string, unknown>;
+      const url = typeof rec.url === "string" ? rec.url : undefined;
+      const title = typeof rec.title === "string" ? rec.title : undefined;
+      const snippet = typeof rec.snippet === "string"
+        ? rec.snippet
+        : typeof rec.description === "string"
+        ? rec.description
+        : undefined;
+      const key = url ?? title ?? JSON.stringify(rec);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (url || title || snippet) out.push({ url, title, snippet });
+    }
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 export function generateText(
   inputsCell: Cell<BuiltInGenerateTextParams>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
@@ -481,27 +786,55 @@ export function generateText(
   let previousCallHash: string | undefined = undefined;
   let cellsInitialized = false;
   let resultCell: Cell<Schema<typeof GenerateTextResultSchema>>;
+  let cellScope: CellScope | undefined;
 
   return (tx: IExtendedStorageTransaction) => {
-    if (!cellsInitialized) {
-      resultCell = runtime.getCell(
+    tx.resetNarrowestReadScope();
+    const {
+      system,
+      prompt,
+      messages,
+      model,
+      maxTokens,
+      search,
+      nativeModelToolIds,
+    } = inputs.withTx(tx).get();
+    const effectiveNativeModelToolIds = resolveNativeModelToolIds(
+      search,
+      nativeModelToolIds,
+    );
+
+    // Build context documentation from context cells and append to system prompt
+    const contextDocs = buildContextDocumentation(
+      inputs,
+      runtime,
+      parentCell.space,
+      tx,
+      "generateText",
+    );
+    const outputScope = tx.getNarrowestReadScope();
+
+    if (!cellsInitialized || cellScope !== outputScope) {
+      if (cellsInitialized && cellScope !== outputScope) {
+        previousCallHash = undefined;
+      }
+      const baseResultCell = runtime.getCell(
         parentCell.space,
         { generateText: { result: cause } },
         GenerateTextResultSchema,
         tx,
       );
+      resultCell = scopedCell(runtime, tx, baseResultCell, outputScope);
       resultCell.sync();
       sendResult(tx, resultCell);
       cellsInitialized = true;
+      cellScope = outputScope;
     }
     const pendingWithLog = resultCell.key("pending").withTx(tx);
     const resultWithLog = resultCell.key("result").withTx(tx);
     const errorWithLog = resultCell.key("error").withTx(tx);
     const partialWithLog = resultCell.key("partial").withTx(tx);
     const requestHashWithLog = resultCell.key("requestHash").withTx(tx);
-
-    const { system, prompt, messages, model, maxTokens } = inputs.withTx(tx)
-      .get();
 
     // If neither prompt nor messages is provided, don't make a request
     const hasPrompt = Array.isArray(prompt) ? prompt.length > 0 : !!prompt;
@@ -518,16 +851,9 @@ export function generateText(
       (messages as unknown as readonly BuiltInLLMMessage[]) ||
       [{ role: "user", content: prompt! }];
 
-    // Build context documentation from context cells and append to system prompt
-    const contextDocs = buildContextDocumentation(
-      inputs,
-      runtime,
-      parentCell.space,
-      tx,
-    );
-
     const llmParams: LLMRequest = {
-      system: (system ?? "") + contextDocs,
+      system: ((system ?? "") + contextDocs.docs).trim() ||
+        "You are a helpful assistant.",
       messages: requestMessages,
       stop: "",
       maxTokens: maxTokens ?? 4096,
@@ -537,10 +863,26 @@ export function generateText(
         context: "piece",
       },
       cache: true,
+      ...(effectiveNativeModelToolIds
+        ? { nativeModelToolIds: effectiveNativeModelToolIds }
+        : {}),
       // tools will be added below if present
     };
 
-    const hash = refer(llmParams).toString();
+    const toolsCell = inputs.key("tools").asSchema({
+      type: "object",
+      additionalProperties: LLMToolSchema,
+    });
+    const toolCatalog = toolsCell
+      ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
+      : undefined;
+    const requestSnapshot = createFrozenRequestSnapshot(
+      toolCatalog ? { ...llmParams, tools: toolCatalog.llmTools } : llmParams,
+    );
+    const hash = hashOf(requestSnapshot).toString();
+    const queueName = inputs.key("queue").withTx(tx).get() as unknown as
+      | string
+      | undefined;
     const currentRequestHash = requestHashWithLog.get();
     const currentResult = resultWithLog.get();
     const currentError = errorWithLog.get();
@@ -559,7 +901,14 @@ export function generateText(
       return;
     }
 
-    previousCallHash = hash;
+    markRequestHashPendingCommit(
+      tx,
+      hash,
+      () => previousCallHash,
+      (next) => {
+        previousCallHash = next;
+      },
+    );
 
     // Only increment currentRun if this is a NEW request (different hash)
     // This prevents abandoning in-flight requests when the same params are re-evaluated
@@ -573,69 +922,99 @@ export function generateText(
     partialWithLog.set(undefined);
     pendingWithLog.set(true);
 
+    // When queued, disable run cancellation — the queue manages lifecycle.
+    // Once enqueued, the job must run to completion to avoid abandoning
+    // HTTP streams (which causes ERR_INCOMPLETE_CHUNK_ENCODING).
+    const getRunForCancellation = queueName ? () => thisRun : () => currentRun;
+
     const { callback: updatePartial, cleanup: cleanupPartial } =
       createUpdatePartialCallback(
         resultCell,
         runtime,
-        () => currentRun,
+        getRunForCancellation,
         thisRun,
       );
 
-    // Build tool catalog if tools are present, then start execution
-    const resultPromise = (async () => {
-      try {
-        const toolsCell = inputs.key("tools").asSchema({
-          type: "object",
-          additionalProperties: LLMToolSchema,
-        });
-        const toolCatalog = toolsCell
-          ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
-          : undefined;
+    enqueuePostCommitLLMWork(
+      tx,
+      "generateText",
+      `generateText:${hash}`,
+      "generateText-start",
+      requestSnapshot,
+      () => {
+        const resultPromise = (async () => {
+          try {
+            const doWork = () =>
+              executeWithToolsLoop({
+                initialMessages: requestMessages,
+                llmParams: requestSnapshot,
+                toolCatalog,
+                initialObservedConfidentiality:
+                  contextDocs.observedConfidentiality,
+                // Deployment-bounded so post-commit tool reads can't exceed the
+                // generateText sink ceiling (#3993 review).
+                observationMaxConfidentiality: llmToolExecutionHelpers
+                  .effectiveObservationCeiling(
+                    runtime,
+                    "generateText",
+                    inputs.key("observationMaxConfidentiality").get() as
+                      | readonly unknown[]
+                      | undefined,
+                  ),
+                updatePartial,
+                runtime,
+                space: parentCell.space,
+                getCurrentRun: getRunForCancellation,
+                thisRun,
+                onComplete: async (llmResult) => {
+                  await runtime.idle();
 
-        await executeWithToolsLoop({
-          initialMessages: requestMessages,
-          llmParams,
-          toolCatalog: toolCatalog!,
-          updatePartial,
-          runtime,
-          space: parentCell.space,
-          getCurrentRun: () => currentRun,
-          thisRun,
-          onComplete: async (llmResult) => {
-            await runtime.idle();
+                  const textResult = extractTextFromLLMResponse(llmResult);
+                  const groundingSources = extractGroundingSources(llmResult);
 
-            const textResult = extractTextFromLLMResponse(llmResult);
+                  await runtime.editWithRetry((tx) => {
+                    resultCell.key("pending").withTx(tx).set(false);
+                    resultCell.key("result").withTx(tx).set(textResult);
+                    resultCell.key("error").withTx(tx).set(undefined);
+                    resultCell.key("partial").withTx(tx).set(textResult);
+                    resultCell.key("requestHash").withTx(tx).set(hash);
+                    resultCell.key("groundingSources").withTx(tx).set(
+                      groundingSources,
+                    );
+                  });
+                },
+              });
 
-            await runtime.editWithRetry((tx) => {
-              resultCell.key("pending").withTx(tx).set(false);
-              resultCell.key("result").withTx(tx).set(textResult);
-              resultCell.key("error").withTx(tx).set(undefined);
-              resultCell.key("partial").withTx(tx).set(textResult);
-              resultCell.key("requestHash").withTx(tx).set(hash);
-            });
-          },
-        });
-      } finally {
-        cleanupPartial();
-      }
-    })();
+            if (queueName) {
+              await runtime.getOrCreateQueue(queueName).enqueue(doWork);
+            } else {
+              await doWork();
+            }
+          } finally {
+            cleanupPartial();
+          }
+        })();
 
-    resultPromise.catch((e) =>
-      handleLLMError(
-        e,
-        runtime,
-        resultCell.key("pending"),
-        resultCell.key("result"),
-        resultCell.key("error"),
-        resultCell.key("partial"),
-        resultCell.key("requestHash"),
-        hash,
-        () => currentRun,
-        thisRun,
-        () => {
-          previousCallHash = undefined;
-        },
-      )
+        resultPromise.catch((e) =>
+          handleLLMError(
+            e,
+            runtime,
+            resultCell.key("pending"),
+            resultCell.key("result"),
+            resultCell.key("error"),
+            resultCell.key("partial"),
+            resultCell.key("requestHash"),
+            hash,
+            getRunForCancellation,
+            thisRun,
+            () => {
+              // Only clear if this is still the current request; a newer request
+              // may have already set previousCallHash to its own hash.
+              if (hash === previousCallHash) previousCallHash = undefined;
+            },
+          )
+        );
+      },
     );
   };
 }
@@ -673,25 +1052,10 @@ export function generateObject<T extends Record<string, unknown>>(
   let previousCallHash: string | undefined = undefined;
   let cellsInitialized = false;
   let resultCell: Cell<Schema<typeof GenerateObjectResultSchema>>;
+  let cellScope: CellScope | undefined;
 
   return (tx: IExtendedStorageTransaction) => {
-    if (!cellsInitialized) {
-      resultCell = runtime.getCell(
-        parentCell.space,
-        { generateObject: { result: cause } },
-        GenerateObjectResultSchema,
-        tx,
-      );
-      resultCell.sync();
-      sendResult(tx, resultCell);
-      cellsInitialized = true;
-    }
-    const pendingWithLog = resultCell.key("pending").withTx(tx);
-    const resultWithLog = resultCell.key("result").withTx(tx);
-    const errorWithLog = resultCell.key("error").withTx(tx);
-    const partialWithLog = resultCell.key("partial").withTx(tx);
-    const requestHashWithLog = resultCell.key("requestHash").withTx(tx);
-
+    tx.resetNarrowestReadScope();
     const {
       prompt,
       messages,
@@ -702,11 +1066,61 @@ export function generateObject<T extends Record<string, unknown>>(
       cache,
       tools,
       metadata,
+      schemaSanitizePromptInjection,
+      search,
+      nativeModelToolIds,
     } = inputs.withTx(tx).get() ?? {};
+    const effectiveNativeModelToolIds = resolveNativeModelToolIds(
+      search,
+      nativeModelToolIds,
+    );
+    const context = inputs.key("context").withTx(tx).get() as
+      | Record<string, unknown>
+      | undefined;
+    // Bound the pattern-supplied ceiling by the deployment generateObject
+    // ceiling once here; every downstream consumer (context docs, the tools
+    // loop, and the direct path) inherits the effective bound, so post-commit
+    // tool reads can't observe past the deployment ceiling (#3993 review).
+    const observationMaxConfidentiality = llmToolExecutionHelpers
+      .effectiveObservationCeiling(
+        runtime,
+        "generateObject",
+        inputs.key("observationMaxConfidentiality").withTx(tx).get() as
+          | readonly unknown[]
+          | undefined,
+      );
+    const outputScope = tx.getNarrowestReadScope();
+
+    if (!cellsInitialized || cellScope !== outputScope) {
+      if (cellsInitialized && cellScope !== outputScope) {
+        previousCallHash = undefined;
+      }
+      const baseResultCell = runtime.getCell(
+        parentCell.space,
+        { generateObject: { result: cause } },
+        GenerateObjectResultSchema,
+        tx,
+      );
+      resultCell = scopedCell(runtime, tx, baseResultCell, outputScope);
+      resultCell.sync();
+      sendResult(tx, resultCell);
+      cellsInitialized = true;
+      cellScope = outputScope;
+    }
+    const pendingWithLog = resultCell.key("pending").withTx(tx);
+    const resultWithLog = resultCell.key("result").withTx(tx);
+    const messagesWithLog = resultCell.key("messages").withTx(tx);
+    const errorWithLog = resultCell.key("error").withTx(tx);
+    const partialWithLog = resultCell.key("partial").withTx(tx);
+    const requestHashWithLog = resultCell.key("requestHash").withTx(tx);
 
     const hasPrompt = Array.isArray(prompt) ? prompt.length > 0 : !!prompt;
-    if ((!hasPrompt && (!messages || messages.length === 0)) || !schema) {
+    if (
+      (!hasPrompt && (!messages || messages.length === 0)) ||
+      schema === undefined
+    ) {
       resultWithLog.set(undefined);
+      messagesWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(false);
@@ -721,20 +1135,65 @@ export function generateObject<T extends Record<string, unknown>>(
       [{ role: "user", content: prompt! }];
 
     // Build context documentation from context cells and append to system prompt
-    const contextDocs = buildContextDocumentation(
-      inputs,
-      runtime,
-      parentCell.space,
-      tx,
-    );
-
+    const pinnedCellsSchema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          name: { type: "string" },
+        },
+        required: ["path", "name"],
+      },
+    } as const;
+    const contextDocs = context
+      ? llmToolExecutionHelpers.buildAvailableCellsDocumentationWithObservation(
+        runtime,
+        parentCell.space,
+        context as Record<string, Cell<any>>,
+        runtime.getCell(
+          parentCell.space,
+          { generateObject: { pinnedCells: [] } },
+          pinnedCellsSchema,
+          tx,
+        ),
+        observationMaxConfidentiality,
+      )
+      : {
+        docs: "",
+        observedConfidentiality: [],
+      };
     // Determine whether to use the tool-calling path or the direct generateObject path
     const hasTools = isObject(tools) && Object.keys(tools).length > 0;
+    const validationSchema = schemaSanitizePromptInjection
+      ? JSON.parse(JSON.stringify(schema)) as JSONSchema
+      : undefined;
+    const resultSchemaForObserved = (
+      observedConfidentiality: readonly unknown[],
+    ) =>
+      schemaSanitizePromptInjection
+        ? schemaWithInjectionSafeAnnotations(
+          validationSchema as any,
+          observedConfidentiality,
+        )
+        : undefined;
+    const validateResultForSchemaSanitization = (value: unknown): void => {
+      if (validationSchema === undefined) {
+        return;
+      }
+      const failure = validateAgainstSchema(validationSchema, value);
+      if (failure !== undefined) {
+        throw new Error(
+          `generateObject result failed schema sanitization validation: ${failure}`,
+        );
+      }
+    };
 
     if (hasTools) {
       // Use tool-calling path with presentResult builtin tool
       const llmParams: LLMRequest = {
-        system: (system ?? "") + contextDocs,
+        system: ((system ?? "") + contextDocs.docs).trim() ||
+          "You are a helpful assistant.",
         messages: requestMessages,
         stop: "",
         maxTokens: maxTokens ?? 8192,
@@ -745,12 +1204,65 @@ export function generateObject<T extends Record<string, unknown>>(
           context: "piece",
         },
         cache: cache ?? true,
+        ...(effectiveNativeModelToolIds
+          ? { nativeModelToolIds: effectiveNativeModelToolIds }
+          : {}),
       };
 
-      const hash = refer({ ...llmParams, schema }).toString();
+      const toolsCell = inputs.key("tools").asSchema({
+        type: "object",
+        additionalProperties: LLMToolSchema,
+      });
+      const baseCatalog = llmToolExecutionHelpers.buildToolCatalog(
+        toolsCell,
+      );
+
+      // Add presentResult builtin tool.
+      const toolCatalog = {
+        ...baseCatalog,
+        llmTools: {
+          ...baseCatalog.llmTools,
+          [llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME]: {
+            description:
+              "Call this tool with the final structured result matching the required schema. This should be your last action.",
+            // TODO(danfuzz): Replace JSON.parse(JSON.stringify(...)) with
+            // cloneSchemaMutable() here.
+            inputSchema: llmToolExecutionHelpers.prepareSchemaForLLM(
+              JSON.parse(JSON.stringify(schema)),
+            ),
+          },
+        },
+      };
+      const llmParamsWithTools: LLMRequest = {
+        ...llmParams,
+        tools: toolCatalog.llmTools,
+      };
+      const requestSnapshot = createFrozenRequestSnapshot(
+        JSON.parse(
+          JSON.stringify({
+            ...llmParamsWithTools,
+            schema,
+            schemaSanitizePromptInjection,
+          }),
+        ),
+      );
+      const hash = hashOf(requestSnapshot).toString();
+      const queueName = inputs.key("queue").withTx(tx).get() as unknown as
+        | string
+        | undefined;
       const currentRequestHash = requestHashWithLog.get();
       const currentResult = resultWithLog.get();
       const currentError = errorWithLog.get();
+      const toolsRequestSummary = summarizeGenerateObjectRequest({
+        hash,
+        path: "tools",
+        model: llmParamsWithTools.model,
+        hasTools: true,
+        toolNames: Object.keys(toolCatalog.llmTools),
+        messageCount: requestMessages.length,
+        contextKeys: context ? Object.keys(context) : [],
+        queueName,
+      });
 
       // Return if the same request is being made again
       // Also return if there's an error for this request (don't retry automatically)
@@ -758,14 +1270,23 @@ export function generateObject<T extends Record<string, unknown>>(
         (currentResult !== undefined || currentError !== undefined) &&
         hash === currentRequestHash
       ) {
+        logGenerateObject("skip-cached", toolsRequestSummary);
         return;
       }
 
       if (hash === previousCallHash) {
+        logGenerateObject("skip-inflight", toolsRequestSummary);
         return;
       }
 
-      previousCallHash = hash;
+      markRequestHashPendingCommit(
+        tx,
+        hash,
+        () => previousCallHash,
+        (next) => {
+          previousCallHash = next;
+        },
+      );
 
       if (hash !== currentRequestHash) {
         currentRun++;
@@ -773,169 +1294,271 @@ export function generateObject<T extends Record<string, unknown>>(
       const thisRun = currentRun;
 
       resultWithLog.set(undefined);
+      messagesWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
+      messagesWithLog.set(JSON.parse(JSON.stringify(requestMessages)) as any);
       pendingWithLog.set(true);
 
       const { callback: updatePartial, cleanup: cleanupPartial } =
         createUpdatePartialCallback(
           resultCell,
           runtime,
-          () => currentRun,
+          queueName ? () => thisRun : () => currentRun,
           thisRun,
         );
 
-      // Build tool catalog with presentResult tool
-      const resultPromise = (async () => {
-        try {
-          const toolsCell = inputs.key("tools").asSchema({
-            type: "object",
-            additionalProperties: LLMToolSchema,
-          });
-          const baseCatalog = llmToolExecutionHelpers.buildToolCatalog(
-            toolsCell,
-          );
+      // When queued, disable run cancellation — the queue manages lifecycle.
+      const isRunCancelled = queueName
+        ? () => false
+        : () => thisRun !== currentRun;
 
-          // Add presentResult builtin tool
-          const toolCatalog = {
-            ...baseCatalog,
-            llmTools: {
-              ...baseCatalog.llmTools,
-              [llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME]: {
-                description:
-                  "Call this tool with the final structured result matching the required schema. This should be your last action.",
-                inputSchema: llmToolExecutionHelpers.prepareSchemaForLLM(
-                  JSON.parse(JSON.stringify(schema)),
-                ),
-              },
-            },
-          };
+      logGenerateObject("enqueue", toolsRequestSummary);
 
-          // Execute with tools - capture presentResult when called
-          let finalResult: T | undefined;
+      enqueuePostCommitLLMWork(
+        tx,
+        "generateObject",
+        `generateObject:${hash}`,
+        "generateObject-start",
+        requestSnapshot,
+        () => {
+          logGenerateObject("post-commit-start", toolsRequestSummary);
+          const resultPromise = (async () => {
+            try {
+              await inputs.pull();
+              const liveContext = inputs.key("context").get() as
+                | Record<string, unknown>
+                | undefined;
+              await pullContextCells(liveContext);
+              const liveContextDocs = liveContext
+                ? llmToolExecutionHelpers
+                  .buildAvailableCellsDocumentationWithObservation(
+                    runtime,
+                    parentCell.space,
+                    liveContext as Record<string, Cell<any>>,
+                    runtime.getCell(
+                      parentCell.space,
+                      { generateObject: { pinnedCells: [] } },
+                      pinnedCellsSchema,
+                    ),
+                    observationMaxConfidentiality,
+                  )
+                : {
+                  docs: "",
+                  observedConfidentiality: [],
+                };
+              const liveSystem =
+                ((system ?? "") + liveContextDocs.docs).trim() ||
+                "You are a helpful assistant.";
+              const livePromptObservedConfidentiality =
+                collectGenerateObjectPromptConfidentiality(inputs);
+              const liveInitialObservedConfidentiality = uniqueCfcAtoms([
+                ...livePromptObservedConfidentiality,
+                ...liveContextDocs.observedConfidentiality,
+              ]);
 
-          // Custom execution loop for generateObject with presentResult extraction
-          const executeRecursive = async (
-            currentMessages: readonly BuiltInLLMMessage[],
-          ): Promise<void> => {
-            if (thisRun !== currentRun) return;
+              // Execute with tools - capture presentResult when called
+              let finalResult: T | undefined;
+              let finalMessages: readonly BuiltInLLMMessage[] = requestMessages;
+              let finalObservedConfidentiality: readonly unknown[] =
+                liveInitialObservedConfidentiality;
 
-            const requestParams: LLMRequest = {
-              ...llmParams,
-              messages: currentMessages,
-              tools: toolCatalog.llmTools,
-            };
+              // Custom execution loop for generateObject with presentResult extraction
+              const executeRecursive = async (
+                currentMessages: readonly BuiltInLLMMessage[],
+                observedConfidentiality: readonly unknown[],
+              ): Promise<void> => {
+                if (isRunCancelled()) return;
 
-            const llmResult = await client.sendRequest(
-              requestParams,
-              updatePartial,
-            );
+                const requestParams: LLMRequest = {
+                  ...llmParamsWithTools,
+                  system: liveSystem,
+                  messages: currentMessages,
+                };
 
-            if (thisRun !== currentRun) return;
-
-            const toolCallParts = llmToolExecutionHelpers.extractToolCallParts(
-              llmResult.content,
-            );
-            const hasToolCalls = toolCallParts.length > 0;
-
-            if (hasToolCalls) {
-              const assistantMessage = llmToolExecutionHelpers
-                .buildAssistantMessage(
-                  llmResult.content,
-                  toolCallParts,
+                const mappedLlmHost = runtime.mappedHostFor(
+                  parentCell.space,
+                );
+                const llmResult = await client.sendRequest(
+                  requestParams,
+                  updatePartial,
+                  undefined,
+                  mappedLlmHost
+                    ? { endpoint: new URL("/api/ai/llm", mappedLlmHost) }
+                    : undefined,
                 );
 
-              const toolResults = await llmToolExecutionHelpers
-                .executeToolCalls(
-                  runtime,
-                  parentCell.space,
-                  toolCatalog,
-                  toolCallParts,
+                if (isRunCancelled()) return;
+
+                const toolCallParts = llmToolExecutionHelpers
+                  .extractToolCallParts(llmResult.content);
+                const hasToolCalls = toolCallParts.length > 0;
+
+                if (hasToolCalls) {
+                  const assistantMessage = llmToolExecutionHelpers
+                    .buildAssistantMessage(
+                      llmResult.content,
+                      toolCallParts,
+                    );
+
+                  const toolResults = await llmToolExecutionHelpers
+                    .executeToolCalls(
+                      runtime,
+                      parentCell.space,
+                      toolCatalog,
+                      toolCallParts,
+                      undefined,
+                      observedConfidentiality,
+                      observationMaxConfidentiality,
+                    );
+
+                  // Check if presentResult was called. Cellify from the raw
+                  // tool call input to get live Cell references (the tool result
+                  // itself is serialized with @link for the conversation).
+                  const presentResultPart = toolCallParts.find(
+                    (p) =>
+                      p.toolName ===
+                        llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME,
+                  );
+                  if (presentResultPart) {
+                    finalResult = llmToolExecutionHelpers.traverseAndCellify(
+                      runtime,
+                      parentCell.space,
+                      presentResultPart.input,
+                    ) as T;
+                  }
+
+                  const toolResultMessages = llmToolExecutionHelpers
+                    .createToolResultMessages(toolResults);
+
+                  const updatedMessages = [
+                    ...currentMessages,
+                    assistantMessage,
+                    ...toolResultMessages,
+                  ];
+                  finalMessages = updatedMessages;
+
+                  const nextObservedConfidentiality = uniqueCfcAtoms([
+                    ...observedConfidentiality,
+                    ...toolResults.flatMap((result) =>
+                      result.observedConfidentiality ?? []
+                    ),
+                  ]);
+                  if (presentResultPart) {
+                    finalObservedConfidentiality = nextObservedConfidentiality;
+                  }
+
+                  // Continue if presentResult wasn't called yet
+                  if (!presentResultPart) {
+                    await executeRecursive(
+                      updatedMessages,
+                      nextObservedConfidentiality,
+                    );
+                  }
+                } else {
+                  throw new Error(
+                    "LLM did not call presentResult tool with structured data",
+                  );
+                }
+              };
+
+              const doWork = async () => {
+                logGenerateObject("tools-loop-start", toolsRequestSummary);
+                await executeRecursive(
+                  requestMessages,
+                  liveInitialObservedConfidentiality,
                 );
 
-              // Check if presentResult was called. Cellify from the raw
-              // tool call input to get live Cell references (the tool result
-              // itself is serialized with @link for the conversation).
-              const presentResultPart = toolCallParts.find(
-                (p) =>
-                  p.toolName ===
-                    llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME,
-              );
-              if (presentResultPart) {
-                finalResult = llmToolExecutionHelpers.traverseAndCellify(
-                  runtime,
-                  parentCell.space,
-                  presentResultPart.input,
-                ) as T;
+                if (finalResult === undefined) {
+                  throw new Error("presentResult was never called");
+                }
+                validateResultForSchemaSanitization(finalResult);
+
+                return {
+                  object: finalResult,
+                  messages: finalMessages,
+                  resultSchema: resultSchemaForObserved(
+                    finalObservedConfidentiality,
+                  ),
+                };
+              };
+
+              const objectResponse = queueName
+                ? await runtime.getOrCreateQueue(queueName).enqueue(doWork)
+                : await doWork();
+
+              logGenerateObject("tools-loop-complete", {
+                ...toolsRequestSummary,
+                objectKeys: Object.keys(objectResponse.object ?? {}),
+              });
+
+              if (isRunCancelled()) {
+                logGenerateObject(
+                  "write-skipped-cancelled",
+                  toolsRequestSummary,
+                );
+                return;
               }
 
-              const toolResultMessages = llmToolExecutionHelpers
-                .createToolResultMessages(toolResults);
+              await runtime.idle();
 
-              const updatedMessages = [
-                ...currentMessages,
-                assistantMessage,
-                ...toolResultMessages,
-              ];
-
-              // Continue if presentResult wasn't called yet
-              if (!presentResultPart) {
-                await executeRecursive(updatedMessages);
-              }
-            } else {
-              throw new Error(
-                "LLM did not call presentResult tool with structured data",
-              );
+              await runtime.editWithRetry((tx) => {
+                // The InjectionSafe annotations on resultSchema are minted by
+                // the trusted sanitizer; attribute this write to the builtin so
+                // the persist-time evidence gate trusts them (audit S4).
+                tx.setCfcImplementationIdentity({
+                  kind: "builtin",
+                  builtinId: "generateObject",
+                });
+                resultCell.key("pending").withTx(tx).set(false);
+                const resultTarget = objectResponse.resultSchema === undefined
+                  ? resultCell.key("result")
+                  : resultCell.key("result").asSchema(
+                    objectResponse.resultSchema,
+                  );
+                resultTarget.withTx(tx).set(objectResponse.object);
+                resultCell.key("messages").withTx(tx).set(
+                  JSON.parse(JSON.stringify(objectResponse.messages)) as any,
+                );
+                resultCell.key("error").withTx(tx).set(undefined);
+                resultCell.key("requestHash").withTx(tx).set(hash);
+              });
+              logGenerateObject("write-complete", toolsRequestSummary);
+            } finally {
+              cleanupPartial();
             }
-          };
+          })();
 
-          await executeRecursive(requestMessages);
-
-          if (finalResult === undefined) {
-            throw new Error("presentResult was never called");
-          }
-
-          return finalResult;
-        } finally {
-          cleanupPartial();
-        }
-      })();
-
-      resultPromise
-        .then(async (objectResult) => {
-          if (thisRun !== currentRun) return;
-
-          await runtime.idle();
-
-          await runtime.editWithRetry((tx) => {
-            resultCell.key("pending").withTx(tx).set(false);
-            resultCell.key("result").withTx(tx).set(objectResult);
-            resultCell.key("error").withTx(tx).set(undefined);
-            resultCell.key("requestHash").withTx(tx).set(hash);
+          resultPromise.catch((e) => {
+            logGenerateObject("error", {
+              ...toolsRequestSummary,
+              error: e instanceof Error ? e.message : String(e),
+            });
+            return handleLLMError(
+              e,
+              runtime,
+              resultCell.key("pending"),
+              resultCell.key("result"),
+              resultCell.key("error"),
+              resultCell.key("partial"),
+              resultCell.key("requestHash"),
+              hash,
+              queueName ? () => thisRun : () => currentRun,
+              thisRun,
+              () => {
+                previousCallHash = undefined;
+              },
+            );
           });
-        })
-        .catch((e) =>
-          handleLLMError(
-            e,
-            runtime,
-            resultCell.key("pending"),
-            resultCell.key("result"),
-            resultCell.key("error"),
-            resultCell.key("partial"),
-            resultCell.key("requestHash"),
-            hash,
-            () => currentRun,
-            thisRun,
-            () => {
-              previousCallHash = undefined;
-            },
-          )
-        );
+        },
+      );
     } else {
       // Use direct generateObject path (no tools)
       const generateObjectParams: LLMGenerateObjectRequest = {
         messages: requestMessages,
         maxTokens: maxTokens ?? 8192,
+        // TODO(danfuzz): Replace JSON.parse(JSON.stringify(...)) with
+        // cloneSchemaMutable() here.
         schema: llmToolExecutionHelpers.prepareSchemaForLLM(
           JSON.parse(JSON.stringify(schema)),
         ) as Record<string, unknown>,
@@ -945,15 +1568,36 @@ export function generateObject<T extends Record<string, unknown>>(
           context: "piece",
         },
         cache: cache ?? true,
+        ...(effectiveNativeModelToolIds
+          ? { nativeModelToolIds: effectiveNativeModelToolIds }
+          : {}),
       };
 
       // Always set system prompt with context documentation
-      generateObjectParams.system = (system ?? "") + contextDocs;
+      generateObjectParams.system =
+        ((system ?? "") + contextDocs.docs).trim() ||
+        "You are a helpful assistant.";
 
-      const hash = refer(generateObjectParams).toString();
+      const requestSnapshot = createFrozenRequestSnapshot({
+        ...generateObjectParams,
+        schemaSanitizePromptInjection,
+      });
+      const hash = hashOf(requestSnapshot).toString();
+      const queueName = inputs.key("queue").withTx(tx).get() as unknown as
+        | string
+        | undefined;
       const currentRequestHash = requestHashWithLog.get();
       const currentResult = resultWithLog.get();
       const currentError = errorWithLog.get();
+      const directRequestSummary = summarizeGenerateObjectRequest({
+        hash,
+        path: "direct",
+        model: generateObjectParams.model,
+        hasTools: false,
+        messageCount: requestMessages.length,
+        contextKeys: context ? Object.keys(context) : [],
+        queueName,
+      });
 
       // Return if the same request is being made again
       // Also return if there's an error for this request (don't retry automatically)
@@ -961,15 +1605,24 @@ export function generateObject<T extends Record<string, unknown>>(
         (currentResult !== undefined || currentError !== undefined) &&
         hash === currentRequestHash
       ) {
+        logGenerateObject("skip-cached", directRequestSummary);
         return;
       }
 
       // Also skip if this is the same request in the current transaction
       if (hash === previousCallHash) {
+        logGenerateObject("skip-inflight", directRequestSummary);
         return;
       }
 
-      previousCallHash = hash;
+      markRequestHashPendingCommit(
+        tx,
+        hash,
+        () => previousCallHash,
+        (next) => {
+          previousCallHash = next;
+        },
+      );
 
       // Only increment currentRun if this is a NEW request (different hash)
       // This prevents abandoning in-flight requests when the same params are re-evaluated
@@ -979,46 +1632,156 @@ export function generateObject<T extends Record<string, unknown>>(
       const thisRun = currentRun;
 
       resultWithLog.set(undefined);
+      messagesWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
+      messagesWithLog.set(JSON.parse(JSON.stringify(requestMessages)) as any);
       pendingWithLog.set(true);
 
-      const resultPromise = client.generateObject(
-        generateObjectParams,
-      ) as Promise<{
-        object: T;
-      }>;
+      const isRunCancelled = queueName
+        ? () => false
+        : () => thisRun !== currentRun;
 
-      resultPromise
-        .then(async (response) => {
-          if (thisRun !== currentRun) return;
+      logGenerateObject("enqueue", directRequestSummary);
 
-          await runtime.idle();
+      enqueuePostCommitLLMWork(
+        tx,
+        "generateObject",
+        `generateObject:${hash}`,
+        "generateObject-start",
+        requestSnapshot,
+        () => {
+          logGenerateObject("post-commit-start", directRequestSummary);
+          const doWork = async () => {
+            logGenerateObject("direct-work-start", directRequestSummary);
+            await inputs.pull();
+            const liveContext = inputs.key("context").get() as
+              | Record<string, unknown>
+              | undefined;
+            await pullContextCells(liveContext);
+            const liveContextDocs = liveContext
+              ? llmToolExecutionHelpers
+                .buildAvailableCellsDocumentationWithObservation(
+                  runtime,
+                  parentCell.space,
+                  liveContext as Record<string, Cell<any>>,
+                  runtime.getCell(
+                    parentCell.space,
+                    { generateObject: { pinnedCells: [] } },
+                    pinnedCellsSchema,
+                  ),
+                  observationMaxConfidentiality,
+                )
+              : {
+                docs: "",
+                observedConfidentiality: [],
+              };
+            logGenerateObject("client-generateObject-start", {
+              ...directRequestSummary,
+              observedConfidentialityCount: uniqueCfcAtoms([
+                ...collectGenerateObjectPromptConfidentiality(inputs),
+                ...liveContextDocs.observedConfidentiality,
+              ]).length,
+            });
+            const mappedLlmHost = runtime.mappedHostFor(
+              parentCell.space,
+            );
+            const response = await client.generateObject(
+              {
+                ...generateObjectParams,
+                system: ((system ?? "") + liveContextDocs.docs).trim() ||
+                  "You are a helpful assistant.",
+              },
+              undefined,
+              mappedLlmHost
+                ? { endpoint: new URL("/api/ai/llm", mappedLlmHost) }
+                : undefined,
+            ) as {
+              object: T;
+            };
+            logGenerateObject("client-generateObject-complete", {
+              ...directRequestSummary,
+              objectKeys: Object.keys(response.object ?? {}),
+            });
+            validateResultForSchemaSanitization(response.object);
+            const livePromptObservedConfidentiality =
+              collectGenerateObjectPromptConfidentiality(inputs);
+            return {
+              ...response,
+              resultSchema: resultSchemaForObserved(
+                uniqueCfcAtoms([
+                  ...livePromptObservedConfidentiality,
+                  ...liveContextDocs.observedConfidentiality,
+                ]),
+              ),
+            };
+          };
 
-          await runtime.editWithRetry((tx) => {
-            resultCell.key("pending").withTx(tx).set(false);
-            resultCell.key("result").withTx(tx).set(response.object);
-            resultCell.key("error").withTx(tx).set(undefined);
-            resultCell.key("requestHash").withTx(tx).set(hash);
-          });
-        })
-        .catch((e) =>
-          handleLLMError(
-            e,
-            runtime,
-            resultCell.key("pending"),
-            resultCell.key("result"),
-            resultCell.key("error"),
-            resultCell.key("partial"),
-            resultCell.key("requestHash"),
-            hash,
-            () => currentRun,
-            thisRun,
-            () => {
-              previousCallHash = undefined;
-            },
-          )
-        );
+          const resultPromise = queueName
+            ? runtime.getOrCreateQueue(queueName).enqueue(doWork)
+            : doWork();
+
+          resultPromise
+            .then(async (response) => {
+              if (isRunCancelled()) {
+                logGenerateObject(
+                  "write-skipped-cancelled",
+                  directRequestSummary,
+                );
+                return;
+              }
+
+              await runtime.idle();
+
+              await runtime.editWithRetry((tx) => {
+                // The InjectionSafe annotations on resultSchema are minted by
+                // the trusted sanitizer; attribute this write to the builtin so
+                // the persist-time evidence gate trusts them (audit S4).
+                tx.setCfcImplementationIdentity({
+                  kind: "builtin",
+                  builtinId: "generateObject",
+                });
+                const assistantMessage: BuiltInLLMMessage = {
+                  role: "assistant",
+                  content: JSON.stringify(response.object, null, 2),
+                };
+                resultCell.key("pending").withTx(tx).set(false);
+                const resultTarget = response.resultSchema === undefined
+                  ? resultCell.key("result")
+                  : resultCell.key("result").asSchema(response.resultSchema);
+                resultTarget.withTx(tx).set(response.object);
+                resultCell.key("messages").withTx(tx).set([
+                  ...JSON.parse(JSON.stringify(requestMessages)),
+                  JSON.parse(JSON.stringify(assistantMessage)),
+                ] as any);
+                resultCell.key("error").withTx(tx).set(undefined);
+                resultCell.key("requestHash").withTx(tx).set(hash);
+              });
+              logGenerateObject("write-complete", directRequestSummary);
+            })
+            .catch((e) => {
+              logGenerateObject("error", {
+                ...directRequestSummary,
+                error: e instanceof Error ? e.message : String(e),
+              });
+              return handleLLMError(
+                e,
+                runtime,
+                resultCell.key("pending"),
+                resultCell.key("result"),
+                resultCell.key("error"),
+                resultCell.key("partial"),
+                resultCell.key("requestHash"),
+                hash,
+                queueName ? () => thisRun : () => currentRun,
+                thisRun,
+                () => {
+                  previousCallHash = undefined;
+                },
+              );
+            });
+        },
+      );
     }
   };
 }

@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { Cell, Default, handler, lift, pattern, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commonfabric";
 
 interface OptionalFallbackArgs {
   value: Default<number | null, null>;
@@ -27,11 +26,13 @@ const liftSafeDefault = lift((fallback: number | null) =>
   typeof fallback === "number" ? fallback : 10
 );
 
-const liftSafeValue = lift((inputs: { value?: number; fallback?: number }) => {
-  if (typeof inputs.value === "number") return inputs.value;
-  if (typeof inputs.fallback === "number") return inputs.fallback;
-  return 10;
-});
+const liftSafeValue = lift(
+  (inputs: { value?: number | null; fallback?: number }) => {
+    if (typeof inputs.value === "number") return inputs.value;
+    if (typeof inputs.fallback === "number") return inputs.fallback;
+    return 10;
+  },
+);
 
 export const counterWithOptionalFallback = pattern<OptionalFallbackArgs>(
   ({ value, defaultValue }) => {

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Gmail Label Manager Pattern
  *
@@ -25,15 +24,14 @@
  */
 
 import {
+  computed,
   Default,
-  derive,
   handler,
-  ifElse,
   NAME,
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import {
   type GmailLabel,
   GmailSendClient,
@@ -70,15 +68,15 @@ type OperationResult = {
 
 interface Input {
   /** Message ID(s) to manage labels for - can be single string or array */
-  messageIds: Default<string[], []>;
+  messageIds: string[] | Default<[]>;
   /** Labels to add (by ID) */
-  labelsToAdd: Default<string[], []>;
+  labelsToAdd: string[] | Default<[]>;
   /** Labels to remove (by ID) */
-  labelsToRemove: Default<string[], []>;
+  labelsToRemove: string[] | Default<[]>;
 }
 
 /** Gmail label manager with confirmation. #gmailLabelManager */
-interface Output {
+export interface Output {
   messageIds: string[];
   labelsToAdd: string[];
   labelsToRemove: string[];
@@ -264,25 +262,17 @@ export default pattern<Input, Output>(
     const hasAuth = isReady;
 
     // UI state
-    const availableLabels = Writable.of<GmailLabel[]>([]);
-    const loadingLabels = Writable.of(false);
-    const pendingOp = Writable.of<LabelOperation | null>(null);
-    const processing = Writable.of(false);
-    const result = Writable.of<OperationResult | null>(null);
+    const availableLabels = new Writable<GmailLabel[]>([]);
+    const loadingLabels = new Writable(false);
+    const pendingOp = new Writable<LabelOperation | null>(null);
+    const processing = new Writable(false);
+    const result = new Writable<OperationResult | null>(null);
 
-    // Computed
-    const messageCount = derive(messageIds, (ids) => ids.length);
-    const hasMessages = derive(messageIds, (ids) => ids.length > 0);
-    const hasChanges = derive(
-      { labelsToAdd, labelsToRemove },
-      ({ labelsToAdd, labelsToRemove }) =>
-        labelsToAdd.length > 0 || labelsToRemove.length > 0,
-    );
-    const canApply = derive(
-      { hasAuth, hasMessages, hasChanges, processing },
-      ({ hasAuth, hasMessages, hasChanges, processing }) =>
-        hasAuth && hasMessages && hasChanges && !processing,
-    );
+    // Computed (these values are derived from reactive inputs and local state)
+    const messageCount = messageIds.length;
+    const hasMessages = messageIds.length > 0;
+    const hasChanges = labelsToAdd.length > 0 || labelsToRemove.length > 0;
+    const canApply = hasAuth && hasMessages && hasChanges && !processing.get();
 
     // Common system labels that are useful (prefixed with _ as not currently used)
     const _systemLabelIds = [
@@ -314,135 +304,136 @@ export default pattern<Input, Output>(
           {fullUI}
 
           {/* Refresh labels button - protected until authenticated */}
-          {ifElse(
-            isReady,
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-              }}
-            >
-              <button
-                type="button"
-                onClick={fetchLabels({ auth, availableLabels, loadingLabels })}
-                disabled={loadingLabels}
-                style={{
-                  padding: "6px 12px",
-                  background: "#10b981",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "4px",
-                  fontSize: "12px",
-                  cursor: "pointer",
-                }}
-              >
-                {ifElse(loadingLabels, "Loading...", "Refresh Labels")}
-              </button>
-            </div>,
-            null,
-          )}
-
-          {/* Result display */}
-          {ifElse(
-            derive(result, (r: OperationResult | null) => r?.success === true),
-            <div
-              style={{
-                padding: "16px",
-                background: "#d1fae5",
-                borderRadius: "8px",
-                border: "1px solid #10b981",
-              }}
-            >
+          {isReady
+            ? (
               <div
                 style={{
                   display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
+                  justifyContent: "flex-end",
                 }}
               >
-                <div>
-                  <div
+                <button
+                  type="button"
+                  onClick={fetchLabels({
+                    auth,
+                    availableLabels,
+                    loadingLabels,
+                  })}
+                  disabled={loadingLabels}
+                  style={{
+                    padding: "6px 12px",
+                    background: "#10b981",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "4px",
+                    fontSize: "12px",
+                    cursor: "pointer",
+                  }}
+                >
+                  {loadingLabels ? "Loading..." : "Refresh Labels"}
+                </button>
+              </div>
+            )
+            : null}
+
+          {/* Result display */}
+          {result.get()?.success === true
+            ? (
+              <div
+                style={{
+                  padding: "16px",
+                  background: "#d1fae5",
+                  borderRadius: "8px",
+                  border: "1px solid #10b981",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        fontWeight: "bold",
+                        marginBottom: "4px",
+                        color: "#065f46",
+                      }}
+                    >
+                      Labels Updated Successfully!
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#047857" }}>
+                      Modified {result.get()?.messageCount} message(s)
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={dismissResult({ result })}
                     style={{
-                      fontWeight: "bold",
-                      marginBottom: "4px",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: "18px",
                       color: "#065f46",
                     }}
                   >
-                    Labels Updated Successfully!
-                  </div>
-                  <div style={{ fontSize: "12px", color: "#047857" }}>
-                    Modified {derive(result, (r: OperationResult | null) =>
-                      r?.messageCount)} message(s)
-                  </div>
+                    ×
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={dismissResult({ result })}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: "18px",
-                    color: "#065f46",
-                  }}
-                >
-                  ×
-                </button>
               </div>
-            </div>,
-            null,
-          )}
+            )
+            : null}
 
-          {ifElse(
-            derive(result, (r: OperationResult | null) =>
-              r?.success === false),
-            <div
-              style={{
-                padding: "16px",
-                background: "#fee2e2",
-                borderRadius: "8px",
-                border: "1px solid #ef4444",
-              }}
-            >
+          {result.get()?.success === false
+            ? (
               <div
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
+                  padding: "16px",
+                  background: "#fee2e2",
+                  borderRadius: "8px",
+                  border: "1px solid #ef4444",
                 }}
               >
-                <div>
-                  <div
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        fontWeight: "bold",
+                        marginBottom: "4px",
+                        color: "#991b1b",
+                      }}
+                    >
+                      Failed to Update Labels
+                    </div>
+                    <div style={{ fontSize: "14px", color: "#b91c1c" }}>
+                      {result.get()?.error}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={dismissResult({ result })}
                     style={{
-                      fontWeight: "bold",
-                      marginBottom: "4px",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: "18px",
                       color: "#991b1b",
                     }}
                   >
-                    Failed to Update Labels
-                  </div>
-                  <div style={{ fontSize: "14px", color: "#b91c1c" }}>
-                    {derive(result, (r: OperationResult | null) =>
-                      r?.error)}
-                  </div>
+                    ×
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={dismissResult({ result })}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: "18px",
-                    color: "#991b1b",
-                  }}
-                >
-                  ×
-                </button>
               </div>
-            </div>,
-            null,
-          )}
+            )
+            : null}
 
           {/* Message count indicator */}
           <div
@@ -454,180 +445,160 @@ export default pattern<Input, Output>(
             }}
           >
             <strong>
-              {ifElse(
-                hasMessages,
-                <span>
-                  {messageCount} message(s) selected for label changes
-                </span>,
-                <span style={{ color: "#6b7280" }}>
-                  No messages selected. Link messageIds from a Gmail Importer.
-                </span>,
-              )}
+              {hasMessages
+                ? (
+                  <span>
+                    {messageCount} message(s) selected for label changes
+                  </span>
+                )
+                : (
+                  <span style={{ color: "#6b7280" }}>
+                    No messages selected. Link messageIds from a Gmail Importer.
+                  </span>
+                )}
             </strong>
           </div>
 
           {/* Label selection */}
-          {ifElse(
-            derive(availableLabels, (l: GmailLabel[]) => l.length > 0),
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "16px",
-              }}
-            >
-              {/* Add labels section */}
+          {availableLabels.get().length > 0
+            ? (
               <div
                 style={{
-                  padding: "16px",
-                  background: "#f0fdf4",
-                  borderRadius: "8px",
-                  border: "1px solid #86efac",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "16px",
                 }}
               >
+                {/* Add labels section */}
                 <div
                   style={{
-                    fontWeight: "600",
-                    marginBottom: "12px",
-                    color: "#166534",
+                    padding: "16px",
+                    background: "#f0fdf4",
+                    borderRadius: "8px",
+                    border: "1px solid #86efac",
                   }}
                 >
-                  + Add Labels
+                  <div
+                    style={{
+                      fontWeight: "600",
+                      marginBottom: "12px",
+                      color: "#166534",
+                    }}
+                  >
+                    + Add Labels
+                  </div>
+                  <div
+                    style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}
+                  >
+                    {computed(() =>
+                      availableLabels.get().map((label) => {
+                        const isSelected = labelsToAdd.includes(label.id);
+                        const isInRemove = labelsToRemove.includes(label.id);
+                        return (
+                          <button
+                            type="button"
+                            onClick={toggleAddLabel({
+                              labelsToAdd,
+                              labelId: label.id,
+                            })}
+                            disabled={isInRemove}
+                            style={{
+                              padding: "6px 12px",
+                              borderRadius: "16px",
+                              fontSize: "13px",
+                              cursor: "pointer",
+                              border: "1px solid",
+                              borderColor: isSelected ? "#16a34a" : "#d1d5db",
+                              background: isSelected ? "#dcfce7" : "white",
+                              color: isSelected ? "#166534" : "#374151",
+                              opacity: isInRemove ? 0.5 : 1,
+                            }}
+                          >
+                            {label.type === "system"
+                              ? `[${label.name}]`
+                              : label.name}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
-                <div
-                  style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}
-                >
-                  {derive(availableLabels, (labels) =>
-                    labels.map((label) => {
-                      const isSelected = derive(labelsToAdd, (add) =>
-                        add.includes(label.id));
-                      const isInRemove = derive(labelsToRemove, (rem) =>
-                        rem.includes(label.id));
-                      return (
-                        <button
-                          type="button"
-                          onClick={toggleAddLabel({
-                            labelsToAdd,
-                            labelId: label.id,
-                          })}
-                          disabled={isInRemove}
-                          style={{
-                            padding: "6px 12px",
-                            borderRadius: "16px",
-                            fontSize: "13px",
-                            cursor: "pointer",
-                            border: "1px solid",
-                            borderColor: derive(
-                              isSelected,
-                              (s) => s ? "#16a34a" : "#d1d5db",
-                            ),
-                            background: derive(
-                              isSelected,
-                              (s) =>
-                                s ? "#dcfce7" : "white",
-                            ),
-                            color: derive(
-                              isSelected,
-                              (s) =>
-                                s ? "#166534" : "#374151",
-                            ),
-                            opacity: derive(isInRemove, (r) => (r ? 0.5 : 1)),
-                          }}
-                        >
-                          {label.type === "system"
-                            ? `[${label.name}]`
-                            : label.name}
-                        </button>
-                      );
-                    }))}
-                </div>
-              </div>
 
-              {/* Remove labels section */}
+                {/* Remove labels section */}
+                <div
+                  style={{
+                    padding: "16px",
+                    background: "#fef2f2",
+                    borderRadius: "8px",
+                    border: "1px solid #fca5a5",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontWeight: "600",
+                      marginBottom: "12px",
+                      color: "#991b1b",
+                    }}
+                  >
+                    − Remove Labels
+                  </div>
+                  <div
+                    style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}
+                  >
+                    {computed(() =>
+                      availableLabels.get().map((label) => {
+                        const isSelected = labelsToRemove.includes(label.id);
+                        const isInAdd = labelsToAdd.includes(label.id);
+                        return (
+                          <button
+                            type="button"
+                            onClick={toggleRemoveLabel({
+                              labelsToRemove,
+                              labelId: label.id,
+                            })}
+                            disabled={isInAdd}
+                            style={{
+                              padding: "6px 12px",
+                              borderRadius: "16px",
+                              fontSize: "13px",
+                              cursor: "pointer",
+                              border: "1px solid",
+                              borderColor: isSelected ? "#dc2626" : "#d1d5db",
+                              background: isSelected ? "#fee2e2" : "white",
+                              color: isSelected ? "#991b1b" : "#374151",
+                              opacity: isInAdd ? 0.5 : 1,
+                            }}
+                          >
+                            {label.type === "system"
+                              ? `[${label.name}]`
+                              : label.name}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+            : (
               <div
                 style={{
                   padding: "16px",
-                  background: "#fef2f2",
+                  background: "#f3f4f6",
                   borderRadius: "8px",
-                  border: "1px solid #fca5a5",
+                  textAlign: "center",
+                  color: "#6b7280",
                 }}
               >
-                <div
-                  style={{
-                    fontWeight: "600",
-                    marginBottom: "12px",
-                    color: "#991b1b",
-                  }}
-                >
-                  − Remove Labels
-                </div>
-                <div
-                  style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}
-                >
-                  {derive(availableLabels, (labels) =>
-                    labels.map((label) => {
-                      const isSelected = derive(labelsToRemove, (rem) =>
-                        rem.includes(label.id));
-                      const isInAdd = derive(labelsToAdd, (add) =>
-                        add.includes(label.id));
-                      return (
-                        <button
-                          type="button"
-                          onClick={toggleRemoveLabel({
-                            labelsToRemove,
-                            labelId: label.id,
-                          })}
-                          disabled={isInAdd}
-                          style={{
-                            padding: "6px 12px",
-                            borderRadius: "16px",
-                            fontSize: "13px",
-                            cursor: "pointer",
-                            border: "1px solid",
-                            borderColor: derive(
-                              isSelected,
-                              (s) => s ? "#dc2626" : "#d1d5db",
-                            ),
-                            background: derive(
-                              isSelected,
-                              (s) =>
-                                s ? "#fee2e2" : "white",
-                            ),
-                            color: derive(
-                              isSelected,
-                              (s) =>
-                                s ? "#991b1b" : "#374151",
-                            ),
-                            opacity: derive(isInAdd, (a) => (a ? 0.5 : 1)),
-                          }}
-                        >
-                          {label.type === "system"
-                            ? `[${label.name}]`
-                            : label.name}
-                        </button>
-                      );
-                    }))}
-                </div>
+                {hasAuth
+                  ? (
+                    <span>
+                      Click "Refresh Labels" above to load your Gmail labels.
+                    </span>
+                  )
+                  : <span>Authenticate to load labels.</span>}
               </div>
-            </div>,
-            <div
-              style={{
-                padding: "16px",
-                background: "#f3f4f6",
-                borderRadius: "8px",
-                textAlign: "center",
-                color: "#6b7280",
-              }}
-            >
-              {ifElse(
-                hasAuth,
-                <span>
-                  Click "Refresh Labels" above to load your Gmail labels.
-                </span>,
-                <span>Authenticate to load labels.</span>,
-              )}
-            </div>,
-          )}
+            )}
 
           {/* Apply button */}
           <button
@@ -639,7 +610,7 @@ export default pattern<Input, Output>(
               availableLabels,
               pendingOp,
             })}
-            disabled={derive(canApply, (can) => !can)}
+            disabled={!canApply}
             style={{
               padding: "12px 24px",
               background: "#2563eb",
@@ -649,252 +620,251 @@ export default pattern<Input, Output>(
               fontSize: "16px",
               fontWeight: "500",
               cursor: "pointer",
-              opacity: derive(canApply, (can) => (can ? 1 : 0.5)),
+              opacity: canApply ? 1 : 0.5,
             }}
           >
             Review & Apply Changes
           </button>
 
           {/* CONFIRMATION DIALOG */}
-          {ifElse(
-            pendingOp,
-            <div
-              style={{
-                position: "fixed",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                background: "rgba(0, 0, 0, 0.5)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                zIndex: 1000,
-              }}
-            >
+          {pendingOp.get()
+            ? (
               <div
                 style={{
-                  background: "white",
-                  borderRadius: "12px",
-                  maxWidth: "500px",
-                  width: "90%",
-                  maxHeight: "90vh",
-                  overflow: "auto",
-                  boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+                  position: "fixed",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  background: "rgba(0, 0, 0, 0.5)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 1000,
                 }}
               >
-                {/* Header */}
                 <div
                   style={{
-                    padding: "20px",
-                    borderBottom: "2px solid #2563eb",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "12px",
+                    background: "white",
+                    borderRadius: "12px",
+                    maxWidth: "500px",
+                    width: "90%",
+                    maxHeight: "90vh",
+                    overflow: "auto",
+                    boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
                   }}
                 >
-                  <span style={{ fontSize: "24px" }}>🏷️</span>
-                  <h3 style={{ margin: 0, color: "#2563eb", fontSize: "20px" }}>
-                    Confirm Label Changes
-                  </h3>
-                </div>
-
-                {/* Content */}
-                <div style={{ padding: "20px" }}>
+                  {/* Header */}
                   <div
                     style={{
-                      background: "#f9fafb",
-                      borderRadius: "8px",
-                      padding: "16px",
-                      marginBottom: "16px",
+                      padding: "20px",
+                      borderBottom: "2px solid #2563eb",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
                     }}
                   >
+                    <span style={{ fontSize: "24px" }}>🏷️</span>
+                    <h3
+                      style={{ margin: 0, color: "#2563eb", fontSize: "20px" }}
+                    >
+                      Confirm Label Changes
+                    </h3>
+                  </div>
+
+                  {/* Content */}
+                  <div style={{ padding: "20px" }}>
                     <div
                       style={{
-                        fontSize: "16px",
+                        background: "#f9fafb",
+                        borderRadius: "8px",
+                        padding: "16px",
+                        marginBottom: "16px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: "16px",
+                          fontWeight: "500",
+                          marginBottom: "12px",
+                        }}
+                      >
+                        Modifying{" "}
+                        <strong>
+                          {pendingOp.get()?.messageIds.length || 0}
+                        </strong>{" "}
+                        message(s)
+                      </div>
+
+                      {/* Labels to add */}
+                      {(pendingOp.get()?.addLabelNames.length || 0) > 0
+                        ? (
+                          <div style={{ marginBottom: "12px" }}>
+                            <div
+                              style={{
+                                fontSize: "13px",
+                                color: "#166534",
+                                fontWeight: "500",
+                                marginBottom: "6px",
+                              }}
+                            >
+                              + Adding:
+                            </div>
+                            <div
+                              style={{
+                                display: "flex",
+                                flexWrap: "wrap",
+                                gap: "6px",
+                              }}
+                            >
+                              {computed(() =>
+                                (pendingOp.get()?.addLabelNames || []).map((
+                                  name: string,
+                                ) => (
+                                  <span
+                                    style={{
+                                      background: "#dcfce7",
+                                      color: "#166534",
+                                      padding: "4px 10px",
+                                      borderRadius: "12px",
+                                      fontSize: "13px",
+                                    }}
+                                  >
+                                    {name}
+                                  </span>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        )
+                        : null}
+
+                      {/* Labels to remove */}
+                      {(pendingOp.get()?.removeLabelNames.length || 0) > 0
+                        ? (
+                          <div>
+                            <div
+                              style={{
+                                fontSize: "13px",
+                                color: "#991b1b",
+                                fontWeight: "500",
+                                marginBottom: "6px",
+                              }}
+                            >
+                              − Removing:
+                            </div>
+                            <div
+                              style={{
+                                display: "flex",
+                                flexWrap: "wrap",
+                                gap: "6px",
+                              }}
+                            >
+                              {computed(() =>
+                                (pendingOp.get()?.removeLabelNames || []).map((
+                                  name: string,
+                                ) => (
+                                  <span
+                                    style={{
+                                      background: "#fee2e2",
+                                      color: "#991b1b",
+                                      padding: "4px 10px",
+                                      borderRadius: "12px",
+                                      fontSize: "13px",
+                                    }}
+                                  >
+                                    {name}
+                                  </span>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        )
+                        : null}
+                    </div>
+
+                    {/* Warning */}
+                    <div
+                      style={{
+                        padding: "12px 16px",
+                        background: "#fef3c7",
+                        borderRadius: "8px",
+                        border: "1px solid #f59e0b",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontWeight: "600",
+                          marginBottom: "4px",
+                          color: "#92400e",
+                        }}
+                      >
+                        This will modify your Gmail labels
+                      </div>
+                      <div style={{ fontSize: "14px", color: "#78350f" }}>
+                        The selected labels will be added or removed from the
+                        specified messages in your Gmail account.
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Footer */}
+                  <div
+                    style={{
+                      padding: "16px 20px",
+                      borderTop: "1px solid #e5e7eb",
+                      display: "flex",
+                      gap: "12px",
+                      justifyContent: "flex-end",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={cancelOperation({ pendingOp })}
+                      disabled={processing}
+                      style={{
+                        padding: "10px 20px",
+                        background: "white",
+                        color: "#374151",
+                        border: "1px solid #d1d5db",
+                        borderRadius: "6px",
+                        fontSize: "14px",
                         fontWeight: "500",
-                        marginBottom: "12px",
+                        cursor: "pointer",
                       }}
                     >
-                      Modifying{" "}
-                      <strong>
-                        {derive(pendingOp, (op: LabelOperation | null) =>
-                          op?.messageIds.length || 0)}
-                      </strong>{" "}
-                      message(s)
-                    </div>
-
-                    {/* Labels to add */}
-                    {ifElse(
-                      derive(
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={confirmOperation({
                         pendingOp,
-                        (op: LabelOperation | null) =>
-                          (op?.addLabelNames.length || 0) > 0,
-                      ),
-                      <div style={{ marginBottom: "12px" }}>
-                        <div
-                          style={{
-                            fontSize: "13px",
-                            color: "#166534",
-                            fontWeight: "500",
-                            marginBottom: "6px",
-                          }}
-                        >
-                          + Adding:
-                        </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            flexWrap: "wrap",
-                            gap: "6px",
-                          }}
-                        >
-                          {derive(pendingOp, (op: LabelOperation | null) =>
-                            (op?.addLabelNames || []).map((name: string) => (
-                              <span
-                                style={{
-                                  background: "#dcfce7",
-                                  color: "#166534",
-                                  padding: "4px 10px",
-                                  borderRadius: "12px",
-                                  fontSize: "13px",
-                                }}
-                              >
-                                {name}
-                              </span>
-                            )))}
-                        </div>
-                      </div>,
-                      null,
-                    )}
-
-                    {/* Labels to remove */}
-                    {ifElse(
-                      derive(
-                        pendingOp,
-                        (op: LabelOperation | null) =>
-                          (op?.removeLabelNames.length || 0) > 0,
-                      ),
-                      <div>
-                        <div
-                          style={{
-                            fontSize: "13px",
-                            color: "#991b1b",
-                            fontWeight: "500",
-                            marginBottom: "6px",
-                          }}
-                        >
-                          − Removing:
-                        </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            flexWrap: "wrap",
-                            gap: "6px",
-                          }}
-                        >
-                          {derive(pendingOp, (op: LabelOperation | null) =>
-                            (op?.removeLabelNames || []).map((name: string) => (
-                              <span
-                                style={{
-                                  background: "#fee2e2",
-                                  color: "#991b1b",
-                                  padding: "4px 10px",
-                                  borderRadius: "12px",
-                                  fontSize: "13px",
-                                }}
-                              >
-                                {name}
-                              </span>
-                            )))}
-                        </div>
-                      </div>,
-                      null,
-                    )}
-                  </div>
-
-                  {/* Warning */}
-                  <div
-                    style={{
-                      padding: "12px 16px",
-                      background: "#fef3c7",
-                      borderRadius: "8px",
-                      border: "1px solid #f59e0b",
-                    }}
-                  >
-                    <div
+                        auth,
+                        processing,
+                        result,
+                        labelsToAdd,
+                        labelsToRemove,
+                      })}
+                      disabled={processing}
                       style={{
-                        fontWeight: "600",
-                        marginBottom: "4px",
-                        color: "#92400e",
+                        padding: "10px 20px",
+                        background: "#2563eb",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "6px",
+                        fontSize: "14px",
+                        fontWeight: "500",
+                        cursor: "pointer",
+                        opacity: processing.get() ? 0.7 : 1,
                       }}
                     >
-                      This will modify your Gmail labels
-                    </div>
-                    <div style={{ fontSize: "14px", color: "#78350f" }}>
-                      The selected labels will be added or removed from the
-                      specified messages in your Gmail account.
-                    </div>
+                      {processing ? "Applying..." : "Apply Changes"}
+                    </button>
                   </div>
-                </div>
-
-                {/* Footer */}
-                <div
-                  style={{
-                    padding: "16px 20px",
-                    borderTop: "1px solid #e5e7eb",
-                    display: "flex",
-                    gap: "12px",
-                    justifyContent: "flex-end",
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={cancelOperation({ pendingOp })}
-                    disabled={processing}
-                    style={{
-                      padding: "10px 20px",
-                      background: "white",
-                      color: "#374151",
-                      border: "1px solid #d1d5db",
-                      borderRadius: "6px",
-                      fontSize: "14px",
-                      fontWeight: "500",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={confirmOperation({
-                      pendingOp,
-                      auth,
-                      processing,
-                      result,
-                      labelsToAdd,
-                      labelsToRemove,
-                    })}
-                    disabled={processing}
-                    style={{
-                      padding: "10px 20px",
-                      background: "#2563eb",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "6px",
-                      fontSize: "14px",
-                      fontWeight: "500",
-                      cursor: "pointer",
-                      opacity: derive(processing, (p) => (p ? 0.7 : 1)),
-                    }}
-                  >
-                    {ifElse(processing, "Applying...", "Apply Changes")}
-                  </button>
                 </div>
               </div>
-            </div>,
-            null,
-          )}
+            )
+            : null}
         </div>
       ),
       messageIds,

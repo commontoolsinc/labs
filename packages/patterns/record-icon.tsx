@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Record Icon Module - Pattern for manually setting a record's emoji icon
  *
@@ -8,7 +7,7 @@
  *
  * Uses the emoji-picker pattern for the selection UI.
  */
-import { computed, type Default, NAME, pattern, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 import EmojiPicker from "./emoji-picker.tsx";
 
@@ -27,7 +26,7 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface RecordIconModuleInput {
   /** Custom emoji/icon */
-  icon: Default<string, "">;
+  icon: string | Default<"">;
 }
 
 // ===== The Pattern =====

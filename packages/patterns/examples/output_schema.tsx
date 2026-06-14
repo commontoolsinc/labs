@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   Default,
   handler,
@@ -7,16 +6,16 @@ import {
   UI,
   VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 const increment = handler<unknown, { value: Writable<number> }>((_, state) => {
   state.value.set(state.value.get() + 1);
 });
 
 interface Input {
-  value: Default<number, 0>;
+  value: number | Default<0>;
 }
-interface Output {
+export interface Output {
   value: number;
   [UI]: VNode;
 }
@@ -25,9 +24,9 @@ export default pattern<Input, Output>(({ value }) => {
   return {
     [NAME]: "pattern output issue",
     [UI]: (
-      <ct-button onClick={increment({ value: value })}>
+      <cf-button onClick={increment({ value: value })}>
         {value}
-      </ct-button>
+      </cf-button>
     ),
     value,
   };

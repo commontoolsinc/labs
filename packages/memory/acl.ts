@@ -1,4 +1,4 @@
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import {
   ACL,
   ACLUser,
@@ -67,7 +67,7 @@ const CapabilityMap: Record<Capability, number> = {
   OWNER: 2,
 };
 
-function isCapable(
+export function isCapable(
   capability: Capability,
   requirement: Capability,
 ): boolean {

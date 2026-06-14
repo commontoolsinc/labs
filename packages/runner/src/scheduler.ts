@@ -1,19 +1,6 @@
-import { deepEqual } from "@commontools/utils/deep-equal";
-import { getLogger } from "@commontools/utils/logger";
-import { isRecord } from "@commontools/utils/types";
-import type { MemorySpace, URI } from "@commontools/memory/interface";
-import { getTopFrame } from "./builder/pattern.ts";
-import {
-  type Frame,
-  type Module,
-  type Pattern,
-  TYPE,
-} from "./builder/types.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+import type { SchedulerActionSnapshotQuery } from "@commonfabric/memory/v2";
 import type { Cancel } from "./cancel.ts";
-import {
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "./query-result-proxy.ts";
 import { ConsoleEvent } from "./harness/console.ts";
 import type {
   ConsoleHandler,
@@ -21,200 +8,317 @@ import type {
   ErrorWithContext,
   Runtime,
 } from "./runtime.ts";
-import {
-  areNormalizedLinksSame,
-  type NormalizedFullLink,
-} from "./link-utils.ts";
+import { type NormalizedFullLink } from "./link-utils.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   IStorageSubscription,
-  MediaType,
-  MemoryAddressPathComponent,
-  Metadata,
+  MemorySpace,
+  StorageNotification,
 } from "./storage/interface.ts";
 import {
-  addressesToPathByEntity,
-  arraysOverlap,
-  determineTriggeredActions,
-  sortAndCompactPaths,
-  type SortedAndCompactPaths,
-} from "./reactive-dependencies.ts";
-import { ensurePieceRunning } from "./ensure-piece-running.ts";
+  allowMutableTransactionRead,
+  ignoreReadForScheduling,
+  markReadAsAttemptedWrite,
+} from "./storage/reactivity-log.ts";
 import type {
   ActionStats,
-  CycleReport,
   NonIdempotentReport,
-  SchedulerActionInfo,
   SchedulerDiagnosisResult,
-  SchedulerGraphEdge,
-  SchedulerGraphNode,
   SchedulerGraphSnapshot,
 } from "./telemetry.ts";
-import { ensureNotRenderThread } from "@commontools/utils/env";
+import {
+  DEFAULT_RETRIES_FOR_EVENTS,
+  MAX_SETTLE_STATS_HISTORY,
+} from "./scheduler/constants.ts";
+import {
+  getPieceMetadataFromFrame,
+  getSchedulerActionId,
+  getSchedulerActionTelemetryInfo,
+  handleSchedulerError,
+  queueTask,
+  recordTriggerTrace as recordTriggerTraceState,
+  type SchedulerActionIdentityState,
+} from "./scheduler/diagnostics.ts";
+import {
+  type DiagnosisRecord,
+  runSchedulerDiagnosis,
+  runSchedulerIdempotencyCheck,
+  type SchedulerDiagnosisControlState,
+  startSchedulerDiagnosis,
+  stopSchedulerDiagnosis,
+} from "./scheduler/diagnosis.ts";
+import {
+  type DependencyGraphState,
+  hasDependentPath,
+  isLive,
+  notifyNodeLivenessChange,
+  registerDependentsForWriterSurface,
+  setNodeProvisionalDemand,
+  updateDependentEdgesForLog,
+} from "./scheduler/dependency-graph.ts";
+import { SchedulerMaterializers } from "./scheduler/materializers.ts";
+import { type DependencyUpdateState } from "./scheduler/dependency-updates.ts";
+import { SchedulerWriteIndex } from "./scheduler/scheduling-writes.ts";
+import { NodeRegistry, type SchedulerNode } from "./scheduler/node-record.ts";
+import {
+  SchedulerTriggerIndex,
+  SchedulerTriggerSubscriptions,
+  type TriggerSubscriptionState,
+} from "./scheduler/trigger-index.ts";
+import {
+  collectDependenciesForAction as collectDependenciesForActionState,
+  type DependencyCollectionState,
+} from "./scheduler/dependency-collection.ts";
+import {
+  collectDirtyDependencies as collectDirtyDependenciesState,
+  collectDirtyDependenciesForLog as collectDirtyDependenciesForLogState,
+  collectDirtyDependenciesFromTraversalRoot
+    as collectDirtyDependenciesFromTraversalRootState,
+  type DirtyDependencyCollectionState,
+  snapshotDirtyDependencyTraceContext,
+} from "./scheduler/dirty-dependencies.ts";
+import {
+  runSchedulerAction,
+  type SchedulerActionRunState,
+  schedulerImplementationFingerprint,
+  schedulerRuntimeFingerprint,
+} from "./scheduler/action-run.ts";
+import {
+  buildPullInitialSeeds,
+  collectInitialExecuteDependencies as collectInitialExecuteDependenciesState,
+  collectPostEventDependencies as collectPostEventDependenciesState,
+  createSettlingTracker,
+  markExecuteStart,
+  planPullAdaptiveCycleDebounce,
+  pushBoundedHistory,
+  recordExecuteEnd,
+  type SchedulerSettleLoopState,
+  type SchedulerSettleResult,
+  type SettlingTracker,
+} from "./scheduler/execution.ts";
+import { runPullSchedulerSettleLoop } from "./scheduler/pull-execution.ts";
+import {
+  isSchedulerActionObservation,
+  type PersistedSchedulerObservationSnapshot,
+  type SchedulerActionObservation,
+} from "./scheduler/persistent-observation.ts";
+import {
+  collectPullIterationSeeds as collectPullIterationSeedsState,
+  conditionalEffectHasChangedInputs as conditionalEffectHasChangedInputsState,
+  type DirtyPullRunnableState,
+  type DirtyPullRunnableStateWithDebounce,
+  hasDeferredDirtyEffectWork as hasDeferredDirtyEffectWorkState,
+  hasRunnablePullWork as hasRunnablePullWorkState,
+  markEffectConditionallyScheduled as markEffectConditionallyScheduledState,
+  type PendingPullRunnableState,
+  type PullSchedulingState,
+  scheduleAffectedEffects as scheduleAffectedEffectsState,
+} from "./scheduler/pull-scheduling.ts";
+import {
+  breakPullCyclesIfNeeded,
+  type PullCycleBreakState,
+} from "./scheduler/pull-cycle-break.ts";
+import type { ExecuteContinuationState } from "./scheduler/continuation.ts";
+import { applyPullExecuteContinuation } from "./scheduler/pull-continuation.ts";
+import {
+  canAutomaticallyDebounce as canAutomaticallyDebounceState,
+  getNextDebounceRunTime as getNextDebounceRunTimeState,
+  isDebouncedComputationWaiting as isDebouncedComputationWaitingState,
+  maybeAutoDebounce as maybeAutoDebounceState,
+  scheduleComputationDebounce as scheduleComputationDebounceState,
+  type SchedulerDelayControlState,
+  scheduleWithDebounce as scheduleWithDebounceState,
+} from "./scheduler/delay-control.ts";
+import { SchedulerDelays } from "./scheduler/delays.ts";
+import {
+  addCfcTriggerRead,
+  type StorageNotificationState,
+} from "./scheduler/notifications.ts";
+import { processPullStorageNotification } from "./scheduler/pull-notifications.ts";
+import {
+  clearSchedulerDirectDirty,
+  clearSchedulerDirty,
+  type DirtySchedulingState,
+  markSchedulerDirty,
+  SchedulerStaleness,
+} from "./scheduler/staleness.ts";
+import {
+  type SchedulerSubscribeActionState,
+  type SchedulerSubscriptionState,
+  type SchedulerUnsubscribeActionState,
+  unsubscribeSchedulerAction,
+} from "./scheduler/subscriptions.ts";
+import {
+  markReadersDirtyForChangedWrites,
+  recordChangedComputationWrites,
+  recordChangedWritesHistory,
+  type WritePropagationState,
+} from "./scheduler/write-propagation.ts";
+import {
+  resolveRegistrationSurface,
+  resubscribePullSchedulerAction,
+  subscribePullSchedulerAction,
+} from "./scheduler/pull-subscriptions.ts";
+import {
+  type ActionTimingState,
+  getActionStats as getActionStatsFromState,
+} from "./scheduler/timing.ts";
+import { getCommitLocalSeq } from "./storage/commit-identity.ts";
+import {
+  addSchedulerEventHandler,
+  cancelEventQueueWake as cancelEventQueueWakeState,
+  type EventQueueWakeState,
+  hasEventQueueWakeTimer,
+  isHeadEventParked as isHeadEventParkedState,
+  queueSchedulerEvent,
+  scheduleEventQueueWake as scheduleEventQueueWakeState,
+  type SchedulerEventExecutionState,
+  type SchedulerEventQueueState,
+} from "./scheduler/events.ts";
+import { SpeculationLineage } from "./scheduler/lineage.ts";
+import { processPullQueuedEventDuringExecute } from "./scheduler/pull-events.ts";
+import {
+  buildSchedulerGraphSnapshot,
+  type SchedulerGraphSnapshotState,
+} from "./scheduler/graph-snapshot.ts";
+import type {
+  Action,
+  ActionRunTraceEntry,
+  DirtyDependencyTraceContext,
+  EventHandler,
+  PopulateDependencies,
+  PopulateDependenciesEntry,
+  QueuedEvent,
+  ReactivityLog,
+  SchedulerObservationIdentity,
+  SettleStats,
+  SettleStatsHistoryEntry,
+  SpaceScopeAndURI,
+  TelemetryAnnotations,
+  TriggerTraceEntry,
+  TriggerTraceScheduledEffect,
+} from "./scheduler/types.ts";
+import { ensureNotRenderThread } from "@commonfabric/utils/env";
+
 ensureNotRenderThread();
 
 const logger = getLogger("scheduler", {
   enabled: true,
   level: "warn",
 });
+const DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS = 10_000;
+
+type PendingDependencyCollectionState =
+  SchedulerSubscribeActionState["pendingDependencyCollectionState"];
+type FilterStatsState = { filtered: number; executed: number };
+type SchedulerStorageRehydrationOptions =
+  & SchedulerObservationIdentity
+  & {
+    space: MemorySpace;
+    timeoutMs?: number;
+    // When the pattern is (re)started from a synced/resumed state, wait for the
+    // space's storage to finish syncing before attempting rehydration / the
+    // initial run. This avoids running consumers (map/filter/computed) against
+    // not-yet-synced data and then re-running once it streams in.
+    awaitSync?: boolean;
+  };
 
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
+export type {
+  Action,
+  ActionRunTraceAddress,
+  ActionRunTraceEntry,
+  AnnotatedAction,
+  AnnotatedEventHandler,
+  EventHandler,
+  PopulateDependencies,
+  ReactivityLog,
+  SettleIterationStats,
+  SettleStats,
+  SettleStatsHistoryEntry,
+  SpaceScopeAndURI,
+  SpaceScopeURIAndType,
+  TelemetryAnnotations,
+  TriggerTraceActionRecord,
+  TriggerTraceEntry,
+  TriggerTraceScheduledEffect,
+  TriggerTraceValueKind,
+  TriggerTraceValueSummary,
+} from "./scheduler/types.ts";
+export { txToReactivityLog } from "./scheduler/reactivity.ts";
 
-export interface TelemetryAnnotations {
-  pattern: Pattern;
-  module: Module;
-  reads: NormalizedFullLink[];
-  writes: NormalizedFullLink[];
-}
-
-export type Action = (tx: IExtendedStorageTransaction) => any;
-export type AnnotatedAction = Action & TelemetryAnnotations;
-export type EventHandler =
-  & ((tx: IExtendedStorageTransaction, event: any) => any)
-  & {
-    /**
-     * Optional callback to populate a transaction with the handler's read dependencies.
-     * Called by the scheduler to discover what cells the handler will read.
-     * The callback should read all cells (using .get({ traverseCells: true })) that
-     * the handler will access, so the transaction captures all dependencies.
-     * The event is passed so dependencies can be resolved from links in the event.
-     */
-    populateDependencies?: (
-      tx: IExtendedStorageTransaction,
-      event: any,
-    ) => void;
-  };
-export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
-
-/**
- * Callback to populate a transaction with an action's read dependencies.
- * Called by the scheduler to discover what cells the action will read.
- * The callback should read all cells (using .get({ traverseCells: true })) that
- * the action will access, so the transaction captures all dependencies.
- * The transaction will be aborted after this callback returns, so it's safe
- * to simulate writes.
- */
-export type PopulateDependencies = (tx: IExtendedStorageTransaction) => void;
-type PopulateDependenciesEntry = PopulateDependencies | ReactivityLog;
-
-/**
- * Reactivity log.
- *
- * Used to log reads and writes to docs. Used by scheduler to keep track of
- * dependencies and to topologically sort pending actions before executing them.
- */
-export type ReactivityLog = {
-  reads: IMemorySpaceAddress[];
-  /** Reads that should not invalidate on child writes unless they add a new key */
-  shallowReads: IMemorySpaceAddress[];
-  writes: IMemorySpaceAddress[];
-  /** Reads marked as potential writes (e.g., for diffAndUpdate which reads then conditionally writes) */
-  potentialWrites?: IMemorySpaceAddress[];
+export {
+  allowMutableTransactionRead,
+  ignoreReadForScheduling,
+  markReadAsAttemptedWrite,
 };
-
-const ignoreReadForSchedulingMarker: unique symbol = Symbol(
-  "ignoreReadForSchedulingMarker",
-);
-
-const markReadAsPotentialWriteMarker: unique symbol = Symbol(
-  "markReadAsPotentialWriteMarker",
-);
-
-export const ignoreReadForScheduling: Metadata = {
-  [ignoreReadForSchedulingMarker]: true,
-};
-
-export const markReadAsPotentialWrite: Metadata = {
-  [markReadAsPotentialWriteMarker]: true,
-};
-
-export type SpaceAndURI = `${MemorySpace}/${URI}`;
-export type SpaceURIAndType = `${MemorySpace}/${URI}/${MediaType}`;
-
-/** Per-iteration stats captured during the settle loop. */
-export interface SettleIterationStats {
-  workSetSize: number;
-  orderSize: number;
-  actionsRun: number;
-  /** Action IDs in the work set (truncated to top entries) */
-  actions: { id: string; type: "effect" | "computation" }[];
-  durationMs: number;
-}
-
-/** Stats for the entire settle loop of one execute() call. */
-export interface SettleStats {
-  iterations: SettleIterationStats[];
-  totalDurationMs: number;
-  settledEarly: boolean;
-  initialSeedCount: number;
-}
-
-const MAX_ITERATIONS_PER_RUN = 100;
-const DEFAULT_RETRIES_FOR_EVENTS = 5;
-const MAX_RETRIES_FOR_REACTIVE = 10;
-const AUTO_DEBOUNCE_THRESHOLD_MS = 50;
-const AUTO_DEBOUNCE_MIN_RUNS = 3;
-const AUTO_DEBOUNCE_DELAY_MS = 100;
-
-// Cycle-aware debounce: applies adaptive debounce to actions cycling within one execute()
-const CYCLE_DEBOUNCE_THRESHOLD_MS = 100; // Min iteration time to trigger cycle debounce
-const CYCLE_DEBOUNCE_MIN_RUNS = 3; // Action must run this many times to be considered cycling
-const CYCLE_DEBOUNCE_MULTIPLIER = 2; // Debounce delay = multiplier × iteration time
 
 export class Scheduler {
-  private eventQueue: {
-    action: Action;
-    handler: EventHandler;
-    event: any;
-    retriesLeft: number;
-    onCommit?: (tx: IExtendedStorageTransaction) => void;
-  }[] = [];
+  private eventQueue: QueuedEvent[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
+  readonly lineage = new SpeculationLineage({
+    removeQueuedEvent: (event) => {
+      const index = this.eventQueue.indexOf(event);
+      if (index >= 0) this.eventQueue.splice(index, 1);
+    },
+    queueExecution: () => this.queueExecution(),
+    onError: (error) => logger.error("lineage", () => [error]),
+  });
 
   private pending = new Set<Action>();
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel>();
-  private triggers = new Map<SpaceAndURI, Map<Action, SortedAndCompactPaths>>();
-  private nonRecursiveTriggers = new Map<
-    SpaceAndURI,
-    Map<Action, SortedAndCompactPaths>
+  private triggerIndex = new SchedulerTriggerIndex();
+  // Pending CFC trigger reads per dirtied action (§8.9.2): addresses whose
+  // invalidating writes scheduled it, consumed by the action's next run.
+  private cfcTriggerReads = new WeakMap<
+    Action,
+    { addresses: IMemorySpaceAddress[]; keys: Set<string> }
   >();
   private actionChangeGroups = new WeakMap<Action, ChangeGroup>();
   private retries = new WeakMap<Action, number>();
 
   // Effect/computation tracking for pull-based scheduling
-  private effects = new Set<Action>();
-  private computations = new Set<Action>();
+  private nodes = new NodeRegistry();
   private dependents = new WeakMap<Action, Set<Action>>();
   private reverseDependencies = new WeakMap<Action, Set<Action>>();
-  // Track which actions are effects persistently (survives unsubscribe/re-subscribe)
-  private isEffectAction = new WeakMap<Action, boolean>();
-  private dirty = new Set<Action>();
-  private pullMode = false;
+  private passCounter = 0;
+  private activePassId: number | undefined;
+  private provisionalDemandThisPass = new Set<SchedulerNode>();
+  // In pull mode, `dirty` means direct dirty. `stale` additionally includes
+  // actions with dirty upstream computations.
+  private staleness = new SchedulerStaleness({
+    dependents: this.dependents,
+  });
+
+  // Debugger breakpoints: action IDs that should trigger `debugger` before execution
+  private breakpoints = new Set<string>();
 
   // Compute time tracking for cycle-aware scheduling
   // Keyed by action ID (source location) to persist stats across action recreation
   private actionStats = new Map<string, ActionStats>();
-  private anonymousActionIds = new WeakMap<Action | EventHandler, string>();
-  private anonymousActionCounter = 0;
+  private actionTimingState: ActionTimingState = {
+    actionStats: this.actionStats,
+    getActionId: (action) => this.getActionId(action),
+  };
+  private actionIdentityState: SchedulerActionIdentityState = {
+    anonymousActionIds: new WeakMap<Action | EventHandler, string>(),
+    anonymousActionCounter: 0,
+  };
   // Cycle detection during dependency collection
   private collectStack = new Set<Action>();
+  private dirtyDependencyTraceContext?: DirtyDependencyTraceContext;
 
   // Cycle-aware debounce: track runs per action within current execute() call
   private runsThisExecute = new Map<Action, number>();
   private executeStartTime = 0;
+  private rerunAfterCurrentExecute = false;
 
   // Non-settling heuristic (Phase 1): detects when the system is churning
-  private settlingTracker = {
-    windowStart: 0, // start of current tracking window
-    busyTime: 0, // cumulative ms spent in execute() within window
-    lastExecuteStart: 0, // timestamp when current execute() started
-    isExecuting: false,
-    nonSettlingDetected: false,
-  };
+  private settlingTracker: SettlingTracker = createSettlingTracker();
   private autoTriggerDiagnosis = false;
 
   // Idempotency diagnosis (Phase 2): captures read/write values per action run
@@ -225,11 +329,7 @@ export class Scheduler {
   private diagnosisResolve:
     | ((result: SchedulerDiagnosisResult) => void)
     | null = null;
-  private diagnosisHistory = new Map<string, {
-    readValues: Map<string, unknown>;
-    writeValues: Map<string, unknown>;
-    timestamp: number;
-  }[]>();
+  private diagnosisHistory = new Map<string, DiagnosisRecord[]>();
   private diagnosisNonIdempotent: NonIdempotentReport[] = [];
 
   // Inline idempotency check mode: when enabled, every computation re-run
@@ -245,62 +345,55 @@ export class Scheduler {
     timestamp: number;
   }[] = [];
   private changeGroupToActionId = new Map<ChangeGroup, string>();
+  private diagnosisControlState!: SchedulerDiagnosisControlState;
 
   // Debounce infrastructure for throttling slow actions
-  private debounceTimers = new WeakMap<
-    Action,
-    ReturnType<typeof setTimeout>
-  >();
-  // Track all active debounce timers for cleanup during dispose
-  private activeDebounceTimers = new Set<ReturnType<typeof setTimeout>>();
   private pendingQueueTaskTimer: ReturnType<typeof setTimeout> | null = null;
-  private actionDebounce = new WeakMap<Action, number>();
-  // Actions that opt out of auto-debounce (inverted: true means NO auto-debounce)
-  private noDebounce = new WeakMap<Action, boolean>();
+  private eventQueueWakeState!: EventQueueWakeState;
+  private eventQueueState!: SchedulerEventQueueState;
+  private eventExecutionState!: SchedulerEventExecutionState;
+  private delays = new SchedulerDelays({
+    actionStats: this.actionStats,
+    getActionId: (action) => this.getActionId(action),
+  });
+  private delayControlState!: SchedulerDelayControlState;
 
-  // Throttle infrastructure - "value can be stale by T ms"
-  private actionThrottle = new WeakMap<Action, number>();
-
-  // Track what each action has ever written (grows over time, includes potentialWrites).
-  // Unlike dependencies.writes (current run only), mightWrite is cumulative and used
-  // for building the dependency graph conservatively - if an action ever wrote to a path,
-  // we assume it might write there again. This prevents missed dependencies when an
-  // action's write behavior varies between runs.
-  private mightWrite = new WeakMap<Action, IMemorySpaceAddress[]>();
-  // Index: entity -> actions that write to it (for fast dependency lookup)
-  // Updated when mightWrite changes
-  private writersByEntity = new Map<SpaceAndURI, Set<Action>>();
-  // Reverse index: action -> entities it writes to (for cleanup)
-  private actionWriteEntities = new WeakMap<Action, Set<SpaceAndURI>>();
+  private writeIndex!: SchedulerWriteIndex;
+  private materializers = new SchedulerMaterializers(this.nodes.effects);
+  private dirtyDependencyCollectionState!: DirtyDependencyCollectionState;
   // Track actions scheduled for first time (bypass filter)
   private scheduledFirstTime = new Set<Action>();
   // Filter stats for diagnostics
-  private filterStats = { filtered: 0, executed: 0 };
+  private filterStats: FilterStatsState = { filtered: 0, executed: 0 };
 
   // Settle stats for performance analysis (opt-in via enableSettleStats())
   private collectSettleStats = false;
   private lastSettleStats: SettleStats | null = null;
+  private settleStatsHistory: SettleStatsHistoryEntry[] = [];
+  private collectActionRunTrace = false;
+  private actionRunTrace: ActionRunTraceEntry[] = [];
+  private collectTriggerTrace = false;
+  private triggerTrace: TriggerTraceEntry[] = [];
+  private eventPreflightTelemetryEnabled = false;
+  private changedWritesHistory: IMemorySpaceAddress[] = [];
+  private conditionallyScheduledEffects = new Map<Action, number>();
+  private storageNotificationState!: StorageNotificationState;
 
   // Parent-child action tracking for proper execution ordering
   // When a child action is created during parent execution, parent must run first
   private executingAction: Action | null = null;
-  private actionParent = new WeakMap<Action, Action>();
-  private actionChildren = new WeakMap<Action, Set<Action>>();
-
-  /**
-   * Temporarily set the executing action so that any child actions created
-   * during `fn` are registered as children of `action`. Restores the previous
-   * executing action afterwards (stack-like nesting).
-   */
-  withExecutingAction<T>(action: Action, fn: () => T): T {
-    const prev = this.executingAction;
-    this.executingAction = action;
-    try {
-      return fn();
-    } finally {
-      this.executingAction = prev;
-    }
-  }
+  currentActionId?: string;
+  private dependencyGraphState!: DependencyGraphState;
+  private dependencyUpdateState!: DependencyUpdateState;
+  private triggerSubscriptionState!: TriggerSubscriptionState;
+  private dirtySchedulingState!: DirtySchedulingState;
+  private pendingPullRunnableState!: PendingPullRunnableState;
+  private dirtyPullRunnableState!: DirtyPullRunnableState;
+  private dirtyPullRunnableStateWithDebounce!:
+    DirtyPullRunnableStateWithDebounce;
+  private pullSchedulingState!: PullSchedulingState;
+  private writePropagationState!: WritePropagationState;
+  private subscriptionState!: SchedulerSubscriptionState;
 
   // Dependency population callbacks for first-time subscriptions
   // Called in execute() to discover what cells the action will read
@@ -310,14 +403,62 @@ export class Scheduler {
   >();
   // Actions that need dependency population before first run
   private pendingDependencyCollection = new Set<Action>();
+  private pendingDependencyCollectionState!: PendingDependencyCollectionState;
+  private dependencyCollectionState!: DependencyCollectionState;
+  private subscribeActionState!: SchedulerSubscribeActionState;
+  private unsubscribeState!: SchedulerUnsubscribeActionState;
 
   private idlePromises: (() => void)[] = [];
+  private backgroundTasks = new Set<Promise<unknown>>();
+  private initialRehydrationTokens = new WeakMap<Action, symbol>();
   private loopCounter = new WeakMap<Action, number>();
   private errorHandlers = new Set<ErrorHandler>();
   private consoleHandler: ConsoleHandler;
   private _running: Promise<unknown> | undefined = undefined;
   private scheduled = false;
   private disposed = false;
+  private actionRunState!: SchedulerActionRunState;
+  private graphSnapshotState!: SchedulerGraphSnapshotState;
+  private cycleBreakState!: PullCycleBreakState;
+  private settleLoopState!: SchedulerSettleLoopState;
+  private executeContinuationState!: ExecuteContinuationState;
+
+  // ============================================================
+  // Public API
+  // ============================================================
+
+  constructor(
+    readonly runtime: Runtime,
+    consoleHandler?: ConsoleHandler,
+    errorHandlers?: ErrorHandler[],
+  ) {
+    this.initializeSchedulerState();
+
+    this.consoleHandler = consoleHandler ||
+      function (data) {
+        // Default console handler returns arguments unaffected.
+        return data.args;
+      };
+
+    if (errorHandlers) {
+      errorHandlers.forEach((handler) => this.errorHandlers.add(handler));
+    }
+
+    // Subscribe to storage notifications
+    this.runtime.storageManager.subscribe(
+      this.createStorageSubscription(),
+    );
+
+    // Set up harness event listeners
+    this.runtime.harness.addEventListener("console", (e: Event) => {
+      // Called synchronously when `console` methods are
+      // called within the runtime.
+      const { method, args } = e as ConsoleEvent;
+      const metadata = getPieceMetadataFromFrame();
+      const result = this.consoleHandler({ metadata, method, args });
+      console[method].apply(console, result);
+    });
+  }
 
   get runningPromise(): Promise<unknown> | undefined {
     return this._running;
@@ -336,254 +477,19 @@ export class Scheduler {
     }
   }
 
-  constructor(
-    readonly runtime: Runtime,
-    consoleHandler?: ConsoleHandler,
-    errorHandlers?: ErrorHandler[],
-  ) {
-    this.consoleHandler = consoleHandler ||
-      function (data) {
-        // Default console handler returns arguments unaffected.
-        return data.args;
-      };
-
-    if (errorHandlers) {
-      errorHandlers.forEach((handler) => this.errorHandlers.add(handler));
-    }
-
-    // Subscribe to storage notifications
-    this.runtime.storageManager.subscribe(this.createStorageSubscription());
-
-    // Set up harness event listeners
-    this.runtime.harness.addEventListener("console", (e: Event) => {
-      // Called synchronously when `console` methods are
-      // called within the runtime.
-      const { method, args } = e as ConsoleEvent;
-      const metadata = getPieceMetadataFromFrame();
-      const result = this.consoleHandler({ metadata, method, args });
-      console[method].apply(console, result);
-    });
-  }
-
   /**
-   * Gets a stable identifier for an action based on its source location.
-   * Prefers .src (set as backup) over .name, falls back to a generated ID.
-   * This ID is used for stats tracking to persist across action recreation.
+   * Temporarily set the executing action so that any child actions created
+   * during `fn` are registered as children of `action`. Restores the previous
+   * executing action afterwards (stack-like nesting).
    */
-  private getActionId(action: Action | EventHandler): string {
-    const namedAction = action as Action & { src?: string };
-    if (namedAction.src) return namedAction.src;
-    if (action.name && action.name !== "anonymous") return action.name;
-
-    const existingId = this.anonymousActionIds.get(action);
-    if (existingId) return existingId;
-
-    const generatedId = `anon-${++this.anonymousActionCounter}`;
-    this.anonymousActionIds.set(action, generatedId);
-    return generatedId;
-  }
-
-  private formatTelemetryLink(link: NormalizedFullLink): string {
-    const path = link.path.length ? `/${link.path.join("/")}` : "";
-    return `${link.space}/${link.id}${path}`;
-  }
-
-  private getActionTelemetryInfo(
-    action: Action | EventHandler,
-  ): SchedulerActionInfo | undefined {
-    const annotated = action as Partial<TelemetryAnnotations>;
-
-    const patternName = this.getOptionalName(annotated.pattern);
-    const moduleName = this.getOptionalName(annotated.module);
-    const reads = Array.isArray(annotated.reads)
-      ? annotated.reads.map((link) => this.formatTelemetryLink(link))
-      : undefined;
-    const writes = Array.isArray(annotated.writes)
-      ? annotated.writes.map((link) => this.formatTelemetryLink(link))
-      : undefined;
-
-    if (!patternName && !moduleName && !reads?.length && !writes?.length) {
-      return undefined;
-    }
-
-    return {
-      patternName,
-      moduleName,
-      reads: reads?.length ? reads : undefined,
-      writes: writes?.length ? writes : undefined,
-    };
-  }
-
-  private getOptionalName(value: unknown): string | undefined {
-    if (!isRecord(value)) return undefined;
-    const name = value.name;
-    return typeof name === "string" ? name : undefined;
-  }
-
-  // ── Inline idempotency check mode ──────────────────────────────────
-
-  enableIdempotencyCheck(): void {
-    this.idempotencyCheckMode = true;
-    this.idempotencyViolations = [];
-  }
-
-  disableIdempotencyCheck(): void {
-    this.idempotencyCheckMode = false;
-  }
-
-  getIdempotencyViolations(): NonIdempotentReport[] {
-    return [...this.idempotencyViolations];
-  }
-
-  private makeAddressKey(addr: IMemorySpaceAddress): string {
-    return `${addr.space}/${addr.id}/${addr.path.join("/")}`;
-  }
-
-  private captureWrites(
-    tx: IExtendedStorageTransaction,
-    log: ReactivityLog,
-  ): Map<string, unknown> {
-    const writes = new Map<string, unknown>();
-    for (const write of log.writes) {
-      const key = this.makeAddressKey(write);
-      for (const att of tx.journal.novelty(write.space)) {
-        if (att.address.id === write.id) {
-          // Normalize: post-commit journals wrap values in {value: ...},
-          // pre-commit journals store raw values. Unwrap for consistency.
-          const raw = att.value;
-          const value = isRecord(raw) && "value" in raw ? raw.value : raw;
-          writes.set(key, value);
-          break;
-        }
-      }
-      if (!writes.has(key)) writes.set(key, undefined);
-    }
-    return writes;
-  }
-
-  private runIdempotencyRecheck(
-    action: Action,
-    tx: IExtendedStorageTransaction,
-    log: ReactivityLog,
-  ): void {
-    const writes1 = this.captureWrites(tx, log);
-
-    const tx2 = this.runtime.edit();
-    let isAsync = false;
+  withExecutingAction<T>(action: Action, fn: () => T): T {
+    const prev = this.executingAction;
+    this.executingAction = action;
     try {
-      const result = this.runtime.harness.invoke(() => action(tx2));
-      // Async actions (e.g. raw module actions like wish) can't be safely
-      // rechecked: their continuations may fire side effects (runtime.runSynced,
-      // sub-pattern instantiation) that persist beyond tx2.abort(). Skip the
-      // comparison entirely and just swallow the dangling promise.
-      if (result && typeof result.then === "function") {
-        isAsync = true;
-        result.then(undefined, () => {});
-      }
-    } catch { /* ignore errors */ }
-    const log2 = txToReactivityLog(tx2);
-    const writes2 = isAsync ? new Map() : this.captureWrites(tx2, log2);
-    tx2.abort();
-
-    // Skip comparison for async actions — writes are incomplete/unreliable
-    if (isAsync) return;
-
-    const differingKeys: string[] = [];
-    for (const key of writes2.keys()) {
-      const v2 = writes2.get(key);
-      if (!writes1.has(key)) {
-        differingKeys.push(key);
-      } else if (!deepEqual(writes1.get(key), v2)) {
-        differingKeys.push(key);
-      }
+      return fn();
+    } finally {
+      this.executingAction = prev;
     }
-
-    if (differingKeys.length > 0) {
-      const actionId = this.getActionId(action);
-      // Deduplicate: only record first violation per action
-      if (!this.idempotencyViolations.some((v) => v.actionId === actionId)) {
-        this.idempotencyViolations.push({
-          actionId,
-          actionInfo: this.getActionTelemetryInfo(action),
-          runs: [
-            {
-              timestamp: performance.now(),
-              reads: {},
-              writes: Object.fromEntries(writes1),
-            },
-            {
-              timestamp: performance.now(),
-              reads: {},
-              writes: Object.fromEntries(writes2),
-            },
-          ],
-          differingWriteKeys: differingKeys,
-        });
-      }
-    }
-  }
-
-  private updateActionType(
-    action: Action,
-    isEffect: boolean | undefined,
-    options: { queueExecution?: boolean } = {},
-  ): boolean {
-    if (isEffect) {
-      this.isEffectAction.set(action, true);
-    }
-
-    const actionIsEffect = this.isEffectAction.get(action) ?? false;
-
-    if (actionIsEffect) {
-      this.effects.add(action);
-      this.computations.delete(action);
-      if (options.queueExecution) {
-        this.queueExecution();
-      }
-    } else {
-      this.computations.add(action);
-      this.effects.delete(action);
-      if (options.queueExecution && !this.pullMode) {
-        this.queueExecution();
-      }
-    }
-
-    return actionIsEffect;
-  }
-
-  private updateChangeGroup(
-    action: Action,
-    options: { changeGroup?: ChangeGroup },
-  ): void {
-    if (
-      !Object.prototype.hasOwnProperty.call(options, "changeGroup")
-    ) {
-      return;
-    }
-    if (options.changeGroup === undefined) {
-      this.actionChangeGroups.delete(action);
-    } else {
-      this.actionChangeGroups.set(action, options.changeGroup);
-    }
-  }
-
-  private registerParentChild(
-    action: Action,
-    options: { allowExisting?: boolean } = {},
-  ): void {
-    const { allowExisting = true } = options;
-    if (!this.executingAction || this.executingAction === action) return;
-    if (!allowExisting && this.actionParent.has(action)) return;
-
-    const parent = this.executingAction;
-    this.actionParent.set(action, parent);
-
-    let children = this.actionChildren.get(parent);
-    if (!children) {
-      children = new Set();
-      this.actionChildren.set(parent, children);
-    }
-    children.add(action);
   }
 
   /**
@@ -609,95 +515,32 @@ export class Scheduler {
       noDebounce?: boolean;
       throttle?: number;
       changeGroup?: ChangeGroup;
+      rehydrateFromStorage?: SchedulerStorageRehydrationOptions;
     } = {},
   ): Cancel {
-    // Handle backwards-compatible ReactivityLog argument
-    let populateDependenciesEntry: PopulateDependenciesEntry;
-    let immediateLog: ReactivityLog | undefined;
-    if (typeof populateDependencies === "function") {
-      populateDependenciesEntry = populateDependencies;
-    } else {
-      // ReactivityLog provided directly - set up dependencies immediately
-      // (for backwards compatibility with code that passes reads/writes)
-      immediateLog = populateDependencies;
-      populateDependenciesEntry = immediateLog;
+    const { rehydrateFromStorage } = options;
+    if (rehydrateFromStorage) {
+      this.setActionObservationIdentity(action, rehydrateFromStorage);
     }
-    const {
-      isEffect = false,
-      debounce,
-      noDebounce,
-      throttle,
-    } = options;
-
-    this.updateChangeGroup(action, options);
-
-    // Apply debounce settings if provided
-    if (debounce !== undefined) {
-      this.setDebounce(action, debounce);
-    }
-    if (noDebounce !== undefined) {
-      this.setNoDebounce(action, noDebounce);
-    }
-    // Apply throttle setting if provided
-    if (throttle !== undefined) {
-      this.setThrottle(action, throttle);
-    }
-
-    const actionIsEffect = this.updateActionType(action, isEffect, {
-      queueExecution: true,
-    });
-
-    // Track parent-child relationship if action is created during another action's execution
-    this.registerParentChild(action);
-
-    logger.debug(
-      "schedule",
-      () => [
-        "Subscribing to action:",
-        action,
-        actionIsEffect ? "effect" : "computation",
-      ],
+    const subscribeOptions = {
+      isEffect: options.isEffect,
+      debounce: options.debounce,
+      noDebounce: options.noDebounce,
+      throttle: options.throttle,
+      changeGroup: options.changeGroup,
+      deferInitialExecution: rehydrateFromStorage !== undefined,
+    };
+    this.updateMaterializerRegistration(action);
+    const cancel = subscribePullSchedulerAction(
+      this.subscribeActionState,
+      action,
+      populateDependencies,
+      subscribeOptions,
     );
-
-    // Store the populateDependencies callback for use in execute()
-    this.populateDependenciesCallbacks.set(action, populateDependenciesEntry);
-
-    // If a ReactivityLog was provided directly, set up dependencies immediately.
-    // This ensures writes are tracked right away for reverse dependency graph.
-    if (immediateLog) {
-      const { reads, shallowReads } = this.setDependencies(
-        action,
-        immediateLog,
-      );
-      this.updateDependents(action, immediateLog);
-      const { entities } = this.addTriggerPaths(
-        action,
-        reads,
-        shallowReads,
-      );
-
-      // Register the cancel function for the latest trigger set.
-      this.setCancelForEntities(action, entities);
-    } else {
-      // Mark action for dependency collection before first run
-      this.pendingDependencyCollection.add(action);
+    if (rehydrateFromStorage) {
+      this.queueInitialActionRehydration(action, rehydrateFromStorage);
     }
-
-    // Mark as dirty and pending for first-time execution
-    // In pull mode this still doesn't mean execution: There needs to be an effect to trigger it.
-    this.dirty.add(action);
-    this.pending.add(action);
-    this.scheduledFirstTime.add(action);
-
-    // Emit telemetry for new subscription
-    const actionId = this.getActionId(action);
-    this.runtime.telemetry.submit({
-      type: "scheduler.subscribe",
-      actionId,
-      isEffect: actionIsEffect,
-    });
-
-    return () => this.unsubscribe(action);
+    return cancel;
   }
 
   /**
@@ -716,298 +559,351 @@ export class Scheduler {
   resubscribe(
     action: Action,
     log: ReactivityLog,
-    options: { isEffect?: boolean; changeGroup?: ChangeGroup } = {},
+    options: {
+      isEffect?: boolean;
+      changeGroup?: ChangeGroup;
+    } = {},
   ): void {
-    const { isEffect } = options;
-
-    this.updateChangeGroup(action, options);
-
-    const { reads, shallowReads } = this.setDependencies(action, log);
-
-    // Update reverse dependency graph
-    if (this.pullMode) this.updateDependents(action, log);
-
-    // Track action type for pull-based scheduling
-    // Once an action is marked as an effect, it stays an effect
-    const actionIsEffect = this.updateActionType(action, isEffect);
-    const actionId = this.getActionId(action);
-
-    // Track parent-child relationship if action is created during another action's execution
-    // Only set if not already set (resubscribe can be called multiple times)
-    this.registerParentChild(action, { allowExisting: false });
-
-    const { entities, pathsWithValuesByEntity } = this.addTriggerPaths(
+    this.updateMaterializerRegistration(action);
+    resubscribePullSchedulerAction(
+      this.subscribeActionState,
       action,
-      reads,
-      shallowReads,
+      log,
+      options,
     );
+  }
 
-    logger.debug("schedule-resubscribe", () => [
-      `Action: ${actionId}`,
-      `Entities: ${pathsWithValuesByEntity.size}`,
-      `Reads: ${reads.length}`,
-    ]);
-
-    for (const [spaceAndURI, pathsWithValues] of pathsWithValuesByEntity) {
-      logger.debug("schedule-resubscribe-path", () => [
-        `Registered action for ${spaceAndURI}`,
-        `Paths: ${pathsWithValues.map((p) => p.join("/")).join(", ")}`,
-      ]);
+  rehydrateActionFromObservation(
+    action: Action,
+    snapshot: PersistedSchedulerObservationSnapshot,
+  ): boolean {
+    const actionId = this.getActionId(action);
+    const { observation } = snapshot;
+    if (observation.actionId !== actionId) {
+      return false;
     }
 
-    this.setCancelForEntities(action, entities);
+    // Annotation first; otherwise restore the persisted live surface —
+    // mirroring registration, where subscribe's ReactivityLog supplies the
+    // surface for annotation-less actions.
+    const surface = resolveRegistrationSurface(action, {
+      reads: [],
+      shallowReads: [],
+      writes: observation.currentKnownWrites,
+    });
+    if (observation.actionKind !== "effect" && surface.length > 0) {
+      this.writeIndex.setSurface(action, surface);
+      registerDependentsForWriterSurface(
+        this.dependencyGraphState,
+        action,
+        surface,
+      );
+    }
 
-    // In pull mode: When an effect resubscribes, check if any non-throttled dirty
-    // computations write to what it reads. If so, mark the effect dirty so it can
-    // pull those computations and see fresh data.
-    // Skip throttled computations - they'll trigger via storage changes when unthrottled.
-    // Use isEffectAction instead of effects because unsubscribe() clears effects before run()
-    if (this.pullMode && actionIsEffect && this.dirty.size > 0) {
-      const effectReads = log.reads ?? [];
-      let shouldMarkDirty = false;
+    this.resubscribe(action, {
+      reads: observation.reads,
+      shallowReads: observation.shallowReads,
+      // Static dependency setup ignores this in favor of the live annotation.
+      writes: observation.currentKnownWrites,
+    }, {
+      isEffect: observation.actionKind === "effect",
+    });
+    if (observation.materializerWriteEnvelopes.length > 0) {
+      this.materializers.registerAddresses(
+        action,
+        observation.materializerWriteEnvelopes,
+      );
+    }
 
-      // If there are pending computations whose dependencies haven't been collected yet,
-      // we can't know what they write. Be conservative and assume they might affect this effect.
-      if (this.pendingDependencyCollection.size > 0) {
-        shouldMarkDirty = true;
+    const { actionOptions } = observation;
+    if (actionOptions?.debounceMs !== undefined) {
+      this.delays.setDebounce(action, actionOptions.debounceMs);
+    }
+    if (actionOptions?.noDebounce !== undefined) {
+      this.delays.setNoDebounce(action, actionOptions.noDebounce);
+    }
+    if (actionOptions?.throttleMs !== undefined) {
+      this.delays.setThrottle(action, actionOptions.throttleMs);
+    }
+
+    if (
+      observation.status === "failed" ||
+      snapshot.directDirtySeq !== undefined ||
+      snapshot.staleSeq !== undefined ||
+      snapshot.unknownReason !== undefined
+    ) {
+      this.staleness.markDirectDirty(action);
+      this.pending.add(action);
+      this.queueExecution();
+      return true;
+    }
+
+    clearSchedulerDirectDirty(this.dirtySchedulingState, action);
+    this.staleness.forceClearStale(action);
+    this.pending.delete(action);
+    this.pendingDependencyCollection.delete(action);
+    this.scheduledFirstTime.delete(action);
+    return true;
+  }
+
+  async rehydrateActionFromStorage(
+    action: Action,
+    space: MemorySpace,
+    query: Omit<SchedulerActionSnapshotQuery, "actionId"> = {},
+    options: {
+      shouldApply?: () => boolean;
+    } = {},
+  ): Promise<boolean> {
+    const provider = this.runtime.storageManager.open(space);
+    const listSnapshots = provider.listSchedulerActionSnapshots;
+    if (!listSnapshots) {
+      return false;
+    }
+
+    const result = await listSnapshots.call(provider, {
+      ...query,
+      ownerSpace: query.ownerSpace ?? space,
+      actionId: this.getActionId(action),
+    });
+    const snapshot = result.snapshots[0];
+    if (!snapshot || !isSchedulerActionObservation(snapshot.observation)) {
+      // Health counter: no persisted snapshot matched this action's id. On
+      // reload this is the common reason an action re-runs instead of
+      // rehydrating. Counts surface in getLoggerCounts().counts.scheduler.
+      logger.debug("rehydrate/miss/no-snapshot", () => []);
+      return false;
+    }
+    if (!this.observationMatchesCurrentAction(action, snapshot.observation)) {
+      return false;
+    }
+    if (options.shouldApply && !options.shouldApply()) {
+      logger.debug("rehydrate/skip/should-not-apply", () => []);
+      return false;
+    }
+
+    logger.debug("rehydrate/ok", () => []);
+    return this.rehydrateActionFromObservation(action, {
+      observation: snapshot.observation,
+      ...(snapshot.directDirtySeq !== undefined
+        ? { directDirtySeq: snapshot.directDirtySeq }
+        : {}),
+      ...(snapshot.staleSeq !== undefined
+        ? { staleSeq: snapshot.staleSeq }
+        : {}),
+      ...(snapshot.unknownReason !== undefined
+        ? { unknownReason: snapshot.unknownReason }
+        : {}),
+    });
+  }
+
+  private observationMatchesCurrentAction(
+    action: Action,
+    observation: SchedulerActionObservation,
+  ): boolean {
+    const actionId = this.getActionId(action);
+    if (observation.actionId !== actionId) {
+      logger.debug("rehydrate/miss/action-id", () => []);
+      return false;
+    }
+
+    const telemetry = getSchedulerActionTelemetryInfo(action);
+    const matches = observation.implementationFingerprint ===
+        schedulerImplementationFingerprint(action, actionId, telemetry) &&
+      observation.runtimeFingerprint === schedulerRuntimeFingerprint("pull");
+    if (!matches) logger.debug("rehydrate/miss/fingerprint", () => []);
+    return matches;
+  }
+
+  private setActionObservationIdentity(
+    action: Action,
+    identity: SchedulerObservationIdentity & { space?: MemorySpace },
+  ): void {
+    (action as Partial<TelemetryAnnotations>).schedulerObservationIdentity = {
+      ownerSpace: identity.ownerSpace ?? identity.space,
+      pieceId: identity.pieceId,
+      ...(identity.branch !== undefined ? { branch: identity.branch } : {}),
+      ...(identity.processGeneration !== undefined
+        ? { processGeneration: identity.processGeneration }
+        : {}),
+    };
+  }
+
+  private queueInitialActionRehydration(
+    action: Action,
+    options: SchedulerStorageRehydrationOptions,
+  ): void {
+    const token = Symbol("scheduler-initial-rehydration");
+    this.initialRehydrationTokens.set(action, token);
+    const task = (async () => {
+      // The sync wait and the rehydration lookup share ONE timeout budget, so a
+      // stuck sync can't double the resumed startup delay: each step is bounded
+      // by the time remaining until this common deadline.
+      const deadline = performance.now() +
+        Math.max(
+          0,
+          options.timeoutMs ?? DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS,
+        );
+      const remainingMs = () => Math.max(0, deadline - performance.now());
+      if (options.awaitSync) {
+        // Resumed from a synced state: hold the initial rehydration/run until
+        // the space has finished syncing so consumers don't race the data.
+        await this.awaitSpaceSyncedWithTimeout(options.space, remainingMs());
+        // The action may have been superseded while we waited for sync.
+        if (!this.canApplyInitialActionRehydration(action, token)) return;
       }
-
-      // Use writersByEntity index for efficient lookup
-      if (!shouldMarkDirty) {
-        for (const read of effectReads) {
-          const entity = `${read.space}/${read.id}` as SpaceAndURI;
-          const writers = this.writersByEntity.get(entity);
-          if (!writers) continue;
-
-          for (const writer of writers) {
-            if (writer === action) continue;
-            if (!this.dirty.has(writer)) continue;
-            if (this.effects.has(writer)) continue; // Only check computations
-            if (this.isThrottled(writer)) continue; // Skip throttled - they trigger via storage
-
-            // Check path overlap
-            const writerWrites = this.mightWrite.get(writer) ?? [];
-            for (const write of writerWrites) {
-              if (
-                write.space === read.space &&
-                write.id === read.id &&
-                arraysOverlap(write.path, read.path)
-              ) {
-                shouldMarkDirty = true;
-                break;
-              }
-            }
-            if (shouldMarkDirty) break;
-          }
-          if (shouldMarkDirty) break;
+      const rehydrated = await this.runInitialActionRehydrationWithTimeout(
+        action,
+        options.awaitSync ? { ...options, timeoutMs: remainingMs() } : options,
+        token,
+      );
+      if (rehydrated === "timeout") {
+        if (this.canApplyInitialActionRehydration(action, token)) {
+          logger.warn("scheduler-rehydrate", () => [
+            "Timed out rehydrating scheduler action; falling back to initial run",
+            this.getActionId(action),
+            options.timeoutMs ?? DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS,
+          ]);
+          this.initialRehydrationTokens.delete(action);
+          logger.debug("rehydrate/fallback-run/timeout", () => []);
+          this.scheduleInitialActionRun(action);
         }
+        return;
       }
+      if (!this.canApplyInitialActionRehydration(action, token)) {
+        return;
+      }
+      if (!rehydrated) {
+        logger.debug("rehydrate/fallback-run/no-match", () => []);
+        this.scheduleInitialActionRun(action);
+      }
+    })().catch((error) => {
+      logger.warn("scheduler-rehydrate", () => [
+        "Failed to rehydrate scheduler action; falling back to initial run",
+        this.getActionId(action),
+        error,
+      ]);
+      if (!this.canApplyInitialActionRehydration(action, token)) {
+        return;
+      }
+      this.scheduleInitialActionRun(action);
+    });
 
-      if (shouldMarkDirty && !this.dirty.has(action)) {
-        this.dirty.add(action);
-        this.pending.add(action);
-        this.queueExecution();
+    this.backgroundTasks.add(task);
+    task.finally(() => {
+      this.backgroundTasks.delete(task);
+      if (this.initialRehydrationTokens.get(action) === token) {
+        this.initialRehydrationTokens.delete(action);
+      }
+    });
+  }
+
+  // Wait for the space's storage replica to finish syncing, bounded by the
+  // rehydration timeout so a stuck sync can't wedge the initial run forever.
+  private async awaitSpaceSyncedWithTimeout(
+    space: MemorySpace,
+    timeoutMs?: number,
+  ): Promise<void> {
+    const provider = this.runtime.storageManager.open(space);
+    const synced = provider?.synced?.bind(provider);
+    if (!synced) return;
+    const ms = Math.max(0, timeoutMs ?? DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS);
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<void>((resolve) => {
+      timeoutId = setTimeout(resolve, ms);
+    });
+    const syncedPromise = synced();
+    // If the timeout wins the race the sync promise is left pending; swallow a
+    // later rejection so it doesn't surface as an unhandled promise rejection.
+    syncedPromise.catch(() => {});
+    try {
+      await Promise.race([syncedPromise, timeout]);
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    }
+  }
+
+  private async runInitialActionRehydrationWithTimeout(
+    action: Action,
+    options: SchedulerStorageRehydrationOptions,
+    token: symbol,
+  ): Promise<boolean | "timeout"> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutMs = Math.max(
+      0,
+      options.timeoutMs ?? DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS,
+    );
+    const timeout = new Promise<"timeout">((resolve) => {
+      timeoutId = setTimeout(() => resolve("timeout"), timeoutMs);
+    });
+    try {
+      return await Promise.race([
+        this.rehydrateActionFromStorage(
+          action,
+          options.space,
+          {
+            ...(options.branch !== undefined ? { branch: options.branch } : {}),
+            ownerSpace: options.ownerSpace ?? options.space,
+            pieceId: options.pieceId,
+            ...(options.processGeneration !== undefined
+              ? { processGeneration: options.processGeneration }
+              : {}),
+          },
+          {
+            shouldApply: () =>
+              this.canApplyInitialActionRehydration(action, token),
+          },
+        ),
+        timeout,
+      ]);
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
       }
     }
   }
 
-  unsubscribe(action: Action): void {
-    this.cancels.get(action)?.();
-    this.cancels.delete(action);
-    this.dependencies.delete(action);
-    this.actionChangeGroups.delete(action);
-    this.pending.delete(action);
-    const dependencies = this.reverseDependencies.get(action);
-    if (dependencies) {
-      for (const dependency of dependencies) {
-        const dependents = this.dependents.get(dependency);
-        dependents?.delete(action);
-        if (dependents && dependents.size === 0) {
-          this.dependents.delete(dependency);
-        }
-      }
-      this.reverseDependencies.delete(action);
+  private canApplyInitialActionRehydration(
+    action: Action,
+    token: symbol,
+  ): boolean {
+    return this.initialRehydrationTokens.get(action) === token &&
+      (this.nodes.effects.has(action) || this.nodes.computations.has(action)) &&
+      !this.pending.has(action) &&
+      !this.staleness.dirty.has(action);
+  }
+
+  private scheduleInitialActionRun(action: Action): void {
+    if (
+      !this.nodes.effects.has(action) && !this.nodes.computations.has(action)
+    ) {
+      return;
     }
-    this.dependents.delete(action);
-    // Clean up effect/computation tracking
-    this.effects.delete(action);
-    this.computations.delete(action);
-    // Clean up dirty tracking
-    this.dirty.delete(action);
-    // Clean up writersByEntity index
-    const writeEntities = this.actionWriteEntities.get(action);
-    if (writeEntities) {
-      for (const entity of writeEntities) {
-        const writers = this.writersByEntity.get(entity);
-        writers?.delete(action);
-        if (writers && writers.size === 0) {
-          this.writersByEntity.delete(entity);
-        }
-      }
-      // Clear actionWriteEntities so resubscribe will re-register the action
-      this.actionWriteEntities.delete(action);
+
+    this.pendingDependencyCollection.add(action);
+    this.staleness.markDirectDirty(action);
+    this.pending.add(action);
+    this.scheduledFirstTime.add(action);
+
+    if (
+      !this.nodes.isKnownEffect(action) &&
+      this.writeIndex.getSchedulingWrites(action)?.length
+    ) {
+      this.scheduleAffectedEffects(action);
     }
-    // NOTE: We intentionally keep parent-child relationships intact.
-    // They're needed for cycle detection (identifying obsolete children
-    // when parent is re-running). They'll be cleaned up when parent is
-    // garbage collected (WeakMap).
-    // Cancel any pending debounce timer
-    this.cancelDebounceTimer(action);
-    // Clean up dependency collection tracking
-    this.populateDependenciesCallbacks.delete(action);
-    this.pendingDependencyCollection.delete(action);
+
+    this.queueExecution();
+  }
+
+  unsubscribe(
+    action: Action,
+    options: { preserveChangeGroup?: boolean } = {},
+  ): void {
+    unsubscribeSchedulerAction(this.unsubscribeState, action, options);
+    this.materializers.clearAction(action);
   }
 
   async run(action: Action): Promise<any> {
-    logger.timeStart("scheduler", "run");
-    const actionId = this.getActionId(action);
-    this.runtime.telemetry.submit({
-      type: "scheduler.run",
-      actionId,
-      actionInfo: this.getActionTelemetryInfo(action),
-    });
-
-    logger.debug("schedule-run-start", () => [
-      `[RUN] Starting action: ${actionId}`,
-      `Pull mode: ${this.pullMode}`,
-    ]);
-
-    if (this.runningPromise) await this.runningPromise;
-
-    const tx = this.runtime.edit();
-    const actionStartTime = performance.now();
-
-    let result: any;
-    this.runningPromise = new Promise((resolve) => {
-      const finalizeAction = (error?: unknown) => {
-        // Record action execution time for cycle-aware scheduling
-        const elapsed = performance.now() - actionStartTime;
-        this.recordActionTime(action, elapsed);
-
-        try {
-          if (error) {
-            logger.error("schedule-error", () => [
-              `[RUN] Action failed: ${actionId}`,
-              `Error: ${error}`,
-            ]);
-            this.handleError(error as Error, action);
-          }
-        } finally {
-          // Set up new reactive subscriptions after the action runs
-
-          // Commit the transaction. The code continues synchronously after
-          // kicking off the commit, i.e. it assumes the commit will be
-          // successful. If it isn't, the data will be rolled back and all other
-          // reactive functions based on it will be retriggered. But also, the
-          // retry logic below will have re-scheduled this action, so
-          // topological sorting should move it before the dependencies.
-          logger.timeStart("scheduler", "run", "commit");
-          const commitPromise = tx.commit();
-          logger.timeEnd("scheduler", "run", "commit");
-          commitPromise.then(({ error }) => {
-            // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
-            // on every attempt we still call the re-subscribe below, so that
-            // even after we run out of retries, this will be re-triggered when
-            // input data changes.
-            if (error) {
-              logger.info(
-                "schedule-run-error",
-                "Error committing transaction",
-                error,
-              );
-
-              this.retries.set(action, (this.retries.get(action) ?? 0) + 1);
-              if (this.retries.get(action)! < MAX_RETRIES_FOR_REACTIVE) {
-                // Re-schedule the action to run again on conflict failure.
-                // Use resubscribe to set up dependencies/triggers from the log,
-                // then mark as dirty/pending to ensure it runs again.
-                this.resubscribe(action, log);
-                this.dirty.add(action);
-                this.pending.add(action);
-                this.queueExecution();
-              }
-            } else {
-              // Clear retries after successful commit.
-              this.retries.delete(action);
-            }
-          }).catch((error) => {
-            logger.error(
-              "schedule-error",
-              "Commit promise rejected in finalizeAction:",
-              error,
-            );
-          });
-          const log = txToReactivityLog(tx);
-
-          logger.debug("schedule-run-complete", () => [
-            `[RUN] Action completed: ${actionId}`,
-            `Reads: ${log.reads.length}`,
-            `Writes: ${log.writes.length}`,
-            `Elapsed: ${elapsed.toFixed(2)}ms`,
-          ]);
-
-          // Diagnosis capture: record read/write values for idempotency checking
-          if (this.diagnosisEnabled) {
-            this.captureDiagnosisRecord(actionId, action, tx, log);
-
-            // Map the action's changeGroup to its ID for causal tracking
-            const cg = this.actionChangeGroups.get(action);
-            if (cg) {
-              this.changeGroupToActionId.set(cg, actionId);
-            }
-          }
-
-          // Inline idempotency re-run: when the mode is on, every
-          // computation gets a second synchronous run against post-commit
-          // state. An idempotent computation produces the same writes
-          // both times. Uses isEffectAction (persists past unsubscribe)
-          // since execute() calls unsubscribe() before run().
-          if (
-            this.idempotencyCheckMode &&
-            !this.isEffectAction.get(action)
-          ) {
-            this.runIdempotencyRecheck(action, tx, log);
-          }
-
-          this.resubscribe(action, log);
-          resolve(result);
-        }
-      };
-
-      try {
-        // Track executing action for parent-child relationship tracking
-        this.executingAction = action;
-        logger.timeStart("scheduler", "run", "action");
-        Promise.resolve(action(tx))
-          .then((actionResult) => {
-            logger.timeEnd("scheduler", "run", "action");
-            result = actionResult;
-            this.executingAction = null;
-            logger.debug("schedule-action-timing", () => {
-              const duration = ((performance.now() - actionStartTime) / 1000)
-                .toFixed(3);
-              return [
-                `Action ${actionId} completed in ${duration}s`,
-              ];
-            });
-            finalizeAction();
-          })
-          .catch((error) => {
-            logger.timeEnd("scheduler", "run", "action");
-            this.executingAction = null;
-            finalizeAction(error);
-          });
-      } catch (error) {
-        logger.timeEnd("scheduler", "run", "action");
-        this.executingAction = null;
-        finalizeAction(error);
-      }
-    });
-
-    return this.runningPromise.then((result) => {
-      logger.timeEnd("scheduler", "run");
-      return result;
-    });
+    return await runSchedulerAction(this.actionRunState, action);
   }
 
   idle(): Promise<void> {
@@ -1015,7 +911,31 @@ export class Scheduler {
       if (this.runningPromise) {
         // Something is currently running - wait for it then check again
         this.runningPromise.then(() => this.idle().then(resolve));
+      } else if (this.backgroundTasks.size > 0) {
+        // Async scheduler work, such as event-triggered auto-start, is still in
+        // flight. Wait for it to settle and then re-check the scheduler state.
+        Promise.allSettled([...this.backgroundTasks]).then(() =>
+          this.idle().then(resolve)
+        );
+      } else if (
+        hasEventQueueWakeTimer(this.eventQueueWakeState) &&
+        ((this.eventQueue.length > 0 &&
+          isHeadEventParkedState(this.eventQueueWakeState)) ||
+          this.hasDeferredDirtyEffectWork())
+      ) {
+        // A queued event is parked behind a throttled dependency. Wait for the
+        // wake timer to re-schedule the queue and then re-check.
+        this.idlePromises.push(resolve);
+      } else if (this.hasPendingLineageHeadEvent()) {
+        // A cross-space lineage head has no timer; its origin commit callback
+        // is the wake source, so idle must stay open until that callback runs.
+        this.idlePromises.push(resolve);
       } else if (!this.scheduled) {
+        if (this.hasRunnablePullWork()) {
+          this.queueExecution();
+          this.idlePromises.push(resolve);
+          return;
+        }
         // Nothing is scheduled to run - we're idle.
         // In pull mode, pending computations won't run without an effect to pull them,
         // so we don't wait for them.
@@ -1027,42 +947,41 @@ export class Scheduler {
     });
   }
 
+  queueExecution(): void {
+    if (this.disposed) return;
+    if (this.scheduled) {
+      if (this.pendingQueueTaskTimer === null) {
+        this.rerunAfterCurrentExecute = true;
+      }
+      return;
+    }
+    this.pendingQueueTaskTimer = queueTask(() => {
+      this.pendingQueueTaskTimer = null;
+      this.execute();
+    });
+    this.scheduled = true;
+  }
+
   queueEvent(
     eventLink: NormalizedFullLink,
     event: any,
     retries: number = DEFAULT_RETRIES_FOR_EVENTS,
+    // Internal-only commit callback. This runs after the final commit result,
+    // including exhausted failure, so it must not perform external side
+    // effects. Use the post-commit outbox for success-only effect release.
     onCommit?: (tx: IExtendedStorageTransaction) => void,
     doNotLoadPieceIfNotRunning: boolean = false,
+    opts: { eventId?: string; originTx?: IExtendedStorageTransaction } = {},
   ): void {
-    let handlerFound = false;
-
-    for (const [link, handler] of this.eventHandlers) {
-      if (areNormalizedLinksSame(link, eventLink)) {
-        handlerFound = true;
-        this.queueExecution();
-        this.eventQueue.push({
-          action: (tx: IExtendedStorageTransaction) => handler(tx, event),
-          handler,
-          event,
-          retriesLeft: retries,
-          onCommit,
-        });
-      }
-    }
-
-    // If no handler was found, try to start the piece that should handle this event
-    if (!handlerFound && !doNotLoadPieceIfNotRunning) {
-      // Use an async IIFE to handle the async operation without blocking
-      (async () => {
-        const started = await ensurePieceRunning(this.runtime, eventLink);
-        if (started) {
-          // Piece was started, re-queue the event. Don't trigger loading again
-          // if this didn't result in registering a handler, as trying again
-          // won't change this.
-          this.queueEvent(eventLink, event, retries, onCommit, true);
-        }
-      })();
-    }
+    queueSchedulerEvent(this.eventQueueState, {
+      eventLink,
+      event,
+      retries,
+      onCommit,
+      doNotLoadPieceIfNotRunning,
+      eventId: opts.eventId,
+      originTx: opts.originTx,
+    });
   }
 
   addEventHandler(
@@ -1073,16 +992,13 @@ export class Scheduler {
       event: any,
     ) => void,
   ): Cancel {
-    if (populateDependencies) {
-      handler.populateDependencies = populateDependencies;
-    }
-    this.eventHandlers.push([ref, handler]);
-    return () => {
-      const index = this.eventHandlers.findIndex(([r, h]) =>
-        r === ref && h === handler
-      );
-      if (index !== -1) this.eventHandlers.splice(index, 1);
-    };
+    return addSchedulerEventHandler({
+      eventHandlers: this.eventHandlers,
+    }, {
+      handler,
+      ref,
+      populateDependencies,
+    });
   }
 
   onConsole(fn: ConsoleHandler): void {
@@ -1093,945 +1009,12 @@ export class Scheduler {
     this.errorHandlers.add(fn);
   }
 
-  /**
-   * Creates and returns a new storage subscription that can be used to receive storage notifications.
-   *
-   * @returns A new IStorageSubscription instance
-   */
-  private createStorageSubscription(): IStorageSubscription {
-    return {
-      next: (notification) => {
-        const space = notification.space;
-
-        // Log notification details
-        logger.debug("schedule-notification", () => [
-          `Type: ${notification.type}`,
-          `Space: ${space}`,
-          `Has source: ${
-            "source" in notification ? notification.source : "none"
-          }`,
-          `Changes: ${
-            "changes" in notification ? [...notification.changes].length : 0
-          }`,
-        ]);
-
-        if ("changes" in notification) {
-          const sourceChangeGroup = notification.type === "commit"
-            ? notification.source?.changeGroup
-            : undefined;
-          const hasSourceChangeGroup = notification.type === "commit" &&
-            sourceChangeGroup !== undefined;
-
-          let changeIndex = 0;
-          for (const change of notification.changes) {
-            changeIndex++;
-            logger.debug("schedule-change", () => [
-              `Change #${changeIndex}`,
-              `Address: ${change.address.id}/${change.address.path.join("/")}`,
-              `Before: ${JSON.stringify(change.before)}`,
-              `After: ${JSON.stringify(change.after)}`,
-            ]);
-            this.runtime.telemetry.submit({
-              type: "cell.update",
-              change: change,
-            });
-
-            if (change.address.type !== "application/json") {
-              logger.debug("schedule-change-skip", () => [
-                `Change #${changeIndex} skipping non-JSON type: ${change.address.type}`,
-              ]);
-              continue;
-            }
-
-            const spaceAndURI = `${space}/${change.address.id}` as SpaceAndURI;
-            const paths = this.triggers.get(spaceAndURI);
-            const nonRecursivePaths = this.nonRecursiveTriggers.get(
-              spaceAndURI,
-            );
-
-            if (paths || nonRecursivePaths) {
-              logger.debug("schedule-change-match", () => [
-                `Change #${changeIndex} found ${
-                  (paths?.size ?? 0) + (nonRecursivePaths?.size ?? 0)
-                } registered actions for ${spaceAndURI}`,
-              ]);
-
-              const triggeredActionSet = new Set<Action>();
-              if (paths) {
-                for (
-                  const action of determineTriggeredActions(
-                    paths,
-                    change.before,
-                    change.after,
-                    change.address.path,
-                  )
-                ) {
-                  triggeredActionSet.add(action);
-                }
-              }
-              if (nonRecursivePaths) {
-                for (
-                  const action of determineTriggeredActions(
-                    nonRecursivePaths,
-                    change.before,
-                    change.after,
-                    change.address.path,
-                    { nonRecursive: true },
-                  )
-                ) {
-                  triggeredActionSet.add(action);
-                }
-              }
-              const triggeredActions = [...triggeredActionSet];
-
-              logger.debug("schedule-change-trigger", () => [
-                `Change #${changeIndex} triggered ${triggeredActions.length} actions`,
-              ]);
-
-              for (const action of triggeredActions) {
-                // Causal edge tracking for diagnosis
-                if (
-                  this.diagnosisEnabled && hasSourceChangeGroup &&
-                  sourceChangeGroup !== undefined
-                ) {
-                  const writerActionId = this.changeGroupToActionId.get(
-                    sourceChangeGroup,
-                  );
-                  if (writerActionId) {
-                    this.causalEdges.push({
-                      writer: writerActionId,
-                      cell: spaceAndURI,
-                      triggered: this.getActionId(action),
-                      timestamp: performance.now(),
-                    });
-                  }
-                }
-
-                const actionChangeGroup = this.actionChangeGroups.get(action);
-                if (
-                  hasSourceChangeGroup &&
-                  actionChangeGroup !== undefined &&
-                  Object.is(actionChangeGroup, sourceChangeGroup)
-                ) {
-                  logger.debug("schedule-change-skip-group", () => [
-                    `Change #${changeIndex} skipped action change group`,
-                    `Action: ${this.getActionId(action)}`,
-                  ]);
-                  continue;
-                }
-
-                logger.debug("schedule-trigger", () => [
-                  `Action for ${spaceAndURI}/${change.address.path.join("/")}`,
-                  `Action: ${this.getActionId(action)}`,
-                  `Mode: ${this.pullMode ? "pull" : "push"}`,
-                  `Type: ${
-                    this.effects.has(action) ? "effect" : "computation"
-                  }`,
-                ]);
-
-                if (this.pullMode) {
-                  // Pull mode: only schedule effects, mark computations as dirty
-                  if (this.effects.has(action)) {
-                    this.scheduleWithDebounce(action);
-                  } else {
-                    // Mark computation as dirty and schedule affected effects
-                    this.markDirty(action);
-                    this.scheduleAffectedEffects(action);
-                  }
-                } else {
-                  // Push mode: existing behavior - schedule all triggered actions
-                  this.scheduleWithDebounce(action);
-                }
-              }
-            } else {
-              logger.debug("schedule", () => [
-                `[CHANGE ${changeIndex}] No registered actions for ${spaceAndURI}`,
-              ]);
-            }
-          }
-        }
-        return { done: false };
-      },
-    } satisfies IStorageSubscription;
+  setEventPreflightTelemetryEnabled(enabled: boolean): void {
+    this.eventPreflightTelemetryEnabled = enabled;
   }
 
-  queueExecution(): void {
-    if (this.scheduled || this.disposed) return;
-    this.pendingQueueTaskTimer = queueTask(() => {
-      this.pendingQueueTaskTimer = null;
-      this.execute();
-    });
-    this.scheduled = true;
-  }
-
-  private setDependencies(
-    action: Action,
-    log: ReactivityLog,
-  ): {
-    reads: IMemorySpaceAddress[];
-    shallowReads: IMemorySpaceAddress[];
-  } {
-    const reads = sortAndCompactPaths(log.reads);
-    const shallowReads = sortAndCompactPaths(log.shallowReads, false);
-    const writes = sortAndCompactPaths(log.writes);
-    this.dependencies.set(action, { reads, shallowReads, writes });
-
-    // Initialize/update mightWrite with declared writes
-    // This ensures dependency chain can be built even before action runs
-    const existingMightWrite = this.mightWrite.get(action) ?? [];
-    const newMightWrite = sortAndCompactPaths([
-      ...existingMightWrite,
-      ...writes,
-      ...(log.potentialWrites ?? []),
-    ]);
-    this.mightWrite.set(action, newMightWrite);
-
-    const addedWrites = newMightWrite.filter((write) =>
-      !existingMightWrite.some((existing) =>
-        existing.space === write.space &&
-        existing.id === write.id &&
-        existing.type === write.type &&
-        existing.path.length <= write.path.length &&
-        arraysOverlap(existing.path, write.path)
-      )
-    );
-
-    // Update writersByEntity index for fast dependency lookup
-    // Collect new entities from writes
-    const existingEntities = this.actionWriteEntities.get(action);
-    const nextEntities = new Set<SpaceAndURI>();
-    const addedEntities = new Set<SpaceAndURI>();
-    for (const write of newMightWrite) {
-      const entity: SpaceAndURI = `${write.space}/${write.id}`;
-      nextEntities.add(entity);
-      if (!existingEntities?.has(entity)) {
-        addedEntities.add(entity);
-      }
-    }
-
-    // Add action to writersByEntity for each newly discovered entity
-    for (const entity of addedEntities) {
-      // Skip if already registered
-      let writers = this.writersByEntity.get(entity);
-      if (!writers) {
-        writers = new Set();
-        this.writersByEntity.set(entity, writers);
-      }
-      writers.add(action);
-    }
-    this.actionWriteEntities.set(action, nextEntities);
-
-    if (this.pullMode && addedWrites.length > 0) {
-      // Backfill reverse edges when new writers appear after readers are already subscribed.
-      this.backfillDependentsForNewWrites(action, addedWrites);
-    }
-
-    return { reads, shallowReads };
-  }
-
-  private addTriggerPaths(
-    action: Action,
-    reads: IMemorySpaceAddress[],
-    shallowReads: IMemorySpaceAddress[],
-  ): {
-    entities: Set<SpaceAndURI>;
-    pathsWithValuesByEntity: Map<SpaceAndURI, SortedAndCompactPaths>;
-  } {
-    this.clearActionTriggers(action);
-    const pathsByEntity = addressesToPathByEntity(reads);
-    const nonRecursivePathsByEntity = addressesToPathByEntity(
-      shallowReads,
-    );
-    const entities = new Set<SpaceAndURI>();
-    const pathsWithValuesByEntity = new Map<
-      SpaceAndURI,
-      SortedAndCompactPaths
-    >();
-
-    for (const [spaceAndURI, paths] of pathsByEntity) {
-      entities.add(spaceAndURI);
-      if (!this.triggers.has(spaceAndURI)) {
-        this.triggers.set(spaceAndURI, new Map());
-      }
-      const pathsWithValues = paths.map((path) =>
-        [
-          "value",
-          ...path,
-        ] as readonly MemoryAddressPathComponent[]
-      );
-      this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
-      pathsWithValuesByEntity.set(spaceAndURI, pathsWithValues);
-    }
-    for (const [spaceAndURI, paths] of nonRecursivePathsByEntity) {
-      entities.add(spaceAndURI);
-      if (!this.nonRecursiveTriggers.has(spaceAndURI)) {
-        this.nonRecursiveTriggers.set(spaceAndURI, new Map());
-      }
-      const pathsWithValues = paths.map((path) =>
-        [
-          "value",
-          ...path,
-        ] as readonly MemoryAddressPathComponent[]
-      );
-      this.nonRecursiveTriggers.get(spaceAndURI)!.set(action, pathsWithValues);
-    }
-
-    return { entities, pathsWithValuesByEntity };
-  }
-
-  private clearActionTriggers(action: Action): void {
-    const cancel = this.cancels.get(action);
-    if (!cancel) return;
-
-    cancel();
-    this.cancels.delete(action);
-  }
-
-  private setCancelForEntities(
-    action: Action,
-    entities: Set<SpaceAndURI>,
-  ): void {
-    const actionId = this.getActionId(action);
-    this.cancels.set(action, () => {
-      logger.debug("schedule-unsubscribe", () => [
-        `Action: ${actionId}`,
-        `Entities: ${entities.size}`,
-      ]);
-      for (const spaceAndURI of entities) {
-        this.triggers.get(spaceAndURI)?.delete(action);
-        this.nonRecursiveTriggers.get(spaceAndURI)?.delete(action);
-      }
-    });
-  }
-
-  private collectDependenciesForAction(
-    action: Action,
-    populateDependencies: PopulateDependenciesEntry,
-    options: {
-      errorLogLabel: string;
-      errorMessage: (action: Action, error: unknown) => string;
-      updateDependents?: boolean;
-      useRawReadsForTriggers?: boolean;
-    },
-  ): { log: ReactivityLog; entities: Set<SpaceAndURI> } {
-    let log: ReactivityLog;
-    if (typeof populateDependencies === "function") {
-      const depTx = this.runtime.edit();
-      try {
-        populateDependencies(depTx);
-      } catch (error) {
-        logger.debug(options.errorLogLabel, () => [
-          options.errorMessage(action, error),
-        ]);
-      }
-      log = txToReactivityLog(depTx);
-      depTx.abort();
-    } else {
-      log = populateDependencies;
-    }
-
-    const { reads, shallowReads } = this.setDependencies(action, log);
-    if (options.updateDependents ?? true) {
-      this.updateDependents(action, log);
-    }
-
-    const readsForTriggers = options.useRawReadsForTriggers ? log.reads : reads;
-    const shallowReadsForTriggers = options.useRawReadsForTriggers
-      ? log.shallowReads
-      : shallowReads;
-    const { entities } = this.addTriggerPaths(
-      action,
-      readsForTriggers,
-      shallowReadsForTriggers,
-    );
-    this.setCancelForEntities(action, entities);
-
-    return { log, entities };
-  }
-
-  /**
-   * Updates the reverse dependency graph (dependents map).
-   * For each action that writes to paths this action reads, add this action as a dependent.
-   */
-  private updateDependents(action: Action, log: ReactivityLog): void {
-    const previousDependencies = this.reverseDependencies.get(action);
-    if (previousDependencies) {
-      for (const dependency of previousDependencies) {
-        const dependents = this.dependents.get(dependency);
-        dependents?.delete(action);
-        if (dependents && dependents.size === 0) {
-          this.dependents.delete(dependency);
-        }
-      }
-      this.reverseDependencies.delete(action);
-    }
-
-    const newDependencies = new Set<Action>();
-
-    // Group reads by entity for efficient lookup
-    const readsByEntity = new Map<SpaceAndURI, IMemorySpaceAddress[]>();
-    for (const read of log.reads) {
-      const entity: SpaceAndURI = `${read.space}/${read.id}`;
-      let entityReads = readsByEntity.get(entity);
-      if (!entityReads) {
-        entityReads = [];
-        readsByEntity.set(entity, entityReads);
-      }
-      entityReads.push(read);
-    }
-    const nonRecursiveByEntity = new Map<SpaceAndURI, IMemorySpaceAddress[]>();
-    for (const read of log.shallowReads) {
-      const entity: SpaceAndURI = `${read.space}/${read.id}`;
-      let entityReads = nonRecursiveByEntity.get(entity);
-      if (!entityReads) {
-        entityReads = [];
-        nonRecursiveByEntity.set(entity, entityReads);
-      }
-      entityReads.push(read);
-    }
-    const allEntities = new Set([
-      ...readsByEntity.keys(),
-      ...nonRecursiveByEntity.keys(),
-    ]);
-
-    // For each entity we read from, find actions that write to it
-    for (const entity of allEntities) {
-      const writers = this.writersByEntity.get(entity);
-      if (!writers) continue;
-
-      const entityReads = readsByEntity.get(entity) ?? [];
-      const entityNonRecursiveReads = nonRecursiveByEntity.get(entity) ?? [];
-
-      for (const otherAction of writers) {
-        if (otherAction === action) continue;
-        // Skip if we already found this dependency
-        if (newDependencies.has(otherAction)) continue;
-
-        // Get paths this action writes to
-        const otherWrites = this.mightWrite.get(otherAction) ?? [];
-
-        if (
-          this.readsOverlapWrites(
-            entityReads,
-            entityNonRecursiveReads,
-            otherWrites,
-          )
-        ) {
-          // otherAction writes → this action reads, so this action depends on otherAction
-          let deps = this.dependents.get(otherAction);
-          if (!deps) {
-            deps = new Set();
-            this.dependents.set(otherAction, deps);
-          }
-          deps.add(action);
-          newDependencies.add(otherAction);
-        }
-      }
-    }
-
-    if (newDependencies.size > 0) {
-      this.reverseDependencies.set(action, newDependencies);
-    }
-
-    // Emit telemetry for dependency updates
-    const actionId = this.getActionId(action);
-    this.runtime.telemetry.submit({
-      type: "scheduler.dependencies.update",
-      actionId,
-      reads: [...log.reads, ...log.shallowReads].map((r) =>
-        `${r.space}/${r.id}/${r.path.join("/")}`
-      ),
-      writes: log.writes.map((w) => `${w.space}/${w.id}/${w.path.join("/")}`),
-    });
-  }
-
-  private registerDependentEdge(writer: Action, dependent: Action): void {
-    if (writer === dependent) return;
-
-    let dependents = this.dependents.get(writer);
-    if (!dependents) {
-      dependents = new Set();
-      this.dependents.set(writer, dependents);
-    }
-    dependents.add(dependent);
-
-    let reverse = this.reverseDependencies.get(dependent);
-    if (!reverse) {
-      reverse = new Set();
-      this.reverseDependencies.set(dependent, reverse);
-    }
-    reverse.add(writer);
-  }
-
-  private backfillDependentsForNewWrites(
-    writer: Action,
-    writes: IMemorySpaceAddress[],
-  ): void {
-    if (writes.length === 0) return;
-
-    const scanAction = (action: Action) => {
-      if (action === writer) return;
-      const log = this.dependencies.get(action);
-      if (!log?.reads?.length && !log?.shallowReads.length) return;
-      if (
-        !this.readsOverlapWrites(log.reads, log.shallowReads, writes)
-      ) return;
-      this.registerDependentEdge(writer, action);
-    };
-
-    for (const effect of this.effects) scanAction(effect);
-    for (const computation of this.computations) scanAction(computation);
-  }
-
-  private readsOverlapWrites(
-    reads: IMemorySpaceAddress[],
-    shallowReads: IMemorySpaceAddress[],
-    writes: IMemorySpaceAddress[],
-  ): boolean {
-    for (const read of reads) {
-      for (const write of writes) {
-        if (
-          read.space === write.space &&
-          read.id === write.id &&
-          arraysOverlap(write.path, read.path)
-        ) {
-          return true;
-        }
-      }
-    }
-    // For non-recursive reads, only same/ancestor path or direct child writes
-    // create a dependency. Deep descendant writes cannot affect shallow structure.
-    for (const read of shallowReads) {
-      for (const write of writes) {
-        if (
-          read.space === write.space &&
-          read.id === write.id &&
-          write.path.length <= read.path.length + 1 &&
-          arraysOverlap(write.path, read.path)
-        ) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  /**
-   * Returns diagnostic statistics about the scheduler state.
-   * Useful for debugging and monitoring pull-based scheduling behavior.
-   */
-  getStats(): { effects: number; computations: number; pending: number } {
-    return {
-      effects: this.effects.size,
-      computations: this.computations.size,
-      pending: this.pending.size,
-    };
-  }
-
-  /**
-   * Returns a snapshot of the current dependency graph for visualization.
-   * Uses getActionId for the identifier (includes code location).
-   */
-  getGraphSnapshot(): SchedulerGraphSnapshot {
-    const nodes: SchedulerGraphNode[] = [];
-    const edges: SchedulerGraphEdge[] = [];
-    const actionById = new Map<string, Action>();
-
-    // Build nodes from all known actions (effects + computations)
-    for (const action of [...this.effects, ...this.computations]) {
-      const id = this.getActionId(action);
-      actionById.set(id, action);
-
-      // Get parent-child relationships
-      const parent = this.actionParent.get(action);
-      const parentId = parent ? this.getActionId(parent) : undefined;
-      const children = this.actionChildren.get(action);
-      const childCount = children ? children.size : undefined;
-
-      // Get reads and writes for diagnostics
-      const deps = this.dependencies.get(action);
-      const reads = deps?.reads.map((r) =>
-        `${r.space}/${r.id}/${r.path.join("/")}`
-      );
-      const writes = this.mightWrite.get(action)?.map((w) =>
-        `${w.space}/${w.id}/${w.path.join("/")}`
-      );
-
-      // Get timing controls
-      const debounceMs = this.actionDebounce.get(action);
-      const throttleMs = this.actionThrottle.get(action);
-
-      nodes.push({
-        id,
-        type: this.effects.has(action) ? "effect" : "computation",
-        stats: this.actionStats.get(id),
-        isDirty: this.dirty.has(action),
-        isPending: this.pending.has(action),
-        parentId,
-        childCount: childCount && childCount > 0 ? childCount : undefined,
-        preview: (action as Action & {
-          module?: { implementation?: { preview?: string } };
-        }).module?.implementation?.preview,
-        reads,
-        writes,
-        debounceMs: debounceMs && debounceMs > 0 ? debounceMs : undefined,
-        throttleMs: throttleMs && throttleMs > 0 ? throttleMs : undefined,
-      });
-    }
-
-    // Build edges from dependents map
-    for (const action of [...this.effects, ...this.computations]) {
-      const actionId = this.getActionId(action);
-      const deps = this.dependents.get(action);
-      if (deps) {
-        for (const dependent of deps) {
-          const dependentId = this.getActionId(dependent);
-          // Find overlapping cells between action's writes and dependent's reads
-          const cells = this.findOverlappingCells(action, dependent);
-          edges.push({
-            from: actionId,
-            to: dependentId,
-            cells,
-          });
-        }
-      }
-    }
-
-    // Find source entities (read but not written by any action)
-    // These represent pattern inputs / external data
-    const entityReaders = new Map<string, Set<string>>(); // entity -> action IDs that read it
-    const writtenEntities = new Set<string>();
-
-    for (const action of [...this.effects, ...this.computations]) {
-      const actionId = this.getActionId(action);
-      const deps = this.dependencies.get(action);
-      if (deps) {
-        for (const read of deps.reads) {
-          const entity = `${read.space}/${read.id}`;
-          if (!entityReaders.has(entity)) {
-            entityReaders.set(entity, new Set());
-          }
-          entityReaders.get(entity)!.add(actionId);
-        }
-      }
-
-      const writes = this.mightWrite.get(action);
-      if (writes) {
-        for (const write of writes) {
-          writtenEntities.add(`${write.space}/${write.id}`);
-        }
-      }
-    }
-
-    // Add input nodes for source entities
-    for (const [entity, readers] of entityReaders) {
-      if (!writtenEntities.has(entity)) {
-        const inputId = `input:${entity}`;
-        nodes.push({
-          id: inputId,
-          type: "input",
-          isDirty: false,
-          isPending: false,
-        });
-
-        // Add edges from input to all actions that read it
-        for (const readerId of readers) {
-          edges.push({
-            from: inputId,
-            to: readerId,
-            cells: [entity],
-          });
-        }
-      }
-    }
-
-    // Add parent-child edges
-    for (const action of [...this.effects, ...this.computations]) {
-      const parent = this.actionParent.get(action);
-      if (parent) {
-        const parentId = this.getActionId(parent);
-        const childId = this.getActionId(action);
-        // Only add if both nodes exist in the graph
-        if (actionById.has(parentId)) {
-          edges.push({
-            from: parentId,
-            to: childId,
-            cells: [],
-            edgeType: "parent",
-          });
-        }
-      }
-    }
-
-    // Add inactive nodes for actions that have stats but are no longer registered
-    // This preserves visibility of actions that were unsubscribed
-    for (const [actionId, stats] of this.actionStats) {
-      if (!actionById.has(actionId)) {
-        nodes.push({
-          id: actionId,
-          type: "inactive",
-          stats,
-          isDirty: false,
-          isPending: false,
-        });
-      }
-    }
-
-    return {
-      nodes,
-      edges,
-      pullMode: this.pullMode,
-      timestamp: performance.now(),
-    };
-  }
-
-  /**
-   * Finds the cell IDs that create a dependency between producer and consumer.
-   */
-  private findOverlappingCells(producer: Action, consumer: Action): string[] {
-    const producerWrites = this.mightWrite.get(producer) ?? [];
-    const consumerDeps = this.dependencies.get(consumer);
-    if (!consumerDeps) return [];
-
-    const overlapping: string[] = [];
-    for (const write of producerWrites) {
-      for (const read of consumerDeps.reads) {
-        if (
-          write.space === read.space &&
-          write.id === read.id &&
-          arraysOverlap(write.path, read.path)
-        ) {
-          overlapping.push(`${write.space}/${write.id}`);
-        }
-      }
-    }
-    return [...new Set(overlapping)]; // Deduplicate
-  }
-
-  /**
-   * Returns whether an action is registered as an effect.
-   */
-  isEffect(action: Action): boolean {
-    return this.effects.has(action);
-  }
-
-  /**
-   * Returns whether an action is registered as a computation.
-   */
-  isComputation(action: Action): boolean {
-    return this.computations.has(action);
-  }
-
-  /**
-   * Returns the set of actions that depend on this action's output.
-   */
-  getDependents(action: Action): Set<Action> {
-    return this.dependents.get(action) ?? new Set();
-  }
-
-  // ============================================================
-  // Pull-based scheduling methods
-  // ============================================================
-
-  /**
-   * Enables pull-based scheduling mode.
-   * In pull mode, only effects are scheduled; computations are marked dirty
-   * and pulled on demand when effects need their values.
-   */
-  enablePullMode(): void {
-    this.pullMode = true;
-
-    // Rebuild reverse dependency graph (dependents map) from current dependencies.
-    // In push mode, processRun() doesn't update dependents, so the map may be stale.
-    // We need accurate dependents for markDirty() propagation and scheduleAffectedEffects().
-    for (const action of [...this.effects, ...this.computations]) {
-      const log = this.dependencies.get(action);
-      if (log) {
-        this.updateDependents(action, log);
-      }
-    }
-
-    this.runtime.telemetry.submit({
-      type: "scheduler.mode.change",
-      pullMode: true,
-    });
-    this.queueExecution();
-  }
-
-  /**
-   * Disables pull-based scheduling mode (returns to push mode).
-   */
-  disablePullMode(): void {
-    this.pullMode = false;
-    // Clear dirty set when switching back to push mode
-    this.dirty.clear();
-    this.runtime.telemetry.submit({
-      type: "scheduler.mode.change",
-      pullMode: false,
-    });
-    this.queueExecution();
-  }
-
-  /**
-   * Returns whether pull mode is enabled.
-   */
-  isPullModeEnabled(): boolean {
-    return this.pullMode;
-  }
-
-  /**
-   * Marks an action as dirty and propagates to all dependents transitively.
-   */
-  private markDirty(action: Action): void {
-    if (this.dirty.has(action)) return; // Already dirty, avoid infinite recursion
-
-    this.dirty.add(action);
-
-    // Propagate to dependents transitively
-    const deps = this.dependents.get(action);
-    if (deps) {
-      for (const dependent of deps) {
-        this.markDirty(dependent);
-      }
-    }
-  }
-
-  /**
-   * Returns whether an action is marked as dirty.
-   */
-  isDirty(action: Action): boolean {
-    return this.dirty.has(action);
-  }
-
-  /**
-   * Clears the dirty flag for an action.
-   */
-  private clearDirty(action: Action): void {
-    this.dirty.delete(action);
-  }
-
-  /**
-   * Collects all dirty computations that an action depends on (transitively).
-   * Used in pull mode to build the complete work set before execution.
-   */
-  private collectDirtyDependencies(
-    action: Action,
-    workSet: Set<Action>,
-  ): void {
-    const log = this.dependencies.get(action);
-    if (!log) return;
-
-    // Check for cycle: if action is already in the collection stack, skip
-    if (this.collectStack.has(action)) return;
-
-    // Add to collection stack before processing
-    this.collectStack.add(action);
-
-    // Find dirty computations that write to entities this action reads
-    for (const computation of this.dirty) {
-      if (workSet.has(computation)) continue; // Already added
-      if (computation === action) continue;
-
-      const computationWrites = this.mightWrite.get(computation) ?? [];
-      if (computationWrites.length === 0) continue;
-
-      // Check if computation writes to something action reads (with path overlap)
-      let found = false;
-      for (const write of computationWrites) {
-        for (const read of log.reads) {
-          if (
-            write.space === read.space &&
-            write.id === read.id &&
-            arraysOverlap(write.path, read.path)
-          ) {
-            workSet.add(computation);
-            // Recursively collect deps of this computation
-            this.collectDirtyDependencies(computation, workSet);
-            found = true;
-            break;
-          }
-        }
-        if (found) break;
-      }
-    }
-
-    // Remove from collection stack after processing
-    this.collectStack.delete(action);
-  }
-
-  /**
-   * Finds and schedules all effects that transitively depend on the given computation.
-   */
-  private scheduleAffectedEffects(computation: Action): void {
-    const visited = new Set<Action>();
-    const toSchedule: Action[] = [];
-
-    const findEffects = (action: Action) => {
-      if (visited.has(action)) return;
-      visited.add(action);
-
-      if (this.effects.has(action)) {
-        toSchedule.push(action);
-      }
-
-      const deps = this.dependents.get(action);
-      if (deps) {
-        for (const dependent of deps) {
-          findEffects(dependent);
-        }
-      }
-    };
-
-    findEffects(computation);
-
-    for (const effect of toSchedule) {
-      this.scheduleWithDebounce(effect);
-    }
-  }
-
-  // ============================================================
-  // Compute time tracking for cycle-aware scheduling
-  // ============================================================
-
-  /**
-   * Records the execution time for an action.
-   * Updates running statistics including run count, total time, and average time.
-   * Stats are keyed by action ID (source location) to persist across action recreation.
-   */
-  private recordActionTime(action: Action, elapsed: number): void {
-    const now = performance.now();
-    const actionId = this.getActionId(action);
-    const existing = this.actionStats.get(actionId);
-    if (existing) {
-      existing.runCount++;
-      existing.totalTime += elapsed;
-      existing.averageTime = existing.totalTime / existing.runCount;
-      existing.lastRunTime = elapsed;
-      existing.lastRunTimestamp = now;
-    } else {
-      this.actionStats.set(actionId, {
-        runCount: 1,
-        totalTime: elapsed,
-        averageTime: elapsed,
-        lastRunTime: elapsed,
-        lastRunTimestamp: now,
-      });
-    }
-
-    // Check if action should be auto-debounced based on performance
-    this.maybeAutoDebounce(action);
-  }
-
-  /**
-   * Returns the execution statistics for an action, if available.
-   * Useful for diagnostics and determining cycle convergence strategy.
-   * Accepts either an Action or an action ID string.
-   */
-  getActionStats(action: Action | string): ActionStats | undefined {
-    const actionId = typeof action === "string"
-      ? action
-      : this.getActionId(action);
-    return this.actionStats.get(actionId);
+  isEventPreflightTelemetryEnabled(): boolean {
+    return this.eventPreflightTelemetryEnabled;
   }
 
   // ============================================================
@@ -2044,26 +1027,21 @@ export class Scheduler {
    * If triggered again during the delay, the timer resets.
    */
   setDebounce(action: Action, ms: number): void {
-    if (ms <= 0) {
-      this.actionDebounce.delete(action);
-    } else {
-      this.actionDebounce.set(action, ms);
-    }
+    this.delays.setDebounce(action, ms);
   }
 
   /**
    * Gets the current debounce delay for an action, if set.
    */
   getDebounce(action: Action): number | undefined {
-    return this.actionDebounce.get(action);
+    return this.delays.getDebounce(action);
   }
 
   /**
    * Clears the debounce setting for an action.
    */
   clearDebounce(action: Action): void {
-    this.actionDebounce.delete(action);
-    this.cancelDebounceTimer(action);
+    this.delays.clearDebounce(action);
   }
 
   /**
@@ -2072,90 +1050,7 @@ export class Scheduler {
    * By default, slow actions (> 50ms avg after 3 runs) will automatically get debounced.
    */
   setNoDebounce(action: Action, optOut: boolean): void {
-    if (optOut) {
-      this.noDebounce.set(action, true);
-    } else {
-      this.noDebounce.delete(action);
-    }
-  }
-
-  /**
-   * Cancels any pending debounce timer for an action.
-   */
-  private cancelDebounceTimer(action: Action): void {
-    const timer = this.debounceTimers.get(action);
-    if (timer) {
-      clearTimeout(timer);
-      this.debounceTimers.delete(action);
-      this.activeDebounceTimers.delete(timer);
-    }
-  }
-
-  /**
-   * Schedules an action with debounce support.
-   * If the action has a debounce delay, it will wait before being added to pending.
-   * Otherwise, it's added immediately.
-   */
-  private scheduleWithDebounce(action: Action): void {
-    const debounceMs = this.actionDebounce.get(action);
-
-    if (!debounceMs || debounceMs <= 0) {
-      // No debounce - add immediately
-      this.pending.add(action);
-      this.queueExecution();
-      return;
-    }
-
-    // Clear existing timer if any
-    this.cancelDebounceTimer(action);
-
-    // Set new timer
-    const timer = setTimeout(() => {
-      this.debounceTimers.delete(action);
-      this.activeDebounceTimers.delete(timer);
-      this.pending.add(action);
-      this.queueExecution();
-    }, debounceMs);
-
-    this.debounceTimers.set(action, timer);
-    this.activeDebounceTimers.add(timer);
-
-    logger.debug("schedule-debounce", () => [
-      `[DEBOUNCE] Action ${
-        this.getActionId(action)
-      } debounced for ${debounceMs}ms`,
-    ]);
-  }
-
-  /**
-   * Checks if an action should be auto-debounced based on its performance stats.
-   * Called after recording action time to potentially enable debouncing for slow actions.
-   * Auto-debounce is enabled by default; use noDebounce to opt out.
-   */
-  private maybeAutoDebounce(action: Action): void {
-    // Check if action has opted out of auto-debounce
-    if (this.noDebounce.get(action)) return;
-
-    // Check if already has a manual debounce set
-    if (this.actionDebounce.has(action)) return;
-
-    const stats = this.actionStats.get(this.getActionId(action));
-    if (!stats) return;
-
-    // Need minimum runs before auto-detecting
-    if (stats.runCount < AUTO_DEBOUNCE_MIN_RUNS) return;
-
-    // Check if action is slow enough to warrant debouncing
-    if (stats.averageTime >= AUTO_DEBOUNCE_THRESHOLD_MS) {
-      this.actionDebounce.set(action, AUTO_DEBOUNCE_DELAY_MS);
-      const actionId = this.getActionId(action);
-      logger.debug("schedule-debounce", () => [
-        `[AUTO-DEBOUNCE] Action ${actionId} ` +
-        `auto-debounced (avg ${
-          stats.averageTime.toFixed(1)
-        }ms >= ${AUTO_DEBOUNCE_THRESHOLD_MS}ms)`,
-      ]);
-    }
+    this.delays.setNoDebounce(action, optOut);
   }
 
   // ============================================================
@@ -2166,43 +1061,97 @@ export class Scheduler {
    * Sets a throttle period for an action.
    * The action won't run if it ran within the last `ms` milliseconds.
    * Unlike debounce, throttled actions stay dirty and will be pulled
-   * by effects when the throttle period expires.
+   * by effects when the throttle period expires. Event handlers whose head
+   * dependencies are throttled are parked until the earliest eligible wake time.
    */
   setThrottle(action: Action, ms: number): void {
-    if (ms <= 0) {
-      this.actionThrottle.delete(action);
-    } else {
-      this.actionThrottle.set(action, ms);
-    }
+    this.delays.setThrottle(action, ms);
   }
 
   /**
    * Gets the current throttle period for an action, if set.
    */
   getThrottle(action: Action): number | undefined {
-    return this.actionThrottle.get(action);
+    return this.delays.getThrottle(action);
   }
 
   /**
    * Clears the throttle setting for an action.
    */
   clearThrottle(action: Action): void {
-    this.actionThrottle.delete(action);
+    this.delays.clearThrottle(action);
   }
 
   /**
-   * Checks if an action is currently throttled (ran too recently).
-   * Returns true if the action should be skipped this execution cycle.
+   * Set action IDs that should trigger a debugger breakpoint before execution.
    */
-  private isThrottled(action: Action): boolean {
-    const throttleMs = this.actionThrottle.get(action);
-    if (!throttleMs) return false;
+  setBreakpoints(actionIds: string[]): void {
+    this.breakpoints.clear();
+    for (const id of actionIds) {
+      this.breakpoints.add(id);
+    }
+  }
 
-    const stats = this.actionStats.get(this.getActionId(action));
-    if (!stats) return false; // No stats yet, action hasn't run
+  /**
+   * Get currently set breakpoint action IDs.
+   */
+  getBreakpoints(): string[] {
+    return Array.from(this.breakpoints);
+  }
 
-    const elapsed = performance.now() - stats.lastRunTimestamp;
-    return elapsed < throttleMs;
+  /**
+   * Check if an action ID has a breakpoint set.
+   */
+  hasBreakpoint(actionId: string): boolean {
+    return this.breakpoints.has(actionId);
+  }
+
+  /**
+   * Returns diagnostic statistics about the scheduler state.
+   * Useful for debugging and monitoring pull-based scheduling behavior.
+   */
+  getStats(): { effects: number; computations: number; pending: number } {
+    return {
+      effects: this.nodes.effects.size,
+      computations: this.nodes.computations.size,
+      pending: this.pending.size,
+    };
+  }
+
+  /**
+   * Returns whether an action is registered as an effect.
+   */
+  isEffect(action: Action): boolean {
+    return this.nodes.effects.has(action);
+  }
+
+  /**
+   * Returns whether an action is registered as a computation.
+   */
+  isComputation(action: Action): boolean {
+    return this.nodes.computations.has(action);
+  }
+
+  /**
+   * Returns whether an action is marked as dirty.
+   */
+  isDirty(action: Action): boolean {
+    return this.staleness.dirty.has(action);
+  }
+
+  /**
+   * Returns the set of actions that depend on this action's output.
+   */
+  getDependents(action: Action): Set<Action> {
+    return this.dependents.get(action) ?? new Set();
+  }
+
+  /**
+   * Returns a snapshot of the current dependency graph for visualization.
+   * Uses getActionId for the identifier (includes code location).
+   */
+  getGraphSnapshot(): SchedulerGraphSnapshot {
+    return buildSchedulerGraphSnapshot(this.graphSnapshotState);
   }
 
   // ============================================================
@@ -2210,10 +1159,23 @@ export class Scheduler {
   // ============================================================
 
   /**
-   * Returns the accumulated "might write" set for an action.
+   * Returns the action's static write surface.
    */
   getMightWrite(action: Action): IMemorySpaceAddress[] | undefined {
-    return this.mightWrite.get(action);
+    return this.writeIndex.getSchedulingWrites(action);
+  }
+
+  // ============================================================
+  // Compute time tracking for cycle-aware scheduling
+  // ============================================================
+
+  /**
+   * Returns the execution statistics for an action, if available.
+   * Useful for diagnostics and determining cycle convergence strategy.
+   * Accepts either an Action or an action ID string.
+   */
+  getActionStats(action: Action | string): ActionStats | undefined {
+    return getActionStatsFromState(this.actionTimingState, action);
   }
 
   /**
@@ -2227,7 +1189,8 @@ export class Scheduler {
    * Resets filter statistics.
    */
   resetFilterStats(): void {
-    this.filterStats = { filtered: 0, executed: 0 };
+    this.filterStats.filtered = 0;
+    this.filterStats.executed = 0;
   }
 
   /**
@@ -2235,7 +1198,19 @@ export class Scheduler {
    * Call this once before running patterns to opt in to the overhead.
    */
   enableSettleStats(): void {
-    this.collectSettleStats = true;
+    this.setSettleStatsEnabled(true);
+  }
+
+  /**
+   * Enables or disables collection of per-iteration settle stats during execute().
+   * Disabling also clears the last collected stats to avoid stale reads.
+   */
+  setSettleStatsEnabled(enabled: boolean): void {
+    this.collectSettleStats = enabled;
+    if (!enabled) {
+      this.lastSettleStats = null;
+      this.settleStatsHistory = [];
+    }
   }
 
   /**
@@ -2243,6 +1218,49 @@ export class Scheduler {
    */
   getSettleStats(): SettleStats | null {
     return this.lastSettleStats;
+  }
+
+  /**
+   * Returns recent settle stats history from execute() calls, oldest first.
+   */
+  getSettleStatsHistory(): SettleStatsHistoryEntry[] {
+    return [...this.settleStatsHistory];
+  }
+
+  /**
+   * Enables or disables collection of exact action-run history.
+   * Disabling clears the current ring buffer to avoid stale reads.
+   */
+  setActionRunTraceEnabled(enabled: boolean): void {
+    this.collectActionRunTrace = enabled;
+    if (!enabled) {
+      this.actionRunTrace.length = 0;
+    }
+  }
+
+  /**
+   * Returns recent exact action-run history, oldest first.
+   */
+  getActionRunTrace(): ActionRunTraceEntry[] {
+    return [...this.actionRunTrace];
+  }
+
+  /**
+   * Enables or disables collection of structured trigger-trace entries.
+   * Disabling clears the current ring buffer to avoid stale reads.
+   */
+  setTriggerTraceEnabled(enabled: boolean): void {
+    this.collectTriggerTrace = enabled;
+    if (!enabled) {
+      this.triggerTrace = [];
+    }
+  }
+
+  /**
+   * Returns recent structured trigger-trace entries, oldest first.
+   */
+  getTriggerTrace(): TriggerTraceEntry[] {
+    return [...this.triggerTrace];
   }
 
   // ============================================================
@@ -2266,80 +1284,28 @@ export class Scheduler {
     this.autoTriggerDiagnosis = enabled;
   }
 
-  // ============================================================
-  // Idempotency diagnosis API (Phase 2 + 3)
-  // ============================================================
-
-  /**
-   * Starts diagnosis mode: captures read/write values and causal edges.
-   * Automatically stops after durationMs.
-   */
-  private startDiagnosis(durationMs = 5000): void {
-    if (this.diagnosisEnabled) return;
-
-    this.diagnosisEnabled = true;
-    this.diagnosisStartTime = performance.now();
-    this.diagnosisBusyTime = 0;
-    this.diagnosisHistory.clear();
-    this.diagnosisNonIdempotent = [];
-    this.causalEdges = [];
-    this.changeGroupToActionId = new Map();
-
-    this.diagnosisTimeout = setTimeout(() => {
-      this.stopDiagnosis();
-    }, durationMs);
-  }
-
-  /**
-   * Stops diagnosis mode and finalizes results.
-   */
-  private stopDiagnosis(): void {
-    if (!this.diagnosisEnabled) return;
-
-    this.diagnosisEnabled = false;
-    if (this.diagnosisTimeout) {
-      clearTimeout(this.diagnosisTimeout);
-      this.diagnosisTimeout = null;
-    }
-
-    const duration = performance.now() - this.diagnosisStartTime;
-
-    // Detect cycles from causal edges
-    const cycles = this.detectCycles();
-
-    const result: SchedulerDiagnosisResult = {
-      nonIdempotent: this.diagnosisNonIdempotent,
-      cycles,
-      duration,
-      busyTime: this.diagnosisBusyTime,
-    };
-
-    // Clean up
-    this.diagnosisHistory.clear();
-    this.causalEdges = [];
-    this.changeGroupToActionId = new Map();
-
-    // Resolve the promise if someone is waiting
-    if (this.diagnosisResolve) {
-      this.diagnosisResolve(result);
-      this.diagnosisResolve = null;
-    }
-  }
-
   /**
    * Runs a diagnosis for the specified duration and returns the result.
    * This is the main entry point for external callers (IPC, console).
    */
   runDiagnosis(durationMs = 5000): Promise<SchedulerDiagnosisResult> {
-    // If already running, stop and start fresh
-    if (this.diagnosisEnabled) {
-      this.stopDiagnosis();
-    }
+    return runSchedulerDiagnosis(this.diagnosisControlState, durationMs);
+  }
 
-    return new Promise<SchedulerDiagnosisResult>((resolve) => {
-      this.diagnosisResolve = resolve;
-      this.startDiagnosis(durationMs);
-    });
+  // ── Inline idempotency check mode ──────────────────────────────────
+
+  enableIdempotencyCheck(): void {
+    this.idempotencyCheckMode = true;
+    this.idempotencyViolations.length = 0;
+    this.queueExecution();
+  }
+
+  disableIdempotencyCheck(): void {
+    this.idempotencyCheckMode = false;
+  }
+
+  getIdempotencyViolations(): NonIdempotentReport[] {
+    return [...this.idempotencyViolations];
   }
 
   /**
@@ -2348,263 +1314,43 @@ export class Scheduler {
    * automatically gets a second synchronous run for comparison.
    */
   async runIdempotencyCheck(): Promise<SchedulerDiagnosisResult> {
-    this.idempotencyViolations = [];
-    this.idempotencyCheckMode = true;
-
-    try {
-      // Snapshot computations to avoid iterating a live Set
-      const computationsSnapshot = [...this.computations];
-      for (const action of computationsSnapshot) {
-        await this.run(action);
-      }
-    } finally {
-      this.idempotencyCheckMode = false;
-    }
-
-    return {
-      nonIdempotent: [...this.idempotencyViolations],
-      cycles: [],
-      duration: 0,
-      busyTime: 0,
-    };
+    return await runSchedulerIdempotencyCheck(this.diagnosisControlState);
   }
 
   /**
-   * Captures a diagnosis record for a single action run.
-   * Called from run() when diagnosisEnabled is true.
+   * Clean up all pending timers and resources.
+   * Should be called when the scheduler is being torn down.
    */
-  private captureDiagnosisRecord(
-    actionId: string,
-    action: Action,
-    tx: IExtendedStorageTransaction,
-    log: ReactivityLog,
-  ): void {
-    // Build address key helper
-    const makeKey = (addr: IMemorySpaceAddress): string =>
-      `${addr.space}/${addr.id}/${addr.path.join("/")}`;
-
-    // Capture read values from committed storage (what the next run would see)
-    const readValues = new Map<string, unknown>();
-    for (const read of log.reads) {
-      const key = makeKey(read);
-      let readerTx: IExtendedStorageTransaction | undefined;
-      try {
-        readerTx = this.runtime.edit();
-        const result = readerTx.tx.read(
-          {
-            space: read.space,
-            id: read.id,
-            type: read.type ?? "application/json",
-            path: ["value", ...read.path],
-          },
-          { meta: ignoreReadForScheduling },
-        );
-        readValues.set(key, result.ok?.value);
-      } catch {
-        readValues.set(key, "[read-error]");
-      } finally {
-        readerTx?.abort();
-      }
+  dispose(): void {
+    this.disposed = true;
+    // Clear all active debounce timers
+    this.delays.clearActiveDebounceTimers();
+    if (this.pendingQueueTaskTimer !== null) {
+      clearTimeout(this.pendingQueueTaskTimer);
+      this.pendingQueueTaskTimer = null;
     }
-
-    // Capture write values from the action's transaction journal
-    const writeValues = new Map<string, unknown>();
-    for (const write of log.writes) {
-      const key = makeKey(write);
-      try {
-        for (const att of tx.journal.novelty(write.space)) {
-          if (att.address.id === write.id) {
-            writeValues.set(key, att.value);
-            break;
-          }
-        }
-        if (!writeValues.has(key)) {
-          writeValues.set(key, undefined);
-        }
-      } catch {
-        writeValues.set(key, "[write-error]");
-      }
+    this.triggerIndex.clear();
+    cancelEventQueueWakeState(this.eventQueueWakeState);
+    // Clean up diagnosis state
+    if (this.diagnosisTimeout) {
+      clearTimeout(this.diagnosisTimeout);
+      this.diagnosisTimeout = null;
     }
-
-    const record = {
-      readValues,
-      writeValues,
-      timestamp: performance.now(),
-    };
-
-    // Store in ring buffer (max 10 per action)
-    let history = this.diagnosisHistory.get(actionId);
-    if (!history) {
-      history = [];
-      this.diagnosisHistory.set(actionId, history);
-    }
-    history.push(record);
-    if (history.length > 10) {
-      history.shift();
-    }
-
-    // Compare with previous records: same reads, different writes => non-idempotent
-    this.checkIdempotency(actionId, action, history);
+    this.diagnosisEnabled = false;
   }
 
-  /**
-   * Checks if any two records in the history have the same reads but different writes.
-   */
-  private checkIdempotency(
-    actionId: string,
-    action: Action,
-    history: {
-      readValues: Map<string, unknown>;
-      writeValues: Map<string, unknown>;
-      timestamp: number;
-    }[],
-  ): void {
-    if (history.length < 2) return;
-
-    const latest = history[history.length - 1];
-
-    for (let i = 0; i < history.length - 1; i++) {
-      const prev = history[i];
-
-      // Check if reads are the same
-      if (!mapsEqual(latest.readValues, prev.readValues)) continue;
-
-      // Reads are the same - check if writes differ
-      const differingKeys: string[] = [];
-      const allWriteKeys = new Set([
-        ...latest.writeValues.keys(),
-        ...prev.writeValues.keys(),
-      ]);
-
-      for (const key of allWriteKeys) {
-        const latestVal = latest.writeValues.get(key);
-        const prevVal = prev.writeValues.get(key);
-        if (!deepEqual(latestVal, prevVal)) {
-          differingKeys.push(key);
-        }
-      }
-
-      if (differingKeys.length > 0) {
-        // Non-idempotent detected! Only report once per action.
-        const existing = this.diagnosisNonIdempotent.find(
-          (r) => r.actionId === actionId,
-        );
-        if (!existing) {
-          this.diagnosisNonIdempotent.push({
-            actionId,
-            actionInfo: this.getActionTelemetryInfo(action),
-            runs: [
-              {
-                timestamp: prev.timestamp,
-                reads: Object.fromEntries(prev.readValues),
-                writes: Object.fromEntries(prev.writeValues),
-              },
-              {
-                timestamp: latest.timestamp,
-                reads: Object.fromEntries(latest.readValues),
-                writes: Object.fromEntries(latest.writeValues),
-              },
-            ],
-            differingWriteKeys: differingKeys,
-          });
-        }
-      }
-    }
-  }
-
-  /**
-   * Detects cycles in the causal edge graph using DFS.
-   */
-  private detectCycles(): CycleReport[] {
-    // Build adjacency list: writer -> [{ triggered, cell }]
-    const adj = new Map<string, { triggered: string; cell: string }[]>();
-    for (const edge of this.causalEdges) {
-      let neighbors = adj.get(edge.writer);
-      if (!neighbors) {
-        neighbors = [];
-        adj.set(edge.writer, neighbors);
-      }
-      neighbors.push({ triggered: edge.triggered, cell: edge.cell });
-    }
-
-    const cycles: CycleReport[] = [];
-    const visited = new Set<string>();
-    const inStack = new Set<string>();
-    const stack: { actionId: string; writesCell: string }[] = [];
-
-    const dfs = (node: string) => {
-      if (inStack.has(node)) {
-        // Found a cycle - extract it from the stack
-        const cycleStart = stack.findIndex((s) => s.actionId === node);
-        if (cycleStart !== -1) {
-          const cycle = stack.slice(cycleStart);
-          cycles.push({
-            cycle: [...cycle],
-            timestamp: performance.now(),
-          });
-        }
-        return;
-      }
-      if (visited.has(node)) return;
-
-      visited.add(node);
-      inStack.add(node);
-
-      const neighbors = adj.get(node) ?? [];
-      for (const { triggered, cell } of neighbors) {
-        stack.push({ actionId: node, writesCell: cell });
-        dfs(triggered);
-        stack.pop();
-      }
-
-      inStack.delete(node);
-    };
-
-    for (const node of adj.keys()) {
-      if (!visited.has(node)) {
-        dfs(node);
-      }
-    }
-
-    return cycles;
-  }
+  // ============================================================
+  // Execution orchestration
+  // ============================================================
 
   private handleError(error: Error, action: any) {
-    const { pieceId, spellId, patternId, space } = getPieceMetadataFromFrame(
-      (error as Error & { frame?: Frame }).frame,
-    );
-
-    // Transform stack trace to show original source locations
-    if (error.stack) {
-      error.stack = this.runtime.harness.parseStack(error.stack);
-    }
-
-    const errorWithContext = error as ErrorWithContext;
-    errorWithContext.action = action;
-    if (pieceId) errorWithContext.pieceId = pieceId;
-    if (spellId) errorWithContext.spellId = spellId;
-    if (patternId) errorWithContext.patternId = patternId;
-    if (space) errorWithContext.space = space as MemorySpace;
-
-    for (const handler of this.errorHandlers) {
-      try {
-        handler(errorWithContext);
-      } catch (handlerError) {
-        console.error("Error in error handler:", handlerError);
-      }
-    }
-
-    const prefix = this.errorHandlers.size === 0
-      ? "Uncaught error in action:"
-      : "Error in action:";
-
-    console.error(
-      prefix,
-      String(error),
-      ...(pieceId ? [`\n  pieceId: ${pieceId}`] : []),
-      ...(space ? [`\n  space: ${space}`] : []),
-      ...(patternId ? [`\n  patternId: ${patternId}`] : []),
-      ...(error.stack ? [`\n${error.stack}`] : []),
+    handleSchedulerError(
+      {
+        errorHandlers: this.errorHandlers,
+        parseStack: (stack) => this.runtime.harness.parseStack(stack),
+      },
+      error,
+      action,
     );
   }
 
@@ -2615,864 +1361,1175 @@ export class Scheduler {
     // In case a directly invoked `run` is still running, wait for it to finish.
     if (this.runningPromise) await this.runningPromise;
 
+    this.beginExecuteCycle();
+    const { newActionsWithoutDependencies } = this
+      .collectInitialExecuteDependencies();
+    const eventBlockingDeps = await this.processExecuteEventPhase();
+    this.collectPostEventDependencies();
+    const initialSeeds = this.buildInitialExecuteSeeds(
+      newActionsWithoutDependencies,
+      eventBlockingDeps,
+    );
+
+    const settleResult = await this.runSettleLoop(initialSeeds);
+    await breakPullCyclesIfNeeded(this.cycleBreakState, settleResult);
+    this.applyAdaptiveCycleDebounce();
+    this.recordExecuteEndTelemetry();
+    this.applyExecuteContinuation();
+    logger.timeEnd("scheduler", "execute");
+  }
+
+  private beginExecuteCycle(): void {
     // Track timing for cycle-aware debounce
     this.executeStartTime = performance.now();
     this.runsThisExecute.clear();
+    this.activePassId = ++this.passCounter;
+    this.provisionalDemandThisPass.clear();
 
     // Non-settling heuristic: record execute() start
-    const tracker = this.settlingTracker;
-    const now = performance.now();
-    tracker.lastExecuteStart = now;
-    tracker.isExecuting = true;
-    if (tracker.windowStart === 0) {
-      tracker.windowStart = now;
-    }
+    markExecuteStart(this.settlingTracker);
+  }
 
-    logger.timeStart("scheduler", "execute", "depCollect");
-    // Process pending dependency collection for newly subscribed actions.
-    // This discovers what cells each action will read before it runs.
-    for (const action of this.pendingDependencyCollection) {
-      const populateDependencies = this.populateDependenciesCallbacks.get(
-        action,
-      );
-      if (!populateDependencies) continue;
-
-      const { log, entities } = this.collectDependenciesForAction(
-        action,
-        populateDependencies,
-        {
-          errorLogLabel: "schedule-dep-error",
-          errorMessage: (target, error) =>
-            `Error populating dependencies for ${
-              this.getActionId(target)
-            }: ${error}`,
-        },
-      );
-
-      logger.debug("schedule-dep-collect", () => [
-        `Collected dependencies for ${
-          this.getActionId(action)
-        }: ${log.reads.length} reads, ${log.writes.length} writes, ${entities.size} entities`,
-      ]);
-    }
-
-    // Now mark downstream nodes as dirty if we introduced new dependencies for them
-    this.pendingDependencyCollection.forEach((action) => {
-      this.scheduleAffectedEffects(action);
+  private collectInitialExecuteDependencies(): {
+    newActionsWithoutDependencies: Action[];
+  } {
+    return collectInitialExecuteDependenciesState({
+      pendingDependencyCollection: this.pendingDependencyCollection,
+      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
+      effects: this.nodes.effects,
+      getSchedulingWrites: (action) =>
+        this.writeIndex.getSchedulingWrites(action),
+      collectDependenciesForAction: (action, populateDependencies, options) =>
+        this.collectDependenciesForAction(
+          action,
+          populateDependencies,
+          options,
+        ),
+      getActionId: (action) => this.getActionId(action),
+      scheduleAffectedEffects: (action) => this.scheduleAffectedEffects(action),
     });
+  }
 
-    // Find computation actions with no dependencies. We run them on the first
-    // run to capture any writes they might perform to cells pass into them.
-    //
-    // TODO(seefeld): Once we more reliably capture what they can write via
-    // WriteableCell or so, then we can treat this more deliberately via the
-    // dependency collection process above. We'll have to re-run it whenever
-    // inputs change, as they might change what they can write to. We hope that
-    // for now this will be sufficiently captured in mightWrite.
-    // NOTE: Use .writes (current run) not mightWrite (historical) here.
-    // We want to know if action currently writes, not if it ever wrote.
-    const newActionsWithoutDependencies = [...this.pendingDependencyCollection]
-      .filter(
-        (action) =>
-          !this.dependencies.get(action)?.writes.length &&
-          !this.effects.has(action),
-      );
-
-    // Clear the pending collection set - dependencies have been collected
-    this.pendingDependencyCollection.clear();
-    logger.timeEnd("scheduler", "execute", "depCollect");
-
+  private async processExecuteEventPhase(): Promise<Set<Action>> {
     // Track dirty dependencies that block events - these must be added to workSet
     const eventBlockingDeps = new Set<Action>();
 
     logger.timeStart("scheduler", "execute", "event");
-    // Process next event from the event queue.
-    const queuedEvent = this.eventQueue.shift();
-    if (queuedEvent) {
-      const { action, handler, event: eventValue, retriesLeft, onCommit } =
-        queuedEvent;
-      const handlerId = this.getActionId(handler);
-      this.runtime.telemetry.submit({
-        type: "scheduler.invocation",
-        handlerId,
-        handlerInfo: this.getActionTelemetryInfo(handler),
-      });
-      // In pull mode, ensure handler dependencies are computed before running
-      let shouldSkipEvent = false;
-      if (this.pullMode && handler.populateDependencies) {
-        // Get the handler's dependencies (read-only, just capturing what will be read)
-        const depTx = this.runtime.edit();
-        handler.populateDependencies(depTx, eventValue);
-        const deps = txToReactivityLog(depTx);
-        // Commit even though we only read - the tx has no writes so this is safe
-        depTx.commit();
-
-        // Check if any dependencies are dirty (have pending computations)
-        // We need to find dirty actions that WRITE to the entities we're reading
-        const dirtyDeps: Action[] = [];
-        for (const read of deps.reads) {
-          for (const action of this.dirty) {
-            const writes = this.mightWrite.get(action);
-            if (writes) {
-              for (const write of writes) {
-                if (
-                  write.space === read.space &&
-                  write.id === read.id &&
-                  arraysOverlap(write.path, read.path)
-                ) {
-                  if (!dirtyDeps.includes(action)) {
-                    dirtyDeps.push(action);
-                  }
-                  break;
-                }
-              }
-            }
-          }
-        }
-
-        // If there are dirty dependencies, add them to pending and re-queue event
-        if (dirtyDeps.length > 0) {
-          for (const dep of dirtyDeps) {
-            this.pending.add(dep);
-            eventBlockingDeps.add(dep); // Track for workSet inclusion
-          }
-          // Re-queue the event to be processed after dependencies compute
-          this.eventQueue.unshift(queuedEvent);
-          shouldSkipEvent = true;
-        }
-      }
-
-      // Skip running the event if we need to compute dependencies first
-      if (shouldSkipEvent) {
-        // Continue to process pending actions
-        // The event will be processed in the next execute() cycle
-      } else {
-        const finalize = (error?: unknown) => {
-          try {
-            if (error) this.handleError(error as Error, action);
-          } finally {
-            tx.commit().then(({ error }) => {
-              // If the transaction failed, and we have retries left, queue the
-              // event again at the beginning of the queue. This isn't guaranteed
-              // to be the same order as the original event, but it's close
-              // enough, especially for a series of event that act on the same
-              // conflicting data.
-              if (error && retriesLeft > 0) {
-                logger.warn(
-                  "scheduler",
-                  `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
-                  { error, handlerId },
-                );
-                this.eventQueue.unshift({
-                  action,
-                  handler,
-                  event: eventValue,
-                  retriesLeft: retriesLeft - 1,
-                  onCommit,
-                });
-                // Ensure the re-queued event gets processed even if the scheduler
-                // finished this cycle before the commit completed.
-                this.queueExecution();
-              } else {
-                if (error) {
-                  logger.error(
-                    "schedule-error",
-                    "Event handler transaction failed after exhausting all retries",
-                    { error, handlerId },
-                  );
-                }
-                if (onCommit) {
-                  // Call commit callback when:
-                  // - Commit succeeds (!error), OR
-                  // - Commit fails but we're out of retries (retriesLeft === 0)
-                  try {
-                    onCommit(tx);
-                  } catch (callbackError) {
-                    logger.error(
-                      "schedule-error",
-                      "Error in event commit callback:",
-                      callbackError,
-                    );
-                  }
-                }
-              }
-            }).catch((error) => {
-              logger.error(
-                "schedule-error",
-                "Event handler commit promise rejected:",
-                error,
-              );
-            });
-          }
-        };
-        const tx = this.runtime.edit();
-        tx.tx.immediate = true;
-        const actionId = this.getActionId(action);
-
-        try {
-          const actionStartTime = performance.now();
-          this.runningPromise = Promise.resolve(
-            this.runtime.harness.invoke(() => action(tx)),
-          ).then(() => {
-            const duration = (performance.now() - actionStartTime) / 1000;
-            if (duration > 10) {
-              console.warn(`Slow action: ${duration.toFixed(3)}s`, action);
-            }
-            logger.debug("action-timing", () => {
-              return [
-                `Action ${actionId} completed in ${duration.toFixed(3)}s`,
-              ];
-            });
-            finalize();
-          }).catch((error) => finalize(error));
-          await this.runningPromise;
-        } catch (error) {
-          finalize(error);
-        }
-      } // Close else block for shouldSkipEvent
-    }
-    logger.timeEnd("scheduler", "execute", "event");
-
-    // Process any newly subscribed actions that were added during event handling.
-    // This handles cases like event handlers that create sub-patterns whose
-    // computations need their dependencies discovered before we build the workSet.
-    if (this.pendingDependencyCollection.size > 0) {
-      for (const action of this.pendingDependencyCollection) {
-        const populateDependencies = this.populateDependenciesCallbacks.get(
-          action,
-        );
-        if (!populateDependencies) continue;
-
-        this.collectDependenciesForAction(action, populateDependencies, {
-          errorLogLabel: "schedule-dep-error-post-event",
-          errorMessage: (target, error) =>
-            `Error populating dependencies for ${
-              this.getActionId(target)
-            }: ${error}`,
-        });
-
-        logger.debug("schedule-dep-collect-post-event", () => [
-          `Collected dependencies for ${this.getActionId(action)}`,
-        ]);
-      }
-      this.pendingDependencyCollection.clear();
-    }
-
-    // Build initial seeds for pull mode (effects + special actions)
-    const initialSeeds = new Set<Action>();
-    if (this.pullMode) {
-      // Add pending effects (not computations)
-      for (const action of this.pending) {
-        if (this.effects.has(action)) {
-          initialSeeds.add(action);
-        }
-      }
-      // Add dirty effects - these may have been skipped due to cycle detection
-      // or throttling but still need to run
-      for (const action of this.dirty) {
-        if (this.effects.has(action)) {
-          initialSeeds.add(action);
-        }
-      }
-      // Add any actions that need to write to capture possible writes
-      for (const action of newActionsWithoutDependencies) {
-        initialSeeds.add(action);
-      }
-      // Add computations that are blocking deferred events
-      for (const action of eventBlockingDeps) {
-        initialSeeds.add(action);
-      }
-    }
-
-    // Settle loop: runs until no more dirty work is found.
-    // First iteration processes initial seeds + their dirty deps.
-    // Subsequent iterations process new subscriptions and re-collect dirty deps.
-    logger.timeStart("scheduler", "execute", "settle");
-    const maxSettleIterations = this.pullMode ? 10 : 10;
-    const EARLY_ITERATION_THRESHOLD = 5;
-    const earlyIterationComputations = new Set<Action>(); // Track computations in first N iterations
-    let lastWorkSet: Set<Action> = new Set();
-    let settledEarly = false;
-    const settleIterStats: SettleIterationStats[] | undefined =
-      this.collectSettleStats ? [] : undefined;
-    const settleStartTime = this.collectSettleStats ? performance.now() : 0;
-
-    for (let settleIter = 0; settleIter < maxSettleIterations; settleIter++) {
-      const iterStart = settleIterStats ? performance.now() : 0;
-      let iterActionsRun = 0;
-
-      // Process any newly subscribed actions from previous iteration.
-      // This sets up their dependencies so collectDirtyDependencies can find them.
-      if (this.pullMode && this.pendingDependencyCollection.size > 0) {
-        for (const action of this.pendingDependencyCollection) {
-          const populateDependencies = this.populateDependenciesCallbacks.get(
-            action,
-          );
-          if (!populateDependencies) continue;
-
-          this.collectDependenciesForAction(action, populateDependencies, {
-            errorLogLabel: "schedule-dep-error-pre-run",
-            errorMessage: (target, error) =>
-              `Error collecting deps for ${this.getActionId(target)}: ${error}`,
-            useRawReadsForTriggers: true,
-          });
-        }
-        this.pendingDependencyCollection.clear();
-      }
-
-      // Build the work set for this iteration
-      let workSet: Set<Action>;
-
-      if (this.pullMode) {
-        workSet = new Set<Action>();
-
-        // On first iteration, add initial seeds and collect their dirty deps
-        if (settleIter === 0) {
-          for (const seed of initialSeeds) {
-            workSet.add(seed);
-          }
-          // Collect dirty dependencies from initial seeds
-          for (const seed of initialSeeds) {
-            this.collectDirtyDependencies(seed, workSet);
-          }
-          logger.debug("schedule-execute-pull", () => [
-            `Pull mode: Effects: ${initialSeeds.size}, Dirty deps added: ${
-              workSet.size - initialSeeds.size
-            }`,
-          ]);
-        } else {
-          // On subsequent iterations, re-collect from all effects
-          for (const effect of this.effects) {
-            if (this.dependencies.has(effect)) {
-              this.collectDirtyDependencies(effect, workSet);
-            }
-          }
-        }
-      } else {
-        // Push mode: work set is just the pending actions
-        workSet = this.pending;
-      }
-
-      if (workSet.size === 0) {
-        settledEarly = true;
-        break;
-      }
-
-      // Track computations in early iterations for cycle detection
-      if (this.pullMode && settleIter < EARLY_ITERATION_THRESHOLD) {
-        for (const fn of workSet) {
-          if (!this.effects.has(fn)) {
-            earlyIterationComputations.add(fn);
-          }
-        }
-      }
-      lastWorkSet = workSet;
-
-      // Snapshot workSet size before topo sort (in push mode, workSet === this.pending
-      // which gets mutated during execution)
-      const iterWorkSetSize = workSet.size;
-
-      const order = topologicalSort(
-        workSet,
-        this.dependencies,
-        this.mightWrite,
-        this.actionParent,
+    try {
+      await processPullQueuedEventDuringExecute(
+        this.eventExecutionState,
+        eventBlockingDeps,
       );
+      return eventBlockingDeps;
+    } finally {
+      logger.timeEnd("scheduler", "execute", "event");
+    }
+  }
 
-      logger.debug("schedule-execute", () => [
-        `Running ${order.length} actions (settle iteration ${settleIter})`,
-      ]);
+  private collectPostEventDependencies(): void {
+    collectPostEventDependenciesState({
+      pendingDependencyCollection: this.pendingDependencyCollection,
+      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
+      effects: this.nodes.effects,
+      getSchedulingWrites: (action) =>
+        this.writeIndex.getSchedulingWrites(action),
+      collectDependenciesForAction: (action, populateDependencies, options) =>
+        this.collectDependenciesForAction(
+          action,
+          populateDependencies,
+          options,
+        ),
+      getActionId: (action) => this.getActionId(action),
+    });
+  }
 
-      // Implicit cycle detection for effects:
-      // Clear dirty flags for all effects upfront. If an effect becomes dirty again
-      // by the time we run it, something in the execution re-dirtied it → cycle.
-      if (this.pullMode) {
-        for (const fn of order) {
-          if (this.effects.has(fn)) {
-            this.clearDirty(fn);
-          }
-        }
-      }
+  private buildInitialExecuteSeeds(
+    newActionsWithoutDependencies: Iterable<Action>,
+    eventBlockingDeps: Iterable<Action>,
+  ): Set<Action> {
+    // Build initial seeds for pull mode (effects + special actions).
+    return buildPullInitialSeeds({
+      pending: this.pending,
+      dirty: this.staleness.dirty,
+      effects: this.nodes.effects,
+      newActionsWithoutDependencies,
+      eventBlockingDeps,
+      computationDebounceFlushSeeds: this.delays.computationDebounceFlushSeeds,
+    });
+  }
 
-      // Run all functions. This will resubscribe actions with their new dependencies.
-      for (const fn of order) {
-        // Check if action is still scheduled (not unsubscribed during this tick).
-        // Running an action might unsubscribe other actions in the workSet.
-        const isStillScheduled = this.computations.has(fn) ||
-          this.effects.has(fn);
-        if (!isStillScheduled) continue;
+  private async runSettleLoop(
+    initialSeeds: ReadonlySet<Action>,
+  ): Promise<SchedulerSettleResult> {
+    const settleResult = await runPullSchedulerSettleLoop(
+      this.settleLoopState,
+      initialSeeds,
+    );
 
-        // Check if action is still valid
-        // In pull mode, check both pending (effects) and dirty (computations)
-        const isInPending = this.pending.has(fn);
-        const isInDirty = this.dirty.has(fn);
-
-        if (this.pullMode) {
-          // For effects: we cleared dirty upfront, so check if re-dirtied (cycle)
-          if (this.effects.has(fn)) {
-            if (this.dirty.has(fn)) {
-              // Effect was re-dirtied during this tick → cycle detected
-              logger.debug("schedule-cycle", () => [
-                `[CYCLE] Effect ${
-                  this.getActionId(fn)
-                } re-dirtied, skipping (cycle detected)`,
-              ]);
-              // Skip this effect - it will run on a future tick after cycle settles
-              this.pending.delete(fn);
-              continue;
-            }
-            if (!isInPending) continue;
-          } else {
-            // For computations: must be pending or dirty
-            if (!isInPending && !isInDirty) continue;
-          }
-        } else {
-          // Push mode: action must be in pending
-          if (!isInPending) continue;
-        }
-
-        // Check throttle: skip recently-run actions but keep them dirty
-        // They'll be pulled next time an effect needs them (if throttle expired)
-        if (this.isThrottled(fn)) {
-          logger.debug("schedule-throttle", () => [
-            `[THROTTLE] Skipping throttled action: ${this.getActionId(fn)}`,
-          ]);
-          this.filterStats.filtered++;
-          // Don't clear from pending or dirty - action stays in its current state
-          // but we remove from pending so it doesn't run this cycle
-          this.pending.delete(fn);
-          // Keep dirty flag so it can be pulled later
-          continue;
-        }
-
-        // Clean up from pending/dirty before running
-        this.pending.delete(fn);
-        if (this.pullMode) {
-          this.clearDirty(fn);
-        }
-        this.unsubscribe(fn);
-
-        this.filterStats.executed++;
-        iterActionsRun++;
-        this.loopCounter.set(fn, (this.loopCounter.get(fn) || 0) + 1);
-        // Track runs for cycle-aware debounce
-        this.runsThisExecute.set(fn, (this.runsThisExecute.get(fn) ?? 0) + 1);
-        if (this.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
-          const error = new Error(
-            `Too many iterations: ${this.loopCounter.get(fn)} ${
-              this.getActionId(fn)
-            }`,
-          );
-          // Attach the last frame from the action so handleError can
-          // extract piece/spell metadata (CT-1316: fixes message:null).
-          const lastFrame = (fn as Action & { lastFrame?: Frame }).lastFrame;
-          if (lastFrame) {
-            (error as Error & { frame?: Frame }).frame = lastFrame;
-          }
-          this.handleError(error, fn);
-        } else {
-          await this.run(fn);
-        }
-      }
-
-      // Capture per-iteration settle stats (only when enabled)
-      if (settleIterStats) {
-        const iterActions: { id: string; type: "effect" | "computation" }[] =
-          [];
-        // Use `order` (stable array) instead of `workSet` which may be mutated in push mode
-        for (const fn of order) {
-          iterActions.push({
-            id: this.getActionId(fn),
-            type: this.effects.has(fn) ? "effect" : "computation",
-          });
-          if (iterActions.length >= 30) break; // Cap to avoid huge arrays
-        }
-        settleIterStats.push({
-          workSetSize: iterWorkSetSize,
-          orderSize: order.length,
-          actionsRun: iterActionsRun,
-          actions: iterActions,
-          durationMs: performance.now() - iterStart,
-        });
-      }
+    if (settleResult.settleStats) {
+      this.lastSettleStats = settleResult.settleStats;
+      pushBoundedHistory(
+        this.settleStatsHistory,
+        { recordedAt: performance.now(), stats: settleResult.settleStats },
+        MAX_SETTLE_STATS_HISTORY,
+      );
     }
 
-    // Store settle stats for external access (only when enabled)
-    if (settleIterStats) {
-      this.lastSettleStats = {
-        iterations: settleIterStats,
-        totalDurationMs: performance.now() - settleStartTime,
-        settledEarly,
-        initialSeedCount: initialSeeds.size,
-      };
-    }
+    this.clearProvisionalDemandAtPassEnd();
+    this.activePassId = undefined;
 
-    logger.timeEnd("scheduler", "execute", "settle");
+    return settleResult;
+  }
 
-    // If we hit max iterations without settling, break the cycle:
-    // 1. Clear dirty/pending for computations that were in early iterations AND still in last workSet
-    // 2. Run all remaining dirty effects so they don't get lost
-    if (this.pullMode && !settledEarly && lastWorkSet.size > 0) {
-      logger.debug("schedule-cycle", () => [
-        `[CYCLE-BREAK] Hit max iterations (${maxSettleIterations}), breaking cycle`,
-        `Early computations: ${earlyIterationComputations.size}, Last workSet: ${lastWorkSet.size}`,
-      ]);
+  private applyExecuteContinuation(): void {
+    applyPullExecuteContinuation(this.executeContinuationState);
+  }
 
-      // Clear computations that appear to be in the cycle
-      // (present in early iterations AND still in the last workSet)
-      // But don't clear throttled computations - they should stay dirty
-      for (const comp of earlyIterationComputations) {
-        if (
-          lastWorkSet.has(comp) && this.dirty.has(comp) &&
-          !this.isThrottled(comp)
-        ) {
-          logger.debug("schedule-cycle", () => [
-            `[CYCLE-BREAK] Clearing cyclic computation: ${
-              this.getActionId(comp)
-            }`,
-          ]);
-          this.clearDirty(comp);
-          this.pending.delete(comp);
-        }
-      }
-
-      // Run all remaining dirty effects - these shouldn't be lost
-      // But skip throttled effects - they should stay dirty for later
-      for (const effect of this.effects) {
-        if (this.dirty.has(effect) && !this.isThrottled(effect)) {
-          logger.debug("schedule-cycle", () => [
-            `[CYCLE-BREAK] Running dirty effect: ${this.getActionId(effect)}`,
-          ]);
-          this.clearDirty(effect);
-          this.pending.delete(effect);
-          this.unsubscribe(effect);
-          this.filterStats.executed++;
-          await this.run(effect);
-        }
-      }
-    }
-
-    // Apply cycle-aware debounce to actions that ran multiple times this execute()
-    const executeElapsed = performance.now() - this.executeStartTime;
-    if (this.pullMode && executeElapsed >= CYCLE_DEBOUNCE_THRESHOLD_MS) {
-      for (const [action, runs] of this.runsThisExecute) {
-        if (runs >= CYCLE_DEBOUNCE_MIN_RUNS && !this.noDebounce.get(action)) {
-          // This action is cycling - apply adaptive debounce
-          const adaptiveDelay = Math.round(
-            CYCLE_DEBOUNCE_MULTIPLIER * executeElapsed,
-          );
-          const currentDebounce = this.actionDebounce.get(action) ?? 0;
-          if (adaptiveDelay > currentDebounce) {
-            this.actionDebounce.set(action, adaptiveDelay);
-            logger.debug("schedule-cycle-debounce", () => [
-              `[CYCLE-DEBOUNCE] Action ${this.getActionId(action)} ` +
-              `ran ${runs}x in ${executeElapsed.toFixed(1)}ms, ` +
-              `setting debounce to ${adaptiveDelay}ms`,
-            ]);
-          }
-        }
-      }
-    }
-
-    // Non-settling heuristic: accumulate busy time at end of execute()
-    {
-      const endNow = performance.now();
-      const elapsed = endNow - tracker.lastExecuteStart;
-      tracker.busyTime += elapsed;
-      if (this.diagnosisEnabled) {
-        this.diagnosisBusyTime += elapsed;
-      }
-      tracker.isExecuting = false;
-
-      const windowDuration = endNow - tracker.windowStart;
-      if (windowDuration > 5000) {
-        const busyRatio = tracker.busyTime / windowDuration;
-        if (busyRatio > 0.3 && tracker.busyTime > 1000) {
-          if (!tracker.nonSettlingDetected) {
-            tracker.nonSettlingDetected = true;
-            this.runtime.telemetry.submit({
-              type: "scheduler.non-settling",
-              busyTime: tracker.busyTime,
-              windowDuration,
-              busyRatio,
-            });
-            // Auto-trigger diagnosis if enabled
-            if (this.autoTriggerDiagnosis && !this.diagnosisEnabled) {
-              this.startDiagnosis();
-            }
-          }
-        }
-      }
-      // Slide the window if it exceeds 10s without idle
-      if (windowDuration > 10000) {
-        tracker.windowStart = endNow;
-        tracker.busyTime = tracker.busyTime / 2; // Rolling average
-      }
-    }
-
-    // In pull mode, we consider ourselves done when there are no effects to execute.
-    // Check both pending AND dirty effects - dirty effects may exist from:
-    // - Cycle detection (effect re-dirtied, skipped to prevent infinite loop)
-    // - Throttling (effect throttled, kept dirty for later)
-    const hasPendingEffects = this.pullMode
-      ? [...this.pending].some((a) => this.effects.has(a))
-      : this.pending.size > 0;
-    const hasDirtyEffects = this.pullMode &&
-      [...this.dirty].some((a) => this.effects.has(a));
-
-    if (
-      !hasPendingEffects && !hasDirtyEffects && this.eventQueue.length === 0
+  private applyAdaptiveCycleDebounce(): void {
+    // Apply cycle-aware debounce to effects that ran multiple times this execute().
+    // Pull computations are already demand-gated; debouncing them can leave a
+    // live renderer observing stale materialized data until an arbitrary timer
+    // fires.
+    const cycleDebouncePlan = planPullAdaptiveCycleDebounce({
+      executeStartTime: this.executeStartTime,
+      runsThisExecute: this.runsThisExecute,
+      canAutomaticallyDebounce: (action) =>
+        this.canAutomaticallyDebounce(
+          action,
+        ),
+      getCurrentDebounce: (action) => this.delays.getDebounce(action),
+    });
+    for (
+      const { action, runs, delayMs } of cycleDebouncePlan.updates
     ) {
-      const promises = this.idlePromises;
-      for (const resolve of promises) resolve();
-      this.idlePromises.length = 0;
-      this.loopCounter = new WeakMap();
-      this.scheduled = false;
-
-      // Reset settling tracker on idle
-      this.settlingTracker = {
-        windowStart: 0,
-        busyTime: 0,
-        lastExecuteStart: 0,
-        isExecuting: false,
-        nonSettlingDetected: false,
-      };
-
-      this.scheduledFirstTime.clear();
-    } else {
-      // Keep scheduled = true since we're queuing another execution
-      this.pendingQueueTaskTimer = queueTask(() => {
-        this.pendingQueueTaskTimer = null;
-        this.execute();
-      });
+      this.delays.setDebounce(action, delayMs);
+      logger.debug("schedule-cycle-debounce", () => [
+        `[CYCLE-DEBOUNCE] Action ${this.getActionId(action)} ` +
+        `ran ${runs}x in ${cycleDebouncePlan.elapsedMs.toFixed(1)}ms, ` +
+        `setting debounce to ${delayMs}ms`,
+      ]);
     }
-    logger.timeEnd("scheduler", "execute");
+  }
+
+  private recordExecuteEndTelemetry(): void {
+    // Non-settling heuristic: accumulate busy time at end of execute()
+    const executeEnd = recordExecuteEnd(this.settlingTracker);
+    if (this.diagnosisEnabled) {
+      this.diagnosisBusyTime += executeEnd.diagnosisBusyTimeMs;
+    }
+    if (executeEnd.nonSettlingTelemetry) {
+      this.runtime.telemetry.submit({
+        type: "scheduler.non-settling",
+        ...executeEnd.nonSettlingTelemetry,
+      });
+      // Auto-trigger diagnosis if enabled
+      if (this.autoTriggerDiagnosis && !this.diagnosisEnabled) {
+        this.startDiagnosis();
+      }
+    }
+  }
+
+  // ============================================================
+  // Idempotency diagnosis API (Phase 2 + 3)
+  // ============================================================
+
+  /**
+   * Starts diagnosis mode: captures read/write values and causal edges.
+   * Automatically stops after durationMs.
+   */
+  private startDiagnosis(durationMs = 5000): void {
+    startSchedulerDiagnosis(this.diagnosisControlState, durationMs);
   }
 
   /**
-   * Clean up all pending timers and resources.
-   * Should be called when the scheduler is being torn down.
+   * Stops diagnosis mode and finalizes results.
    */
-  dispose(): void {
-    this.disposed = true;
-    // Clear all active debounce timers
-    for (const timer of this.activeDebounceTimers) {
-      clearTimeout(timer);
-    }
-    this.activeDebounceTimers.clear();
-    if (this.pendingQueueTaskTimer !== null) {
-      clearTimeout(this.pendingQueueTaskTimer);
-      this.pendingQueueTaskTimer = null;
-    }
-    // Clean up diagnosis state
-    if (this.diagnosisTimeout) {
-      clearTimeout(this.diagnosisTimeout);
-      this.diagnosisTimeout = null;
-    }
-    this.diagnosisEnabled = false;
-  }
-}
-
-function mapsEqual(
-  a: Map<string, unknown>,
-  b: Map<string, unknown>,
-): boolean {
-  if (a.size !== b.size) return false;
-  for (const [key, val] of a) {
-    if (!b.has(key)) return false;
-    if (!deepEqual(val, b.get(key))) return false;
-  }
-  return true;
-}
-
-function topologicalSort(
-  actions: Set<Action>,
-  dependencies: WeakMap<Action, ReactivityLog>,
-  mightWrite: WeakMap<Action, IMemorySpaceAddress[]>,
-  actionParent?: WeakMap<Action, Action>,
-): Action[] {
-  const graph = new Map<Action, Set<Action>>();
-  const inDegree = new Map<Action, number>();
-
-  // Initialize graph and inDegree for relevant actions
-  for (const action of actions) {
-    graph.set(action, new Set());
-    inDegree.set(action, 0);
+  private stopDiagnosis(): void {
+    stopSchedulerDiagnosis(this.diagnosisControlState);
   }
 
-  // Build the graph based on read/write dependencies
-  for (const actionA of actions) {
-    const log = dependencies.get(actionA);
-    if (!log) continue;
-    const writes = mightWrite.get(actionA) ?? [];
-    const graphA = graph.get(actionA)!;
-    for (const write of writes) {
-      for (const actionB of actions) {
-        if (actionA !== actionB && !graphA.has(actionB)) {
-          const logB = dependencies.get(actionB);
-          if (!logB) continue;
-          const { reads } = logB;
-          if (
-            reads.some(
-              (addr) =>
-                addr.space === write.space &&
-                addr.id === write.id &&
-                arraysOverlap(write.path, addr.path),
-            )
-          ) {
-            graphA.add(actionB);
-            inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
-          }
-        }
-      }
-    }
-  }
-
-  // Add parent-child edges: parent must execute before child
-  if (actionParent) {
-    for (const child of actions) {
-      const parent = actionParent.get(child);
-      if (parent && actions.has(parent)) {
-        const graphParent = graph.get(parent)!;
-        if (!graphParent.has(child)) {
-          graphParent.add(child);
-          inDegree.set(child, (inDegree.get(child) || 0) + 1);
-        }
-      }
-    }
-  }
-
-  // Perform topological sort with cycle handling
-  const queue: Action[] = [];
-  const result: Action[] = [];
-  const visited = new Set<Action>();
-
-  // Add all actions with no dependencies (in-degree 0) to the queue
-  for (const [action, degree] of inDegree.entries()) {
-    if (degree === 0) {
-      queue.push(action);
-    }
-  }
-
-  while (queue.length > 0 || visited.size < actions.size) {
-    if (queue.length === 0) {
-      // Handle cycle: prefer parents over children, then lowest in-degree
-      // This ensures parent runs before child even when they form a read/write cycle
-      const unvisited = Array.from(actions).filter(
-        (action) => !visited.has(action),
-      );
-
-      // Sort by: prefer no unvisited parent, then by in-degree
-      unvisited.sort((a, b) => {
-        const aParent = actionParent?.get(a);
-        const bParent = actionParent?.get(b);
-        const aHasUnvisitedParent = aParent && !visited.has(aParent) &&
-          actions.has(aParent);
-        const bHasUnvisitedParent = bParent && !visited.has(bParent) &&
-          actions.has(bParent);
-
-        // Prefer nodes whose parent is already visited (or have no parent)
-        if (aHasUnvisitedParent && !bHasUnvisitedParent) return 1; // b first
-        if (!aHasUnvisitedParent && bHasUnvisitedParent) return -1; // a first
-
-        // Fall back to in-degree
-        return (inDegree.get(a) || 0) - (inDegree.get(b) || 0);
-      });
-
-      queue.push(unvisited[0]);
-    }
-
-    const current = queue.shift()!;
-    if (visited.has(current)) continue;
-
-    result.push(current);
-    visited.add(current);
-
-    for (const neighbor of graph.get(current) || []) {
-      inDegree.set(neighbor, inDegree.get(neighbor)! - 1);
-      if (inDegree.get(neighbor) === 0) {
-        queue.push(neighbor);
-      }
-    }
-  }
-
-  return result;
-}
-
-export function txToReactivityLog(
-  tx: IExtendedStorageTransaction,
-): ReactivityLog {
-  const log: ReactivityLog = { reads: [], shallowReads: [], writes: [] };
-  for (const activity of tx.journal.activity()) {
-    if ("read" in activity && activity.read) {
-      if (activity.read.meta?.[ignoreReadForSchedulingMarker]) continue;
-      const address = {
-        space: activity.read.space,
-        id: activity.read.id,
-        type: activity.read.type,
-        path: activity.read.path.slice(1), // Remove the "value" prefix
-      };
-      if (activity.read.nonRecursive === true) {
-        log.shallowReads.push(address);
-      } else {
-        log.reads.push(address);
-      }
-      // If marked as potential write, also add to potentialWrites
-      if (activity.read.meta?.[markReadAsPotentialWriteMarker]) {
-        if (!log.potentialWrites) {
-          log.potentialWrites = [];
-        }
-        log.potentialWrites.push(address);
-      }
-    }
-    if ("write" in activity && activity.write) {
-      log.writes.push({
-        space: activity.write.space,
-        id: activity.write.id,
-        type: activity.write.type,
-        path: activity.write.path.slice(1),
-      });
-    }
-  }
-  return log;
-}
-
-function getPieceMetadataFromFrame(frame?: Frame): {
-  spellId?: string;
-  patternId?: string;
-  space?: string;
-  pieceId?: string;
-} {
-  // TODO(seefeld): This is a rather hacky way to get the context, based on the
-  // unsafe_binding pattern. Once we replace that mechanism, let's add nicer
-  // abstractions for context here as well.
-  frame ??= getTopFrame();
-
-  const sourceAsProxy = frame?.unsafe_binding?.materialize([]);
-
-  if (!isCellResultForDereferencing(sourceAsProxy)) {
-    return {};
-  }
-  const result: ReturnType<typeof getPieceMetadataFromFrame> = {};
-  const source = getCellOrThrow(sourceAsProxy).asSchema({
-    type: "object",
-    properties: {
-      [TYPE]: { type: "string" },
-      spell: { type: "object", asCell: true },
-      resultRef: { type: "object", asCell: true },
+  private collectDependenciesForAction(
+    action: Action,
+    populateDependencies: PopulateDependenciesEntry,
+    options: {
+      errorLogLabel: string;
+      errorMessage: (action: Action, error: unknown) => string;
+      updateDependents?: boolean;
+      useRawReadsForTriggers?: boolean;
     },
-  });
-  result.patternId = source.get()?.[TYPE];
-  const spellCell = source.get()?.spell;
-  result.spellId = spellCell?.getAsNormalizedFullLink().id;
-  const resultCell = source.get()?.resultRef;
-  result.space = source.space;
-  result.pieceId = JSON.parse(
-    JSON.stringify(resultCell?.entityId ?? {}),
-  )["/"];
-  return result;
-}
+  ): { log: ReactivityLog; entities: Set<SpaceScopeAndURI> } {
+    return collectDependenciesForActionState(
+      this.dependencyCollectionState,
+      action,
+      populateDependencies,
+      options,
+    );
+  }
 
-function queueTask(fn: () => void): ReturnType<typeof setTimeout> {
-  return setTimeout(fn, 0);
+  /**
+   * Updates the reverse dependency graph (dependents map).
+   * For each action that writes to paths this action reads, add this action as a dependent.
+   */
+  private updateDependents(action: Action, log: ReactivityLog): void {
+    const actionId = this.getActionId(action);
+    updateDependentEdgesForLog(this.dependencyGraphState, action, log);
+
+    // Emit telemetry for dependency updates
+    this.runtime.telemetry.submit({
+      type: "scheduler.dependencies.update",
+      actionId,
+      reads: [...log.reads, ...log.shallowReads].map((r) =>
+        `${r.space}/${r.id}/${r.path.join("/")}`
+      ),
+      writes: log.writes.map((w) => `${w.space}/${w.id}/${w.path.join("/")}`),
+    });
+  }
+
+  // ============================================================
+  // State wiring
+  // ============================================================
+
+  // Keep state-bundle wiring explicit without making the field declarations
+  // read like one large object graph.
+  private initializeSchedulerState(): void {
+    this.diagnosisControlState = this.createDiagnosisControlState();
+    this.eventQueueWakeState = this.createEventQueueWakeState();
+    this.writeIndex = this.createWriteIndex();
+    this.delayControlState = this.createDelayControlState();
+    this.dirtyDependencyCollectionState = this
+      .createDirtyDependencyCollectionState();
+    this.dependencyGraphState = this.createDependencyGraphState();
+    this.dependencyUpdateState = this.createDependencyUpdateState();
+    this.triggerSubscriptionState = this.createTriggerSubscriptionState();
+    this.dirtySchedulingState = this.createDirtySchedulingState();
+    this.storageNotificationState = this.createStorageNotificationState();
+    this.pendingPullRunnableState = this.createPendingPullRunnableState();
+    this.dirtyPullRunnableState = this.createDirtyPullRunnableState();
+    this.dirtyPullRunnableStateWithDebounce = this
+      .createDirtyPullRunnableStateWithDebounce();
+    this.pullSchedulingState = this.createPullSchedulingState();
+    this.writePropagationState = this.createWritePropagationState();
+    this.subscriptionState = this.createSubscriptionState();
+    this.pendingDependencyCollectionState = this
+      .createPendingDependencyCollectionState();
+    this.subscribeActionState = this.createSubscribeActionState();
+    this.unsubscribeState = this.createUnsubscribeState();
+    this.cycleBreakState = this.createCycleBreakState();
+    this.settleLoopState = this.createSettleLoopState();
+    this.executeContinuationState = this.createExecuteContinuationState();
+    this.eventQueueState = this.createEventQueueState();
+    this.eventExecutionState = this.createEventExecutionState();
+    this.dependencyCollectionState = this.createDependencyCollectionState();
+    this.actionRunState = this.createActionRunState();
+    this.graphSnapshotState = this.createGraphSnapshotState();
+  }
+
+  private createDiagnosisControlState(): SchedulerDiagnosisControlState {
+    return {
+      getDiagnosisEnabled: () => this.diagnosisEnabled,
+      setDiagnosisEnabled: (enabled) => {
+        this.diagnosisEnabled = enabled;
+      },
+      getDiagnosisTimeout: () => this.diagnosisTimeout,
+      setDiagnosisTimeout: (timeout) => {
+        this.diagnosisTimeout = timeout;
+      },
+      getDiagnosisStartTime: () => this.diagnosisStartTime,
+      setDiagnosisStartTime: (time) => {
+        this.diagnosisStartTime = time;
+      },
+      getDiagnosisBusyTime: () => this.diagnosisBusyTime,
+      setDiagnosisBusyTime: (time) => {
+        this.diagnosisBusyTime = time;
+      },
+      getDiagnosisResolve: () => this.diagnosisResolve,
+      setDiagnosisResolve: (resolve) => {
+        this.diagnosisResolve = resolve;
+      },
+      diagnosisHistory: this.diagnosisHistory,
+      diagnosisNonIdempotent: this.diagnosisNonIdempotent,
+      causalEdges: this.causalEdges,
+      idempotencyViolations: this.idempotencyViolations,
+      computations: this.nodes.computations,
+      setIdempotencyCheckMode: (enabled) => {
+        this.idempotencyCheckMode = enabled;
+      },
+      runAction: (action) => this.run(action),
+    };
+  }
+
+  private createEventQueueWakeState(): EventQueueWakeState {
+    return {
+      timer: null,
+      wakeAt: null,
+      eventQueue: this.eventQueue,
+      isDisposed: () => this.disposed,
+      queueExecution: () => this.queueExecution(),
+    };
+  }
+
+  private createWriteIndex(): SchedulerWriteIndex {
+    return new SchedulerWriteIndex();
+  }
+
+  private createDelayControlState(): SchedulerDelayControlState {
+    return {
+      delays: this.delays,
+      computations: this.nodes.computations,
+      effects: this.nodes.effects,
+      dirty: this.staleness.dirty,
+      pending: this.pending,
+      queueExecution: () => this.queueExecution(),
+      logDebounce: (message) =>
+        logger.debug("schedule-debounce", () => [message]),
+      shouldDebounceFirstRun: (action) => {
+        const record = this.nodes.get(action);
+        return record?.provisionalDemand === true &&
+          record.status === "never-ran";
+      },
+    };
+  }
+
+  private createDirtyDependencyCollectionState(): DirtyDependencyCollectionState {
+    return {
+      collectStack: this.collectStack,
+      getTrace: () => this.dirtyDependencyTraceContext,
+      dirty: this.staleness.dirty,
+      pending: this.pending,
+      computations: this.nodes.computations,
+      reverseDependencies: this.reverseDependencies,
+      dependencies: this.dependencies,
+      writersByEntity: this.writeIndex.writersByEntity,
+      effects: this.nodes.effects,
+      materializerIndex: this.materializers,
+      isStale: (target) => this.staleness.isStale(target),
+      getSchedulingWrites: (target) =>
+        this.writeIndex.getSchedulingWrites(target),
+      getActionId: (target) => this.getActionId(target),
+    };
+  }
+
+  private createDependencyGraphState(): DependencyGraphState {
+    return {
+      triggerIndex: this.triggerIndex,
+      writersByEntity: this.writeIndex.writersByEntity,
+      dependencies: this.dependencies,
+      dependents: this.dependents,
+      reverseDependencies: this.reverseDependencies,
+      staleness: this.staleness,
+      nodes: this.nodes,
+      materializerIndex: this.materializers,
+      getSchedulingWrites: (action) =>
+        this.writeIndex.getSchedulingWrites(action),
+      isStale: (action) => this.staleness.isStale(action),
+      queueExecution: () => this.queueExecution(),
+    };
+  }
+
+  private createDependencyUpdateState(): DependencyUpdateState {
+    return {
+      writeIndex: this.writeIndex,
+      dependencies: this.dependencies,
+    };
+  }
+
+  private createTriggerSubscriptionState(): TriggerSubscriptionState {
+    return new SchedulerTriggerSubscriptions({
+      triggerIndex: this.triggerIndex,
+      cancels: this.cancels,
+      getActionId: (action) => this.getActionId(action),
+      onTriggerUnsubscribe: (actionId, entityCount) => {
+        logger.debug("schedule-unsubscribe", () => [
+          `Action: ${actionId}`,
+          `Entities: ${entityCount}`,
+        ]);
+      },
+    });
+  }
+
+  private createDirtySchedulingState(): DirtySchedulingState {
+    return {
+      staleness: this.staleness,
+      computations: this.nodes.computations,
+      scheduleComputationDebounce: (action) =>
+        this.scheduleComputationDebounce(action),
+      clearComputationDebounceState: (action) =>
+        this.delays.clearComputationDebounceState(action),
+      isLiveComputation: (action) => this.isDemandedPullComputation(action),
+      materializerIndex: this.materializers,
+      queueExecution: () => this.queueExecution(),
+    };
+  }
+
+  private createStorageNotificationState(): StorageNotificationState {
+    return {
+      triggerIndex: this.triggerIndex,
+      cfcTriggerReads: this.cfcTriggerReads,
+      getDiagnosisEnabled: () => this.diagnosisEnabled,
+      getCollectTriggerTrace: () => this.collectTriggerTrace,
+      changeGroupToActionId: this.changeGroupToActionId,
+      recordCausalEdge: (edge) => {
+        this.causalEdges.push(edge);
+      },
+      actionChangeGroups: this.actionChangeGroups,
+      effects: this.nodes.effects,
+      pending: this.pending,
+      dirty: this.staleness.dirty,
+      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+      getActionId: (target) => this.getActionId(target),
+      recordCellUpdate: (change) =>
+        this.runtime.telemetry.submit({
+          type: "cell.update",
+          change,
+        }),
+      recordTriggerTrace: (entry) =>
+        recordTriggerTraceState({ triggerTrace: this.triggerTrace }, entry),
+      scheduleWithDebounce: (target) => this.scheduleWithDebounce(target),
+      markDirty: (target) =>
+        markSchedulerDirty(this.dirtySchedulingState, target),
+      materializerIndex: this.materializers,
+      queueExecution: () => this.queueExecution(),
+      scheduleAffectedEffects: (target) => this.scheduleAffectedEffects(target),
+    };
+  }
+
+  private createStorageSubscription(): IStorageSubscription {
+    return {
+      next: (notification: StorageNotification) => {
+        this.processStorageNotification(notification);
+        return { done: false };
+      },
+    };
+  }
+
+  private processStorageNotification(notification: StorageNotification): void {
+    processPullStorageNotification(
+      this.storageNotificationState,
+      notification,
+    );
+  }
+
+  private createPendingPullRunnableState(): PendingPullRunnableState {
+    return {
+      effects: this.nodes.effects,
+      isDemandedPullComputation: (action) =>
+        this.isDemandedPullComputation(action),
+      shouldRunFirstPullComputationInDemandContext: (action) =>
+        this.shouldRunFirstPullComputationInDemandContext(action),
+    };
+  }
+
+  private createDirtyPullRunnableState(): DirtyPullRunnableState {
+    return {
+      effects: this.nodes.effects,
+      isDemandedPullComputation: (action) =>
+        this.isDemandedPullComputation(action),
+      isThrottled: (action) => this.delays.isThrottled(action),
+    };
+  }
+
+  private createDirtyPullRunnableStateWithDebounce(): DirtyPullRunnableStateWithDebounce {
+    return {
+      ...this.dirtyPullRunnableState,
+      isDebouncedComputationWaiting: (action) =>
+        this.isDebouncedComputationWaiting(action),
+    };
+  }
+
+  private createPullSchedulingState(): PullSchedulingState {
+    return {
+      changedWritesHistory: this.changedWritesHistory,
+      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+      dependencies: this.dependencies,
+      pending: this.pending,
+      dirty: this.staleness.dirty,
+      effects: this.nodes.effects,
+      materializerIndex: this.materializers,
+      dependents: this.dependents,
+      pendingPullRunnableState: this.pendingPullRunnableState,
+      dirtyPullRunnableState: this.dirtyPullRunnableState,
+      dirtyPullRunnableStateWithDebounce: this
+        .dirtyPullRunnableStateWithDebounce,
+      getDebounce: (action) => this.delays.getDebounce(action),
+      scheduleWithDebounce: (action) => this.scheduleWithDebounce(action),
+      getActionId: (action) => this.getActionId(action),
+    };
+  }
+
+  private createWritePropagationState(): WritePropagationState {
+    return {
+      triggerIndex: this.triggerIndex,
+      changedWritesHistory: this.changedWritesHistory,
+      effects: this.nodes.effects,
+      computations: this.nodes.computations,
+      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+      nodes: this.nodes,
+      pending: this.pending,
+      markPullDemandContinuation: (action) =>
+        this.markPullDemandContinuation(action),
+      scheduleWithDebounce: (action) => this.scheduleWithDebounce(action),
+      markDirty: (action) =>
+        markSchedulerDirty(this.dirtySchedulingState, action),
+      materializerIndex: this.materializers,
+      scheduleAffectedEffects: (action) => {
+        this.scheduleAffectedEffects(action);
+      },
+      queueExecution: () => this.queueExecution(),
+    };
+  }
+
+  private createSubscriptionState(): SchedulerSubscriptionState {
+    return {
+      actionChangeGroups: this.actionChangeGroups,
+      changeGroupToActionId: this.changeGroupToActionId,
+      nodes: this.nodes,
+      dependencyGraphState: this.dependencyGraphState,
+      getIdempotencyCheckMode: () => this.idempotencyCheckMode,
+      queueExecution: () => this.queueExecution(),
+      getActionId: (target) => this.getActionId(target),
+      getExecutingAction: () => this.executingAction,
+    };
+  }
+
+  private createPendingDependencyCollectionState(): PendingDependencyCollectionState {
+    return {
+      pendingDependencyCollection: this.pendingDependencyCollection,
+      effects: this.nodes.effects,
+      isThrottled: (action) => this.delays.isThrottled(action),
+      getSchedulingWrites: (action) =>
+        this.writeIndex.getSchedulingWrites(action),
+      hasDependentPath: (from, to) =>
+        hasDependentPath(this.dependents, from, to),
+    };
+  }
+
+  private createSubscribeActionState(): SchedulerSubscribeActionState {
+    return {
+      subscriptionState: this.subscriptionState,
+      dependencyUpdateState: this.dependencyUpdateState,
+      triggerSubscriptionState: this.triggerSubscriptionState,
+      pendingDependencyCollectionState: this.pendingDependencyCollectionState,
+      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
+      pendingDependencyCollection: this.pendingDependencyCollection,
+      markProvisionalDemand: (record) => this.markProvisionalDemand(record),
+      pending: this.pending,
+      scheduledFirstTime: this.scheduledFirstTime,
+      effects: this.nodes.effects,
+      dirty: this.staleness.dirty,
+      stale: this.staleness.stale,
+      writeIndex: this.writeIndex,
+      setDebounce: (action, ms) => this.setDebounce(action, ms),
+      setNoDebounce: (action, optOut) => this.setNoDebounce(action, optOut),
+      setThrottle: (action, ms) => this.setThrottle(action, ms),
+      getSchedulingWrites: (action) =>
+        this.writeIndex.getSchedulingWrites(action),
+      isThrottled: (action) => this.delays.isThrottled(action),
+      isStale: (action) => this.staleness.isStale(action),
+      markDirectDirty: (action) => {
+        this.staleness.markDirectDirty(action);
+      },
+      markEffectConditionallyScheduled: (action) =>
+        this.markEffectConditionallyScheduled(action),
+      updateDependents: (action, log) => this.updateDependents(action, log),
+      registerWriterDependents: (action, writes) =>
+        registerDependentsForWriterSurface(
+          this.dependencyGraphState,
+          action,
+          writes,
+        ),
+      scheduleAffectedEffects: (action) => this.scheduleAffectedEffects(action),
+      queueExecution: () => this.queueExecution(),
+      getActionId: (action) => this.getActionId(action),
+      unsubscribe: (action) => this.unsubscribe(action),
+      submitSubscribeTelemetry: (event) => {
+        this.runtime.telemetry.submit(event);
+      },
+    };
+  }
+
+  private createUnsubscribeState(): SchedulerUnsubscribeActionState {
+    return {
+      cancels: this.cancels,
+      dependencies: this.dependencies,
+      cfcTriggerReads: this.cfcTriggerReads,
+      actionChangeGroups: this.actionChangeGroups,
+      changeGroupToActionId: this.changeGroupToActionId,
+      pending: this.pending,
+      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+      reverseDependencies: this.reverseDependencies,
+      dependents: this.dependents,
+      dependencyGraphState: this.dependencyGraphState,
+      nodes: this.nodes,
+      writeIndex: this.writeIndex,
+      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
+      pendingDependencyCollection: this.pendingDependencyCollection,
+      getActionId: (target) => this.getActionId(target),
+      clearDirectDirty: (target) =>
+        clearSchedulerDirectDirty(this.dirtySchedulingState, target),
+      forceClearStale: (target) => this.staleness.forceClearStale(target),
+      cancelDebounceTimer: (target) => this.delays.cancelDebounceTimer(target),
+      clearComputationDebounceState: (target, targetOptions) =>
+        this.delays.clearComputationDebounceState(target, targetOptions),
+    };
+  }
+
+  private createCycleBreakState(): PullCycleBreakState {
+    return {
+      dirty: this.staleness.dirty,
+      effects: this.nodes.effects,
+      runsThisExecute: this.runsThisExecute,
+      pending: this.pending,
+      isThrottled: (action) => this.delays.isThrottled(action),
+      clearDirty: (action) =>
+        clearSchedulerDirty(this.dirtySchedulingState, action),
+      unsubscribe: (action) => this.unsubscribe(action),
+      recordExecuted: () => {
+        this.filterStats.executed++;
+      },
+      getActionId: (action) => this.getActionId(action),
+      runAction: (action) => this.run(action),
+    };
+  }
+
+  private createSettleLoopState(): SchedulerSettleLoopState {
+    return {
+      getCollectSettleStats: () => this.collectSettleStats,
+      pendingDependencyCollection: this.pendingDependencyCollection,
+      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
+      effects: this.nodes.effects,
+      computations: this.nodes.computations,
+      pending: this.pending,
+      dirty: this.staleness.dirty,
+      dependencies: this.dependencies,
+      nodes: this.nodes,
+      dependents: this.dependents,
+      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+      filterStats: this.filterStats,
+      getLoopCounter: () => this.loopCounter,
+      runsThisExecute: this.runsThisExecute,
+      materializerIndex: this.materializers,
+      getSchedulingWrites: (action) =>
+        this.writeIndex.getSchedulingWrites(action),
+      getSchedulingWritesMap: () => this.writeIndex.getSchedulingWritesMap(),
+      collectDependenciesForAction: (action, populateDependencies, options) =>
+        this.collectDependenciesForAction(
+          action,
+          populateDependencies,
+          options,
+        ),
+      collectPullIterationSeeds: (seeds) =>
+        this.collectPullIterationSeeds(seeds),
+      collectDirtyDependencies: (seed, targetWorkSet, memo) =>
+        this.collectDirtyDependencies(seed, targetWorkSet, memo),
+      collectDirtyDependenciesFromTraversalRoot: (
+        seed,
+        targetWorkSet,
+        memo,
+      ) =>
+        this.collectDirtyDependenciesFromTraversalRoot(
+          seed,
+          targetWorkSet,
+          memo,
+        ),
+      getActionId: (action) => this.getActionId(action),
+      clearDirty: (action) =>
+        clearSchedulerDirty(this.dirtySchedulingState, action),
+      markDirectDirty: (action) => this.staleness.markDirectDirty(action),
+      isThrottled: (action) => this.delays.isThrottled(action),
+      isDebouncedComputationWaiting: (action) =>
+        this.isDebouncedComputationWaiting(action),
+      clearComputationDebounceState: (action) =>
+        this.delays.clearComputationDebounceState(action),
+      conditionalEffectHasChangedInputs: (action) =>
+        this.conditionalEffectHasChangedInputs(action),
+      handleError: (error, action) => this.handleError(error, action),
+      runAction: (action) => this.run(action),
+    };
+  }
+
+  private createExecuteContinuationState(): ExecuteContinuationState {
+    return {
+      pending: this.pending,
+      dirty: this.staleness.dirty,
+      effects: this.nodes.effects,
+      eventQueue: this.eventQueue,
+      eventQueueWakeState: this.eventQueueWakeState,
+      idlePromises: this.idlePromises,
+      scheduledFirstTime: this.scheduledFirstTime,
+      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+      changedWritesHistory: this.changedWritesHistory,
+      consumeRerunAfterCurrentExecute: () => {
+        const shouldRerun = this.rerunAfterCurrentExecute;
+        this.rerunAfterCurrentExecute = false;
+        return shouldRerun;
+      },
+      isDemandedPullComputation: (action) =>
+        this.isDemandedPullComputation(action),
+      materializerIndex: this.materializers,
+      shouldRunFirstPullComputationInDemandContext: (action) =>
+        this.shouldRunFirstPullComputationInDemandContext(action),
+      isDebouncedComputationWaiting: (action) =>
+        this.isDebouncedComputationWaiting(action),
+      getNextDebounceRunTime: (action) => this.getNextDebounceRunTime(action),
+      getNextEligibleRunTime: (action) =>
+        this.delays.getNextEligibleRunTime(action),
+      hasPendingLineageHeadEvent: () => this.hasPendingLineageHeadEvent(),
+      resetLoopCounter: () => {
+        this.loopCounter = new WeakMap();
+      },
+      setScheduled: (scheduled) => {
+        this.scheduled = scheduled;
+      },
+      resetSettlingTracker: () => {
+        this.settlingTracker = createSettlingTracker();
+      },
+      setPendingQueueTaskTimer: (timer) => {
+        this.pendingQueueTaskTimer = timer;
+      },
+      execute: () => this.execute(),
+    };
+  }
+
+  private createEventQueueState(): SchedulerEventQueueState {
+    return {
+      runtime: this.runtime,
+      eventHandlers: this.eventHandlers,
+      eventQueue: this.eventQueue,
+      backgroundTasks: this.backgroundTasks,
+      queueExecution: () => this.queueExecution(),
+      queueEvent: (
+        targetEventLink,
+        targetEvent,
+        targetRetries,
+        targetOnCommit,
+        targetDoNotLoad,
+        targetOpts,
+      ) =>
+        this.queueEvent(
+          targetEventLink,
+          targetEvent,
+          targetRetries,
+          targetOnCommit,
+          targetDoNotLoad,
+          targetOpts,
+        ),
+      recordLineageEvent: (originTx, queuedEvent) => {
+        this.lineage.recordEvent(originTx, queuedEvent);
+      },
+    };
+  }
+
+  private createEventExecutionState(): SchedulerEventExecutionState {
+    const getEventPreflightTelemetryEnabled = () =>
+      this.eventPreflightTelemetryEnabled;
+    return {
+      runtime: this.runtime,
+      eventQueue: this.eventQueue,
+      dirty: this.staleness.dirty,
+      pending: this.pending,
+      get eventPreflightTelemetryEnabled() {
+        return getEventPreflightTelemetryEnabled();
+      },
+      setRunningPromise: (promise) => {
+        this.runningPromise = promise;
+      },
+      getActionId: (target) => this.getActionId(target),
+      getActionTelemetryInfo: (target) =>
+        getSchedulerActionTelemetryInfo(target),
+      handleError: (error, target) => this.handleError(error, target),
+      queueExecution: () => this.queueExecution(),
+      setDirtyDependencyTraceContext: (trace) => {
+        this.dirtyDependencyTraceContext = trace;
+      },
+      collectDirtyDependenciesForLog: (deps, dirtyDeps, dirtyDepMemo) =>
+        this.collectDirtyDependenciesForLog(
+          deps,
+          dirtyDeps,
+          dirtyDepMemo,
+        ),
+      isDebouncedComputationWaiting: (target) =>
+        this.isDebouncedComputationWaiting(target),
+      getNextDebounceRunTime: (target) => this.getNextDebounceRunTime(target),
+      getNextEligibleRunTime: (target) =>
+        this.delays.getNextEligibleRunTime(target),
+      scheduleEventQueueWake: (notBefore) =>
+        scheduleEventQueueWakeState(this.eventQueueWakeState, notBefore),
+      lineageStatus: (originTx) => this.lineage.originStatus(originTx),
+      releaseLineageEvent: (originTx, queuedEvent) => {
+        this.lineage.release(originTx, queuedEvent);
+      },
+      recordLineageEvent: (originTx, queuedEvent) => {
+        this.lineage.recordEvent(originTx, queuedEvent);
+      },
+      getOriginLocalSeq: (originTx, targetSpace) =>
+        getCommitLocalSeq(originTx.tx, targetSpace),
+      snapshotDirtyDependencyTraceContext: (trace) =>
+        snapshotDirtyDependencyTraceContext(
+          this.dirtyDependencyCollectionState,
+          trace,
+        ),
+      onEventCommitWrites: (sourceAction, writes) => {
+        recordChangedWritesHistory(this.writePropagationState, writes);
+        markReadersDirtyForChangedWrites(
+          this.writePropagationState,
+          sourceAction,
+          writes,
+        );
+      },
+    };
+  }
+
+  private createDependencyCollectionState(): DependencyCollectionState {
+    return {
+      runtime: this.runtime,
+      dependencyUpdateState: this.dependencyUpdateState,
+      triggerSubscriptionState: this.triggerSubscriptionState,
+      updateDependents: (action, log) => this.updateDependents(action, log),
+    };
+  }
+
+  private createActionRunState(): SchedulerActionRunState {
+    return {
+      runtime: this.runtime,
+      takeCfcTriggerReads: (target) => {
+        const pending = this.cfcTriggerReads.get(target);
+        if (pending === undefined) {
+          return undefined;
+        }
+        this.cfcTriggerReads.delete(target);
+        return pending.addresses;
+      },
+      restoreCfcTriggerReads: (target, addresses) => {
+        for (const address of addresses) {
+          addCfcTriggerRead(
+            { cfcTriggerReads: this.cfcTriggerReads },
+            target,
+            address,
+          );
+        }
+      },
+      actionChangeGroups: this.actionChangeGroups,
+      actionTimingState: this.actionTimingState,
+      retries: this.retries,
+      pending: this.pending,
+      actionRunTrace: this.actionRunTrace,
+      nodes: this.nodes,
+      diagnosisHistory: this.diagnosisHistory,
+      diagnosisNonIdempotent: this.diagnosisNonIdempotent,
+      idempotencyViolations: this.idempotencyViolations,
+      getRunningPromise: () => this.runningPromise,
+      setRunningPromise: (promise) => {
+        this.runningPromise = promise;
+      },
+      modeLabel: () => "pull",
+      getCollectActionRunTrace: () => this.collectActionRunTrace,
+      getDiagnosisEnabled: () => this.diagnosisEnabled,
+      getIdempotencyCheckMode: () => this.idempotencyCheckMode,
+      getActionId: (target) => this.getActionId(target),
+      getActionTelemetryInfo: (target) =>
+        getSchedulerActionTelemetryInfo(target),
+      getSchedulingWrites: (target) =>
+        this.writeIndex.getSchedulingWrites(target),
+      getMaterializerWriteEnvelopes: (target) =>
+        this.materializers.getMaterializerWriteEnvelopes(target),
+      getDebounce: (target) => this.delays.getDebounce(target),
+      getNoDebounce: (target) => this.delays.getNoDebounce(target),
+      getThrottle: (target) => this.delays.getThrottle(target),
+      maybeAutoDebounce: (target) => this.maybeAutoDebounce(target),
+      markActionHasRun: (target) => {
+        this.delays.markActionHasRun(target);
+        this.initialRehydrationTokens.delete(target);
+      },
+      markNodeHasRun: (target) => this.markNodeHasRun(target),
+      handleError: (error, target) => this.handleError(error, target),
+      resubscribe: (target, log) => this.resubscribe(target, log),
+      markDirectDirty: (target) => this.staleness.markDirectDirty(target),
+      recordChangedComputationWrites: (target, tx, log) => {
+        return recordChangedComputationWrites(
+          this.writePropagationState,
+          target,
+          tx,
+          log,
+        );
+      },
+      markReadersDirtyForChangedWrites: (target, changedWrites) => {
+        if (!this.nodes.computations.has(target)) return;
+        clearSchedulerDirectDirty(this.dirtySchedulingState, target);
+        markReadersDirtyForChangedWrites(
+          this.writePropagationState,
+          target,
+          changedWrites,
+        );
+      },
+      queueExecution: () => this.queueExecution(),
+      setExecutingAction: (target, targetActionId) => {
+        this.executingAction = target;
+        this.currentActionId = targetActionId;
+      },
+      clearExecutingAction: () => {
+        this.executingAction = null;
+        this.currentActionId = undefined;
+      },
+    };
+  }
+
+  private createGraphSnapshotState(): SchedulerGraphSnapshotState {
+    return {
+      pullMode: true,
+      effects: this.nodes.effects,
+      computations: this.nodes.computations,
+      pending: this.pending,
+      dirty: this.staleness.dirty,
+      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+      dependencies: this.dependencies,
+      dependents: this.dependents,
+      nodes: this.nodes,
+      actionStats: this.actionStats,
+      getDebounce: (action) => this.delays.getDebounce(action),
+      getThrottle: (action) => this.delays.getThrottle(action),
+      hasActiveDebounceTimer: (action) =>
+        this.delays.hasActiveDebounceTimer(action),
+      getActionId: (action) => this.getActionId(action),
+      getSchedulingWrites: (action) =>
+        this.writeIndex.getSchedulingWrites(action),
+      getNextDebounceRunTime: (action) => this.getNextDebounceRunTime(action),
+      getNextEligibleRunTime: (action) =>
+        this.delays.getNextEligibleRunTime(action),
+      isDemandedPullComputation: (action) =>
+        this.isDemandedPullComputation(action),
+      isLiveEffect: (action) => this.isLiveEffect(action),
+      isPullDemandRootEffect: (action) => this.isPullDemandRootEffect(action),
+      getPatternId: (action) => {
+        const annotated = action as Partial<TelemetryAnnotations>;
+        return annotated.pattern
+          ? this.runtime.patternManager.getPatternId(annotated.pattern)
+          : undefined;
+      },
+    };
+  }
+
+  // ============================================================
+  // Private forwarding helpers
+  // ============================================================
+
+  /**
+   * Gets a stable identifier for an action based on its source location.
+   * Prefers .src (set as backup) over .name, falls back to a generated ID.
+   * This ID is used for stats tracking to persist across action recreation.
+   */
+  private getActionId(action: Action | EventHandler): string {
+    return getSchedulerActionId(this.actionIdentityState, action);
+  }
+
+  private isDemandedPullComputation(action: Action): boolean {
+    const record = this.nodes.get(action);
+    return record?.kind === "computation" &&
+      isLive(this.dependencyGraphState, record);
+  }
+
+  private shouldRunFirstPullComputationInDemandContext(
+    action: Action,
+  ): boolean {
+    const record = this.nodes.get(action);
+    return record?.kind === "computation" &&
+      record.status === "never-ran" &&
+      record.provisionalDemand;
+  }
+
+  private isLiveEffect(action: Action): boolean {
+    return this.nodes.get(action)?.kind === "effect";
+  }
+
+  private isPullDemandRootEffect(action: Action): boolean {
+    const record = this.nodes.get(action);
+    return record?.kind === "effect" &&
+      (this.writeIndex.getSchedulingWrites(action)?.length ?? 0) === 0;
+  }
+
+  /**
+   * Collects computations that must run before `action` can observe up-to-date
+   * values. This includes explicitly dirty computations and clean intermediates
+   * whose own inputs flow from dirty upstream computations.
+   *
+   * Returns whether `action` itself is stale with respect to the current dirty
+   * set.
+   */
+  private collectDirtyDependencies(
+    action: Action,
+    workSet: Set<Action>,
+    memo = new Map<Action, boolean>(),
+  ): boolean {
+    return collectDirtyDependenciesState(
+      this.dirtyDependencyCollectionState,
+      action,
+      workSet,
+      memo,
+    );
+  }
+
+  private collectDirtyDependenciesFromTraversalRoot(
+    action: Action,
+    workSet: Set<Action>,
+    memo = new Map<Action, boolean>(),
+  ): boolean {
+    return collectDirtyDependenciesFromTraversalRootState(
+      this.dirtyDependencyCollectionState,
+      action,
+      workSet,
+      memo,
+    );
+  }
+
+  private collectDirtyDependenciesForLog(
+    log: ReactivityLog,
+    workSet: Set<Action>,
+    memo = new Map<Action, boolean>(),
+  ): boolean {
+    return collectDirtyDependenciesForLogState(
+      this.dirtyDependencyCollectionState,
+      log,
+      workSet,
+      memo,
+    );
+  }
+
+  private canAutomaticallyDebounce(action: Action): boolean {
+    return canAutomaticallyDebounceState(this.delayControlState, action);
+  }
+
+  private markEffectConditionallyScheduled(effect: Action): void {
+    markEffectConditionallyScheduledState(this.pullSchedulingState, effect);
+  }
+
+  private conditionalEffectHasChangedInputs(effect: Action): boolean {
+    return conditionalEffectHasChangedInputsState(
+      this.pullSchedulingState,
+      effect,
+    );
+  }
+
+  private collectPullIterationSeeds(workSet: Set<Action>): void {
+    collectPullIterationSeedsState(this.pullSchedulingState, workSet);
+  }
+
+  private hasRunnablePullWork(): boolean {
+    return hasRunnablePullWorkState(this.pullSchedulingState);
+  }
+
+  private hasDeferredDirtyEffectWork(): boolean {
+    return hasDeferredDirtyEffectWorkState(this.pullSchedulingState);
+  }
+
+  private hasPendingLineageHeadEvent(): boolean {
+    const head = this.eventQueue[0];
+    if (head?.originTx === undefined) return false;
+    if (this.lineage.originStatus(head.originTx) !== "pending") return false;
+    return getCommitLocalSeq(head.originTx.tx, head.eventLink.space) ===
+      undefined;
+  }
+
+  private scheduleAffectedEffects(
+    computation: Action,
+  ): TriggerTraceScheduledEffect[] {
+    return scheduleAffectedEffectsState(this.pullSchedulingState, computation);
+  }
+
+  private updateMaterializerRegistration(action: Action): void {
+    const record = this.nodes.get(action);
+    const wasLive = record ? isLive(this.dependencyGraphState, record) : false;
+    this.materializers.register(
+      action,
+      (action as Partial<TelemetryAnnotations>).materializerWriteEnvelopes,
+    );
+    notifyNodeLivenessChange(this.dependencyGraphState, action, wasLive);
+  }
+
+  private markProvisionalDemand(record: SchedulerNode): void {
+    setNodeProvisionalDemand(
+      this.dependencyGraphState,
+      record,
+      true,
+      this.activePassId,
+    );
+    if (this.activePassId !== undefined) {
+      this.provisionalDemandThisPass.add(record);
+    }
+  }
+
+  private markPullDemandContinuation(action: Action): void {
+    const record = this.nodes.get(action);
+    if (!record) return;
+    setNodeProvisionalDemand(this.dependencyGraphState, record, true);
+  }
+
+  private markNodeHasRun(action: Action): void {
+    const record = this.nodes.get(action);
+    if (!record) return;
+
+    if (record.status === "never-ran") {
+      record.status = "clean";
+    }
+
+    if (
+      record.provisionalDemand &&
+      (record.provisionalDemandPass === undefined ||
+        this.passCounter > record.provisionalDemandPass)
+    ) {
+      setNodeProvisionalDemand(this.dependencyGraphState, record, false);
+    }
+  }
+
+  private clearProvisionalDemandAtPassEnd(): void {
+    const passId = this.activePassId;
+    if (passId === undefined) return;
+
+    for (const record of this.provisionalDemandThisPass) {
+      if (
+        record.provisionalDemand &&
+        record.provisionalDemandPass === passId &&
+        record.status !== "never-ran"
+      ) {
+        setNodeProvisionalDemand(this.dependencyGraphState, record, false);
+      }
+    }
+    this.provisionalDemandThisPass.clear();
+  }
+
+  private getNextDebounceRunTime(action: Action): number | undefined {
+    return getNextDebounceRunTimeState(this.delayControlState, action);
+  }
+
+  private isDebouncedComputationWaiting(action: Action): boolean {
+    return isDebouncedComputationWaitingState(this.delayControlState, action);
+  }
+
+  private scheduleComputationDebounce(action: Action): void {
+    scheduleComputationDebounceState(this.delayControlState, action);
+  }
+
+  /**
+   * Schedules an action with debounce support.
+   * If the action has a debounce delay, it will wait before being added to pending.
+   * Otherwise, it's added immediately.
+   */
+  private scheduleWithDebounce(action: Action): void {
+    scheduleWithDebounceState(this.delayControlState, action);
+  }
+
+  /**
+   * Checks if an action should be auto-debounced based on its performance stats.
+   * Called after recording action time to potentially enable debouncing for slow actions.
+   * Auto-debounce is enabled by default; use noDebounce to opt out.
+   */
+  private maybeAutoDebounce(action: Action): void {
+    const update = maybeAutoDebounceState(this.delayControlState, action);
+    if (update) {
+      logger.debug("schedule-debounce", () => [
+        `[AUTO-DEBOUNCE] Action ${update.actionId} ` +
+        `auto-debounced (avg ${
+          update.averageTime.toFixed(1)
+        }ms >= ${update.thresholdMs}ms)`,
+      ]);
+    }
+  }
 }

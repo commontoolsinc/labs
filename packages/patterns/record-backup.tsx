@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Record Backup Pattern - Import/Export for Records
  *
@@ -21,10 +20,11 @@ import {
   NAME,
   navigateTo,
   pattern,
+  safeDateNow,
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import { createSubPiece, getDefinition } from "./record/registry.ts";
 import type { SubPieceEntry, TrashedSubPieceEntry } from "./record/types.ts";
@@ -74,10 +74,10 @@ interface ImportResult {
 // ===== Pattern Input/Output =====
 
 interface Input {
-  importJson: Default<string, "">;
+  importJson: string | Default<"">;
 }
 
-interface Output {
+export interface Output {
   exportedJson: string;
   importJson: string;
   recordCount: number;
@@ -98,7 +98,7 @@ interface RecordPiece {
 /**
  * Coerce data types to match schema expectations
  * Handles common type mismatches (e.g., "1986" string → 1986 number)
- * Used by both export (to fix ct-input storing numbers as strings)
+ * Used by both export (to fix cf-input storing numbers as strings)
  * and import (to handle JSON that may have wrong types)
  */
 function coerceDataTypes(
@@ -163,7 +163,7 @@ function extractModuleData(
     }
   }
 
-  // Coerce types to match schema (fixes ct-input storing numbers as strings)
+  // Coerce types to match schema (fixes cf-input storing numbers as strings)
   return coerceDataTypes(type, data);
 }
 
@@ -223,7 +223,7 @@ const buildExportData = lift(
 
     return {
       version: "1.0",
-      exportDate: new Date().toISOString(),
+      exportDate: new Date(safeDateNow()).toISOString(),
       records: exportedRecords,
     };
   },
@@ -360,40 +360,36 @@ function parseImportJson(jsonText: string): {
 }
 
 /**
- * Create a module from imported data
- * Returns the piece instance or null if type is unknown
- * Throws if module creation fails
+ * Extract Note input from imported data without instantiating the Note pattern.
+ */
+function noteInputFromImportedData(
+  data: Record<string, unknown>,
+  recordPatternJson: string,
+): Record<string, unknown> {
+  let content = "";
+  if (typeof data.content === "string") {
+    content = data.content;
+  } else if (typeof data.notes === "string") {
+    // Fallback for legacy field name
+    content = data.notes;
+  }
+
+  return {
+    content,
+    embedded: true,
+    linkPattern: recordPatternJson,
+  };
+}
+
+/**
+ * Create a non-Note module from imported data.
+ * Returns the piece instance or null if type is unknown.
+ * Throws if module creation fails.
  */
 function createModuleFromData(
   type: string,
   data: Record<string, unknown>,
-  recordPatternJson: string,
 ): unknown | null {
-  // Special handling for notes - needs embedded flag and linkPattern
-  if (type === "notes") {
-    // Type-safe content extraction
-    let content = "";
-    if (typeof data.content === "string") {
-      content = data.content;
-    } else if (typeof data.notes === "string") {
-      // Fallback for legacy field name
-      content = data.notes;
-    }
-    // Silently use empty string for non-string values
-
-    const note = Note({
-      content,
-      embedded: true,
-      linkPattern: recordPatternJson,
-      // deno-lint-ignore no-explicit-any
-    } as any);
-
-    if (!note) {
-      throw new Error("Note constructor returned null/undefined");
-    }
-    return note;
-  }
-
   // Check if type is known
   const def = getDefinition(type);
   if (!def) {
@@ -460,11 +456,15 @@ const importRecords = handler<
 
       for (const moduleData of recordData.modules) {
         try {
-          const piece = createModuleFromData(
-            moduleData.type,
-            moduleData.data,
-            recordPatternJson,
-          );
+          const piece = moduleData.type === "notes"
+            ? Note(
+              // deno-lint-ignore no-explicit-any
+              noteInputFromImportedData(
+                moduleData.data,
+                recordPatternJson,
+              ) as any,
+            )
+            : createModuleFromData(moduleData.type, moduleData.data);
 
           if (piece === null) {
             // Unknown module type - skip with warning
@@ -497,11 +497,15 @@ const importRecords = handler<
 
       for (const moduleData of recordData.trashedModules) {
         try {
-          const piece = createModuleFromData(
-            moduleData.type,
-            moduleData.data,
-            recordPatternJson,
-          );
+          const piece = moduleData.type === "notes"
+            ? Note(
+              // deno-lint-ignore no-explicit-any
+              noteInputFromImportedData(
+                moduleData.data,
+                recordPatternJson,
+              ) as any,
+            )
+            : createModuleFromData(moduleData.type, moduleData.data);
 
           if (piece === null) {
             result.errors.push({
@@ -583,23 +587,28 @@ const clearImportResult = handler<
  * Handler to process uploaded file
  */
 const handleFileUpload = handler<
-  { detail: { files: Array<{ data: string; name: string }> } },
+  {
+    detail: {
+      files: Array<{
+        name: string;
+        data?: string;
+      }>;
+    };
+  },
   { importJson: Writable<string> }
 >(({ detail }, { importJson }) => {
   const files = detail?.files;
   if (!files || files.length === 0) return;
 
   const file = files[0];
-  // data is a data URL, need to extract the JSON content
-  const dataUrl = file.data;
-  const base64Match = dataUrl.match(/base64,(.+)/);
-  if (base64Match) {
-    try {
-      const jsonContent = atob(base64Match[1]);
-      importJson.set(jsonContent);
-    } catch (e) {
-      console.error("Failed to decode file:", e);
-    }
+  if (!file.data) return;
+  const commaIndex = file.data.indexOf(",");
+  const bytes = commaIndex === -1 ? file.data : file.data.slice(commaIndex + 1);
+  try {
+    const jsonContent = atob(bytes);
+    importJson.set(jsonContent);
+  } catch (e) {
+    console.error("Failed to decode file:", e);
   }
 });
 
@@ -609,7 +618,7 @@ export default pattern<Input, Output>(({ importJson }) => {
   // Get all pieces in the space
   const { allPieces } = wish<{ allPieces: RecordPiece[] }>({
     query: "#default",
-  }).result;
+  }).result!;
 
   // Build export data
   const exportData = buildExportData({ allPieces });
@@ -617,7 +626,7 @@ export default pattern<Input, Output>(({ importJson }) => {
   const recordCount = countRecords({ exportData });
 
   // Import result state
-  const importResult = Writable.of<ImportResult | null>(null);
+  const importResult = new Writable<ImportResult | null>(null);
 
   // Computed values for import result display
   const hasImportResult = computed(() => importResult.get() !== null);
@@ -647,35 +656,35 @@ export default pattern<Input, Output>(({ importJson }) => {
   return {
     [NAME]: computed(() => `Record Backup (${recordCount} records)`),
     [UI]: (
-      <ct-screen>
-        <ct-toolbar slot="header" sticky>
+      <cf-screen>
+        <cf-toolbar slot="header" sticky>
           <div slot="start">
             <span style={{ fontWeight: "bold" }}>Record Backup</span>
           </div>
-        </ct-toolbar>
+        </cf-toolbar>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack gap="6" padding="6">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack gap="6" padding="6">
             {/* Export Section */}
-            <ct-card>
-              <ct-vstack gap="4">
+            <cf-card>
+              <cf-vstack gap="4">
                 <h2>Export Records</h2>
                 <p>
                   Found <strong>{recordCount}</strong>{" "}
                   records in this space. Copy the JSON below to save your data.
                 </p>
-                <ct-file-download
+                <cf-file-download
                   $data={exportedJson}
                   filename={`record-backup-${
-                    new Date().toISOString().slice(0, 10)
+                    new Date(safeDateNow()).toISOString().slice(0, 10)
                   }.json`}
                   mimeType="application/json"
                   variant="primary"
                   allowAutosave
                 >
                   Download Backup
-                </ct-file-download>
-                <ct-code-editor
+                </cf-file-download>
+                <cf-code-editor
                   $value={exportedJson}
                   language="application/json"
                   theme="light"
@@ -688,23 +697,24 @@ export default pattern<Input, Output>(({ importJson }) => {
                   }}
                   readonly
                 />
-              </ct-vstack>
-            </ct-card>
+              </cf-vstack>
+            </cf-card>
 
             {/* Import Section */}
-            <ct-card>
-              <ct-vstack gap="4">
+            <cf-card>
+              <cf-vstack gap="4">
                 <h2>Import Records</h2>
                 <p>
                   Upload a backup file or paste JSON to restore your records.
                 </p>
-                <ct-file-input
+                <cf-file-input
                   accept=".json,application/json"
+                  includeData
                   buttonText="📤 Upload Backup File"
                   showPreview={false}
-                  onct-change={handleFileUpload({ importJson })}
+                  oncf-change={handleFileUpload({ importJson })}
                 />
-                <ct-code-editor
+                <cf-code-editor
                   $value={importJson}
                   language="application/json"
                   theme="light"
@@ -721,7 +731,7 @@ export default pattern<Input, Output>(({ importJson }) => {
   "records": [...]
 }`}
                 />
-                <ct-button
+                <cf-button
                   onClick={importRecords({
                     importJson,
                     allPieces,
@@ -730,7 +740,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                   variant="primary"
                 >
                   Import Records
-                </ct-button>
+                </cf-button>
 
                 {/* Import Result Display */}
                 {ifElse(
@@ -743,25 +753,25 @@ export default pattern<Input, Output>(({ importJson }) => {
                       border: importResultBorder,
                     }}
                   >
-                    <ct-vstack gap="2">
+                    <cf-vstack gap="2">
                       <strong>{importResultTitle}</strong>
                       <p>{importResultMessage}</p>
-                      <ct-button
+                      <cf-button
                         size="sm"
                         variant="ghost"
                         onClick={clearImportResult({ importResult })}
                       >
                         Dismiss
-                      </ct-button>
-                    </ct-vstack>
+                      </cf-button>
+                    </cf-vstack>
                   </div>,
                   null,
                 )}
-              </ct-vstack>
-            </ct-card>
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+              </cf-vstack>
+            </cf-card>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
     exportedJson,
     importJson,

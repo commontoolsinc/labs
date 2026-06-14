@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Extractor Module - Controller sub-piece for LLM-assisted field extraction
  *
@@ -25,14 +24,16 @@ import {
   type ImageData,
   NAME,
   pattern,
+  safeDateNow,
+  toCompactDebugString,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import {
   createSubPiece,
+  getAvailableTypes,
   getDefinition,
   getFieldToTypeMapping as getFullFieldMapping,
-  SUB_PIECE_REGISTRY,
 } from "../registry.ts";
 import type { SubPieceEntry, TrashedSubPieceEntry } from "../types.ts";
 import type {
@@ -60,52 +61,58 @@ interface ExtractorModuleInput {
   parentTitle: Writable<string>;
   // Source selection state (index -> selected, default true)
   sourceSelections: Writable<
-    Default<Record<number, boolean>, Record<number, never>>
+    Record<number, boolean> | Default<Record<number, never>>
   >;
   // Trash selection state (index -> should trash, default false)
   trashSelections: Writable<
-    Default<Record<number, boolean>, Record<number, never>>
+    Record<number, boolean> | Default<Record<number, never>>
   >;
   // Field selections for preview
-  selections: Writable<Default<Record<string, boolean>, Record<string, never>>>;
+  selections: Writable<
+    Record<string, boolean> | Default<Record<string, never>>
+  >;
   // Extraction phase
   extractPhase: Writable<
-    Default<"select" | "extracting" | "preview", "select">
+    "select" | "extracting" | "preview" | Default<"select">
   >;
   // Combined content for extraction (built from sources)
-  extractionPrompt: Writable<Default<string, "">>;
+  extractionPrompt: Writable<string | Default<"">>;
   // Notes cleanup state
-  cleanupNotesEnabled: Writable<Default<boolean, true>>;
+  cleanupNotesEnabled: Writable<boolean | Default<true>>;
   // Snapshot of Notes content at extraction start (for cleanup comparison)
   // Map of subPiece index (as string) -> original content for ALL selected Notes modules
   // NOTE: Uses string keys to avoid Cell coercing numeric keys to array indices
   notesContentSnapshot: Writable<
-    Default<Record<string, string>, Record<string, never>>
+    Record<string, string> | Default<Record<string, never>>
   >;
   // Cleanup application status tracking
   cleanupApplyStatus: Writable<
-    Default<"pending" | "success" | "failed" | "skipped", "pending">
+    "pending" | "success" | "failed" | "skipped" | Default<"pending">
   >;
   // Apply in progress guard (prevents double-click race condition)
-  applyInProgress: Writable<Default<boolean, false>>;
+  applyInProgress: Writable<boolean | Default<false>>;
   // Error details expanded state (for showing full error in UI)
-  errorDetailsExpanded: Writable<Default<boolean, false>>;
+  errorDetailsExpanded: Writable<boolean | Default<false>>;
 }
 
-interface ExtractorModuleOutput {
-  sourceSelections?: Default<Record<number, boolean>, Record<number, never>>;
-  trashSelections?: Default<Record<number, boolean>, Record<number, never>>;
-  selections?: Default<Record<string, boolean>, Record<string, never>>;
-  extractPhase?: Default<"select" | "extracting" | "preview", "select">;
-  extractionPrompt?: Default<string, "">;
-  cleanupNotesEnabled?: Default<boolean, true>;
-  notesContentSnapshot?: Default<Record<string, string>, Record<string, never>>;
-  cleanupApplyStatus?: Default<
-    "pending" | "success" | "failed" | "skipped",
-    "pending"
-  >;
-  applyInProgress?: Default<boolean, false>;
-  errorDetailsExpanded?: Default<boolean, false>;
+export interface ExtractorModuleOutput {
+  sourceSelections?: Record<number, boolean> | Default<Record<number, never>>;
+  trashSelections?: Record<number, boolean> | Default<Record<number, never>>;
+  selections?: Record<string, boolean> | Default<Record<string, never>>;
+  extractPhase?: "select" | "extracting" | "preview" | Default<"select">;
+  extractionPrompt?: string | Default<"">;
+  cleanupNotesEnabled?: boolean | Default<true>;
+  notesContentSnapshot?:
+    | Record<string, string>
+    | Default<Record<string, never>>;
+  cleanupApplyStatus?:
+    | "pending"
+    | "success"
+    | "failed"
+    | "skipped"
+    | Default<"pending">;
+  applyInProgress?: boolean | Default<false>;
+  errorDetailsExpanded?: boolean | Default<false>;
 }
 
 // ===== Constants =====
@@ -312,7 +319,7 @@ function getPrimaryFieldName(
   fieldName: string,
   moduleType: string,
 ): string {
-  const def = SUB_PIECE_REGISTRY[moduleType];
+  const def = getDefinition(moduleType);
   if (!def?.fieldMapping || def.fieldMapping.length === 0) {
     return fieldName; // No mapping, use as-is
   }
@@ -382,10 +389,10 @@ function isEmpty(value: unknown): boolean {
 /**
  * Format a value for display in the diff view
  */
-function formatValue(value: unknown): string {
+function debugFormatValue(value: unknown): string {
   if (isEmpty(value)) return "(empty)";
-  if (Array.isArray(value)) return JSON.stringify(value);
-  if (typeof value === "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return toCompactDebugString(value);
+  if (typeof value === "object") return toCompactDebugString(value);
   return String(value);
 }
 
@@ -781,7 +788,7 @@ function buildPreview(
   // Handle array extraction mode (e.g., customFields for custom-field module)
   // Modules with extractionMode: "array" extract an array where each item
   // becomes a separate module instance
-  for (const def of Object.values(SUB_PIECE_REGISTRY)) {
+  for (const def of getAvailableTypes()) {
     if (def.extractionMode !== "array" || !def.fieldMapping) continue;
 
     // Get the array field name (first entry in fieldMapping)
@@ -941,7 +948,7 @@ const dismiss = handler<
   parentSubPieces.set(current.filter((e) => e?.type !== "extractor"));
   parentTrashedSubPieces.push({
     ...selfEntry,
-    trashedAt: new Date().toISOString(),
+    trashedAt: new Date(safeDateNow()).toISOString(),
   });
 });
 
@@ -953,7 +960,7 @@ const toggleSourceHandler = handler<
   {
     index: number;
     sourceSelectionsCell: Writable<
-      Default<Record<number, boolean>, Record<number, never>>
+      Record<number, boolean> | Default<Record<number, never>>
     >;
   }
 >((_event, { index, sourceSelectionsCell }) => {
@@ -974,7 +981,7 @@ const toggleTrashHandler = handler<
   {
     index: number;
     trashSelectionsCell: Writable<
-      Default<Record<number, boolean>, Record<number, never>>
+      Record<number, boolean> | Default<Record<number, never>>
     >;
   }
 >((_event, { index, trashSelectionsCell }) => {
@@ -995,7 +1002,7 @@ const toggleFieldHandler = handler<
   {
     fieldKey: string;
     selectionsCell: Writable<
-      Default<Record<string, boolean>, Record<string, never>>
+      Record<string, boolean> | Default<Record<string, never>>
     >;
     defaultSelected: boolean;
   }
@@ -1022,14 +1029,14 @@ const startExtraction = handler<
   unknown,
   {
     sourceSelectionsCell: Writable<
-      Default<Record<number, boolean>, Record<number, never>>
+      Record<number, boolean> | Default<Record<number, never>>
     >;
     parentSubPiecesCell: Writable<SubPieceEntry[]>;
     extractPhaseCell: Writable<
-      Default<"select" | "extracting" | "preview", "select">
+      "select" | "extracting" | "preview" | Default<"select">
     >;
     notesContentSnapshotCell: Writable<
-      Default<Record<number, string>, Record<number, never>>
+      Record<number, string> | Default<Record<number, never>>
     >;
   }
 >(
@@ -1119,7 +1126,7 @@ function applyFieldToModule(
     console.warn(
       `[Extract] Type mismatch for ${moduleType}.${actualFieldName}: ` +
         `expected ${fieldSchema?.type}, got ${actualType}. ` +
-        `Value: ${JSON.stringify(extractedValue)}. Skipping field.`,
+        `Value: ${toCompactDebugString(extractedValue)}. Skipping field.`,
     );
     return false;
   }
@@ -1169,7 +1176,9 @@ function createModuleWithFields(
       console.warn(
         `[Extract] Type mismatch for new module ${moduleType}.${actualFieldName}: ` +
           `expected ${fieldSchema?.type}, got ${actualType}. ` +
-          `Value: ${JSON.stringify(field.extractedValue)}. Skipping field.`,
+          `Value: ${
+            toCompactDebugString(field.extractedValue)
+          }. Skipping field.`,
       );
       continue;
     }
@@ -1209,7 +1218,7 @@ interface NotesCleanupParams {
   cleanedNotesValue: string;
   notesSnapshotMapValue: Record<string, string>;
   cleanupApplyStatusCell: Writable<
-    Default<"pending" | "success" | "failed" | "skipped", "pending">
+    "pending" | "success" | "failed" | "skipped" | Default<"pending">
   >;
 }
 
@@ -1376,19 +1385,19 @@ const applySelected = handler<
       { confidence: number; explanation: string; sourceExcerpt?: string }
     >;
     selectionsCell: Writable<
-      Default<Record<string, boolean>, Record<string, never>>
+      Record<string, boolean> | Default<Record<string, never>>
     >;
     trashSelectionsCell: Writable<
-      Default<Record<number, boolean>, Record<number, never>>
+      Record<number, boolean> | Default<Record<number, never>>
     >;
     cleanupEnabledValue: boolean;
     cleanedNotesValue: string;
     // Dereferenced value from notesContentSnapshot Cell (map of Notes module index as string -> original content)
     notesSnapshotMapValue: Record<string, string>;
     cleanupApplyStatusCell: Writable<
-      Default<"pending" | "success" | "failed" | "skipped", "pending">
+      "pending" | "success" | "failed" | "skipped" | Default<"pending">
     >;
-    applyInProgressCell: Writable<Default<boolean, false>>;
+    applyInProgressCell: Writable<boolean | Default<false>>;
   }
 >(
   (
@@ -1525,7 +1534,7 @@ const applySelected = handler<
               anySuccess = true;
               console.debug(
                 `[Extract] Created new ${moduleType} instance: ${
-                  JSON.stringify(initialValues)
+                  toCompactDebugString(initialValues)
                 }`,
               );
             } catch (e) {
@@ -1627,7 +1636,7 @@ const applySelected = handler<
         if (entry) {
           parentTrashedSubPiecesCell.push({
             ...entry,
-            trashedAt: new Date().toISOString(),
+            trashedAt: new Date(safeDateNow()).toISOString(),
           });
         }
       }
@@ -1665,18 +1674,9 @@ export const ExtractorModule = pattern<
       errorDetailsExpanded,
     },
   ) => {
-    // ===== TRANSFORMER BUG WORKAROUND =====
-    // The TypeScript transformer has a bug where .map()/.filter()/.some() called on
-    // a computed variable aren't properly transformed to their reactive equivalents.
-    // See: packages/ts-transformers/test/fixtures/pending/computed-var-then-map.issue.md
-    // GitHub Issue: https://github.com/commontoolsinc/labs/issues/2442
-    //
-    // WORKAROUND: Compute ALL source-derived data in a SINGLE computed block, then
-    // expose individual values as simple property accesses. This avoids calling
-    // scanExtractableSources() 10+ times in separate computed blocks.
-    //
-    // PERFORMANCE IMPACT: Before this fix, extraction took 2+ minutes with 113% CPU
-    // due to O(n * 10) reactive operations. Now it's O(n) with a single scan.
+    // Compute all source-derived data in one pass so downstream views can read
+    // simple properties instead of re-running scanExtractableSources() in
+    // separate computed blocks. This keeps the extraction path O(n).
 
     // Single computed that derives ALL source-related data
     const sourceData = computed(() => {
@@ -1784,7 +1784,7 @@ export const ExtractorModule = pattern<
         index: photo.index,
         ocr: generateText({
           system: OCR_SYSTEM_PROMPT,
-          prompt,
+          prompt: prompt as any,
           model: "anthropic:claude-sonnet-4-5",
         }),
       };
@@ -1890,7 +1890,7 @@ export const ExtractorModule = pattern<
     // Single extraction call for all sources combined
     const singleExtraction = generateObject({
       system: EXTRACTION_SYSTEM_PROMPT,
-      prompt: combinedExtractionPrompt,
+      prompt: combinedExtractionPrompt as any,
       schema: RECOMMENDATIONS_SCHEMA,
       model: "anthropic:claude-haiku-4-5",
     });
@@ -2471,7 +2471,7 @@ export const ExtractorModule = pattern<
             }}
           >
             <span style={{ color: "#92400e", fontWeight: "500" }}>
-              {ifElse(isPreviewPhase, "Review Changes", "Select Sources")}
+              {isPreviewPhase ? "Review Changes" : "Select Sources"}
             </span>
             {ifElse(
               isExtractingPhase,
@@ -2526,11 +2526,9 @@ export const ExtractorModule = pattern<
                       color: "#6b7280",
                     }}
                   >
-                    {ifElse(
-                      hasNoUsableSources,
-                      "Add content to sources below:",
-                      "Select sources to extract from:",
-                    )}
+                    {hasNoUsableSources
+                      ? "Add content to sources below:"
+                      : "Select sources to extract from:"}
                   </div>
                   <div
                     style={{
@@ -2637,7 +2635,7 @@ export const ExtractorModule = pattern<
                         color: "#6b7280",
                       }}
                     >
-                      <ct-loader size="sm" />
+                      <cf-loader size="sm" />
                       <span>Running OCR on photos...</span>
                     </div>,
                     null,
@@ -2697,7 +2695,7 @@ export const ExtractorModule = pattern<
                       }}
                     >
                       Extract from {selectedSourceCount} source
-                      {ifElse(isSingleSource, "", "s")}
+                      {isSingleSource ? "" : "s"}
                     </button>
                   </div>
                 </div>,
@@ -2718,7 +2716,7 @@ export const ExtractorModule = pattern<
                 padding: "24px",
               }}
             >
-              <ct-loader size="sm" show-elapsed />
+              <cf-loader size="sm" show-elapsed />
               <span style={{ color: "#92400e" }}>
                 {extractingProgressIcon} {extractingProgressMessage}
               </span>
@@ -2761,7 +2759,7 @@ export const ExtractorModule = pattern<
                     textDecoration: "underline",
                   }}
                 >
-                  {ifElse(showErrorDetails, "Hide details", "Show details")}
+                  {showErrorDetails ? "Hide details" : "Show details"}
                 </button>
                 {ifElse(
                   showErrorDetails,
@@ -2995,8 +2993,8 @@ export const ExtractorModule = pattern<
                             fontFamily: "monospace",
                           }}
                         >
-                          {formatValue(f.currentValue)} -&gt;{" "}
-                          {formatValue(f.extractedValue)}
+                          {debugFormatValue(f.currentValue)} -&gt;{" "}
+                          {debugFormatValue(f.extractedValue)}
                         </div>
                         {ifElse(
                           f.explanation !== undefined && f.explanation !== "",
@@ -3086,7 +3084,7 @@ export const ExtractorModule = pattern<
                         color: "#6b7280",
                       }}
                     >
-                      <ct-loader size="sm" />
+                      <cf-loader size="sm" />
                       <span>Generating cleanup preview...</span>
                     </div>,
                     <div>
@@ -3207,11 +3205,9 @@ export const ExtractorModule = pattern<
                             fontStyle: "italic",
                           }}
                         >
-                          {ifElse(
-                            cleanupDisabled,
-                            "Cleanup disabled - Notes will remain unchanged",
-                            "No changes needed to Notes content",
-                          )}
+                          {cleanupDisabled
+                            ? "Cleanup disabled - Notes will remain unchanged"
+                            : "No changes needed to Notes content"}
                         </div>,
                       )}
                     </div>,

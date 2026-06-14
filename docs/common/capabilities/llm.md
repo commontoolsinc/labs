@@ -1,3 +1,9 @@
+# LLM Generation
+
+LLM calls are reactive nodes, not promises: never `await` them. Call them in
+the pattern body and check `pending` / `error` / `result` reactively, as shown
+below.
+
 ## generateText
 
 Free-form text generation.
@@ -9,13 +15,11 @@ const response = generateText({
 });
 
 // Response: { result: string, error: string, pending: boolean }
-{ifElse(response.pending,
-  <span>Generating...</span>,
-  ifElse(response.error,
-    <span>Error: {response.error}</span>,
-    <div>{response.result}</div>
-  )
-)}
+{response.pending
+  ? <span>Generating...</span>
+  : response.error
+  ? <span>Error: {response.error}</span>
+  : <div>{response.result}</div>}
 ```
 
 ---
@@ -38,17 +42,17 @@ const idea = generateObject<ProductIdea>({
 });
 
 // Response: { result: ProductIdea, error: string, pending: boolean }
-{ifElse(idea.pending,
-  <span>Generating...</span>,
-  ifElse(idea.error,
-    <span>Error: {idea.error}</span>,
+{idea.pending
+  ? <span>Generating...</span>
+  : idea.error
+  ? <span>Error: {idea.error}</span>
+  : (
     <div>
       <h3>{idea.result?.name}</h3>
       <p>{idea.result?.description}</p>
       <p>${idea.result?.price}</p>
     </div>
-  )
-)}
+  )}
 ```
 
 ## Processing Arrays
@@ -66,10 +70,9 @@ const summaries = articles.map((article) => ({
 {summaries.map(({ article, summary }) => (
   <div>
     <h3>{article.title}</h3>
-    {ifElse(summary.pending,
-      <em>Summarizing...</em>,
-      <p>{summary.result}</p>
-    )}
+    {summary.pending
+      ? <em>Summarizing...</em>
+      : <p>{summary.result}</p>}
   </div>
 ))}
 ```

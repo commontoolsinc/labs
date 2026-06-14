@@ -1,27 +1,26 @@
-/// <cts-enable />
 /**
  * Regression test: computed() inside ifElse branch should not double-wrap .get()
  *
  * When a computed() callback is inside an ifElse branch, the OpaqueRefJSX
  * transformer's rewriteChildExpressions should NOT wrap expressions like
- * `toggle.get()` in an extra derive, since the computed callback is already
+ * `toggle.get()` in an extra lift-applied computation, since the computed callback is already
  * a safe reactive context.
  *
  * Bug: secondToggle.get() was returning CellImpl instead of boolean
  * Fix: Added isInsideSafeCallbackWrapper check in rewriteChildExpressions
  */
-import { computed, ifElse, pattern, UI, Writable } from "commontools";
+import { computed, ifElse, pattern, UI, Writable } from "commonfabric";
 
 // FIXTURE: nested-computed-in-ifelse
-// Verifies: computed() inside ifElse branches transforms to derive() without double-wrapping .get()
-//   computed(() => { secondToggle.get(); ... }) → derive({ secondToggle }, ({ secondToggle }) => { secondToggle.get(); ... })
+// Verifies: computed() inside ifElse branches transforms to the lift-applied form without double-wrapping .get()
+//   computed(() => { secondToggle.get(); ... }) → lift(({ secondToggle }) => { secondToggle.get(); ... })({ secondToggle })
 //   ternary (showOuter ? ... : ...) → ifElse(showOuter, ..., ...)
 // Context: Regression test — .get() inside a computed() that is nested within
-//   an ifElse branch must NOT get an extra derive wrapper, since computed is
+//   an ifElse branch must NOT get an extra lift-applied wrapper, since computed is
 //   already a safe reactive context.
 export default pattern<Record<PropertyKey, never>>(() => {
-  const showOuter = Writable.of(false);
-  const secondToggle = Writable.of(false);
+  const showOuter = new Writable(false);
+  const secondToggle = new Writable(false);
 
   return {
     [UI]: (
@@ -36,7 +35,7 @@ export default pattern<Record<PropertyKey, never>>(() => {
         {ifElse(
           showOuter,
           <div style={computed(() => {
-            // This .get() should NOT be wrapped in extra derive
+            // This .get() should NOT be wrapped in an extra lift-applied computation
             const val = secondToggle.get();
             return { background: val ? "green" : "red" };
           })}>Case B</div>,

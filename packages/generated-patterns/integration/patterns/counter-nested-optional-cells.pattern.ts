@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   type Cell,
   computed,
@@ -6,7 +5,7 @@ import {
   handler,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface OptionalBranch {
   counter?: number;

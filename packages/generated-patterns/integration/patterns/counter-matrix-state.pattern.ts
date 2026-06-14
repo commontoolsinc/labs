@@ -1,13 +1,4 @@
-/// <cts-enable />
-import {
-  type Cell,
-  Default,
-  derive,
-  handler,
-  lift,
-  pattern,
-  str,
-} from "commontools";
+import { type Cell, Default, handler, lift, pattern, str } from "commonfabric";
 
 type Matrix = number[][];
 
@@ -28,12 +19,12 @@ interface SetCellEvent {
 
 interface SetRowEvent {
   row?: number;
-  values?: unknown;
+  values?: number[];
 }
 
 interface SetColumnEvent {
   column?: number;
-  values?: unknown;
+  values?: number[];
   value?: number;
 }
 
@@ -240,10 +231,10 @@ const liftColumnSummary = lift((columns: number[]) =>
 
 export const counterWithMatrixState = pattern<CounterMatrixStateArgs>(
   ({ matrix }) => {
-    const matrixView = derive(matrix, sanitizeMatrix);
-    const rowTotals = derive(matrix, computeRowTotals);
-    const columnTotals = derive(matrix, computeColumnTotals);
-    const dimensions = derive(matrix, computeDimensions);
+    const matrixView = sanitizeMatrix(matrix);
+    const rowTotals = computeRowTotals(matrix);
+    const columnTotals = computeColumnTotals(matrix);
+    const dimensions = computeDimensions(matrix);
     const total = liftTotal(rowTotals);
     const rowSummary = liftRowSummary(rowTotals);
     const columnSummary = liftColumnSummary(columnTotals);

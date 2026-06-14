@@ -8,10 +8,10 @@
 
 ```typescript
 // Not bidirectional - won't update automatically
-<ct-checkbox checked={item.done} />
+<cf-checkbox checked={item.done} />
 
 // Bidirectional - updates automatically
-<ct-checkbox $checked={item.done} />
+<cf-checkbox $checked={item.done} />
 ```
 
 **Check 2:** Using handler when bidirectional binding would work?
@@ -21,10 +21,10 @@
 const toggle = handler(({ detail }, { item }) => {
   item.set.key("done").set(detail.checked);
 });
-<ct-checkbox checked={item.done} onct-change={toggle({ item })} />
+<cf-checkbox checked={item.done} oncf-change={toggle({ item })} />
 
 // Use bidirectional binding instead
-<ct-checkbox $checked={item.done} />
+<cf-checkbox $checked={item.done} />
 ```
 
 **Check 3:** Wrong event name for handler?
@@ -33,10 +33,10 @@ Each component has specific event names. Check @common/components/COMPONENTS.md 
 
 ```typescript
 // Wrong event name
-<ct-checkbox onChange={...} />
+<cf-checkbox onChange={...} />
 
 // Correct event name
-<ct-checkbox onct-change={...} />
+<cf-checkbox oncf-change={...} />
 ```
 
 ## Filtered/Sorted List Not Updating
@@ -58,30 +58,61 @@ const activeItems = computed(() => items.filter(item => !item.done));
 
 **The Pattern:** Compute transformations (filter, sort, group) outside JSX using `computed()`, then map over the computed result inside JSX. Mapping over `computed()` results is the canonical pattern.
 
+## Mapped List Churns or Times Out
+
+**Issue:** Rendering a list triggers `non-idempotent raw:map`,
+`Too many iterations: ... raw:map`, link-resolution churn, or a test action
+timeout.
+
+**Check:** Look for render-time writes inside the `.map()` body. Event props
+must receive a handler to run later, not the result of calling a stream or
+mutation immediately.
+
+```tsx
+// Wrong - send runs while the row renders
+{items.map((item, index) => (
+  <cf-button onClick={selectItem.send(index)}>Select</cf-button>
+))}
+
+// Correct - send runs when clicked
+{items.map((item, index) => (
+  <cf-button onClick={() => selectItem.send(index)}>Select</cf-button>
+))}
+```
+
+See [Immediate Event Invocation](gotchas/immediate-event-invocation.md) for the
+full diagnosis checklist.
+
 ## Conditional Rendering Not Working
 
-**Issue:** Ternary operator doesn't work for conditional rendering
+**Issue:** A conditional section doesn't render or update as expected
 
-**Problem:** Ternaries don't work for conditional elements
-
-```typescript
-{showDetails ? <div>Details</div> : null}  {/* Won't work! */}
-```
-
-**Solution:** Use `ifElse()` for conditional rendering
+Plain authored ternaries ARE the idiom for conditional rendering — the
+transformer lowers them to `ifElse()` for you, so you usually do not need to
+author `ifElse()` directly. See
+[Conditional Rendering](../../common/patterns/conditional.md).
 
 ```typescript
-{ifElse(showDetails, <div>Details</div>, null)}  {/* Works! */}
-```
+// Preferred - the transformer handles this
+{showDetails ? <div>Details</div> : null}
 
-**Note:** Ternaries DO work in JSX attributes for simple values:
-
-```typescript
-// Ternaries work in attributes
+// Also fine in attributes and other value positions
 <span style={item.done ? { textDecoration: "line-through" } : {}}>
   {item.title}
 </span>
 ```
+
+If a conditional section still misbehaves, check:
+
+- **Eager branch evaluation:** both branches of the lowered `ifElse()` are
+  evaluated as arguments, so property access on a nullable reactive value
+  inside a branch can crash even when the condition is falsy. See
+  [Eager Ternary Branch Evaluation](gotchas/eager-ternary-branch-evaluation.md).
+- **Composed pattern cells:** condition cells taken directly from a composed
+  sub-pattern can hang the piece. See
+  [ifElse with Composed Pattern Cells](gotchas/quick.md#ifelse-with-composed-pattern-cells).
+- **Unusual sites:** inspect the lowering with
+  `deno task cf check <pattern>.tsx --show-transformed` rather than guessing.
 
 ## Variable Scoping in Reactive Contexts
 
@@ -99,7 +130,13 @@ const activeItems = computed(() => items.filter(item => !item.done));
 ))}
 ```
 
-**Solution:** Pre-compute grouped data
+**Solution:** Pre-compute grouped data — but watch the receiver shape inside
+the inner `.map(...)`. ⚠️ `(reactiveCall() ?? plain).map(...)` nested in
+another `.map((row) => ...)` aborts pattern construction by hiding the cell
+from the ts-transformer; see
+[gotchas/closure-capture-in-nested-map.md](gotchas/closure-capture-in-nested-map.md).
+The safe pre-bake is a top-level computed of plain data — the `?? []`
+fallback below is a plain-array fallback, NOT a reactive-call wrapper:
 
 ```typescript
 const groupedItems = computed(() => {
@@ -113,12 +150,19 @@ const groupedItems = computed(() => {
 
 {categories.map((category) => (
   <div>
+    {/* Safe: `groupedItems[category]` is plain JS by the time the outer
+        `categories.map` reaches it. */}
     {(groupedItems[category] ?? []).map(item => (
       <div>{item.title}</div>
     ))}
   </div>
 ))}
 ```
+
+If `groupedItems` were itself something you'd read with `.get()`, hoist the
+per-category list to its own top-level computed and map *that* directly —
+don't write `(groupedItems.get() ?? {})[category]?.map(...)` inside the row
+callback.
 
 **Related issue with lift():**
 

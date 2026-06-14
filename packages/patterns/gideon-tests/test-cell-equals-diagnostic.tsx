@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * DIAGNOSTIC PATTERN: Understanding Cell.get() array access behavior
  *
@@ -7,17 +6,28 @@
  * 2. Set selectedItem to that value
  * 3. Check if it creates links/aliases vs copies
  */
-import { Default, handler, NAME, pattern, UI, Writable } from "commontools";
+import {
+  Default,
+  handler,
+  NAME,
+  nonPrivateRandom,
+  pattern,
+  safeDateNow,
+  toCompactDebugString,
+  toIndentedDebugString,
+  UI,
+  Writable,
+} from "commonfabric";
 
 interface Item {
   title: string;
   value: number;
 }
 
-interface DiagInput {
-  items: Default<Item[], []>;
-  selectedItem: Default<Item | null, null>;
-  log: Default<string[], []>;
+export interface DiagInput {
+  items: Item[] | Default<[]>;
+  selectedItem: Item | null | Default<null>;
+  log: string[] | Default<[]>;
 }
 
 // Add item handler
@@ -27,8 +37,8 @@ const addItem = handler<
 >(
   (_, { items, log }) => {
     const newItem: Item = {
-      title: `Item-${Date.now()}`,
-      value: Math.floor(Math.random() * 100),
+      title: `Item-${safeDateNow()}`,
+      value: Math.floor(nonPrivateRandom() * 100),
     };
     items.push(newItem);
     log.push(`Added item: ${newItem.title}`);
@@ -50,7 +60,7 @@ const selectByIndex = handler<
     log.push(`items.get() returned array of length: ${itemsArray.length}`);
 
     const targetItem = itemsArray[index];
-    log.push(`itemsArray[${index}] = ${JSON.stringify(targetItem)}`);
+    log.push(`itemsArray[${index}] = ${toCompactDebugString(targetItem)}`);
     log.push(`typeof targetItem: ${typeof targetItem}`);
     log.push(`targetItem constructor: ${targetItem?.constructor?.name}`);
 
@@ -64,11 +74,11 @@ const selectByIndex = handler<
 
     // Read back
     const readBack = selectedItem.get();
-    log.push(`selectedItem.get() = ${JSON.stringify(readBack)}`);
+    log.push(`selectedItem.get() = ${toCompactDebugString(readBack)}`);
 
     // Check items again
     const itemsAfter = items.get();
-    log.push(`items after set: ${JSON.stringify(itemsAfter)}`);
+    log.push(`items after set: ${toCompactDebugString(itemsAfter)}`);
   },
 );
 
@@ -106,11 +116,11 @@ export default pattern<DiagInput, DiagInput>(
               flexWrap: "wrap",
             }}
           >
-            <ct-button onClick={addItem({ items, log })}>Add Item</ct-button>
-            <ct-button onClick={clearSelection({ selectedItem, log })}>
+            <cf-button onClick={addItem({ items, log })}>Add Item</cf-button>
+            <cf-button onClick={clearSelection({ selectedItem, log })}>
               Clear Selection
-            </ct-button>
-            <ct-button onClick={clearLog({ log })}>Clear Log</ct-button>
+            </cf-button>
+            <cf-button onClick={clearLog({ log })}>Clear Log</cf-button>
           </div>
 
           <div style={{ marginBottom: "1rem" }}>
@@ -132,11 +142,11 @@ export default pattern<DiagInput, DiagInput>(
                   }}
                 >
                   <span>[{index}] {item.title}: {item.value}</span>
-                  <ct-button
+                  <cf-button
                     onClick={selectByIndex({ items, selectedItem, log, index })}
                   >
                     Select
-                  </ct-button>
+                  </cf-button>
                 </div>
               ))}
             </div>
@@ -151,7 +161,7 @@ export default pattern<DiagInput, DiagInput>(
                 marginTop: "0.25rem",
               }}
             >
-              <pre>{JSON.stringify(selectedItem, null, 2)}</pre>
+              <pre>{toIndentedDebugString(selectedItem)}</pre>
             </div>
           </div>
 

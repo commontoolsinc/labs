@@ -1,8 +1,8 @@
 # TS Transformers Goals
 
 **Status:** Working goals (current understanding)\
-**Date:** March 4, 2026\
-**Package:** `@commontools/ts-transformers`\
+**Date:** March 17, 2026\
+**Package:** `@commonfabric/ts-transformers`\
 **Related:**
 
 - `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`
@@ -44,7 +44,7 @@ Authors should be able to:
 
 The runtime should receive:
 
-1. explicit schemas for significant boundaries (`pattern`, `derive`, `lift`,
+1. explicit schemas for significant boundaries (`pattern`, `lift`,
    `handler`, `cell`, `wish`, `generateObject`, conditional helpers)
 2. explicit closure capture params instead of hidden lexical captures
 3. explicit control-flow helper calls where required by reactive semantics
@@ -90,6 +90,8 @@ crashing transformation.
 
 Schema fidelity includes preserving meaningful optional/undefined distinctions
 (`T | undefined`) through synthetic-node schema generation paths.
+It also includes preserving the semantic distinction between `unknown`
+(`{ type: "unknown" }`, opaque/unresolved) and `any` (`true`, accept anything).
 
 ## G-006 Explicit Closure Capture
 
@@ -114,7 +116,7 @@ traceability are goals, not just parser validity.
 ## G-010 Nested Collection-Operator Semantics
 
 Nested contexts must preserve a clear, deterministic operator policy, especially
-for collection methods (`.map`, and in future analogously `.filter`, etc.).
+for collection methods (`.map`, `.filter`, `.flatMap`, and future analogs).
 
 The key requirement is that rewrite policy follows the **active context at the
 operator site**, not only the outer expression.
@@ -123,24 +125,31 @@ operator site**, not only the outer expression.
 
 | Active context at operator call | Receiver category                                                                                   | Goal policy                                                                                       |
 | ------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Pattern context                 | reactive/opaque pattern-facing values                                                               | Rewrite to explicit reactive form (for `.map`, currently `mapWithPattern` + patternized callback) |
+| Pattern context                 | reactive/opaque pattern-facing values                                                               | Rewrite to explicit reactive form (currently `...WithPattern` + patternized callback)             |
 | Pattern context                 | plain JS arrays/values                                                                              | No reactive rewrite                                                                               |
 | Compute context                 | cell-like values that still require reactive lifting (`Cell` / `Writable` / `Stream` / equivalents) | Rewrite                                                                                           |
 | Compute context                 | values treated as plain/auto-unwrapped in compute callbacks                                         | Do not rewrite                                                                                    |
 
-This is the tricky case for `.map`: in pattern context we want broad rewrite
-coverage for reactive receivers, while in compute context rewrites should be
-narrow and type-driven.
+This is the tricky case for array methods: in pattern context we want broad
+rewrite coverage for reactive receivers, while in compute context rewrites
+should be narrow and type-driven.
 
-For future operators (`.filter`, `.find`, etc.), the goal is to keep the same
+For future operators (`.find`, `.some`, etc.), the goal is to keep the same
 matrix shape unless there is a semantics-specific reason to diverge.
 
-Important callback rule for `.map`:
+Important callback rule for rewritten collection methods:
 
-1. If a call site is rewritten to `mapWithPattern`, its callback parameter
+1. If a call site is rewritten to a `...WithPattern` form, its callback parameter
    semantics are pattern-like (opaque/pattern callback boundary).
 2. If a call site is not rewritten, callback parameter semantics stay normal for
    that context (no implicit promotion to pattern callback semantics).
+
+Nested compute nuance:
+
+1. Local aliases that re-wrap reactive collections inside a compute callback
+   should re-enter the same policy matrix as other reactive receivers.
+2. Fully compute-owned branches introduced by earlier rewrites must not
+   accidentally fall back to pattern-context collection policy.
 
 ## G-011 Least-Capability Boundary Types
 
@@ -166,6 +175,9 @@ Path-sensitive shrinking should be context-scoped, not global.
    is strong.
 3. Unknown-dynamic or wildcard operations should conservatively fall back to
    broader shape.
+4. Array-like shapes accessed only through non-item properties (for example
+   `.length`) should preserve array shape while shrinking item type to
+   `unknown`.
 
 Context-specific propagation rule:
 
@@ -190,17 +202,20 @@ with independent acceptance criteria.
 ## G-015 Guard Against Common Type Inference Footguns
 
 The transformer should catch common authoring traps early when TypeScript
-inference creates unusable reactive types (for example `Cell.of([])` inferring
+inference creates unusable reactive types (for example `new Cell([])` inferring
 `never[]`), and emit diagnostics that provide a direct fix path.
 
 ## G-016 Validate Schema Shrink Coverage
 
 When capability analysis detects that a callback reads specific properties, and
 schema shrinking attempts to narrow the declared type to those paths, the result
-must be validated. If the declared type is `unknown`/`any` (no structure) or is
+must be validated. If the declared type is `unknown` (no structure), or is
 concrete but missing accessed properties, the transformer must produce a hard
-error so authors fix their types before the pattern compiles. Silent fallback to
-unshrunk schemas hides type mismatches that cause runtime surprises.
+error so authors fix their types before the pattern compiles. `any` remains the
+full-shape fallback and does not trigger this diagnostic. Silent fallback to
+unshrunk schemas hides type mismatches that cause runtime surprises. This
+includes declared members whose own type is `unknown`, not just top-level
+`unknown` parameters.
 
 ## 5. Non-Goals
 
@@ -231,9 +246,10 @@ take priority over opaque micro-optimizations.
 
 ## 6. Constraints And Invariants
 
-## C-001 Explicit Opt-In
+## C-001 Default-On With Explicit Opt-Out
 
-Transform-heavy behavior is opt-in via `/// <cts-enable />`.
+Transform-heavy behavior is enabled by default. Files can opt out explicitly via
+`/// <cf-disable-transform />`.
 
 ## C-002 Ordered Multi-Stage Pipeline
 
@@ -341,9 +357,9 @@ We are meeting goals when:
     enabled
 12. empty-array cell-factory fixtures fail with actionable diagnostics unless
     explicit element type arguments are provided
-13. schema shrink validation errors on `unknown`/`any` parameter types when
-    property accesses are detected, and on concrete types missing accessed
-    properties, with messages that name the missing paths and guide the fix
+13. schema shrink validation errors on `unknown` parameter types when property
+    accesses are detected, and on concrete types missing accessed properties,
+    with messages that name the missing paths and guide the fix
 
 ## 8. Policy For Future Changes
 

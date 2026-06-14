@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: ifElse with Simple Cell - WORKING (with caveats)
  *
@@ -47,11 +46,11 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface State {
-  count: Default<number, 0>;
-  showButton: Default<boolean, true>;
+  count: number | Default<0>;
+  showButton: boolean | Default<true>;
 }
 
 const incrementHandler = handler<unknown, { count: Writable<number> }>(
@@ -69,15 +68,15 @@ export default pattern<State>(({ count, showButton }) => {
         <p>Current count: {count}</p>
 
         <div style={{ marginBottom: "1rem" }}>
-          <ct-checkbox $checked={showButton}>Show button</ct-checkbox>
+          <cf-checkbox $checked={showButton}>Show button</cf-checkbox>
         </div>
 
         {/* WORKING: ifElse with plain cell (not derived) */}
         {ifElse(
           showButton,
-          <ct-button onClick={incrementHandler({ count })}>
+          <cf-button onClick={incrementHandler({ count })}>
             Increment (WORKING with ifElse)
-          </ct-button>,
+          </cf-button>,
           <p style={{ color: "gray" }}>Button hidden by ifElse condition</p>,
         )}
 

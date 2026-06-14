@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Berkeley Public Library Email Pattern
  *
@@ -16,7 +15,7 @@
  * Usage:
  * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct piece link google-auth/auth berkeley-library/overrideAuth
+ * 3. Link: cf piece link google-auth/auth berkeley-library/overrideAuth
  *
  * Omnibot Actions:
  * - markAsReturned: Mark a book as returned by title
@@ -30,10 +29,11 @@ import {
   NAME,
   pattern,
   Stream,
+  toIndentedDebugString,
   UI,
   Writable,
-} from "commontools";
-import type { Schema } from "commontools/schema";
+} from "commonfabric";
+import type { Schema } from "commonfabric/schema";
 import GmailExtractor from "../core/gmail-extractor.tsx";
 import type { Auth } from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
@@ -357,11 +357,11 @@ const toggleItemSelection = handler<
   unknown,
   {
     item: TrackedItem;
-    selectedItems: Writable<Default<string[], []>>;
+    selectedItems: Writable<string[] | Default<[]>>;
   }
 >((_, { item, selectedItems }) => {
   const key = item.key; // Access key inside handler context
-  const current = selectedItems.get() || [];
+  const current = (selectedItems.get() || []) as string[];
   const idx = current.indexOf(key);
   if (idx >= 0) {
     selectedItems.set(current.filter((k: string) => k !== key));
@@ -380,7 +380,7 @@ const toggleItemSelection = handler<
 const markAsReturnedHandler = handler<
   { title: string },
   {
-    manuallyReturned: Writable<Default<string[], []>>;
+    manuallyReturned: Writable<string[] | Default<[]>>;
     rawAnalyses: Array<{
       analysis?: { result?: LibraryEmailAnalysis };
     }>;
@@ -394,7 +394,7 @@ const markAsReturnedHandler = handler<
   const searchTitle = byMatch ? byMatch[1].trim() : normalizedInput;
   const searchAuthor = byMatch ? byMatch[2].trim() : "";
 
-  const current = manuallyReturned.get() || [];
+  const current = (manuallyReturned.get() || []) as string[];
   const keysToAdd: string[] = [];
 
   // Search through all analyzed emails for matching items
@@ -438,7 +438,7 @@ const markAsReturnedHandler = handler<
 const dismissHoldHandler = handler<
   { title: string },
   {
-    dismissedHolds: Writable<Default<string[], []>>;
+    dismissedHolds: Writable<string[] | Default<[]>>;
     rawAnalyses: Array<{
       analysis?: { result?: LibraryEmailAnalysis };
     }>;
@@ -452,7 +452,7 @@ const dismissHoldHandler = handler<
   const searchTitle = byMatch ? byMatch[1].trim() : normalizedInput;
   const searchAuthor = byMatch ? byMatch[2].trim() : "";
 
-  const current = dismissedHolds.get() || [];
+  const current = (dismissedHolds.get() || []) as string[];
   const keysToAdd: string[] = [];
 
   // Search through all analyzed emails for matching holds
@@ -493,9 +493,9 @@ const setDueDateForGroup = handler<
   unknown,
   {
     groupItems: TrackedItem[];
-    selectedItems: Writable<Default<string[], []>>;
+    selectedItems: Writable<string[] | Default<[]>>;
     dueDateOverrides: Writable<
-      Default<Record<string, string>, Record<string, never>>
+      Record<string, string> | Default<Record<string, never>>
     >;
   }
 >((event, { groupItems, selectedItems, dueDateOverrides }) => {
@@ -504,7 +504,7 @@ const setDueDateForGroup = handler<
   if (!newDueDate) return;
 
   // Get selected items in this group (not in deselected list = selected)
-  const deselectedKeys = selectedItems.get() || [];
+  const deselectedKeys = (selectedItems.get() || []) as string[];
   const selectedInThisGroup = groupItems.filter(
     (item: TrackedItem) => !deselectedKeys.includes(item.key),
   );
@@ -535,22 +535,22 @@ const setDueDateForGroup = handler<
 
 interface PatternInput {
   // Optional: Link auth directly from a Google Auth piece
-  // Use: ct piece link googleAuthPiece/auth berkeleyLibraryPiece/overrideAuth
+  // Use: cf piece link googleAuthPiece/auth berkeleyLibraryPiece/overrideAuth
   overrideAuth?: Auth;
   // Track items manually marked as returned (persisted)
-  manuallyReturned?: Writable<Default<string[], []>>;
+  manuallyReturned?: Writable<string[] | Default<[]>>;
   // Track holds manually dismissed (persisted)
-  dismissedHolds?: Writable<Default<string[], []>>;
+  dismissedHolds?: Writable<string[] | Default<[]>>;
   // Track selected items for bulk operations (per-group checkboxes)
-  selectedItems?: Writable<Default<string[], []>>;
+  selectedItems?: Writable<string[] | Default<[]>>;
   // Track manual due date overrides (persisted)
   dueDateOverrides?: Writable<
-    Default<Record<string, string>, Record<string, never>>
+    Record<string, string> | Default<Record<string, never>>
   >;
 }
 
 /** Berkeley Public Library book tracker. #berkeleyLibrary */
-interface PatternOutput {
+export interface PatternOutput {
   trackedItems: TrackedItem[];
   holdsReady: TrackedItem[];
   overdueCount: number;
@@ -974,13 +974,13 @@ export default pattern<PatternInput, PatternOutput>(
       }),
 
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           <div slot="header">
-            <ct-heading level={3}>Berkeley Public Library</ct-heading>
+            <cf-heading level={3}>Berkeley Public Library</cf-heading>
           </div>
 
-          <ct-vscroll flex showScrollbar>
-            <ct-vstack padding="6" gap="4">
+          <cf-vscroll flex showScrollbar>
+            <cf-vstack padding="6" gap="4">
               {/* Auth UI from GmailExtractor */}
               {extractor.ui.authStatusUI}
 
@@ -1088,7 +1088,7 @@ export default pattern<PatternInput, PatternOutput>(
                 >
                   Checked Out Items
                 </h3>
-                <ct-vstack gap="4">
+                <cf-vstack gap="4">
                   {itemsByDueDate.map((group) => {
                     // Compute selected count outside JSX - items not in deselected list are selected
                     const selectedCount = computed(() => {
@@ -1236,7 +1236,7 @@ export default pattern<PatternInput, PatternOutput>(
                         </div>
 
                         {/* Items in this group */}
-                        <ct-vstack gap="2">
+                        <cf-vstack gap="2">
                           {group.items.map((item) => {
                             // Extract key before computed to avoid OpaqueRef issues
                             const itemKey = item.key;
@@ -1330,11 +1330,11 @@ export default pattern<PatternInput, PatternOutput>(
                               </div>
                             );
                           })}
-                        </ct-vstack>
+                        </cf-vstack>
                       </div>
                     );
                   })}
-                </ct-vstack>
+                </cf-vstack>
               </div>
 
               {/* Holds Ready Section */}
@@ -1353,7 +1353,7 @@ export default pattern<PatternInput, PatternOutput>(
                 >
                   🔵 Holds Ready for Pickup ({holdsReadyCount})
                 </h3>
-                <ct-vstack gap="2">
+                <cf-vstack gap="2">
                   {holdsReady.map((item) => (
                     <div
                       style={{
@@ -1412,7 +1412,7 @@ export default pattern<PatternInput, PatternOutput>(
                       </button>
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </div>
 
               {/* Dismissed Holds Section */}
@@ -1436,7 +1436,7 @@ export default pattern<PatternInput, PatternOutput>(
                     ✓ Dismissed Holds (
                     {computed(() => (dismissedHoldsItems || []).length)})
                   </summary>
-                  <ct-vstack gap="2">
+                  <cf-vstack gap="2">
                     {dismissedHoldsItems.map((item) => (
                       <div
                         style={{
@@ -1496,7 +1496,7 @@ export default pattern<PatternInput, PatternOutput>(
                         </button>
                       </div>
                     ))}
-                  </ct-vstack>
+                  </cf-vstack>
                 </details>
               </div>
 
@@ -1521,7 +1521,7 @@ export default pattern<PatternInput, PatternOutput>(
                     📚 Marked as Returned (
                     {computed(() => (historicalItems || []).length)})
                   </summary>
-                  <ct-vstack gap="2">
+                  <cf-vstack gap="2">
                     {historicalItems.map((item) => (
                       <div
                         style={{
@@ -1581,7 +1581,7 @@ export default pattern<PatternInput, PatternOutput>(
                         </button>
                       </div>
                     ))}
-                  </ct-vstack>
+                  </cf-vstack>
                 </details>
               </div>
 
@@ -1620,7 +1620,7 @@ export default pattern<PatternInput, PatternOutput>(
                     >
                       Fetched Library Emails:
                     </h4>
-                    <ct-vstack gap="2">
+                    <cf-vstack gap="2">
                       {extractor.emails.map((email: Email) => (
                         <div
                           style={{
@@ -1645,7 +1645,7 @@ export default pattern<PatternInput, PatternOutput>(
                           </div>
                         </div>
                       ))}
-                    </ct-vstack>
+                    </cf-vstack>
 
                     <h4
                       style={{
@@ -1658,7 +1658,7 @@ export default pattern<PatternInput, PatternOutput>(
                     >
                       LLM Analysis Results:
                     </h4>
-                    <ct-vstack gap="2">
+                    <cf-vstack gap="2">
                       {rawAnalyses.map((analysisItem) => {
                         const debugResult = analysisItem.analysis?.result as
                           | EmailAnalysisResult
@@ -1698,7 +1698,7 @@ export default pattern<PatternInput, PatternOutput>(
                                 marginTop: "4px",
                               }}
                             >
-                              <ct-loader size="sm" />
+                              <cf-loader size="sm" />
                               <span>Analyzing...</span>
                             </div>
 
@@ -1786,10 +1786,8 @@ export default pattern<PatternInput, PatternOutput>(
                                   }}
                                 >
                                 {computed(() =>
-                                  JSON.stringify(
+                                  toIndentedDebugString(
                                     debugResult?.items || [],
-                                    null,
-                                    2,
                                   )
                                 )}
                                 </pre>
@@ -1798,7 +1796,7 @@ export default pattern<PatternInput, PatternOutput>(
                           </div>
                         );
                       })}
-                    </ct-vstack>
+                    </cf-vstack>
                   </div>
                 </details>
               </div>
@@ -1823,9 +1821,9 @@ export default pattern<PatternInput, PatternOutput>(
                   Open Library Website
                 </a>
               </div>
-            </ct-vstack>
-          </ct-vscroll>
-        </ct-screen>
+            </cf-vstack>
+          </cf-vscroll>
+        </cf-screen>
       ),
     };
   },

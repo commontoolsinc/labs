@@ -1,13 +1,11 @@
-/// <cts-enable />
 /**
  * Regression test: action() result used in same ternary branch as computed()
  *
  * When a ternary branch contains both a computed() value and an action() reference,
- * the action must be captured in the derive wrapper along with the computed value.
- * Previously, action() results were incorrectly classified as "function declarations"
- * and skipped by CaptureCollector.
+ * the nested computed expression should still lower locally in JSX without forcing
+ * the whole JSX branch through an extra lift-applied wrapper.
  */
-import { action, Cell, computed, pattern, UI } from "commontools";
+import { action, Cell, computed, pattern, UI } from "commonfabric";
 
 interface Card {
   title: string;
@@ -19,12 +17,13 @@ interface Input {
 }
 
 // FIXTURE: action-in-ternary-branch
-// Verifies: action() result used in a ternary branch alongside computed() is captured in the derive wrapper
+// Verifies: action() result used in a ternary branch alongside computed() keeps
+//   local JSX rewrites instead of forcing a whole-branch lift-applied computation
 //   action(() => ...) → handler(eventSchema, captureSchema, (_, { isEditing }) => ...)({ isEditing })
-//   ternary with computed → ifElse(...) with inner derive() capturing { card, hasDescription, startEditing }
-// Context: Regression -- action results were previously skipped by CaptureCollector as "function declarations"
+//   nested hasDescription ternary → local ifElse(...) inside the JSX branch
+// Context: Regression coverage for JSX-local rewriting with action references in the same branch
 export default pattern<Input>(({ card }) => {
-  const isEditing = Cell.of(false);
+  const isEditing = new Cell(false);
 
   const startEditing = action(() => {
     isEditing.set(true);
@@ -37,19 +36,19 @@ export default pattern<Input>(({ card }) => {
 
   return {
     [UI]: (
-      <ct-card>
+      <cf-card>
         {isEditing ? (
           <div>Editing</div>
         ) : (
           <div>
             <span>{card.title}</span>
-            {/* Nested ternary with computed - triggers derive wrapper */}
+            {/* Nested ternary with computed - lowers locally inside JSX */}
             {hasDescription ? <span>{card.description}</span> : null}
-            {/* Action in SAME branch - must be captured by the derive! */}
-            <ct-button onClick={startEditing}>Edit</ct-button>
+            {/* Action in SAME branch stays direct while JSX-local rewrites handle the computed value */}
+            <cf-button onClick={startEditing}>Edit</cf-button>
           </div>
         )}
-      </ct-card>
+      </cf-card>
     ),
     card,
   };

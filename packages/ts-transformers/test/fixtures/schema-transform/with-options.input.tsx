@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { toSchema } from "commontools";
+import { toSchema } from "commonfabric";
 
 interface Config {
   value: number;

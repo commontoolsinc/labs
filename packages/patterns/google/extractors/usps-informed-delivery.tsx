@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * USPS Informed Delivery Mail Analyzer
  *
@@ -15,7 +14,7 @@
  * Usage:
  * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct piece link google-auth/auth usps/overrideAuth
+ * 3. Link: cf piece link google-auth/auth usps/overrideAuth
  */
 import {
   computed,
@@ -27,8 +26,8 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
-import type { Schema } from "commontools/schema";
+} from "commonfabric";
+import type { Schema } from "commonfabric/schema";
 import GmailExtractor, { type Auth } from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
 
@@ -263,14 +262,14 @@ const deleteMember = handler<
 // =============================================================================
 
 interface PatternInput {
-  householdMembers?: Default<HouseholdMember[], []>;
+  householdMembers?: HouseholdMember[] | Default<[]>;
   // Optional: Link auth directly from a Google Auth piece
-  // Use: ct piece link googleAuthPiece/auth uspsPiece/overrideAuth
+  // Use: cf piece link googleAuthPiece/auth uspsPiece/overrideAuth
   overrideAuth?: Auth;
 }
 
 /** USPS Informed Delivery mail analyzer. #uspsInformedDelivery */
-interface PatternOutput {
+export interface PatternOutput {
   mailPieces: MailAnalysis[];
   householdMembers: HouseholdMember[];
   mailCount: number;
@@ -288,7 +287,7 @@ interface PatternOutput {
 }
 
 export default pattern<PatternInput, PatternOutput>(
-  ({ householdMembers, overrideAuth }) => {
+  (({ householdMembers, overrideAuth }: any) => {
     // Directly instantiate GmailExtractor with USPS-specific settings (raw mode)
     // This eliminates the need for separate gmail-importer piece + wish()
     const extractor = GmailExtractor({
@@ -416,7 +415,7 @@ IMPORTANT: Use "personal" ONLY for greeting cards, holiday cards, and handwritte
 If you cannot read the image clearly, make your best guess based on what you can see.`,
             },
           ];
-        }),
+        }) as any,
         schema: MAIL_ANALYSIS_SCHEMA,
         // IMPORTANT: Must specify model explicitly for generateObject with images
         model: "anthropic:claude-sonnet-4-5",
@@ -495,7 +494,7 @@ If you cannot read the image clearly, make your best guess based on what you can
 
     // Unconfirmed members count
     const unconfirmedCount = computed(
-      () => householdMembers?.filter((m) => !m.isConfirmed)?.length || 0,
+      () => householdMembers?.filter((m: any) => !m.isConfirmed)?.length || 0,
     );
 
     // Get top 3 categories for preview summary
@@ -587,13 +586,13 @@ If you cannot read the image clearly, make your best guess based on what you can
       previewUI,
 
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           <div slot="header">
-            <ct-heading level={3}>USPS Informed Delivery</ct-heading>
+            <cf-heading level={3}>USPS Informed Delivery</cf-heading>
           </div>
 
-          <ct-vscroll flex showScrollbar>
-            <ct-vstack padding="6" gap="4">
+          <cf-vscroll flex showScrollbar>
+            <cf-vstack padding="6" gap="4">
               {/* Auth UI from embedded GmailExtractor */}
               {extractor.ui.authStatusUI}
 
@@ -678,7 +677,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                             color: "#2563eb",
                           }}
                         >
-                          <ct-loader size="sm" />
+                          <cf-loader size="sm" />
                           {pendingCount} analyzing...
                         </span>
                       )}
@@ -897,7 +896,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                       : null}
                   </summary>
 
-                  <ct-vstack gap="2">
+                  <cf-vstack gap="2">
                     {!householdMembers?.length
                       ? (
                         <div style={{ color: "#666", fontSize: "14px" }}>
@@ -907,7 +906,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                       )
                       : null}
                     {/* Use .map() directly on cell array to get cell references */}
-                    {householdMembers.map((member) => (
+                    {householdMembers.map((member: any) => (
                       <div
                         style={{
                           display: "flex",
@@ -968,19 +967,10 @@ If you cannot read the image clearly, make your best guess based on what you can
                         </button>
                       </div>
                     ))}
-                  </ct-vstack>
+                  </cf-vstack>
                 </details>
               )}
 
-              {
-                /* Possibly Urgent Section
-                  WORKAROUND: Using CSS display:none instead of conditional rendering (ifElse or &&)
-                  because .map() inside conditionals doesn't get transformed to mapWithPattern,
-                  causing raw vnode JSON to render instead of actual UI elements.
-                  See: packages/ts-transformers/ISSUES_TO_FOLLOW_UP.md Issue #5
-                  Related: https://github.com/user/repo/commit/1b10bac4d (link subscription bug)
-              */
-              }
               <div
                 style={{
                   marginTop: "8px",
@@ -1093,7 +1083,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                   Mail Pieces (Live Analysis)
                 </summary>
 
-                <ct-vstack gap="2">
+                <cf-vstack gap="2">
                   {imageCount === 0
                     ? (
                       <div style={{ color: "#666", fontSize: "14px" }}>
@@ -1147,7 +1137,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                                 gap: "8px",
                               }}
                             >
-                              <ct-loader size="sm" />
+                              <cf-loader size="sm" />
                               <span style={{ color: "#6b7280" }}>
                                 Analyzing...
                               </span>
@@ -1236,12 +1226,12 @@ If you cannot read the image clearly, make your best guess based on what you can
                       </div>
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </details>
-            </ct-vstack>
-          </ct-vscroll>
-        </ct-screen>
+            </cf-vstack>
+          </cf-vscroll>
+        </cf-screen>
       ),
     };
-  },
+  }) as any,
 );

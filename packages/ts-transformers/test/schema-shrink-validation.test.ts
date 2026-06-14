@@ -1,39 +1,56 @@
-import { assertEquals, assertGreater } from "@std/assert";
+import { assertEquals, assertGreater, assertStringIncludes } from "@std/assert";
 import { validateSource } from "./utils.ts";
 import type { TransformationDiagnostic } from "../src/mod.ts";
-import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
+import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 
 /**
  * Extracts JSON schema literals from transformed output.
- * Schemas appear as `{ type: "object", ... } as const satisfies __ctHelpers.JSONSchema`
+ * Schemas appear as either:
+ * - `{ type: "object", ... } as const satisfies __cfHelpers.JSONSchema`
+ * - `true as const satisfies __cfHelpers.JSONSchema`
+ * - `false as const satisfies __cfHelpers.JSONSchema`
  * Returns them in order of appearance.
  */
 function extractSchemas(output: string): string[] {
   const schemas: string[] = [];
-  const marker = "as const satisfies __ctHelpers.JSONSchema";
+  const marker = "as const satisfies __cfHelpers.JSONSchema";
   let searchFrom = 0;
   while (true) {
     const markerIdx = output.indexOf(marker, searchFrom);
     if (markerIdx === -1) break;
-    // Walk backwards from marker to find matching opening brace
-    let depth = 0;
+    // Walk backwards from marker to find the schema literal.
     let start = markerIdx - 1;
     // Skip whitespace before marker
     while (start >= 0 && /\s/.test(output[start]!)) start--;
-    // Now we should be at a closing brace or end of object literal
-    if (output[start] !== "}") {
+
+    let schemaText: string | undefined;
+    if (output[start] === "}") {
+      let depth = 1;
+      start--;
+      while (start >= 0 && depth > 0) {
+        if (output[start] === "}") depth++;
+        else if (output[start] === "{") depth--;
+        start--;
+      }
+      start++; // back to the opening brace
+      schemaText = output.slice(start, markerIdx).trim();
+    } else {
+      let tokenStart = start;
+      while (tokenStart >= 0 && /[A-Za-z]/.test(output[tokenStart]!)) {
+        tokenStart--;
+      }
+      tokenStart++;
+      const token = output.slice(tokenStart, start + 1).trim();
+      if (token === "true" || token === "false") {
+        schemaText = token;
+      }
+    }
+
+    if (!schemaText) {
       searchFrom = markerIdx + marker.length;
       continue;
     }
-    depth = 1;
-    start--;
-    while (start >= 0 && depth > 0) {
-      if (output[start] === "}") depth++;
-      else if (output[start] === "{") depth--;
-      start--;
-    }
-    start++; // back to the opening brace
-    const schemaText = output.slice(start, markerIdx).trim();
+
     schemas.push(schemaText);
     searchFrom = markerIdx + marker.length;
   }
@@ -49,8 +66,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "errors when parameter is 'unknown' but code accesses properties",
     async () => {
       const source = [
-        "/// <cts-enable />",
-        'import { pattern } from "commontools";',
+        'import { pattern } from "commonfabric";',
         "",
         "export default pattern((state: unknown) => {",
         "  const x = state.foo;",
@@ -59,7 +75,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "});",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -78,8 +94,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "errors when declared type is missing an accessed property",
     async () => {
       const source = [
-        "/// <cts-enable />",
-        'import { pattern } from "commontools";',
+        'import { pattern } from "commonfabric";',
         "",
         "export default pattern((state: { a: string }) => {",
         "  const x = state.a;",
@@ -88,7 +103,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "});",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -107,15 +122,14 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "errors on interprocedural unknown-type access in lift callback",
     async () => {
       const source = [
-        "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const helper = (x: unknown) => (x as any).foo;",
         "",
         "const fn = lift((state: unknown) => helper(state));",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -133,15 +147,14 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "errors on interprocedural path-not-in-type via as-any cast in lift callback",
     async () => {
       const source = [
-        "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const helper = (x: { a: string }) => (x as any).b;",
         "",
         "const fn = lift((state: { a: string }) => helper(state));",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -159,13 +172,12 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "errors when unknown parameter is passed to opaque function in lift",
     async () => {
       const source = [
-        "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const fn = lift((state: unknown) => console.log(state));",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -183,13 +195,12 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "no error when any parameter is passed to opaque function in lift",
     async () => {
       const source = [
-        "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const fn = lift((state: any) => console.log(state));",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -206,16 +217,41 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
-    "no error when concrete type is passed to opaque function in lift",
+    "no error when unknown parameter is passed to equals in lift",
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { equals, lift } from "commonfabric";',
+        "",
+        "const fn = lift((state: unknown) => equals(state, state));",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:unknown-type-access",
+      );
+      assertEquals(
+        shrinkErrors.length,
+        0,
+        `Expected no schema:unknown-type-access for equals(identity) but got: ${
+          shrinkErrors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
+    "no error when concrete type is passed to opaque function in lift",
+    async () => {
+      const source = [
+        'import { lift } from "commonfabric";',
         "",
         "const fn = lift((state: { a: string }) => console.log(state));",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -235,8 +271,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "errors when unknown parameter is passed to opaque function in pattern",
     async () => {
       const source = [
-        "/// <cts-enable />",
-        'import { pattern } from "commontools";',
+        'import { pattern } from "commonfabric";',
         "",
         "export default pattern((state: unknown) => {",
         "  console.log(state);",
@@ -244,7 +279,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "});",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -259,11 +294,142 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "errors when interface property is typed unknown in handler",
+    async () => {
+      const source = [
+        'import { handler } from "commonfabric";',
+        "",
+        "interface BatchEvent {",
+        "  amounts?: unknown;",
+        "  note?: unknown;",
+        "}",
+        "",
+        "export const h = handler(",
+        "  (event: BatchEvent) => {",
+        "    const x = event.amounts;",
+        "    return {};",
+        "  },",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:unknown-type-access",
+      );
+      assertGreater(
+        shrinkErrors.length,
+        0,
+        "Expected schema:unknown-type-access for unknown-typed property in interface",
+      );
+    },
+  );
+
+  await t.step(
+    "errors when interface property is typed unknown in pattern",
+    async () => {
+      const source = [
+        'import { pattern } from "commonfabric";',
+        "",
+        "interface State {",
+        "  data?: unknown;",
+        "}",
+        "",
+        "export default pattern((state: State) => {",
+        "  const x = state.data;",
+        "  return { x };",
+        "});",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:unknown-type-access",
+      );
+      assertGreater(
+        shrinkErrors.length,
+        0,
+        "Expected schema:unknown-type-access for unknown-typed property in pattern",
+      );
+    },
+  );
+
+  await t.step(
+    "no error when interface property is typed any (not unknown)",
+    async () => {
+      const source = [
+        'import { handler } from "commonfabric";',
+        "",
+        "interface BatchEvent {",
+        "  amounts?: any;",
+        "}",
+        "",
+        "export const h = handler(",
+        "  (event: BatchEvent) => {",
+        "    const x = event.amounts;",
+        "    return {};",
+        "  },",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:unknown-type-access",
+      );
+      assertEquals(
+        shrinkErrors.length,
+        0,
+        `Expected no schema:unknown-type-access for 'any'-typed property but got: ${
+          shrinkErrors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
+    "no error when interface property is typed with concrete type",
+    async () => {
+      const source = [
+        'import { handler } from "commonfabric";',
+        "",
+        "interface BatchEvent {",
+        "  amounts?: number[];",
+        "  note?: string;",
+        "}",
+        "",
+        "export const h = handler(",
+        "  (event: BatchEvent) => {",
+        "    const x = event.amounts;",
+        "    return {};",
+        "  },",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:unknown-type-access",
+      );
+      assertEquals(
+        shrinkErrors.length,
+        0,
+        `Expected no schema:unknown-type-access for concrete-typed properties but got: ${
+          shrinkErrors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
     "no error when handler parameter type is a type alias",
     async () => {
       const source = [
-        "/// <cts-enable />",
-        'import { handler } from "commontools";',
+        'import { handler } from "commonfabric";',
         "",
         "type Req = { item: string };",
         "",
@@ -272,7 +438,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -294,8 +460,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "no diagnostic when declared type matches all accessed paths",
     async () => {
       const source = [
-        "/// <cts-enable />",
-        'import { pattern } from "commontools";',
+        'import { pattern } from "commonfabric";',
         "",
         "export default pattern((state: { a: string; b: number }) => {",
         "  const x = state.a;",
@@ -304,7 +469,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "});",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -326,15 +491,14 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "no error when handler parameter is T | undefined",
     async () => {
       const source = [
-        "/// <cts-enable />",
-        'import { handler } from "commontools";',
+        'import { handler } from "commonfabric";',
         "",
         "export const h = handler<{ amount?: number } | undefined, {}>(",
         "  (args) => { console.log(args.amount); },",
         ");",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -356,15 +520,14 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "no error when handler parameter is a multi-member union",
     async () => {
       const source = [
-        "/// <cts-enable />",
-        'import { handler } from "commontools";',
+        'import { handler } from "commonfabric";',
         "",
         "export const h = handler<{ value?: number } | number | undefined, {}>(",
         "  (args) => { console.log(args.value); },",
         ");",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -386,8 +549,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "no error when handler parameter is TypeAlias | undefined",
     async () => {
       const source = [
-        "/// <cts-enable />",
-        'import { handler } from "commontools";',
+        'import { handler } from "commonfabric";',
         "",
         "interface Req { item: string }",
         "",
@@ -396,7 +558,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -418,13 +580,12 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "no error when lift accesses numeric index on array",
     async () => {
       const source = [
-        "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const fn = lift((items: number[]) => items[0]);",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -446,8 +607,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "no error when lift accesses .length on array type alias",
     async () => {
       const source = [
-        "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "type Items = Array<{ name: string }>;",
         "const hasItems = lift<Items, boolean>(",
@@ -455,7 +615,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -474,13 +634,40 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "errors when lift accesses .length on numeric index signature object",
+    async () => {
+      const source = [
+        'import { lift } from "commonfabric";',
+        "",
+        "type Indexed = { [index: number]: string };",
+        "const hasItems = lift<Indexed, boolean>(",
+        "  (items) => items.length > 0,",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:path-not-in-type",
+      );
+      assertGreater(
+        shrinkErrors.length,
+        0,
+        `Expected schema:path-not-in-type for numeric index signature .length access but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
     "no error when handler without type args has SomeType | undefined param",
     async () => {
       // Reproduces pattern-ingredient-scaler: handler() without type args
       // where the callback param is SomeType | undefined and accesses a property.
       const source = [
-        "/// <cts-enable />",
-        'import { type Cell, handler } from "commontools";',
+        'import { type Cell, handler } from "commonfabric";',
         "",
         "interface ServingsEvent { servings?: number; delta?: number }",
         "",
@@ -491,7 +678,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -517,16 +704,14 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "handler<E, T> generates same schemas as handler((e: E, t: T) => ...)",
     async () => {
       const sourceTypeArgs = [
-        "/// <cts-enable />",
-        'import { type Cell, handler } from "commontools";',
+        'import { type Cell, handler } from "commonfabric";',
         "",
         "export const h = handler<{ amount: number }, { total: Cell<number> }>(",
         "  (event, ctx) => { ctx.total.set(event.amount); },",
         ");",
       ].join("\n");
       const sourceInline = [
-        "/// <cts-enable />",
-        'import { type Cell, handler } from "commontools";',
+        'import { type Cell, handler } from "commonfabric";',
         "",
         "export const h = handler(",
         "  (event: { amount: number }, ctx: { total: Cell<number> }) => {",
@@ -535,10 +720,10 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const rTA = await validateSource(sourceTypeArgs, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const rInline = await validateSource(sourceInline, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       assertEquals(
         getShrinkErrors(rTA.diagnostics).length,
@@ -569,16 +754,14 @@ Deno.test("Schema Shrink Validation", async (t) => {
       // Remaining divergence: optional property encoding differs
       // (type-arg: {type:"number"}, inline: {anyOf:[{type:"number"},{type:"undefined"}]}).
       const sourceTypeArgs = [
-        "/// <cts-enable />",
-        'import { type Cell, handler } from "commontools";',
+        'import { type Cell, handler } from "commonfabric";',
         "",
         "export const h = handler<{ amount?: number } | undefined, { total: Cell<number> }>(",
         "  (event, ctx) => { ctx.total.set(event?.amount ?? 0); },",
         ");",
       ].join("\n");
       const sourceInline = [
-        "/// <cts-enable />",
-        'import { type Cell, handler } from "commontools";',
+        'import { type Cell, handler } from "commonfabric";',
         "",
         "export const h = handler(",
         "  (event: { amount?: number } | undefined, ctx: { total: Cell<number> }) => {",
@@ -587,10 +770,10 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const rTA = await validateSource(sourceTypeArgs, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const rInline = await validateSource(sourceInline, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       assertEquals(
         getShrinkErrors(rTA.diagnostics).length,
@@ -632,8 +815,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "handler<TypeAlias | undefined, TypeAlias> preserves | undefined in both forms",
     async () => {
       const sourceTypeArgs = [
-        "/// <cts-enable />",
-        'import { type Cell, handler } from "commontools";',
+        'import { type Cell, handler } from "commonfabric";',
         "",
         "interface ScaleEvent { servings?: number; delta?: number }",
         "interface ScaleState { desiredServings: Cell<number> }",
@@ -643,8 +825,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const sourceInline = [
-        "/// <cts-enable />",
-        'import { type Cell, handler } from "commontools";',
+        'import { type Cell, handler } from "commonfabric";',
         "",
         "interface ScaleEvent { servings?: number; delta?: number }",
         "interface ScaleState { desiredServings: Cell<number> }",
@@ -656,10 +837,10 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const rTA = await validateSource(sourceTypeArgs, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const rInline = await validateSource(sourceInline, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       assertEquals(
         getShrinkErrors(rTA.diagnostics).length,
@@ -699,26 +880,24 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "lift<T, R> generates same schemas as lift((x: T): R => ...)",
     async () => {
       const sourceTypeArgs = [
-        "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const fn = lift<{ count: number }, string>(",
         "  (state) => `count: ${state.count}`,",
         ");",
       ].join("\n");
       const sourceInline = [
-        "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const fn = lift(",
         "  (state: { count: number }): string => `count: ${state.count}`,",
         ");",
       ].join("\n");
       const rTA = await validateSource(sourceTypeArgs, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const rInline = await validateSource(sourceInline, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       assertEquals(
         getShrinkErrors(rTA.diagnostics).length,
@@ -745,26 +924,24 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       // Both forms now preserve `| undefined` in the input schema.
       const sourceTypeArgs = [
-        "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const fn = lift<{ count: number } | undefined, number>(",
         "  (state) => state?.count ?? 0,",
         ");",
       ].join("\n");
       const sourceInline = [
-        "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const fn = lift(",
         "  (state: { count: number } | undefined): number => state?.count ?? 0,",
         ");",
       ].join("\n");
       const rTA = await validateSource(sourceTypeArgs, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const rInline = await validateSource(sourceInline, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       assertEquals(
         getShrinkErrors(rTA.diagnostics).length,
@@ -804,8 +981,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     "lift<TypeAlias, R> generates same schemas as lift with inline alias",
     async () => {
       const sourceTypeArgs = [
-        "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "interface Item { name: string; price: number }",
         "",
@@ -814,8 +990,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const sourceInline = [
-        "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "interface Item { name: string; price: number }",
         "",
@@ -824,10 +999,10 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const rTA = await validateSource(sourceTypeArgs, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const rInline = await validateSource(sourceInline, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       assertEquals(
         getShrinkErrors(rTA.diagnostics).length,
@@ -852,32 +1027,27 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
-    "pattern<T> and inline form both produce valid schemas (KNOWN DIVERGENCE)",
+    "pattern<T> and inline destructured form produce identical schemas",
     async () => {
-      // Known divergence: pattern<T> produces both argument and result schemas
-      // (result schema has asOpaque on each property), while inline form produces
-      // only the argument schema. This needs more changes to reconcile.
       const sourceTypeArgs = [
-        "/// <cts-enable />",
-        'import { pattern } from "commontools";',
+        'import { pattern } from "commonfabric";',
         "",
         "export default pattern<{ name: string; count: number }>(({ name, count }) => {",
         "  return { name, count };",
         "});",
       ].join("\n");
       const sourceInline = [
-        "/// <cts-enable />",
-        'import { pattern } from "commontools";',
+        'import { pattern } from "commonfabric";',
         "",
         "export default pattern(({ name, count }: { name: string; count: number }) => {",
         "  return { name, count };",
         "});",
       ].join("\n");
       const rTA = await validateSource(sourceTypeArgs, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const rInline = await validateSource(sourceInline, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       assertEquals(
         getShrinkErrors(rTA.diagnostics).length,
@@ -901,22 +1071,19 @@ Deno.test("Schema Shrink Validation", async (t) => {
         0,
         "inline form should produce schemas",
       );
-      // Argument schemas (first schema) should match
       assertEquals(
-        schemasTA[0],
-        schemasInline[0],
-        "pattern argument schemas should be identical between type-arg and inline forms",
+        schemasTA,
+        schemasInline,
+        "pattern schemas should be identical between type-arg and inline forms",
       );
     },
   );
 
   await t.step(
-    "pattern<TypeAlias> and inline form both produce valid schemas (KNOWN DIVERGENCE)",
+    "pattern<TypeAlias> and inline destructured alias form produce identical schemas",
     async () => {
-      // Same divergence as above.
       const sourceTypeArgs = [
-        "/// <cts-enable />",
-        'import { pattern } from "commontools";',
+        'import { pattern } from "commonfabric";',
         "",
         "interface Args { name: string; count: number }",
         "",
@@ -925,8 +1092,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "});",
       ].join("\n");
       const sourceInline = [
-        "/// <cts-enable />",
-        'import { pattern } from "commontools";',
+        'import { pattern } from "commonfabric";',
         "",
         "interface Args { name: string; count: number }",
         "",
@@ -935,10 +1101,10 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "});",
       ].join("\n");
       const rTA = await validateSource(sourceTypeArgs, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const rInline = await validateSource(sourceInline, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       assertEquals(
         getShrinkErrors(rTA.diagnostics).length,
@@ -964,12 +1130,851 @@ Deno.test("Schema Shrink Validation", async (t) => {
         0,
         "inline form should produce schemas",
       );
-      // Argument schemas (first schema) should match
       assertEquals(
-        schemasTA[0],
-        schemasInline[0],
-        "pattern argument schemas should be identical between type-arg and inline forms",
+        schemasTA,
+        schemasInline,
+        "pattern schemas should be identical between type-arg and inline forms",
       );
+    },
+  );
+
+  await t.step(
+    "lift object-literal input preserves property schemas",
+    async () => {
+      const source = [
+        'import { cell, lift } from "commonfabric";',
+        "",
+        'const stage = cell<string>("initial");',
+        "const attemptCount = cell<number>(0);",
+        "const acceptedCount = cell<number>(0);",
+        "const rejectedCount = cell<number>(0);",
+        "",
+        "const normalizedStage = lift((value: string) => value)(stage);",
+        "const attempts = lift((count: number) => count)(attemptCount);",
+        "const accepted = lift((count: number) => count)(acceptedCount);",
+        "const rejected = lift((count: number) => count)(rejectedCount);",
+        "",
+        "const _summary = lift((snapshot) =>",
+        "  `stage:${snapshot.stage} attempts:${snapshot.attempts}` +",
+        "  ` accepted:${snapshot.accepted} rejected:${snapshot.rejected}`",
+        ")(",
+        "  {",
+        "    stage: normalizedStage,",
+        "    attempts: attempts,",
+        "    accepted: accepted,",
+        "    rejected: rejected,",
+        "  },",
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      assertStringIncludes(result.output, "stage: {");
+      assertStringIncludes(result.output, "attempts: {");
+      assertStringIncludes(result.output, "accepted: {");
+      assertStringIncludes(result.output, "rejected: {");
+      assertEquals(result.output.includes("stage: true"), false);
+      assertEquals(result.output.includes("attempts: true"), false);
+      assertEquals(result.output.includes("accepted: true"), false);
+      assertEquals(result.output.includes("rejected: true"), false);
+    },
+  );
+
+  await t.step(
+    "lift validates direct array parameters against item fields used in for...of loops",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commonfabric";',
+        "type AssetRecord = {",
+        "  id: string;",
+        "  stage: string;",
+        "  owner: string;",
+        "  unused: { nested: string };",
+        "};",
+        "type StageBucket = { id: string; stage: string; owner: string };",
+        "const toBuckets = lift((entries: AssetRecord[]): StageBucket[] => {",
+        "  const buckets: StageBucket[] = [];",
+        "  for (const entry of entries) {",
+        "    buckets.push({",
+        "      id: entry.id,",
+        "      stage: entry.stage,",
+        "      owner: entry.owner,",
+        "    });",
+        "  }",
+        "  return buckets;",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "id");
+      assertStringIncludes(inputSchema, "stage");
+      assertStringIncludes(inputSchema, "owner");
+      assertEquals(inputSchema.includes("unused"), false);
+      assertEquals(inputSchema.includes("nested"), false);
+    },
+  );
+
+  await t.step(
+    "lift validates array unions against item fields used after ?? fallback",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commonfabric";',
+        "type LeadScoreSummary = {",
+        "  id: string;",
+        "  score: number;",
+        "  unused: string;",
+        "};",
+        "const liftScoreByLead = lift((list: LeadScoreSummary[] | undefined) => {",
+        "  const record: Record<string, number> = {};",
+        "  for (const entry of list ?? []) {",
+        "    record[entry.id] = entry.score;",
+        "  }",
+        "  return record;",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "id");
+      assertStringIncludes(inputSchema, "score");
+    },
+  );
+
+  await t.step(
+    "lift preserves inherited interface fields used after ?? fallback",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commonfabric";',
+        "interface LeadState {",
+        "  id: string;",
+        "  name: string;",
+        "}",
+        "interface LeadScoreSummary extends LeadState {",
+        "  score: number;",
+        "  unused: string;",
+        "}",
+        "const liftScoreByLead = lift((list: LeadScoreSummary[] | undefined) => {",
+        "  const record: Record<string, number> = {};",
+        "  for (const entry of list ?? []) {",
+        "    record[entry.id] = entry.score;",
+        "  }",
+        "  return record;",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "id");
+      assertStringIncludes(inputSchema, "score");
+      assertEquals(inputSchema.includes("name"), false);
+      assertEquals(inputSchema.includes("unused"), false);
+    },
+  );
+
+  await t.step(
+    "lift preserves plain array callback item fields in shrunk schemas",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commonfabric";',
+        "type Route = { id: string; label: string; capacity: number; unused: string };",
+        "const liftLoadMetrics = lift((input: { routeList: Route[] }) =>",
+        "  input.routeList.map((route) => ({",
+        "    route: route.id,",
+        "    label: route.label,",
+        "    capacity: route.capacity,",
+        "  }))",
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "id");
+      assertStringIncludes(inputSchema, "label");
+      assertStringIncludes(inputSchema, "capacity");
+      assertEquals(inputSchema.includes("unused"), false);
+    },
+  );
+
+  await t.step(
+    "lift preserves tracked values stored in local Map lookups",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commonfabric";',
+        "type Component = { id: string; name: string; props: string[]; unused: string };",
+        "const liftNames = lift((input: { components: Component[]; ids: string[] }) => {",
+        "  const componentMap = new Map<string, Component>();",
+        "  input.components.forEach((component) => componentMap.set(component.id, component));",
+        "  return input.ids.map((id) => componentMap.get(id)?.name ?? id);",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "components");
+      assertStringIncludes(inputSchema, "id");
+      assertStringIncludes(inputSchema, "name");
+      assertEquals(inputSchema.includes("unused"), false);
+    },
+  );
+
+  await t.step(
+    "lift preserves tracked values stored in local arrays used by sort callbacks",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commonfabric";',
+        "type Candidate = { id: string; age: number; site: string; unused: string };",
+        "type Result = { candidate: Candidate; eligible: boolean };",
+        "const liftIds = lift((input: { candidates: Candidate[] }) => {",
+        "  const results: Result[] = [];",
+        "  for (const candidate of input.candidates) {",
+        "    results.push({ candidate, eligible: candidate.age >= 18 });",
+        "  }",
+        "  results.sort((left, right) => left.candidate.id.localeCompare(right.candidate.id));",
+        "  return results.length;",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "id");
+      assertStringIncludes(inputSchema, "age");
+      assertEquals(inputSchema.includes("unused"), false);
+    },
+  );
+
+  await t.step(
+    "lift preserves element bindings through filter-to-map chains",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commonfabric";',
+        "type ScreeningResult = {",
+        "  candidate: { id: string; site: string; unused: string };",
+        "  eligible: boolean;",
+        "};",
+        "const liftEligibleIds = lift((input: { report: ScreeningResult[] }) =>",
+        "  input.report",
+        "    .filter((entry) => entry.eligible)",
+        "    .map((entry) => entry.candidate.id)",
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "eligible");
+      assertStringIncludes(inputSchema, "candidate");
+      assertStringIncludes(inputSchema, "id");
+      assertEquals(inputSchema.includes("unused"), false);
+    },
+  );
+
+  await t.step(
+    "lift preserves properties read from find() result aliases",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commonfabric";',
+        "type IncidentStep = {",
+        "  id: string;",
+        "  title: string;",
+        "  owner: string;",
+        '  status: "pending" | "in_progress";',
+        "  expectedMinutes: number;",
+        "  elapsedMinutes: number;",
+        "};",
+        "const liftActiveStepTitle = lift((input: { list: IncidentStep[]; active: string | null }) => {",
+        "  const target = input.list.find((step) => step.id === input.active);",
+        '  return target ? target.title : "idle";',
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "list");
+      assertStringIncludes(inputSchema, "id");
+      assertStringIncludes(inputSchema, "title");
+      assertStringIncludes(inputSchema, "active");
+      assertEquals(inputSchema.includes("owner"), false);
+    },
+  );
+
+  await t.step(
+    "lift preserves direct properties read from find() results",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commonfabric";',
+        "type ParkingPerson = {",
+        "  name: string;",
+        "  priorityRank: number;",
+        "  defaultSpot: string;",
+        "};",
+        "const liftPriority = lift((input: { people: ParkingPerson[] }) =>",
+        '  input.people.find((person) => person.name === "Alice")?.priorityRank === 1',
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "people");
+      assertStringIncludes(inputSchema, "name");
+      assertStringIncludes(inputSchema, "priorityRank");
+      assertEquals(inputSchema.includes("defaultSpot"), false);
+    },
+  );
+
+  await t.step(
+    "lift keeps full receiver shape through unknown array methods",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commonfabric";',
+        "type ParkingPerson = {",
+        "  name: string;",
+        "  priorityRank: number;",
+        "  defaultSpot: string;",
+        "  active: boolean;",
+        "};",
+        "const liftPriority = lift((input: { people: ParkingPerson[]; other: string }) =>",
+        '  input.people.filter((person) => person.active).slice(0).find((person) => person.name === "Alice")?.priorityRank === 1',
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "people");
+      assertStringIncludes(inputSchema, "active");
+      assertStringIncludes(inputSchema, "name");
+      assertStringIncludes(inputSchema, "priorityRank");
+      assertStringIncludes(inputSchema, "defaultSpot");
+      assertEquals(inputSchema.includes("other"), false);
+    },
+  );
+
+  await t.step(
+    "lift preserves full receiver shape when identity use overlaps an unknown chain",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { equals, lift } from "commonfabric";',
+        "type ParkingPerson = {",
+        "  active: boolean;",
+        "  name: string;",
+        "  priorityRank: number;",
+        "  defaultSpot: string;",
+        "};",
+        "const samePeople = lift((input: { people: ParkingPerson[] }) =>",
+        "  equals(",
+        "    input.people,",
+        "    input.people.filter((person) => person.active).slice(0),",
+        "  )",
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "people");
+      assertStringIncludes(inputSchema, "active");
+      assertStringIncludes(inputSchema, "name");
+      assertStringIncludes(inputSchema, "priorityRank");
+      assertStringIncludes(inputSchema, "defaultSpot");
+    },
+  );
+
+  await t.step(
+    "lift shrinks item fields through right-hand ?? fallback aliases",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commonfabric";',
+        "type Note = { title: string; body: string };",
+        "const cached = undefined as Note[] | undefined;",
+        "const liftTitles = lift((input: { notes: Note[] }) => {",
+        "  const items = cached ?? input.notes;",
+        "  for (const item of items) {",
+        "    return item.title;",
+        "  }",
+        '  return "";',
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "notes");
+      assertStringIncludes(inputSchema, "title");
+      assertEquals(inputSchema.includes("body"), false);
+    },
+  );
+
+  await t.step(
+    "lift preserves array item properties named key",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commonfabric";',
+        'type ColumnKey = "backlog" | "inProgress" | "review" | "done";',
+        "interface KanbanTask { id: string; title: string; column: ColumnKey; points: number; }",
+        "interface ColumnSummary {",
+        "  key: ColumnKey;",
+        "  title: string;",
+        "  limit: number;",
+        "  count: number;",
+        "  overloaded: boolean;",
+        "  items: KanbanTask[];",
+        "}",
+        "const liftOverloadedColumns = lift((summaries: ColumnSummary[]) =>",
+        "  summaries",
+        "    .filter((summary) => summary.overloaded)",
+        "    .map((summary) => summary.key)",
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "overloaded");
+      assertStringIncludes(inputSchema, "key");
+      assertEquals(inputSchema.includes("title"), false);
+      assertEquals(inputSchema.includes("limit"), false);
+    },
+  );
+
+  await t.step(
+    "lift preserves chained || fallback fields in object inputs",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commonfabric";',
+        "const liftFirstOption = lift(",
+        "  (state: { name: string; firstItem: string | undefined }) =>",
+        '    state.name || state.firstItem || "default",',
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "name");
+      assertStringIncludes(inputSchema, "firstItem");
+    },
+  );
+
+  await t.step(
+    "lift narrows cell wrappers when callback only uses .get() on inferred input",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift, type Writable } from "commonfabric";',
+        "const value = {} as Writable<number>;",
+        "const doubled = lift((v) => v.get() * 2)(value);",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, 'asCell: ["readonly"]');
+      assertEquals(inputSchema.includes("asOpaque: true"), false);
+    },
+  );
+
+  await t.step(
+    "lift narrows cell wrappers when expression-bodied callback is a direct .get() call",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift, type Writable } from "commonfabric";',
+        "const value = {} as Writable<number>;",
+        "const copy = lift((v) => v.get())(value);",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, 'asCell: ["readonly"]');
+      assertEquals(inputSchema.includes("asOpaque: true"), false);
+    },
+  );
+
+  await t.step(
+    "handler preserves explicit primitive-object union event schemas through typeof narrowing",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { type Cell, handler } from "commonfabric";',
+        "type AppendValueEvent = { value?: number } | number | undefined;",
+        "const appendValueToList = handler(",
+        "  (event: AppendValueEvent, context: { values: Cell<number[]> }) => {",
+        '    const rawValue = typeof event === "number" ? event : event?.value;',
+        "    if (rawValue === undefined) return;",
+        "    context.values.push(rawValue);",
+        "  },",
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertEquals(
+        inputSchema === "true",
+        false,
+        "event schema should not widen to true",
+      );
+      assertStringIncludes(inputSchema, '"undefined"');
+      assertStringIncludes(inputSchema, "value");
+    },
+  );
+
+  await t.step(
+    "lift shrinks aliased fixed-symbol destructuring without pulling unrelated fields",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift, NAME as CF_NAME } from "commonfabric";',
+        "type Piece = {",
+        "  [CF_NAME]?: string;",
+        "  metadata: { author: string; tags: string[] };",
+        "};",
+        "const piece = {} as Piece;",
+        'const label = lift(({ piece: { [CF_NAME]: name } }) => name ?? "")({ piece });',
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "$NAME");
+      assertEquals(inputSchema.includes("metadata"), false);
+      assertEquals(inputSchema.includes("author"), false);
+    },
+  );
+
+  await t.step(
+    "pattern preserves defaults for fixed-symbol destructuring aliases",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { NAME as CF_NAME, pattern, UI } from "commonfabric";',
+        "type Piece = {",
+        "  [CF_NAME]?: string;",
+        "  metadata: { author: string; tags: string[] };",
+        "};",
+        'const p = pattern<Piece>(({ [CF_NAME]: name = "Untitled" }) => ({',
+        "  [UI]: <div>{name}</div>,",
+        "}));",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "$NAME");
+      assertStringIncludes(inputSchema, '"default": "Untitled"');
+    },
+  );
+
+  await t.step(
+    "lift preserves nullable cell wrappers for equals-only root inputs",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift, equals, type Writable } from "commonfabric";',
+        "const state = {} as (Writable<number> | undefined);",
+        "const same = lift((state) => equals(state, state))(state);",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, 'type: "undefined"');
+      assertStringIncludes(inputSchema, 'asCell: ["comparable"]');
+    },
+  );
+
+  await t.step(
+    "lift wildcard usage keeps conservative full-shape input schema",
+    async () => {
+      const source = [
+        'import { lift, type Writable } from "commonfabric";',
+        "const input = {} as Writable<{ foo: string; bar: string }>;",
+        "const d = lift((v: Writable<{ foo: string; bar: string }>) => {",
+        '  const foo = v.key("foo").get();',
+        "  Object.keys(v.get());",
+        "  return foo;",
+        "})(input);",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      assertStringIncludes(result.output, 'asCell: ["readonly"]');
+      assertStringIncludes(result.output, '"foo"');
+      assertStringIncludes(result.output, '"bar"');
+    },
+  );
+
+  await t.step(
+    "handler wildcard usage keeps conservative full-shape state schema",
+    async () => {
+      const source = [
+        'import { handler, type Writable } from "commonfabric";',
+        "const h = handler((event: { id: string }, state: Writable<{ foo: string; bar: string }>) => {",
+        '  const foo = state.key("foo").get();',
+        "  Object.keys(state.get());",
+        "  return foo + event.id;",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      assertStringIncludes(result.output, 'asCell: ["readonly"]');
+      assertStringIncludes(result.output, '"foo"');
+      assertStringIncludes(result.output, '"bar"');
     },
   );
 });

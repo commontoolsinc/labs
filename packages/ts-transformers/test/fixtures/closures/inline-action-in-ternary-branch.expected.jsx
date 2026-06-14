@@ -1,13 +1,24 @@
-import * as __ctHelpers from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 /**
  * Regression test: inline arrow function inside explicit computed() in JSX
  *
  * Variation where an inline arrow function handler is wrapped inside an
  * explicit computed() in JSX. The transformer will convert the arrow function
  * to a handler, and the Cell reference (state.isEditing) must be properly
- * captured in the derive wrapper created for the computed.
+ * captured in the lift-applied computation created for the computed.
  */
-import { Cell, computed, pattern, UI } from "commontools";
+import { Cell, computed, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Card {
     title: string;
     description: string;
@@ -16,95 +27,100 @@ interface State {
     card: Card;
     isEditing: Cell<boolean>;
 }
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                isEditing: {
+                    type: "boolean",
+                    asCell: ["writeonly"]
+                }
+            },
+            required: ["isEditing"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state }) => state.isEditing.set(true));
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        isEditing: __cfHelpers.ReadonlyCell<boolean>;
+    };
+}, __cfHelpers.JSXElement>(({ state }) => (<cf-button onClick={__cfHandler_1({
+    state: {
+        isEditing: state.isEditing
+    }
+})}>Edit</cf-button>), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                isEditing: {
+                    type: "boolean",
+                    asCell: ["readonly"]
+                }
+            },
+            required: ["isEditing"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: inline-action-in-ternary-branch
-// Verifies: inline arrow handler inside explicit computed() in a ternary branch is extracted and captured in derive
-//   computed(() => <ct-button onClick={() => state.isEditing.set(true)} />) → derive({ state: { isEditing: asCell } }, ..., handler(...)(...))
-// Context: Regression -- inline handler inside computed() must have its Cell ref captured in the derive wrapper
+// Verifies: inline arrow handler inside explicit computed() in a ternary branch is extracted and captured in a lift-applied computation
+//   computed(() => <cf-button onClick={() => state.isEditing.set(true)} />) → lift(..., handler(...)(...))({ state: { isEditing: asCell } })
+// Context: Regression -- inline handler inside computed() must have its Cell ref captured in the lift-applied computation
 export default pattern((state) => {
     return {
-        [UI]: (<ct-card>
-        {__ctHelpers.ifElse({
+        [UI]: (<cf-card>
+        {__cfHelpers.ifElse({
             type: "boolean",
-            asCell: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+            asCell: ["cell"]
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, state.key("isEditing"), <div>Editing</div>, <div>
+        } as const satisfies __cfHelpers.JSONSchema, state.key("isEditing"), <div>Editing</div>, <div>
             <span>{state.key("card", "title")}</span>
             {/* Explicit computed() wrapping a button with inline handler */}
-            {/* The Cell ref in the handler must be captured in the derive */}
-            {__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    state: {
-                        type: "object",
-                        properties: {
-                            isEditing: {
-                                type: "boolean",
-                                asCell: true
-                            }
-                        },
-                        required: ["isEditing"]
-                    }
-                },
-                required: ["state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, { state: {
+            {/* The Cell ref in the handler must be captured in the lift-applied computation */}
+            {__cfLift_1({ state: {
                     isEditing: state.key("isEditing")
-                } }, ({ state }) => (<ct-button onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
-                type: "object",
-                properties: {
-                    state: {
-                        type: "object",
-                        properties: {
-                            isEditing: {
-                                type: "boolean",
-                                asCell: true
-                            }
-                        },
-                        required: ["isEditing"]
-                    }
-                },
-                required: ["state"]
-            } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => state.isEditing.set(true))({
-                state: {
-                    isEditing: state.isEditing
-                }
-            })}>Edit</ct-button>))}
+                } })}
           </div>)}
-      </ct-card>),
+      </cf-card>),
         card: state.key("card"),
     };
 }, {
@@ -115,7 +131,7 @@ export default pattern((state) => {
         },
         isEditing: {
             type: "boolean",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["card", "isEditing"],
@@ -133,15 +149,14 @@ export default pattern((state) => {
             required: ["title", "description"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
             $ref: "#/$defs/JSXElement"
         },
         card: {
-            $ref: "#/$defs/Card",
-            asOpaque: true
+            $ref: "#/$defs/Card"
         }
     },
     required: ["$UI", "card"],
@@ -162,11 +177,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -179,8 +193,11 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfHandler_1,
+    __cfLift_1
+});

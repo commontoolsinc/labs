@@ -1,47 +1,31 @@
-import * as __ctHelpers from "commontools";
-import { pattern, type Writable, UI } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { pattern, type Writable, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     foo: string;
     bar: string;
 }
-// FIXTURE: pattern-preserve-opaque-input
-// Verifies: Writable<T> pattern input is preserved as an opaque ref, with JSX .get() wrapped in derive
-//   input.key("foo").get() in JSX → derive({ input }, ({ input }) => input.key("foo").get())
-// Context: When the pattern parameter is typed as Writable<State>, the input
-//   schema uses asOpaque: true. The .get() call inside JSX is not in a safe
-//   reactive context, so it gets wrapped in a derive.
-export default pattern((input: Writable<State>) => {
-    return {
-        [UI]: <div>{__ctHelpers.derive({
-            type: "object",
-            properties: {
-                input: {
-                    $ref: "#/$defs/State",
-                    asCell: true
-                }
-            },
-            required: ["input"],
-            $defs: {
-                State: {
-                    type: "object",
-                    properties: {
-                        foo: {
-                            type: "string"
-                        },
-                        bar: {
-                            type: "string"
-                        }
-                    },
-                    required: ["foo", "bar"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { input: input }, ({ input: input_1 }) => input.key("foo").get())}</div>,
-    };
-}, {
-    $ref: "#/$defs/State",
-    asOpaque: true,
+const __cfLift_1 = __cfHelpers.lift<{
+    input: __cfHelpers.Writable<State>;
+}, string>(({ input }) => input.key("foo").get(), {
+    type: "object",
+    properties: {
+        input: {
+            $ref: "#/$defs/State",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["input"],
     $defs: {
         State: {
             type: "object",
@@ -56,7 +40,37 @@ export default pattern((input: Writable<State>) => {
             required: ["foo", "bar"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+// FIXTURE: pattern-preserve-opaque-input
+// Verifies: Writable<T> pattern input is preserved as an opaque ref, with JSX .get() wrapped in a lift-applied computation
+//   input.key("foo").get() in JSX → lift(({ input }) => input.key("foo").get())({ input })
+// Context: When the pattern parameter is typed as Writable<State>, the input
+//   schema uses asOpaque: true. The .get() call inside JSX is not in a safe
+//   reactive context, so it gets wrapped in a lift-applied computation.
+export default pattern((input: Writable<State>) => {
+    return {
+        [UI]: <div>{__cfLift_1({ input: input })}</div>,
+    };
+}, {
+    $ref: "#/$defs/State",
+    asCell: ["opaque"],
+    $defs: {
+        State: {
+            type: "object",
+            properties: {
+                foo: {
+                    type: "string"
+                },
+                bar: {
+                    type: "string"
+                }
+            },
+            required: ["foo", "bar"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -69,11 +83,10 @@ export default pattern((input: Writable<State>) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -86,8 +99,10 @@ export default pattern((input: Writable<State>) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

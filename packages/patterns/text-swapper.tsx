@@ -1,22 +1,21 @@
-/// <cts-enable />
 /**
  * Text Swapper
  *
  * Simple pattern with two text labels and a swap button between them.
  * Click on either label to rename it via modal.
  */
-import { Default, handler, pattern, UI, Writable } from "commontools";
+import { Default, handler, pattern, UI, Writable } from "commonfabric";
 
 // ============ TYPES ============
 
 type EditingSide = "left" | "right" | null;
 
 interface Input {
-  leftText: Writable<Default<string, "Hello">>;
-  rightText: Writable<Default<string, "World">>;
+  leftText: Writable<string | Default<"Hello">>;
+  rightText: Writable<string | Default<"World">>;
 }
 
-interface Output {
+export interface Output {
   leftText: string;
   rightText: string;
 }
@@ -107,9 +106,9 @@ const closeModal = handler<
 
 export default pattern<Input, Output>(({ leftText, rightText }) => {
   // Modal state
-  const showModal = Writable.of<boolean>(false);
-  const editingSide = Writable.of<EditingSide>(null);
-  const editValue = Writable.of<string>("");
+  const showModal = new Writable<boolean>(false);
+  const editingSide = new Writable<EditingSide>(null);
+  const editValue = new Writable<string>("");
 
   const labelStyle = {
     padding: "12px 24px",
@@ -146,9 +145,9 @@ export default pattern<Input, Output>(({ leftText, rightText }) => {
           {leftText}
         </div>
 
-        <ct-button onClick={swapTexts({ leftText, rightText })}>
+        <cf-button onClick={swapTexts({ leftText, rightText })}>
           ⇄ Swap
-        </ct-button>
+        </cf-button>
 
         <div
           style={labelStyle}
@@ -163,7 +162,7 @@ export default pattern<Input, Output>(({ leftText, rightText }) => {
         </div>
 
         {/* Edit Modal */}
-        <ct-modal $open={showModal} dismissable size="sm" label="Edit Text">
+        <cf-modal $open={showModal} dismissable size="sm" label="Edit Text">
           <span slot="header">
             Edit {editingSide.get() === "left" ? "Left" : "Right"} Text
           </span>
@@ -179,7 +178,7 @@ export default pattern<Input, Output>(({ leftText, rightText }) => {
             >
               Text
             </label>
-            <ct-input
+            <cf-input
               $value={editValue}
               placeholder="Enter text..."
               style="width: 100%;"
@@ -231,7 +230,7 @@ export default pattern<Input, Output>(({ leftText, rightText }) => {
               Save
             </button>
           </div>
-        </ct-modal>
+        </cf-modal>
       </div>
     ),
   };

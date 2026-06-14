@@ -1,5 +1,16 @@
-import * as __ctHelpers from "commontools";
-import { lift } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { lift } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Person {
     name: string;
     age: number;
@@ -14,7 +25,10 @@ const currentYear = 2024;
 //   lift((person: Person): PersonWithYear => ...) → lift(inputSchema, outputSchema, fn)
 // Context: lift() appears as a JSX child expression; schemas derived from param + return type annotations
 export const result = (<div>
-    {lift({
+    {lift((person: Person): PersonWithYear => ({
+        name: person.name,
+        birthYear: currentYear - person.age,
+    }), {
         type: "object",
         properties: {
             name: {
@@ -25,7 +39,7 @@ export const result = (<div>
             }
         },
         required: ["name", "age"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             name: {
@@ -36,12 +50,8 @@ export const result = (<div>
             }
         },
         required: ["name", "birthYear"]
-    } as const satisfies __ctHelpers.JSONSchema, (person: Person): PersonWithYear => ({
-        name: person.name,
-        birthYear: currentYear - person.age,
-    }))}
+    } as const satisfies __cfHelpers.JSONSchema)}
   </div>);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);

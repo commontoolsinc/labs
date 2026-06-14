@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Relationship Module - Pattern for people connections
  *
@@ -13,7 +12,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -45,13 +44,13 @@ type ClosenessLevel = "intimate" | "close" | "casual" | "distant";
 
 export interface RelationshipModuleInput {
   /** Relationship types (e.g., friend, family, colleague) */
-  relationTypes: Default<string[], []>;
+  relationTypes: string[] | Default<[]>;
   /** Closeness level */
-  closeness: Default<ClosenessLevel | "", "">;
+  closeness: ClosenessLevel | "" | Default<"">;
   /** How we met */
-  howWeMet: Default<string, "">;
+  howWeMet: string | Default<"">;
   /** Inner circle member */
-  innerCircle: Default<boolean, false>;
+  innerCircle: boolean | Default<false>;
 }
 
 // ===== Constants =====
@@ -115,13 +114,13 @@ export const RelationshipModule = pattern<
         `${MODULE_METADATA.icon} Relationship: ${displayText}`
       ),
       [UI]: (
-        <ct-vstack style={{ gap: "16px" }}>
+        <cf-vstack style={{ gap: "16px" }}>
           {/* Relation types (multi-select chips) */}
-          <ct-vstack style={{ gap: "4px" }}>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Relationship Type(s)
             </label>
-            <ct-hstack style={{ gap: "8px", flexWrap: "wrap" }}>
+            <cf-hstack style={{ gap: "8px", flexWrap: "wrap" }}>
               {RELATION_TYPE_OPTIONS.map((type, index) => {
                 const isSelected = computed(() =>
                   (relationTypes || []).some((t: string) => t === type)
@@ -147,31 +146,31 @@ export const RelationshipModule = pattern<
                   </button>
                 );
               })}
-            </ct-hstack>
-          </ct-vstack>
+            </cf-hstack>
+          </cf-vstack>
 
           {/* Closeness */}
-          <ct-vstack style={{ gap: "4px" }}>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Closeness
             </label>
-            <ct-select $value={closeness} items={CLOSENESS_OPTIONS} />
-          </ct-vstack>
+            <cf-select $value={closeness} items={CLOSENESS_OPTIONS} />
+          </cf-vstack>
 
           {/* How we met */}
-          <ct-vstack style={{ gap: "4px" }}>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               How We Met
             </label>
-            <ct-textarea
+            <cf-textarea
               $value={howWeMet}
               placeholder="How did you meet?"
               rows={2}
             />
-          </ct-vstack>
+          </cf-vstack>
 
           {/* Inner circle toggle */}
-          <ct-hstack style={{ alignItems: "center", gap: "8px" }}>
+          <cf-hstack style={{ alignItems: "center", gap: "8px" }}>
             <button
               type="button"
               onClick={toggleInnerCircle({ innerCircle })}
@@ -192,8 +191,8 @@ export const RelationshipModule = pattern<
               {innerCircle ? "✓" : ""}
             </button>
             <span style={{ fontSize: "14px" }}>Inner Circle ⭐</span>
-          </ct-hstack>
-        </ct-vstack>
+          </cf-hstack>
+        </cf-vstack>
       ),
       relationTypes,
       closeness,

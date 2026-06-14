@@ -1,5 +1,5 @@
-import { refer } from "@commontools/memory/reference";
-import { isRecord } from "@commontools/utils/types";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { isRecord } from "@commonfabric/utils/types";
 import { isOpaqueRef } from "./builder/types.ts";
 import {
   getCellOrThrow,
@@ -17,8 +17,13 @@ export type EntityId = {
 /**
  * Generates an entity ID.
  *
+ * Derivation inputs must resolve: a Cell with no entityId or an OpaqueRef with
+ * no value throws rather than minting a random substitute, so a derived id never
+ * silently becomes non-deterministic (audit S14). A missing `cause`, by
+ * contrast, deliberately mints a fresh random id.
+ *
  * @param source - The source object.
- * @param cause - Optional causal source. Otherwise a random n is used.
+ * @param cause - Optional causal source. If omitted, a random id is minted.
  */
 export function createRef(
   source: Record<string | number | symbol, any> = {},
@@ -33,8 +38,8 @@ export function createRef(
   const seen = new Set<any>();
 
   // Unwrap query result proxies, replace docs with their ids and remove
-  // functions and undefined values, since `merkle-reference` doesn't support
-  // them.
+  // functions and undefined values, since our data model doesn't support them.
+  // TODO(danfuzz): Revisit this when `undefined` is fully supported.
   function traverse(obj: any): any {
     // Avoid cycles — only track objects/arrays/functions (not primitives).
     // Primitives use value equality in Set, so repeated strings like
@@ -64,11 +69,11 @@ export function createRef(
     if (isOpaqueRef(obj)) {
       const val = obj.export().value;
       if (val == null) {
-        console.error(
-          "[createRef] OpaqueRef has no value — falling back to randomUUID",
-          new Error().stack,
+        // An OpaqueRef feeding a derived id must carry a value; otherwise the
+        // id would silently become non-deterministic (audit S14). Fail closed.
+        throw new Error(
+          "[createRef] OpaqueRef has no value; cannot derive a stable id",
         );
-        return crypto.randomUUID();
       }
       return val;
     }
@@ -82,11 +87,12 @@ export function createRef(
     if (isCell(obj)) {
       const id = obj.entityId;
       if (id == null) {
-        console.error(
-          "[createRef] Cell has no entityId — falling back to randomUUID",
-          new Error().stack,
+        // A Cell referenced from a derived id must have an entityId; otherwise
+        // the id would silently become non-deterministic (audit S14). Fail
+        // closed rather than mint a random substitute.
+        throw new Error(
+          "[createRef] Cell has no entityId; cannot derive a stable id",
         );
-        return crypto.randomUUID();
       }
       return id;
     } else if (Array.isArray(obj)) return obj.map(traverse);
@@ -99,7 +105,7 @@ export function createRef(
     else return obj;
   }
 
-  return refer(traverse({ ...source, causal: cause }));
+  return hashOf(traverse({ ...source, causal: cause }));
 }
 
 /**
@@ -119,8 +125,6 @@ export function getEntityId(value: any): { "/": string } | undefined {
   const entityId = { "/": fromURI(link.id) };
 
   if (link.path && link.path.length > 0) {
-    return JSON.parse(
-      JSON.stringify(createRef({ path: link.path }, entityId)),
-    );
+    return createRef({ path: link.path }, entityId).toJSON!();
   } else return entityId;
 }

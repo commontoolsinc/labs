@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { cell } from "commontools";
+import { cell } from "commonfabric";
 
 // FIXTURE: literal-widen-boolean
 // Verifies: boolean literals (true/false) are widened to { type: "boolean" } schema

@@ -6,15 +6,32 @@
  * and handles bidirectional bindings and event dispatch.
  */
 
-import type { CellRef, RuntimeClient } from "@commontools/runtime-client";
+import type { CellRef, RuntimeClient } from "@commonfabric/runtime-client";
 import { serializeEvent } from "./events.ts";
 import type { DomEventMessage } from "./events.ts";
 import type { VDomBatch, VDomOp } from "../vdom-ops.ts";
-import { CellHandle } from "@commontools/runtime-client";
+import { CellHandle, cellRefToKey } from "@commonfabric/runtime-client";
 import { setPropDefault, type SetPropHandler } from "../render-utils.ts";
-import { getLogger } from "@commontools/utils/logger";
+import { getLogger } from "@commonfabric/utils/logger";
+import { provideElementSpace } from "./space-context.ts";
 
 const logger = getLogger("vdom-applicator", { enabled: false, level: "debug" });
+
+const ELEMENT_NODE = 1;
+const TEXT_NODE = 3;
+
+function hasNodeType(node: unknown, nodeType: number): boolean {
+  return typeof node === "object" && node !== null &&
+    (node as { nodeType?: unknown }).nodeType === nodeType;
+}
+
+function isElementNode(node: unknown): node is HTMLElement {
+  return hasNodeType(node, ELEMENT_NODE);
+}
+
+function isTextNode(node: unknown): node is Node {
+  return hasNodeType(node, TEXT_NODE);
+}
 
 /**
  * Reserved node ID for the container element.
@@ -107,7 +124,7 @@ export class DomApplicator {
   private applyOp(op: VDomOp): void {
     switch (op.op) {
       case "create-element":
-        this.createElement(op.nodeId, op.tagName);
+        this.createElement(op.nodeId, op.tagName, op.space);
         break;
 
       case "create-text":
@@ -266,8 +283,11 @@ export class DomApplicator {
 
   // ============== Operation Implementations ==============
 
-  private createElement(nodeId: number, tagName: string): void {
+  private createElement(nodeId: number, tagName: string, space?: string): void {
     const element = this.document.createElement(tagName);
+    if (space !== undefined) {
+      provideElementSpace(element, space);
+    }
     this.nodes.set(nodeId, element);
   }
 
@@ -278,14 +298,14 @@ export class DomApplicator {
 
   private updateText(nodeId: number, text: string): void {
     const node = this.nodes.get(nodeId);
-    if (node && node.nodeType === Node.TEXT_NODE) {
+    if (isTextNode(node)) {
       node.textContent = text;
     }
   }
 
   private setProp(nodeId: number, key: string, value: unknown): void {
     const node = this.nodes.get(nodeId);
-    if (!(node instanceof HTMLElement)) return;
+    if (!isElementNode(node)) return;
 
     // Use the configured property setter (defaults to setPropDefault)
     this.setPropHandler(node, key, value);
@@ -293,7 +313,7 @@ export class DomApplicator {
 
   private removeProp(nodeId: number, key: string): void {
     const node = this.nodes.get(nodeId);
-    if (!(node instanceof HTMLElement)) return;
+    if (!isElementNode(node)) return;
 
     if (key.startsWith("on") && key.length > 2) {
       this.removeEvent(nodeId, key.slice(2).toLowerCase());
@@ -314,6 +334,7 @@ export class DomApplicator {
 
     // Remove existing listener for this event type
     this.removeEvent(nodeId, eventType);
+    this.removeEventForNode(node, eventType);
 
     // Create new listener
     const listener: EventListener = (event: Event) => {
@@ -339,6 +360,22 @@ export class DomApplicator {
     (node as EventTarget).addEventListener(eventType, listener);
   }
 
+  private removeEventForNode(node: Node, eventType: string): void {
+    for (const [trackedNodeId, listeners] of this.eventListeners) {
+      const trackedNode = this.nodes.get(trackedNodeId);
+      if (trackedNode !== node) continue;
+
+      const listener = listeners.get(eventType);
+      if (!listener) continue;
+
+      (node as EventTarget).removeEventListener(eventType, listener);
+      listeners.delete(eventType);
+      if (listeners.size === 0) {
+        this.eventListeners.delete(trackedNodeId);
+      }
+    }
+  }
+
   private removeEvent(nodeId: number, eventType: string): void {
     const listeners = this.eventListeners.get(nodeId);
     if (!listeners) return;
@@ -355,14 +392,45 @@ export class DomApplicator {
 
   private setBinding(nodeId: number, propName: string, cellRef: CellRef): void {
     const node = this.nodes.get(nodeId);
-    if (!(node instanceof HTMLElement)) return;
+    if (!isElementNode(node)) return;
+
+    const existing = (node as any)[propName];
+    if (
+      existing instanceof CellHandle &&
+      cellRefToKey(existing.ref()) === cellRefToKey(cellRef)
+    ) {
+      return;
+    }
 
     // Create a CellHandle from the CellRef
     const cellHandle = new CellHandle(this.runtimeClient, cellRef);
 
     // Set the CellHandle on the element's property
-    // Custom elements like ct-input and ct-checkbox expect this
+    // Custom elements like cf-input and cf-checkbox expect this
     (node as any)[propName] = cellHandle;
+    this.notifyBoundProperty(node, propName);
+  }
+
+  private notifyBoundProperty(
+    node: HTMLElement,
+    propName: string,
+  ): void {
+    const element = node as HTMLElement & {
+      requestUpdate?: (name?: PropertyKey, oldValue?: unknown) => void;
+    };
+
+    if (typeof element.requestUpdate === "function") {
+      element.requestUpdate(propName, undefined);
+      return;
+    }
+
+    const tagName = element.localName ?? element.tagName?.toLowerCase();
+    if (!tagName || !tagName.includes("-")) {
+      return;
+    }
+    void globalThis.customElements?.whenDefined(tagName).then(() => {
+      element.requestUpdate?.(propName, undefined);
+    });
   }
 
   private insertChild(

@@ -1,5 +1,6 @@
 import { isAbsolute, join } from "@std/path";
-import type { ExperimentalOptions } from "@commontools/runner";
+import type { ExperimentalOptions } from "@commonfabric/runner";
+import { cliName } from "./cli-name.ts";
 
 export function absPath(relpath: string, cwd = Deno.cwd()): string {
   // TODO(js): homedir check is not cross platform
@@ -16,19 +17,30 @@ export function absPath(relpath: string, cwd = Deno.cwd()): string {
  * (felt.config.ts) so all three share one source of truth.
  */
 export function experimentalOptionsFromEnv(): ExperimentalOptions {
-  const read = (name: string) => Deno.env.get(name) === "true";
-  const opts: ExperimentalOptions = {
-    richStorableValues: read("EXPERIMENTAL_RICH_STORABLE_VALUES"),
-    storableProtocol: read("EXPERIMENTAL_STORABLE_PROTOCOL"),
-    unifiedJsonEncoding: read("EXPERIMENTAL_UNIFIED_JSON_ENCODING"),
-    canonicalHashing: read("EXPERIMENTAL_CANONICAL_HASHING"),
+  /**
+   * Results in `true` (on), `false` (off), or `undefined` (default).
+   */
+  const read = (name: string): boolean | undefined => {
+    const v = Deno.env.get(name);
+    return v === undefined ? undefined : v === "true";
   };
-  const active = Object.entries(opts).filter(([, v]) => v);
-  if (active.length > 0) {
+  const opts: ExperimentalOptions = {
+    modernCellRep: read("EXPERIMENTAL_MODERN_CELL_REP"),
+    persistentSchedulerState: read(
+      "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
+    ),
+  };
+
+  // Log any overridden experimental flags.
+  const overrideFlags = Object.entries(opts)
+    .filter(([_, v]) => v !== undefined)
+    .map(([k, v]) => `${k}=${v}`);
+  if (overrideFlags.length > 0) {
     console.error(
-      `[ct] Experimental flags: ${active.map(([k]) => k).join(", ")}`,
+      `[${cliName()}] Experimental flag overrides: ${overrideFlags.join(", ")}`,
     );
   }
+
   return opts;
 }
 
@@ -49,7 +61,7 @@ export async function awaitSyncWithTimeout(
         new Error(
           `Sync timed out after ${timeoutMs / 1000}s. ` +
             `This often indicates a client/server configuration mismatch ` +
-            `(e.g., EXPERIMENTAL_CANONICAL_HASHING enabled on the server but not the CLI). ` +
+            `(e.g., an EXPERIMENTAL_* option enabled on the server but not the CLI). ` +
             `Check toolshed logs for AuthorizationError details.`,
         ),
       );

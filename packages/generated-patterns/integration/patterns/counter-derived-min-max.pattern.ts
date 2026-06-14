@@ -1,14 +1,12 @@
-/// <cts-enable />
 import {
   type Cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
   str,
-  toSchema,
-} from "commontools";
+  type Writable,
+} from "commonfabric";
 
 interface DerivedMinMaxArgs {
   value: Default<number, 0>;
@@ -79,21 +77,19 @@ const adjustCounter = handler(
   },
 );
 
-const computeLimits = lift(
-  toSchema<{ values: Cell<number[]>; current: Cell<number> }>(),
-  toSchema<{ min: number; max: number }>(),
-  ({ values, current }) => {
-    const entries = sanitizeHistory(values.get());
-    const baseline = toInteger(current.get());
-    if (entries.length === 0) {
-      return { min: baseline, max: baseline };
-    }
-    return {
-      min: minimumOf(entries),
-      max: maximumOf(entries),
-    };
-  },
-);
+const computeLimits = lift<
+  { values: Writable<number[]>; current: Writable<number> }
+>(({ values, current }) => {
+  const entries = sanitizeHistory([...values.get()]);
+  const baseline = toInteger(current.get());
+  if (entries.length === 0) {
+    return { min: baseline, max: baseline };
+  }
+  return {
+    min: minimumOf(entries),
+    max: maximumOf(entries),
+  };
+});
 
 const liftToInteger = lift((input: number | undefined) => toInteger(input));
 const liftSanitizeHistory = lift(sanitizeHistory);
@@ -106,8 +102,8 @@ export const counterWithDerivedMinMax = pattern<DerivedMinMaxArgs>(
       values: historyValues,
       current: currentValue,
     });
-    const minValue = derive(limits, (snapshot) => snapshot.min);
-    const maxValue = derive(limits, (snapshot) => snapshot.max);
+    const minValue = limits.min;
+    const maxValue = limits.max;
     const label = str`Min: ${minValue}, Max: ${maxValue}`;
 
     return {

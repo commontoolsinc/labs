@@ -1,6 +1,15 @@
 import ts from "typescript";
 
-import type { DataFlowGraph, DataFlowNode } from "./dataflow.ts";
+import type {
+  DataFlowAnalysis,
+  DataFlowGraph,
+  DataFlowNode,
+} from "./dataflow.ts";
+import { classifyArrayMethodCallSite, detectCallKind } from "./call-kind.ts";
+import {
+  classifyReactiveContext,
+  type ReactiveContextLookup,
+} from "./reactive-context.ts";
 import { getExpressionText } from "./utils.ts";
 
 export interface NormalizedDataFlow {
@@ -10,18 +19,204 @@ export interface NormalizedDataFlow {
   readonly scopeId: number;
 }
 
-export interface NormalizedDataFlowSet {
-  readonly all: readonly NormalizedDataFlow[];
-  readonly byCanonicalKey: ReadonlyMap<string, NormalizedDataFlow>;
+function originatesFromIgnoredParameter(
+  expression: ts.Expression,
+  scopeId: number,
+  analysis: DataFlowAnalysis,
+  checker: ts.TypeChecker,
+  lookup?: ReactiveContextLookup,
+): boolean {
+  const scope = analysis.graph.scopes.find((candidate) =>
+    candidate.id === scopeId
+  );
+  if (!scope) return false;
+
+  const isIgnoredSymbol = (symbol: ts.Symbol | undefined): boolean => {
+    if (!symbol) return false;
+    const symbolName = symbol.getName();
+    return scope.parameters.some((parameter) => {
+      if (parameter.symbol === symbol || parameter.name === symbolName) {
+        if (
+          parameter.declaration &&
+          isOpaqueCallParameter(parameter.declaration, checker, lookup)
+        ) {
+          return false;
+        }
+        return true;
+      }
+      return false;
+    });
+  };
+
+  const inner = (expr: ts.Expression): boolean => {
+    if (ts.isIdentifier(expr)) {
+      const symbol = checker.getSymbolAtLocation(expr);
+
+      if (!symbol) {
+        return scope.parameters.some((parameter) => {
+          if (parameter.name !== expr.text) {
+            return false;
+          }
+          if (
+            parameter.declaration &&
+            isOpaqueCallParameter(
+              parameter.declaration,
+              checker,
+              lookup,
+            )
+          ) {
+            return false;
+          }
+          return true;
+        });
+      }
+
+      return isIgnoredSymbol(symbol);
+    }
+    if (
+      ts.isPropertyAccessExpression(expr) || ts.isElementAccessExpression(expr)
+    ) {
+      return inner(expr.expression);
+    }
+    if (ts.isCallExpression(expr)) {
+      return inner(expr.expression);
+    }
+    return false;
+  };
+
+  return inner(expression);
+}
+
+function isOpaqueCallParameter(
+  declaration: ts.ParameterDeclaration,
+  checker: ts.TypeChecker,
+  lookup?: ReactiveContextLookup,
+): boolean {
+  let functionNode: ts.Node | undefined = declaration.parent;
+  while (functionNode && !ts.isFunctionLike(functionNode)) {
+    functionNode = functionNode.parent;
+  }
+  if (!functionNode) return false;
+
+  let candidate: ts.Node | undefined = functionNode.parent;
+  while (candidate && !ts.isCallExpression(candidate)) {
+    candidate = candidate.parent;
+  }
+  if (!candidate) return false;
+
+  const callKind = detectCallKind(candidate, checker);
+  if (callKind?.kind === "builder") {
+    return true;
+  }
+
+  const arrayMethodCallSite = classifyArrayMethodCallSite(candidate, checker);
+  if (arrayMethodCallSite?.ownership !== "reactive") {
+    return false;
+  }
+
+  if (!lookup) {
+    return true;
+  }
+
+  const reactiveContext = classifyReactiveContext(
+    candidate,
+    checker,
+    lookup,
+  );
+  return reactiveContext.kind === "pattern";
+}
+
+function filterRelevantDataFlows(
+  dataFlows: readonly NormalizedDataFlow[],
+  analysis: DataFlowAnalysis,
+  checker: ts.TypeChecker,
+  lookup?: ReactiveContextLookup,
+): readonly NormalizedDataFlow[] {
+  const hasSyntheticRoot = (expr: ts.Expression): boolean => {
+    let current = expr;
+    while (
+      ts.isPropertyAccessExpression(current) ||
+      ts.isElementAccessExpression(current)
+    ) {
+      current = current.expression;
+    }
+    if (ts.isIdentifier(current)) {
+      return !checker.getSymbolAtLocation(current);
+    }
+    return false;
+  };
+
+  const filterIgnoredParams = (
+    candidateFlows: readonly NormalizedDataFlow[],
+  ): readonly NormalizedDataFlow[] =>
+    candidateFlows.filter((dataFlow) =>
+      !originatesFromIgnoredParameter(
+        dataFlow.expression,
+        dataFlow.scopeId,
+        analysis,
+        checker,
+        lookup,
+      )
+    );
+
+  const syntheticDataFlows = dataFlows.filter((df) =>
+    hasSyntheticRoot(df.expression)
+  );
+
+  if (syntheticDataFlows.length > 0) {
+    const hasSyntheticMapParams = syntheticDataFlows.some((df) => {
+      let rootExpr: ts.Expression = df.expression;
+      while (
+        ts.isPropertyAccessExpression(rootExpr) ||
+        ts.isElementAccessExpression(rootExpr)
+      ) {
+        rootExpr = rootExpr.expression;
+      }
+      if (ts.isIdentifier(rootExpr)) {
+        const name = rootExpr.text;
+        return name === "element" || name === "index" || name === "array";
+      }
+      return false;
+    });
+
+    if (hasSyntheticMapParams) {
+      const nonSyntheticDataFlows = dataFlows.filter((df) =>
+        !hasSyntheticRoot(df.expression)
+      );
+
+      const isInMarkedCallback = !!lookup?.isArrayMethodCallback &&
+        dataFlows.some((df) => {
+          const scope = analysis.graph.scopes.find((s) => s.id === df.scopeId);
+          if (!scope || scope.parameters.length === 0) return false;
+
+          const firstParam = scope.parameters[0];
+          if (!firstParam?.declaration) return false;
+
+          let node: ts.Node | undefined = firstParam.declaration.parent;
+          while (node) {
+            if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+              return lookup.isArrayMethodCallback(node);
+            }
+            node = node.parent;
+          }
+          return false;
+        });
+
+      return filterIgnoredParams(
+        nonSyntheticDataFlows.length === 0 || isInMarkedCallback
+          ? dataFlows
+          : nonSyntheticDataFlows,
+      );
+    }
+  }
+
+  return filterIgnoredParams(dataFlows);
 }
 
 export function normalizeDataFlows(
   graph: DataFlowGraph,
   requestedDataFlows?: ts.Expression[],
-): NormalizedDataFlowSet {
-  const nodesById = new Map<number, DataFlowNode>();
-  for (const node of graph.nodes) nodesById.set(node.id, node);
-
+): readonly NormalizedDataFlow[] {
   // If specific dataFlows were requested, only process nodes corresponding to those expressions
   // This prevents suppressing nodes that are explicitly needed as dependencies
   let nodesToProcess = graph.nodes;
@@ -39,7 +234,6 @@ export function normalizeDataFlows(
     nodes: DataFlowNode[];
     scopeId: number;
   }>();
-  const nodeToGroup = new Map<number, string>();
 
   const normalizeExpression = (node: DataFlowNode): ts.Expression => {
     let current: ts.Expression = node.expression;
@@ -113,35 +307,22 @@ export function normalizeDataFlows(
       grouped.set(key, group);
     }
     group.nodes.push(node);
-    nodeToGroup.set(node.id, key);
   }
 
   const suppressed = new Set<string>();
+  const explicitChildrenByParentId = new Set(
+    graph.nodes
+      .filter((node) => node.isExplicit && node.parentId !== null)
+      .map((node) => node.parentId!),
+  );
 
   // Parent suppression: suppress parents that have more specific children
   // BUT: If we're working with explicitly requested dataFlows, don't suppress any of them
   // They were all explicitly requested as dependencies
   if (!requestedDataFlows || requestedDataFlows.length === 0) {
     for (const [canonicalKey, group] of grouped.entries()) {
-      // Check if any node in this group has an explicit child
-      // If so, this parent should be suppressed in favor of the more specific child
-      for (const node of group.nodes) {
-        let hasExplicitChild = false;
-
-        // Check all nodes to see if any child is explicit
-        for (const potentialChild of graph.nodes) {
-          if (
-            potentialChild.parentId === node.id && potentialChild.isExplicit
-          ) {
-            hasExplicitChild = true;
-            break;
-          }
-        }
-
-        if (hasExplicitChild) {
-          suppressed.add(canonicalKey);
-          break;
-        }
+      if (group.nodes.some((node) => explicitChildrenByParentId.has(node.id))) {
+        suppressed.add(canonicalKey);
       }
     }
   }
@@ -149,7 +330,7 @@ export function normalizeDataFlows(
   const filtered = Array.from(grouped.entries())
     .filter(([canonicalKey]) => !suppressed.has(canonicalKey));
 
-  const all: NormalizedDataFlow[] = filtered.map(([canonicalKey, value]) => ({
+  return filtered.map(([canonicalKey, value]) => ({
     canonicalKey,
     expression: value.expression,
     occurrences: value.nodes,
@@ -159,14 +340,23 @@ export function normalizeDataFlows(
     const bId = b.occurrences[0]?.id ?? -1;
     return aId - bId;
   });
+}
 
-  return {
-    all,
-    byCanonicalKey: new Map(all.map((dependency) => [
-      dependency.canonicalKey,
-      dependency,
-    ])),
-  };
+export function getRelevantDataFlows(
+  analysis: DataFlowAnalysis,
+  checker: ts.TypeChecker,
+  lookup?: ReactiveContextLookup,
+): readonly NormalizedDataFlow[] {
+  const normalized = normalizeDataFlows(
+    analysis.graph,
+    analysis.dataFlows,
+  );
+  return filterRelevantDataFlows(
+    normalized,
+    analysis,
+    checker,
+    lookup,
+  );
 }
 
 const isWithin = (outer: ts.Node, inner: ts.Node): boolean => {
@@ -174,10 +364,10 @@ const isWithin = (outer: ts.Node, inner: ts.Node): boolean => {
 };
 
 export function selectDataFlowsWithin(
-  set: NormalizedDataFlowSet,
+  dataFlows: readonly NormalizedDataFlow[],
   node: ts.Node,
 ): NormalizedDataFlow[] {
-  return set.all.filter((dataFlow) =>
+  return dataFlows.filter((dataFlow) =>
     dataFlow.occurrences.some((occurrence) =>
       isWithin(node, occurrence.expression)
     )
@@ -196,7 +386,7 @@ export function selectDataFlowsWithin(
  * @returns Data flows whose expressions are referenced within the node
  */
 export function selectDataFlowsReferencedIn(
-  set: NormalizedDataFlowSet,
+  dataFlows: readonly NormalizedDataFlow[],
   node: ts.Node,
 ): NormalizedDataFlow[] {
   const referencedExpressions = new Set<string>();
@@ -211,7 +401,7 @@ export function selectDataFlowsReferencedIn(
   visit(node);
 
   // Return data flows whose expression text matches any referenced expression
-  return set.all.filter((dataFlow) => {
+  return dataFlows.filter((dataFlow) => {
     const flowExprText = getExpressionText(dataFlow.expression);
     return referencedExpressions.has(flowExprText);
   });

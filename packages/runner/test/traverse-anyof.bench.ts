@@ -1,12 +1,12 @@
-import { refer } from "merkle-reference/json";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import type {
   Entity,
   Revision,
   SchemaPathSelector,
   State,
-  StorableDatum,
   URI,
-} from "@commontools/memory/interface";
+} from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   IMemorySpaceValueAttestation,
   SchemaObjectTraverser,
@@ -19,7 +19,7 @@ import type { JSONSchema, JSONSchemaTypes } from "../src/builder/types.ts";
 function getTraverser(
   store: Map<string, Revision<State>>,
   selector: SchemaPathSelector,
-): SchemaObjectTraverser<StorableDatum> {
+): SchemaObjectTraverser<FabricValue> {
   const manager = new StoreObjectManager(store);
   const managedTx = new ManagedStorageTransaction(manager);
   const tx = new ExtendedStorageTransaction(managedTx);
@@ -29,7 +29,7 @@ function getTraverser(
 function makeDoc(
   store: Map<string, Revision<State>>,
   uri: string,
-  value: StorableDatum,
+  value: FabricValue,
 ): IMemorySpaceValueAttestation {
   const type = "application/json" as const;
   const entity = uri as Entity;
@@ -37,7 +37,7 @@ function makeDoc(
     the: type,
     of: entity,
     is: { value },
-    cause: refer({ the: type, of: entity }),
+    cause: hashOf({ the: type, of: entity }),
     since: 1,
   };
   store.set(`${revision.of}/${revision.the}`, revision);

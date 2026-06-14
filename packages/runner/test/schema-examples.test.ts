@@ -3,11 +3,11 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import "@commontools/utils/equal-ignoring-symbols";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import "@commonfabric/utils/equal-ignoring-symbols";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Cell, isCell } from "../src/cell.ts";
-import type { StorableValue } from "@commontools/memory/interface";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { SigilLink } from "../src/sigil-types.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -131,7 +131,7 @@ describe("Schema - Examples", () => {
               type: "object",
               properties: { label: { type: "string" } },
               required: ["label"],
-              asCell: true,
+              asCell: ["cell"],
             },
           },
           required: ["value", "current"],
@@ -141,7 +141,7 @@ describe("Schema - Examples", () => {
       cell.withTx(tx).setRawUntyped({
         value: "root",
         current: innerCell.getAsLink(),
-      } as StorableValue);
+      } as FabricValue);
 
       tx.commit();
       tx = runtime.edit();
@@ -278,7 +278,7 @@ describe("Schema - Examples", () => {
             type: "object",
             properties: { label: { type: "string" } },
             required: ["label"],
-            asCell: true,
+            asCell: ["cell"],
           },
         },
         required: ["value", "current"],
@@ -350,8 +350,8 @@ describe("Schema - Examples", () => {
         id: toURI(docCell.entityId!),
         path: ["current", "label"],
         space,
+        scope: "space",
         schema: current.schema,
-        type: "application/json",
       });
 
       // .get() the currently selected cell. This should not change when
@@ -379,7 +379,7 @@ describe("Schema - Examples", () => {
         id: toURI(initialEntityId),
         path: ["foo"],
         space,
-        type: "application/json",
+        scope: "space",
         schema: omitSchema,
       });
       const log = txToReactivityLog(tx);
@@ -394,14 +394,14 @@ describe("Schema - Examples", () => {
       expect(
         reads.some((r) =>
           r.id === toURI(docCell.entityId!) &&
-          r.path[0] === "current"
+          r.path[0] === "value" && r.path[1] === "current"
         ),
       ).toBe(true);
       // The initial entity is read via followPointer at the "foo" sub-path.
       expect(
         reads.some((r) =>
           r.id === toURI(initialEntityId) &&
-          r.path[0] === "foo"
+          r.path[0] === "value" && r.path[1] === "foo"
         ),
       ).toBe(true);
 

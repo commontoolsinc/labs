@@ -7,7 +7,7 @@ import {
   maybeReuseIdentifier,
   normalizeBindingName,
 } from "../../utils/identifiers.ts";
-import { createDeriveCall } from "../../transformers/builtins/derive.ts";
+import { createLiftAppliedCall } from "../../transformers/builtins/lift-applied.ts";
 
 function isBindingPattern(name: ts.BindingName): name is ts.BindingPattern {
   return ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name);
@@ -65,7 +65,7 @@ function buildElementBindingPlan(
             const symbol = checker.getSymbolAtLocation(element.name);
             if (symbol) {
               const aliasName = element.name.text;
-              const keyBase = `__ct_${aliasName}_key`;
+              const keyBase = `__cf_${aliasName}_key`;
               const unique = getUniqueIdentifier(keyBase, keyNames, {
                 fallback: keyBase,
               });
@@ -86,7 +86,7 @@ function buildElementBindingPlan(
         if (propertyName && ts.isIdentifier(propertyName)) {
           nextPath = [...path, propertyName.text];
           const base = nextTemplate ??
-            factory.createIdentifier("__ct_placeholder");
+            factory.createIdentifier("__cf_placeholder");
           nextTemplate = factory.createPropertyAccessExpression(
             base,
             factory.createIdentifier(propertyName.text),
@@ -94,7 +94,7 @@ function buildElementBindingPlan(
         } else if (propertyName && ts.isStringLiteral(propertyName)) {
           nextPath = [...path, propertyName.text];
           const base = nextTemplate ??
-            factory.createIdentifier("__ct_placeholder");
+            factory.createIdentifier("__cf_placeholder");
           nextTemplate = factory.createElementAccessExpression(
             base,
             factory.createStringLiteral(propertyName.text),
@@ -102,7 +102,7 @@ function buildElementBindingPlan(
         } else if (!propertyName && ts.isIdentifier(element.name)) {
           nextPath = [...path, element.name.text];
           const base = nextTemplate ??
-            factory.createIdentifier("__ct_placeholder");
+            factory.createIdentifier("__cf_placeholder");
           nextTemplate = factory.createPropertyAccessExpression(
             base,
             factory.createIdentifier(element.name.text),
@@ -181,7 +181,7 @@ export function analyzeElementBinding(
 
   if (!elemParam) {
     const identifier = createBindingIdentifier(
-      captureTree.has("element") ? "__ct_element" : "element",
+      captureTree.has("element") ? "__cf_element" : "element",
     );
     return {
       bindingName: identifier,
@@ -217,7 +217,7 @@ export function analyzeElementBinding(
   }
 
   const elementIdentifier = createBindingIdentifier(
-    captureTree.has("element") ? "__ct_element" : "element",
+    captureTree.has("element") ? "__cf_element" : "element",
   );
 
   let destructureStatement: ts.Statement | undefined;
@@ -251,12 +251,12 @@ export function analyzeElementBinding(
   };
 }
 
-function createDerivedAliasExpression(
+function createAliasExpressionAsLiftApplied(
   info: ComputedAliasInfo,
   elementIdentifier: ts.Identifier,
   context: TransformationContext,
 ): ts.Expression {
-  const { factory, ctHelpers, tsContext, checker } = context;
+  const { factory, cfHelpers, tsContext, checker } = context;
   const keyIdent = factory.createIdentifier(info.keyIdentifier.text);
 
   const accessBase = createCaptureAccessExpression(
@@ -273,29 +273,29 @@ function createDerivedAliasExpression(
 
   // Register the type of the synthetic elementAccess in typeRegistry.
   // The type comes from info.symbol which was captured from the original
-  // binding element. Without this registration, createDeriveCall cannot
-  // determine the correct result type for the synthetic derive.
-  if (context.options.typeRegistry && info.symbol) {
+  // binding element. Without this registration, createLiftAppliedCall cannot
+  // determine the correct result type for the synthetic lift-applied call.
+  if (context.options.state?.typeRegistry && info.symbol) {
     const symbolType = checker.getTypeOfSymbol(info.symbol);
     if (symbolType) {
-      context.options.typeRegistry.set(elementAccess, symbolType);
+      context.options.state?.typeRegistry.set(elementAccess, symbolType);
     }
   }
 
   const elementRef = factory.createIdentifier(elementIdentifier.text);
 
-  const deriveExpression = createDeriveCall(
+  const liftAppliedExpression = createLiftAppliedCall(
     elementAccess,
     [elementRef, keyIdent],
     {
       factory,
       tsContext,
-      ctHelpers,
+      cfHelpers,
       context,
     },
   );
 
-  return deriveExpression ?? elementAccess;
+  return liftAppliedExpression ?? elementAccess;
 }
 
 export function rewriteCallbackBody(
@@ -334,7 +334,7 @@ export function rewriteCallbackBody(
               factory.createIdentifier(info.aliasName),
               undefined,
               undefined,
-              createDerivedAliasExpression(
+              createAliasExpressionAsLiftApplied(
                 info,
                 analysis.elementIdentifier,
                 context,

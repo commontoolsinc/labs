@@ -6,37 +6,44 @@
  * TypeScript compilation overhead for patterns that don't need schema inference.
  *
  * Usage:
- *   import type { Schema } from "commontools/schema";
+ *   import type { Schema } from "commonfabric/schema";
  *   // or
- *   import type { Schema } from "@commontools/api/schema";
+ *   import type { Schema } from "@commonfabric/api/schema";
  *
  * When imported, this module also augments the function types from the main API
- * (PatternFunction, DeriveFunction, etc.) with schema-based overloads.
+ * (PatternFunction, HandlerFunction, etc.) with schema-based overloads.
  */
 
 import type {
+  AsCellType,
   Cell,
+  ComparableCell,
   HandlerFactory,
   JSONSchema,
   ModuleFactory,
   Opaque,
+  OpaqueCell,
   OpaqueRef,
   PatternFactory,
+  ReadonlyCell,
   SELF,
   Stream,
-} from "commontools";
+  WriteonlyCell,
+} from "commonfabric";
 
 // ===== Helper Types =====
 
 /**
  * Helper type to recursively remove `readonly` properties from type `T`.
  *
- * (Duplicated from @commontools/utils/types.ts, but we want to keep this
+ * (Duplicated from @commonfabric/utils/types.ts, but we want to keep this
  * independent for now)
  */
 export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
   : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
   : T;
+
+type IsAny<T> = 0 extends (1 & T) ? true : false;
 
 // ===== JSON Pointer Path Resolution Utilities =====
 
@@ -154,7 +161,7 @@ type SchemaCore<
   Depth extends DepthLevel,
   WrapCells extends boolean,
 > = T extends { $ref: "#" } ? SchemaInner<
-    Omit<Root, "asCell" | "asStream">,
+    Omit<Root, "asCell">,
     Root,
     DecrementDepth<Depth>,
     WrapCells
@@ -201,21 +208,58 @@ type SchemaCore<
     : Record<string, unknown>
   : any;
 
+type WrapperList<T extends JSONSchema> = T extends
+  { asCell: infer AC extends readonly AsCellType[] } ? AC
+  : readonly [];
+
+type StripWrappers<T extends JSONSchema> = Omit<T, "asCell">;
+
+type ShiftWrapper<T extends readonly AsCellType[]> = T extends
+  readonly [infer _First extends AsCellType, ...infer Rest extends AsCellType[]]
+  ? Rest
+  : readonly [];
+
+type FirstWrapper<T extends readonly AsCellType[]> = T extends
+  readonly [infer First extends AsCellType, ...infer _Rest extends AsCellType[]]
+  ? First
+  : T[number];
+
+type WrapperKind<W extends AsCellType> = W extends { kind: infer K } ? K : W;
+
+type ReapplyWrappers<
+  T extends JSONSchema,
+  Wrappers extends readonly AsCellType[],
+> = Wrappers extends readonly [] ? StripWrappers<T>
+  : StripWrappers<T> & { asCell: Wrappers };
+
+type ApplyWrapper<W extends AsCellType, T> = W extends AsCellType
+  ? WrapperKind<W> extends "cell" ? Cell<T>
+  : WrapperKind<W> extends "stream" ? Stream<T>
+  : WrapperKind<W> extends "opaque" ? OpaqueCell<T>
+  : WrapperKind<W> extends "readonly" ? ReadonlyCell<T>
+  : WrapperKind<W> extends "writeonly" ? WriteonlyCell<T>
+  : WrapperKind<W> extends "comparable" ? ComparableCell<T>
+  : T
+  : never;
+
 type SchemaInner<
   T extends JSONSchema,
   Root extends JSONSchema = T,
   Depth extends DepthLevel = 9,
   WrapCells extends boolean = true,
-> = Depth extends 0 ? unknown
-  : T extends { asCell: true }
-    ? WrapCells extends true
-      ? Cell<SchemaInner<Omit<T, "asCell">, Root, Depth, WrapCells>>
-    : SchemaInner<Omit<T, "asCell">, Root, Depth, WrapCells>
-  : T extends { asStream: true }
-    ? WrapCells extends true
-      ? Stream<SchemaInner<Omit<T, "asStream">, Root, Depth, WrapCells>>
-    : SchemaInner<Omit<T, "asStream">, Root, Depth, WrapCells>
-  : SchemaCore<T, Root, Depth, WrapCells>;
+> = IsAny<T> extends true ? any
+  : Depth extends 0 ? unknown
+  : WrapperList<T> extends readonly [] ? SchemaCore<T, Root, Depth, WrapCells>
+  : WrapCells extends true ? ApplyWrapper<
+      FirstWrapper<WrapperList<T>>,
+      SchemaInner<
+        ReapplyWrappers<T, ShiftWrapper<WrapperList<T>>>,
+        Root,
+        Depth,
+        WrapCells
+      >
+    >
+  : SchemaInner<StripWrappers<T>, Root, Depth, WrapCells>;
 
 /**
  * Convert a JSONSchema type to its corresponding TypeScript type.
@@ -312,7 +356,12 @@ type DecrementDepth<D extends DepthLevel> = Decrement[D] & DepthLevel;
 
 /**
  * Like Schema<T> but without Cell/Stream wrapping.
- * Used for type parameters in factory return types.
+ *
+ * INPUT-POSITION ONLY: used for factory *argument* type parameters, where the
+ * stripped shape feeds `Opaque<...>` acceptance. Factory *result* type
+ * parameters use `Schema<T>` so that `asCell`/`asStream` entries surface as
+ * Cell<>/Stream<> brands — matching what consumers actually receive at runtime
+ * (see the boundary principle on PatternFunction in index.ts).
  */
 export type SchemaWithoutCell<
   T extends JSONSchema,
@@ -322,7 +371,7 @@ export type SchemaWithoutCell<
 
 // ===== Module Augmentation for Schema-based Overloads =====
 
-declare module "commontools" {
+declare module "commonfabric" {
   // Augment PatternFunction with schema-based overloads
   interface PatternFunction {
     // Function + two schemas: infer types from JSONSchema literals
@@ -332,7 +381,7 @@ declare module "commontools" {
       ) => Opaque<Schema<OS>>,
       argumentSchema: IS,
       resultSchema: OS,
-    ): PatternFactory<SchemaWithoutCell<IS>, SchemaWithoutCell<OS>>;
+    ): PatternFactory<SchemaWithoutCell<IS>, Schema<OS>>;
 
     // Function + one schema: infer input type from JSONSchema literal
     <IS extends JSONSchema = JSONSchema>(
@@ -343,13 +392,28 @@ declare module "commontools" {
     ): PatternFactory<SchemaWithoutCell<IS>, any>;
   }
 
-  // Augment LiftFunction with schema-based overload
+  // Augment LiftFunction with schema-based overloads (callback-first, matching
+  // the index.ts ordering and the PatternFunction shape above). The callback's
+  // input/result types are MATERIALIZED from the supplied JSONSchema literals via
+  // Schema<>, so the provided schema and the callback's types can never
+  // contradict — the schema is the single source of truth.
   interface LiftFunction {
-    <T extends JSONSchema = JSONSchema, R extends JSONSchema = JSONSchema>(
-      argumentSchema: T,
-      resultSchema: R,
-      implementation: (input: Schema<T>) => Schema<R>,
-    ): ModuleFactory<SchemaWithoutCell<T>, SchemaWithoutCell<R>>;
+    // Callback + two schemas: input type from argSchema, result type from resSchema.
+    <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
+      implementation: (input: Schema<IS>) => Schema<OS>,
+      argumentSchema: IS,
+      resultSchema: OS,
+    ): ModuleFactory<SchemaWithoutCell<IS>, Schema<OS>>;
+
+    // Callback + one schema: input type from argSchema; result type inferred from
+    // the callback's return.
+    <IS extends JSONSchema = JSONSchema>(
+      implementation: (input: Schema<IS>) => any,
+      argumentSchema: IS,
+    ): ModuleFactory<
+      SchemaWithoutCell<IS>,
+      ReturnType<typeof implementation>
+    >;
   }
 
   // Augment HandlerFunction with schema-based overload
@@ -361,28 +425,12 @@ declare module "commontools" {
     ): HandlerFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
   }
 
-  // Augment DeriveFunction with schema-based overload
-  /** @deprecated Use compute() instead */
-  interface DeriveFunction {
-    <
-      InputSchema extends JSONSchema = JSONSchema,
-      ResultSchema extends JSONSchema = JSONSchema,
-    >(
-      argumentSchema: InputSchema,
-      resultSchema: ResultSchema,
-      input: Opaque<SchemaWithoutCell<InputSchema>>,
-      f: (
-        input: Schema<InputSchema>,
-      ) => Schema<ResultSchema>,
-    ): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
-  }
-
   // Augment WishFunction with schema-based overloads
   interface WishFunction {
     <S extends JSONSchema = JSONSchema>(
-      target: Opaque<import("commontools").WishParams>,
+      target: Opaque<WishParams>,
       schema: S,
-    ): OpaqueRef<import("commontools").WishState<Schema<S>>>;
+    ): OpaqueRef<WishState<Schema<S>>>;
   }
 
   // Augment IResolvable with schema-based getArgumentCell overload
@@ -394,9 +442,14 @@ declare module "commontools" {
 
   // Augment CellTypeConstructor with schema-based of() overload
   interface CellTypeConstructor<Wrap> {
+    new <S extends JSONSchema>(
+      value: Schema<S>,
+      schema: S,
+    ): Apply<Wrap, Schema<S>>;
+
     of<S extends JSONSchema>(
       value: Schema<S>,
       schema: S,
-    ): import("commontools").Apply<Wrap, Schema<S>>;
+    ): Apply<Wrap, Schema<S>>;
   }
 }

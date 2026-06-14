@@ -1,11 +1,10 @@
-/// <cts-enable />
 /**
  * Test Pattern for Superstition #33
  *
  * Tests whether computed() creates read-only projections vs property access maintaining writability.
  *
  * Claim:
- * - computed(() => obj.property) creates a read-only projection (writes silently fail)
+ * - computed(() => obj.property) creates a read-only projection (writes are ineffective)
  * - obj.property maintains live Cell reference (writes work)
  *
  * This pattern creates a "source" object with an auth-like structure, then tests
@@ -18,8 +17,10 @@ import {
   handler,
   NAME,
   pattern,
+  safeDateNow,
+  toIndentedDebugString,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 interface AuthData {
   token: string;
@@ -34,15 +35,17 @@ interface Source {
 
 // Schema definition for default value
 interface InputSchema {
-  source: Default<Source, {
-    auth: { token: "initial-token"; expiresAt: 0; refreshCount: 0 };
-    name: "Test Source";
-  }>;
+  source:
+    | Source
+    | Default<{
+      auth: { token: "initial-token"; expiresAt: 0; refreshCount: 0 };
+      name: "Test Source";
+    }>;
 }
 
 // Pattern output type - describes the inner value, not the cell wrapper
 // The pattern returns OpaqueCell<Source>, so output type is `Source`
-interface Output {
+export interface Output {
   source: Source;
 }
 
@@ -55,7 +58,7 @@ const updateViaComputed = handler<
   const current = computedAuth.get();
   computedAuth.set({
     ...current,
-    token: "updated-via-computed-" + Date.now(),
+    token: "updated-via-computed-" + safeDateNow(),
     refreshCount: current.refreshCount + 1,
   });
 });
@@ -69,7 +72,7 @@ const updateViaKey = handler<
   const current = authViaKey.get();
   authViaKey.set({
     ...current,
-    token: "updated-via-key-" + Date.now(),
+    token: "updated-via-key-" + safeDateNow(),
     refreshCount: current.refreshCount + 1,
   });
 });
@@ -85,7 +88,7 @@ const updateDirect = handler<
     ...current,
     auth: {
       ...current.auth,
-      token: "updated-direct-" + Date.now(),
+      token: "updated-direct-" + safeDateNow(),
       refreshCount: current.auth.refreshCount + 1,
     },
   });
@@ -98,7 +101,7 @@ export default pattern<InputSchema, Output>(({ source }) => {
 
   // Approach 2: .key() method - claims to maintain writability
   // Note: .key() returns OpaqueCell which is used in handlers for writes
-  const authViaKey = source.key("auth");
+  const authViaKey = (source as any).key("auth");
 
   // For display - all use direct property access on source
   // (both computedAuth and source.auth should show the same values)
@@ -128,7 +131,8 @@ export default pattern<InputSchema, Output>(({ source }) => {
           <ul>
             <li>
               <code>computed(() =&gt; obj.property)</code> creates a{" "}
-              <strong>read-only projection</strong> - writes silently fail
+              <strong>read-only projection</strong>{" "}
+              - writes do not update the source
             </li>
             <li>
               <code>obj.key("property")</code> maintains{" "}
@@ -173,9 +177,9 @@ export default pattern<InputSchema, Output>(({ source }) => {
             <div style={{ marginBottom: "10px" }}>
               <strong>Refresh Count:</strong> {computedRefreshCount}
             </div>
-            <ct-button onClick={updateViaComputed({ computedAuth })}>
+            <cf-button onClick={updateViaComputed({ computedAuth })}>
               Update via Computed
-            </ct-button>
+            </cf-button>
           </div>
 
           {/* .key() Access */}
@@ -206,9 +210,9 @@ export default pattern<InputSchema, Output>(({ source }) => {
             <div style={{ marginBottom: "10px" }}>
               <strong>Refresh Count:</strong> {directRefreshCount}
             </div>
-            <ct-button onClick={updateViaKey({ authViaKey })}>
+            <cf-button onClick={updateViaKey({ authViaKey })}>
               Update via .key()
-            </ct-button>
+            </cf-button>
           </div>
 
           {/* Direct Source (Control) */}
@@ -239,9 +243,9 @@ export default pattern<InputSchema, Output>(({ source }) => {
             <div style={{ marginBottom: "10px" }}>
               <strong>Refresh Count:</strong> {directRefreshCount}
             </div>
-            <ct-button onClick={updateDirect({ source })}>
+            <cf-button onClick={updateDirect({ source })}>
               Update Direct
-            </ct-button>
+            </cf-button>
           </div>
         </div>
 
@@ -257,7 +261,7 @@ export default pattern<InputSchema, Output>(({ source }) => {
           <ul>
             <li>
               <strong style={{ color: "#e74c3c" }}>Computed:</strong>{" "}
-              Click should NOT update token (silent failure)
+              Click should NOT update token
             </li>
             <li>
               <strong style={{ color: "#27ae60" }}>.key():</strong>{" "}
@@ -284,7 +288,7 @@ export default pattern<InputSchema, Output>(({ source }) => {
         >
           <h3>Raw Source State:</h3>
           <pre style={{ fontSize: "12px", overflow: "auto" }}>
-            {computed(() => JSON.stringify({ auth: source.auth, name: source.name }, null, 2))}
+            {computed(() => toIndentedDebugString({ auth: source.auth, name: source.name }))}
           </pre>
         </div>
       </div>

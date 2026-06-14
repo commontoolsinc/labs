@@ -4,16 +4,36 @@ import {
   Runtime,
   RuntimeProgram,
   type Schema,
-} from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache";
-import { type NameSchema, nameSchema } from "@commontools/runner/schemas";
+} from "@commonfabric/runner";
+import type { CellScope } from "@commonfabric/api";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
+import { type NameSchema, nameSchema } from "@commonfabric/runner/schemas";
 import { PieceManager } from "../index.ts";
 import { PieceController } from "./piece-controller.ts";
 import { compileProgram } from "./utils.ts";
-import { createSession, Identity } from "@commontools/identity";
-import { HttpProgramResolver } from "@commontools/js-compiler";
+import { createSession, Identity } from "@commonfabric/identity";
+import { HttpProgramResolver } from "@commonfabric/js-compiler";
 import { ACLManager } from "./acl-manager.ts";
-import { homeSchema } from "@commontools/home-schemas";
+import { homeSchema } from "@commonfabric/home-schemas";
+
+const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
+  Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
+
+async function timePiecesPhase<T>(
+  label: string,
+  run: () => T | Promise<T>,
+): Promise<T> {
+  if (!PIECE_TRACE_TIMINGS) {
+    return await run();
+  }
+  const start = performance.now();
+  try {
+    return await run();
+  } finally {
+    const elapsed = Math.round(performance.now() - start);
+    console.error(`[piece-phase] ${elapsed}ms :: ${label}`);
+  }
+}
 
 export interface CreatePieceOptions {
   input?: object;
@@ -39,16 +59,18 @@ export class PiecesController<T = unknown> {
     cause: string | undefined = undefined,
   ): Promise<PieceController<U>> {
     this.disposeCheck();
+    const start = options.start ?? true;
     const pattern = await compileProgram(this.#manager, program);
     const piece = await this.#manager.runPersistent<U>(
       pattern,
       options.input,
       cause,
-      undefined,
-      { start: options.start ?? true },
+      { start },
     );
-    await this.#manager.runtime.idle();
-    await this.#manager.synced();
+    if (!start) {
+      await this.#manager.runtime.idle();
+      await this.#manager.synced();
+    }
     return new PieceController<U>(this.#manager, piece);
   }
 
@@ -56,27 +78,33 @@ export class PiecesController<T = unknown> {
     pieceId: string,
     runIt: boolean,
     schema: S,
+    scope?: CellScope,
   ): Promise<PieceController<Schema<S>>>;
   async get<T = unknown>(
     pieceId: string,
     runIt?: boolean,
     schema?: JSONSchema,
+    scope?: CellScope,
   ): Promise<PieceController<T>>;
   async get(
     pieceId: string,
     runIt: boolean = false,
     schema?: JSONSchema,
+    scope?: CellScope,
   ): Promise<PieceController> {
     this.disposeCheck();
-    const cell = await (await this.#manager.get(pieceId, runIt, schema)).sync();
+    const cell = await (await this.#manager.get(pieceId, runIt, schema, scope))
+      .sync();
     return new PieceController(this.#manager, cell);
   }
 
   async getAllPieces() {
     this.disposeCheck();
     const piecesCell = await this.#manager.getPieces();
-    const pieces = piecesCell.get();
-    return pieces.map((piece) => new PieceController(this.#manager, piece));
+    const pieces = await this.#manager.syncPieces(piecesCell);
+    return pieces.map((piece) =>
+      new PieceController(this.#manager, piece.asSchema(undefined))
+    );
   }
 
   async remove(pieceId: string): Promise<boolean> {
@@ -126,8 +154,13 @@ export class PiecesController<T = unknown> {
       apiUrl: new URL(apiUrl),
       storageManager: StorageManager.open({
         as: session.as,
-        address: new URL("/api/storage/memory", apiUrl),
+        memoryHost: new URL(apiUrl),
         spaceIdentity: session.spaceIdentity,
+      }),
+      cfcEnforcementMode: "enforce-explicit",
+      trustSnapshotProvider: () => ({
+        id: `principal:${session.as.did()}`,
+        actingPrincipal: session.as.did(),
       }),
     });
 
@@ -147,10 +180,17 @@ export class PiecesController<T = unknown> {
   private async getDefaultAppUrlFromHome(): Promise<string> {
     try {
       const homeSpaceCell = this.#manager.runtime.getHomeSpaceCell();
-      await homeSpaceCell.sync();
+      await timePiecesPhase(
+        "getDefaultAppUrlFromHome.homeSpaceCell.sync",
+        () => homeSpaceCell.sync(),
+      );
 
-      const url = homeSpaceCell.key("defaultPattern")
-        .asSchema(homeSchema).key("defaultAppUrl").get();
+      const url = await timePiecesPhase(
+        "getDefaultAppUrlFromHome.defaultAppUrl.get",
+        () =>
+          homeSpaceCell.key("defaultPattern")
+            .asSchema(homeSchema).key("defaultAppUrl").get(),
+      );
       return typeof url === "string" ? url.trim() : "";
     } catch (error) {
       console.warn("Failed to read defaultAppUrl from home space:", error);
@@ -175,6 +215,7 @@ export class PiecesController<T = unknown> {
     // We need to stop it to prevent resource leaks or duplicate behavior from the old pattern
     // Access the space cell directly to get the pattern reference without running it
     const spaceCellContents = this.#manager.getSpaceCellContents();
+    await spaceCellContents.sync();
     const defaultPatternRef = spaceCellContents.key("defaultPattern").get();
     if (defaultPatternRef) {
       // Stop the existing pattern (no-op if not running)
@@ -199,6 +240,7 @@ export class PiecesController<T = unknown> {
       };
       pattern = await this.#manager.runtime.patternManager.compilePattern(
         options.customProgram,
+        { space: this.#manager.getSpace() },
       );
     } else {
       if (isHomeSpace) {
@@ -221,19 +263,20 @@ export class PiecesController<T = unknown> {
         this.#manager.runtime.apiUrl,
       );
 
-      // Load and compile the pattern
+      // Load and compile the pattern (cache in the target space — CT-1623).
       const program = await this.#manager.runtime.harness.resolve(
         new HttpProgramResolver(patternUrl.href),
       );
       pattern = await this.#manager.runtime.patternManager.compilePattern(
         program,
+        { space: this.#manager.getSpace() },
       );
     }
 
     // Create new piece cell
     let pieceCell: Cell<NameSchema>;
 
-    await this.#manager.runtime.editWithRetry((tx) => {
+    const { error } = await this.#manager.runtime.editWithRetry((tx) => {
       // Create piece cell within this transaction
       pieceCell = this.#manager.runtime.getCell<NameSchema>(
         this.#manager.getSpace(),
@@ -246,13 +289,19 @@ export class PiecesController<T = unknown> {
       this.#manager.runtime.run(tx, pattern, {}, pieceCell);
 
       // Link as default pattern within same transaction
-      const spaceCellWithTx = this.#manager.getSpaceCellContents().withTx(tx);
+      const spaceCellWithTx = spaceCellContents.withTx(tx);
       const defaultPatternCell = spaceCellWithTx.key("defaultPattern");
       defaultPatternCell.set(pieceCell.withTx(tx));
     });
+    if (error) {
+      throw new Error(
+        `Updating the default pattern failed because storage returned ${error.name}: ${error.message}`,
+        { cause: error },
+      );
+    }
 
     // Fetch the final result
-    const finalPattern = await this.#manager.getDefaultPattern();
+    const finalPattern = await this.#manager.getDefaultPattern(false);
     if (!finalPattern) {
       throw new Error("Failed to create default pattern");
     }
@@ -299,7 +348,10 @@ export class PiecesController<T = unknown> {
         cause: "home-pattern",
       };
     } else {
-      const customUrl = await this.getDefaultAppUrlFromHome();
+      const customUrl = await timePiecesPhase(
+        "ensureDefaultPattern.getDefaultAppUrlFromHome",
+        () => this.getDefaultAppUrlFromHome(),
+      );
       patternConfig = {
         name: "DefaultPieceList",
         urlPath: customUrl || "/api/patterns/system/default-app.tsx",
@@ -313,11 +365,23 @@ export class PiecesController<T = unknown> {
     );
 
     // Load and compile the pattern (async work outside transaction)
-    const program = await this.#manager.runtime.harness.resolve(
-      new HttpProgramResolver(patternUrl.href),
+    const program = await timePiecesPhase(
+      "ensureDefaultPattern.resolveProgram",
+      () =>
+        this.#manager.runtime.harness.resolve(
+          new HttpProgramResolver(patternUrl.href),
+        ),
     );
-    const pattern = await this.#manager.runtime.patternManager.compilePattern(
-      program,
+    const pattern = await timePiecesPhase(
+      "ensureDefaultPattern.compilePattern",
+      () =>
+        this.#manager.runtime.patternManager.compilePattern(
+          program,
+          // Route the space-root compile through the content-addressed cell
+          // cache so the reload (fresh worker) reuses the compiled module set
+          // instead of cold-compiling the home/default-app pattern (CT-1623).
+          { space: this.#manager.getSpace() },
+        ),
     );
 
     // Atomic creation with automatic retry on conflicts.
@@ -327,45 +391,63 @@ export class PiecesController<T = unknown> {
     // - On retry, we'll see the existing pattern and return early
     let pieceCell: Cell<NameSchema>;
 
-    await this.#manager.runtime.editWithRetry((tx) => {
-      // Double-check pattern doesn't exist (read establishes invariant)
-      const spaceCellWithTx = this.#manager.getSpaceCellContents().withTx(tx);
-      const defaultPatternCell = spaceCellWithTx.key("defaultPattern");
-      const existingDefault = defaultPatternCell.get();
+    await timePiecesPhase(
+      "ensureDefaultPattern.editWithRetry",
+      () =>
+        this.#manager.runtime.editWithRetry((tx) => {
+          // Double-check pattern doesn't exist (read establishes invariant)
+          const spaceCellWithTx = this.#manager.getSpaceCellContents().withTx(
+            tx,
+          );
+          const defaultPatternCell = spaceCellWithTx.key("defaultPattern");
+          const existingDefault = defaultPatternCell.get();
 
-      if (existingDefault?.get()) {
-        // Pattern was created by another process - we're done
-        // The editWithRetry will complete successfully, and we'll
-        // fetch the existing pattern below
-        return;
-      }
+          if (existingDefault?.get()) {
+            // Pattern was created by another process - we're done
+            // The editWithRetry will complete successfully, and we'll
+            // fetch the existing pattern below
+            return;
+          }
 
-      // Create piece cell within this transaction
-      pieceCell = this.#manager.runtime.getCell<NameSchema>(
-        this.#manager.getSpace(),
-        patternConfig.cause,
-        nameSchema,
-        tx,
-      );
+          // Create piece cell within this transaction
+          pieceCell = this.#manager.runtime.getCell<NameSchema>(
+            this.#manager.getSpace(),
+            patternConfig.cause,
+            nameSchema,
+            tx,
+          );
 
-      // Run pattern setup within same transaction
-      this.#manager.runtime.run(tx, pattern, {}, pieceCell);
+          // Run pattern setup within same transaction
+          this.#manager.runtime.run(tx, pattern, {}, pieceCell);
 
-      // Link as default pattern within same transaction
-      defaultPatternCell.set(pieceCell.withTx(tx));
-    });
+          // Link as default pattern within same transaction
+          defaultPatternCell.set(pieceCell.withTx(tx));
+        }),
+    );
 
     // After transaction commits, fetch the final result
     // (either we created it, or another process did)
-    const finalPattern = await this.#manager.getDefaultPattern();
+    const finalPattern = await timePiecesPhase(
+      "ensureDefaultPattern.getDefaultPattern(false)",
+      () => this.#manager.getDefaultPattern(false),
+    );
     if (!finalPattern) {
       throw new Error("Failed to create or find default pattern");
     }
 
     // Start the piece after successful creation/discovery
-    await this.#manager.startPiece(finalPattern);
-    await this.#manager.runtime.idle();
-    await this.#manager.synced();
+    await timePiecesPhase(
+      "ensureDefaultPattern.startPiece",
+      () => this.#manager.startPiece(finalPattern),
+    );
+    await timePiecesPhase(
+      "ensureDefaultPattern.runtime.idle",
+      () => this.#manager.runtime.idle(),
+    );
+    await timePiecesPhase(
+      "ensureDefaultPattern.synced",
+      () => this.#manager.synced(),
+    );
 
     return new PieceController<NameSchema>(this.#manager, finalPattern);
   }

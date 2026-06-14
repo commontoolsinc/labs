@@ -1,14 +1,12 @@
-/// <cts-enable />
 import {
   type Cell,
   cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
-  toSchema,
-} from "commontools";
+  type Writable,
+} from "commonfabric";
 
 interface BudgetCategoryInput {
   name?: string;
@@ -433,54 +431,40 @@ const liftSanitizedTotal = lift((value: number | undefined) =>
   sanitizeTotalBudget(value)
 );
 
-const liftBaseState = lift(
-  toSchema<{
-    categories: Cell<BudgetCategoryInput[]>;
-    total: Cell<number>;
-  }>(),
-  toSchema<{
+const liftBaseState = lift<{
+  categories: Writable<BudgetCategoryInput[]>;
+  total: Writable<number>;
+}>(({ categories, total }) =>
+  sanitizeCategoryList(categories.get(), total.get())
+);
+
+const liftSummary = lift<{
+  total: Writable<number>;
+  base: Writable<{
     catalog: BudgetCategoryCatalog[];
     allocations: AllocationRecord;
-  }>(),
-  ({ categories, total }) =>
-    sanitizeCategoryList(categories.get(), total.get()),
-);
+  }>;
+  overrides: Writable<AllocationRecord | null>;
+}>(({ total, base, overrides }) => {
+  const baseStateValue = base.get();
+  const active = overrides.get() ?? baseStateValue.allocations;
+  return enforceAllocationLimits(
+    active,
+    baseStateValue.catalog,
+    sanitizeTotalBudget(total.get()),
+  );
+});
 
-const liftSummary = lift(
-  toSchema<{
-    total: Cell<number>;
-    base: Cell<{
-      catalog: BudgetCategoryCatalog[];
-      allocations: AllocationRecord;
-    }>;
-    overrides: Cell<AllocationRecord | null>;
-  }>(),
-  toSchema<BudgetSummary>(),
-  ({ total, base, overrides }) => {
-    const baseStateValue = base.get();
-    const active = overrides.get() ?? baseStateValue.allocations;
-    return enforceAllocationLimits(
-      active,
-      baseStateValue.catalog,
-      sanitizeTotalBudget(total.get()),
-    );
-  },
-);
-
-const liftSummaryLabel = lift(
-  toSchema<{
-    total: Cell<number>;
-    summary: Cell<BudgetSummary>;
-  }>(),
-  toSchema<string>(),
-  ({ total, summary }) => {
-    const totalValue = sanitizeTotalBudget(total.get());
-    const state = summary.get();
-    return `Allocated ${formatAmount(state.totalAllocated)} of ` +
-      `${formatAmount(totalValue)} (${formatAmount(state.remaining)} ` +
-      "remaining)";
-  },
-);
+const liftSummaryLabel = lift<{
+  total: Writable<number>;
+  summary: Writable<BudgetSummary>;
+}>(({ total, summary }) => {
+  const totalValue = sanitizeTotalBudget(total.get());
+  const state = summary.get();
+  return `Allocated ${formatAmount(state.totalAllocated)} of ` +
+    `${formatAmount(totalValue)} (${formatAmount(state.remaining)} ` +
+    "remaining)";
+});
 
 const liftStatusMessage = lift((state: BudgetSummary) => {
   if (state.remaining <= 0.01) {
@@ -499,7 +483,7 @@ export const budgetPlanner = pattern<BudgetPlannerArgs>(
 
     const baseState = liftBaseState({ categories, total: sanitizedTotal });
 
-    const categoryCatalog = derive(baseState, (state) => state.catalog);
+    const categoryCatalog = baseState.catalog;
     const overrides = cell<AllocationRecord | null>(null);
     const history = cell<string[]>(["Budget initialized"]);
     const lastAction = cell("Budget initialized");
@@ -511,15 +495,12 @@ export const budgetPlanner = pattern<BudgetPlannerArgs>(
       overrides,
     });
 
-    const categorySummary = derive(summary, (state) => state.categories);
-    const allocationView = derive(summary, (state) => state.allocations);
-    const allocatedTotal = derive(summary, (state) => state.totalAllocated);
-    const remainingBudget = derive(summary, (state) => state.remaining);
-    const overflowAmount = derive(summary, (state) => state.overflow);
-    const balanced = derive(
-      summary,
-      (state) => state.remaining <= 0.01 && state.overflow === 0,
-    );
+    const categorySummary = summary.categories;
+    const allocationView = summary.allocations;
+    const allocatedTotal = summary.totalAllocated;
+    const remainingBudget = summary.remaining;
+    const overflowAmount = summary.overflow;
+    const balanced = summary.remaining <= 0.01 && summary.overflow === 0;
 
     const summaryLabel = liftSummaryLabel({ total: sanitizedTotal, summary });
 

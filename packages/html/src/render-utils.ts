@@ -1,10 +1,14 @@
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commonfabric/utils/types";
 import {
   CellHandle,
   isCellHandle,
   UI,
   type VNode,
-} from "@commontools/runtime-client";
+} from "@commonfabric/runtime-client";
+import {
+  getEventProvenance,
+  getEventTargetDataset,
+} from "./event-provenance.ts";
 
 export type SetPropHandler = <T>(
   target: T,
@@ -55,9 +59,12 @@ export const getBindingPropName = (key: string): string => {
   return key.startsWith("$") ? key.slice(1) : key;
 };
 
+// key must be an event property (one that starts with "on"; can be checked with isEventProp).
 export const cleanEventProp = (key: string) => {
   if (!key.startsWith("on")) {
-    return null;
+    throw new Error(
+      'cleanEventProp requires an event prop key (starts with "on")',
+    );
   }
   return key.slice(2).toLowerCase();
 };
@@ -180,9 +187,9 @@ export const sanitizeNode = (node: VNode): VNode | null => {
     return null;
   }
   // Fragments (`<></>`) appear as VNodes with
-  // no name property. Rewrite to `ct-fragment`.
+  // no name property. Rewrite to `cf-fragment`.
   if (!node.name) {
-    node.name = "ct-fragment";
+    node.name = "cf-fragment";
   }
   if (!isCellHandle(node.props) && !isObject(node.props)) {
     node = { ...node, props: {} };
@@ -236,6 +243,10 @@ const allowListedEventTargetProperties = [
  */
 export function sanitizeEvent(event: Event): object {
   const eventObject: Record<string, unknown> = {};
+  const provenance = getEventProvenance(event, event.target);
+  if (provenance) {
+    eventObject.provenance = provenance;
+  }
   for (const property of allowListedEventProperties) {
     eventObject[property] = event[property as keyof Event];
   }
@@ -255,16 +266,11 @@ export function sanitizeEvent(event: Event): object {
       );
   }
 
-  // Copy dataset as a plain object for serialization
-  if (isObject(target) && "dataset" in target && isRecord(target.dataset)) {
-    const dataset: Record<string, string> = {};
-    for (const key in target.dataset) {
-      // String() to normalize, just in case
-      dataset[key] = String(target.dataset[key]);
-    }
-    if (Object.keys(dataset).length > 0) {
-      targetObject.dataset = dataset;
-    }
+  // Copy the event target's own dataset as handler-visible data. UI contract
+  // markers from the composed path are serialized separately in provenance.
+  const dataset = getEventTargetDataset(target);
+  if (dataset) {
+    targetObject.dataset = dataset;
   }
 
   if (Object.keys(targetObject).length > 0) eventObject.target = targetObject;
@@ -288,8 +294,8 @@ export function isSelectElement(value: unknown): value is HTMLSelectElement {
 // `{ "$NAME": "<ref>", "$UI": <ref> }` as VNodes, but lack
 // a `type = "vnode"`. This checks for type, $UI property.
 export function isVNodeish(value: unknown): value is VNode {
-  if (!isObject(value)) return false;
-  if ((value as VNode).type === "vnode") return true;
+  if (!isRecord(value) || Array.isArray(value)) return false;
+  if (value.type === "vnode") return true;
   if (UI in value && value[UI]) return true;
   return false;
 }

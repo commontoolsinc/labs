@@ -1,4 +1,4 @@
-# CT Protocol: CFC & Trust Profiles (Sections 10–12)
+# CF Protocol: CFC & Trust Profiles (Sections 10–12)
 
 See `docs/specs/verifiable-execution/README.md` for navigation.
 
@@ -137,10 +137,10 @@ mechanically applied during execution.
 
 ### 11.2 Why the Distinction Matters
 
-The CT Protocol does not force a single answer. A system can choose to accept
+The CF Protocol does not force a single answer. A system can choose to accept
 commitment alone, or it can require proof of enforcement, depending on context.
 
-By separating declaration from demonstration, the CT Protocol avoids the false
+By separating declaration from demonstration, the CF Protocol avoids the false
 dichotomy between blind trust and maximal proof.
 
 ### 11.3 Trusted Execution Environments (TEEs)

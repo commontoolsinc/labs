@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { ifElse, pattern, UI } from "commontools";
+import { ifElse, pattern, UI } from "commonfabric";
 
 interface State {
   isActive: boolean;

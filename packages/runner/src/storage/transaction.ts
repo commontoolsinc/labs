@@ -1,5 +1,5 @@
-import { getLogger } from "@commontools/utils/logger";
-import type { StorableDatum } from "@commontools/memory/interface";
+import { getLogger } from "@commonfabric/utils/logger";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type {
   ChangeGroup,
   CommitError,
@@ -14,6 +14,7 @@ import type {
   IStorageTransactionWriteIsolationError,
   ITransactionReader,
   ITransactionWriter,
+  IWriteOptions,
   MemorySpace,
   ReaderError,
   Result,
@@ -23,8 +24,10 @@ import type {
   WriteError,
   WriterError,
 } from "./interface.ts";
+import { createReadOnlyTransactionError } from "./interface.ts";
 
 import * as Journal from "./transaction/journal.ts";
+import { recordWriteStackTrace } from "./write-stack-trace.ts";
 
 const logger = getLogger("storage-transaction", {
   enabled: false,
@@ -70,6 +73,7 @@ export type State =
 class StorageTransaction implements IStorageTransaction {
   changeGroup?: ChangeGroup;
   immediate?: boolean;
+  #readOnlySource?: string;
 
   static mutate(transaction: StorageTransaction, state: State) {
     transaction.#state = state;
@@ -81,6 +85,22 @@ class StorageTransaction implements IStorageTransaction {
   #state: State;
   constructor(state: State) {
     this.#state = state;
+  }
+
+  setReadOnly(reason = "runtime.readTx()"): void {
+    this.#readOnlySource = reason;
+  }
+
+  clearReadOnly(): void {
+    this.#readOnlySource = undefined;
+  }
+
+  isReadOnly(): boolean {
+    return this.#readOnlySource !== undefined;
+  }
+
+  getReadOnlySource(): string | undefined {
+    return this.#readOnlySource;
   }
 
   get journal() {
@@ -103,8 +123,12 @@ class StorageTransaction implements IStorageTransaction {
     return read(this, address, options);
   }
 
-  write(address: IMemorySpaceAddress, value?: StorableDatum) {
-    return write(this, address, value);
+  write(
+    address: IMemorySpaceAddress,
+    value?: FabricValue,
+    options?: IWriteOptions,
+  ) {
+    return write(this, address, value, options);
   }
 
   abort(reason?: unknown): Result<Unit, InactiveTransactionError> {
@@ -117,6 +141,16 @@ class StorageTransaction implements IStorageTransaction {
 }
 
 const { mutate, use } = StorageTransaction;
+
+const assertWritable = (
+  transaction: StorageTransaction,
+  method: string,
+): void => {
+  const source = transaction.getReadOnlySource();
+  if (source !== undefined) {
+    throw createReadOnlyTransactionError(method, source);
+  }
+};
 
 /**
  * Returns given transaction status.
@@ -178,6 +212,7 @@ export const writer = (
   transaction: StorageTransaction,
   space: MemorySpace,
 ): Result<ITransactionWriter, WriterError> => {
+  assertWritable(transaction, "writer()");
   const { error, ok: ready } = edit(transaction);
   if (error) {
     return { error };
@@ -229,57 +264,31 @@ export const read = (
     return { error };
   } else {
     const { space: _, ...memoryAddress } = address;
-    const result = space.read(memoryAddress, options);
-
-    // Special handling for source path, API is to always return object
-    // We should return objects, but we get JSON strings from transaction, so we convert
-    if (
-      result.ok && address.path.length === 1 && address.path[0] === "source"
-    ) {
-      const value = result.ok.value;
-      logger.debug("storage-source-read", () => [
-        `Read source path for ${address.id}`,
-        `Value type: ${typeof value}`,
-        `Value: ${JSON.stringify(value)}`,
-      ]);
-
-      if (typeof value === "string" && value.startsWith('{"/":')) {
-        try {
-          // Parse the JSON string to return an object
-          const parsedValue = JSON.parse(value);
-          // Create a new attestation with the parsed value
-          result.ok = {
-            address: result.ok.address,
-            value: parsedValue,
-          };
-          logger.debug("storage-source-parse", () => [
-            `Parsed JSON string to object`,
-            `Result: ${JSON.stringify(parsedValue)}`,
-          ]);
-        } catch (e) {
-          // If parsing fails, leave it as is
-          logger.error("storage-error", () => [
-            `[SOURCE PATH] Failed to parse JSON string`,
-            `Error: ${e}`,
-          ]);
-        }
-      }
-    }
-    return result;
+    return space.read(memoryAddress, options);
   }
 };
 
 export const write = (
   transaction: StorageTransaction,
   address: IMemorySpaceAddress,
-  value?: StorableDatum,
+  value?: FabricValue,
+  options?: IWriteOptions,
 ): Result<IAttestation, WriterError | WriteError> => {
   const { ok: space, error } = writer(transaction, address.space);
   if (error) {
     return { error };
   } else {
     const { space: _, ...memoryAddress } = address;
-    return space.write(memoryAddress, value);
+    const result = space.write(memoryAddress, value, options);
+    if (!result.error) {
+      recordWriteStackTrace(address, value, {
+        scopeId:
+          (transaction as { writeTraceScopeId?: string }).writeTraceScopeId,
+        writerActionId:
+          (transaction as { debugActionId?: string }).debugActionId,
+      });
+    }
+    return result;
   }
 };
 
@@ -287,6 +296,7 @@ export const abort = (
   transaction: StorageTransaction,
   reason: unknown,
 ): Result<Unit, InactiveTransactionError> => {
+  assertWritable(transaction, "abort()");
   const { error, ok: ready } = edit(transaction);
   if (error) {
     return { error };
@@ -310,6 +320,7 @@ export const abort = (
 export const commit = async (
   transaction: StorageTransaction,
 ): Promise<Result<Unit, CommitError>> => {
+  assertWritable(transaction, "commit()");
   const { error, ok: ready } = edit(transaction);
   if (error) {
     return { error };
@@ -332,8 +343,11 @@ export const commit = async (
           `Committing ${changes.facts.length} writes to replica`,
         ]);
       }
-      const promise = hasWrites
-        ? replica!.commit(changes, transaction)
+      if (hasWrites && !replica?.commit) {
+        throw new Error("Storage replica does not support legacy commit()");
+      }
+      const promise = hasWrites && replica
+        ? replica.commit!(changes, transaction)
         : Promise.resolve({ ok: {} });
 
       mutate(transaction, {

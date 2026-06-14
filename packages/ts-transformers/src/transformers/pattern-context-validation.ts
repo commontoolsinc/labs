@@ -12,41 +12,87 @@
  * - Reading from opaques IS allowed in:
  *   - computed()
  *   - action()
- *   - derive()
  *   - lift()
  *   - handler()
- *   - JSX expressions (handled by OpaqueRefJSXTransformer)
+ *   - JSX expressions and other lowerable expression sites
+ * - Local values created by computed()/lift() inside the current
+ *   computed()/lift() callback remain reactive and cannot be used as plain
+ *   values until a nested computed()/lift() consumes them.
  *
  * - Function creation is NOT allowed in pattern context (must be at module scope)
  * - lift() and handler() must be defined at module scope, not inside patterns
  *
  * Errors reported:
  * - Property access used in computation: ERROR (must wrap in computed())
- * - Optional chaining (?.): ERROR (not allowed in reactive context)
+ * - Optional chaining:
+ *   - optional property/element access is allowed in supported lowerable
+ *     expression sites
+ *   - optional calls and non-lowerable optional access still error
  * - Calling .get() on cells: ERROR (must wrap in computed())
  * - Function creation in pattern context: ERROR (move to module scope)
  * - lift()/handler() inside pattern: ERROR (move to module scope)
- * - .map() on fallback expression (x ?? [] or x || []): ERROR (use direct property access)
+ * - Local computed()/lift() aliases used as plain values in the same
+ *   callback: ERROR (use a nested computed()/lift())
  */
 import ts from "typescript";
-import { TransformationContext, Transformer } from "../core/mod.ts";
+import { COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES } from "../core/commonfabric-runtime-registry.ts";
+import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import {
-  createDataFlowAnalyzer,
+  classifyArrayMethodCallSite,
   detectCallKind,
+  detectDirectBuilderCall,
   isInRestrictedReactiveContext,
   isInsideRestrictedContext,
   isInsideSafeCallbackWrapper,
   isStandaloneFunctionDefinition,
 } from "../ast/mod.ts";
-import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
+import { getCallbackBoundarySemantics } from "../policy/callback-boundary.ts";
+import {
+  collectLocalOpaqueRootSymbols,
+  isOpaqueSourceExpression,
+  isTopmostMemberAccess,
+} from "./opaque-roots.ts";
+import {
+  classifyRestrictedReactiveComputation,
+  classifyUnsupportedExpressionSiteCallRoot,
+  findLowerableExpressionSite,
+} from "./expression-site-policy.ts";
+import {
+  isDeclaredWithinFunction,
+  isModuleScopedDeclaration,
+} from "../ast/scope-analysis.ts";
+import type {
+  CallbackBoundarySemantics,
+  SupportedCallbackBoundaryKind,
+} from "../policy/callback-boundary.ts";
 
-export class PatternContextValidationTransformer extends Transformer {
+const EMPTY_OPAQUE_ROOTS = new Set<string>();
+const SES_SELF_CONTAINED_CALLBACK_BOUNDARIES = new Set<
+  SupportedCallbackBoundaryKind
+>([
+  "event-handler",
+  "reactive-array-method",
+  "pattern-tool",
+  "pattern-builder",
+  "render-builder",
+  "lift-applied",
+  "computed-builder",
+  "action-builder",
+  "lift-builder",
+  "handler-builder",
+  // NB: "sqlite-row-label-rule" is deliberately NOT here — table() evaluates
+  // the rule callback eagerly at pattern build into a serialized AST; it is
+  // never extracted to run later, so closure capture is harmless.
+]);
+
+export class PatternContextValidationTransformer
+  extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     const checker = context.checker;
-    const analyze = createDataFlowAnalyzer(checker);
+    const analyze = context.getDataFlowAnalyzer();
 
     const visit = (node: ts.Node): ts.Node => {
-      // Skip JSX - OpaqueRefJSXTransformer handles those
+      // Skip JSX element containers; expression-level handling is shared.
       if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) {
         return ts.visitEachChild(node, visit, context.tsContext);
       }
@@ -63,17 +109,53 @@ export class PatternContextValidationTransformer extends Transformer {
         if (isStandaloneFunctionDefinition(node)) {
           this.validateStandaloneFunction(node, context, checker);
         }
+
+        if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+          const boundarySemantics = getCallbackBoundarySemantics(
+            node,
+            checker,
+            context,
+          );
+          if (boundarySemantics.establishesLocalReactiveAliasScope) {
+            this.validateLocalReactiveAliasUsage(node, context);
+          }
+
+          this.validateCallbackSelfContainment(
+            node,
+            boundarySemantics,
+            context,
+            checker,
+          );
+
+          this.validateSupportedPatternStatements(node, context, checker);
+        }
       }
 
       // Check for optional chaining in reactive context
-      // Note: isInRestrictedReactiveContext returns false for JSX expressions
-      // (they are handled by OpaqueRefJSXTransformer), so this won't flag
-      // optional chaining inside JSX like <div>{user?.name}</div>
+      // Note: isInRestrictedReactiveContext returns false for JSX expressions,
+      // so this won't flag optional chaining inside JSX like <div>{user?.name}</div>
       if (
-        ts.isPropertyAccessExpression(node) &&
+        (
+          ts.isPropertyAccessExpression(node) ||
+          ts.isElementAccessExpression(node)
+        ) &&
         node.questionDotToken
       ) {
-        if (isInRestrictedReactiveContext(node, checker, context)) {
+        const optionalCallTargetHandledByCallRootPolicy =
+          !!node.questionDotToken &&
+          !!node.parent &&
+          ts.isCallExpression(node.parent) &&
+          node.parent.expression === node &&
+          classifyUnsupportedExpressionSiteCallRoot(
+              node.parent,
+              context,
+              analyze,
+            ) === "optional-call";
+        if (
+          !optionalCallTargetHandledByCallRootPolicy &&
+          isInRestrictedReactiveContext(node, checker, context) &&
+          !findLowerableExpressionSite(node, context, analyze)
+        ) {
           context.reportDiagnostic({
             severity: "error",
             type: "pattern-context:optional-chaining",
@@ -90,25 +172,32 @@ export class PatternContextValidationTransformer extends Transformer {
         // Check for lift/handler inside pattern
         this.validateBuilderPlacement(node, context, checker);
 
-        // Check for .map() on fallback expressions (x ?? [] or x || [])
-        // Only in restricted context (pattern body) where this pattern causes runtime failures.
-        // Note: We use isInsideRestrictedContext, not isInRestrictedReactiveContext, because
-        // the map-on-fallback pattern fails even inside JSX expressions (which are "safe" for
-        // other validations but still need this check).
-        if (isInsideRestrictedContext(node, checker, context)) {
-          this.validateArrayMethodOnFallbackExpression(
-            node,
-            context,
-            checker,
-            analyze,
-          );
-        }
+        // patternTool's first argument must be a pattern() (CT-1655)
+        this.validatePatternToolFirstArgument(node, context, checker);
 
-        // Check for .get() calls
-        if (
-          this.isGetCall(node) &&
-          isInRestrictedReactiveContext(node, checker, context)
+        const unsupportedCallRoot = classifyUnsupportedExpressionSiteCallRoot(
+          node,
+          context,
+          analyze,
+        );
+        if (unsupportedCallRoot === "optional-call") {
+          context.reportDiagnostic({
+            severity: "error",
+            type: "pattern-context:optional-chaining",
+            message:
+              `Optional chaining '?.' is not allowed in reactive context. ` +
+              `Use ifElse() or wrap in computed() for conditional access.`,
+            node,
+          });
+        } else if (
+          unsupportedCallRoot === "restricted-get-call" &&
+          !findLowerableExpressionSite(node, context, analyze)
         ) {
+          // A bare terminal `.get()` (no enclosing lowerable expression site)
+          // can't be auto-wrapped, so it stays an error. But a `.get()` that
+          // feeds a computation at a lowerable site (variable initializer, JSX,
+          // return, …) is auto-wrapped into a lift by the rewriter — so don't
+          // reject it here.
           context.reportDiagnostic({
             severity: "error",
             type: "pattern-context:get-call",
@@ -123,25 +212,13 @@ export class PatternContextValidationTransformer extends Transformer {
       // Check for property access used in computation (not just pass-through)
       // This applies to expressions in binary operators, conditionals, etc.
       if (this.isComputationExpression(node)) {
-        this.validateComputationExpression(node, context, checker, analyze);
+        this.validateComputationExpression(node, context, analyze);
       }
 
       return ts.visitEachChild(node, visit, context.tsContext);
     };
 
     return ts.visitNode(context.sourceFile, visit) as ts.SourceFile;
-  }
-
-  /**
-   * Checks if a call expression is a .get() call
-   */
-  private isGetCall(node: ts.CallExpression): boolean {
-    const expr = node.expression;
-    return (
-      ts.isPropertyAccessExpression(expr) &&
-      expr.name.text === "get" &&
-      node.arguments.length === 0
-    );
   }
 
   /**
@@ -163,40 +240,31 @@ export class PatternContextValidationTransformer extends Transformer {
   private validateComputationExpression(
     node: ts.Node,
     context: TransformationContext,
-    checker: ts.TypeChecker,
-    analyze: ReturnType<typeof createDataFlowAnalyzer>,
+    analyze: ReturnType<TransformationContext["getDataFlowAnalyzer"]>,
   ): void {
-    // Skip if not in restricted reactive context
-    if (!isInRestrictedReactiveContext(node, checker, context)) {
-      return;
-    }
-
-    // Skip if inside JSX
-    if (this.isInsideJsx(node)) {
-      return;
-    }
-
-    // Analyze the expression for reactive dependencies
     const expression = node as ts.Expression;
-    const analysis = analyze(expression);
-
-    // If this computation contains reactive refs, it should be wrapped in computed()
-    if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
-      // Find the specific property access that's causing the issue
-      const problemAccess = this.findProblematicAccess(node);
-      const accessText = problemAccess
-        ? `'${problemAccess.getText()}'`
-        : "property access";
-
-      context.reportDiagnostic({
-        severity: "error",
-        type: "pattern-context:computation",
-        message:
-          `Property access ${accessText} used in computation is not allowed in reactive context. ` +
-          `Wrap the computation in computed(() => ...) instead.`,
-        node,
-      });
+    const decision = classifyRestrictedReactiveComputation(
+      expression,
+      context,
+      analyze,
+    );
+    if (decision.kind !== "requires-computed") {
+      return;
     }
+
+    const problemAccess = this.findProblematicAccess(node);
+    const accessText = problemAccess
+      ? `'${problemAccess.getText()}'`
+      : "property access";
+
+    context.reportDiagnostic({
+      severity: "error",
+      type: "pattern-context:computation",
+      message:
+        `Property access ${accessText} used in computation is not allowed in reactive context. ` +
+        `Wrap the computation in computed(() => ...) instead.`,
+      node,
+    });
   }
 
   /**
@@ -238,9 +306,267 @@ export class PatternContextValidationTransformer extends Transformer {
     return result;
   }
 
+  private validateLocalReactiveAliasUsage(
+    func: ts.ArrowFunction | ts.FunctionExpression,
+    context: TransformationContext,
+  ): void {
+    const localOpaqueRootSymbols = collectLocalOpaqueRootSymbols(
+      func.body,
+      context,
+    );
+    if (localOpaqueRootSymbols.size === 0) {
+      return;
+    }
+
+    const diagnosticsSeen = new Set<number>();
+
+    const findProblematicUse = (
+      expression: ts.Expression,
+    ): ts.Expression | undefined => {
+      let culprit: ts.Expression | undefined;
+
+      const visit = (node: ts.Node): void => {
+        if (culprit) return;
+        if (node !== expression && ts.isFunctionLike(node)) return;
+
+        if (
+          ts.isCallExpression(node) &&
+          isOpaqueSourceExpression(
+            node,
+            EMPTY_OPAQUE_ROOTS,
+            localOpaqueRootSymbols,
+            context,
+          )
+        ) {
+          culprit = node;
+          return;
+        }
+
+        if (
+          (ts.isPropertyAccessExpression(node) ||
+            ts.isElementAccessExpression(node)) &&
+          isTopmostMemberAccess(node) &&
+          isOpaqueSourceExpression(
+            node,
+            EMPTY_OPAQUE_ROOTS,
+            localOpaqueRootSymbols,
+            context,
+          )
+        ) {
+          culprit = node;
+          return;
+        }
+
+        if (
+          ts.isIdentifier(node) &&
+          !this.isMemberAccessBase(node) &&
+          isOpaqueSourceExpression(
+            node,
+            EMPTY_OPAQUE_ROOTS,
+            localOpaqueRootSymbols,
+            context,
+          )
+        ) {
+          culprit = node;
+          return;
+        }
+
+        ts.forEachChild(node, visit);
+      };
+
+      visit(expression);
+      return culprit;
+    };
+
+    const report = (culprit: ts.Expression): void => {
+      const key = culprit.getStart(context.sourceFile);
+      if (diagnosticsSeen.has(key)) return;
+      diagnosticsSeen.add(key);
+
+      context.reportDiagnostic({
+        severity: "error",
+        type: "compute-context:local-reactive-use",
+        message: `Reactive value '${culprit.getText()}' is created in this ` +
+          `computed()/lift() callback and cannot be used as a plain value ` +
+          `here. Move this use into a nested computed(() => ...) or ` +
+          `module-scope lift() callback.`,
+        node: culprit,
+      });
+    };
+
+    const checkExpression = (expression: ts.Expression | undefined): void => {
+      if (!expression) return;
+      const culprit = findProblematicUse(expression);
+      if (culprit) {
+        report(culprit);
+      }
+    };
+
+    const visitBody = (node: ts.Node): void => {
+      if (node !== func.body && ts.isFunctionLike(node)) {
+        return;
+      }
+
+      if (ts.isIfStatement(node)) {
+        checkExpression(node.expression);
+      } else if (ts.isWhileStatement(node) || ts.isDoStatement(node)) {
+        checkExpression(node.expression);
+      } else if (ts.isForStatement(node)) {
+        checkExpression(node.condition);
+      } else if (ts.isSwitchStatement(node)) {
+        checkExpression(node.expression);
+      } else if (this.isComputationExpression(node)) {
+        checkExpression(node as ts.Expression);
+      }
+
+      ts.forEachChild(node, visitBody);
+    };
+
+    visitBody(func.body);
+  }
+
+  private isMemberAccessBase(node: ts.Identifier): boolean {
+    const parent = node.parent;
+    return !!parent &&
+      (
+        (ts.isPropertyAccessExpression(parent) ||
+          ts.isElementAccessExpression(parent)) &&
+        parent.expression === node
+      );
+  }
+
+  /**
+   * Validates statement-level constructs in pattern-owned callback bodies.
+   * For now, the supported subset is intentionally narrow:
+   * - a single terminal return statement
+   * - no let declarations
+   * - no reassignment
+   * - no loops
+   * - no var declarations
+   *
+   * This applies to any callback body that still classifies as pattern context
+   * at validation time, which intentionally includes pattern-owned array method
+   * callbacks while excluding compute-owned wrappers like computed()/lift().
+   */
+  private validateSupportedPatternStatements(
+    func: ts.ArrowFunction | ts.FunctionExpression,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+  ): void {
+    if (!ts.isBlock(func.body)) return;
+
+    const boundarySemantics = getCallbackBoundarySemantics(
+      func,
+      checker,
+      context,
+    );
+    const bodyContext = context.getReactiveContext(func.body);
+    if (
+      !boundarySemantics.supportsPatternOwnedStatements ||
+      bodyContext.kind !== "pattern"
+    ) {
+      return;
+    }
+
+    const lastStatement = func.body.statements.at(-1);
+    const diagnosticsSeen = new Set<number>();
+    const reportOnce = (
+      node: ts.Node,
+      type:
+        | "pattern-context:assignment"
+        | "pattern-context:early-return"
+        | "pattern-context:let-declaration"
+        | "pattern-context:loop"
+        | "pattern-context:var-declaration",
+      message: string,
+    ) => {
+      const start = node.getStart(context.sourceFile);
+      if (diagnosticsSeen.has(start)) return;
+      diagnosticsSeen.add(start);
+      context.reportDiagnostic({
+        severity: "error",
+        type,
+        message,
+        node,
+      });
+    };
+
+    const visit = (node: ts.Node): void => {
+      if (node !== func.body && ts.isFunctionLike(node)) {
+        return;
+      }
+
+      if (ts.isReturnStatement(node)) {
+        const isTerminalReturn = node.parent === func.body &&
+          node === lastStatement;
+        if (!isTerminalReturn) {
+          reportOnce(
+            node,
+            "pattern-context:early-return",
+            `Early returns are not supported in pattern bodies. ` +
+              `Use a single terminal return statement and move conditional branching into expressions or helper wrappers.`,
+          );
+        }
+        return;
+      }
+
+      if (ts.isVariableDeclarationList(node)) {
+        if ((node.flags & ts.NodeFlags.Let) !== 0) {
+          reportOnce(
+            node,
+            "pattern-context:let-declaration",
+            `let declarations are not supported in pattern-owned callback bodies. ` +
+              `Use const, or move mutable logic into computed(), module-scope lift(), or a helper.`,
+          );
+        } else if (
+          (node.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) === 0
+        ) {
+          reportOnce(
+            node,
+            "pattern-context:var-declaration",
+            `var declarations are not supported in pattern-owned callback bodies. ` +
+              `Use const, or move mutable logic into computed(), module-scope lift(), or a module-scope helper.`,
+          );
+        }
+      }
+
+      if (
+        ts.isForStatement(node) ||
+        ts.isForInStatement(node) ||
+        ts.isForOfStatement(node) ||
+        ts.isWhileStatement(node) ||
+        ts.isDoStatement(node)
+      ) {
+        reportOnce(
+          node,
+          "pattern-context:loop",
+          `Loop statements are not supported in pattern-owned callback bodies. ` +
+            `Use array methods, helper-owned expressions, or move imperative iteration into computed(), module-scope lift(), or a helper.`,
+        );
+      }
+
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+      ) {
+        reportOnce(
+          node,
+          "pattern-context:assignment",
+          `Reassignment is not supported in pattern-owned callback bodies. ` +
+            `Use straight-line data construction, or move mutable logic into computed(), module-scope lift(), or a helper.`,
+        );
+      }
+
+      ts.forEachChild(node, visit);
+    };
+
+    visit(func.body);
+  }
+
   /**
    * Validates that functions are not created directly in pattern context.
-   * Functions inside safe wrappers (computed, action, derive, lift, handler)
+   * Functions inside safe wrappers (computed, action, lift, handler)
    * and inside JSX expressions are allowed since they get transformed.
    */
   private validateFunctionCreation(
@@ -248,18 +574,40 @@ export class PatternContextValidationTransformer extends Transformer {
     context: TransformationContext,
     checker: ts.TypeChecker,
   ): void {
-    // Skip if inside JSX (including map callbacks, event handlers)
-    if (this.isInsideJsx(node)) return;
-
-    // Skip if inside safe wrapper callback (computed, action, derive, lift, handler)
+    // Skip if inside safe wrapper callback (computed, action, lift, handler)
     if (isInsideSafeCallbackWrapper(node, checker, context)) return;
 
-    // Skip if this function IS a callback to a safe wrapper
-    // e.g., computed(() => ...), action(() => ...), derive(() => ...)
-    if (this.isSafeWrapperCallback(node, checker)) return;
+    const boundarySemantics = !ts.isFunctionDeclaration(node)
+      ? getCallbackBoundarySemantics(node, checker, context)
+      : undefined;
+
+    if (boundarySemantics?.allowsRestrictedContextFunctionCallback) {
+      return;
+    }
 
     // Only error if inside restricted context (pattern/render)
     if (!isInsideRestrictedContext(node, checker, context)) return;
+
+    if (this.isInsideJsx(node)) {
+      if (boundarySemantics?.decision.kind === "supported") {
+        return;
+      }
+
+      if (
+        boundarySemantics?.decision.kind === "unsupported" &&
+        boundarySemantics.decision.boundaryDiagnostic === "callback-container"
+      ) {
+        context.reportDiagnostic({
+          severity: "error",
+          type: "pattern-context:callback-container",
+          message:
+            `Callbacks passed to unsupported containers in pattern-facing JSX are not supported. ` +
+            `Use a supported array method/value call, an event handler, or move this work into computed(() => ...), module-scope lift(), or a helper.`,
+          node,
+        });
+      }
+      return;
+    }
 
     context.reportDiagnostic({
       severity: "error",
@@ -272,50 +620,6 @@ export class PatternContextValidationTransformer extends Transformer {
   }
 
   /**
-   * Checks if a function is being passed directly as a callback to a safe wrapper
-   * (computed, action, derive, lift, handler) or to a .map() call on cells/opaques.
-   */
-  private isSafeWrapperCallback(
-    node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
-    checker: ts.TypeChecker,
-  ): boolean {
-    // Function declarations can't be callbacks
-    if (ts.isFunctionDeclaration(node)) return false;
-
-    const parent = node.parent;
-    if (!parent || !ts.isCallExpression(parent)) return false;
-
-    // Check if this function is an argument to the call
-    if (!parent.arguments.includes(node)) return false;
-
-    const callKind = detectCallKind(parent, checker);
-    if (!callKind) return false;
-
-    // derive is a safe wrapper
-    if (callKind.kind === "derive") return true;
-
-    // array method calls on cells/opaques are transformed, so callbacks are allowed
-    if (callKind.kind === "array-method") return true;
-
-    // patternTool handles closure capture for its callback
-    if (callKind.kind === "pattern-tool") return true;
-
-    // Check builder-based safe wrappers (computed, action, lift, handler)
-    // Note: derive is handled separately above (it has its own kind, not "builder")
-    if (callKind.kind === "builder") {
-      const safeBuilders = new Set([
-        "computed",
-        "action",
-        "lift",
-        "handler",
-      ]);
-      return safeBuilders.has(callKind.builderName);
-    }
-
-    return false;
-  }
-
-  /**
    * Validates that lift() and handler() are at module scope, not inside patterns.
    * These builders create reusable functions and should be defined outside the pattern body.
    */
@@ -324,18 +628,16 @@ export class PatternContextValidationTransformer extends Transformer {
     context: TransformationContext,
     checker: ts.TypeChecker,
   ): void {
-    // Only check direct calls to lift/handler, not calls to functions returned by them
-    // detectCallKind can incorrectly match calls to lift-returned functions
+    const builderCall = detectDirectBuilderCall(node, checker);
     if (
-      !this.isDirectBuilderCall(node, "lift") &&
-      !this.isDirectBuilderCall(node, "handler")
+      !builderCall ||
+      (builderCall.builderName !== "lift" &&
+        builderCall.builderName !== "handler")
     ) {
       return;
     }
 
-    const builderName = this.isDirectBuilderCall(node, "lift")
-      ? "lift"
-      : "handler";
+    const builderName = builderCall.builderName;
 
     // Only error if inside restricted context
     if (!isInsideRestrictedContext(node, checker, context)) return;
@@ -370,87 +672,105 @@ export class PatternContextValidationTransformer extends Transformer {
   }
 
   /**
-   * Checks if a call expression is a direct call to a builder (lift, handler, etc.)
-   * by checking if the callee is literally the builder name.
+   * Validates that `patternTool(...)`'s first argument is a `pattern(...)`, not a
+   * bare callback (CT-1655). Passing a function directly used to be auto-wrapped
+   * (`pattern(fn)`) by the runtime and auto-captured by a transformer strategy;
+   * both were removed in favor of an explicit, addressable pattern. Authors now
+   * wrap the callback themselves: `patternTool(pattern(fn), extraParams?)`.
    */
-  private isDirectBuilderCall(
-    node: ts.CallExpression,
-    builderName: string,
-  ): boolean {
-    const callee = node.expression;
-
-    // Direct call: lift(...) or handler(...)
-    if (ts.isIdentifier(callee) && callee.text === builderName) {
-      return true;
-    }
-
-    // Property access call: something.lift(...) or something.handler(...)
-    if (
-      ts.isPropertyAccessExpression(callee) && callee.name.text === builderName
-    ) {
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * Validates that .map() is not called on a fallback expression like (x ?? []) or (x || [])
-   * where one side is reactive (OpaqueRef) and the other is not.
-   *
-   * This pattern fails at runtime because the transformer can't properly detect that
-   * the result needs mapWithPattern transformation.
-   */
-  private validateArrayMethodOnFallbackExpression(
+  private validatePatternToolFirstArgument(
     node: ts.CallExpression,
     context: TransformationContext,
-    _checker: ts.TypeChecker,
-    analyze: ReturnType<typeof createDataFlowAnalyzer>,
+    checker: ts.TypeChecker,
   ): void {
-    if (!ts.isPropertyAccessExpression(node.expression)) return;
-    const methodName = node.expression.name.text;
-    if (
-      methodName !== "map" && methodName !== "filter" &&
-      methodName !== "flatMap"
-    ) return;
-
-    let target: ts.Expression = node.expression.expression;
-
-    // Unwrap parentheses
-    while (ts.isParenthesizedExpression(target)) {
-      target = target.expression;
+    if (detectCallKind(node, checker)?.kind !== "pattern-tool") {
+      return;
     }
-
-    // Check if target is (x ?? y) or (x || y)
-    if (!ts.isBinaryExpression(target)) return;
-
-    const op = target.operatorToken.kind;
+    const firstArg = node.arguments[0];
     if (
-      op !== ts.SyntaxKind.QuestionQuestionToken &&
-      op !== ts.SyntaxKind.BarBarToken
+      !firstArg ||
+      !(ts.isArrowFunction(firstArg) || ts.isFunctionExpression(firstArg))
+    ) {
+      return;
+    }
+    context.reportDiagnostic({
+      severity: "error",
+      type: "pattern-context:patterntool-requires-pattern",
+      message:
+        `patternTool()'s first argument must be a pattern(), not a bare callback. ` +
+        `Wrap the callback in pattern(): patternTool(pattern(fn), extraParams?). ` +
+        `Module-scoped reactive values the callback reads are captured by the ` +
+        `pattern automatically; per-instance values go in extraParams.`,
+      node: firstArg,
+    });
+  }
+
+  private validateCallbackSelfContainment(
+    func: ts.ArrowFunction | ts.FunctionExpression,
+    boundarySemantics: CallbackBoundarySemantics,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+  ): void {
+    const decision = boundarySemantics.decision;
+    if (
+      decision.kind !== "supported" ||
+      !SES_SELF_CONTAINED_CALLBACK_BOUNDARIES.has(decision.boundaryKind)
     ) {
       return;
     }
 
-    // Check if left side traces to a reactive pattern parameter and right side does not
-    const leftIsOpaque = analyze(target.left).containsOpaqueRef;
-    const rightIsOpaque = analyze(target.right).containsOpaqueRef;
+    const diagnosticsSeen = new Set<string>();
 
-    if (leftIsOpaque && !rightIsOpaque) {
+    const report = (node: ts.Identifier): void => {
+      if (diagnosticsSeen.has(node.text)) return;
+      diagnosticsSeen.add(node.text);
       context.reportDiagnostic({
         severity: "error",
-        type: "pattern-context:map-on-fallback",
+        type: "ses-callback:callable-capture",
         message:
-          `'.${methodName}()' on fallback expression with mixed reactive/non-reactive types is not supported. ` +
-          `Use direct property access: 'x.${methodName}(...)' rather than '(x ?? fallback).${methodName}(...)'`,
+          `Callback passed to ${decision.boundaryKind} captures callable ` +
+          `'${node.text}' from an enclosing function scope. SES callback ` +
+          `implementations must be self-contained; move callable helpers to ` +
+          `module scope, or pass serializable data through explicit inputs/state.`,
         node,
       });
+    };
+
+    const visit = (node: ts.Node): void => {
+      if (node !== func && ts.isFunctionLike(node)) {
+        return;
+      }
+
+      if (ts.isIdentifier(node) && !this.shouldIgnoreReferenceSite(node)) {
+        const symbol = this.getReferenceSymbol(node, checker);
+        const declarations = (symbol?.getDeclarations() ?? []).filter((decl) =>
+          !ts.isShorthandPropertyAssignment(decl)
+        );
+        if (
+          declarations.length > 0 &&
+          declarations.some((decl) =>
+            this.isEnclosingFunctionScopedDeclaration(decl, func)
+          ) &&
+          this.isCallableReference(node, declarations, checker)
+        ) {
+          report(node);
+        }
+      }
+
+      ts.forEachChild(node, visit);
+    };
+
+    for (const parameter of func.parameters) {
+      if (parameter.initializer) {
+        visit(parameter.initializer);
+      }
     }
+    visit(func.body);
   }
 
   /**
    * Validates that standalone functions don't use reactive operations like
-   * computed(), derive(), or .map() on CellLike types.
+   * computed(), lift(), or .map() on CellLike types.
    *
    * Standalone functions cannot have their closures captured automatically.
    * Users should either:
@@ -477,8 +797,15 @@ export class PatternContextValidationTransformer extends Transformer {
     checker: ts.TypeChecker,
   ): void {
     // Skip if this function is passed to patternTool()
-    if (this.isPatternToolArgument(func, checker)) {
-      return;
+    if (!ts.isFunctionDeclaration(func)) {
+      const boundarySemantics = getCallbackBoundarySemantics(
+        func,
+        checker,
+        context,
+      );
+      if (boundarySemantics.isPatternToolCallback) {
+        return;
+      }
     }
 
     // Walk the function body looking for reactive operations
@@ -495,18 +822,36 @@ export class PatternContextValidationTransformer extends Transformer {
 
       if (ts.isCallExpression(node)) {
         const callKind = detectCallKind(node, checker);
+        const arrayMethodCallSite = classifyArrayMethodCallSite(node, checker);
 
         if (callKind) {
-          // Check for computed() calls
           if (
             callKind.kind === "builder" &&
-            callKind.builderName === "computed"
+            COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES.has(
+              callKind.builderName,
+            )
           ) {
             context.reportDiagnostic({
               severity: "error",
               type: "standalone-function:reactive-operation",
               message:
-                `computed() is not allowed inside standalone functions. ` +
+                `${callKind.builderName}() is not allowed inside standalone functions. ` +
+                `Common Fabric builders must be authored in an allowed context ` +
+                `so their callbacks can be self-contained for SES sandboxing. ` +
+                `Move the ${callKind.builderName}() call to module scope, a pattern-owned context, or use patternTool() when closure capture is required.`,
+              node,
+            });
+            return;
+          }
+
+          // Check for lift-applied calls (the lowered form of computed() and
+          // other reactive lifted-function computations).
+          if (callKind.kind === "lift-applied") {
+            context.reportDiagnostic({
+              severity: "error",
+              type: "standalone-function:reactive-operation",
+              message:
+                `Reactive computations are not allowed inside standalone functions. ` +
                 `Standalone functions cannot capture reactive closures. ` +
                 `Move the computed() call to the pattern body, or use patternTool() to enable automatic closure capture.`,
               node,
@@ -514,40 +859,18 @@ export class PatternContextValidationTransformer extends Transformer {
             return;
           }
 
-          // Check for derive() calls
-          if (callKind.kind === "derive") {
+          if (arrayMethodCallSite?.ownership === "reactive") {
             context.reportDiagnostic({
               severity: "error",
               type: "standalone-function:reactive-operation",
-              message: `derive() is not allowed inside standalone functions. ` +
+              message:
+                `.${arrayMethodCallSite.family}() on reactive types is not allowed inside standalone functions. ` +
                 `Standalone functions cannot capture reactive closures. ` +
-                `Move the derive() call to the pattern body, or use patternTool() to enable automatic closure capture.`,
+                `Move the .${arrayMethodCallSite.family}() call to the pattern body, or use patternTool() to enable automatic closure capture. ` +
+                `If this is an explicit Cell/Writable value and eager ${arrayMethodCallSite.family}ing is acceptable, use <cell>.get().${arrayMethodCallSite.family}(...).`,
               node,
             });
             return;
-          }
-
-          // Check for array method on CellLike types
-          if (callKind.kind === "array-method") {
-            // Check if this is an array method on a CellLike type (not a plain array)
-            if (ts.isPropertyAccessExpression(node.expression)) {
-              const receiverType = checker.getTypeAtLocation(
-                node.expression.expression,
-              );
-              if (this.isCellLikeOrOpaqueRefType(receiverType, checker)) {
-                context.reportDiagnostic({
-                  severity: "error",
-                  type: "standalone-function:reactive-operation",
-                  message:
-                    `.map() on reactive types is not allowed inside standalone functions. ` +
-                    `Standalone functions cannot capture reactive closures. ` +
-                    `Move the .map() call to the pattern body, or use patternTool() to enable automatic closure capture. ` +
-                    `If this is an explicit Cell/Writable value and eager mapping is acceptable, use <cell>.get().map(...).`,
-                  node,
-                });
-                return;
-              }
-            }
           }
         }
       }
@@ -560,56 +883,227 @@ export class PatternContextValidationTransformer extends Transformer {
     }
   }
 
-  /**
-   * Checks if a function is passed directly as an argument to patternTool().
-   * If so, the patternTool transformer will handle closure capture.
-   */
-  private isPatternToolArgument(
-    func: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
-    checker: ts.TypeChecker,
-  ): boolean {
-    // Function declarations can't be passed as arguments
-    if (ts.isFunctionDeclaration(func)) return false;
-
-    const parent = func.parent;
-    if (!parent || !ts.isCallExpression(parent)) return false;
-
-    // Check if this function is the first argument
-    if (parent.arguments[0] !== func) return false;
-
-    // Use detectCallKind for consistent call detection
-    const callKind = detectCallKind(parent, checker);
-    return callKind?.kind === "pattern-tool";
-  }
-
-  /**
-   * Checks if a type is a CellLike or OpaqueRef type that would require
-   * reactive handling in .map() calls inside standalone functions.
-   *
-   * Includes OpaqueRef/OpaqueRefMethods because standalone helper functions
-   * may accept pattern parameters (typed as OpaqueRef<T[]>) and call .map()
-   * on them.
-   */
-  private isCellLikeOrOpaqueRefType(
-    type: ts.Type,
-    checker: ts.TypeChecker,
-  ): boolean {
-    // Check if it's an OpaqueRef type
-    if (isOpaqueRefType(type, checker)) {
+  private shouldIgnoreReferenceSite(node: ts.Identifier): boolean {
+    if (!node.parent || this.isInsideTypeNode(node)) {
       return true;
     }
 
-    // Check the type name for Cell-like types
-    const typeStr = checker.typeToString(type);
-    const cellLikePatterns = [
-      "Cell<",
-      "OpaqueCell<",
-      "Writable<",
-      "Stream<",
-      "OpaqueRef<",
-      "OpaqueRefMethods<",
-    ];
+    if (
+      ts.isPropertyAccessExpression(node.parent) &&
+      node.parent.name === node
+    ) {
+      return true;
+    }
 
-    return cellLikePatterns.some((pattern) => typeStr.includes(pattern));
+    if (ts.isPropertyAssignment(node.parent) && node.parent.name === node) {
+      return true;
+    }
+
+    if (ts.isBindingElement(node.parent)) {
+      return true;
+    }
+
+    if (ts.isVariableDeclaration(node.parent) && node.parent.name === node) {
+      return true;
+    }
+
+    if (ts.isParameter(node.parent) && node.parent.name === node) {
+      return true;
+    }
+
+    if (
+      ts.isFunctionDeclaration(node.parent) &&
+      node.parent.name === node
+    ) {
+      return true;
+    }
+
+    if (
+      ts.isFunctionExpression(node.parent) &&
+      node.parent.name === node
+    ) {
+      return true;
+    }
+
+    if (
+      ts.isJsxOpeningElement(node.parent) ||
+      ts.isJsxClosingElement(node.parent) ||
+      ts.isJsxSelfClosingElement(node.parent)
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private isInsideTypeNode(node: ts.Node): boolean {
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (this.isTypeNode(current)) {
+        return true;
+      }
+      if (ts.isExpression(current)) {
+        return false;
+      }
+      current = current.parent;
+    }
+    return false;
+  }
+
+  private isTypeNode(node: ts.Node): boolean {
+    return node.kind >= ts.SyntaxKind.FirstTypeNode &&
+      node.kind <= ts.SyntaxKind.LastTypeNode;
+  }
+
+  private getReferenceSymbol(
+    node: ts.Identifier,
+    checker: ts.TypeChecker,
+  ): ts.Symbol | undefined {
+    if (ts.isShorthandPropertyAssignment(node.parent)) {
+      return checker.getShorthandAssignmentValueSymbol(node.parent) ??
+        checker.getShorthandAssignmentValueSymbol(
+          ts.getOriginalNode(node.parent),
+        );
+    }
+    return checker.getSymbolAtLocation(node) ??
+      checker.getSymbolAtLocation(ts.getOriginalNode(node));
+  }
+
+  private isEnclosingFunctionScopedDeclaration(
+    declaration: ts.Declaration,
+    func: ts.FunctionLikeDeclaration,
+  ): boolean {
+    if (isDeclaredWithinFunction(declaration, func)) {
+      return false;
+    }
+
+    if (
+      ts.isImportClause(declaration) ||
+      ts.isImportSpecifier(declaration) ||
+      ts.isNamespaceImport(declaration) ||
+      isModuleScopedDeclaration(declaration)
+    ) {
+      return false;
+    }
+
+    let current: ts.Node | undefined = declaration.parent;
+    while (current) {
+      if (ts.isFunctionLike(current)) {
+        return true;
+      }
+      if (ts.isSourceFile(current)) {
+        return false;
+      }
+      current = current.parent;
+    }
+
+    return false;
+  }
+
+  private isCallableReference(
+    node: ts.Identifier,
+    declarations: readonly ts.Declaration[],
+    checker: ts.TypeChecker,
+  ): boolean {
+    if (
+      declarations.some((declaration) => this.isSyntacticCallable(declaration))
+    ) {
+      return true;
+    }
+
+    if (
+      !this.isCallableUseSite(node) &&
+      !declarations.some((declaration) =>
+        this.shouldCheckInferredCallabilityForCapture(declaration)
+      )
+    ) {
+      return false;
+    }
+
+    // Keep checker queries narrow; broad validation-time type queries can
+    // perturb later schema inference ordering for unrelated expression sites.
+    // In addition to direct calls, check inferred callability for captured
+    // aliases and contextual bindings so forwarded helpers cannot cross SES
+    // callback boundaries unnoticed.
+    const type = checker.getTypeAtLocation(node);
+    return type.getCallSignatures().length > 0 ||
+      type.getConstructSignatures().length > 0;
+  }
+
+  private shouldCheckInferredCallabilityForCapture(
+    declaration: ts.Declaration,
+  ): boolean {
+    return (
+      ts.isBindingElement(declaration) ||
+      ts.isParameter(declaration) ||
+      (ts.isVariableDeclaration(declaration) &&
+        declaration.initializer !== undefined)
+    );
+  }
+
+  private isSyntacticCallable(declaration: ts.Declaration): boolean {
+    if (
+      ts.isFunctionDeclaration(declaration) ||
+      ts.isFunctionExpression(declaration) ||
+      ts.isMethodDeclaration(declaration) ||
+      ts.isClassDeclaration(declaration)
+    ) {
+      return true;
+    }
+
+    if (ts.isVariableDeclaration(declaration)) {
+      if (declaration.initializer) {
+        const initializer = declaration.initializer;
+        if (
+          ts.isArrowFunction(initializer) ||
+          ts.isFunctionExpression(initializer) ||
+          ts.isClassExpression(initializer)
+        ) {
+          return true;
+        }
+      }
+      return !!declaration.type &&
+        this.isCallableTypeNode(declaration.type);
+    }
+
+    if (ts.isParameter(declaration)) {
+      return !!declaration.type && this.isCallableTypeNode(declaration.type);
+    }
+
+    return false;
+  }
+
+  private isCallableTypeNode(type: ts.TypeNode): boolean {
+    if (ts.isFunctionTypeNode(type) || ts.isConstructorTypeNode(type)) {
+      return true;
+    }
+
+    if (ts.isParenthesizedTypeNode(type)) {
+      return this.isCallableTypeNode(type.type);
+    }
+
+    if (ts.isUnionTypeNode(type) || ts.isIntersectionTypeNode(type)) {
+      return type.types.some((member) => this.isCallableTypeNode(member));
+    }
+
+    if (
+      ts.isTypeReferenceNode(type) &&
+      ts.isIdentifier(type.typeName) &&
+      type.typeName.text === "Function"
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private isCallableUseSite(node: ts.Identifier): boolean {
+    const parent = node.parent;
+    return !!parent &&
+      (
+        (ts.isCallExpression(parent) && parent.expression === node) ||
+        (ts.isNewExpression(parent) && parent.expression === node) ||
+        (ts.isTaggedTemplateExpression(parent) && parent.tag === node)
+      );
   }
 }

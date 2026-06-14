@@ -23,12 +23,12 @@ const addItem = handler<unknown, { items: Writable<Item[]>; itemTitle: Writable<
 );
 
 export default pattern<Input, Input>(({ items }) => {
-  const itemTitle = Writable.of("");
+  const itemTitle = new Writable("");
   return {
     [UI]: (
       <div>
-        <ct-input $value={itemTitle} />
-        <ct-button onClick={addItem({ items, itemTitle })}>Add</ct-button>
+        <cf-input $value={itemTitle} />
+        <cf-button onClick={addItem({ items, itemTitle })}>Add</cf-button>
       </div>
     ),
     items,
@@ -66,7 +66,7 @@ export default pattern(({ searchQuery }) => {
         {loading && <span>Loading...</span>}
         {error && <span>Error: {error}</span>}
         {result && <div>{result}</div>}
-        <ct-message-input onct-send={handleSearch({ searchQuery })} />
+        <cf-message-input oncf-send={handleSearch({ searchQuery })} />
       </div>
     ),
   };
@@ -78,4 +78,4 @@ export default pattern(({ searchQuery }) => {
 ## See Also
 
 - @common/concepts/reactivity.md - Reactivity and fetchData patterns
-- @common/concepts/types-and-schemas.md - Cell and Writable types
+- @common/concepts/types-and-schemas/writable.md - Cell and Writable types

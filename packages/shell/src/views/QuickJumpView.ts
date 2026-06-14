@@ -2,9 +2,10 @@ import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
+import type { DID } from "@commonfabric/identity";
 import { Task } from "@lit/task";
 import { navigate } from "../../shared/mod.ts";
-import { PageHandle } from "@commontools/runtime-client";
+import { PageHandle } from "@commonfabric/runtime-client";
 
 type PieceItem = { id: string; name: string };
 
@@ -15,7 +16,7 @@ export class XQuickJumpView extends BaseView {
       top: 0;
       left: 0;
       width: 100vw;
-      height: 100vh;
+      height: 100dvh;
       display: none;
       align-items: center;
       justify-content: center;
@@ -35,7 +36,7 @@ export class XQuickJumpView extends BaseView {
     .panel {
       position: relative;
       width: min(720px, 90vw);
-      background: #fff;
+      background: var(--shell-surface);
       border: var(--border-width, 2px) solid var(--border-color, #000);
       box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
       overflow: hidden;
@@ -51,6 +52,8 @@ export class XQuickJumpView extends BaseView {
       font-size: 14px;
       width: 100%;
       box-sizing: border-box;
+      background: var(--shell-surface);
+      color: var(--font-color);
     }
 
     .list {
@@ -67,46 +70,55 @@ export class XQuickJumpView extends BaseView {
       display: flex;
       gap: 8px;
       align-items: baseline;
+      user-select: none;
     }
 
     .item[aria-selected="true"] {
-      background: #f0f4ff;
+      background: var(--shell-highlight);
     }
     .item:hover {
-      background: #f0f4ff;
+      background: var(--shell-highlight);
     }
 
     .name {
       flex: 1;
-      color: var(--text-primary, #000);
+      color: var(--font-color);
     }
 
     .id {
-      color: #666;
+      color: var(--shell-text-muted);
       font-size: 12px;
     }
   `;
 
   @property({ type: Boolean, reflect: true })
-  visible = false;
+  accessor visible = false;
 
   @property({ attribute: false })
-  rt?: RuntimeInternals;
+  accessor rt: RuntimeInternals | undefined = undefined;
+
+  /** The resolved space DID of the current view (view state). */
+  @property({ attribute: false })
+  accessor space: DID | undefined = undefined;
+
+  /** Human-readable space name of the current view, when it has one. */
+  @property({ attribute: false })
+  accessor spaceName: string | undefined = undefined;
 
   @state()
-  private query = "";
+  private accessor query = "";
 
   @state()
-  private selectedIndex = 0;
+  private accessor selectedIndex = 0;
 
   private inputEl?: HTMLInputElement | null;
 
   private _pieces = new Task(this, {
-    task: async ([rt]) => {
-      if (!rt) return undefined;
-      await rt.synced();
+    task: async ([rt, space]) => {
+      if (!rt || !space) return undefined;
+      await rt.synced(space);
 
-      const piecesListCell = await rt.getPiecesListCell();
+      const piecesListCell = await rt.getPiecesListCell(space);
       await piecesListCell.sync();
 
       const piecesList = piecesListCell.get() as any[];
@@ -127,7 +139,7 @@ export class XQuickJumpView extends BaseView {
       */
       return [];
     },
-    args: () => [this.rt],
+    args: () => [this.rt, this.space],
   });
 
   override updated(changed: Map<string, unknown>) {
@@ -168,7 +180,10 @@ export class XQuickJumpView extends BaseView {
   }
 
   private score(item: PieceItem, q: string): number {
-    if (!q) return 0;
+    // Caller must pass a non-empty query.
+    if (!q) {
+      throw new Error("score requires a non-empty query");
+    }
     const n = item.name.toLowerCase();
     const i = item.id.toLowerCase();
     const ql = q.toLowerCase();
@@ -238,9 +253,13 @@ export class XQuickJumpView extends BaseView {
   };
 
   private navigateTo(id: string) {
-    const spaceName = this.rt?.spaceName();
-    if (!spaceName) return;
-    navigate({ spaceName, pieceId: id });
+    if (this.spaceName) {
+      navigate({ spaceName: this.spaceName, pieceId: id });
+    } else if (this.space) {
+      navigate({ spaceDid: this.space, pieceId: id });
+    } else {
+      return;
+    }
     this.close();
   }
 

@@ -1,9 +1,16 @@
 import ts from "typescript";
-import type {
-  CapabilityParamSummary,
-  FunctionCapabilitySummary,
-  ReactiveCapability,
+import {
+  classifyArrayCallbackContainerCall,
+  isCellLikeType,
+  isWildcardTraversalCall,
+} from "../ast/mod.ts";
+import {
+  type CapabilityParamSummary,
+  type FunctionCapabilitySummary,
+  type ReactiveCapability,
+  resolvesToCommonFabricSymbol,
 } from "../core/mod.ts";
+import { getKnownComputedKeyPathSegment } from "../utils/reactive-keys.ts";
 import { decodePath, encodePath } from "../utils/path-serialization.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 
@@ -16,15 +23,39 @@ type CapabilityAnalyzableFunction =
 export interface CapabilityAnalysisOptions {
   readonly checker?: ts.TypeChecker;
   readonly interprocedural?: boolean;
+  readonly includeNestedCallbacks?: boolean;
   readonly summaryCache?: WeakMap<ts.Node, FunctionCapabilitySummary>;
   readonly inProgress?: WeakSet<ts.Node>;
 }
 
 interface MutableCapabilityState {
   readonly reads: Set<string>;
+  readonly fullShapeReads: Set<string>;
   readonly writes: Set<string>;
+  readonly rawIdentityPaths: Set<string>;
+  readonly rawIdentityCellPaths: Set<string>;
+  readonly rawComparablePaths: Set<string>;
+  readonly rawComparableCellPaths: Set<string>;
+  readonly rawOpaquePaths: Set<string>;
   passthrough: boolean;
   wildcard: boolean;
+  hasIdentityUse: boolean;
+  hasNonIdentityUse: boolean;
+  hasNonIdentityRootUse: boolean;
+}
+
+interface ObservedCapabilityUsage {
+  readonly readPaths: readonly (readonly string[])[];
+  readonly fullShapePaths: readonly (readonly string[])[];
+  readonly writePaths: readonly (readonly string[])[];
+  readonly opaquePaths: readonly (readonly string[])[];
+  readonly passthrough: boolean;
+  readonly wildcard: boolean;
+  readonly identityOnly: boolean;
+  readonly identityPaths: readonly (readonly string[])[];
+  readonly identityCellPaths: readonly (readonly string[])[];
+  readonly comparablePaths: readonly (readonly string[])[];
+  readonly comparableCellPaths: readonly (readonly string[])[];
 }
 
 interface AccessPathInfo {
@@ -38,13 +69,78 @@ interface SourceRef {
   readonly root: string;
   readonly path: readonly string[];
   readonly dynamic: boolean;
+  readonly arrayElement?: boolean;
+  readonly elementResult?: boolean;
+}
+
+interface AliasShape {
+  readonly properties: ReadonlyMap<string, AliasBinding>;
+}
+
+type AliasBinding = SourceRef | AliasShape;
+
+function materializeSourceRef(ref: SourceRef): SourceRef {
+  if (!ref.arrayElement) {
+    return ref;
+  }
+  return {
+    root: ref.root,
+    path: [...ref.path, "0"],
+    dynamic: ref.dynamic,
+    elementResult: ref.elementResult,
+  };
+}
+
+function extendSourceRef(
+  ref: SourceRef,
+  path: readonly string[],
+): SourceRef {
+  const base = materializeSourceRef(ref);
+  return {
+    root: base.root,
+    path: [...base.path, ...path],
+    dynamic: base.dynamic,
+    elementResult: base.elementResult && path.length === 0,
+  };
 }
 
 const PARAMETER_SUMMARY_PREFIX = "__param";
 
 const WRITER_METHODS = new Set(["set", "update"]);
+const ARRAY_IDENTITY_WRITER_METHODS = new Set([
+  "push",
+  "unshift",
+  "splice",
+  "remove",
+  "removeAll",
+]);
+const ARRAY_IDENTITY_PRESERVING_CHAIN_METHODS = new Set(["slice"]);
 const READER_METHODS = new Set(["get"]);
-const WILDCARD_OBJECT_METHODS = new Set(["keys", "values", "entries"]);
+const OPAQUE_DERIVATION_METHODS = new Set([
+  "map",
+  "mapWithPattern",
+  "flatMap",
+  "flatMapWithPattern",
+  "filter",
+  "filterWithPattern",
+]);
+const FALLBACK_OPERATORS = new Set<ts.SyntaxKind>([
+  ts.SyntaxKind.QuestionQuestionToken,
+  ts.SyntaxKind.BarBarToken,
+]);
+const PRECISE_CHAIN_METHODS = new Set([
+  "map",
+  "mapWithPattern",
+  "filter",
+  "filterWithPattern",
+  "flatMap",
+  "flatMapWithPattern",
+  "sort",
+  "toSorted",
+  "find",
+  "findLast",
+  "at",
+]);
 const ASSIGNMENT_OPERATORS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.EqualsToken,
   ts.SyntaxKind.PlusEqualsToken,
@@ -77,6 +173,14 @@ function isCapabilityAnalyzableFunction(
     !!node.body;
 }
 
+function isInterproceduralSummaryTarget(
+  declaration: ts.Node | undefined,
+  sourceFile: ts.SourceFile,
+): declaration is CapabilityAnalyzableFunction {
+  return isCapabilityAnalyzableFunction(declaration) &&
+    declaration.getSourceFile() === sourceFile;
+}
+
 function isLiteralElement(
   expr: ts.Expression | undefined,
 ): expr is
@@ -97,6 +201,7 @@ function getLiteralElementText(
 
 function extractLiteralPathArguments(
   args: readonly ts.Expression[],
+  checker?: ts.TypeChecker,
 ): { path: readonly string[]; dynamic: boolean } {
   const path: string[] = [];
   for (const arg of args) {
@@ -108,12 +213,42 @@ function extractLiteralPathArguments(
       path.push(arg.text);
       continue;
     }
+    const knownKey = getKnownComputedKeyPathSegment(arg, checker);
+    if (knownKey) {
+      path.push(knownKey);
+      continue;
+    }
     return { path, dynamic: true };
   }
   return { path, dynamic: false };
 }
 
-function extractAccessPath(expr: ts.Expression): AccessPathInfo | undefined {
+function getStaticPropertyKeyText(
+  name: ts.PropertyName,
+  checker?: ts.TypeChecker,
+): string | undefined {
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name)) {
+    return name.text;
+  }
+
+  if (ts.isNumericLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)) {
+    return name.text;
+  }
+
+  if (ts.isComputedPropertyName(name)) {
+    return getKnownComputedKeyPathSegment(name.expression, checker) ??
+      (isLiteralElement(name.expression)
+        ? getLiteralElementText(name.expression)
+        : undefined);
+  }
+
+  return undefined;
+}
+
+function extractAccessPath(
+  expr: ts.Expression,
+  checker?: ts.TypeChecker,
+): AccessPathInfo | undefined {
   const path: string[] = [];
   let dynamic = false;
   let optional = false;
@@ -132,7 +267,13 @@ function extractAccessPath(expr: ts.Expression): AccessPathInfo | undefined {
       if (isLiteralElement(current.argumentExpression)) {
         path.unshift(getLiteralElementText(current.argumentExpression));
       } else {
-        dynamic = true;
+        const knownKey = current.argumentExpression &&
+          getKnownComputedKeyPathSegment(current.argumentExpression, checker);
+        if (knownKey) {
+          path.unshift(knownKey);
+        } else {
+          dynamic = true;
+        }
       }
       current = unwrapExpression(current.expression);
       continue;
@@ -202,8 +343,85 @@ function isAssignmentOperator(kind: ts.SyntaxKind): boolean {
   return ASSIGNMENT_OPERATORS.has(kind);
 }
 
+function isBooleanConditionUsage(expression: ts.Expression): boolean {
+  const parent = expression.parent;
+  if (!parent) return false;
+
+  if (
+    (ts.isParenthesizedExpression(parent) ||
+      ts.isAsExpression(parent) ||
+      ts.isTypeAssertionExpression(parent) ||
+      ts.isSatisfiesExpression(parent) ||
+      ts.isNonNullExpression(parent)) &&
+    parent.expression === expression
+  ) {
+    return isBooleanConditionUsage(parent);
+  }
+
+  if (
+    ts.isPrefixUnaryExpression(parent) &&
+    parent.operator === ts.SyntaxKind.ExclamationToken &&
+    parent.operand === expression
+  ) {
+    return isBooleanConditionUsage(parent);
+  }
+
+  if (
+    (ts.isIfStatement(parent) ||
+      ts.isWhileStatement(parent) ||
+      ts.isDoStatement(parent)) &&
+    parent.expression === expression
+  ) {
+    return true;
+  }
+
+  if (ts.isConditionalExpression(parent) && parent.condition === expression) {
+    return true;
+  }
+
+  if (ts.isForStatement(parent) && parent.condition === expression) {
+    return true;
+  }
+
+  if (
+    ts.isBinaryExpression(parent) &&
+    parent.left === expression &&
+    (
+      parent.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+      parent.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+      parent.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 function unwrapIdentifierUsageSite(node: ts.Identifier): ts.Expression {
   let current: ts.Expression = node;
+  while (true) {
+    const parent = current.parent;
+    if (!parent) {
+      return current;
+    }
+    if (
+      (ts.isParenthesizedExpression(parent) ||
+        ts.isAsExpression(parent) ||
+        ts.isTypeAssertionExpression(parent) ||
+        ts.isSatisfiesExpression(parent) ||
+        ts.isNonNullExpression(parent)) &&
+      parent.expression === current
+    ) {
+      current = parent;
+      continue;
+    }
+    return current;
+  }
+}
+
+function unwrapExpressionUsageSite(node: ts.Expression): ts.Expression {
+  let current = node;
   while (true) {
     const parent = current.parent;
     if (!parent) {
@@ -268,43 +486,450 @@ function isCallOrNewArgumentUsage(
   return false;
 }
 
+function isArrayIdentityWriterArgumentUsage(
+  usage: ts.Expression,
+): boolean {
+  const parent = usage.parent;
+  if (!parent || !ts.isCallExpression(parent)) {
+    return false;
+  }
+  if (!parent.arguments.includes(usage)) {
+    return false;
+  }
+  const target = unwrapExpression(parent.expression);
+  const methodName = ts.isPropertyAccessExpression(target)
+    ? target.name.text
+    : ts.isElementAccessExpression(target) && target.argumentExpression &&
+        isLiteralElement(target.argumentExpression)
+    ? getLiteralElementText(target.argumentExpression)
+    : undefined;
+  return isArrayIdentityWriterValueArgument(methodName, parent, usage);
+}
+
+function isArrayIdentityWriterValueArgument(
+  methodName: string | undefined,
+  call: ts.CallExpression,
+  usage: ts.Expression,
+): boolean {
+  if (!methodName || !ARRAY_IDENTITY_WRITER_METHODS.has(methodName)) {
+    return false;
+  }
+  const index = call.arguments.findIndex((argument) => argument === usage);
+  if (index < 0) {
+    return false;
+  }
+  return methodName === "splice" ? index >= 2 : true;
+}
+
+function isOptionalAliasInitializerMemberUsage(usage: ts.Expression): boolean {
+  let current: ts.Expression = usage;
+  let sawOptionalMemberAccess = (ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current)) && !!current.questionDotToken;
+  while (current.parent) {
+    const parent = current.parent;
+    if (
+      (ts.isPropertyAccessExpression(parent) ||
+        ts.isElementAccessExpression(parent)) &&
+      parent.expression === current
+    ) {
+      sawOptionalMemberAccess ||= !!parent.questionDotToken;
+      current = parent;
+      continue;
+    }
+    if (
+      (ts.isParenthesizedExpression(parent) ||
+        ts.isAsExpression(parent) ||
+        ts.isTypeAssertionExpression(parent) ||
+        ts.isSatisfiesExpression(parent) ||
+        ts.isNonNullExpression(parent)) &&
+      parent.expression === current
+    ) {
+      current = parent;
+      continue;
+    }
+    return sawOptionalMemberAccess && ts.isVariableDeclaration(parent) &&
+      parent.initializer === current;
+  }
+  return false;
+}
+
+function getIdentityArrayLocalNameForElementUsage(
+  usage: ts.Node,
+): string | undefined {
+  const parent = usage.parent;
+  if (!parent || !ts.isArrayLiteralExpression(parent)) {
+    return undefined;
+  }
+
+  let current: ts.Expression = parent;
+  while (current.parent) {
+    const parentNode = current.parent;
+    if (
+      (ts.isParenthesizedExpression(parentNode) ||
+        ts.isAsExpression(parentNode) ||
+        ts.isTypeAssertionExpression(parentNode) ||
+        ts.isSatisfiesExpression(parentNode) ||
+        ts.isNonNullExpression(parentNode)) &&
+      parentNode.expression === current
+    ) {
+      current = parentNode;
+      continue;
+    }
+
+    if (
+      (ts.isPropertyAccessExpression(parentNode) ||
+        ts.isElementAccessExpression(parentNode)) &&
+      parentNode.expression === current
+    ) {
+      current = parentNode;
+      continue;
+    }
+
+    if (
+      ts.isCallExpression(parentNode) &&
+      parentNode.expression === current
+    ) {
+      current = parentNode;
+      continue;
+    }
+
+    if (
+      ts.isVariableDeclaration(parentNode) &&
+      parentNode.initializer === current &&
+      ts.isIdentifier(parentNode.name)
+    ) {
+      return parentNode.name.text;
+    }
+
+    return undefined;
+  }
+
+  return undefined;
+}
+
+function getIdentityArrayLocalNameForWriterArgumentUsage(
+  usage: ts.Expression,
+): string | undefined {
+  const parent = usage.parent;
+  if (!parent || !ts.isCallExpression(parent)) {
+    return undefined;
+  }
+  const target = unwrapExpression(parent.expression);
+  const receiver = ts.isPropertyAccessExpression(target) ||
+      ts.isElementAccessExpression(target)
+    ? unwrapExpression(target.expression)
+    : undefined;
+  const methodName = getCallMethodNameFromExpression(parent.expression);
+  if (!receiver || !ts.isIdentifier(receiver)) {
+    return undefined;
+  }
+  if (!isArrayIdentityWriterValueArgument(methodName, parent, usage)) {
+    return undefined;
+  }
+  return receiver.text;
+}
+
+function collectArrayLocalsPassedToSet(
+  body: ts.ConciseBody,
+  checker?: ts.TypeChecker,
+): ReadonlySet<string> {
+  const arrayInitializerLocals = new Set<string>();
+  const setArgumentLocals = new Set<string>();
+  const structurallyAccessedArrayLocals = new Set<string>();
+
+  const expressionIsIdentityArrayInitializer = (
+    expression: ts.Expression,
+  ): boolean => {
+    const current = unwrapExpression(expression);
+    if (ts.isArrayLiteralExpression(current)) {
+      return true;
+    }
+    if (ts.isCallExpression(current)) {
+      const target = unwrapExpression(current.expression);
+      if (
+        ts.isPropertyAccessExpression(target) ||
+        ts.isElementAccessExpression(target)
+      ) {
+        const methodName = getCallMethodNameFromExpression(current.expression);
+        return !!methodName &&
+          ARRAY_IDENTITY_PRESERVING_CHAIN_METHODS.has(methodName) &&
+          expressionIsIdentityArrayInitializer(target.expression);
+      }
+    }
+    return false;
+  };
+
+  const isCallReceiverForMethod = (
+    node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+    methods: ReadonlySet<string>,
+  ): boolean => {
+    const methodName = getCallMethodNameFromExpression(node);
+    return !!methodName &&
+      methods.has(methodName) &&
+      ts.isCallExpression(node.parent) &&
+      node.parent.expression === node;
+  };
+
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      ts.isExpression(node.initializer) &&
+      expressionIsIdentityArrayInitializer(node.initializer)
+    ) {
+      arrayInitializerLocals.add(node.name.text);
+    }
+
+    if (ts.isCallExpression(node)) {
+      const methodName = getCallMethodNameFromExpression(node.expression);
+      const receiver = getCallReceiverFromExpression(node.expression);
+      const receiverIsCellLike = !checker ||
+        (receiver &&
+          isCellLikeType(checker.getTypeAtLocation(receiver), checker));
+      if (methodName === "set" && receiverIsCellLike) {
+        for (const argument of node.arguments) {
+          const current = unwrapExpression(argument);
+          if (ts.isIdentifier(current)) {
+            setArgumentLocals.add(current.text);
+          }
+        }
+      }
+    }
+
+    if (ts.isPropertyAccessExpression(node)) {
+      const current = unwrapExpression(node.expression);
+      const isSetCallReceiver = node.name.text === "set" &&
+        ts.isCallExpression(node.parent) &&
+        node.parent.expression === node;
+      const isIdentityWriterReceiver = isCallReceiverForMethod(
+        node,
+        ARRAY_IDENTITY_WRITER_METHODS,
+      );
+      if (
+        ts.isIdentifier(current) && !isSetCallReceiver &&
+        !isIdentityWriterReceiver
+      ) {
+        structurallyAccessedArrayLocals.add(current.text);
+      }
+    }
+
+    if (ts.isElementAccessExpression(node)) {
+      const current = unwrapExpression(node.expression);
+      const isSetCallReceiver = node.argumentExpression &&
+        isLiteralElement(node.argumentExpression) &&
+        getLiteralElementText(node.argumentExpression) === "set" &&
+        ts.isCallExpression(node.parent) &&
+        node.parent.expression === node;
+      const isIdentityWriterReceiver = isCallReceiverForMethod(
+        node,
+        ARRAY_IDENTITY_WRITER_METHODS,
+      );
+      if (
+        ts.isIdentifier(current) && !isSetCallReceiver &&
+        !isIdentityWriterReceiver
+      ) {
+        structurallyAccessedArrayLocals.add(current.text);
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(body);
+  return new Set(
+    [...arrayInitializerLocals].filter((name) =>
+      setArgumentLocals.has(name) && !structurallyAccessedArrayLocals.has(name)
+    ),
+  );
+}
+
+function getCallReceiverFromExpression(
+  expression: ts.Expression,
+): ts.Expression | undefined {
+  const current = unwrapExpression(expression);
+  if (ts.isPropertyAccessExpression(current)) {
+    return current.expression;
+  }
+  if (ts.isElementAccessExpression(current)) {
+    return current.expression;
+  }
+  return undefined;
+}
+
+function getCallMethodNameFromExpression(
+  expression: ts.Expression,
+): string | undefined {
+  const current = unwrapExpression(expression);
+  if (ts.isPropertyAccessExpression(current)) {
+    return current.name.text;
+  }
+  if (
+    ts.isElementAccessExpression(current) &&
+    current.argumentExpression &&
+    isLiteralElement(current.argumentExpression)
+  ) {
+    return getLiteralElementText(current.argumentExpression);
+  }
+  return undefined;
+}
+
+function isKnownIdentityEqualsCallee(
+  expr: ts.Expression,
+  checker?: ts.TypeChecker,
+): boolean {
+  const current = unwrapExpression(expr);
+
+  if (ts.isIdentifier(current)) {
+    if (current.text !== "equals" && current.text !== "equalLinks") {
+      return false;
+    }
+    if (!checker) {
+      return true;
+    }
+    const symbol = checker.getSymbolAtLocation(current);
+    return resolvesToCommonFabricSymbol(symbol, checker, current.text);
+  }
+
+  if (ts.isPropertyAccessExpression(current)) {
+    if (current.name.text !== "equals" && current.name.text !== "equalLinks") {
+      return false;
+    }
+    return !checker ||
+      isCellLikeType(checker.getTypeAtLocation(current.expression), checker);
+  }
+
+  if (
+    ts.isElementAccessExpression(current) &&
+    current.argumentExpression &&
+    isLiteralElement(current.argumentExpression)
+  ) {
+    const methodName = getLiteralElementText(current.argumentExpression);
+    if (methodName !== "equals" && methodName !== "equalLinks") {
+      return false;
+    }
+    return !checker ||
+      isCellLikeType(checker.getTypeAtLocation(current.expression), checker);
+  }
+
+  return false;
+}
+
+function isKnownIdentityEqualsCall(
+  call: ts.CallExpression,
+  checker?: ts.TypeChecker,
+): boolean {
+  return isKnownIdentityEqualsCallee(call.expression, checker);
+}
+
+function isKnownIdentityNavigationCallee(
+  expr: ts.Expression,
+  checker?: ts.TypeChecker,
+): boolean {
+  const current = unwrapExpression(expr);
+  if (!ts.isIdentifier(current) || current.text !== "navigateTo") {
+    return false;
+  }
+  if (!checker) {
+    return true;
+  }
+  const symbol = checker.getSymbolAtLocation(current);
+  return resolvesToCommonFabricSymbol(symbol, checker, "navigateTo");
+}
+
+function isKnownIdentityArgumentCall(
+  call: ts.CallExpression,
+  checker?: ts.TypeChecker,
+): boolean {
+  return isKnownIdentityEqualsCall(call, checker) ||
+    isKnownIdentityNavigationCallee(call.expression, checker);
+}
+
+function isAliasShape(binding: AliasBinding): binding is AliasShape {
+  return "properties" in binding;
+}
+
+function isSourceRefBinding(binding: AliasBinding): binding is SourceRef {
+  return "root" in binding;
+}
+
+function aliasBindingEquals(
+  left: AliasBinding,
+  right: AliasBinding,
+): boolean {
+  if (isSourceRefBinding(left) && isSourceRefBinding(right)) {
+    return left.root === right.root &&
+      left.dynamic === right.dynamic &&
+      !!left.arrayElement === !!right.arrayElement &&
+      !!left.elementResult === !!right.elementResult &&
+      left.path.length === right.path.length &&
+      left.path.every((segment, index) => segment === right.path[index]);
+  }
+
+  if (isAliasShape(left) && isAliasShape(right)) {
+    if (left.properties.size !== right.properties.size) {
+      return false;
+    }
+    for (const [key, leftValue] of left.properties.entries()) {
+      const rightValue = right.properties.get(key);
+      if (!rightValue || !aliasBindingEquals(leftValue, rightValue)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  return false;
+}
+
 function clearBindingAliases(
   name: ts.BindingName,
   aliases: Map<string, SourceRef>,
+  aliasShapes: Map<string, AliasShape>,
 ): void {
   if (ts.isIdentifier(name)) {
     aliases.delete(name.text);
+    aliasShapes.delete(name.text);
     return;
   }
   for (const element of name.elements) {
     if (ts.isOmittedExpression(element)) continue;
-    clearBindingAliases(element.name, aliases);
+    clearBindingAliases(element.name, aliases, aliasShapes);
   }
 }
 
 function assignParameterBindingAlias(
   name: ts.BindingName,
-  source: SourceRef | undefined,
+  source: AliasBinding | undefined,
   aliases: Map<string, SourceRef>,
+  aliasShapes: Map<string, AliasShape>,
   markWildcard: (name: string) => void,
+  checker?: ts.TypeChecker,
 ): void {
   if (ts.isIdentifier(name)) {
-    if (source) {
+    if (!source) {
+      aliases.delete(name.text);
+      aliasShapes.delete(name.text);
+    } else if (isSourceRefBinding(source)) {
       aliases.set(name.text, source);
+      aliasShapes.delete(name.text);
     } else {
       aliases.delete(name.text);
+      aliasShapes.set(name.text, source);
     }
     return;
   }
 
   if (!source) {
-    clearBindingAliases(name, aliases);
+    clearBindingAliases(name, aliases, aliasShapes);
     return;
   }
 
   if (ts.isArrayBindingPattern(name)) {
-    markWildcard(source.root);
-    clearBindingAliases(name, aliases);
+    if (isSourceRefBinding(source)) {
+      markWildcard(source.root);
+    }
+    clearBindingAliases(name, aliases, aliasShapes);
     return;
   }
 
@@ -312,8 +937,10 @@ function assignParameterBindingAlias(
     if (ts.isOmittedExpression(element)) continue;
 
     if (element.dotDotDotToken || element.initializer) {
-      markWildcard(source.root);
-      clearBindingAliases(element.name, aliases);
+      if (isSourceRefBinding(source)) {
+        markWildcard(source.root);
+      }
+      clearBindingAliases(element.name, aliases, aliasShapes);
       continue;
     }
 
@@ -322,30 +949,27 @@ function assignParameterBindingAlias(
       if (ts.isIdentifier(element.name)) {
         key = element.name.text;
       }
-    } else if (ts.isIdentifier(element.propertyName)) {
-      key = element.propertyName.text;
-    } else if (ts.isStringLiteral(element.propertyName)) {
-      key = element.propertyName.text;
-    } else if (ts.isNumericLiteral(element.propertyName)) {
-      key = element.propertyName.text;
     } else {
-      markWildcard(source.root);
+      key = getStaticPropertyKeyText(element.propertyName, checker);
+      if (!key && isSourceRefBinding(source)) {
+        markWildcard(source.root);
+      }
     }
 
     if (!key) {
-      clearBindingAliases(element.name, aliases);
+      clearBindingAliases(element.name, aliases, aliasShapes);
       continue;
     }
 
     assignParameterBindingAlias(
       element.name,
-      {
-        root: source.root,
-        path: [...source.path, key],
-        dynamic: source.dynamic,
-      },
+      isSourceRefBinding(source)
+        ? extendSourceRef(source, [key])
+        : source.properties.get(key),
       aliases,
+      aliasShapes,
       markWildcard,
+      checker,
     );
   }
 }
@@ -357,7 +981,91 @@ function toCapability(state: MutableCapabilityState): ReactiveCapability {
   if (hasReads && hasWrites) return "writable";
   if (hasReads) return "readonly";
   if (hasWrites) return "writeonly";
+  if (state.rawComparablePaths.size > 0 && !state.hasNonIdentityUse) {
+    return "comparable";
+  }
   return "opaque";
+}
+
+function normalizeObservedCapabilityUsage(
+  state: MutableCapabilityState,
+): ObservedCapabilityUsage {
+  const readPaths = Array.from(state.reads).map(decodePath);
+  const fullShapePaths = Array.from(state.fullShapeReads).map(decodePath);
+  const writePaths = Array.from(state.writes).map(decodePath);
+  const opaquePaths = Array.from(state.rawOpaquePaths)
+    .map(decodePath)
+    .filter((opaquePath) =>
+      ![
+        ...readPaths,
+        ...fullShapePaths,
+        ...writePaths,
+      ].some((path) =>
+        path.length >= opaquePath.length &&
+        opaquePath.every((segment, index) => path[index] === segment)
+      )
+    );
+  const identityPaths = Array.from(state.rawIdentityPaths)
+    .map(decodePath)
+    .filter((identityPath) => {
+      if (state.wildcard) {
+        return false;
+      }
+      if (identityPath.length === 0 && state.hasNonIdentityRootUse) {
+        return false;
+      }
+      const overlapsNonIdentity = [
+        ...readPaths,
+        ...fullShapePaths,
+        ...writePaths,
+        ...opaquePaths,
+      ].some((path) =>
+        path.length >= identityPath.length &&
+        identityPath.every((segment, index) => path[index] === segment)
+      );
+      return !overlapsNonIdentity;
+    });
+  const keptIdentityPaths = new Set(identityPaths.map(encodePath));
+  const identityCellPaths = Array.from(state.rawIdentityCellPaths)
+    .filter((path) => keptIdentityPaths.has(path))
+    .map(decodePath);
+  const comparablePaths = Array.from(state.rawComparablePaths)
+    .filter((path) => keptIdentityPaths.has(path))
+    .map(decodePath);
+  const keptComparablePaths = new Set(comparablePaths.map(encodePath));
+  const comparableCellPaths = Array.from(state.rawComparableCellPaths)
+    .filter((path) => keptComparablePaths.has(path))
+    .map(decodePath);
+
+  return {
+    readPaths,
+    fullShapePaths,
+    writePaths,
+    opaquePaths,
+    passthrough: state.passthrough,
+    wildcard: state.wildcard,
+    identityOnly: identityPaths.some((path) => path.length === 0) &&
+      !state.hasNonIdentityUse &&
+      state.reads.size === 0 &&
+      state.writes.size === 0 &&
+      !state.wildcard,
+    identityPaths,
+    identityCellPaths,
+    comparablePaths,
+    comparableCellPaths,
+  };
+}
+
+function buildCapabilityParamSummary(
+  name: string,
+  state: MutableCapabilityState,
+): CapabilityParamSummary {
+  const observed = normalizeObservedCapabilityUsage(state);
+  return {
+    name,
+    capability: toCapability(state),
+    ...observed,
+  };
 }
 
 export function analyzeFunctionCapabilities(
@@ -380,6 +1088,8 @@ export function analyzeFunctionCapabilities(
   try {
     const checker = options?.checker;
     const interprocedural = !!options?.interprocedural && !!checker;
+    const includeNestedCallbacks = !!options?.includeNestedCallbacks;
+    const summarySourceFile = fn.getSourceFile();
 
     if (!fn.body) {
       const empty = { params: [] };
@@ -389,6 +1099,10 @@ export function analyzeFunctionCapabilities(
 
     const states = new Map<string, MutableCapabilityState>();
     const aliases = new Map<string, SourceRef>();
+    const aliasShapes = new Map<string, AliasShape>();
+    const optionalPresenceAliases = new Set<string>();
+    const localArrayElementBindings = new Map<string, AliasBinding>();
+    const localMapValueBindings = new Map<string, AliasBinding>();
     const parameterStateKeys: string[] = [];
 
     const ensureState = (name: string): MutableCapabilityState => {
@@ -396,29 +1110,158 @@ export function analyzeFunctionCapabilities(
       if (!state) {
         state = {
           reads: new Set<string>(),
+          fullShapeReads: new Set<string>(),
           writes: new Set<string>(),
+          rawIdentityPaths: new Set<string>(),
+          rawIdentityCellPaths: new Set<string>(),
+          rawComparablePaths: new Set<string>(),
+          rawComparableCellPaths: new Set<string>(),
+          rawOpaquePaths: new Set<string>(),
           passthrough: false,
           wildcard: false,
+          hasIdentityUse: false,
+          hasNonIdentityUse: false,
+          hasNonIdentityRootUse: false,
         };
         states.set(name, state);
       }
       return state;
     };
 
-    const trackRead = (name: string, path: readonly string[]): void => {
-      ensureState(name).reads.add(encodePath(path));
+    const trackRead = (
+      name: string,
+      path: readonly string[],
+      options?: { identityOnly?: boolean },
+    ): void => {
+      const state = ensureState(name);
+      state.reads.add(encodePath(path));
+      if (options?.identityOnly) {
+        state.hasIdentityUse = true;
+      } else {
+        state.hasNonIdentityUse = true;
+      }
     };
 
     const trackWrite = (name: string, path: readonly string[]): void => {
-      ensureState(name).writes.add(encodePath(path));
+      const state = ensureState(name);
+      state.writes.add(encodePath(path));
+      state.hasNonIdentityUse = true;
+    };
+
+    const trackFullShapeRead = (
+      name: string,
+      path: readonly string[],
+    ): void => {
+      const state = ensureState(name);
+      state.fullShapeReads.add(encodePath(path));
+      state.hasNonIdentityUse = true;
     };
 
     const markWildcard = (name: string): void => {
-      ensureState(name).wildcard = true;
+      const state = ensureState(name);
+      state.wildcard = true;
+      state.hasNonIdentityUse = true;
     };
 
-    const markPassthrough = (name: string): void => {
-      ensureState(name).passthrough = true;
+    const markPassthrough = (
+      name: string,
+      options?: { identityOnly?: boolean },
+    ): void => {
+      const state = ensureState(name);
+      state.passthrough = true;
+      if (options?.identityOnly) {
+        state.hasIdentityUse = true;
+      } else {
+        state.hasNonIdentityUse = true;
+        state.hasNonIdentityRootUse = true;
+      }
+    };
+
+    const markOpaqueUse = (name: string, path: readonly string[]): void => {
+      const state = ensureState(name);
+      state.hasNonIdentityUse = true;
+      if (path.length === 0) {
+        state.hasNonIdentityRootUse = true;
+      }
+    };
+
+    const recordOpaquePath = (
+      name: string,
+      path: readonly string[],
+    ): void => {
+      const state = ensureState(name);
+      state.rawOpaquePaths.add(encodePath(path));
+      state.hasNonIdentityUse = true;
+      if (path.length === 0) {
+        state.hasNonIdentityRootUse = true;
+      }
+    };
+
+    const recordIdentityPath = (
+      name: string,
+      path: readonly string[],
+      options?: { cellLike?: boolean },
+    ): void => {
+      const state = ensureState(name);
+      const encoded = encodePath(path);
+      state.rawIdentityPaths.add(encoded);
+      if (options?.cellLike) {
+        state.rawIdentityCellPaths.add(encoded);
+      }
+      state.hasIdentityUse = true;
+    };
+
+    const recordComparablePath = (
+      name: string,
+      path: readonly string[],
+      options?: { cellLike?: boolean },
+    ): void => {
+      recordIdentityPath(name, path, options);
+      const state = ensureState(name);
+      const encoded = encodePath(path);
+      state.rawComparablePaths.add(encoded);
+      if (options?.cellLike) {
+        state.rawComparableCellPaths.add(encoded);
+      }
+    };
+
+    const hasRecordedIdentityPath = (
+      name: string,
+      path: readonly string[],
+    ): boolean => {
+      return ensureState(name).rawIdentityPaths.has(encodePath(path));
+    };
+
+    const hasRecordedIdentityUseRef = (ref: SourceRef): boolean => {
+      const materialized = materializeSourceRef(ref);
+      if (materialized.dynamic) {
+        return false;
+      }
+      return hasRecordedIdentityPath(materialized.root, materialized.path);
+    };
+
+    const isCellLikeExpression = (expr: ts.Expression): boolean => {
+      if (!checker) {
+        return false;
+      }
+      return isCellLikeType(checker.getTypeAtLocation(expr), checker);
+    };
+
+    const isPrimitiveLikeExpression = (expr: ts.Expression): boolean => {
+      if (!checker) {
+        return false;
+      }
+      const type = checker.getTypeAtLocation(expr);
+      const flags = type.flags;
+      return !!(
+        flags &
+        (ts.TypeFlags.BooleanLike |
+          ts.TypeFlags.NumberLike |
+          ts.TypeFlags.StringLike |
+          ts.TypeFlags.BigIntLike |
+          ts.TypeFlags.ESSymbolLike |
+          ts.TypeFlags.EnumLike)
+      );
     };
 
     for (let index = 0; index < fn.parameters.length; index++) {
@@ -446,7 +1289,9 @@ export function analyzeFunctionCapabilities(
           dynamic: false,
         },
         aliases,
+        aliasShapes,
         markWildcard,
+        checker,
       );
     }
 
@@ -456,60 +1301,451 @@ export function analyzeFunctionCapabilities(
       return empty;
     }
 
-    const resolveFromAccess = (
+    // Track .get() CallExpression nodes whose result was resolved with a more
+    // specific path (e.g. notes.get().length → ["length"]).  When the
+    // READER_METHODS handler encounters these, it skips the blanket [] read.
+    const resolvedGetCalls = new Set<ts.Node>();
+
+    // Track alias names (e.g. "notes") that were resolved with specific
+    // property paths through a .get() chain.  When the identifier handler
+    // encounters a synthetic identifier with no parent pointer, it can skip
+    // the blanket read if the alias already has a more specific path.
+    const aliasesWithSpecificPaths = new Set<string>();
+    const identityArrayLocals = collectArrayLocalsPassedToSet(fn.body, checker);
+
+    const getIdentifierName = (
       expression: ts.Expression,
-    ): SourceRef | undefined => {
-      const info = extractAccessPath(expression);
-      if (!info) return undefined;
-      const alias = aliases.get(info.root);
-      if (!alias) return undefined;
-      return {
-        root: alias.root,
-        path: [...alias.path, ...info.path],
-        dynamic: alias.dynamic || info.dynamic,
-      };
+    ): string | undefined => {
+      const current = unwrapExpression(expression);
+      return ts.isIdentifier(current) ? current.text : undefined;
     };
 
-    const resolveSourceRef = (
+    const getCallMethodName = (
       expression: ts.Expression,
-    ): SourceRef | undefined => {
+    ): string | undefined => {
       const current = unwrapExpression(expression);
-      const byAccess = resolveFromAccess(current);
-      if (byAccess) return byAccess;
+      if (ts.isPropertyAccessExpression(current)) {
+        return current.name.text;
+      }
+      if (
+        ts.isElementAccessExpression(current) &&
+        current.argumentExpression &&
+        isLiteralElement(current.argumentExpression)
+      ) {
+        return getLiteralElementText(current.argumentExpression);
+      }
+      return undefined;
+    };
+
+    const resolveShapePath = (
+      binding: AliasBinding | undefined,
+      path: readonly string[],
+    ): AliasBinding | undefined => {
+      if (!binding) return undefined;
+      if (path.length === 0) {
+        return binding;
+      }
+      if (isSourceRefBinding(binding)) {
+        return extendSourceRef(binding, path);
+      }
+
+      const [head, ...tail] = path;
+      const child = binding.properties.get(head!);
+      return resolveShapePath(child, tail);
+    };
+
+    const resolveBinding = (
+      expression: ts.Expression,
+    ): AliasBinding | undefined => {
+      const current = unwrapExpression(expression);
+      if (
+        ts.isBinaryExpression(current) &&
+        FALLBACK_OPERATORS.has(current.operatorToken.kind)
+      ) {
+        const left = resolveBinding(current.left);
+        const right = resolveBinding(current.right);
+        if (left && right) {
+          return aliasBindingEquals(left, right) ? left : undefined;
+        }
+        return left ?? right;
+      }
+
+      const info = extractAccessPath(current, checker);
+      if (info) {
+        const alias = aliases.get(info.root);
+        if (alias) {
+          const resolved = extendSourceRef(alias, info.path);
+          return {
+            root: resolved.root,
+            path: resolved.path,
+            dynamic: resolved.dynamic || info.dynamic,
+            elementResult: resolved.elementResult,
+          };
+        }
+
+        if (!info.dynamic) {
+          const shape = aliasShapes.get(info.root);
+          const resolved = resolveShapePath(shape, info.path);
+          if (resolved) {
+            return resolved;
+          }
+        }
+      }
+
+      if (
+        ts.isPropertyAccessExpression(current) ||
+        ts.isElementAccessExpression(current)
+      ) {
+        const innerBinding = resolveBinding(current.expression) ??
+          (ts.isCallExpression(current.expression)
+            ? buildAliasBindingFromExpression(current.expression)
+            : undefined);
+        if (innerBinding) {
+          if (ts.isPropertyAccessExpression(current)) {
+            if (ts.isCallExpression(current.expression)) {
+              resolvedGetCalls.add(current.expression);
+            }
+            return resolveShapePath(innerBinding, [current.name.text]);
+          }
+          if (
+            ts.isElementAccessExpression(current) &&
+            isLiteralElement(current.argumentExpression)
+          ) {
+            if (ts.isCallExpression(current.expression)) {
+              resolvedGetCalls.add(current.expression);
+            }
+            return resolveShapePath(innerBinding, [
+              getLiteralElementText(current.argumentExpression),
+            ]);
+          }
+        }
+      }
 
       if (
         ts.isCallExpression(current) &&
         ts.isPropertyAccessExpression(current.expression)
       ) {
-        const receiverRef = resolveSourceRef(current.expression.expression);
-        if (!receiverRef) return undefined;
-
         const methodName = current.expression.name.text;
-        if (methodName === "get" && current.arguments.length === 0) {
-          return receiverRef;
-        }
-        if (methodName === "key") {
-          const argPath = extractLiteralPathArguments(current.arguments);
-          if (argPath.dynamic) {
-            return { ...receiverRef, dynamic: true };
+        const localMapName = getIdentifierName(current.expression.expression);
+        if (methodName === "get" && localMapName) {
+          const localBinding = localMapValueBindings.get(localMapName);
+          if (localBinding) {
+            return localBinding;
           }
-          return {
-            root: receiverRef.root,
-            path: [...receiverRef.path, ...argPath.path],
-            dynamic: receiverRef.dynamic,
-          };
+        }
+
+        const receiverBinding = resolveBinding(current.expression.expression);
+        if (receiverBinding && isSourceRefBinding(receiverBinding)) {
+          if (methodName === "get" && current.arguments.length === 0) {
+            return receiverBinding;
+          }
+          if (methodName === "key") {
+            const argPath = extractLiteralPathArguments(
+              current.arguments,
+              checker,
+            );
+            if (argPath.dynamic) {
+              return {
+                ...receiverBinding,
+                dynamic: true,
+              };
+            }
+            return {
+              root: receiverBinding.root,
+              path: [...receiverBinding.path, ...argPath.path],
+              dynamic: receiverBinding.dynamic,
+            };
+          }
         }
       }
 
       return undefined;
     };
 
-    const trackReadRef = (ref: SourceRef): void => {
+    const resolveSourceRef = (
+      expression: ts.Expression,
+    ): SourceRef | undefined => {
+      const binding = resolveBinding(expression);
+      return binding && isSourceRefBinding(binding) ? binding : undefined;
+    };
+
+    const resolveConservativeCallReceiverRef = (
+      call: ts.CallExpression,
+    ): SourceRef | undefined => {
+      const target = unwrapExpression(call.expression);
+      if (
+        !ts.isPropertyAccessExpression(target) &&
+        !ts.isElementAccessExpression(target)
+      ) {
+        return undefined;
+      }
+
+      const direct = resolveSourceRef(target.expression);
+      if (direct) {
+        return direct;
+      }
+
+      return ts.isCallExpression(target.expression)
+        ? resolveConservativeCallReceiverRef(target.expression)
+        : undefined;
+    };
+
+    const buildAliasBindingFromExpression = (
+      expression: ts.Expression,
+    ): AliasBinding | undefined => {
+      const direct = resolveBinding(expression);
+      if (direct) {
+        return direct;
+      }
+
+      const current = unwrapExpression(expression);
+      if (
+        ts.isCallExpression(current) &&
+        (
+          ts.isPropertyAccessExpression(current.expression) ||
+          ts.isElementAccessExpression(current.expression)
+        )
+      ) {
+        const receiverExpr = current.expression.expression;
+        const methodName = getCallMethodName(current.expression);
+        if (
+          receiverExpr &&
+          (methodName === "filter" || methodName === "sort" ||
+            methodName === "toSorted")
+        ) {
+          return resolveBinding(receiverExpr);
+        }
+
+        if (
+          receiverExpr &&
+          (methodName === "find" || methodName === "findLast" ||
+            methodName === "at")
+        ) {
+          const binding = resolveArrayElementBinding(receiverExpr);
+          if (binding && isSourceRefBinding(binding)) {
+            return {
+              root: binding.root,
+              path: binding.path,
+              dynamic: binding.dynamic,
+              arrayElement: true,
+              elementResult: true,
+            };
+          }
+        }
+      }
+
+      if (!ts.isObjectLiteralExpression(current)) {
+        return undefined;
+      }
+
+      const properties = new Map<string, AliasBinding>();
+      for (const property of current.properties) {
+        if (ts.isSpreadAssignment(property)) {
+          return undefined;
+        }
+
+        if (ts.isShorthandPropertyAssignment(property)) {
+          const binding = resolveBinding(property.name);
+          if (binding) {
+            properties.set(property.name.text, binding);
+          }
+          continue;
+        }
+
+        if (!ts.isPropertyAssignment(property)) {
+          continue;
+        }
+
+        const key = getStaticPropertyKeyText(property.name, checker);
+        if (!key) {
+          return undefined;
+        }
+
+        const binding = buildAliasBindingFromExpression(property.initializer);
+        if (binding) {
+          properties.set(key, binding);
+        }
+      }
+
+      return properties.size > 0 ? { properties } : undefined;
+    };
+
+    const mergeAliasBinding = (
+      current: AliasBinding | undefined,
+      next: AliasBinding | undefined,
+    ): AliasBinding | undefined => {
+      if (!next) return current;
+      if (!current) return next;
+      return aliasBindingEquals(current, next) ? current : undefined;
+    };
+
+    const updateLocalCollectionBinding = (
+      bindings: Map<string, AliasBinding>,
+      name: string,
+      next: AliasBinding | undefined,
+    ): void => {
+      if (!next) {
+        bindings.delete(name);
+        return;
+      }
+
+      const merged = mergeAliasBinding(bindings.get(name), next);
+      if (merged) {
+        bindings.set(name, merged);
+      } else {
+        bindings.delete(name);
+      }
+    };
+
+    const resolveArrayElementBinding = (
+      expression: ts.Expression,
+    ): AliasBinding | undefined => {
+      const current = unwrapExpression(expression);
+      if (ts.isCallExpression(current)) {
+        const target = unwrapExpression(current.expression);
+        const receiverExpr = ts.isPropertyAccessExpression(target) ||
+            ts.isElementAccessExpression(target)
+          ? target.expression
+          : undefined;
+        const methodName = getCallMethodName(current.expression);
+        if (
+          receiverExpr &&
+          (methodName === "filter" || methodName === "sort" ||
+            methodName === "toSorted")
+        ) {
+          return resolveArrayElementBinding(receiverExpr);
+        }
+      }
+
+      const localName = getIdentifierName(expression);
+      if (localName) {
+        const localBinding = localArrayElementBindings.get(localName);
+        if (localBinding) {
+          return localBinding;
+        }
+      }
+
+      const source = resolveSourceRef(expression);
+      if (!source) {
+        return undefined;
+      }
+      return {
+        root: source.root,
+        path: source.path,
+        dynamic: source.dynamic,
+        arrayElement: true,
+      };
+    };
+
+    const clearLocalCollectionBindings = (name: string): void => {
+      localArrayElementBindings.delete(name);
+      localMapValueBindings.delete(name);
+    };
+
+    const scopedLocalCollectionNamesStack: Array<Set<string>> = [];
+
+    const markScopedLocalCollectionName = (name: string): void => {
+      const currentScope = scopedLocalCollectionNamesStack[
+        scopedLocalCollectionNamesStack.length - 1
+      ];
+      currentScope?.add(name);
+    };
+
+    const clearScopedLocalCollectionBindingNames = (
+      name: ts.BindingName,
+    ): void => {
+      if (ts.isIdentifier(name)) {
+        markScopedLocalCollectionName(name.text);
+        clearLocalCollectionBindings(name.text);
+        return;
+      }
+
+      for (const element of name.elements) {
+        if (ts.isOmittedExpression(element)) continue;
+        clearScopedLocalCollectionBindingNames(element.name);
+      }
+    };
+
+    const restoreScopedLocalCollectionBindings = (
+      names: ReadonlySet<string>,
+      savedArrayElementBindings: ReadonlyMap<string, AliasBinding>,
+      savedMapValueBindings: ReadonlyMap<string, AliasBinding>,
+    ): void => {
+      for (const name of names) {
+        const arrayBinding = savedArrayElementBindings.get(name);
+        if (arrayBinding) {
+          localArrayElementBindings.set(name, arrayBinding);
+        } else {
+          localArrayElementBindings.delete(name);
+        }
+
+        const mapBinding = savedMapValueBindings.get(name);
+        if (mapBinding) {
+          localMapValueBindings.set(name, mapBinding);
+        } else {
+          localMapValueBindings.delete(name);
+        }
+      }
+    };
+
+    const visitScopedLocalCollectionBindings = (visitor: () => void): void => {
+      const savedLocalArrayElementBindings = new Map(
+        localArrayElementBindings,
+      );
+      const savedLocalMapValueBindings = new Map(localMapValueBindings);
+      const scopedLocalCollectionNames = new Set<string>();
+      scopedLocalCollectionNamesStack.push(scopedLocalCollectionNames);
+
+      try {
+        visitor();
+      } finally {
+        scopedLocalCollectionNamesStack.pop();
+        restoreScopedLocalCollectionBindings(
+          scopedLocalCollectionNames,
+          savedLocalArrayElementBindings,
+          savedLocalMapValueBindings,
+        );
+      }
+    };
+
+    const recordLocalArrayIdentityWrite = (
+      arrayName: string,
+      args: readonly ts.Expression[],
+    ): void => {
+      let next = localArrayElementBindings.get(arrayName);
+      for (const arg of args) {
+        next = mergeAliasBinding(next, buildAliasBindingFromExpression(arg));
+        if (!next) {
+          break;
+        }
+      }
+      if (next) {
+        localArrayElementBindings.set(arrayName, next);
+      } else {
+        localArrayElementBindings.delete(arrayName);
+      }
+    };
+
+    const recordLocalMapSet = (
+      mapName: string,
+      valueExpr: ts.Expression | undefined,
+    ): void => {
+      updateLocalCollectionBinding(
+        localMapValueBindings,
+        mapName,
+        valueExpr ? buildAliasBindingFromExpression(valueExpr) : undefined,
+      );
+    };
+
+    const trackReadRef = (
+      ref: SourceRef,
+      options?: { identityOnly?: boolean },
+    ): void => {
       if (ref.dynamic) {
         markWildcard(ref.root);
         return;
       }
-      trackRead(ref.root, ref.path);
+      trackRead(ref.root, ref.path, options);
     };
 
     const trackWriteRef = (ref: SourceRef): void => {
@@ -520,71 +1756,31 @@ export function analyzeFunctionCapabilities(
       trackWrite(ref.root, ref.path);
     };
 
+    const trackFullShapeReadRef = (ref: SourceRef): void => {
+      if (ref.dynamic) {
+        markWildcard(ref.root);
+        return;
+      }
+      trackFullShapeRead(ref.root, ref.path);
+    };
+
     const assignBindingAlias = (
       name: ts.BindingName,
-      source: SourceRef | undefined,
+      source: AliasBinding | undefined,
     ): void => {
-      if (ts.isIdentifier(name)) {
-        if (source) {
-          aliases.set(name.text, source);
-        } else {
-          aliases.delete(name.text);
-        }
-        return;
-      }
-
-      if (!source) {
-        clearBindingAliases(name, aliases);
-        return;
-      }
-
-      if (ts.isArrayBindingPattern(name)) {
-        markWildcard(source.root);
-        clearBindingAliases(name, aliases);
-        return;
-      }
-
-      for (const element of name.elements) {
-        if (ts.isOmittedExpression(element)) continue;
-
-        if (element.dotDotDotToken || element.initializer) {
-          markWildcard(source.root);
-          clearBindingAliases(element.name, aliases);
-          continue;
-        }
-
-        let key: string | undefined;
-        if (!element.propertyName) {
-          if (ts.isIdentifier(element.name)) {
-            key = element.name.text;
-          }
-        } else if (ts.isIdentifier(element.propertyName)) {
-          key = element.propertyName.text;
-        } else if (ts.isStringLiteral(element.propertyName)) {
-          key = element.propertyName.text;
-        } else if (ts.isNumericLiteral(element.propertyName)) {
-          key = element.propertyName.text;
-        } else {
-          markWildcard(source.root);
-        }
-
-        if (!key) {
-          clearBindingAliases(element.name, aliases);
-          continue;
-        }
-
-        trackRead(source.root, [...source.path, key]);
-        assignBindingAlias(element.name, {
-          root: source.root,
-          path: [...source.path, key],
-          dynamic: source.dynamic,
-        });
-      }
+      assignParameterBindingAlias(
+        name,
+        source,
+        aliases,
+        aliasShapes,
+        markWildcard,
+        checker,
+      );
     };
 
     const assignExpressionPatternAlias = (
       pattern: ts.Expression,
-      source: SourceRef | undefined,
+      source: AliasBinding | undefined,
     ): void => {
       if (ts.isParenthesizedExpression(pattern)) {
         assignExpressionPatternAlias(pattern.expression, source);
@@ -592,11 +1788,7 @@ export function analyzeFunctionCapabilities(
       }
 
       if (ts.isIdentifier(pattern)) {
-        if (source) {
-          aliases.set(pattern.text, source);
-        } else {
-          aliases.delete(pattern.text);
-        }
+        assignBindingAlias(pattern, source);
         return;
       }
 
@@ -605,6 +1797,7 @@ export function analyzeFunctionCapabilities(
           for (const property of pattern.properties) {
             if (ts.isShorthandPropertyAssignment(property)) {
               aliases.delete(property.name.text);
+              aliasShapes.delete(property.name.text);
             } else if (ts.isPropertyAssignment(property)) {
               assignExpressionPatternAlias(property.initializer, undefined);
             }
@@ -614,17 +1807,20 @@ export function analyzeFunctionCapabilities(
 
         for (const property of pattern.properties) {
           if (ts.isSpreadAssignment(property)) {
-            markWildcard(source.root);
+            if (isSourceRefBinding(source)) {
+              markWildcard(source.root);
+            }
             continue;
           }
 
           if (ts.isShorthandPropertyAssignment(property)) {
-            trackRead(source.root, [...source.path, property.name.text]);
-            aliases.set(property.name.text, {
-              root: source.root,
-              path: [...source.path, property.name.text],
-              dynamic: source.dynamic,
-            });
+            const binding = isSourceRefBinding(source)
+              ? extendSourceRef(source, [property.name.text])
+              : source.properties.get(property.name.text);
+            if (binding && isSourceRefBinding(binding)) {
+              trackRead(binding.root, binding.path);
+            }
+            assignBindingAlias(property.name, binding);
             continue;
           }
 
@@ -632,14 +1828,8 @@ export function analyzeFunctionCapabilities(
             continue;
           }
 
-          let key: string | undefined;
-          if (ts.isIdentifier(property.name)) {
-            key = property.name.text;
-          } else if (ts.isStringLiteral(property.name)) {
-            key = property.name.text;
-          } else if (ts.isNumericLiteral(property.name)) {
-            key = property.name.text;
-          } else {
+          const key = getStaticPropertyKeyText(property.name, checker);
+          if (!key && isSourceRefBinding(source)) {
             markWildcard(source.root);
           }
 
@@ -648,18 +1838,19 @@ export function analyzeFunctionCapabilities(
             continue;
           }
 
-          trackRead(source.root, [...source.path, key]);
-          assignExpressionPatternAlias(property.initializer, {
-            root: source.root,
-            path: [...source.path, key],
-            dynamic: source.dynamic,
-          });
+          const binding = isSourceRefBinding(source)
+            ? extendSourceRef(source, [key])
+            : source.properties.get(key);
+          if (binding && isSourceRefBinding(binding)) {
+            trackRead(binding.root, binding.path);
+          }
+          assignExpressionPatternAlias(property.initializer, binding);
         }
         return;
       }
 
       if (ts.isArrayLiteralExpression(pattern)) {
-        if (source) {
+        if (source && isSourceRefBinding(source)) {
           markWildcard(source.root);
         }
         for (const element of pattern.elements) {
@@ -690,6 +1881,36 @@ export function analyzeFunctionCapabilities(
       marker(ref.root, ref.path);
     };
 
+    const markIdentityUseRef = (
+      ref: SourceRef,
+      expr?: ts.Expression,
+      options?: { comparable?: boolean },
+    ): void => {
+      const cellLike = expr
+        ? isCellLikeExpression(expr) || !isPrimitiveLikeExpression(expr)
+        : false;
+      const record = options?.comparable
+        ? recordComparablePath
+        : recordIdentityPath;
+      if (ref.dynamic) {
+        markWildcard(ref.root);
+      } else if (ref.path.length === 0) {
+        record(ref.root, [], { cellLike });
+        markPassthrough(ref.root, { identityOnly: true });
+      } else {
+        record(ref.root, ref.path, { cellLike });
+      }
+    };
+
+    const markArrayItemIdentityUseRef = (ref: SourceRef): void => {
+      const materialized = materializeSourceRef(ref);
+      if (materialized.dynamic) {
+        markWildcard(materialized.root);
+        return;
+      }
+      recordIdentityPath(materialized.root, [...materialized.path, "0"]);
+    };
+
     const resolveInterproceduralSummary = (
       call: ts.CallExpression,
     ): FunctionCapabilitySummary | undefined => {
@@ -697,7 +1918,7 @@ export function analyzeFunctionCapabilities(
       const signature = checker.getResolvedSignature(call);
       if (!signature) return undefined;
       const declaration = signature.declaration;
-      if (!isCapabilityAnalyzableFunction(declaration)) {
+      if (!isInterproceduralSummaryTarget(declaration, summarySourceFile)) {
         return undefined;
       }
 
@@ -709,7 +1930,153 @@ export function analyzeFunctionCapabilities(
       });
     };
 
+    const visitScopedFunctionBody = (
+      callback: CapabilityAnalyzableFunction,
+      paramBindings?: ReadonlyMap<number, AliasBinding>,
+    ): void => {
+      const savedAliases = new Map(aliases);
+      const savedAliasShapes = new Map(aliasShapes);
+      const savedOptionalPresenceAliases = new Set(optionalPresenceAliases);
+      const savedSpecificPaths = new Set(aliasesWithSpecificPaths);
+      const savedLocalArrayElementBindings = new Map(
+        localArrayElementBindings,
+      );
+      const savedLocalMapValueBindings = new Map(localMapValueBindings);
+      const scopedLocalCollectionNames = new Set<string>();
+      scopedLocalCollectionNamesStack.push(scopedLocalCollectionNames);
+
+      try {
+        if (callback.name && ts.isIdentifier(callback.name)) {
+          aliases.delete(callback.name.text);
+          aliasShapes.delete(callback.name.text);
+        }
+        for (const [index, parameter] of callback.parameters.entries()) {
+          clearScopedLocalCollectionBindingNames(parameter.name);
+          clearBindingAliases(parameter.name, aliases, aliasShapes);
+          const binding = paramBindings?.get(index);
+          if (binding) {
+            assignBindingAlias(parameter.name, binding);
+          }
+        }
+
+        const body = callback.body;
+        if (!body) return;
+
+        if (ts.isBlock(body)) {
+          for (const statement of body.statements) {
+            visit(statement);
+          }
+        } else {
+          visit(body);
+        }
+      } finally {
+        scopedLocalCollectionNamesStack.pop();
+        aliases.clear();
+        for (const [name, source] of savedAliases) {
+          aliases.set(name, source);
+        }
+        aliasShapes.clear();
+        for (const [name, shape] of savedAliasShapes) {
+          aliasShapes.set(name, shape);
+        }
+        optionalPresenceAliases.clear();
+        for (const name of savedOptionalPresenceAliases) {
+          optionalPresenceAliases.add(name);
+        }
+        aliasesWithSpecificPaths.clear();
+        for (const name of savedSpecificPaths) {
+          aliasesWithSpecificPaths.add(name);
+        }
+        restoreScopedLocalCollectionBindings(
+          scopedLocalCollectionNames,
+          savedLocalArrayElementBindings,
+          savedLocalMapValueBindings,
+        );
+      }
+    };
+
+    const visitInlineEagerCallbackArguments = (
+      call: ts.CallExpression,
+    ): void => {
+      if (!checker) return;
+
+      const callbackContainerKind = classifyArrayCallbackContainerCall(
+        call,
+        checker,
+      );
+      if (!callbackContainerKind) {
+        return;
+      }
+
+      const callbackArg = call.arguments[0];
+      if (!callbackArg || !isCapabilityAnalyzableFunction(callbackArg)) {
+        return;
+      }
+
+      const paramBindings = new Map<number, AliasBinding>();
+      const target = unwrapExpression(call.expression);
+      const receiverExpr = ts.isPropertyAccessExpression(target) ||
+          ts.isElementAccessExpression(target)
+        ? target.expression
+        : undefined;
+      const itemBinding = receiverExpr
+        ? resolveArrayElementBinding(receiverExpr)
+        : undefined;
+      const methodName = getCallMethodName(call.expression);
+      if (itemBinding) {
+        if (callbackArg.parameters[0]) {
+          paramBindings.set(0, itemBinding);
+        }
+        if (
+          callbackArg.parameters[1] &&
+          (methodName === "sort" || methodName === "toSorted")
+        ) {
+          paramBindings.set(1, itemBinding);
+        }
+      }
+
+      visitScopedFunctionBody(
+        callbackArg,
+        paramBindings.size > 0 ? paramBindings : undefined,
+      );
+    };
+
     const visit = (node: ts.Node): void => {
+      if (node !== fn && isCapabilityAnalyzableFunction(node)) {
+        if (includeNestedCallbacks) {
+          visitScopedFunctionBody(node);
+        }
+        return;
+      }
+
+      if (
+        ts.isBinaryExpression(node) &&
+        FALLBACK_OPERATORS.has(node.operatorToken.kind)
+      ) {
+        const leftExpr = unwrapExpression(node.left);
+        const shouldVisitNestedFallbackLeft = ts.isBinaryExpression(leftExpr) &&
+          FALLBACK_OPERATORS.has(leftExpr.operatorToken.kind);
+
+        if (shouldVisitNestedFallbackLeft) {
+          visit(node.left);
+        } else {
+          const leftRef = resolveSourceRef(node.left);
+          if (leftRef) {
+            if (leftRef.dynamic) {
+              markWildcard(leftRef.root);
+            } else if (leftRef.path.length === 0) {
+              markPassthrough(leftRef.root);
+            } else {
+              trackReadRef(leftRef);
+            }
+          } else {
+            visit(node.left);
+          }
+        }
+        visit(node.right);
+        return;
+      }
+
       if (
         ts.isBinaryExpression(node) &&
         isAssignmentOperator(node.operatorToken.kind)
@@ -723,17 +2090,16 @@ export function analyzeFunctionCapabilities(
         const operator = node.operatorToken.kind;
         if (operator === ts.SyntaxKind.EqualsToken) {
           if (ts.isIdentifier(node.left)) {
-            const nextRef = resolveSourceRef(node.right);
-            if (nextRef) {
-              aliases.set(node.left.text, nextRef);
-            } else {
-              aliases.delete(node.left.text);
-            }
+            clearLocalCollectionBindings(node.left.text);
+            assignBindingAlias(
+              node.left,
+              buildAliasBindingFromExpression(node.right),
+            );
           } else if (
             ts.isObjectLiteralExpression(node.left) ||
             ts.isArrayLiteralExpression(node.left)
           ) {
-            const nextRef = resolveSourceRef(node.right);
+            const nextRef = buildAliasBindingFromExpression(node.right);
             assignExpressionPatternAlias(node.left, nextRef);
           } else {
             markFromExpression(node.left, trackWrite);
@@ -741,6 +2107,8 @@ export function analyzeFunctionCapabilities(
         } else {
           if (ts.isIdentifier(node.left)) {
             aliases.delete(node.left.text);
+            aliasShapes.delete(node.left.text);
+            clearLocalCollectionBindings(node.left.text);
           } else {
             markFromExpression(node.left, trackWrite);
             markFromExpression(node.left, trackRead);
@@ -758,16 +2126,37 @@ export function analyzeFunctionCapabilities(
         } else {
           const source = aliases.get(node.text);
           if (source && !isMemberRootIdentifier(node)) {
+            const resolvedSource = materializeSourceRef(source);
             const usage = unwrapIdentifierUsageSite(node);
             const parent = usage.parent;
             if (!parent) {
               // Synthetic identifiers can temporarily be detached from parent links.
               // Preserve narrowed-path reads while avoiding false root-read expansion.
-              if (!source.dynamic && source.path.length === 0) {
-                markPassthrough(source.root);
+              if (!resolvedSource.dynamic && resolvedSource.path.length === 0) {
+                markPassthrough(resolvedSource.root);
+              } else if (aliasesWithSpecificPaths.has(node.text)) {
+                // This alias was already resolved with specific property paths
+                // (e.g. notes.get().length → ["notes", "length"]).  The blanket
+                // read from the detached identifier is redundant.
+                markPassthrough(resolvedSource.root);
               } else {
-                trackReadRef(source);
+                trackReadRef(resolvedSource);
               }
+            } else if (
+              source.elementResult &&
+              isBooleanConditionUsage(usage)
+            ) {
+              // Truthiness checks on array-element aliases (e.g. find() results)
+              // don't require loading the element payload.
+            } else if (
+              source.path.length > 0 &&
+              !source.dynamic &&
+              (optionalPresenceAliases.has(node.text) ||
+                !isPrimitiveLikeExpression(usage)) &&
+              isBooleanConditionUsage(usage)
+            ) {
+              // Truthiness checks on local aliases of source properties only
+              // require presence, not the aliased payload shape.
             } else if (
               !(
                 parent &&
@@ -789,17 +2178,88 @@ export function analyzeFunctionCapabilities(
                 )
               )
             ) {
+              const identityOnlyArgumentUse = !!(
+                parent &&
+                ts.isCallExpression(parent) &&
+                parent.arguments.includes(usage) &&
+                isKnownIdentityArgumentCall(parent, checker)
+              );
+              const identityArrayLocal =
+                getIdentityArrayLocalNameForElementUsage(usage);
+              const identityOnlyArrayElementUse = !!identityArrayLocal &&
+                identityArrayLocals.has(identityArrayLocal);
+              const identityArrayWriterLocal =
+                getIdentityArrayLocalNameForWriterArgumentUsage(usage);
+              const identityOnlyArrayWriterArgumentUse =
+                !!identityArrayWriterLocal &&
+                identityArrayLocals.has(identityArrayWriterLocal);
+              const arrayIdentityWriterArgumentUse =
+                isArrayIdentityWriterArgumentUsage(usage);
               if (
-                isCallOrNewArgumentUsage(usage) ||
-                isPassThroughIdentifierUsage(node)
+                arrayIdentityWriterArgumentUse &&
+                !identityOnlyArrayWriterArgumentUse
               ) {
-                if (source.path.length === 0 && !source.dynamic) {
-                  markPassthrough(source.root);
+                if (
+                  source.arrayElement &&
+                  !resolvedSource.dynamic
+                ) {
+                  trackReadRef(resolvedSource);
+                }
+                if (
+                  hasRecordedIdentityUseRef(source) &&
+                  !resolvedSource.dynamic
+                ) {
+                  recordIdentityPath(resolvedSource.root, resolvedSource.path, {
+                    cellLike: isCellLikeExpression(usage),
+                  });
                 } else {
-                  trackReadRef(source);
+                  trackReadRef(resolvedSource);
+                }
+              } else if (
+                isCallOrNewArgumentUsage(usage) ||
+                isPassThroughIdentifierUsage(node) ||
+                identityOnlyArrayElementUse ||
+                identityOnlyArrayWriterArgumentUse
+              ) {
+                if (
+                  resolvedSource.path.length === 0 && !resolvedSource.dynamic
+                ) {
+                  if (identityOnlyArgumentUse) {
+                    recordIdentityPath(resolvedSource.root, [], {
+                      cellLike: isCellLikeExpression(usage),
+                    });
+                  }
+                  markPassthrough(
+                    resolvedSource.root,
+                    identityOnlyArgumentUse
+                      ? { identityOnly: true }
+                      : undefined,
+                  );
+                } else if (
+                  identityOnlyArgumentUse && !resolvedSource.dynamic
+                ) {
+                  recordIdentityPath(resolvedSource.root, resolvedSource.path, {
+                    cellLike: isCellLikeExpression(usage),
+                  });
+                } else if (
+                  (identityOnlyArrayElementUse ||
+                    identityOnlyArrayWriterArgumentUse) &&
+                  !resolvedSource.dynamic
+                ) {
+                  recordIdentityPath(resolvedSource.root, resolvedSource.path, {
+                    cellLike: isCellLikeExpression(usage) ||
+                      !isPrimitiveLikeExpression(usage),
+                  });
+                } else {
+                  trackReadRef(
+                    resolvedSource,
+                    identityOnlyArgumentUse
+                      ? { identityOnly: true }
+                      : undefined,
+                  );
                 }
               } else {
-                trackReadRef(source);
+                trackReadRef(resolvedSource);
               }
             }
           }
@@ -814,17 +2274,74 @@ export function analyzeFunctionCapabilities(
           const parent = node.parent;
           if (
             !(parent && ts.isCallExpression(parent) &&
-              parent.expression === node)
+              parent.expression === node) &&
+            !isOptionalAliasInitializerMemberUsage(node)
           ) {
             const ref = resolveSourceRef(node);
             if (ref) {
               trackReadRef(ref);
+              // If this resolution went through a .get() call, record the
+              // alias name so the identifier handler can skip redundant
+              // blanket reads.  Only suppress for actual .get() bases —
+              // ordinary member reads (e.g. state.foo) must not be tagged.
+              // Walk through intermediate member accesses to find the .get()
+              // call (handles chains like notes.get().meta.length).
+              let getBaseExpr: ts.Expression = node.expression;
+              while (
+                ts.isPropertyAccessExpression(getBaseExpr) ||
+                ts.isElementAccessExpression(getBaseExpr)
+              ) {
+                getBaseExpr = getBaseExpr.expression;
+              }
+              if (
+                ts.isCallExpression(getBaseExpr) &&
+                resolvedGetCalls.has(getBaseExpr)
+              ) {
+                // Unwrap the .get() call to find the root identifier:
+                // notes.get() → notes.get (PropertyAccess) → notes (Identifier)
+                const calleeExpr = getBaseExpr.expression;
+                let rootExpr: ts.Expression = ts.isPropertyAccessExpression(
+                    calleeExpr,
+                  )
+                  ? calleeExpr.expression
+                  : calleeExpr;
+                while (ts.isPropertyAccessExpression(rootExpr)) {
+                  rootExpr = rootExpr.expression;
+                }
+                if (ts.isIdentifier(rootExpr) && aliases.has(rootExpr.text)) {
+                  aliasesWithSpecificPaths.add(rootExpr.text);
+                }
+              }
             }
           }
         }
       }
 
       if (ts.isCallExpression(node)) {
+        const localReceiverName =
+          ts.isPropertyAccessExpression(node.expression) ||
+            ts.isElementAccessExpression(node.expression)
+            ? getIdentifierName(node.expression.expression)
+            : undefined;
+        const localMethodName = getCallMethodName(node.expression);
+        if (
+          localReceiverName &&
+          localMethodName &&
+          ARRAY_IDENTITY_WRITER_METHODS.has(localMethodName) &&
+          node.arguments.length > 0
+        ) {
+          recordLocalArrayIdentityWrite(
+            localReceiverName,
+            localMethodName === "splice"
+              ? node.arguments.slice(2)
+              : node.arguments,
+          );
+        } else if (localReceiverName && localMethodName === "set") {
+          recordLocalMapSet(localReceiverName, node.arguments[1]);
+        }
+
+        const identityEqualsCall = isKnownIdentityEqualsCall(node, checker);
+        const identityArgumentCall = isKnownIdentityArgumentCall(node, checker);
         const interproceduralHandledArgs = new Set<number>();
         const calleeSummary = resolveInterproceduralSummary(node);
         if (calleeSummary) {
@@ -852,9 +2369,64 @@ export function analyzeFunctionCapabilities(
             for (const writePath of paramSummary.writePaths) {
               trackWrite(source.root, [...source.path, ...writePath]);
             }
+            for (const opaquePath of paramSummary.opaquePaths ?? []) {
+              recordOpaquePath(source.root, [
+                ...source.path,
+                ...opaquePath,
+              ]);
+            }
+            if (
+              paramSummary.capability === "opaque" &&
+              !paramSummary.passthrough &&
+              paramSummary.readPaths.length === 0 &&
+              paramSummary.writePaths.length === 0 &&
+              (paramSummary.opaquePaths?.length ?? 0) === 0
+            ) {
+              markOpaqueUse(source.root, source.path);
+            }
+
+            for (const identityPath of paramSummary.identityPaths ?? []) {
+              if (source.dynamic) {
+                markWildcard(source.root);
+              } else {
+                const isComparablePath = (paramSummary.comparablePaths ?? [])
+                  .some((path) =>
+                    path.length === identityPath.length &&
+                    path.every((segment, index) =>
+                      segment === identityPath[index]
+                    )
+                  );
+                const recordPath = isComparablePath
+                  ? recordComparablePath
+                  : recordIdentityPath;
+                recordPath(
+                  source.root,
+                  [...source.path, ...identityPath],
+                  {
+                    cellLike: (paramSummary.identityCellPaths ?? []).some(
+                      (path) =>
+                        path.length === identityPath.length &&
+                        path.every((segment, index) =>
+                          segment === identityPath[index]
+                        ),
+                    ),
+                  },
+                );
+              }
+            }
 
             if (paramSummary.passthrough && source.path.length === 0) {
-              markPassthrough(source.root);
+              if (paramSummary.identityOnly) {
+                if (paramSummary.capability === "comparable") {
+                  recordComparablePath(source.root, []);
+                } else {
+                  recordIdentityPath(source.root, []);
+                }
+              }
+              markPassthrough(
+                source.root,
+                paramSummary.identityOnly ? { identityOnly: true } : undefined,
+              );
             }
           }
         }
@@ -867,72 +2439,163 @@ export function analyzeFunctionCapabilities(
           }
         }
 
-        if (ts.isPropertyAccessExpression(node.expression)) {
-          const receiver = resolveSourceRef(node.expression.expression);
+        if (
+          ts.isPropertyAccessExpression(node.expression) ||
+          ts.isElementAccessExpression(node.expression)
+        ) {
+          const directReceiver = resolveSourceRef(node.expression.expression);
+          const receiver = directReceiver ??
+            resolveConservativeCallReceiverRef(node);
           if (receiver) {
-            const methodName = node.expression.name.text;
-            if (methodName === "key") {
-              const argPath = extractLiteralPathArguments(node.arguments);
+            const methodName = getCallMethodName(node.expression);
+            const shouldTrackFullShape = !directReceiver &&
+              (!methodName || !PRECISE_CHAIN_METHODS.has(methodName));
+            if (!methodName) {
+              if (shouldTrackFullShape) {
+                trackFullShapeReadRef(receiver);
+              } else {
+                trackReadRef(receiver);
+              }
+            } else if (methodName === "key") {
+              const argPath = extractLiteralPathArguments(
+                node.arguments,
+                checker,
+              );
               if (argPath.dynamic) {
                 markWildcard(receiver.root);
+              } else {
+                const keyUsage = unwrapExpressionUsageSite(node);
+                const keyUsageParent = keyUsage.parent;
+                const isChainedIntoMemberAccess = !!(
+                  keyUsageParent &&
+                  (ts.isPropertyAccessExpression(keyUsageParent) ||
+                    ts.isElementAccessExpression(keyUsageParent)) &&
+                  keyUsageParent.expression === keyUsage
+                );
+                if (!isChainedIntoMemberAccess) {
+                  trackReadRef({
+                    root: receiver.root,
+                    path: [...receiver.path, ...argPath.path],
+                    dynamic: receiver.dynamic,
+                  });
+                }
               }
+            } else if (identityEqualsCall) {
+              markIdentityUseRef(receiver, node.expression.expression, {
+                comparable: true,
+              });
             } else if (WRITER_METHODS.has(methodName)) {
               trackWriteRef(receiver);
+            } else if (ARRAY_IDENTITY_WRITER_METHODS.has(methodName)) {
+              trackWriteRef(receiver);
+              let hasIdentityArgument = false;
+              for (const argument of node.arguments) {
+                const argumentRef = resolveSourceRef(argument);
+                const rawArgument = unwrapExpression(argument);
+                const rawAlias = ts.isIdentifier(rawArgument)
+                  ? aliases.get(rawArgument.text)
+                  : undefined;
+                if (rawAlias?.arrayElement || argumentRef?.arrayElement) {
+                  trackReadRef(materializeSourceRef(rawAlias ?? argumentRef!));
+                }
+                if (argumentRef && hasRecordedIdentityUseRef(argumentRef)) {
+                  hasIdentityArgument = true;
+                  markIdentityUseRef(argumentRef, argument);
+                }
+              }
+              if (hasIdentityArgument) {
+                markArrayItemIdentityUseRef(receiver);
+              }
             } else if (READER_METHODS.has(methodName)) {
-              trackReadRef(receiver);
+              // If the .get() result was already resolved with a more specific
+              // path by the member-access handler (e.g. notes.get().length →
+              // ["notes", "length"]), skip the blanket read.
+              if (!resolvedGetCalls.has(node)) {
+                trackReadRef(receiver);
+              }
+            } else if (
+              OPAQUE_DERIVATION_METHODS.has(methodName) &&
+              (
+                !checker ||
+                isCellLikeExpression(node.expression.expression)
+              )
+            ) {
+              // These methods are available on opaque cells and return opaque
+              // results. Dynamic receivers can hide which branch is used, so
+              // they must disable shrinking for the root.
+              if (receiver.dynamic) {
+                markWildcard(receiver.root);
+              } else if (receiver.path.length > 0) {
+                recordOpaquePath(receiver.root, receiver.path);
+              } else {
+                markOpaqueUse(receiver.root, receiver.path);
+              }
             } else {
               // Unknown method call over a tracked source reads at least the receiver path.
-              trackReadRef(receiver);
+              if (shouldTrackFullShape) {
+                trackFullShapeReadRef(receiver);
+              } else if (directReceiver) {
+                trackReadRef(receiver);
+              }
             }
           }
         }
 
         // Passing a tracked root object into an opaque helper can conceal
         // indirect traversal/mutation; conservatively disable shrinking.
-        for (let index = 0; index < node.arguments.length; index++) {
-          if (interproceduralHandledArgs.has(index)) {
-            continue;
+        if (!identityArgumentCall) {
+          for (let index = 0; index < node.arguments.length; index++) {
+            if (interproceduralHandledArgs.has(index)) {
+              continue;
+            }
+            const argument = node.arguments[index];
+            if (!argument) continue;
+            const unwrappedArgument = unwrapExpression(argument);
+            if (!ts.isIdentifier(unwrappedArgument)) continue;
+            const source = resolveSourceRef(unwrappedArgument);
+            if (!source) continue;
+            if (source.dynamic || source.path.length > 0) continue;
+            markWildcard(source.root);
           }
-          const argument = node.arguments[index];
-          if (!argument) continue;
-          const unwrappedArgument = unwrapExpression(argument);
-          if (!ts.isIdentifier(unwrappedArgument)) continue;
-          const source = resolveSourceRef(unwrappedArgument);
-          if (!source) continue;
-          if (source.dynamic || source.path.length > 0) continue;
-          markWildcard(source.root);
+        }
+        if (identityArgumentCall) {
+          for (const argument of node.arguments) {
+            const source = resolveSourceRef(argument);
+            if (source) {
+              markIdentityUseRef(source, argument, {
+                comparable: identityEqualsCall,
+              });
+            }
+          }
         }
 
         // Full-shape operations.
-        if (
-          ts.isPropertyAccessExpression(node.expression) &&
-          ts.isIdentifier(node.expression.expression) &&
-          node.expression.expression.text === "Object" &&
-          WILDCARD_OBJECT_METHODS.has(node.expression.name.text)
-        ) {
+        if (isWildcardTraversalCall(node, checker)) {
           const firstArg = node.arguments[0];
           if (firstArg) {
             markWildcardFromExpression(firstArg);
           }
         }
 
-        if (
-          ts.isPropertyAccessExpression(node.expression) &&
-          ts.isIdentifier(node.expression.expression) &&
-          node.expression.expression.text === "JSON" &&
-          node.expression.name.text === "stringify"
-        ) {
-          const firstArg = node.arguments[0];
-          if (firstArg) {
-            markWildcardFromExpression(firstArg);
-          }
-        }
+        visitInlineEagerCallbackArguments(node);
       }
 
       if (ts.isVariableDeclaration(node)) {
+        clearScopedLocalCollectionBindingNames(node.name);
         const initRef = node.initializer && ts.isExpression(node.initializer)
-          ? resolveSourceRef(node.initializer)
+          ? buildAliasBindingFromExpression(node.initializer)
           : undefined;
+        if (ts.isIdentifier(node.name)) {
+          if (
+            node.initializer &&
+            ts.isExpression(node.initializer) &&
+            isOptionalAliasInitializerMemberUsage(node.initializer)
+          ) {
+            optionalPresenceAliases.add(node.name.text);
+          } else {
+            optionalPresenceAliases.delete(node.name.text);
+          }
+        }
         assignBindingAlias(node.name, initRef);
       }
 
@@ -948,18 +2611,119 @@ export function analyzeFunctionCapabilities(
         }
       }
 
-      if (
-        ts.isSpreadElement(node) ||
-        ts.isSpreadAssignment(node)
-      ) {
+      if (ts.isSpreadElement(node)) {
+        const spreadExpr = node.expression;
+        if (spreadExpr) {
+          const ref = resolveSourceRef(spreadExpr);
+          if (ref) {
+            trackReadRef(ref);
+            const identityArrayLocal = getIdentityArrayLocalNameForElementUsage(
+              node,
+            );
+            if (
+              identityArrayLocal && identityArrayLocals.has(identityArrayLocal)
+            ) {
+              markArrayItemIdentityUseRef(ref);
+            }
+          } else {
+            markWildcardFromExpression(spreadExpr);
+          }
+        }
+      }
+
+      if (ts.isSpreadAssignment(node)) {
         const spreadExpr = node.expression;
         if (spreadExpr) {
           markWildcardFromExpression(spreadExpr);
         }
       }
 
-      if (ts.isForInStatement(node) || ts.isForOfStatement(node)) {
+      if (ts.isForInStatement(node)) {
         markWildcardFromExpression(node.expression);
+        ts.forEachChild(node, visit);
+        return;
+      }
+
+      if (ts.isForOfStatement(node)) {
+        const iterableExpression = unwrapExpression(node.expression);
+        const iterableBinding = resolveArrayElementBinding(node.expression);
+        const iterableRef =
+          iterableBinding && isSourceRefBinding(iterableBinding)
+            ? iterableBinding
+            : undefined;
+        if (iterableRef) {
+          if (iterableRef.dynamic) {
+            markWildcard(iterableRef.root);
+          } else if (iterableRef.path.length === 0) {
+            markPassthrough(iterableRef.root);
+          } else {
+            trackReadRef(iterableRef);
+          }
+          if (ts.isCallExpression(iterableExpression)) {
+            visit(node.expression);
+          }
+        } else {
+          visit(node.expression);
+        }
+
+        const savedAliases = new Map(aliases);
+        const savedAliasShapes = new Map(aliasShapes);
+        const savedOptionalPresenceAliases = new Set(optionalPresenceAliases);
+        const savedSpecificPaths = new Set(aliasesWithSpecificPaths);
+        const savedLocalArrayElementBindings = new Map(
+          localArrayElementBindings,
+        );
+        const savedLocalMapValueBindings = new Map(localMapValueBindings);
+        const scopedLocalCollectionNames = new Set<string>();
+        scopedLocalCollectionNamesStack.push(scopedLocalCollectionNames);
+        try {
+          if (iterableBinding) {
+            if (ts.isVariableDeclarationList(node.initializer)) {
+              for (const declaration of node.initializer.declarations) {
+                clearScopedLocalCollectionBindingNames(declaration.name);
+                assignBindingAlias(declaration.name, iterableBinding);
+              }
+            } else if (ts.isExpression(node.initializer)) {
+              assignExpressionPatternAlias(node.initializer, iterableBinding);
+            }
+          } else {
+            visit(node.initializer);
+          }
+          visit(node.statement);
+        } finally {
+          scopedLocalCollectionNamesStack.pop();
+          aliases.clear();
+          for (const [name, source] of savedAliases) {
+            aliases.set(name, source);
+          }
+          aliasShapes.clear();
+          for (const [name, shape] of savedAliasShapes) {
+            aliasShapes.set(name, shape);
+          }
+          optionalPresenceAliases.clear();
+          for (const name of savedOptionalPresenceAliases) {
+            optionalPresenceAliases.add(name);
+          }
+          aliasesWithSpecificPaths.clear();
+          for (const name of savedSpecificPaths) {
+            aliasesWithSpecificPaths.add(name);
+          }
+          restoreScopedLocalCollectionBindings(
+            scopedLocalCollectionNames,
+            savedLocalArrayElementBindings,
+            savedLocalMapValueBindings,
+          );
+        }
+        return;
+      }
+
+      if (ts.isBlock(node)) {
+        visitScopedLocalCollectionBindings(() => {
+          for (const statement of node.statements) {
+            visit(statement);
+          }
+        });
+        return;
       }
 
       ts.forEachChild(node, visit);
@@ -982,14 +2746,7 @@ export function analyzeFunctionCapabilities(
         : `${PARAMETER_SUMMARY_PREFIX}${index}`;
       const state = states.get(summaryName);
       if (!state) continue;
-      params.push({
-        name: summaryName,
-        capability: toCapability(state),
-        readPaths: Array.from(state.reads).map(decodePath),
-        writePaths: Array.from(state.writes).map(decodePath),
-        passthrough: state.passthrough,
-        wildcard: state.wildcard,
-      });
+      params.push(buildCapabilityParamSummary(summaryName, state));
     }
 
     const result = { params };

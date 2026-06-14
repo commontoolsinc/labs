@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Imported Calendar Pattern
  *
@@ -16,15 +15,15 @@ import {
   Cell,
   computed,
   Default,
-  derive,
   handler,
-  ifElse,
   NAME,
+  nonPrivateRandom,
   pattern,
+  safeDateNow,
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Type matching CalendarEvent from google-calendar-importer.tsx
 type CalendarEvent = {
@@ -57,11 +56,11 @@ type LocalEvent = {
 };
 
 interface Input {
-  title?: Default<string, "Imported Calendar">;
-  localEvents?: Writable<Default<LocalEvent[], []>>;
+  title?: string | Default<"Imported Calendar">;
+  localEvents?: Writable<LocalEvent[] | Default<[]>>;
 }
 
-interface Output {
+export interface Output {
   title: string;
   eventCount: number;
   localEvents: LocalEvent[];
@@ -88,7 +87,9 @@ const COLORS = [
 
 // Simple random ID generator
 const generateId = () =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
+  `${safeDateNow().toString(36)}-${
+    nonPrivateRandom().toString(36).slice(2, 11)
+  }`;
 
 // ============ STYLES ============
 
@@ -355,41 +356,38 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   // ==========================================================================
   const { events: importedEvents } = wish<{ events: CalendarEvent[] }>(
     { query: "#calendarEvents" },
-  ).result;
+  ).result!;
 
   // Navigation State (Writable so navigation buttons work)
-  const startDate = Writable.of(getWeekStart(getTodayDate()));
-  const visibleDays = Writable.of(7);
+  const startDate = new Writable(getWeekStart(getTodayDate()));
+  const visibleDays = new Writable(7);
 
   // Create Form State
-  const showNewEventPrompt = Writable.of<boolean>(false);
-  const newEventTitle = Writable.of<string>("");
-  const newEventDate = Writable.of<string>(getTodayDate());
-  const newEventStartTime = Writable.of<string>("09:00");
-  const newEventEndTime = Writable.of<string>("10:00");
-  const newEventColor = Writable.of<string>(COLORS[0]);
-  const usedCreateAnother = Writable.of<boolean>(false);
+  const showNewEventPrompt = new Writable<boolean>(false);
+  const newEventTitle = new Writable<string>("");
+  const newEventDate = new Writable<string>(getTodayDate());
+  const newEventStartTime = new Writable<string>("09:00");
+  const newEventEndTime = new Writable<string>("10:00");
+  const newEventColor = new Writable<string>(COLORS[0]);
+  const usedCreateAnother = new Writable<boolean>(false);
 
   // Edit Form State
-  const showEditModal = Writable.of<boolean>(false);
-  const editingEventIndex = Writable.of<number>(-1);
-  const editEventTitle = Writable.of<string>("");
-  const editEventDate = Writable.of<string>("");
-  const editEventStartTime = Writable.of<string>("09:00");
-  const editEventEndTime = Writable.of<string>("10:00");
-  const editEventColor = Writable.of<string>(COLORS[0]);
+  const showEditModal = new Writable<boolean>(false);
+  const editingEventIndex = new Writable<number>(-1);
+  const editEventTitle = new Writable<string>("");
+  const editEventDate = new Writable<string>("");
+  const editEventStartTime = new Writable<string>("09:00");
+  const editEventEndTime = new Writable<string>("10:00");
+  const editEventColor = new Writable<string>(COLORS[0]);
 
   // Track last drop time to prevent click firing after drag
-  const lastDropTime = Cell.of(0);
+  const lastDropTime = new Cell(0);
 
   // Computed Values
-  const importedEventCount = derive(
-    importedEvents,
-    (evts: CalendarEvent[]) => evts?.length || 0,
-  );
-  const localEventCount = computed(() => localEvents.get().length);
-  const eventCount = computed(() => importedEventCount + localEventCount);
-  const weekDates = computed(() => getWeekDates(startDate.get(), 7));
+  const importedEventCount = importedEvents?.length || 0;
+  const localEventCount = localEvents.get().length;
+  const eventCount = importedEventCount + localEventCount;
+  const weekDates = getWeekDates(startDate.get(), 7);
   const todayDate = getTodayDate();
 
   // Navigation Actions
@@ -472,7 +470,10 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
     editingEventIndex.set(-1);
   });
 
-  // Computed Styles for View Toggle
+  // Computed Styles for View Toggle.
+  // Whole-object bindings at pattern-factory scope must stay wrapped in
+  // computed(): a bare object-literal initializer is a disallowed top-level
+  // value under SES verification.
   const dayButtonStyle = computed(() => ({
     ...STYLES.button.base,
     backgroundColor: visibleDays.get() === 1 ? "#3b82f6" : "#fff",
@@ -487,9 +488,9 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
 
   // ===== Render =====
   return {
-    [NAME]: computed(() => `${title} (${eventCount})`),
+    [NAME]: `${title} (${eventCount})`,
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         {/* Header */}
         <div
           slot="header"
@@ -559,7 +560,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
           }}
         >
           {/* New Event Modal */}
-          <ct-modal
+          <cf-modal
             $open={showNewEventPrompt}
             dismissable
             size="sm"
@@ -577,7 +578,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               {/* Title Input */}
               <div>
                 <label style={STYLES.label}>Title</label>
-                <ct-input
+                <cf-input
                   $value={newEventTitle}
                   placeholder="Event title..."
                   style={{ width: "100%" }}
@@ -587,7 +588,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               {/* Date Input */}
               <div>
                 <label style={STYLES.label}>Date</label>
-                <ct-input
+                <cf-input
                   $value={newEventDate}
                   type="date"
                   style={{ width: "100%" }}
@@ -598,16 +599,16 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               <div style={{ display: "flex", gap: "8px" }}>
                 <div style={{ flex: 1 }}>
                   <label style={STYLES.label}>Start</label>
-                  <ct-input
+                  <cf-input
                     $value={newEventStartTime}
                     type="time"
                     style={{ width: "100%" }}
-                    onct-change={onStartTimeChange}
+                    oncf-change={onStartTimeChange}
                   />
                 </div>
                 <div style={{ flex: 1 }}>
                   <label style={STYLES.label}>End</label>
-                  <ct-input
+                  <cf-input
                     $value={newEventEndTime}
                     type="time"
                     style={{ width: "100%" }}
@@ -624,11 +625,9 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                       style={{
                         ...STYLES.colorSwatch,
                         backgroundColor: c,
-                        border: computed(() =>
-                          newEventColor.get() === c
-                            ? "2px solid #111"
-                            : "2px solid transparent"
-                        ),
+                        border: newEventColor.get() === c
+                          ? "2px solid #111"
+                          : "2px solid transparent",
                       }}
                       onClick={colorActions[idx]}
                     />
@@ -689,10 +688,10 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                 Create
               </button>
             </div>
-          </ct-modal>
+          </cf-modal>
 
           {/* Edit Event Modal */}
-          <ct-modal
+          <cf-modal
             $open={showEditModal}
             dismissable
             size="sm"
@@ -710,7 +709,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               {/* Title Input */}
               <div>
                 <label style={STYLES.label}>Title</label>
-                <ct-input
+                <cf-input
                   $value={editEventTitle}
                   placeholder="Event title..."
                   style={{ width: "100%" }}
@@ -720,7 +719,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               {/* Date Input */}
               <div>
                 <label style={STYLES.label}>Date</label>
-                <ct-input
+                <cf-input
                   $value={editEventDate}
                   type="date"
                   style={{ width: "100%" }}
@@ -731,16 +730,16 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               <div style={{ display: "flex", gap: "8px" }}>
                 <div style={{ flex: 1 }}>
                   <label style={STYLES.label}>Start</label>
-                  <ct-input
+                  <cf-input
                     $value={editEventStartTime}
                     type="time"
                     style={{ width: "100%" }}
-                    onct-change={onEditStartTimeChange}
+                    oncf-change={onEditStartTimeChange}
                   />
                 </div>
                 <div style={{ flex: 1 }}>
                   <label style={STYLES.label}>End</label>
-                  <ct-input
+                  <cf-input
                     $value={editEventEndTime}
                     type="time"
                     style={{ width: "100%" }}
@@ -757,11 +756,9 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                       style={{
                         ...STYLES.colorSwatch,
                         backgroundColor: c,
-                        border: computed(() =>
-                          editEventColor.get() === c
-                            ? "2px solid #111"
-                            : "2px solid transparent"
-                        ),
+                        border: editEventColor.get() === c
+                          ? "2px solid #111"
+                          : "2px solid transparent",
                       }}
                       onClick={editColorActions[idx]}
                     />
@@ -803,7 +800,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                 Save
               </button>
             </div>
-          </ct-modal>
+          </cf-modal>
 
           {/* Calendar Grid */}
           <div
@@ -815,7 +812,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               userSelect: "none",
             }}
           >
-            <ct-vscroll flex showScrollbar fadeEdges>
+            <cf-vscroll flex showScrollbar fadeEdges>
               <div
                 style={{
                   display: "flex",
@@ -847,21 +844,22 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
 
                 {/* Day Columns */}
                 {COLUMN_INDICES.map((colIdx) => {
-                  // Use computed() to properly extract values from the computed array
-                  const columnDate = computed(() => weekDates[colIdx] || "");
-                  const isToday = derive(weekDates, (dates) =>
-                    dates?.[colIdx] === todayDate);
-                  const dateHeader = derive(weekDates, (dates) => {
-                    const d = dates?.[colIdx];
+                  // Extract per-column values from the reactive weekDates array
+                  const columnDate = weekDates[colIdx] || "";
+                  const isToday = weekDates?.[colIdx] === todayDate;
+                  const dateHeader = computed(() => {
+                    const d = weekDates?.[colIdx];
                     return d ? formatDateHeader(d) : "";
                   });
-                  const displayStyle = computed(() =>
-                    colIdx < visibleDays.get() ? "flex" : "none"
-                  );
-                  const headerBg = derive(weekDates, (dates) =>
-                    dates?.[colIdx] === todayDate ? "#eff6ff" : "transparent");
-                  const headerColor = derive(weekDates, (dates) =>
-                    dates?.[colIdx] === todayDate ? "#2563eb" : "#374151");
+                  const displayStyle = colIdx < visibleDays.get()
+                    ? "flex"
+                    : "none";
+                  const headerBg = weekDates?.[colIdx] === todayDate
+                    ? "#eff6ff"
+                    : "transparent";
+                  const headerColor = weekDates?.[colIdx] === todayDate
+                    ? "#2563eb"
+                    : "#374151";
 
                   // Drop handler for moving/resizing local events
                   const handleDayDrop = action((e: {
@@ -930,13 +928,13 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                       );
                     }
 
-                    lastDropTime.set(Date.now());
+                    lastDropTime.set(safeDateNow());
                   });
 
                   // Click handlers for creating events at specific hours
                   const hourClickActions = HOURS.map((hour) =>
                     action(() => {
-                      if (Date.now() - lastDropTime.get() < 300) {
+                      if (safeDateNow() - lastDropTime.get() < 300) {
                         return;
                       }
                       newEventTitle.set("");
@@ -990,19 +988,21 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                         >
                           {dateHeader}
                         </div>
-                        {ifElse(
-                          isToday,
-                          <div style={{ fontSize: "0.6rem", color: "#3b82f6" }}>
-                            Today
-                          </div>,
-                          null,
-                        )}
+                        {isToday
+                          ? (
+                            <div
+                              style={{ fontSize: "0.6rem", color: "#3b82f6" }}
+                            >
+                              Today
+                            </div>
+                          )
+                          : null}
                       </div>
 
                       {/* Time Grid with Drop Zone */}
-                      <ct-drop-zone
+                      <cf-drop-zone
                         accept="local-event,local-event-resize"
-                        onct-drop={handleDayDrop}
+                        oncf-drop={handleDayDrop}
                         style={{ position: "relative", flex: "1" }}
                       >
                         {HOURS.map((hour, hourIdx) => (
@@ -1019,71 +1019,60 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                             onClick={hourClickActions[hourIdx]}
                           />
                         ))}
-                      </ct-drop-zone>
+                      </cf-drop-zone>
                     </div>
                   );
                 })}
 
-                {/* Event Blocks - using derive() to compute everything at once */}
-                {importedEvents.map((evt) => {
-                  // Use derive() to extract display properties
-                  // All derives guard against undefined events
-                  const evtTitle = derive(
-                    evt,
-                    (e) =>
-                      e?.summary || "(No title)",
+                {/* Event Blocks - extract display properties per event */}
+                {importedEvents.map((evt: any) => {
+                  // Project display properties from the event.
+                  // All projections guard against undefined events.
+                  const evtTitle = evt?.summary || "(No title)";
+                  const evtColor = getColorForCalendar(
+                    evt?.calendarId || "default",
                   );
-                  const evtColor = derive(
-                    evt,
-                    (e) =>
-                      getColorForCalendar(e?.calendarId || "default"),
-                  );
-                  const evtLocation = derive(evt, (e) =>
-                    e?.location || "");
-                  const evtTimeRange = derive(evt, (e) => {
-                    if (!e) {
+                  const evtLocation = evt?.location || "";
+                  const evtTimeRange = computed(() => {
+                    if (!evt) {
                       return "";
                     }
-                    const startTime = e.isAllDay
+                    const startTime = evt.isAllDay
                       ? "00:00"
-                      : extractTime(e.startDateTime);
-                    const endTime = e.isAllDay
+                      : extractTime(evt.startDateTime);
+                    const endTime = evt.isAllDay
                       ? "23:59"
-                      : extractTime(e.endDateTime);
+                      : extractTime(evt.endDateTime);
                     return `${startTime} - ${endTime}`;
                   });
-                  const hasLocation = derive(
-                    evt,
-                    (e) =>
-                      (e?.location || "").length > 0,
-                  );
+                  const hasLocation = (evt?.location || "").length > 0;
 
                   // Build direct event edit link: /r/eventedit/{base64(eventId + " " + calendarId)}
                   // This loads faster than the full calendar view
-                  const googleLink = derive(evt, (e) => {
-                    if (!e) {
+                  const googleLink = computed(() => {
+                    if (!evt) {
                       return "";
                     }
-                    if (!e.id || !e.calendarId) {
-                      return e.htmlLink || "";
+                    if (!evt.id || !evt.calendarId) {
+                      return evt.htmlLink || "";
                     }
                     try {
-                      const combined = `${e.id} ${e.calendarId}`;
+                      const combined = `${evt.id} ${evt.calendarId}`;
                       const encoded = btoa(combined);
                       return `https://calendar.google.com/calendar/u/0/r/eventedit/${encoded}`;
                     } catch {
                       // Fallback to htmlLink if encoding fails
-                      return e.htmlLink || "";
+                      return evt.htmlLink || "";
                     }
                   });
 
-                  // Compute position/visibility in single derive
-                  // Note: startDate and visibleDays are Cell.of(), so access with .get()
-                  const styles = derive(evt, (e) => {
+                  // Compute position/visibility once.
+                  // Note: startDate and visibleDays are new Writable(), so access with .get()
+                  const styles = computed(() => {
                     const weekStart = startDate.get();
                     const visibleCount = visibleDays.get();
-                    const eventDate = e
-                      ? extractDate(e.start || e.startDateTime)
+                    const eventDate = evt
+                      ? extractDate(evt.start || evt.startDateTime)
                       : null;
 
                     const hidden = {
@@ -1111,12 +1100,12 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                       return hidden;
                     }
 
-                    const startTime = e.isAllDay
+                    const startTime = evt.isAllDay
                       ? "00:00"
-                      : extractTime(e.startDateTime);
-                    const endTime = e.isAllDay
+                      : extractTime(evt.startDateTime);
+                    const endTime = evt.isAllDay
                       ? "23:59"
-                      : extractTime(e.endDateTime);
+                      : extractTime(evt.endDateTime);
                     const startMin = timeToMinutes(startTime) - DAY_START * 60;
                     const endMin = timeToMinutes(endTime) - DAY_START * 60;
                     const top = (startMin / 60) * HOUR_HEIGHT;
@@ -1183,19 +1172,19 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                         }}
                       >
                         {evtTimeRange}
-                        {ifElse(
-                          hasLocation,
-                          <div
-                            style={{
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            📍 {evtLocation}
-                          </div>,
-                          null,
-                        )}
+                        {hasLocation
+                          ? (
+                            <div
+                              style={{
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              📍 {evtLocation}
+                            </div>
+                          )
+                          : null}
                       </div>
                     </a>
                   );
@@ -1256,7 +1245,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
 
                   // Click action to open edit modal
                   const openEvent = action(() => {
-                    if (Date.now() - lastDropTime.get() < 300) {
+                    if (safeDateNow() - lastDropTime.get() < 300) {
                       return;
                     }
                     // Populate edit form with event data
@@ -1329,7 +1318,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                       </div>
 
                       {/* Drag Source for Moving */}
-                      <ct-drag-source
+                      <cf-drag-source
                         $cell={evt}
                         type="local-event"
                         onClick={openEvent}
@@ -1344,10 +1333,10 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                         }}
                       >
                         {dragAreaContent}
-                      </ct-drag-source>
+                      </cf-drag-source>
 
                       {/* Resize Drag Source */}
-                      <ct-drag-source
+                      <cf-drag-source
                         $cell={evt}
                         type="local-event-resize"
                         style={{
@@ -1364,34 +1353,33 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                         }}
                       >
                         {resizeHandleLines}
-                      </ct-drag-source>
+                      </cf-drag-source>
                     </div>
                   );
                 })}
               </div>
-            </ct-vscroll>
+            </cf-vscroll>
           </div>
         </div>
 
         {/* Empty State */}
-        {ifElse(
-          computed(() =>
-            eventCount === 0
-          ),
-          <div
-            slot="footer"
-            style={{
-              textAlign: "center",
-              padding: "16px",
-              color: "#6b7280",
-              fontSize: "0.875rem",
-            }}
-          >
-            No events yet. Click "+ Add" or click on a time slot to create one.
-          </div>,
-          null,
-        )}
-      </ct-screen>
+        {eventCount === 0
+          ? (
+            <div
+              slot="footer"
+              style={{
+                textAlign: "center",
+                padding: "16px",
+                color: "#6b7280",
+                fontSize: "0.875rem",
+              }}
+            >
+              No events yet. Click "+ Add" or click on a time slot to create
+              one.
+            </div>
+          )
+          : null}
+      </cf-screen>
     ),
     title,
     eventCount,

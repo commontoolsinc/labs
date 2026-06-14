@@ -1,10 +1,10 @@
 # Drag and Drop
 
-Enable drag-and-drop interactions between cells using `ct-drag-source` and `ct-drop-zone` components.
+Enable drag-and-drop interactions between cells using `cf-drag-source` and `cf-drop-zone` components.
 
 ## Components
 
-### ct-drag-source
+### cf-drag-source
 
 Wraps content that can be dragged. The dragged cell is passed to any drop zone that accepts it.
 
@@ -14,7 +14,7 @@ Wraps content that can be dragged. The dragged cell is passed to any drop zone t
 | `type` | `string` | Type identifier for filtering which drop zones accept this source |
 | `disabled` | `boolean` | Disable dragging |
 
-### ct-drop-zone
+### cf-drop-zone
 
 Marks a region where items can be dropped. Provides visual feedback (dashed outline) when a valid drag is over it.
 
@@ -26,14 +26,13 @@ Marks a region where items can be dropped. Provides visual feedback (dashed outl
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `onct-drop` | `{ detail: { sourceCell: Writable<T>, type?: string } }` | Fired when a valid drop occurs |
-| `onct-drag-enter` | `{ detail: { sourceCell: Cell, type?: string } }` | Fired when drag enters the zone |
-| `onct-drag-leave` | `{ detail: {} }` | Fired when drag leaves the zone |
+| `oncf-drop` | `{ detail: { sourceCell: Writable<T>, type?: string } }` | Fired when a valid drop occurs |
+| `oncf-drag-enter` | `{ detail: { sourceCell: Cell, type?: string } }` | Fired when drag enters the zone |
+| `oncf-drag-leave` | `{ detail: {} }` | Fired when drag leaves the zone |
 
 ## Example
 
 ```tsx
-/// <cts-enable />
 import {
   Default,
   equals,
@@ -42,14 +41,14 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface Item {
   title: string;
 }
 
 interface DragDropDemoInput {
-  availableItems: Default<Item[], [{ title: "Item A" }, { title: "Item B" }, { title: "Item C" }]>;
+  availableItems: Item[] | Default<[{ title: "Item A" }, { title: "Item B" }, { title: "Item C" }]>;
   droppedItems: Writable<Item[]>;
 }
 
@@ -81,7 +80,7 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
             <h3 style={{ marginTop: 0 }}>Available Items</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
               {availableItems.map((item) => (
-                <ct-drag-source $cell={item} type="item">
+                <cf-drag-source $cell={item} type="item">
                   <div
                     style={{
                       padding: "0.75rem",
@@ -93,15 +92,15 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
                   >
                     {item.title}
                   </div>
-                </ct-drag-source>
+                </cf-drag-source>
               ))}
             </div>
           </div>
 
           {/* Drop Zone */}
-          <ct-drop-zone
+          <cf-drop-zone
             accept="item"
-            onct-drop={(e: { detail: { sourceCell: Writable<Item> } }) => {
+            oncf-drop={(e: { detail: { sourceCell: Writable<Item> } }) => {
               droppedItems.push(e.detail.sourceCell);
             }}
           >
@@ -133,15 +132,15 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
                       }}
                     >
                       <span>{item.title}</span>
-                      <ct-button onClick={removeItem({ droppedItems, item })}>
+                      <cf-button onClick={removeItem({ droppedItems, item })}>
                         x
-                      </ct-button>
+                      </cf-button>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-          </ct-drop-zone>
+          </cf-drop-zone>
         </div>
       ),
       availableItems,

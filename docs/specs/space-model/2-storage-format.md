@@ -29,24 +29,34 @@ The `is` field contains the value, which may include:
 - References to other facts (via sigil links)
 - Special markers (e.g., `{ $stream: true }` for stream endpoints)
 
-### Process Cells
+### Result Cell Metadata
 
-A special category of fact stores execution metadata:
+Piece execution metadata is anchored on the result cell through metadata fields.
+Related cells link back to their owning result cell so traversal can recover the
+piece ownership graph:
 
 ```
 {
-  $TYPE: string,           // pattern/function content ID (serialized key is "$TYPE")
-  resultRef: SigilLink,    // link to the result cell
-  argument?: any,          // input data (optional)
-  spell?: SigilLink,       // link to spell cell (optional)
-  internal?: any           // working state storage (optional)
+  pattern: SigilLink,  // link to the pattern cell
+  argument: SigilLink, // link to the argument cell
+  internal: [          // manifest of derived internal cells
+    {
+      partialCause: JSONValue,
+      link: SigilLink
+    }
+  ],
+  schema?: JSONSchema, // result schema
+  slug?: string        // optional piece slug metadata
 }
 ```
 
-Process cells enable:
+The argument cell and each derived internal cell store reciprocal `result`
+metadata links to the owning result cell.
+
+Result-cell metadata enables:
 - Identifying which pattern governs a piece
 - Lazy loading of pieces when events arrive
-- Traversing the ownership graph via `sourceCell` chains
+- Traversing the ownership graph through `result` metadata links
 
 ### Encoding Formats
 

@@ -19,9 +19,13 @@ class MockReplica implements ISpaceReplica {
     return this.space;
   }
 
-  get(entry: { id: string; type: string }) {
-    const key = `${entry.id}:${entry.type}`;
+  get(entry: { id: string; type?: string }) {
+    const key = `${entry.id}:${entry.type ?? "application/json"}`;
     return this.data.get(key);
+  }
+
+  getDocument() {
+    return undefined;
   }
 
   commit() {

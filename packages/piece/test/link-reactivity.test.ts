@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { createSession, Identity } from "@commontools/identity";
+import { parseLink, resolveCellPath, Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { createSession, Identity } from "@commonfabric/identity";
 import { PieceManager } from "../src/manager.ts";
 
 const signer = await Identity.fromPassphrase("test link reactivity");
@@ -67,5 +67,139 @@ describe("PieceManager.link() reactivity", () => {
     // Target should see updated value through the link
     const updatedLinkedValue = targetCell.key("linked").get();
     expect(updatedLinkedValue).toBe("updated value");
+  });
+
+  it("should be idempotent - writing a link at a path that already has a link should overwrite, not follow", async () => {
+    // Create source and target cells
+    const sourceCell = runtime.getCell(manager.getSpace(), "source-idem");
+    const targetCell = runtime.getCell(manager.getSpace(), "target-idem");
+
+    await runtime.editWithRetry((tx) => {
+      sourceCell.withTx(tx).set({ data: "original" });
+    });
+    await runtime.editWithRetry((tx) => {
+      targetCell.withTx(tx).set({ linked: null });
+    });
+    await runtime.idle();
+
+    // First link: target.linked -> source.data (using cell.set which creates a link)
+    await runtime.editWithRetry((tx) => {
+      const target = targetCell.withTx(tx);
+      const source = sourceCell.withTx(tx);
+      target.key("linked").set(source.key("data"));
+    });
+    await runtime.idle();
+
+    // Verify link works
+    expect(targetCell.key("linked").get()).toBe("original");
+
+    // Now re-link: write the same link again at target.linked
+    // WITHOUT resolveAsCell(), this should overwrite the link at the path
+    // WITH resolveAsCell(), this would follow the existing link and corrupt source.data
+    await runtime.editWithRetry((tx) => {
+      const target = targetCell.withTx(tx);
+      const source = sourceCell.withTx(tx);
+      // This is what manager.link() does (without resolveAsCell)
+      target.key("linked").setRawUntyped(
+        source.key("data").getAsLink({
+          base: target,
+          includeSchema: true,
+          keepStreams: true,
+        }),
+      );
+    });
+    await runtime.idle();
+
+    // Source must NOT be corrupted — it should still have "original"
+    expect(sourceCell.key("data").get()).toBe("original");
+    // Target should still resolve the link correctly
+    expect(targetCell.key("linked").get()).toBe("original");
+
+    // Verify reactivity still works after re-linking
+    await runtime.editWithRetry((tx) => {
+      sourceCell.withTx(tx).set({ data: "updated" });
+    });
+    await runtime.idle();
+    expect(targetCell.key("linked").get()).toBe("updated");
+  });
+
+  it("links scoped source cells into scoped target cells", async () => {
+    const sourceCell = runtime.getCellFromLink({
+      id: "of:scoped-source",
+      path: [],
+      space: manager.getSpace(),
+      scope: "user",
+    });
+    const targetCell = runtime.getCellFromLink({
+      id: "of:scoped-target",
+      path: [],
+      space: manager.getSpace(),
+      scope: "session",
+    });
+
+    await runtime.editWithRetry((tx) => {
+      sourceCell.withTx(tx).set({ data: "scoped value" });
+      targetCell.withTx(tx).set({ linked: null });
+    });
+    await runtime.idle();
+
+    await manager.link(
+      "scoped-source",
+      ["data"],
+      "scoped-target",
+      ["linked"],
+      { start: false, sourceScope: "user", targetScope: "session" },
+    );
+    await targetCell.sync();
+
+    const rawLink = targetCell.key("linked").getRaw();
+    expect(parseLink(rawLink, targetCell)?.scope).toBe("user");
+    expect(targetCell.key("linked").get()).toBe("scoped value");
+  });
+
+  it("should link through exposed cell-valued source fields", async () => {
+    const cellSchema = {
+      type: "number",
+      default: 0,
+      asCell: ["cell"],
+    } as const;
+    const modelSchema = {
+      type: "object",
+      properties: { value: cellSchema },
+      default: { value: 0 },
+    } as const;
+    const sourceArgument = runtime.getCell(manager.getSpace(), "source-arg");
+    const sourceResult = runtime.getCell(manager.getSpace(), "source-result");
+    const targetArgument = runtime.getCell(
+      manager.getSpace(),
+      "target-arg",
+      modelSchema,
+    );
+
+    await runtime.editWithRetry((tx) => {
+      sourceArgument.withTx(tx).set({ value: 10 });
+      targetArgument.withTx(tx).set({ value: 0 });
+    });
+    await runtime.editWithRetry((tx) => {
+      sourceResult.withTx(tx).set({
+        value: sourceArgument.withTx(tx).key("value").asSchema(cellSchema),
+      });
+    });
+    await runtime.idle();
+
+    await runtime.editWithRetry((tx) => {
+      const target = targetArgument.withTx(tx).key("value");
+      const source = sourceResult.asSchemaFromLinks().key("value");
+      target.setRawUntyped(
+        source.getAsLink({
+          base: targetArgument,
+          includeSchema: true,
+          keepStreams: true,
+        }),
+      );
+    });
+    await runtime.idle();
+
+    expect(resolveCellPath(targetArgument, ["value"])).toBe(10);
   });
 });

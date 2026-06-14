@@ -1,29 +1,52 @@
-import type { Immutable } from "@commontools/utils/types";
-import type { EntityId } from "../create-ref.ts";
+import type { Immutable } from "@commonfabric/utils/types";
+import type { CellScope } from "@commonfabric/api";
 import type {
-  Assertion,
-  AuthorizationError as IAuthorizationError,
-  ConflictError as IConflictError,
-  ConnectionError as IConnectionError,
-  DID,
-  Fact,
-  Invariant as IClaim,
-  MemorySpace,
-  QueryError as IQueryError,
-  Result,
-  SchemaPathSelector,
-  Signer,
-  State,
-  StorableDatum,
-  StorableValue,
-  The as MediaType,
-  TransactionError,
-  Unit,
-  URI,
-  Variant,
-} from "@commontools/memory/interface";
-import { BaseMemoryAddress } from "@commontools/runner/traverse";
+  CommitPrecondition,
+  EntityDocument,
+  PatchOp,
+  SchedulerActionSnapshotQuery,
+  SchedulerSnapshotListResult,
+  SqliteDbRef,
+  SqliteOperation,
+  SqliteParamsWire,
+  SqliteQueryResult,
+  SqliteRegisterDiskSourceResult,
+} from "@commonfabric/memory/v2";
+import type { EntityId } from "../create-ref.ts";
+import {
+  type Assertion,
+  type AuthorizationError as IAuthorizationError,
+  type ConflictError as IConflictError,
+  type ConnectionError as IConnectionError,
+  type DID,
+  type FabricValue,
+  type Fact,
+  type Invariant as IClaim,
+  type MemorySpace,
+  type QueryError as IQueryError,
+  type Result,
+  type SchemaPathSelector,
+  type Signer,
+  type State,
+  type The as MediaType,
+  type TransactionError,
+  type Unit,
+  type URI,
+  type Variant,
+} from "@commonfabric/memory/interface";
+import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import { Cell } from "../cell.ts";
+import type {
+  CfcDereferenceTrace,
+  CfcEnforcementMode,
+  CfcFlowLabelsMode,
+  CfcTxState,
+  ImplementationIdentity,
+  PostCommitSideEffect,
+  TrustSnapshot,
+  WritePolicyInput,
+} from "../cfc/mod.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
 
 export type {
   Assertion,
@@ -39,7 +62,6 @@ export type {
   Unit,
   URI,
 };
-
 export type ChangeGroup = unknown;
 
 /**
@@ -79,21 +101,14 @@ export interface IReadOptions {
   nonRecursive?: boolean;
 }
 
-// This type is used to tag a document with any important metadata.
-// Currently, the only supported type is the classification.
-export type Labels = {
-  classification?: string[];
-};
-
 /** Immutable storage value container. */
-export interface StorageValue<T extends StorableValue = StorableValue> {
+export interface StorageValue<T extends FabricValue = FabricValue> {
   readonly value: Immutable<T>;
   readonly source?: EntityId;
-  readonly labels?: Immutable<Labels>;
 }
 
 /** Optional `StorageValue<T>`. */
-export type OptStorageValue<T extends StorableValue = StorableValue> =
+export type OptStorageValue<T extends FabricValue = FabricValue> =
   | StorageValue<T>
   | undefined;
 
@@ -111,6 +126,15 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * space.
    */
   open(space: MemorySpace): IStorageProviderWithReplica;
+
+  /**
+   * Record a runtime-learned host hint for a space (federation site
+   * table). Optional: managers without remote, per-space resolution
+   * (emulated/test) simply don't implement it. Returns true when the
+   * hint is in effect; false when refused (seeded differently, or the
+   * space's connection is already open to another host).
+   */
+  registerSpaceHost?(space: MemorySpace, host: string): boolean;
 
   /**
    * Close all storage providers
@@ -140,6 +164,22 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * Remove a promise from the list of cross-space promises.
    */
   removeCrossSpacePromise(promise: Promise<void>): void;
+
+  /**
+   * Number of cross-space promises currently pending (async loads of link
+   * targets in other spaces, kicked during link resolution or read
+   * traversal). Zero in steady state — `Cell.pull()` uses this to decide
+   * whether a convergence round is needed at all (CT-1667).
+   */
+  pendingCrossSpacePromiseCount?(): number;
+
+  /**
+   * Wait for the currently pending cross-space promises (and any they
+   * transitively kick) to settle, WITHOUT waiting for full provider sync the
+   * way `synced()` does. Used by `Cell.pull()`'s convergence loop so pulls
+   * that kicked no loads keep their existing timing.
+   */
+  crossSpaceSettled?(): Promise<void>;
 
   /**
    * Load cell from storage. Will also subscribe to new changes.
@@ -180,6 +220,7 @@ export interface IStorageProvider {
   sync(
     uri: URI,
     selector?: SchemaPathSelector,
+    scope?: CellScope,
   ): Promise<Result<Unit, Error>>;
 
   /**
@@ -207,6 +248,34 @@ export interface IStorageProvider {
 
 export interface IStorageProviderWithReplica extends IStorageProvider {
   replica: ISpaceReplica;
+
+  /**
+   * Internal scheduler persistence query. Memory v2 providers implement this
+   * so the runner can rebuild scheduler indexes from persisted observations.
+   */
+  listSchedulerActionSnapshots?(
+    query?: SchedulerActionSnapshotQuery,
+  ): Promise<SchedulerSnapshotListResult>;
+
+  /** Run a server-side read-only SQLite query against a cell-derived db. */
+  sqliteQuery?(
+    db: SqliteDbRef,
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<SqliteQueryResult>;
+
+  // No `sqliteExecute`: SQLite writes go through the commit fold
+  // (recordSqliteWrite -> a `sqlite` op in the commit), never a standalone RPC.
+
+  /**
+   * Register an injected on-disk SQLite source (Phase 7, read-only v1). After
+   * this, server-side reads for `id` resolve against the on-disk file at `path`
+   * (attached read-only) instead of the cell-derived db; writes are rejected.
+   */
+  registerSqliteDiskSource?(
+    id: string,
+    path: string,
+  ): Promise<SqliteRegisterDiskSourceResult>;
 }
 
 /**
@@ -214,7 +283,7 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
  * {@link IStorageManager} in the future. It provides capability to subscribe
  * to the storage notifications.
  */
-export interface IStorageSubscriptionCapability {
+export interface IStorageNotificationCapability {
   /**
    * Subscribes to the storage manager's notifications.
    *
@@ -242,13 +311,18 @@ export interface IStorageSubscriptionCapability {
    * storage.subscribe(log(5));
    * ```
    */
-  subscribe(subscription: IStorageSubscription): void;
+  subscribe(subscription: IStorageNotification): void;
+
+  /**
+   * Removes a previously registered notification subscriber.
+   */
+  unsubscribe?(subscription: IStorageNotification): void;
 }
 
 /**
  * Subscription that can be used to receive storage notifications.
  */
-export interface IStorageSubscription {
+export interface IStorageNotification {
   /**
    * Called with a next notification, if returns `{ done: true }` or throws an
    * exception, subscription will be cancelled and method will not be called
@@ -260,6 +334,19 @@ export interface IStorageSubscription {
     notification: StorageNotification,
   ): Omit<IteratorResult<unknown, unknown>, "value"> | undefined;
 }
+
+/**
+ * Backward-compatible alias retained while the v1 naming is still used
+ * throughout the runner.
+ */
+export interface IStorageSubscriptionCapability
+  extends IStorageNotificationCapability {}
+
+/**
+ * Backward-compatible alias retained while the v1 naming is still used
+ * throughout the runner.
+ */
+export interface IStorageSubscription extends IStorageNotification {}
 
 /**
  * Notification produced by the underlying storage. It is a variant type
@@ -379,6 +466,27 @@ export interface IResetNotification {
 export interface IMergedChanges extends Iterable<IMemoryChange> {
 }
 
+/**
+ * Options accepted by transaction write operations.
+ */
+export interface IWriteOptions {
+  /**
+   * When true, the write removes the slot at the address path — deleting an
+   * object key or punching an array hole — instead of storing a value.
+   * `value` must be `undefined`. Without this flag, writing `undefined`
+   * stores `undefined` as a real value: present-but-undefined is distinct
+   * from absent. A root-path delete retracts the document.
+   */
+  delete?: boolean;
+}
+
+export interface ITransactionWriteRequest {
+  address: IMemorySpaceAddress;
+  value: FabricValue;
+  /** See {@link IWriteOptions.delete}. */
+  delete?: boolean;
+}
+
 export interface IMemoryChange {
   /**
    * Memory address that was changed.
@@ -387,11 +495,11 @@ export interface IMemoryChange {
   /**
    * Value memory address had before change.
    */
-  before: Immutable<StorableValue>;
+  before: Immutable<FabricValue>;
   /**
    * Value memory address has after change.
    */
-  after: Immutable<StorableValue>;
+  after: Immutable<FabricValue>;
 }
 
 export type StorageTransactionStatus =
@@ -427,10 +535,124 @@ export interface IStorageTransaction {
    */
   immediate?: boolean;
   /**
+   * The scheduler action whose run opened this transaction (spec scheduler-v2
+   * P5). Change records derived from this transaction must not re-trigger this
+   * action. Compared by OBJECT IDENTITY — diagnostic action ids may collide
+   * across instances.
+   */
+  sourceAction?: object;
+  /**
+   * Opt the transaction into writing to more than one memory space. By default
+   * a transaction may write to a single space only. When enabled, commit()
+   * commits each written space's changes as a separate per-space commit, in the
+   * provided order (or first-write order if omitted). The per-space commits run
+   * sequentially with NO cross-space atomicity, and STOP at the first per-space
+   * failure: spaces committed before the failure are durable and not rolled back
+   * (logged), while the failing space and every space after it are left
+   * uncommitted. (Stopping preserves the requested order — e.g. a child space
+   * before the parent that links to it — and avoids double-applying later writes
+   * on retry.)
+   *
+   * `order` is a sequencing hint ONLY: it controls the order in which written
+   * spaces are committed (spaces listed first commit first). It does NOT
+   * restrict which spaces may be written — a written space absent from `order`
+   * still commits, appended in first-write order. Authorization is unchanged:
+   * each space commits through its own authenticated session exactly as a
+   * single-space commit would, so this opt-in cannot grant access the caller
+   * does not already hold. Calling this more than once is allowed; the last
+   * non-undefined `order` wins.
+   *
+   * Partial-failure contract: because there is no rollback, a multi-space commit
+   * error means the cross-space state is INDETERMINATE — some spaces may be
+   * durably committed and others not. Callers must treat the error accordingly
+   * (the first per-space error is surfaced as the overall result; all per-space
+   * failures are logged).
+   */
+  enableMultiSpaceWrites?(order?: readonly MemorySpace[]): void;
+  /**
+   * Optional read-only mode hook used by runtime-generated fallback read
+   * transactions.
+   */
+  setReadOnly?(reason?: string): void;
+  clearReadOnly?(): void;
+  isReadOnly?(): boolean;
+  /**
    * The transaction journal containing all read and write activities.
    * Provides access to transaction operations and dependency tracking.
    */
   readonly journal: ITransactionJournal;
+
+  /**
+   * Optional lightweight dependency summary.
+   *
+   * V2 transactions can provide this directly instead of requiring callers to
+   * reconstruct it from journal activity.
+   */
+  getReactivityLog?(): TransactionReactivityLog;
+
+  /**
+   * Optional scheduler observation payload to persist alongside the native
+   * memory transaction. When there are no semantic writes, storage backends may
+   * still commit this metadata as an internal no-op observation.
+   */
+  setSchedulerObservation?(observation: unknown): void;
+  getSchedulerObservation?(): unknown;
+
+  /**
+   * Optional commit-time preconditions attached to this transaction's commit in
+   * the given space. Storage backends that support v2 native commits read these
+   * during commit construction.
+   */
+  addCommitPrecondition?(
+    space: MemorySpace,
+    precondition: CommitPrecondition,
+  ): void;
+  getCommitPreconditions?(
+    space: MemorySpace,
+  ): readonly CommitPrecondition[] | undefined;
+
+  /**
+   * Mark an entity this transaction creates as create-only: the commit fails
+   * with PreconditionFailedError("receipt-exists") if the entity already has a
+   * head (scheduler-v2 §7.6 receipts).
+   */
+  markCreateOnly?(
+    link: { space: MemorySpace; id: string; scope?: unknown },
+  ): void;
+
+  /**
+   * Optional: record a folded SQLite write onto this transaction so it commits
+   * ATOMICALLY with the cell ops targeting `space` (one commit = cell ops + a
+   * `sqlite` op; on SQL failure the whole commit aborts). Claims `space` as a
+   * write target (same write-isolation rules as a cell write) and throws if the
+   * tx is not writable. See
+   * docs/specs/sqlite-builtin/plans/sqlite-execute-commit-fold.md.
+   */
+  recordSqliteWrite?(space: MemorySpace, op: SqliteOperation): void;
+
+  /**
+   * Optional raw read observations recorded by this transaction.
+   *
+   * V2 transactions can provide these directly instead of requiring callers to
+   * scan journal activity.
+   */
+  getReadActivities?(): Iterable<IReadActivity>;
+
+  /**
+   * Optional write details for the given space.
+   *
+   * V2 transactions can provide the current and previous values directly
+   * instead of materializing novelty/history attestations.
+   */
+  getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
+
+  /**
+   * Optional read details for the given space: the values this transaction
+   * observed for its reads (its read invariants). Available after commit or
+   * abort, since the underlying per-document snapshots are pinned for the
+   * transaction's lifetime.
+   */
+  getReadDetails?(space: MemorySpace): Iterable<TransactionReadDetail>;
 
   /**
    * Describes current status of the transaction. Returns a union type with
@@ -479,12 +701,22 @@ export interface IStorageTransaction {
    *
    * @param address - Memory address to write to.
    * @param value - Value to write.
+   * @param options - Optional write options (e.g. explicit delete intent).
    * @returns Result containing the written value or an error.
    */
   write(
     address: IMemorySpaceAddress,
-    value?: StorableDatum,
+    value?: FabricValue,
+    options?: IWriteOptions,
   ): Result<IAttestation, WriterError | WriteError>;
+
+  /**
+   * Optional batched write hook for transactions that can apply multiple path
+   * writes more efficiently than one-at-a-time.
+   */
+  writeBatch?(
+    writes: Iterable<ITransactionWriteRequest>,
+  ): Result<Unit, WriterError | WriteError>;
 
   /**
    * Creates a memory space reader for inside this transaction. Fails if
@@ -517,20 +749,172 @@ export interface IStorageTransaction {
    * MAY also fail due to insufficient authorization level or due to various IO
    * problems.
    *
-   * Commit is idempotent, meaning calling it over and over will return same
-   * exact value as on first call and no execution will take place on subsequent
-   * calls.
+   * Calling commit on a transaction that has already completed (committed or
+   * failed) returns the prior error or a {@link IStorageTransactionComplete}
+   * error. Commit is NOT idempotent — it does not replay the original result.
+   *
+   * When this method returns, the changes will have been committed locally,
+   * but may not be visible to another runtime. When the returned promise
+   * resolves, the data is fully committed and available to other processes.
    */
   commit(): Promise<Result<Unit, CommitError>>;
+
+  /**
+   * Optional native commit draft hook for storage backends that can consume a
+   * more direct representation than legacy fact archives.
+   */
+  getNativeCommit?(space: MemorySpace): NativeStorageCommit | undefined;
 }
 
-export interface IExtendedStorageTransaction extends IStorageTransaction {
+export interface IExtendedStorageTransaction
+  extends Omit<IStorageTransaction, "reader" | "writer"> {
   tx: IStorageTransaction;
+
+  /**
+   * The durable id of the event whose dispatch opened this transaction
+   * (spec §7.5). Set by the scheduler's event dispatch; consumed by the
+   * runner to derive the handler result cell's cause (spec §7.6).
+   */
+  dispatchedEventId?: string;
+
+  /**
+   * Commit-time preconditions attached to this transaction's commit in
+   * the given space (scheduler-v2 §7.6). Violations surface as
+   * IPreconditionFailedError (permanent — never retried).
+   */
+  addCommitPrecondition?(
+    space: MemorySpace,
+    precondition: CommitPrecondition,
+  ): void;
+  getCommitPreconditions?(
+    space: MemorySpace,
+  ): readonly CommitPrecondition[] | undefined;
+
+  /**
+   * Mark an entity this transaction creates as create-only: the commit fails
+   * with PreconditionFailedError("receipt-exists") if the entity already has a
+   * head (scheduler-v2 §7.6 receipts).
+   */
+  markCreateOnly?(
+    link: { space: MemorySpace; id: string; scope?: unknown },
+  ): void;
+
+  getCfcState(): Readonly<CfcTxState>;
+  setCfcEnforcementMode(mode: CfcEnforcementMode): void;
+  setCfcFlowLabelsMode(mode: CfcFlowLabelsMode): void;
+  /**
+   * Record the addresses whose invalidating writes scheduled this run
+   * (§8.9.2 trigger reads). Their labels join the flow-label derivation
+   * even when the run never re-reads them.
+   */
+  addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void;
+  /**
+   * Run `fn` with `meta` merged into every read issued within (explicit
+   * per-read meta wins). Lets scheduling machinery tag its reads without
+   * threading metadata through intermediate APIs.
+   */
+  runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T;
+  markCfcRelevant(reason?: string): void;
+  invalidateCfc(reason: string): void;
+
+  getNarrowestReadScope(): CellScope;
+  resetNarrowestReadScope(scope?: CellScope): void;
+
+  /**
+   * CFC recording / ownership-transfer API.
+   *
+   * The methods below all hand a caller-constructed record into the CFC
+   * subsystem's transaction-scoped state. Each one establishes an
+   * ownership transfer at the call boundary: from the moment the call
+   * returns, the supplied record is owned by the transaction. Callers
+   * MUST NOT subsequently mutate it (or any object reachable from it),
+   * and MUST NOT retain it for use anywhere else that depends on it
+   * remaining mutable.
+   *
+   * The CFC subsystem treats these records as identity-stable structural
+   * fingerprints — they participate in canonicalization, sorting, and
+   * `hashStringOf()`-based equality. The CFC implementation is therefore
+   * permitted to `deepFreeze()` the record on entry, both as a tripwire
+   * for accidental mutation and to make it eligible for the
+   * `hashStringOf()` WeakMap cache. The
+   * `record*` methods that take a structurally-shaped record
+   * (`recordCfcDereferenceTrace()` and `recordCfcWritePolicyInput()`)
+   * actively do this on entry; the contract applies uniformly to every
+   * method in the group.
+   *
+   * Callers do not need to freeze the record themselves — the CFC
+   * implementation will, where it's useful. Freezing on the caller side
+   * is equally welcome though, and is often a reasonable choice when
+   * the same record (or sub-objects) is also handed to other consumers
+   * with similar contracts; `deepFreeze()` short-circuits on input
+   * that's already deeply frozen, so a redundant freeze costs almost
+   * nothing.
+   */
+
+  /**
+   * Records a CFC dereference trace produced by following a write
+   * redirect or value reference. See ownership note above; the
+   * argument is `deepFreeze()`d on entry so every CfcAddress that
+   * flows into the digest input is immutable.
+   */
+  recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void;
+
+  /**
+   * Runs CFC boundary verification for this transaction and records the
+   * prepared digest. Takes no caller-supplied input: the commit-time digest
+   * recheck only confirms the prepared input matches real activity, so an
+   * external input override would let a caller skip verification while still
+   * passing the recheck (audit S2).
+   */
+  prepareCfc(): string;
+
+  /**
+   * Sets (or clears) the CFC trust snapshot for this transaction. See
+   * ownership note above.
+   */
+  setCfcTrustSnapshot(snapshot: TrustSnapshot | undefined): void;
+
+  /**
+   * Sets (or clears) the implementation identity that will be folded
+   * into the CFC digest for this transaction. See ownership note above.
+   */
+  setCfcImplementationIdentity(
+    identity: ImplementationIdentity | undefined,
+  ): void;
+
+  /**
+   * Records a write-policy input that will participate in the CFC
+   * commit-boundary digest. See ownership note above; the argument is
+   * `deepFreeze()`d on entry, both to honor the ownership-transfer
+   * contract and to enable the within-sort tiebreaker cache in
+   * `compareWritePolicyInput`.
+   */
+  recordCfcWritePolicyInput(input: WritePolicyInput): void;
+
+  /**
+   * Surfaces a post-commit sink-request release rejection (the effect is fail-
+   * closed and not sent) to CFC diagnostics and runtime stats, instead of only
+   * logging it (audit W3.23).
+   */
+  noteCfcSinkReleaseReject(
+    info: { sink: string; effectId: string; detail: string },
+  ): void;
+
+  /**
+   * Enqueues a side effect to run from the CFC outbox after a successful
+   * commit. See ownership note above.
+   */
+  enqueuePostCommitEffect(effect: PostCommitSideEffect): void;
 
   /**
    * Add a callback to be called when the transaction commit completes.
    * The callback receives the transaction as a parameter and is called
    * regardless of whether the commit succeeded or failed.
+   *
+   * Internal-only hook. Callbacks may run after failed commits and therefore
+   * must not perform external side effects or release external requests. Use
+   * the CFC post-commit outbox for effectful work that should happen only after
+   * a successful commit.
    *
    * Note: Callbacks are called synchronously after commit completes.
    * If a callback throws, the error is logged but doesn't affect other callbacks.
@@ -554,46 +938,103 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   readOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): StorableValue;
+  ): FabricValue;
 
   /**
    * Reads a value from a (local) memory address and throws on error, except for
    * `NotFoundError` which is returned as undefined.
    *
-   * Also prepends `value` to path, for how source metadata currently works.
+   * Thin convenience wrapper over `readOrThrow()` that prepends `"value"` to
+   * the supplied path.
    *
    * @param address - Memory address to read from.
    * @returns The read value.
    */
   readValueOrThrow(
-    address: IMemorySpaceAddress,
+    address: NormalizedFullLink,
     options?: IReadOptions,
-  ): StorableValue;
+  ): FabricValue;
 
   /**
    * Writes a value into a storage at a given address, including creating parent
    * entries in the document if a path is provided or throws an error.
    *
+   * Internal runner API. Phase-1 CFC no-op attempted-target coverage is not
+   * derived from blind direct `write*()` calls. Callers that need attempted
+   * target coverage before same-value short-circuiting must first establish it
+   * through a higher-level diff path such as `markReadAsAttemptedWrite`.
+   * Runner-owned system metadata writes may also use this directly when they
+   * are intentionally out of phase-1 value-surface CFC scope.
+   *
    * @param address - Memory address to write to.
    * @param value - Value to write.
+   * @param options - Optional write options (e.g. explicit delete intent).
    */
   writeOrThrow(
     address: IMemorySpaceAddress,
-    value: StorableValue,
+    value: FabricValue,
+    options?: IWriteOptions,
   ): void;
 
   /**
    * Writes a value into a storage at a given address, including creating parent
    * entries in the document if a path is provided or throws an error.
    *
-   * Also prepends `value` to path, for how source metadata currently works.
+   * Thin convenience wrapper over `writeOrThrow()` that prepends `"value"` to
+   * the supplied path.
+   *
+   * Internal runner API with the same phase-1 CFC caveat as `writeOrThrow()`:
+   * blind same-value direct writes do not by themselves establish attempted
+   * target coverage. Use higher-level diff paths when no-op attempted writes
+   * need to appear in `attemptedWrites`.
    *
    * @param address - Memory address to write to.
    * @param value - Value to write.
+   * @param options - Optional write options (e.g. explicit delete intent).
    */
   writeValueOrThrow(
-    address: IMemorySpaceAddress,
-    value: StorableValue,
+    address: NormalizedFullLink,
+    value: FabricValue,
+    options?: IWriteOptions,
+  ): void;
+
+  /**
+   * Optional batched write helper that preserves the extended transaction's
+   * `["value", ...path]` helper semantics on top of `writeBatch`.
+   */
+  writeValuesOrThrow?(
+    writes: Iterable<
+      { address: NormalizedFullLink; value: FabricValue; delete?: boolean }
+    >,
+  ): void;
+
+  /**
+   * Per-transaction memoization for `Cell.get()` results.
+   *
+   * Within a single transaction, repeatedly reading the same cell recomputes the
+   * full read pipeline (link resolution, schema merge, schema-guided traversal).
+   * When no write has occurred since the last read, that work is redundant: the
+   * value, the reactive reads it registers, and the CFC state it produces are all
+   * identical. These two methods let `Cell.get()` cache its result keyed by the
+   * cell's link identity; the implementation clears the entire cache on any
+   * write, so a cached entry is only ever returned when no write has intervened.
+   *
+   * Optional: transactions that must not cache (e.g. the non-reactive `sample()`
+   * wrapper) leave these undefined and callers fall back to recomputing.
+   * `keyObject` must be a stable per-cell object identity (the cell's normalized
+   * link); `variant` distinguishes reads that differ in options. A returned
+   * `{ value }` wrapper signals a hit, so a cached `undefined` value is
+   * distinguishable from a miss.
+   */
+  getCachedReadResult?(
+    keyObject: object,
+    variant: string,
+  ): { value: unknown } | undefined;
+
+  setCachedReadResult?(
+    keyObject: object,
+    variant: string,
+    value: unknown,
   ): void;
 }
 
@@ -648,7 +1089,8 @@ export interface ITransactionWriter extends ITransactionReader {
    */
   write(
     address: IMemoryAddress,
-    value?: StorableDatum,
+    value?: FabricValue,
+    options?: IWriteOptions,
   ): Result<IAttestation, WriteError>;
 }
 
@@ -677,6 +1119,18 @@ export interface IStorageTransactionInconsistent extends IStorageError {
 }
 
 /**
+ * A commit-time precondition failed (spec scheduler-v2 §7.6). Unlike
+ * optimistic conflicts, this class is PERMANENT: the client must not
+ * retry. `origin-committed` — the transaction that caused this work
+ * never committed. `receipt-exists` — another handling of the same
+ * event already committed (lost race).
+ */
+export interface IPreconditionFailedError extends Error {
+  name: "PreconditionFailedError";
+  precondition: "origin-committed" | "receipt-exists";
+}
+
+/**
  * Error that indicating that no change could be made to a transaction is it is
  * no longer active.
  */
@@ -691,6 +1145,7 @@ export type StorageTransactionFailed =
 
 export type StorageTransactionRejected =
   | IConflictError
+  | IPreconditionFailedError
   | IStoreError
   | TransactionError
   | IConnectionError
@@ -780,12 +1235,16 @@ export interface IMemoryAddress {
    */
   id: URI;
   /**
-   * Media type under which data is stored. It corresponds to `the` field in the
-   * memory protocol.
+   * Protocol fact type. Document addresses omit this; storage boundaries use
+   * application/json.
    */
-  type: MediaType;
+  type?: MediaType;
   /**
-   * Intra-value path to the {@link StorableDatum} being referenced by this
+   * Declared scoped cell instance. Storage defaults omitted scope to `space`.
+   */
+  scope?: CellScope;
+  /**
+   * Intra-value path to the {@link FabricValue} being referenced by this
    * address. It is a path within the `is` field of the fact in memory protocol.
    */
   path: readonly MemoryAddressPathComponent[];
@@ -800,7 +1259,7 @@ export type MemoryAddressPathComponent = string;
 export interface Assert {
   the: MediaType;
   of: URI;
-  is: StorableDatum;
+  is: FabricValue;
 
   claim?: void;
 }
@@ -831,8 +1290,15 @@ export interface ISpaceReplica extends ISpace {
    */
   get(entry: BaseMemoryAddress): State | undefined;
 
-  commit(
+  getDocument(id: URI, scope?: CellScope): EntityDocument | undefined;
+
+  commit?(
     transaction: ITransaction,
+    source?: IStorageTransaction,
+  ): Promise<Result<Unit, StorageTransactionRejected>>;
+
+  commitNative?(
+    transaction: NativeStorageCommit,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>>;
 }
@@ -842,6 +1308,7 @@ export type PushError =
   | IStoreError
   | IConnectionError
   | IConflictError
+  | IPreconditionFailedError
   | TransactionError
   | IAuthorizationError;
 
@@ -868,6 +1335,59 @@ export interface ITransactionJournal {
 
   novelty(space: MemorySpace): Iterable<IAttestation>;
   history(space: MemorySpace): Iterable<IAttestation>;
+}
+
+export interface TransactionReactivityLog {
+  reads: IMemorySpaceAddress[];
+  shallowReads: IMemorySpaceAddress[];
+  writes: IMemorySpaceAddress[];
+  attemptedWrites?: IMemorySpaceAddress[];
+}
+
+export interface TransactionWriteDetail {
+  address: IMemorySpaceAddress;
+  value?: Immutable<FabricValue>;
+  previousValue?: Immutable<FabricValue>;
+}
+
+export interface TransactionReadDetail {
+  address: IMemorySpaceAddress;
+  value?: Immutable<FabricValue>;
+}
+
+export type NativeStorageCommitOperation =
+  | {
+    op: "set";
+    id: URI;
+    type: MediaType;
+    scope?: CellScope;
+    value: FabricValue;
+  }
+  | {
+    op: "delete";
+    id: URI;
+    type: MediaType;
+    scope?: CellScope;
+  }
+  | {
+    op: "patch";
+    id: URI;
+    type: MediaType;
+    scope?: CellScope;
+    patches: PatchOp[];
+    value: FabricValue;
+  };
+
+export interface NativeStorageCommit {
+  operations: readonly NativeStorageCommitOperation[];
+  schedulerObservation?: unknown;
+  preconditions?: readonly CommitPrecondition[];
+  /**
+   * Folded SQLite write ops, applied in the same wire commit as `operations`
+   * (appended last). They are NOT entity revisions and stay out of the
+   * doc-pending / touched / notify machinery.
+   */
+  sqliteOps?: readonly SqliteOperation[];
 }
 
 export interface ITransaction {
@@ -950,13 +1470,13 @@ export interface ITypeMismatchError extends IStorageError {
  */
 export interface IAttestation {
   readonly address: IMemoryAddress;
-  readonly value?: Immutable<StorableDatum>;
+  readonly value?: Immutable<FabricValue>;
 }
 
 // An IAttestation where the address is an IMemorySpaceAddress
 export interface IMemorySpaceAttestation {
   readonly address: IMemorySpaceAddress;
-  readonly value?: Immutable<StorableDatum>;
+  readonly value?: Immutable<FabricValue>;
 }
 
 // Re-export transaction wrapper utilities from implementation
@@ -965,6 +1485,18 @@ export {
   createNonReactiveTransaction,
   TransactionWrapper,
 } from "./extended-storage-transaction.ts";
+
+export const createReadOnlyTransactionError = (
+  method: string,
+  source = "runtime.readTx()",
+): Error => {
+  const error = new Error(
+    `Cannot call ${method} on a read-only transaction returned by ${source}; ` +
+      "use runtime.edit() to create an owned writable transaction.",
+  );
+  error.name = "ReadOnlyTransactionError";
+  return error;
+};
 
 /**
  * Converts an IStorageError to a throwable Error instance.

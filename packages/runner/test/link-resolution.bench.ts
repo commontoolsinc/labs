@@ -1,5 +1,5 @@
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { resolveLink } from "../src/link-resolution.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -10,7 +10,9 @@ const space = signer.did();
 
 // Benchmarks using Deno.bench
 Deno.bench("followWriteRedirects with simple alias", () => {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
@@ -34,7 +36,9 @@ Deno.bench("followWriteRedirects with simple alias", () => {
 });
 
 Deno.bench("followWriteRedirects with nested aliases (5 levels)", () => {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
@@ -71,7 +75,9 @@ Deno.bench("followWriteRedirects with nested aliases (5 levels)", () => {
 });
 
 Deno.bench("resolveLink with direct reference", () => {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
@@ -94,7 +100,9 @@ Deno.bench("resolveLink with direct reference", () => {
 });
 
 Deno.bench("circular reference navigation (A->B->A->value)", () => {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
@@ -125,7 +133,9 @@ Deno.bench("circular reference navigation (A->B->A->value)", () => {
 });
 
 Deno.bench("complex path navigation (6 hops through 3 cells)", () => {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
@@ -163,7 +173,9 @@ Deno.bench("complex path navigation (6 hops through 3 cells)", () => {
 });
 
 Deno.bench("array element resolution in circular structures", () => {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
@@ -202,7 +214,9 @@ Deno.bench("array element resolution in circular structures", () => {
 });
 
 Deno.bench("resolveLink with infinitely growing path (A->A/foo)", () => {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,

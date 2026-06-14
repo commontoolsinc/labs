@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Weekly Calendar Pattern
  *
@@ -24,11 +23,12 @@ import {
   NAME,
   navigateTo,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import Event, { COLORS, generateId } from "./event.tsx";
 
@@ -59,13 +59,13 @@ type MentionablePiece = {
 };
 
 interface Input {
-  title?: Default<string, "Weekly Calendar">;
-  events: Writable<Default<EventPiece[], []>>;
-  isCalendar?: Default<boolean, true>; // Marker for identification
-  isHidden?: Default<boolean, false>;
+  title?: string | Default<"Weekly Calendar">;
+  events: Writable<EventPiece[] | Default<[]>>;
+  isCalendar?: boolean | Default<true>; // Marker for identification
+  isHidden?: boolean | Default<false>;
 }
 
-interface Output {
+export interface Output {
   title: string;
   events: EventPiece[];
   mentionable: EventPiece[];
@@ -367,36 +367,37 @@ const handleSetTitle = handler<
 
 const WeeklyCalendar = pattern<Input, Output>(
   ({ title, events, isCalendar, isHidden }) => {
-    const { allPieces } =
-      wish<{ allPieces: EventPiece[] }>({ query: "#default" }).result;
+    const { allPieces } = wish<{ allPieces: EventPiece[] }>({
+      query: "#default",
+    }).result!;
 
     // Navigation State
-    const startDate = Cell.of(getWeekStart(getTodayDate()));
-    const visibleDays = Cell.of(7);
+    const startDate = new Cell(getWeekStart(getTodayDate()));
+    const visibleDays = new Cell(7);
 
     // Create Form State
-    const showNewEventPrompt = Writable.of<boolean>(false);
-    const newEventTitle = Writable.of<string>("");
-    const newEventDate = Writable.of<string>(getTodayDate());
-    const newEventStartTime = Writable.of<string>("09:00");
-    const newEventEndTime = Writable.of<string>("10:00");
-    const newEventColor = Writable.of<string>(COLORS[0]);
-    const usedCreateAnother = Writable.of<boolean>(false);
+    const showNewEventPrompt = new Writable<boolean>(false);
+    const newEventTitle = new Writable<string>("");
+    const newEventDate = new Writable<string>(getTodayDate());
+    const newEventStartTime = new Writable<string>("09:00");
+    const newEventEndTime = new Writable<string>("10:00");
+    const newEventColor = new Writable<string>(COLORS[0]);
+    const usedCreateAnother = new Writable<boolean>(false);
 
     // Edit Form State
-    const showEditModal = Writable.of<boolean>(false);
-    const editingEventIndex = Writable.of<number>(-1);
-    const editEventTitle = Writable.of<string>("");
-    const editEventDate = Writable.of<string>("");
-    const editEventStartTime = Writable.of<string>("09:00");
-    const editEventEndTime = Writable.of<string>("10:00");
-    const editEventColor = Writable.of<string>(COLORS[0]);
+    const showEditModal = new Writable<boolean>(false);
+    const editingEventIndex = new Writable<number>(-1);
+    const editEventTitle = new Writable<string>("");
+    const editEventDate = new Writable<string>("");
+    const editEventStartTime = new Writable<string>("09:00");
+    const editEventEndTime = new Writable<string>("10:00");
+    const editEventColor = new Writable<string>(COLORS[0]);
 
     // Track last drop time to prevent click firing after drag
-    const lastDropTime = Cell.of(0);
+    const lastDropTime = new Cell(0);
 
     // Backlinks
-    const backlinks = Writable.of<MentionablePiece[]>([]);
+    const backlinks = new Writable<MentionablePiece[]>([]);
 
     // Computed Values
     const eventCount = computed(() => events.get().length);
@@ -505,7 +506,7 @@ const WeeklyCalendar = pattern<Input, Output>(
     return {
       [NAME]: computed(() => `${title} (${eventCount})`),
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           {/* Header */}
           <div
             slot="header"
@@ -587,7 +588,7 @@ const WeeklyCalendar = pattern<Input, Output>(
             }}
           >
             {/* New Event Modal */}
-            <ct-modal
+            <cf-modal
               $open={showNewEventPrompt}
               dismissable
               size="sm"
@@ -605,7 +606,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                 {/* Title Input */}
                 <div>
                   <label style={STYLES.label}>Title</label>
-                  <ct-input
+                  <cf-input
                     $value={newEventTitle}
                     placeholder="Event title..."
                     style={{ width: "100%" }}
@@ -615,7 +616,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                 {/* Date Input */}
                 <div>
                   <label style={STYLES.label}>Date</label>
-                  <ct-input
+                  <cf-input
                     $value={newEventDate}
                     type="date"
                     style={{ width: "100%" }}
@@ -626,16 +627,16 @@ const WeeklyCalendar = pattern<Input, Output>(
                 <div style={{ display: "flex", gap: "8px" }}>
                   <div style={{ flex: 1 }}>
                     <label style={STYLES.label}>Start</label>
-                    <ct-input
+                    <cf-input
                       $value={newEventStartTime}
                       type="time"
                       style={{ width: "100%" }}
-                      onct-change={onStartTimeChange}
+                      oncf-change={onStartTimeChange}
                     />
                   </div>
                   <div style={{ flex: 1 }}>
                     <label style={STYLES.label}>End</label>
-                    <ct-input
+                    <cf-input
                       $value={newEventEndTime}
                       type="time"
                       style={{ width: "100%" }}
@@ -719,10 +720,10 @@ const WeeklyCalendar = pattern<Input, Output>(
                   Create
                 </button>
               </div>
-            </ct-modal>
+            </cf-modal>
 
             {/* Edit Event Modal */}
-            <ct-modal
+            <cf-modal
               $open={showEditModal}
               dismissable
               size="sm"
@@ -740,7 +741,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                 {/* Title Input */}
                 <div>
                   <label style={STYLES.label}>Title</label>
-                  <ct-input
+                  <cf-input
                     $value={editEventTitle}
                     placeholder="Event title..."
                     style={{ width: "100%" }}
@@ -750,7 +751,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                 {/* Date Input */}
                 <div>
                   <label style={STYLES.label}>Date</label>
-                  <ct-input
+                  <cf-input
                     $value={editEventDate}
                     type="date"
                     style={{ width: "100%" }}
@@ -761,16 +762,16 @@ const WeeklyCalendar = pattern<Input, Output>(
                 <div style={{ display: "flex", gap: "8px" }}>
                   <div style={{ flex: 1 }}>
                     <label style={STYLES.label}>Start</label>
-                    <ct-input
+                    <cf-input
                       $value={editEventStartTime}
                       type="time"
                       style={{ width: "100%" }}
-                      onct-change={onEditStartTimeChange}
+                      oncf-change={onEditStartTimeChange}
                     />
                   </div>
                   <div style={{ flex: 1 }}>
                     <label style={STYLES.label}>End</label>
-                    <ct-input
+                    <cf-input
                       $value={editEventEndTime}
                       type="time"
                       style={{ width: "100%" }}
@@ -833,7 +834,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                   Save
                 </button>
               </div>
-            </ct-modal>
+            </cf-modal>
 
             {/* Calendar Grid */}
             <div
@@ -845,7 +846,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                 userSelect: "none",
               }}
             >
-              <ct-vscroll flex showScrollbar fadeEdges>
+              <cf-vscroll flex showScrollbar fadeEdges>
                 <div
                   style={{
                     display: "flex",
@@ -967,13 +968,13 @@ const WeeklyCalendar = pattern<Input, Output>(
                           .set(addMinutesToTime(newTime, duration));
                       }
 
-                      lastDropTime.set(Date.now());
+                      lastDropTime.set(safeDateNow());
                     });
 
                     // Click handlers for creating events at specific hours (using action)
                     const hourClickActions = HOURS.map((hour) =>
                       action(() => {
-                        if (Date.now() - lastDropTime.get() < 300) return;
+                        if (safeDateNow() - lastDropTime.get() < 300) return;
                         newEventTitle.set("");
                         newEventDate.set(columnDate);
                         newEventStartTime.set(hour.startTime);
@@ -1026,9 +1027,9 @@ const WeeklyCalendar = pattern<Input, Output>(
                         </div>
 
                         {/* Time Grid with Drop Zone */}
-                        <ct-drop-zone
+                        <cf-drop-zone
                           accept="event,event-resize"
-                          onct-drop={handleDayDrop}
+                          oncf-drop={handleDayDrop}
                           style={{ position: "relative", flex: "1" }}
                         >
                           {HOURS.map((hour, hourIdx) => (
@@ -1045,7 +1046,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                               onClick={hourClickActions[hourIdx]}
                             />
                           ))}
-                        </ct-drop-zone>
+                        </cf-drop-zone>
                       </div>
                     );
                   })}
@@ -1102,7 +1103,7 @@ const WeeklyCalendar = pattern<Input, Output>(
 
                     // Click action to open edit modal
                     const openEvent = action(() => {
-                      if (Date.now() - lastDropTime.get() < 300) return;
+                      if (safeDateNow() - lastDropTime.get() < 300) return;
                       // Populate edit form with event data
                       editingEventIndex.set(evtIndex);
                       editEventTitle.set(evt.title || "");
@@ -1173,7 +1174,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                         </div>
 
                         {/* Drag Source for Moving */}
-                        <ct-drag-source
+                        <cf-drag-source
                           $cell={evt}
                           type="event"
                           onClick={openEvent}
@@ -1188,10 +1189,10 @@ const WeeklyCalendar = pattern<Input, Output>(
                           }}
                         >
                           {dragAreaContent}
-                        </ct-drag-source>
+                        </cf-drag-source>
 
                         {/* Resize Drag Source */}
-                        <ct-drag-source
+                        <cf-drag-source
                           $cell={evt}
                           type="event-resize"
                           style={{
@@ -1208,12 +1209,12 @@ const WeeklyCalendar = pattern<Input, Output>(
                           }}
                         >
                           {resizeHandleLines}
-                        </ct-drag-source>
+                        </cf-drag-source>
                       </div>
                     );
                   })}
                 </div>
-              </ct-vscroll>
+              </cf-vscroll>
             </div>
           </div>
 
@@ -1235,7 +1236,7 @@ const WeeklyCalendar = pattern<Input, Output>(
           )}
 
           {/* Backlinks footer */}
-          <ct-hstack
+          <cf-hstack
             slot="footer"
             gap="2"
             padding="3"
@@ -1244,7 +1245,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                 backlinks.get().length > 0 ? "flex" : "none"
               ),
               alignItems: "center",
-              borderTop: "1px solid var(--ct-color-border, #e5e5e7)",
+              borderTop: "1px solid var(--cf-theme-color-border, #e5e5e7)",
               flexWrap: "wrap",
             }}
           >
@@ -1252,23 +1253,23 @@ const WeeklyCalendar = pattern<Input, Output>(
               style={{
                 fontSize: "12px",
                 lineHeight: "28px",
-                color: "var(--ct-color-text-secondary, #666)",
+                color: "var(--cf-theme-color-text-secondary, #666)",
               }}
             >
               Linked from:
             </span>
             {backlinks.map((piece) => (
-              <ct-button
+              <cf-button
                 variant="ghost"
                 size="sm"
                 onClick={handleBacklinkClick({ piece })}
                 style={{ fontSize: "12px" }}
               >
                 {piece?.[NAME]}
-              </ct-button>
+              </cf-button>
             ))}
-          </ct-hstack>
-        </ct-screen>
+          </cf-hstack>
+        </cf-screen>
       ),
       title,
       events,

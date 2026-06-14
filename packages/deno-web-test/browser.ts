@@ -1,14 +1,53 @@
-import { Browser, ConsoleEvent, launch, Page } from "@astral/astral";
+import {
+  Browser as AstralBrowser,
+  ConsoleEvent,
+  launch,
+  LaunchOptions,
+  Page,
+} from "@astral/astral";
 import { Manifest } from "./manifest.ts";
 import { tsToJs } from "./utils.ts";
 import { TestResult } from "./interface.ts";
 import { extractAstralConfig } from "./config.ts";
-import { sleep } from "@commontools/utils/sleep";
+import { sleep } from "@commonfabric/utils/sleep";
+
+const LAUNCH_RETRY_ATTEMPTS = 5;
+const LAUNCH_RETRYABLE_ETXTBSY = "Text file busy (os error 26)";
+
+type LaunchFn = (options: LaunchOptions) => Promise<AstralBrowser>;
+type SleepFn = (ms: number) => Promise<unknown>;
+
+export function isRetryableAstralLaunchError(error: unknown): boolean {
+  return String(error).includes(LAUNCH_RETRYABLE_ETXTBSY);
+}
+
+export async function launchWithRetry(
+  options: LaunchOptions,
+  launchImpl: LaunchFn = launch,
+  sleepImpl: SleepFn = sleep,
+): Promise<AstralBrowser> {
+  for (let attempt = 1; attempt <= LAUNCH_RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await launchImpl(options);
+    } catch (error) {
+      if (
+        attempt === LAUNCH_RETRY_ATTEMPTS ||
+        !isRetryableAstralLaunchError(error)
+      ) {
+        throw error;
+      }
+      await sleepImpl(250 * 2 ** (attempt - 1));
+    }
+  }
+  throw new Error("unreachable");
+}
 
 export class BrowserController extends EventTarget {
+  private static readonly HARNESS_READY_TIMEOUT_MS = 10_000;
+  private static readonly HARNESS_READY_POLL_MS = 200;
   private manifest: Manifest;
   private page: Page | null;
-  private browser: Browser | null;
+  private browser: AstralBrowser | null;
   private serverPort: number;
 
   constructor(manifest: Manifest, serverPort: number) {
@@ -28,7 +67,7 @@ export class BrowserController extends EventTarget {
     if (this.page) {
       await this.page.goto(testUrl);
     } else {
-      this.browser = await launch(extractAstralConfig(config));
+      this.browser = await launchWithRetry(extractAstralConfig(config));
       this.page = await this.browser.newPage(testUrl);
       this.page.addEventListener("console", (e) => {
         // Not sure why this event needs reconstructed in order
@@ -70,7 +109,11 @@ export class BrowserController extends EventTarget {
     if (!this.page) {
       throw new Error("No page loaded.");
     }
-    for (let i = 0; i < 10; i++) {
+    const attempts = Math.ceil(
+      BrowserController.HARNESS_READY_TIMEOUT_MS /
+        BrowserController.HARNESS_READY_POLL_MS,
+    );
+    for (let i = 0; i < attempts; i++) {
       const response = await this.page.evaluate(() =>
         // @ts-ignore This is defined in the JS harness
         globalThis.__denoWebTest && globalThis.__denoWebTest.isReady()
@@ -81,9 +124,11 @@ export class BrowserController extends EventTarget {
       if (response.error) {
         throw new Error(response.error?.message ?? response.error);
       }
-      await sleep(200);
+      await sleep(BrowserController.HARNESS_READY_POLL_MS);
     }
-    throw new Error("Test harness not ready in 2s.");
+    throw new Error(
+      `Test harness not ready in ${BrowserController.HARNESS_READY_TIMEOUT_MS}ms.`,
+    );
   }
 
   async close() {

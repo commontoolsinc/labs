@@ -3,19 +3,34 @@ import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import { getPatternEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { JSONSchema, Schema } from "../builder/types.ts";
+import type { Schema } from "../builder/types.ts";
+import type { CellScope } from "../builder/types.ts";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import {
   computeInputHashFromValue,
   internalSchema,
   tryClaimMutex,
   tryWriteResult,
 } from "./fetch-utils.ts";
+import { setPatternCell, setResultCell } from "../result-utils.ts";
+import { scopedCell } from "./scope-policy.ts";
 
 /** The shape of fetchData's input cell. */
+type FetchDataOptions = {
+  body?: any;
+  method?: string;
+  headers?: Record<string, string>;
+  mutexTimeoutMs?: number;
+};
+
+type FetchRequestOptions = Omit<FetchDataOptions, "mutexTimeoutMs">;
+
 type FetchDataInputs = {
   url?: string;
-  mode?: "text" | "json";
-  options?: { body?: any; method?: string; headers?: Record<string, string> };
+  mode?: "text" | "json" | "dataUrl";
+  options?: FetchDataOptions;
 };
 
 /**
@@ -23,43 +38,80 @@ type FetchDataInputs = {
  * which is `any`) lets cell.asSchema(schema).get() materialize nested
  * properties like options.headers as plain objects instead of proxies.
  */
-const fetchDataInputSchema = {
-  type: "object",
-  properties: {
-    url: { type: "string" },
-    mode: { type: "string" },
-    options: {
-      type: "object",
-      properties: {
-        body: {},
-        method: { type: "string" },
-        headers: {
-          type: "object",
-          additionalProperties: { type: "string" },
+const fetchDataInputSchema = internSchema(
+  {
+    type: "object",
+    properties: {
+      url: { type: "string" },
+      mode: { type: "string" },
+      options: {
+        type: "object",
+        properties: {
+          body: {},
+          method: { type: "string" },
+          mutexTimeoutMs: { type: "number" },
+          headers: {
+            type: "object",
+            additionalProperties: { type: "string" },
+          },
         },
       },
     },
   },
-} as const satisfies JSONSchema;
+);
+
+function normalizedFetchDataInputs(
+  url: string | undefined,
+  rawMode: string | undefined,
+  rawOptions: Readonly<FetchDataOptions> | undefined,
+): FetchDataInputs {
+  const mode = rawMode === "text" || rawMode === "json" ||
+      rawMode === "dataUrl"
+    ? rawMode
+    : undefined;
+  const { mutexTimeoutMs: _mutexTimeoutMs, ...requestOptions } = rawOptions ??
+    {};
+  const body = requestOptions.body;
+  const options = Object.keys(requestOptions).length > 0
+    ? {
+      ...requestOptions,
+      body: body !== undefined && typeof body !== "string"
+        ? JSON.stringify(body)
+        : body,
+    }
+    : undefined;
+  return createFrozenRequestSnapshot({ url, mode, options });
+}
 
 function snapshotFetchDataInputs(
   cell: Cell<FetchDataInputs>,
 ): FetchDataInputs {
   const snapshot = cell.asSchema(fetchDataInputSchema).get() ??
     ({} as FetchDataInputs);
-  const mode = snapshot.mode === "text" || snapshot.mode === "json"
-    ? snapshot.mode
-    : undefined;
-  const body = snapshot.options?.body;
-  const options = snapshot.options
-    ? {
-      ...snapshot.options,
-      body: body !== undefined && typeof body !== "string"
-        ? JSON.stringify(body)
-        : body,
-    }
-    : undefined;
-  return { url: snapshot.url, mode, options };
+  return normalizedFetchDataInputs(
+    snapshot.url,
+    snapshot.mode,
+    snapshot.options,
+  );
+}
+
+function snapshotFetchDataConfig(
+  cell: Cell<FetchDataInputs>,
+): { inputs: FetchDataInputs; mutexTimeoutMs?: number } {
+  const snapshot = cell.asSchema(fetchDataInputSchema).get() ??
+    ({} as FetchDataInputs);
+  const mutexTimeoutMs = snapshot.options?.mutexTimeoutMs;
+  return {
+    inputs: normalizedFetchDataInputs(
+      snapshot.url,
+      snapshot.mode,
+      snapshot.options,
+    ),
+    ...(typeof mutexTimeoutMs === "number" && Number.isFinite(mutexTimeoutMs) &&
+        mutexTimeoutMs > 0
+      ? { mutexTimeoutMs }
+      : {}),
+  };
 }
 
 /**
@@ -85,6 +137,7 @@ export function fetchData(
   let result: Cell<any | undefined>;
   let error: Cell<any | undefined>;
   let internal: Cell<Schema<typeof internalSchema>>;
+  let cellScope: CellScope | undefined;
   let myRequestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
 
@@ -108,6 +161,7 @@ export function fetchData(
 
       // Since we're aborting, don't retry. If the above fails, it's because the
       // requestId was already changing under us.
+      runtime.prepareTxForCommit(tx);
       tx.commit();
     } catch (_) {
       // Ignore errors during cleanup - the runtime might be shutting down
@@ -116,15 +170,22 @@ export function fetchData(
   });
 
   return (tx: IExtendedStorageTransaction) => {
-    if (!cellsInitialized) {
-      pending = runtime.getCell(
+    tx.resetNarrowestReadScope();
+    const { inputs: inputsSnapshot, mutexTimeoutMs } = snapshotFetchDataConfig(
+      inputsCell.withTx(tx),
+    );
+    const outputScope = tx.getNarrowestReadScope();
+
+    if (!cellsInitialized || cellScope !== outputScope) {
+      const basePending = runtime.getCell<boolean>(
         parentCell.space,
         { fetchData: { pending: cause } },
         undefined,
         tx,
       );
+      pending = scopedCell(runtime, tx, basePending, outputScope);
 
-      result = runtime.getCell<any | undefined>(
+      const baseResult = runtime.getCell<any | undefined>(
         parentCell.space,
         {
           fetchData: { result: cause },
@@ -132,8 +193,9 @@ export function fetchData(
         undefined,
         tx,
       );
+      result = scopedCell(runtime, tx, baseResult, outputScope);
 
-      error = runtime.getCell<any | undefined>(
+      const baseError = runtime.getCell<any | undefined>(
         parentCell.space,
         {
           fetchData: { error: cause },
@@ -141,18 +203,27 @@ export function fetchData(
         undefined,
         tx,
       );
+      error = scopedCell(runtime, tx, baseError, outputScope);
 
-      internal = runtime.getCell(
+      const baseInternal = runtime.getCell(
         parentCell.space,
         { fetchData: { internal: cause } },
         internalSchema,
         tx,
       );
+      internal = scopedCell(runtime, tx, baseInternal, outputScope);
 
-      pending.setSourceCell(parentCell);
-      result.setSourceCell(parentCell);
-      error.setSourceCell(parentCell);
-      internal.setSourceCell(parentCell);
+      // Link the new result cells to the parent result cell
+      setResultCell(pending, parentCell);
+      setResultCell(result, parentCell);
+      setResultCell(error, parentCell);
+      setResultCell(internal, parentCell);
+      // Link the new result cells to the pattern cell too
+      const patternCellPtr = parentCell.key("pattern");
+      setPatternCell(pending, patternCellPtr);
+      setPatternCell(result, patternCellPtr);
+      setPatternCell(error, patternCellPtr);
+      setPatternCell(internal, patternCellPtr);
 
       // Kick off sync in the background
       pending.sync();
@@ -161,6 +232,7 @@ export function fetchData(
       internal.sync();
 
       cellsInitialized = true;
+      cellScope = outputScope;
     }
 
     // Set results to links to our cells. We have to do this outside of
@@ -170,7 +242,6 @@ export function fetchData(
     // should be fine.
     sendResult(tx, { pending, result, error });
 
-    const inputsSnapshot = snapshotFetchDataInputs(inputsCell.withTx(tx));
     const url = inputsSnapshot?.url;
     if (!url) {
       // Only update if values actually need to change to reduce transaction conflicts
@@ -229,70 +300,81 @@ export function fetchData(
 
     // Start a new fetch if we don't have a result/error and aren't already fetching
     if (!hasValidResult && !hasError && !alreadyFetching) {
-      const newRequestId = crypto.randomUUID();
-      // Try to claim mutex - returns immediately if another tab is processing
-      tryClaimMutex(
-        runtime,
-        inputsCell,
-        pending,
-        result,
-        error,
-        internal,
-        newRequestId,
-        // Materialize inputs via the schema system and preprocess body.
-        // asSchema().get() returns a frozen plain snapshot with nested
-        // properties (like options.headers) fully resolved, safe to use
-        // after commit.
-        snapshotFetchDataInputs,
-      ).then(
-        ({ claimed, inputs, inputHash }) => {
-          if (!claimed) {
-            // Another tab is handling this, we're done
-            return;
-          }
-
-          const { url, mode, options } = inputs;
-
-          // Clear any previous result/error when starting a new fetch
-          // This ensures observers see a clean pending state
-          runtime.editWithRetry((tx) => {
-            result.withTx(tx).set(undefined);
-            error.withTx(tx).set(undefined);
-          });
-
-          // Check if URL became empty while waiting for mutex
-          if (!url) {
-            // Release the lock and clear state
-            myRequestId = undefined;
-            runtime.editWithRetry((tx) => {
-              pending.withTx(tx).set(false);
-              result.withTx(tx).set(undefined);
-              error.withTx(tx).set(undefined);
-              internal.withTx(tx).set({
-                requestId: "",
-                lastActivity: 0,
-                inputHash: "",
-              });
-            });
-            return;
-          }
-
-          abortController = new AbortController();
-
-          // We claimed the mutex, start the fetch
-          myRequestId = newRequestId;
-          startFetch(
+      const newRequestId = inputHash;
+      enqueueSinkRequestPostCommitEffect(
+        tx,
+        "fetchData",
+        `fetchData:${newRequestId}`,
+        inputsSnapshot,
+        "fetchData-start",
+        () => {
+          // Try to claim mutex - returns immediately if another tab is processing
+          void tryClaimMutex(
             runtime,
             inputsCell,
-            url,
-            mode,
-            options,
-            inputHash,
             pending,
             result,
             error,
             internal,
-            abortController.signal,
+            newRequestId,
+            // Materialize inputs via the schema system and preprocess body.
+            // asSchema().get() returns a frozen plain snapshot with nested
+            // properties (like options.headers) fully resolved, safe to use
+            // after commit.
+            snapshotFetchDataInputs,
+            inputHash,
+            mutexTimeoutMs,
+          ).then(
+            ({ claimed }) => {
+              if (!claimed) {
+                // Another tab is handling this, we're done
+                return;
+              }
+
+              const { url, mode, options } = inputsSnapshot;
+
+              // Clear any previous result/error when starting a new fetch
+              // This ensures observers see a clean pending state
+              runtime.editWithRetry((tx) => {
+                result.withTx(tx).set(undefined);
+                error.withTx(tx).set(undefined);
+              });
+
+              // Check if URL became empty while waiting for mutex
+              if (!url) {
+                // Release the lock and clear state
+                myRequestId = undefined;
+                runtime.editWithRetry((tx) => {
+                  pending.withTx(tx).set(false);
+                  result.withTx(tx).set(undefined);
+                  error.withTx(tx).set(undefined);
+                  internal.withTx(tx).set({
+                    requestId: "",
+                    lastActivity: 0,
+                    inputHash: "",
+                  });
+                });
+                return;
+              }
+
+              abortController = new AbortController();
+
+              // We claimed the mutex, start the fetch
+              myRequestId = newRequestId;
+              startFetch(
+                runtime,
+                inputsCell,
+                url,
+                mode,
+                options,
+                newRequestId,
+                pending,
+                result,
+                error,
+                internal,
+                abortController.signal,
+              );
+            },
           );
         },
       );
@@ -304,8 +386,8 @@ async function startFetch(
   runtime: Runtime,
   inputsCell: Cell<FetchDataInputs>,
   url: string,
-  mode: "text" | "json" | undefined,
-  options: FetchDataInputs["options"],
+  mode: "text" | "json" | "dataUrl" | undefined,
+  options: FetchRequestOptions | undefined,
   inputHash: string,
   pending: Cell<boolean>,
   result: Cell<any | undefined>,
@@ -317,14 +399,32 @@ async function startFetch(
     if (!r.ok) {
       throw new Error(`HTTP ${r.status}: ${r.statusText}`);
     }
-    return (mode || "json") === "json" ? await r.json() : await r.text();
+    if (mode === "text") return await r.text();
+    if (mode === "dataUrl") {
+      const contentType = r.headers.get("content-type")?.split(";")[0]
+        .trim() || "application/octet-stream";
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      let binary = "";
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+      }
+      return `data:${contentType};base64,${btoa(binary)}`;
+    }
+    return await r.json();
   };
 
   // Body preprocessing (stringify non-string bodies) is handled by the
   // snapshotInputs callback in tryClaimMutex, so options is ready to use.
   try {
+    // Relative URLs resolve against the executing space's host when the
+    // space is host-mapped (federation: one runtime spans hosts). An
+    // unmapped space keeps the pattern environment's api base — which on
+    // some deployments (toolshed) deliberately differs from the runtime's
+    // default memory host, so hostForSpace's fallback is NOT used here.
+    const mappedHost = runtime.mappedHostFor(inputsCell.space);
     const response = await fetch(
-      new URL(url, getPatternEnvironment().apiUrl),
+      new URL(url, mappedHost ?? getPatternEnvironment().apiUrl),
       {
         signal: abortSignal,
         ...options,

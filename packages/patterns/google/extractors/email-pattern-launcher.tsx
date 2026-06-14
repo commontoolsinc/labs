@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Email Pattern Launcher
  *
@@ -16,20 +15,20 @@
  * Usage:
  * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct piece link google-auth/auth email-pattern-launcher/overrideAuth
+ * 3. Link: cf piece link google-auth/auth email-pattern-launcher/overrideAuth
  */
 import {
   //compileAndRun,
   computed,
-  derive,
   fetchData,
   //fetchProgram,
   NAME,
   navigateTo,
   pattern,
+  toIndentedDebugString,
   UI,
   when,
-} from "commontools";
+} from "commonfabric";
 import GmailExtractor, { type Auth } from "../core/gmail-extractor.tsx";
 
 import USPSInformedDeliveryPattern from "./usps-informed-delivery.tsx";
@@ -117,12 +116,12 @@ function buildGmailQuery(entries: RegistryEntry[]): string { // Build "from:@dom
 
 interface PatternInput {
   // Optional: Link auth directly from a Google Auth piece
-  // Use: ct piece link googleAuthPiece/auth emailPatternLauncher/overrideAuth
+  // Use: cf piece link googleAuthPiece/auth emailPatternLauncher/overrideAuth
   overrideAuth?: Auth;
 }
 
 /** Email pattern launcher that discovers and runs relevant patterns. #emailPatternLauncher */
-interface PatternOutput {
+export interface PatternOutput {
   matchedPatterns: unknown[];
   emailCount: number;
   matchCount: number;
@@ -242,7 +241,8 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     */
 
     const compiled = {
-      result: derive(matchInfo.patternUri, (patternUri) => {
+      result: computed(() => {
+        const patternUri = matchInfo.patternUri;
         const pattern = PATTERNS[patternUri];
         if (!pattern) return null;
         return pattern({} as any).for(patternUri);
@@ -310,13 +310,13 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     previewUI,
 
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div slot="header">
-          <ct-heading level={3}>Email Pattern Launcher</ct-heading>
+          <cf-heading level={3}>Email Pattern Launcher</cf-heading>
         </div>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack padding="6" gap="4">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack padding="6" gap="4">
             {/* Auth UI from GmailExtractor */}
             {extractor.ui.authStatusUI}
 
@@ -387,12 +387,11 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                   color: "#b91c1c",
                 }}
               >
-                Error loading registry:{" "}
-                {computed(() =>
-                  console.log("registryError 2", registryError)
-                ) &&
-                  ""}
-                <pre>{JSON.stringify(registryError, null, 2)}</pre>
+                Error loading registry:{computed(() => {
+                  console.log("registryError 2", registryError);
+                  return "";
+                })}
+                <pre>{toIndentedDebugString(registryError)}</pre>
               </div>,
             )}
 
@@ -408,15 +407,13 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                   borderRadius: "8px",
                 }}
               >
-                <ct-loader size="sm" />
+                <cf-loader size="sm" />
                 <span>Loading pattern registry...</span>
               </div>
             )}
 
             {/* No Matches Message */}
-            {computed(() =>
-              !registryLoading && emailCount > 0 && matchCount === 0
-            ) && (
+            {!registryLoading && emailCount > 0 && matchCount === 0 && (
               <div
                 style={{
                   display: "block",
@@ -453,7 +450,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                   Active Email Patterns
                 </h3>
 
-                <ct-vstack gap="3">
+                <cf-vstack gap="3">
                   {launchedPatterns.map((patternInfo) => (
                     <div
                       style={{
@@ -516,7 +513,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                             borderRadius: "8px",
                           }}
                         >
-                          <ct-loader size="sm" />
+                          <cf-loader size="sm" />
                           <span>Loading pattern...</span>
                         </div>
                       )}
@@ -553,7 +550,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                         >
                           {/* Render the pattern's previewUI if available */}
                           {
-                            /*<ct-render
+                            /*<cf-render
                             $cell={patternInfo.result}
                             variant="preview"
                           />*/
@@ -563,7 +560,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                       )}
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </div>
             )}
 
@@ -605,9 +602,9 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                 ))}
               </div>
             </details>
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
   };
 });

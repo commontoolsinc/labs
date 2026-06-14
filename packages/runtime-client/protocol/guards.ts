@@ -1,5 +1,5 @@
-import { isDID } from "@commontools/identity";
-import { isRecord } from "@commontools/utils/types";
+import { isDID } from "@commonfabric/identity";
+import { isRecord } from "@commonfabric/utils/types";
 import {
   CellRef,
   CellUpdateNotification,
@@ -22,7 +22,7 @@ export function isCellRef(value: unknown): value is CellRef {
   if (!isRecord(value)) return false;
   return Array.isArray(value.path) && typeof value.id === "string" &&
     !!value.id &&
-    typeof value.type === "string" && isDID(value.space);
+    isDID(value.space);
 }
 
 export function isInitializationData(

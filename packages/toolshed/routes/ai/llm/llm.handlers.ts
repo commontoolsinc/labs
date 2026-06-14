@@ -13,8 +13,8 @@ import { generateText as generateTextCore } from "./generateText.ts";
 import { generateObject as generateObjectCore } from "./generateObject.ts";
 import { findModel } from "./models.ts";
 import env from "@/env.ts";
-import { isLLMRequest } from "@commontools/llm/types";
-import { type BuiltInLLMMessage } from "@commontools/api";
+import { isLLMRequest } from "@commonfabric/llm/types";
+import { type BuiltInLLMMessage } from "@commonfabric/api";
 
 const removeNonCacheableFields = (
   obj: object,
@@ -138,7 +138,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
     payload.metadata.user = user;
   }
 
-  // Enable caching for all requests including those with tools.
+  // Enable caching for deterministic requests including client-side tools.
   // With the sequential request architecture, each request includes complete context
   // (including tool results from previous rounds), making each response cacheable.
   //
@@ -148,11 +148,10 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   // - Tool results (in messages array for subsequent rounds)
   // - Full conversation history
   //
-  // Note: Non-deterministic tools will be cached. If tool results change for the
-  // same inputs, the different results will produce different cache keys, resulting
-  // in a cache miss (correct behavior). For intentional cache invalidation, use
-  // the cache eviction utilities or modify the request to produce a different hash.
-  const shouldCache = payload.cache === true;
+  // Provider-native tools such as Google Search are intentionally time-sensitive.
+  // Treat them as live requests until we have a freshness-aware cache policy.
+  const shouldCache = payload.cache === true &&
+    (payload.nativeModelToolIds?.length ?? 0) === 0;
 
   let cacheKey: string | undefined;
   if (shouldCache) {
@@ -211,7 +210,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
       await persistCache(result.messages);
       const response = c.json(result.message);
       if (result.spanId) {
-        response.headers.set("x-ct-llm-trace-id", result.spanId);
+        response.headers.set("x-cf-llm-trace-id", result.spanId);
       }
       return response;
     }
@@ -222,7 +221,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
         "Transfer-Encoding": "chunked",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
-        ...(result.spanId ? { "x-ct-llm-trace-id": result.spanId } : {}),
+        ...(result.spanId ? { "x-cf-llm-trace-id": result.spanId } : {}),
       },
     });
   } catch (error) {
@@ -257,13 +256,13 @@ export const submitFeedback: AppRouteHandler<FeedbackRoute> = async (c) => {
       headers: {
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "Authorization": `Bearer ${env.CTTS_AI_LLM_PHOENIX_API_KEY}`,
+        "Authorization": `Bearer ${env.CFTS_AI_LLM_PHOENIX_API_KEY}`,
       },
       body: JSON.stringify(phoenixPayload),
     };
 
     const response = await fetch(
-      `${env.CTTS_AI_LLM_PHOENIX_API_URL}/span_annotations?sync=false`,
+      `${env.CFTS_AI_LLM_PHOENIX_API_URL}/span_annotations?sync=false`,
       phoenixAnnotationPayload,
     );
 

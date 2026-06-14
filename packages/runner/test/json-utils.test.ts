@@ -1,21 +1,31 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 
 import {
   createJsonSchema,
+  moduleToJSON,
   toJSONWithLegacyAliases,
 } from "../src/builder/json-utils.ts";
-import { type JSONSchema } from "../src/builder/types.ts";
+import {
+  type FabricValue,
+  type JSONSchema,
+  type JSONSchemaObj,
+} from "../src/builder/types.ts";
+import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
+import { Engine } from "../src/harness/engine.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("createJsonSchema", () => {
+describe("json-utils", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
@@ -33,320 +43,902 @@ describe("createJsonSchema", () => {
     await storageManager?.close();
   });
 
-  it("should create schema for primitive types", () => {
-    expect(createJsonSchema("test")).toEqual({ type: "string" });
-    expect(createJsonSchema(42)).toEqual({ type: "integer" });
-    expect(createJsonSchema(3.14)).toEqual({ type: "number" });
-    expect(createJsonSchema(true)).toEqual({ type: "boolean" });
-    expect(createJsonSchema(null)).toEqual({ type: "null" });
-    expect(createJsonSchema(undefined)).toEqual({});
-  });
+  describe("createJsonSchema", () => {
+    function testSchemaForType(typeName: string, example: unknown) {
+      describe(`basics for type \`${typeName}\``, () => {
+        it("should create schema for direct value", () => {
+          const schema = createJsonSchema(example);
+          expect(schema).toEqual({ type: typeName });
+          expect(isInternedSchema(schema)).toBe(true);
+        });
 
-  it("should create schema for arrays", () => {
-    const arraySchema = createJsonSchema(["a", "b", "c"]);
-    expect(arraySchema).toEqual({
-      type: "array",
-      items: {
-        type: "string",
-      },
+        it("should create schema for single-element array", () => {
+          const schema = createJsonSchema([example]);
+          expect(schema).toEqual({
+            type: "array",
+            items: { type: typeName },
+          });
+          expect(isInternedSchema(schema)).toBe(true);
+        });
+
+        it("should create schema for single-property object", () => {
+          const schema = createJsonSchema({ prop: example });
+          expect(schema).toEqual({
+            type: "object",
+            properties: { prop: { type: typeName } },
+          });
+          expect(isInternedSchema(schema)).toBe(true);
+        });
+
+        it("should set default with addDefaults", () => {
+          const schema = createJsonSchema(example, true);
+          expect(schema).toEqual({
+            type: typeName,
+            default: example,
+          });
+          expect(isInternedSchema(schema)).toBe(true);
+        });
+      });
+    }
+
+    testSchemaForType("string", "test");
+    testSchemaForType("integer", 42);
+    testSchemaForType("number", 3.14);
+    testSchemaForType("boolean", true);
+    testSchemaForType("null", null);
+
+    describe("basics for type `undefined`", () => {
+      it("should create schema for direct value", () => {
+        const schema = createJsonSchema(undefined);
+        expect(schema).toEqual({});
+        expect(isInternedSchema(schema)).toBe(true);
+      });
+
+      it("should create schema for single-element array", () => {
+        const schema = createJsonSchema([undefined]);
+        expect(schema).toEqual({
+          type: "array",
+          items: {},
+        });
+        expect(isInternedSchema(schema)).toBe(true);
+      });
+
+      it("should create schema for single-property object", () => {
+        // The key is still enumerated, but analyzeType(undefined)
+        // produces an empty schema
+        const schema = createJsonSchema({ prop: undefined });
+        expect(schema).toEqual({
+          type: "object",
+          properties: { prop: {} },
+        });
+        expect(isInternedSchema(schema)).toBe(true);
+      });
+
+      it("should not set default with addDefaults", () => {
+        const schema = createJsonSchema(undefined, true);
+        expect(schema).toEqual({});
+        expect(schema).not.toHaveProperty("default");
+        expect(isInternedSchema(schema)).toBe(true);
+      });
     });
 
-    const mixedArraySchema = createJsonSchema([{ name: "item1" }, {
-      name: "item2",
-      value: 42,
-    }]);
-    expect(mixedArraySchema).toEqual(
-      {
+    it("should create schema for arrays", () => {
+      const arraySchema = createJsonSchema(["a", "b", "c"]);
+      expect(arraySchema).toEqual({
+        type: "array",
+        items: {
+          type: "string",
+        },
+      });
+      expect(isInternedSchema(arraySchema)).toBe(true);
+
+      const mixedArraySchema = createJsonSchema([{ name: "item1" }, {
+        name: "item2",
+        value: 42,
+      }]);
+      expect(mixedArraySchema).toEqual(
+        {
+          type: "array",
+          items: {
+            anyOf: [
+              {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                },
+              },
+              {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  value: { type: "integer" },
+                },
+              },
+            ],
+          },
+        } satisfies JSONSchema,
+      );
+      expect(isInternedSchema(mixedArraySchema)).toBe(true);
+    });
+
+    it("should handle single-element array", () => {
+      const schema = createJsonSchema([42]);
+      expect(schema).toEqual({
+        type: "array",
+        items: { type: "integer" },
+      });
+      expect(isInternedSchema(schema)).toBe(true);
+    });
+
+    it("should deduplicate mixed types with repeats in arrays", () => {
+      const schema = createJsonSchema(["hello", 1, "world", 2, true]);
+      expect(schema).toEqual({
+        type: "array",
+        items: {
+          anyOf: [
+            { type: "string" },
+            { type: "integer" },
+            { type: "boolean" },
+          ],
+        },
+      });
+    });
+
+    it("should create schema for objects", () => {
+      const objectSchema = createJsonSchema({
+        string: "text",
+        number: 123,
+        boolean: true,
+        nested: {
+          array: [1, 2, 3],
+          value: null,
+        },
+      });
+
+      expect(objectSchema).toEqual({
+        type: "object",
+        properties: {
+          string: { type: "string" },
+          number: { type: "integer" },
+          boolean: { type: "boolean" },
+          nested: {
+            type: "object",
+            properties: {
+              array: {
+                type: "array",
+                items: {
+                  type: "integer",
+                },
+              },
+              value: { type: "null" },
+            },
+          },
+        },
+      });
+      expect(isInternedSchema(objectSchema)).toBe(true);
+    });
+
+    it("should handle empty objects and arrays", () => {
+      expect(createJsonSchema({})).toEqual({
+        type: "object",
+        properties: {},
+      });
+
+      expect(createJsonSchema([])).toEqual({
+        type: "array",
+        items: {},
+      });
+    });
+
+    it("should handle complex nested structures", () => {
+      const complexData = {
+        users: [
+          { id: 1, name: "Alice", active: true },
+          { id: 2, name: "Bob", active: false },
+        ],
+        settings: {
+          theme: "dark",
+          notifications: {
+            email: true,
+            push: false,
+          },
+        },
+      };
+
+      const schema = createJsonSchema(complexData);
+
+      expect(schema).toEqual({
+        type: "object",
+        properties: {
+          users: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "integer" },
+                name: { type: "string" },
+                active: { type: "boolean" },
+              },
+            },
+          },
+          settings: {
+            type: "object",
+            properties: {
+              theme: { type: "string" },
+              notifications: {
+                type: "object",
+                properties: {
+                  email: { type: "boolean" },
+                  push: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      expect(isInternedSchema(schema)).toBe(true);
+    });
+
+    it("should use cell schema when available", () => {
+      const cellWithSchema = runtime.getImmutableCell(
+        space,
+        "cell@value.com",
+        { type: "string", format: "email" },
+      );
+
+      const schema = createJsonSchema(cellWithSchema, false, runtime);
+      expect(schema).toEqual({ type: "string", format: "email" });
+      expect(isInternedSchema(schema)).toBe(true);
+    });
+
+    it("should analyze cell value when no schema is provided", () => {
+      const cellWithoutSchema = runtime.getImmutableCell(
+        space,
+        {
+          name: "John",
+          age: 30,
+          isActive: true,
+        },
+      );
+
+      const schema = createJsonSchema(cellWithoutSchema, false, runtime);
+      expect(schema).toEqual({
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          age: { type: "integer" },
+          isActive: { type: "boolean" },
+        },
+      });
+      expect(isInternedSchema(schema)).toBe(true);
+    });
+
+    it("should handle array cell without schema", () => {
+      const arrayCell = runtime.getImmutableCell(
+        space,
+        [1, 2, 3, 4],
+      );
+
+      const schema = createJsonSchema(arrayCell, false, runtime);
+
+      expect(schema).toEqual({
+        type: "array",
+        items: {
+          type: "integer",
+        },
+      });
+      expect(isInternedSchema(schema)).toBe(true);
+    });
+
+    it("should handle nested cells with and without schema", () => {
+      const userCell = runtime.getImmutableCell(
+        space,
+        { id: 1, name: "Alice" },
+      );
+
+      const prefsSchema = {
+        type: "object",
+        properties: {
+          darkMode: { type: "boolean" },
+          fontSize: { type: "integer" },
+        },
+      } as const satisfies JSONSchema;
+
+      const prefsCell = runtime.getImmutableCell(
+        space,
+        { darkMode: true, fontSize: 14 },
+        prefsSchema,
+      );
+
+      const nestedObject = {
+        user: userCell,
+        preferences: prefsCell,
+      };
+
+      const schema = createJsonSchema(nestedObject, false, runtime);
+      expect(schema).toEqual({
+        type: "object",
+        properties: {
+          user: {
+            type: "object",
+            properties: {
+              id: { type: "integer" },
+              name: { type: "string" },
+            },
+          },
+          preferences: {
+            type: "object",
+            properties: {
+              darkMode: { type: "boolean" },
+              fontSize: { type: "integer" },
+            },
+          },
+        },
+      });
+    });
+
+    it("should return cached schema when the same cell link appears twice", () => {
+      const cell = runtime.getImmutableCell(
+        space,
+        { x: 1, y: 2 },
+      );
+
+      // The same cell link in two object properties. The second encounter should
+      // hit the `seen.has(linkAsStr)` branch and return a deep copy.
+      const schema = createJsonSchema(
+        { first: cell, second: cell },
+        false,
+        runtime,
+      );
+
+      const expectedCellSchema = {
+        type: "object",
+        properties: {
+          x: { type: "integer" },
+          y: { type: "integer" },
+        },
+      };
+
+      expect(schema).toEqual({
+        type: "object",
+        properties: {
+          first: expectedCellSchema,
+          second: expectedCellSchema,
+        },
+      });
+    });
+
+    it("should deduplicate array items that are identical cell links", () => {
+      const cell = runtime.getImmutableCell(
+        space,
+        { name: "Alice" },
+      );
+
+      // An array where every element is the same cell link. All elements produce
+      // the same schema, so deduplication should yield a single `items` schema.
+      const schema = createJsonSchema([cell, cell], false, runtime);
+
+      expect(schema).toEqual({
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+          },
+        },
+      });
+      expect(isInternedSchema(schema)).toBe(true);
+    });
+
+    it("should produce anyOf for arrays with different cell links", () => {
+      const cellA = runtime.getImmutableCell(
+        space,
+        { name: "Alice" },
+      );
+      const cellB = runtime.getImmutableCell(
+        space,
+        { count: 42 },
+      );
+
+      const schema = createJsonSchema([cellA, cellB], false, runtime);
+
+      expect(schema).toEqual({
         type: "array",
         items: {
           anyOf: [
             {
               type: "object",
-              properties: {
-                name: { type: "string" },
-              },
+              properties: { name: { type: "string" } },
             },
             {
               type: "object",
-              properties: {
-                name: { type: "string" },
-                value: { type: "integer" },
-              },
+              properties: { count: { type: "integer" } },
             },
           ],
         },
-      } satisfies JSONSchema,
-    );
-  });
-
-  it("should create schema for objects", () => {
-    const objectSchema = createJsonSchema({
-      string: "text",
-      number: 123,
-      boolean: true,
-      nested: {
-        array: [1, 2, 3],
-        value: null,
-      },
+      });
     });
 
-    expect(objectSchema).toEqual({
-      type: "object",
-      properties: {
-        string: { type: "string" },
-        number: { type: "integer" },
-        boolean: { type: "boolean" },
-        nested: {
+    it("should deduplicate an array type that is derived from a cell and a non-cell", () => {
+      const itemsSchema = {
+        type: "object",
+        properties: { name: { type: "string" } },
+      };
+      const expectSchema = {
+        type: "array",
+        items: itemsSchema,
+      };
+
+      const nonCell = { name: "Zamboni" };
+      const sansSchema = runtime.getImmutableCell(
+        space,
+        { name: "Philo" },
+      );
+      const avecSchema = runtime.getImmutableCell(
+        space,
+        { name: "Damian" },
+        {
           type: "object",
           properties: {
-            array: {
-              type: "array",
-              items: {
-                type: "integer",
-              },
-            },
-            value: { type: "null" },
-          },
-        },
-      },
-    });
-  });
-
-  it("should handle empty objects and arrays", () => {
-    expect(createJsonSchema({})).toEqual({
-      type: "object",
-      properties: {},
-    });
-
-    expect(createJsonSchema([])).toEqual({
-      type: "array",
-      items: {},
-    });
-  });
-
-  it("should handle complex nested structures", () => {
-    const complexData = {
-      users: [
-        { id: 1, name: "Alice", active: true },
-        { id: 2, name: "Bob", active: false },
-      ],
-      settings: {
-        theme: "dark",
-        notifications: {
-          email: true,
-          push: false,
-        },
-      },
-    };
-
-    const schema = createJsonSchema(complexData);
-
-    expect(schema).toEqual({
-      type: "object",
-      properties: {
-        users: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              id: { type: "integer" },
-              name: { type: "string" },
-              active: { type: "boolean" },
-            },
-          },
-        },
-        settings: {
-          type: "object",
-          properties: {
-            theme: { type: "string" },
-            notifications: {
-              type: "object",
-              properties: {
-                email: { type: "boolean" },
-                push: { type: "boolean" },
-              },
-            },
-          },
-        },
-      },
-    });
-  });
-
-  it("should use cell schema when available", () => {
-    const cellWithSchema = runtime.getImmutableCell(
-      space,
-      "cell@value.com",
-      { type: "string", format: "email" },
-    );
-
-    const schema = createJsonSchema(cellWithSchema, false, runtime);
-    expect(schema).toEqual({ type: "string", format: "email" });
-  });
-
-  it("should analyze cell value when no schema is provided", () => {
-    const cellWithoutSchema = runtime.getImmutableCell(
-      space,
-      {
-        name: "John",
-        age: 30,
-        isActive: true,
-      },
-    );
-
-    const schema = createJsonSchema(cellWithoutSchema, false, runtime);
-    expect(schema).toEqual({
-      type: "object",
-      properties: {
-        name: { type: "string" },
-        age: { type: "integer" },
-        isActive: { type: "boolean" },
-      },
-    });
-  });
-
-  it("should handle array cell without schema", () => {
-    const arrayCell = runtime.getImmutableCell(
-      space,
-      [1, 2, 3, 4],
-    );
-
-    const schema = createJsonSchema(arrayCell, false, runtime);
-
-    expect(schema).toEqual({
-      type: "array",
-      items: {
-        type: "integer",
-      },
-    });
-  });
-
-  it("should handle nested cells with and without schema", () => {
-    const userCell = runtime.getImmutableCell(
-      space,
-      { id: 1, name: "Alice" },
-    );
-
-    const prefsSchema = {
-      type: "object",
-      properties: {
-        darkMode: { type: "boolean" },
-        fontSize: { type: "integer" },
-      },
-    } as const satisfies JSONSchema;
-
-    const prefsCell = runtime.getImmutableCell(
-      space,
-      { darkMode: true, fontSize: 14 },
-      prefsSchema,
-    );
-
-    const nestedObject = {
-      user: userCell,
-      preferences: prefsCell,
-    };
-
-    const schema = createJsonSchema(nestedObject, false, runtime);
-    expect(schema).toEqual({
-      type: "object",
-      properties: {
-        user: {
-          type: "object",
-          properties: {
-            id: { type: "integer" },
             name: { type: "string" },
           },
         },
-        preferences: {
-          type: "object",
-          properties: {
-            darkMode: { type: "boolean" },
-            fontSize: { type: "integer" },
+      );
+
+      const create = (value: FabricValue) =>
+        createJsonSchema(value, false, runtime);
+
+      // Preflight expectations.
+      const schema1 = create(nonCell);
+      const schema2 = create(sansSchema);
+      const schema3 = create(avecSchema);
+      expect(schema1).toEqual(itemsSchema);
+      expect(schema2).toBe(schema1);
+      expect(schema3).toBe(schema1);
+
+      // The main tests.
+      const schema4 = create([sansSchema, nonCell]);
+      const schema5 = create([avecSchema, nonCell]);
+      const schema6 = create([nonCell, sansSchema, avecSchema]);
+      expect(schema4).toEqual(expectSchema);
+      expect(schema5).toBe(schema4);
+      expect(schema6).toBe(schema4);
+    });
+
+    it("should analyze object properties that mix plain values and cell links", () => {
+      const cell = runtime.getImmutableCell(
+        space,
+        [10, 20, 30],
+      );
+
+      const schema = createJsonSchema(
+        { label: "stats", data: cell },
+        false,
+        runtime,
+      );
+
+      expect(schema).toEqual({
+        type: "object",
+        properties: {
+          label: { type: "string" },
+          data: {
+            type: "array",
+            items: { type: "integer" },
           },
         },
-      },
+      });
+      expect(isInternedSchema(schema)).toBe(true);
     });
-  });
 
-  it("should handle multidimensional array of numbers", () => {
-    const data = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
-    expect(createJsonSchema(data)).toEqual({
-      type: "array",
-      items: {
+    it("should handle multidimensional array of numbers", () => {
+      const data = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+      const schema = createJsonSchema(data);
+      expect(schema).toEqual({
         type: "array",
         items: {
-          type: "integer",
+          type: "array",
+          items: {
+            type: "integer",
+          },
         },
-      },
+      });
+      expect(isInternedSchema(schema)).toBe(true);
     });
-  });
 
-  it("should handle nested array of strings", () => {
-    const data = {
-      "recipes": [{
-        "name": "Pasta Carbonara",
-        "ingredients": [
-          "200g spaghetti",
-          "100g pancetta",
-          "2 eggs",
-          "50g pecorino cheese",
-          "50g parmesan",
-          "black pepper",
-        ],
-        "instructions":
-          "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
-      }],
-    };
-    expect(createJsonSchema(data)).toEqual({
-      "type": "object",
-      "properties": {
-        "recipes": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "name": {
-                "type": "string",
-              },
-              "ingredients": {
-                "type": "array",
-                "items": {
+    it("should handle nested array of strings", () => {
+      const data = {
+        "recipes": [{
+          "name": "Pasta Carbonara",
+          "ingredients": [
+            "200g spaghetti",
+            "100g pancetta",
+            "2 eggs",
+            "50g pecorino cheese",
+            "50g parmesan",
+            "black pepper",
+          ],
+          "instructions":
+            "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
+        }],
+      };
+      const schema = createJsonSchema(data);
+      expect(schema).toEqual({
+        "type": "object",
+        "properties": {
+          "recipes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
                   "type": "string",
                 },
-              },
-              "instructions": {
-                "type": "string",
+                "ingredients": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                  },
+                },
+                "instructions": {
+                  "type": "string",
+                },
               },
             },
           },
         },
-      },
+      });
+      expect(isInternedSchema(schema)).toBe(true);
+    });
+
+    it("should not set default on object schemas when addDefaults is true", () => {
+      const schema = createJsonSchema({ name: "Alice", age: 30 }, true);
+      expect(schema).toEqual({
+        type: "object",
+        properties: {
+          name: { type: "string", default: "Alice" },
+          age: { type: "integer", default: 30 },
+        },
+      });
+      // The object itself must not have a default
+      expect(schema).not.toHaveProperty("default");
+    });
+
+    it("should set default on array schemas when addDefaults is true", () => {
+      // Each element gets its own default, so elements with different values
+      // produce different schemas and collapse into anyOf.
+      expect(createJsonSchema([1, 2, 3], true)).toEqual({
+        type: "array",
+        items: {
+          anyOf: [
+            { type: "integer", default: 1 },
+            { type: "integer", default: 2 },
+            { type: "integer", default: 3 },
+          ],
+        },
+        default: [1, 2, 3],
+      });
+
+      // A single-element array produces a single items schema with default.
+      expect(createJsonSchema([42], true)).toEqual({
+        type: "array",
+        items: { type: "integer", default: 42 },
+        default: [42],
+      });
+
+      // Duplicate values in the array deduplicate to one items schema.
+      expect(createJsonSchema(["a", "a", "a"], true)).toEqual({
+        type: "array",
+        items: { type: "string", default: "a" },
+        default: ["a", "a", "a"],
+      });
+    });
+
+    it("should set defaults on leaves but not intermediate objects in nested structures", () => {
+      const schema = createJsonSchema({
+        user: {
+          name: "Bob",
+          active: true,
+        },
+        scores: [10, 20],
+      }, true);
+
+      expect(schema).toEqual({
+        type: "object",
+        properties: {
+          user: {
+            type: "object",
+            properties: {
+              name: { type: "string", default: "Bob" },
+              active: { type: "boolean", default: true },
+            },
+          },
+          scores: {
+            type: "array",
+            items: {
+              anyOf: [
+                { type: "integer", default: 10 },
+                { type: "integer", default: 20 },
+              ],
+            },
+            default: [10, 20],
+          },
+        },
+      });
+
+      // Appease the TS type system.
+      const schemaObj: JSONSchemaObj = schema as JSONSchemaObj;
+
+      // Neither the root nor the nested object should have defaults
+      expect(schemaObj).not.toHaveProperty("default");
+      expect(schemaObj.properties!["user"]).not.toHaveProperty("default");
     });
   });
-  it("should preserve false schema in toJSONWithLegacyAliases", () => {
-    const cellWithFalseSchema = createCell(runtime, {
-      space,
-      schema: false,
-      path: [],
-    });
 
-    const paths = new Map();
-    // Cast to any to bypass strict type checks for test purposes
-    paths.set(cellWithFalseSchema as any, ["path", "to", "cell"]);
+  describe("toJSONWithLegacyAliases", () => {
+    it("should serialize shared object references correctly", () => {
+      // Regression test: shared style objects used across siblings in .map()
+      // should all serialize with full data, not {} for the 3rd+ occurrence.
+      const sharedStyle = {
+        background: "white",
+        borderRadius: "8px",
+        padding: "16px",
+      };
 
-    const result = toJSONWithLegacyAliases(
-      cellWithFalseSchema as any,
-      paths,
-    );
-
-    expect(result).toEqual({
-      "$alias": {
-        path: [
-          "path",
-          "to",
-          "cell",
+      // Simulate a VNode-like tree where multiple siblings share the same style
+      const tree = {
+        type: "vnode",
+        children: [
+          { type: "vnode", props: { style: sharedStyle }, children: ["A"] },
+          { type: "vnode", props: { style: sharedStyle }, children: ["B"] },
+          { type: "vnode", props: { style: sharedStyle }, children: ["C"] },
+          { type: "vnode", props: { style: sharedStyle }, children: ["D"] },
+          { type: "vnode", props: { style: sharedStyle }, children: ["E"] },
         ],
-        schema: false,
-      },
+      };
+
+      const result = toJSONWithLegacyAliases(tree as any) as any;
+
+      // All 5 children should have the full style object
+      for (let i = 0; i < 5; i++) {
+        expect(result.children[i].props.style).toEqual({
+          background: "white",
+          borderRadius: "8px",
+          padding: "16px",
+        });
+      }
     });
+
+    it("should still guard against circular references", () => {
+      const circular: any = { name: "root", child: {} };
+      circular.child.parent = circular; // true circular reference
+
+      const result = toJSONWithLegacyAliases(circular as any) as any;
+
+      // The root should serialize, but the circular back-reference should be {}
+      expect(result.name).toEqual("root");
+      expect(result.child.parent).toEqual({});
+    });
+
+    it("should handle shared nested objects at different depths", () => {
+      const sharedMeta = { author: "test", version: 1 };
+      const tree = {
+        items: [
+          { data: "a", meta: sharedMeta },
+          { data: "b", meta: sharedMeta },
+          { data: "c", nested: { deep: { meta: sharedMeta } } },
+        ],
+      };
+
+      const result = toJSONWithLegacyAliases(tree as any) as any;
+
+      expect(result.items[0].meta).toEqual({ author: "test", version: 1 });
+      expect(result.items[1].meta).toEqual({ author: "test", version: 1 });
+      expect(result.items[2].nested.deep.meta).toEqual({
+        author: "test",
+        version: 1,
+      });
+    });
+
+    it("should preserve false schema", () => {
+      const cellWithFalseSchema = createCell(runtime, {
+        space,
+        schema: false,
+        path: [],
+      });
+
+      const result = toJSONWithLegacyAliases(
+        cellWithFalseSchema as any,
+        (cell) => {
+          const { schema, scope } = cell.export();
+          return {
+            "$alias": {
+              path: ["path", "to", "cell"],
+              ...(schema !== undefined && { schema }),
+              ...(scope !== undefined && { scope }),
+            },
+          };
+        },
+      );
+
+      expect(result).toEqual({
+        "$alias": {
+          path: [
+            "path",
+            "to",
+            "cell",
+          ],
+          schema: false,
+          scope: "space",
+        },
+      });
+    });
+  });
+});
+
+describe("moduleToJSON", () => {
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("serializes unblessed javascript modules with executable source fallback", () => {
+    const implementation = Object.assign(
+      (value: number) => value * 2,
+      {
+        preview: "(value) => value * 2",
+        src: "main.tsx:1:1",
+      },
+    );
+    const serialized = moduleToJSON({
+      type: "javascript",
+      implementation,
+    } as any);
+
+    expect(serialized).toMatchObject({
+      type: "javascript",
+      implementation: Function.prototype.toString.call(implementation),
+      preview: "(value) => value * 2",
+      location: "main.tsx:1:1",
+    });
+  });
+
+  it("serializes non-javascript function-backed modules without leaking implementations", () => {
+    const implementation = Object.assign(
+      () => "ok",
+      {
+        preview: "() => 'ok'",
+        src: "main.tsx:2:1",
+      },
+    );
+    const serialized = moduleToJSON({
+      type: "raw",
+      implementation,
+    } as any);
+
+    expect(serialized).toMatchObject({
+      type: "raw",
+      preview: "() => 'ok'",
+      location: "main.tsx:2:1",
+    });
+    expect("implementation" in serialized).toBe(false);
+  });
+
+  it("keeps the fallback body when the registering runtime can't resolve the $implRef (standalone-engine registration)", async () => {
+    const compileEngine = new Engine(runtime);
+    const repoRoot = new URL("../../..", import.meta.url).pathname.replace(
+      /\/$/,
+      "",
+    );
+    const sourcePath = new URL(
+      "../../patterns/factory-outputs/parking-coordinator/main.test.tsx",
+      import.meta.url,
+    ).pathname;
+    const program = await compileEngine.resolve(
+      new FileSystemProgramResolver(
+        sourcePath,
+        repoRoot,
+      ),
+    );
+    const { main } = await compileEngine.compileAndEvaluateModules(program);
+    const pattern = main?.default as any;
+
+    const seen = new Set<unknown>();
+    let targetModule: any;
+    const visit = (value: unknown) => {
+      if (
+        !value ||
+        (typeof value !== "object" && typeof value !== "function") ||
+        seen.has(value)
+      ) {
+        return;
+      }
+      seen.add(value);
+      if (
+        !targetModule &&
+        typeof (value as { type?: unknown }).type === "string" &&
+        (value as { type?: string }).type === "javascript" &&
+        typeof (value as { implementation?: unknown }).implementation ===
+          "function"
+      ) {
+        const implementation =
+          (value as { implementation: (...args: unknown[]) => unknown })
+            .implementation;
+        const implementationSource =
+          (implementation as { preview?: string }).preview ??
+            implementation.toString();
+        if (
+          implementationSource.includes(
+            "formatDateShort(dateStr).shortName",
+          )
+        ) {
+          targetModule = value;
+          return;
+        }
+      }
+      for (const key of Reflect.ownKeys(value as object)) {
+        const descriptor = Object.getOwnPropertyDescriptor(
+          value as object,
+          key,
+        );
+        if (descriptor && "value" in descriptor) {
+          visit(descriptor.value);
+        }
+      }
+    };
+    visit(pattern);
+
+    expect(targetModule).toBeDefined();
+
+    runtime.patternManager.registerPattern(pattern);
+
+    // The implementation became verified during the STANDALONE Engine's
+    // evaluation, so it carries process-global content-addressed provenance
+    // (Engine.recordModuleProvenance) and `moduleToJSON` writes a `$implRef`.
+    // But this pattern was registered WITHOUT going through
+    // `compilePattern`/`registerEvaluatedModules` on THIS runtime, so its
+    // engine's implementation index never saw the artifact and cannot resolve
+    // that `$implRef` on reload (the cross-engine path the deleted
+    // `associatePattern` bridge used to serve). The serializer must therefore
+    // KEEP the stringified body as the fallback — otherwise reload would miss
+    // the index, miss the registry, and throw.
+    expect(getVerifiedProvenance(targetModule.implementation)).toBeDefined();
+    expect(
+      runtime.patternManager.artifactFromIdentitySync(
+        getVerifiedProvenance(targetModule.implementation)!.identity,
+        getVerifiedProvenance(targetModule.implementation)!.symbol!,
+      ),
+    ).toBeUndefined();
+    expect(
+      runtime.harness.getVerifiedImplementation?.(
+        getVerifiedProvenance(targetModule.implementation)!.identity,
+        getVerifiedProvenance(targetModule.implementation)!.symbol!,
+      ),
+    ).toBeUndefined();
+
+    const frame = pushFrame({ runtime });
+    let serialized: ReturnType<typeof moduleToJSON>;
+    try {
+      serialized = moduleToJSON(targetModule);
+    } finally {
+      popFrame(frame);
+    }
+    expect(serialized).toMatchObject({ type: "javascript" });
+    expect("implementationRef" in serialized).toBe(false);
+    expect(serialized).toHaveProperty("$implRef");
+    // Body KEPT: this runtime cannot resolve the $implRef, so the fallback is
+    // required for a successful reload.
+    expect("implementation" in serialized).toBe(true);
   });
 });

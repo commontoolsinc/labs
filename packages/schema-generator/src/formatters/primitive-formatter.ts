@@ -1,9 +1,6 @@
 import ts from "typescript";
-import type {
-  GenerationContext,
-  SchemaDefinition,
-  TypeFormatter,
-} from "../interface.ts";
+import type { JSONSchemaMutable } from "@commonfabric/api";
+import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import { TypeWithInternals } from "../type-utils.ts";
 
 /**
@@ -30,14 +27,17 @@ export class PrimitiveFormatter implements TypeFormatter {
       (flags & ts.TypeFlags.Any) !== 0;
   }
 
-  formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
+  formatType(
+    type: ts.Type,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
     return PrimitiveFormatter.getSchemaType(type, context);
   }
 
   public static getSchemaType(
     type: ts.Type,
     context: GenerationContext,
-  ): SchemaDefinition {
+  ): JSONSchemaMutable {
     const flags = type.flags;
     // Handle literal types first (more specific)
     // If widenLiterals flag is set, skip enum generation and return base type
@@ -104,9 +104,8 @@ export class PrimitiveFormatter implements TypeFormatter {
       return { type: "undefined" };
     }
     if (flags & ts.TypeFlags.Void) {
-      // void: return true to indicate "accept any value"
-      // void functions don't return meaningful values, so schema validation is permissive
-      return true;
+      // Keep resolved `void` types aligned with `VoidKeyword` handling.
+      return { asCell: ["opaque"] };
     }
     if (flags & ts.TypeFlags.Never) {
       // never: return false to reject all values
@@ -118,9 +117,8 @@ export class PrimitiveFormatter implements TypeFormatter {
       return true;
     }
     if (flags & ts.TypeFlags.Unknown) {
-      // unknown: return true to indicate "accept any value"
-      // Type safety is enforced at compile time via TypeScript narrowing
-      return true;
+      // unknown: return { type: "unknown" } to distinguish from any (true)
+      return { type: "unknown" };
     }
 
     // Fallback

@@ -3,7 +3,7 @@ import {
   Identity,
   serializeKeyPairRaw,
   TransferrableInsecureCryptoKeyPair,
-} from "@commontools/identity";
+} from "@commonfabric/identity";
 import { Command } from "./commands.ts";
 import { AppView } from "./view.ts";
 
@@ -72,7 +72,10 @@ export function applyCommand(
     }
     case "set-view": {
       next.view = command.view;
-      if ("pieceId" in command.view && command.view.pieceId) {
+      if (
+        ("pieceId" in command.view && command.view.pieceId) ||
+        ("pieceSlug" in command.view && command.view.pieceSlug)
+      ) {
         next.config.showShellPieceListView = false;
       }
       break;

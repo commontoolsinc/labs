@@ -1,15 +1,13 @@
-/// <cts-enable />
 import {
   type Cell,
   cell,
+  computed,
   Default,
-  derive,
   handler,
   lift,
   pattern,
   str,
-  toSchema,
-} from "commontools";
+} from "commonfabric";
 
 interface DynamicHandlerArgs {
   values: Default<number[], []>;
@@ -107,42 +105,6 @@ const liftAverage = lift((entries: number[] | undefined) => {
   const rawAverage = sum / list.length;
   return Math.round(rawAverage * 100) / 100;
 });
-const liftSlots = lift(
-  toSchema<
-    {
-      values: Cell<number[]>;
-      view: Cell<number[]>;
-      lastAdjustment: Cell<AdjustmentRecord>;
-      history: Cell<AdjustmentRecord[]>;
-      sequence: Cell<number>;
-    }
-  >(),
-  toSchema<unknown>(),
-  ({ values, view, lastAdjustment, history, sequence }) => {
-    const snapshot = view.get();
-    const list = Array.isArray(snapshot) ? snapshot : [];
-    return list.map((rawValue, index) => {
-      const value = toInteger(rawValue, 0);
-      const name = `Slot ${index + 1}`;
-      return {
-        index,
-        value,
-        label: `${name}: ${value}`,
-        adjust: adjustValue({
-          values,
-          slotIndex: index,
-          lastAdjustment,
-          history,
-          sequence,
-        }),
-      };
-    });
-  },
-);
-const liftHandlers = lift((entries: { adjust: unknown }[] | undefined) => {
-  if (!Array.isArray(entries)) return [] as unknown[];
-  return entries.map((item: any) => item?.adjust);
-});
 const liftHistoryView = lift((entries: AdjustmentRecord[] | undefined) => {
   return Array.isArray(entries) ? entries : [];
 });
@@ -166,22 +128,30 @@ export const counterWithDynamicHandlerList = pattern<DynamicHandlerArgs>(
 
     const normalizedValues = liftNormalizedValues(values);
 
-    const count = derive(normalizedValues, (entries) => entries.length);
-    const total = derive(
-      normalizedValues,
-      (entries) => entries.reduce((sum, value) => sum + value, 0),
-    );
+    const count = normalizedValues.length;
+    const total = normalizedValues.reduce((sum, value) => sum + value, 0);
     const average = liftAverage(normalizedValues);
 
-    const slots = liftSlots({
-      values,
-      view: normalizedValues,
-      lastAdjustment,
-      history,
-      sequence,
-    });
+    const slots = computed(() =>
+      normalizedValues.map((rawValue, index) => {
+        const value = toInteger(rawValue, 0);
+        const name = `Slot ${index + 1}`;
+        return {
+          index,
+          value,
+          label: `${name}: ${value}`,
+          adjust: adjustValue({
+            values,
+            slotIndex: index,
+            lastAdjustment,
+            history,
+            sequence,
+          }),
+        };
+      })
+    );
 
-    const handlers = liftHandlers(slots);
+    const handlers = computed(() => slots.map((slot) => slot.adjust));
 
     const historyView = liftHistoryView(history);
     const lastAdjustmentView = liftLastAdjustmentView(lastAdjustment);

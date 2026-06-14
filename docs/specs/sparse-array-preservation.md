@@ -70,8 +70,9 @@ indices. This makes sparse-safety structural: you can't forget to check `i in
 arr` because there's no check to write. Use this for copies, transforms, and any
 iteration where you only care about present elements.
 
-For a plain copy, `attestation.ts` has a `sparseArrayCopy` helper that uses
-this pattern.
+For a plain copy, `cloneIfNecessary({ frozen: false, deep: false })`
+preserves sparseness internally -- see "v2-transaction write path" below
+for the production usage shape.
 
 ### `for` + `i in arr` (when you need to detect absences)
 
@@ -93,7 +94,7 @@ Data flows through the reactive pipeline in this order. Every layer preserves
 sparseness:
 
 ```
-Write path:  value → toStorableValue → recursivelyAddIDIfNeeded → storage
+Write path:  value → fabricFromNativeValue → recursivelyAddIDIfNeeded → storage
 Read path:   storage → traverseDAG → normalizeAndDiff → builtins (map, etc.)
 ```
 
@@ -102,26 +103,50 @@ Read path:   storage → traverseDAG → normalizeAndDiff → builtins (map, etc
 These layers handle sparse arrays correctly and are less likely to regress
 because their sparse support was part of the original design:
 
-- **`packages/memory/storable-value-modern.ts`** — `shallowStorableFromNativeValueRich` and
-  `storableFromNativeValueRich` use `i in arr` checks.
+- **`packages/data-model/native-conversion.ts`** — `shallowFabricFromNativeValue` and
+  `fabricFromNativeValue` use `i in arr` checks.
 - **`packages/memory/serialization.ts`** — Encodes holes as run-length-encoded
   `/hole` entries; decodes them back to true holes via `new Array(len)`.
-- **`packages/memory/canonical-hash.ts`** — Handles holes in hash computation.
+- **`packages/data-model/value-hash.ts`** — Handles holes in hash computation.
 
-### Value validation (`packages/memory/storable-value.ts`)
+### Value validation (`packages/data-model/fabric-value.ts`)
 
-`isStorableArray` accepts sparse arrays — holes are valid storable structure. It
-uses `for` + `i in` because it needs early return.  `toStorableValueLegacy` and
-`toDeepStorableValueInternal` both use `forEach` to preserve holes during
-conversion.
+`isFabricArray` accepts sparse arrays — holes are valid fabric structure. It
+uses `for` + `i in` because it needs early return.
 
-### Attestation (`packages/runner/src/storage/transaction/attestation.ts`)
+### v2-transaction write path (`packages/runner/src/storage/v2-transaction.ts`)
 
-The `setAtPath` function does copy-on-write: when it needs to modify an element
-in an array, it copies the array first. The `sparseArrayCopy` helper (which uses
-`forEach`) is used at all three copy sites (extension, element set, nested
-modification). The `delete` operation at `setAtPath` creates true holes via
-`delete newArray[index]`.
+The hot write path (since PR #3704) goes through `applyMutablePathWrite`,
+which calls `cloneForMutation` (in `value-clone.ts`) to shallow-thaw the
+spine and then mutates the leaf parent in place. `cloneForMutation`'s
+shallow-thaw step uses `cloneIfNecessary({ frozen: false, deep: false })`
+on each spine container, which for arrays preserves sparseness: it
+pre-allocates `new Array(arr.length)` and copies elements via `i in arr`,
+so holes survive.
+
+The leaf write itself is one of:
+
+- `parent[slot] = value` for array index value writes -- the rest of the
+  array (including holes elsewhere) is untouched, so sparseness is
+  preserved. Writing `undefined` stores `undefined` at the slot
+  (present-but-undefined, `i in arr` returns `true`); it does NOT create
+  a hole.
+- `delete parent[slot]` for explicit array index deletes (requested via
+  the write's `delete` option) -- creates a true hole (`i in arr`
+  returns `false` afterwards).
+- `parent.length = effective` for `.length` writes (see
+  `applyArrayLengthWrite`) -- JS `length=` truncates the tail, leaving
+  holes within the new bound intact.
+
+### Chronicle (`packages/runner/src/storage/transaction/chronicle.ts`)
+
+The working-copy management used by Chronicle (commit-time conflict
+detection) routes its writes through the same
+`applyMutablePathWrite()` helper as the v2-transaction hot write path
+(see above), via a thin `applyWriteToAttestation()` wrapper that maps
+between Chronicle's `IAttestation`-shaped inputs and
+`applyMutablePathWrite`'s `FabricValue`-rooted form. Sparse-array
+handling is therefore identical between the two layers.
 
 ### Cell write path (`packages/runner/src/cell.ts`)
 
@@ -155,9 +180,12 @@ for each index:
 | `i in new` | `i in current` | Action |
 |-----------|----------------|--------|
 | No | No | Skip — hole unchanged |
-| No | Yes | Emit delete (attestation interprets `value: undefined` as "create hole") |
-| Yes | No | Diff as new value |
+| No | Yes | Emit explicit delete (`delete: true` on the change; the write layer creates a hole) |
+| Yes | No | Diff as new value (an explicit `undefined` emits a value write, making the slot present-but-undefined) |
 | Yes | Yes | Diff normally |
+
+Note: a change whose `value` is `undefined` WITHOUT the `delete` flag is a
+value write that stores `undefined`; only `delete: true` creates a hole.
 
 The `hasPath` function uses `index in value` (not `value[index] !== undefined`)
 to correctly report that a path through a hole does not exist.
@@ -181,7 +209,7 @@ The merkle-reference library cannot hash sparse array holes (it throws
 `TypeError: Unknown type undefined`). The `wrappedNodeBuilder.toTree` wrapper
 detects sparse arrays and densifies them (holes → `null`) before passing to the
 default node builder. This only affects hash computation — the actual data in
-storage remains sparse. The canonical hash path (`canonical-hash.ts`) handles
+storage remains sparse. The modern hash path (`value-hash.ts`) handles
 holes natively and does not need this workaround.
 
 ## Writing new code that handles arrays
@@ -202,17 +230,22 @@ reactive pipeline:
    directive `// deno-lint-ignore no-sparse-arrays`) and verify holes survive
    with `i in result`.
 
-If you're writing a plain array copy, use or follow `sparseArrayCopy` from
-`attestation.ts`.
+If you're writing a plain array copy, `cloneIfNecessary` with
+`{ frozen: false, deep: false }` preserves sparseness internally and is
+the preferred entry point in runner code.
 
 ## How we ensure this stays correct
 
 Test coverage verifies sparse preservation at each layer:
 
-- **`packages/memory/test/storable-value-test.ts`** — `isStorableValue` accepts
-  sparse arrays; `toStorableValue` and `toDeepStorableValue` preserve holes.
-- **`packages/runner/test/attestation.test.ts`** — `setAtPath` preserves holes
-  through array copies (extension, element set, nested modification).
+- **`packages/data-model/test/type-check.test.ts`** — `isFabricValueLayer()`
+  accepts sparse arrays.
+- **`packages/data-model/test/native-conversion.test.ts`** — 
+  `fabricFromNativeValue()` preserves holes.
+- **`packages/runner/test/cell-core.test.ts`** — sparse-array writes through
+  the full Cell write path (which lands in `applyMutablePathWrite`) preserve
+  holes; the helper's `cloneForMutation` + leaf-mutation steps round-trip
+  sparseness.
 - **`packages/runner/test/cell.test.ts`** — Writing a sparse array to a cell and
   reading it back preserves holes; `push` onto a sparse array preserves existing
   holes.
@@ -222,8 +255,6 @@ Test coverage verifies sparse preservation at each layer:
 - **`packages/runner/test/data-updating.test.ts`** — All four hole transition
   cases (hole-to-hole, value-to-hole, hole-to-value, value-to-value); `hasPath`
   returns false through holes.
-- **`packages/runner/test/experimental-options.test.ts`** — `isStorableValue`
-  accepts sparse arrays regardless of the `richStorableValues` flag.
 - **`packages/runner/test/patterns-core.test.ts`** — End-to-end test: maps over
   `[10, <hole>, 30]` and verifies output is `[20, <hole>, 60]` with holes
   preserved through the full pipeline.
@@ -234,6 +265,7 @@ will fail these assertions.
 
 ## Known limitations
 
-- **`rich-storable-value.ts` `HasToJSON` path:** `Object.freeze([...converted])`
-  in the `HasToJSON` case would densify a sparse array returned from `toJSON()`.
-  This is an edge case — `toJSON()` rarely returns sparse arrays.
+- **`data-model/native-conversion.ts` `HasToJSON` path:**
+  `Object.freeze([...converted])` in the `HasToJSON` case would densify a sparse
+  array returned from `toJSON()`. This is an edge case — `toJSON()` rarely
+  returns sparse arrays.

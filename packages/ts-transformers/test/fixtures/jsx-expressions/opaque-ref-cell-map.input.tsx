@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   Cell,
   cell,
@@ -9,7 +8,7 @@ import {
   navigateTo,
   pattern,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 // the simple charm (to which we'll store references within a cell)
 const SimplePattern = pattern(() => ({
@@ -19,20 +18,15 @@ const SimplePattern = pattern(() => ({
 
 // Create a cell to store an array of charms
 const createCellRef = lift(
-  {
-    type: "object",
-    properties: {
-      isInitialized: { type: "boolean", "default": false, asCell: true },
-      storedCellRef: { type: "object", asCell: true },
-    },
-  },
-  undefined,
   ({ isInitialized, storedCellRef }) => {
     if (!isInitialized.get()) {
       console.log("Creating cellRef - first time");
       const newCellRef = Cell.for<any[]>("charmsArray");
       newCellRef.set([]);
-      storedCellRef.set(newCellRef);
+      // Local cast: the schema types storedCellRef as a cell of a generic object,
+      // but this fixture stores an array cell into it; the schema accuracy isn't
+      // what this transformer fixture exercises.
+      (storedCellRef as Cell<unknown>).set(newCellRef);
       isInitialized.set(true);
       return {
         cellRef: newCellRef,
@@ -45,6 +39,14 @@ const createCellRef = lift(
       cellRef: storedCellRef,
     };
   },
+  {
+    type: "object",
+    properties: {
+      isInitialized: { type: "boolean", "default": false, asCell: ["cell"] },
+      storedCellRef: { type: "object", asCell: ["cell"] },
+    },
+    required: ["isInitialized", "storedCellRef"],
+  },
 );
 
 // Add a charm to the array and navigate to it
@@ -53,15 +55,6 @@ const createCellRef = lift(
 // we only try to add the charm once to the list
 // and we only call navigateTo once
 const addCharmAndNavigate = lift(
-  {
-    type: "object",
-    properties: {
-      charm: { type: "object" },
-      cellRef: { type: "array", asCell: true },
-      isInitialized: { type: "boolean", asCell: true },
-    },
-  },
-  undefined,
   ({ charm, cellRef, isInitialized }) => {
     if (!isInitialized.get()) {
       if (cellRef) {
@@ -73,6 +66,15 @@ const addCharmAndNavigate = lift(
       }
     }
     return undefined;
+  },
+  {
+    type: "object",
+    properties: {
+      charm: { type: "object" },
+      cellRef: { type: "array", asCell: ["cell"] },
+      isInitialized: { type: "boolean", asCell: ["cell"] },
+    },
+    required: ["charm", "isInitialized"],
   },
 );
 
@@ -99,9 +101,11 @@ const goToCharm = handler<unknown, { charm: any }>(
 );
 
 // FIXTURE: opaque-ref-cell-map
-// Verifies: OpaqueRef<any[]>.map() inside ifElse is transformed to mapWithPattern()
-//   typedCellRef.map((charm, index) => <li>...)  → typedCellRef.mapWithPattern(pattern(...), {})
-//   ifElse(!typedCellRef?.length, <div>, <ul>)   → ifElse(schema..., derive(...), <div>, <ul>)
+// Verifies: a reactive factory result still rewrites JSX ifElse predicates after
+//           the forbidden OpaqueRef cast is removed
+//   ifElse(!cellRef?.length, <div>, <ul>) → ifElse(schema..., lift(...)(...), <div>, <ul>)
+//   cellRef.map((charm, index) => <li>...) → mapWithPattern(...) even with
+//     `as { cellRef: any[] }`, because the cast does not change the reactive origin
 // Context: Real-world pattern using Cell.for<any[]>(), handler, lift, and navigateTo
 // create the named cell inside the pattern body, so we do it just once
 export default pattern(() => {
@@ -122,22 +126,22 @@ export default pattern(() => {
           <ul>
             {cellRef.map((charm: any, index: number) => (
               <li>
-                <ct-button
+                <cf-button
                   onClick={goToCharm({ charm })}
                 >
                   Go to Charm {index + 1}
-                </ct-button>
+                </cf-button>
                 <span>Charm {index + 1}: {charm[NAME] || "Unnamed"}</span>
               </li>
             ))}
           </ul>,
         )}
 
-        <ct-button
+        <cf-button
           onClick={createSimplePattern({ cellRef })}
         >
           Create New Charm
-        </ct-button>
+        </cf-button>
       </div>
     ),
     cellRef,

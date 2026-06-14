@@ -1,14 +1,13 @@
-import { createSession, isDID, Session } from "@commontools/identity";
+import { createSession, isDID, Session } from "@commonfabric/identity";
 import { loadIdentity } from "./identity.ts";
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache";
+import { ACLManager, Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   ACL,
   ACLUser,
   type Capability,
   isACLUser,
-} from "@commontools/memory/acl";
-import { ACLManager } from "@commontools/piece/ops";
+} from "@commonfabric/memory/acl";
 import { awaitSyncWithTimeout, experimentalOptionsFromEnv } from "./utils.ts";
 
 export interface SpaceConfig {
@@ -41,7 +40,7 @@ export async function createRuntime(
     experimental: experimentalOptionsFromEnv(),
     storageManager: StorageManager.open({
       as: session.as,
-      address: new URL("/api/storage/memory", config.apiUrl),
+      memoryHost: new URL(config.apiUrl),
       spaceIdentity: session.spaceIdentity,
     }),
   });

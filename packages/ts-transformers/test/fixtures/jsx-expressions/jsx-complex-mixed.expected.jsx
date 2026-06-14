@@ -1,5 +1,16 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern, UI } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { computed, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Item {
     id: number;
     name: string;
@@ -12,13 +23,407 @@ interface State {
     discount: number;
     taxRate: number;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        items: {
+            name: string;
+        }[];
+        filter: string;
+    };
+}, number>(({ state }) => state.items.filter((i) => i.name.includes(state.filter)).length, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["name"]
+                    }
+                },
+                filter: {
+                    type: "string"
+                }
+            },
+            required: ["items", "filter"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_2 = __cfHelpers.lift<{
+    item: {
+        price: number;
+    };
+    state: {
+        discount: number;
+    };
+}, string>(({ item, state }) => (item.price * (1 - state.discount)).toFixed(2), {
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        },
+        state: {
+            type: "object",
+            properties: {
+                discount: {
+                    type: "number"
+                }
+            },
+            required: ["discount"]
+        }
+    },
+    required: ["item", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_3 = __cfHelpers.lift<{
+    item: {
+        price: number;
+    };
+    state: {
+        discount: number;
+        taxRate: number;
+    };
+}, string>(({ item, state }) => (item.price * (1 - state.discount) * (1 + state.taxRate))
+    .toFixed(2), {
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        },
+        state: {
+            type: "object",
+            properties: {
+                discount: {
+                    type: "number"
+                },
+                taxRate: {
+                    type: "number"
+                }
+            },
+            required: ["discount", "taxRate"]
+        }
+    },
+    required: ["item", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<li key={item.key("id")}>
+              <span>{item.key("name")}</span>
+              <span>- Original: ${item.key("price")}</span>
+              <span>
+                - Discounted: ${__cfLift_2({
+        item: {
+            price: item.key("price")
+        },
+        state: {
+            discount: state.key("discount")
+        }
+    })}
+              </span>
+              <span>
+                - With tax:
+                ${__cfLift_3({
+        item: {
+            price: item.key("price")
+        },
+        state: {
+            discount: state.key("discount"),
+            taxRate: state.key("taxRate")
+        }
+    })}
+              </span>
+            </li>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        },
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        discount: {
+                            type: "number"
+                        },
+                        taxRate: {
+                            type: "number"
+                        }
+                    },
+                    required: ["discount", "taxRate"]
+                }
+            },
+            required: ["state"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                name: {
+                    type: "string"
+                },
+                price: {
+                    type: "number"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["id", "name", "price", "active"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_4 = __cfHelpers.lift<{
+    state: {
+        items: Item[];
+    };
+}, number>(({ state }) => state.items.filter((i) => i.active).length, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            active: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["active"]
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_5 = __cfHelpers.lift<{
+    state: {
+        discount: number;
+    };
+}, number>(({ state }) => state.discount * 100, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                discount: {
+                    type: "number"
+                }
+            },
+            required: ["discount"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_6 = __cfHelpers.lift<{
+    state: {
+        taxRate: number;
+    };
+}, number>(({ state }) => state.taxRate * 100, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                taxRate: {
+                    type: "number"
+                }
+            },
+            required: ["taxRate"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_7 = __cfHelpers.lift<{
+    state: {
+        items: Item[];
+    };
+}, boolean>(({ state }) => state.items.every((i) => i.active), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            active: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["active"]
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_8 = __cfHelpers.lift<{
+    state: {
+        items: Item[];
+    };
+}, boolean>(({ state }) => state.items.some((i) => i.active), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            active: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["active"]
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_9 = __cfHelpers.lift<{
+    state: {
+        items: Item[];
+    };
+}, boolean>(({ state }) => state.items.some((i) => i.price > 100), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            price: {
+                                type: "number"
+                            }
+                        },
+                        required: ["price"]
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_10 = __cfHelpers.lift<{
+    state: {
+        filter: {
+            length: number;
+        };
+    };
+}, boolean>(({ state }) => state.filter.length > 0, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                filter: {
+                    type: "object",
+                    properties: {
+                        length: {
+                            type: "number"
+                        }
+                    },
+                    required: ["length"]
+                }
+            },
+            required: ["filter"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: jsx-complex-mixed
 // Verifies: mixed transforms -- map, filter, arithmetic, ternary/ifElse, attribute bindings in one pattern
 //   .filter(fn)              → .filterWithPattern(pattern(...), {captures})
 //   .map(fn)                 → .mapWithPattern(pattern(...), {captures})
-//   ternary cond ? a : b     → ifElse(derive(cond), a, b)
-//   {state.discount * 100}   → derive({discount}, ...)
-// Context: Comprehensive fixture combining array methods, conditionals, derive, and attributes
+//   ternary cond ? a : b     → ifElse(lift(...)(cond), a, b)
+//   {state.discount * 100}   → lift(...)({ discount })
+// Context: Comprehensive fixture combining array methods, conditionals, lift-applied computations, and attributes
 export default pattern((state) => {
     return {
         [UI]: (<div>
@@ -26,216 +431,15 @@ export default pattern((state) => {
         <p>Total items: {state.key("items", "length")}</p>
         <p>
           Filtered count:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
-                        },
-                        filter: {
-                            type: "string",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items", "filter"]
-                }
-            },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          {__cfLift_1({ state: {
                 items: state.key("items"),
                 filter: state.key("filter")
-            } }, ({ state }) => state.items.filter((i) => i.name.includes(state.filter)).length)}
+            } })}
         </p>
 
         <h3>Array with Complex Expressions</h3>
         <ul>
-          {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element");
-                const state = __ct_pattern_input.key("params", "state");
-                return (<li key={item.key("id")}>
-              <span>{item.key("name")}</span>
-              <span>- Original: ${item.key("price")}</span>
-              <span>
-                - Discounted: ${__ctHelpers.derive({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["price"]
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                discount: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["discount"]
-                        }
-                    },
-                    required: ["item", "state"]
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    item: {
-                        price: item.key("price")
-                    },
-                    state: {
-                        discount: state.key("discount")
-                    }
-                }, ({ item, state }) => (item.price * (1 - state.discount)).toFixed(2))}
-              </span>
-              <span>
-                - With tax:
-                ${__ctHelpers.derive({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["price"]
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                discount: {
-                                    type: "number",
-                                    asOpaque: true
-                                },
-                                taxRate: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["discount", "taxRate"]
-                        }
-                    },
-                    required: ["item", "state"]
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    item: {
-                        price: item.key("price")
-                    },
-                    state: {
-                        discount: state.key("discount"),
-                        taxRate: state.key("taxRate")
-                    }
-                }, ({ item, state }) => (item.price * (1 - state.discount) * (1 + state.taxRate))
-                    .toFixed(2))}
-              </span>
-            </li>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    discount: {
-                                        type: "number",
-                                        asOpaque: true
-                                    },
-                                    taxRate: {
-                                        type: "number",
-                                        asOpaque: true
-                                    }
-                                },
-                                required: ["discount", "taxRate"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            name: {
-                                type: "string"
-                            },
-                            price: {
-                                type: "number"
-                            },
-                            active: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["id", "name", "price", "active"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {
+          {state.key("items").mapWithPattern(__cfPattern_1, {
                 state: {
                     discount: state.key("discount"),
                     taxRate: state.key("taxRate")
@@ -245,312 +449,62 @@ export default pattern((state) => {
 
         <h3>Array Methods</h3>
         <p>Item count: {state.key("items", "length")}</p>
-        <p>Active items: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Active items: {__cfLift_4({ state: {
                 items: state.key("items")
-            } }, ({ state }) => state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-            const i = __ct_pattern_input.key("element");
-            return i.key("active");
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    $ref: "#/$defs/Item"
-                }
-            },
-            required: ["element"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema), {}).length)}</p>
+            } })}</p>
 
         <h3>Simple Operations</h3>
-        <p>Discount percent: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        discount: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["discount"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Discount percent: {__cfLift_5({ state: {
                 discount: state.key("discount")
-            } }, ({ state }) => state.discount * 100)}%</p>
-        <p>Tax percent: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        taxRate: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["taxRate"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+            } })}%</p>
+        <p>Tax percent: {__cfLift_6({ state: {
                 taxRate: state.key("taxRate")
-            } }, ({ state }) => state.taxRate * 100)}%</p>
+            } })}%</p>
 
         <h3>Array Predicates</h3>
-        <p>All active: {__ctHelpers.ifElse({
+        <p>All active: {__cfHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_7({ state: {
                 items: state.key("items")
-            } }, ({ state }) => state.items.every((i) => i.active)), "Yes", "No")}</p>
-        <p>Any active: {__ctHelpers.ifElse({
+            } }), "Yes", "No")}</p>
+        <p>Any active: {__cfHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_8({ state: {
                 items: state.key("items")
-            } }, ({ state }) => state.items.some((i) => i.active)), "Yes", "No")}</p>
+            } }), "Yes", "No")}</p>
         <p>
           Has expensive (gt 100):{" "}
-          {__ctHelpers.ifElse({
+          {__cfHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_9({ state: {
                 items: state.key("items")
-            } }, ({ state }) => state.items.some((i) => i.price > 100)), "Yes", "No")}
+            } }), "Yes", "No")}
         </p>
 
         <h3>Object Operations</h3>
-        <div data-item-count={state.key("items", "length")} data-has-filter={__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        filter: {
-                            type: "object",
-                            properties: {
-                                length: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["length"]
-                        }
-                    },
-                    required: ["filter"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <div data-item-count={state.key("items", "length")} data-has-filter={__cfLift_10({ state: {
                 filter: {
-                    length: state.key("filter").length
+                    length: state.key("filter", "length")
                 }
-            } }, ({ state }) => state.filter.length > 0)} data-discount={state.key("discount")}>
+            } })} data-discount={state.key("discount")}>
           Object attributes
         </div>
       </div>),
@@ -595,7 +549,7 @@ export default pattern((state) => {
             required: ["id", "name", "price", "active"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -608,11 +562,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -625,8 +578,20 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2,
+    __cfLift_3,
+    __cfPattern_1,
+    __cfLift_4,
+    __cfLift_5,
+    __cfLift_6,
+    __cfLift_7,
+    __cfLift_8,
+    __cfLift_9,
+    __cfLift_10
+});

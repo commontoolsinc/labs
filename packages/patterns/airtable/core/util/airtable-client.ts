@@ -11,7 +11,7 @@
  * const records = await client.listRecords(baseId, tableId);
  * ```
  */
-import { getPatternEnvironment, Writable } from "commontools";
+import { getPatternEnvironment, Writable } from "commonfabric";
 
 const env = getPatternEnvironment();
 

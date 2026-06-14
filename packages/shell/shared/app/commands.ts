@@ -1,4 +1,4 @@
-import { Identity } from "@commontools/identity";
+import { Identity } from "@commonfabric/identity";
 import { AppView, isAppView } from "./view.ts";
 import { AppStateConfigKey, isAppStateConfigKey } from "./state.ts";
 

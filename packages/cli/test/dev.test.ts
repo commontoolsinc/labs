@@ -1,10 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { bytesToLines, checkStderr, ct } from "./utils.ts";
+import { bytesToLines, cf, checkStderr, stripAnsi } from "./utils.ts";
 
 describe("cli dev", () => {
   it("Executes a package", async () => {
-    const { code, stdout, stderr } = await ct(
+    const { code, stdout, stderr } = await cf(
       "dev fixtures/pow-5.tsx --pattern-json",
     );
     checkStderr(stderr);
@@ -12,8 +12,8 @@ describe("cli dev", () => {
     expect(code).toBe(0);
   });
 
-  it("Runs a pattern with commontools+3P modules", async () => {
-    const { code, stdout, stderr } = await ct(
+  it("Runs a pattern with commonfabric+3P modules", async () => {
+    const { code, stdout, stderr } = await cf(
       "dev fixtures/3p-modules.tsx --pattern-json",
     );
     checkStderr(stderr);
@@ -21,20 +21,23 @@ describe("cli dev", () => {
     expect(code).toBe(0);
   });
 
-  it("Generates output file with correct filename", async () => {
+  it("Generates output file with the compiled module bodies", async () => {
     const temp = await Deno.makeTempFile();
-    const { code, stdout, stderr } = await ct(
-      `dev fixtures/pattern.tsx --no-run --filename test-file.js --output ${temp}`,
+    const { code, stdout, stderr } = await cf(
+      `dev fixtures/pattern.tsx --no-run --output ${temp}`,
     );
     checkStderr(stderr);
     expect(stdout.length).toBe(0);
     expect(code).toBe(0);
     const rendered = bytesToLines(await Deno.readFile(temp));
-    expect(rendered[rendered.length - 1]).toEqual("//# sourceURL=test-file.js");
+    // Concatenated per-module compiled bodies, each headed by its
+    // content-addressed specifier.
+    expect(rendered[0]).toMatch(/^\/\/ cf:module\//);
+    expect(rendered.some((line) => line.includes('"use strict"'))).toBe(true);
   });
 
   it("Uses default export when no --main-export specified", async () => {
-    const { code, stdout, stderr } = await ct(
+    const { code, stdout, stderr } = await cf(
       "dev fixtures/named-export.tsx --pattern-json",
     );
     checkStderr(stderr);
@@ -44,7 +47,7 @@ describe("cli dev", () => {
   });
 
   it("Uses specified named export with --main-export", async () => {
-    const { code, stdout, stderr } = await ct(
+    const { code, stdout, stderr } = await cf(
       "dev fixtures/named-export.tsx --main-export myNamedPattern --pattern-json",
     );
     checkStderr(stderr);
@@ -57,18 +60,32 @@ describe("cli dev", () => {
   });
 
   it("Produces no output on success by default", async () => {
-    const { code, stdout, stderr } = await ct("dev fixtures/pow-5.tsx");
+    const { code, stdout, stderr } = await cf("dev fixtures/pow-5.tsx");
     checkStderr(stderr);
     expect(stdout.length).toBe(0);
     expect(code).toBe(0);
   });
 
   it("Resolves imports with --root flag", async () => {
-    const { code, stdout, stderr } = await ct(
+    const { code, stdout, stderr } = await cf(
       "dev --root fixtures fixtures/pow-5.tsx --pattern-json",
     );
     checkStderr(stderr);
     expect(stdout[stdout.length - 1]).toBe("25");
     expect(code).toBe(0);
+  });
+
+  it("surfaces fabric imports without a space as a CLI compile error", async () => {
+    const { code, stdout, stderr } = await cf(
+      "check fixtures/fabric-import.tsx --no-run",
+    );
+    const renderedStderr = stripAnsi(stderr.join("\n"));
+
+    expect(code).not.toBe(0);
+    expect(stdout.length).toBe(0);
+    expect(renderedStderr).toContain(
+      "fabric imports require a space context (options.fabricImports)",
+    );
+    expect(renderedStderr).not.toContain("Could not resolve");
   });
 });

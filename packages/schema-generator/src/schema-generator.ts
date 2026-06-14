@@ -1,16 +1,19 @@
 import ts from "typescript";
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 
 import type {
+  JSONSchemaMutable,
+  JSONSchemaObjMutable,
+} from "@commonfabric/api";
+import type {
   GenerationContext,
-  SchemaDefinition,
   SchemaGenerator as ISchemaGenerator,
   TypeFormatter,
 } from "./interface.ts";
 import { PrimitiveFormatter } from "./formatters/primitive-formatter.ts";
 import { ObjectFormatter } from "./formatters/object-formatter.ts";
 import { ArrayFormatter } from "./formatters/array-formatter.ts";
-import { CommonToolsFormatter } from "./formatters/common-tools-formatter.ts";
+import { CommonFabricFormatter } from "./formatters/common-fabric-formatter.ts";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { UnionFormatter } from "./formatters/union-formatter.ts";
 import { IntersectionFormatter } from "./formatters/intersection-formatter.ts";
@@ -30,7 +33,7 @@ import { extractDocFromType } from "./doc-utils.ts";
  */
 export class SchemaGenerator implements ISchemaGenerator {
   private formatters: TypeFormatter[] = [
-    new CommonToolsFormatter(this),
+    new CommonFabricFormatter(this),
     new NativeTypeFormatter(),
     new UnionFormatter(this),
     new IntersectionFormatter(this),
@@ -53,8 +56,23 @@ export class SchemaGenerator implements ISchemaGenerator {
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
     options?: { widenLiterals?: boolean },
-    schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
-  ): SchemaDefinition {
+    schemaHints?: WeakMap<
+      ts.Node,
+      {
+        items?: unknown;
+        cfcUiContract?: {
+          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+          action?: string;
+          surface?: string;
+          role?: string;
+          kind?: string;
+          trustedPattern?: string;
+          requiredEventIntegrity?: string[];
+        };
+      }
+    >,
+    sourceFile?: ts.SourceFile,
+  ): JSONSchemaMutable {
     return this.generateSchemaInternal(
       type,
       checker,
@@ -62,6 +80,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       undefined,
       options,
       schemaHints,
+      sourceFile,
     );
   }
 
@@ -76,8 +95,23 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode: ts.TypeNode,
     checker: ts.TypeChecker,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
-    schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
-  ): SchemaDefinition {
+    schemaHints?: WeakMap<
+      ts.Node,
+      {
+        items?: unknown;
+        cfcUiContract?: {
+          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+          action?: string;
+          surface?: string;
+          role?: string;
+          kind?: string;
+          trustedPattern?: string;
+          requiredEventIntegrity?: string[];
+        };
+      }
+    >,
+    sourceFile?: ts.SourceFile,
+  ): JSONSchemaMutable {
     // Pass 'any' type with the typeNode - auto-detection will choose node-based analysis
     const anyType = checker.getAnyType();
     return this.generateSchemaInternal(
@@ -87,6 +121,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       typeRegistry,
       undefined,
       schemaHints,
+      sourceFile,
     );
   }
 
@@ -100,8 +135,23 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode?: ts.TypeNode,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
     options?: { widenLiterals?: boolean },
-    schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
-  ): SchemaDefinition {
+    schemaHints?: WeakMap<
+      ts.Node,
+      {
+        items?: unknown;
+        cfcUiContract?: {
+          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+          action?: string;
+          surface?: string;
+          role?: string;
+          kind?: string;
+          trustedPattern?: string;
+          requiredEventIntegrity?: string[];
+        };
+      }
+    >,
+    sourceFile?: ts.SourceFile,
+  ): JSONSchemaMutable {
     // Create unified context with all state
     const cycles = this.getCycles(type, checker);
     const context: GenerationContext = {
@@ -120,13 +170,20 @@ export class SchemaGenerator implements ISchemaGenerator {
 
       // Optional context
       ...(typeNode && { typeNode }),
+      ...(typeNode?.getSourceFile()?.fileName && {
+        sourceFileName: typeNode.getSourceFile().fileName,
+      }),
+      ...(sourceFile && {
+        sourceFile,
+        sourceFileName: sourceFile.fileName,
+      }),
       ...(typeRegistry && { typeRegistry }),
       ...(options?.widenLiterals && { widenLiterals: true }),
       ...(schemaHints && { schemaHints }),
     };
 
     // Auto-detect: Should we use node-based or type-based analysis?
-    let schema: SchemaDefinition;
+    let schema: JSONSchemaMutable;
     if (this.shouldUseNodeBasedAnalysis(type, typeNode, checker)) {
       // Use node-based analysis (for synthetic nodes or when type is unreliable)
       schema = this.analyzeTypeNodeStructure(
@@ -134,12 +191,14 @@ export class SchemaGenerator implements ISchemaGenerator {
         checker,
         context,
       );
+      schema = this.applyNodeSchemaHints(schema, context);
       // Build final schema with $schema and $defs
       return this.buildFinalSchemaForSynthetic(schema, context);
     }
 
     // Use type-based analysis (normal path)
     schema = this.formatType(type, context, true);
+    schema = this.applyNodeSchemaHints(schema, context);
 
     // Attach root-level description from JSDoc if available
     schema = this.attachRootDescription(schema, type, context);
@@ -155,9 +214,9 @@ export class SchemaGenerator implements ISchemaGenerator {
    * When TypeScript widens a type to 'any' (e.g., for array element types or synthetic nodes),
    * the TypeNode structure is more reliable than the Type.
    *
-   * EXCEPTION: Wrapper types (Default/Cell/Stream/OpaqueRef) erase to their inner type,
+   * EXCEPTION: Wrapper types (Default/Cell/Stream/OpaqueCell) erase to their inner type,
    * which may appear as 'any', but they should use type-based analysis because
-   * CommonToolsFormatter handles them specially via typeNode context.
+   * CommonFabricFormatter handles them specially via typeNode context.
    */
   private shouldUseNodeBasedAnalysis(
     type: ts.Type,
@@ -188,7 +247,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     type: ts.Type,
     context: GenerationContext,
     typeNode?: ts.TypeNode,
-  ): SchemaDefinition {
+  ): JSONSchemaMutable {
     // IMPORTANT: Always create a new context, replacing typeNode (even if undefined).
     // If we pass the parent context as-is when typeNode is undefined, the child will
     // inherit the parent's typeNode which leads to mismatched type/node pairs.
@@ -203,15 +262,21 @@ export class SchemaGenerator implements ISchemaGenerator {
     );
     if (useNodeBased) {
       // Use node-based analysis (for synthetic nodes or when type is unreliable)
-      return this.analyzeTypeNodeStructure(
-        typeNode!,
-        context.typeChecker,
+      return this.applyNodeSchemaHints(
+        this.analyzeTypeNodeStructure(
+          typeNode!,
+          context.typeChecker,
+          childContext,
+        ),
         childContext,
       );
     }
 
     // Use type-based analysis (normal path)
-    return this.formatType(type, childContext, false);
+    return this.applyNodeSchemaHints(
+      this.formatType(type, childContext, false),
+      childContext,
+    );
   }
 
   /**
@@ -242,7 +307,7 @@ export class SchemaGenerator implements ISchemaGenerator {
         return `Default_${type.flags}_${argTexts}_${locationHash}_${position}`;
       }
 
-      // Cell-like wrappers (Cell, Writable, Stream, OpaqueRef) share their
+      // Cell-like wrappers (Cell, Writable, Stream, OpaqueCell) share their
       // ts.Type identity with the same wrapper instantiation at other positions.
       // When a recursive type like TodoItem contains `Writable<TodoItem[]>`,
       // TypeScript reuses the same Cell<TodoItem[]> type object, causing the
@@ -282,7 +347,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     type: ts.Type,
     context: GenerationContext,
     isRootType: boolean = false,
-  ): SchemaDefinition {
+  ): JSONSchemaMutable {
     if ((type.flags & ts.TypeFlags.TypeParameter) !== 0) {
       const checker = context.typeChecker;
       const baseConstraint = checker.getBaseConstraintOfType(type);
@@ -297,7 +362,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     }
 
     // Handle conditional types that arise from unresolved type parameters.
-    // When a generic type like OpaqueRef<T | undefined> is used where T is a
+    // When a generic type like OpaqueCell<T | undefined> is used where T is a
     // type parameter, TypeScript represents this as a conditional type for
     // deferred evaluation. We treat these as "any" schema since the concrete
     // type isn't known at compile time.
@@ -310,7 +375,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     // by getNamedTypeKey) into definitions and return $ref for non-root uses.
     // Cycle detection still applies via definitionStack.
 
-    // Check if we're in a wrapper context (Default/Cell/Stream/OpaqueRef).
+    // Check if we're in a wrapper context (Default/Cell/Stream/OpaqueCell).
     // Wrapper types erase to their inner type, so we must check typeNode to
     // distinguish wrapper context from inner context.
     // This now handles both direct wrappers and aliases (e.g., type MyDefault<T> = Default<T, T>)
@@ -413,11 +478,11 @@ export class SchemaGenerator implements ISchemaGenerator {
    * Build the final schema with definitions if needed
    */
   private buildFinalSchema(
-    schema: SchemaDefinition,
+    schema: JSONSchemaMutable,
     type: ts.Type,
     context: GenerationContext,
     _typeNode?: ts.TypeNode,
-  ): SchemaDefinition {
+  ): JSONSchemaMutable {
     const { definitions, emittedRefs } = context;
 
     // If no definitions were created or used, return simple schema without $schema
@@ -429,14 +494,14 @@ export class SchemaGenerator implements ISchemaGenerator {
     const namedKey = getNamedTypeKey(type) ?? this.anonymousNames.get(type);
     const shouldPromoteRoot = this.shouldPromoteToRef(namedKey, context);
 
-    let base: SchemaDefinition;
+    let base: JSONSchemaMutable;
 
     if (shouldPromoteRoot && namedKey) {
       // Ensure root is present in definitions
       if (!definitions[namedKey]) {
         definitions[namedKey] = schema;
       }
-      base = { $ref: `#/$defs/${namedKey}` } as SchemaDefinition;
+      base = { $ref: `#/$defs/${namedKey}` };
     } else {
       base = schema;
     }
@@ -453,7 +518,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       ...(base as Record<string, unknown>),
     };
     if (Object.keys(filtered).length > 0) out.$defs = filtered;
-    return out as SchemaDefinition;
+    return out as JSONSchemaMutable;
   }
 
   /**
@@ -470,6 +535,51 @@ export class SchemaGenerator implements ISchemaGenerator {
     // If the root type already exists in definitions and has been referenced,
     // promote it
     return !!(definitions[namedKey] && emittedRefs.has(namedKey));
+  }
+
+  private applyNodeSchemaHints(
+    schema: JSONSchemaMutable,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
+    if (!context.schemaHints || !context.typeNode) {
+      return schema;
+    }
+
+    const hint = context.schemaHints.get(context.typeNode) ??
+      context.schemaHints.get(ts.getOriginalNode(context.typeNode));
+    if (!hint?.cfcUiContract) {
+      return schema;
+    }
+
+    return this.attachUiContract(schema, hint.cfcUiContract);
+  }
+
+  private attachUiContract(
+    schema: JSONSchemaMutable,
+    uiContract: {
+      helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+      action?: string;
+      surface?: string;
+      role?: string;
+      kind?: string;
+      trustedPattern?: string;
+      requiredEventIntegrity?: string[];
+    },
+  ): JSONSchemaMutable {
+    if (typeof schema === "boolean") {
+      return schema === false
+        ? { not: true, ifc: { uiContract } }
+        : { ifc: { uiContract } };
+    }
+
+    const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
+    return {
+      ...schema,
+      ifc: {
+        ...existingIfc,
+        uiContract,
+      },
+    };
   }
 
   /**
@@ -552,10 +662,10 @@ export class SchemaGenerator implements ISchemaGenerator {
    * already supply one.
    */
   private attachRootDescription(
-    schema: SchemaDefinition,
+    schema: JSONSchemaMutable,
     type: ts.Type,
     context: GenerationContext,
-  ): SchemaDefinition {
+  ): JSONSchemaMutable {
     if (typeof schema !== "object") return schema;
 
     const docInfo = extractDocFromType(type, context.typeChecker);
@@ -571,9 +681,9 @@ export class SchemaGenerator implements ISchemaGenerator {
    * including transitive dependencies.
    */
   private collectReferencedDefinitions(
-    fragment: SchemaDefinition,
-    allDefs: Record<string, SchemaDefinition>,
-  ): Record<string, SchemaDefinition> {
+    fragment: JSONSchemaMutable,
+    allDefs: Record<string, JSONSchemaMutable>,
+  ): Record<string, JSONSchemaMutable> {
     const needed = new Set<string>();
     const visited = new Set<string>();
 
@@ -623,7 +733,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     }
 
     // Build the subset map
-    const subset: Record<string, SchemaDefinition> = {};
+    const subset: Record<string, JSONSchemaMutable> = {};
     for (const name of visited) {
       if (allDefs[name]) subset[name] = allDefs[name];
     }
@@ -639,17 +749,18 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode: ts.TypeNode,
     checker: ts.TypeChecker,
     context: GenerationContext,
-  ): SchemaDefinition {
+  ): JSONSchemaMutable {
     const typeRegistry = context.typeRegistry;
 
     // Handle TypeLiteral nodes (object types)
     if (ts.isTypeLiteralNode(typeNode)) {
-      const properties: Record<string, SchemaDefinition> = {};
+      const properties: Record<string, JSONSchemaMutable> = {};
       const required: string[] = [];
+      let additionalProperties: JSONSchemaMutable | undefined;
 
       for (const member of typeNode.members) {
         if (ts.isPropertySignature(member) && member.name && member.type) {
-          const propName = getPropertyNameText(member.name);
+          const propName = getPropertyNameText(member.name, checker);
           if (!propName) {
             continue;
           }
@@ -676,10 +787,42 @@ export class SchemaGenerator implements ISchemaGenerator {
           if (!member.questionToken) {
             required.push(propName);
           }
+        } else if (ts.isIndexSignatureDeclaration(member) && member.type) {
+          // Handle string/number index signatures on synthetic TypeLiteralNodes
+          // by emitting them as `additionalProperties` with the value type's
+          // schema. Without this branch, synthetic `Record<K, V>` /
+          // `{ [k: string]: V }` shapes silently drop their index signature
+          // when routed through node-based analysis (e.g. the SchemaInjection
+          // lift-revisit path that feeds `any` as the paired Type, see
+          // ts-transformers schema-injection.ts ~line 3290).
+          //
+          // Note: unlike `ObjectFormatter.formatType`'s type-driven path
+          // (object-formatter.ts:344-365), this branch does NOT propagate
+          // JSDoc from the index signature. Synthetic TypeLiteralNodes have
+          // no source-positioned declarations to read JSDoc from, so there
+          // is nothing to propagate. If we ever route declaration-bearing
+          // nodes through this path, JSDoc propagation should be added.
+          let valueType: ts.Type;
+          if (typeRegistry && typeRegistry.has(member.type)) {
+            valueType = typeRegistry.get(member.type)!;
+          } else {
+            valueType = checker.getTypeFromTypeNode(member.type);
+          }
+          const valueSchema = this.formatChildType(
+            valueType,
+            context,
+            member.type,
+          );
+          // If multiple index signatures are present (e.g. both string and
+          // number key), the first non-undefined wins — matching
+          // ObjectFormatter's `stringIndex ?? numberIndex` precedence.
+          if (additionalProperties === undefined) {
+            additionalProperties = valueSchema;
+          }
         }
       }
 
-      const schema: SchemaDefinition = {
+      const schema: JSONSchemaObjMutable = {
         type: "object",
         properties,
       };
@@ -688,12 +831,18 @@ export class SchemaGenerator implements ISchemaGenerator {
         schema.required = required;
       }
 
+      if (additionalProperties !== undefined) {
+        (schema as Record<string, unknown>).additionalProperties =
+          additionalProperties;
+      }
+
       return schema;
     }
 
     // Handle ArrayTypeNode (e.g., number[], string[])
     if (ts.isArrayTypeNode(typeNode)) {
-      const elementType = checker.getTypeFromTypeNode(typeNode.elementType);
+      const elementType = typeRegistry?.get(typeNode.elementType) ??
+        checker.getTypeFromTypeNode(typeNode.elementType);
       const items = this.formatChildType(
         elementType,
         context,
@@ -711,18 +860,48 @@ export class SchemaGenerator implements ISchemaGenerator {
         this.analyzeTypeNodeStructure(member, checker, context)
       );
       if (memberSchemas.some((schema) => schema === true)) {
-        return true as SchemaDefinition;
+        return true;
       }
       if (memberSchemas.length === 1) {
         return memberSchemas[0]!;
       }
-      return { anyOf: memberSchemas as Exclude<SchemaDefinition, boolean>[] };
+      // Filter out `false` schemas (from `never` types) — they reject all
+      // values and are no-ops inside anyOf.
+      const filtered = memberSchemas.filter((s) => s !== false);
+      if (filtered.length === 0) return false;
+      if (filtered.length === 1) return filtered[0]!;
+      return { anyOf: filtered as JSONSchemaObjMutable[] };
+    }
+
+    if (ts.isLiteralTypeNode(typeNode)) {
+      const literal = typeNode.literal;
+      if (ts.isStringLiteral(literal)) {
+        return { type: "string", const: literal.text };
+      }
+      if (ts.isNumericLiteral(literal)) {
+        return { type: "number", const: Number(literal.text) };
+      }
+      if (literal.kind === ts.SyntaxKind.TrueKeyword) {
+        return { type: "boolean", const: true };
+      }
+      if (literal.kind === ts.SyntaxKind.FalseKeyword) {
+        return { type: "boolean", const: false };
+      }
+      if (literal.kind === ts.SyntaxKind.NullKeyword) {
+        return { type: "null" };
+      }
     }
 
     // Synthetic TypeReferenceNodes may fail to bind in checker APIs directly.
     // Resolve by name from source scope as a fallback (e.g., CharmEntry in
     // Cell<CharmEntry[]>).
     if (ts.isTypeReferenceNode(typeNode)) {
+      if (detectWrapperViaNode(typeNode, checker)) {
+        const wrapperType = typeRegistry?.get(typeNode) ??
+          checker.getTypeFromTypeNode(typeNode);
+        return this.formatChildType(wrapperType, context, typeNode);
+      }
+
       const resolved = this.resolveTypeReferenceFromScope(
         typeNode,
         checker,
@@ -730,6 +909,12 @@ export class SchemaGenerator implements ISchemaGenerator {
       );
       if (resolved) {
         return this.formatChildType(resolved, context, typeNode);
+      }
+
+      if (
+        ts.isIdentifier(typeNode.typeName) && typeNode.typeName.text === "Date"
+      ) {
+        return { type: "string", format: "date-time" };
       }
     }
 
@@ -748,12 +933,15 @@ export class SchemaGenerator implements ISchemaGenerator {
         return { type: "undefined" };
       case ts.SyntaxKind.NeverKeyword:
         // Reject all values (never type can never occur)
-        return false as SchemaDefinition;
-      case ts.SyntaxKind.VoidKeyword:
-      case ts.SyntaxKind.AnyKeyword:
+        return false;
       case ts.SyntaxKind.UnknownKeyword:
+        return { type: "unknown" };
+      case ts.SyntaxKind.VoidKeyword:
+        // matches anything, but we will not access the cell
+        return { asCell: ["opaque"] };
+      case ts.SyntaxKind.AnyKeyword:
         // Accept any value
-        return true as SchemaDefinition;
+        return true;
     }
 
     // For other TypeNode kinds, try to resolve as Type
@@ -764,7 +952,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     }
 
     // Fallback: accept any value
-    return true as SchemaDefinition;
+    return true;
   }
 
   private resolveTypeReferenceFromScope(
@@ -784,7 +972,17 @@ export class SchemaGenerator implements ISchemaGenerator {
       }
     }
 
-    const scopeNode = context.typeNode?.getSourceFile?.() ??
+    const checkerWithProgram = checker as ts.TypeChecker & {
+      getProgram?: () => ts.Program;
+    };
+    const sourceFromContext = context.sourceFile ??
+      (context.sourceFileName
+        ? checkerWithProgram.getProgram?.().getSourceFile(
+          context.sourceFileName,
+        )
+        : undefined);
+    const scopeNode = sourceFromContext ??
+      context.typeNode?.getSourceFile?.() ??
       typeNode.getSourceFile?.();
     if (!scopeNode) return undefined;
 
@@ -805,9 +1003,9 @@ export class SchemaGenerator implements ISchemaGenerator {
    * Build final schema for synthetic TypeNode with $schema and $defs
    */
   private buildFinalSchemaForSynthetic(
-    schema: SchemaDefinition,
+    schema: JSONSchemaMutable,
     context: GenerationContext,
-  ): SchemaDefinition {
+  ): JSONSchemaMutable {
     const { definitions, emittedRefs } = context;
 
     // Handle boolean schemas (rare, but supported by JSON Schema)
@@ -826,6 +1024,6 @@ export class SchemaGenerator implements ISchemaGenerator {
       ...(schema as Record<string, unknown>),
     };
     if (Object.keys(filtered).length > 0) out.$defs = filtered;
-    return out as SchemaDefinition;
+    return out as JSONSchemaMutable;
   }
 }

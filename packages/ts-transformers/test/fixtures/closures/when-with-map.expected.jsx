@@ -1,4 +1,12 @@
-import * as __ctHelpers from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 /**
  * Test case for when() with a reactive array map as the value.
  *
@@ -6,7 +14,10 @@ import * as __ctHelpers from "commontools";
  * When value is items.map(...), the map gets transformed to mapWithPattern.
  * Schema injection needs to know the type of the mapWithPattern result.
  */
-import { Cell, Default, pattern, UI } from "commontools";
+import { Cell, Default, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Item {
     label: string;
 }
@@ -15,6 +26,49 @@ interface PatternInput {
     items: Cell<Default<Item[], [
     ]>>;
 }
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    return <li>{item.key("label")}</li>;
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                label: {
+                    type: "string"
+                }
+            },
+            required: ["label"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: when-with-map
 // Verifies: && operator becomes when() with reactive map as the value
 //   showItems && items.map(...) → when(showItems, items.mapWithPattern(...))
@@ -22,93 +76,25 @@ interface PatternInput {
 // Context: when(condition, value) returns value if condition is truthy, else
 //   condition. The value branch contains a reactive .map() that must be
 //   transformed to mapWithPattern with proper schema injection.
-export default pattern((__ct_pattern_input) => {
-    const showItems = __ct_pattern_input.key("showItems");
-    const items = __ct_pattern_input.key("items");
+export default pattern((__cf_pattern_input) => {
+    const showItems = __cf_pattern_input.key("showItems");
+    const items = __cf_pattern_input.key("items");
     return {
         [UI]: (<div>
         {/* when(condition, value) where value is a reactive map */}
-        {__ctHelpers.when({
-            type: "boolean",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+        {__cfHelpers.when({
+            type: "boolean"
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "array",
-            items: {
-                $ref: "#/$defs/UIRenderable"
-            },
-            asOpaque: true,
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "array",
-            items: {
-                $ref: "#/$defs/UIRenderable"
-            },
-            asOpaque: true,
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, showItems, items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
-            return <li>{item.key("label")}</li>;
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    $ref: "#/$defs/Item"
-                }
-            },
-            required: ["element"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        label: {
-                            type: "string"
-                        }
-                    },
-                    required: ["label"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
+            items: {}
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                    type: "boolean"
                 }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema), {}))}
+                    type: "array",
+                    items: {}
+                }]
+        } as const satisfies __cfHelpers.JSONSchema, showItems, items.mapWithPattern(__cfPattern_1, {}))}
       </div>),
     };
 }, {
@@ -123,7 +109,7 @@ export default pattern((__ct_pattern_input) => {
                 $ref: "#/$defs/Item"
             },
             "default": [],
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["showItems", "items"],
@@ -138,7 +124,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["label"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -151,11 +137,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -168,8 +153,10 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfPattern_1
+});

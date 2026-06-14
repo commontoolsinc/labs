@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { computed, pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commonfabric";
 
 interface Item {
   id: number;
@@ -19,9 +18,9 @@ interface State {
 // Verifies: mixed transforms -- map, filter, arithmetic, ternary/ifElse, attribute bindings in one pattern
 //   .filter(fn)              → .filterWithPattern(pattern(...), {captures})
 //   .map(fn)                 → .mapWithPattern(pattern(...), {captures})
-//   ternary cond ? a : b     → ifElse(derive(cond), a, b)
-//   {state.discount * 100}   → derive({discount}, ...)
-// Context: Comprehensive fixture combining array methods, conditionals, derive, and attributes
+//   ternary cond ? a : b     → ifElse(lift(...)(cond), a, b)
+//   {state.discount * 100}   → lift(...)({ discount })
+// Context: Comprehensive fixture combining array methods, conditionals, lift-applied computations, and attributes
 export default pattern<State>((state) => {
   return {
     [UI]: (

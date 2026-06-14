@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * BillExtractor Building Block
  *
@@ -22,8 +21,8 @@
  *   formatDate,
  *   formatIdentifier,
  *   getIdentifierColor,
- *   createMarkAsPaidHandler,
- *   createUnmarkAsPaidHandler,
+ *   markAsPaidHandler,
+ *   unmarkAsPaidHandler,
  * } from "../core/bill-extractor/index.tsx";
  *
  * export default pattern(({ overrideAuth, manuallyPaid, demoMode }) => {
@@ -40,25 +39,21 @@
  *     demoMode,
  *   });
  *
- *   // Get handlers for use in UI
- *   const markAsPaid = createMarkAsPaidHandler();
- *   const unmarkAsPaid = createUnmarkAsPaidHandler();
- *
  *   return {
  *     [NAME]: "My Bill Tracker",
  *     bills: tracker.bills,
  *     [UI]: (
- *       <ct-screen>
+ *       <cf-screen>
  *         {tracker.ui.summaryStatsUI}
  *         {tracker.unpaidBills.map((bill) => (
  *           <div>
  *             {formatCurrency(bill.amount)}
- *             <button onClick={markAsPaid({ paidKeys: manuallyPaid, bill })}>
+ *             <button onClick={markAsPaidHandler({ paidKeys: manuallyPaid, bill })}>
  *               Mark Paid
  *             </button>
  *           </div>
  *         ))}
- *       </ct-screen>
+ *       </cf-screen>
  *     ),
  *   };
  * });
@@ -71,7 +66,7 @@ import {
   pattern,
   Stream,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import GmailExtractor from "../gmail-extractor.tsx";
 import type { Auth } from "../gmail-extractor.tsx";
 import ProcessingStatus from "../processing-status.tsx";
@@ -135,7 +130,7 @@ export interface BillExtractorInput {
   shortName: string;
 
   /** Brand color for website button (hex) */
-  brandColor?: Default<string, "#3b82f6">;
+  brandColor?: string | Default<"#3b82f6">;
 
   /** Provider website URL */
   websiteUrl?: string;
@@ -144,20 +139,20 @@ export interface BillExtractorInput {
   overrideAuth?: Auth;
 
   /** State for persistence - which bills user manually marked as paid */
-  manuallyPaid?: Writable<Default<string[], []>>;
+  manuallyPaid?: Writable<string[] | Default<[]>>;
 
   /** Whether to show fake amounts for privacy (demo mode) */
-  demoMode?: Writable<Default<boolean, true>>;
+  demoMode?: Writable<boolean | Default<true>>;
 
   /** Maximum number of emails to fetch */
-  limit?: Default<number, 100>;
+  limit?: number | Default<100>;
 
   /**
    * Whether this provider sends payment confirmation emails.
    * When false, shows a banner explaining manual tracking is required.
    * Defaults to true.
    */
-  supportsAutoDetect?: Default<boolean, true>;
+  supportsAutoDetect?: boolean | Default<true>;
 }
 
 /**
@@ -219,32 +214,36 @@ export interface BillExtractorOutput {
 // =============================================================================
 
 /**
- * Create a handler for marking a bill as paid.
+ * Handler for marking a bill as paid.
  * Use this in patterns to wire up "Mark Paid" buttons.
  */
-export const createMarkAsPaidHandler = () =>
-  handler<void, { paidKeys: Writable<string[]>; bill: TrackedBill }>(
-    (_event, { paidKeys, bill }) => {
-      const current = paidKeys.get() || [];
-      const key = bill.key;
-      if (key && !current.includes(key)) {
-        paidKeys.set([...current, key]);
-      }
-    },
-  );
+export const markAsPaidHandler = handler<
+  void,
+  { paidKeys: Writable<string[]>; bill: TrackedBill }
+>(
+  (_event, { paidKeys, bill }) => {
+    const current = paidKeys.get() || [];
+    const key = bill.key;
+    if (key && !current.includes(key)) {
+      paidKeys.set([...current, key]);
+    }
+  },
+);
 
 /**
- * Create a handler for unmarking a bill as paid.
+ * Handler for unmarking a bill as paid.
  * Use this in patterns to wire up "Undo" buttons.
  */
-export const createUnmarkAsPaidHandler = () =>
-  handler<void, { paidKeys: Writable<string[]>; bill: TrackedBill }>(
-    (_event, { paidKeys, bill }) => {
-      const current = paidKeys.get() || [];
-      const key = bill.key;
-      paidKeys.set(current.filter((k: string) => k !== key));
-    },
-  );
+export const unmarkAsPaidHandler = handler<
+  void,
+  { paidKeys: Writable<string[]>; bill: TrackedBill }
+>(
+  (_event, { paidKeys, bill }) => {
+    const current = paidKeys.get() || [];
+    const key = bill.key;
+    paidKeys.set(current.filter((k: string) => k !== key));
+  },
+);
 
 // =============================================================================
 // BILL PROCESSING (exported for pattern-scope computed)

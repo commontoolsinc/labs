@@ -1,5 +1,16 @@
-import * as __ctHelpers from "commontools";
-import { lift } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { lift } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 type LiftArgs = {
     value: number;
 };
@@ -9,7 +20,9 @@ type LiftResult = {
 // FIXTURE: schema-generation-lift
 // Verifies: lift() with generic type args generates input and output schemas
 //   lift<LiftArgs, LiftResult>(fn) → lift(inputSchema, outputSchema, fn)
-export const doubleValue = lift({
+export const doubleValue = lift(({ value }) => ({
+    doubled: value * 2,
+}), {
     type: "object",
     properties: {
         value: {
@@ -17,7 +30,7 @@ export const doubleValue = lift({
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         doubled: {
@@ -25,10 +38,7 @@ export const doubleValue = lift({
         }
     },
     required: ["doubled"]
-} as const satisfies __ctHelpers.JSONSchema, ({ value }) => ({
-    doubled: value * 2,
-}));
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);

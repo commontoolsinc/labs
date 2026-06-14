@@ -4,8 +4,8 @@
  * For cell layer benchmarks, see cell.bench.ts
  * For storage layer benchmarks, see storage.bench.ts
  */
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { Action } from "../src/scheduler.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -14,18 +14,20 @@ import {
   addressesToPathByEntity,
   sortAndCompactPaths,
 } from "../src/reactive-dependencies.ts";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("bench operator");
 const space = signer.did();
 
 // Setup helper
 function setup() {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
   });
-  runtime.scheduler.disablePullMode();
   const tx = runtime.edit();
   return { runtime, storageManager, tx };
 }
@@ -82,9 +84,9 @@ Deno.bench(
       runtime.scheduler.subscribe(
         action,
         {
-          reads: [source.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [output.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -139,9 +141,9 @@ Deno.bench(
       runtime.scheduler.subscribe(
         action,
         {
-          reads: [input.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(input.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [output.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -197,9 +199,9 @@ Deno.bench(
       runtime.scheduler.subscribe(
         action,
         {
-          reads: [source.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [output.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -252,9 +254,9 @@ Deno.bench(
       runtime.scheduler.subscribe(
         action,
         {
-          reads: [source.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [output.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -302,9 +304,9 @@ Deno.bench(
       runtime.scheduler.subscribe(
         action,
         {
-          reads: [input.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(input.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [output.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -369,9 +371,9 @@ Deno.bench(
       runtime.scheduler.subscribe(
         actionAB,
         {
-          reads: [a.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(a.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [b.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(b.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -384,9 +386,9 @@ Deno.bench(
       runtime.scheduler.subscribe(
         actionAC,
         {
-          reads: [a.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(a.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [c.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(c.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -401,9 +403,12 @@ Deno.bench(
       runtime.scheduler.subscribe(
         actionBCD,
         {
-          reads: [b.getAsNormalizedFullLink(), c.getAsNormalizedFullLink()],
+          reads: [
+            toMemorySpaceAddress(b.getAsNormalizedFullLink()),
+            toMemorySpaceAddress(c.getAsNormalizedFullLink()),
+          ],
           shallowReads: [],
-          writes: [result.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(result.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -456,9 +461,9 @@ Deno.bench(
       runtime.scheduler.subscribe(
         action,
         {
-          reads: [input.getAsNormalizedFullLink()],
+          reads: [toMemorySpaceAddress(input.getAsNormalizedFullLink())],
           shallowReads: [],
-          writes: [output.getAsNormalizedFullLink()],
+          writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
         },
         {},
       );
@@ -491,7 +496,6 @@ Deno.bench(
     const { runtime, storageManager, tx } = setup();
 
     // Enable pull mode for this test
-    runtime.scheduler.enablePullMode();
 
     const source = runtime.getCell<number>(
       space,
@@ -515,9 +519,9 @@ Deno.bench(
     runtime.scheduler.subscribe(
       action,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [output.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
       },
       {},
     );
@@ -648,8 +652,8 @@ Deno.bench(
     const commitTime = performance.now() - start;
 
     // Log commit time (won't show in bench output but useful for debugging)
-    if (commitTime > 100) {
-      console.log(`Commit took ${commitTime.toFixed(1)}ms`);
+    if (commitTime > 100 && Deno.env.get("BENCH_DIAGNOSTICS") === "1") {
+      console.error(`Commit took ${commitTime.toFixed(1)}ms`);
     }
 
     await runtime.dispose();
@@ -681,8 +685,8 @@ Deno.bench(
       tx.writeValueOrThrow(
         {
           space,
+          scope: "space",
           id: `test:raw-write-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -708,8 +712,8 @@ function generateAddresses(
   for (let i = 0; i < count; i++) {
     addresses.push({
       space: space,
+      scope: "space",
       id: `test:entity-${i % entitiesCount}`,
-      type: "application/json",
       path: ["field", `sub${i % 5}`, `deep${i % 3}`],
     });
   }
@@ -768,10 +772,10 @@ Deno.bench(
     const actions: Action[] = [];
     const baseLink = {
       space,
+      scope: "space",
       id: "test:entity" as const,
-      type: "application/json" as const,
       path: ["value"],
-    };
+    } as const;
 
     for (let i = 0; i < 100; i++) {
       const action: Action = () => {};
@@ -804,10 +808,10 @@ Deno.bench(
     const actions: Action[] = [];
     const sharedRead = {
       space,
+      scope: "space",
       id: "test:shared-source" as const,
-      type: "application/json" as const,
       path: ["value"],
-    };
+    } as const;
 
     for (let i = 0; i < 100; i++) {
       const action: Action = () => {};
@@ -819,8 +823,8 @@ Deno.bench(
           shallowReads: [],
           writes: [{
             space,
+            scope: "space",
             id: `test:output-${i}` as const,
-            type: "application/json" as const,
             path: ["value"],
           }],
         },
@@ -846,16 +850,16 @@ Deno.bench(
     const reads: IMemorySpaceAddress[] = [
       {
         space,
+        scope: "space",
         id: "test:source",
-        type: "application/json",
         path: ["value"],
       },
     ];
     const writes: IMemorySpaceAddress[] = [
       {
         space,
+        scope: "space",
         id: "test:output",
-        type: "application/json",
         path: ["value"],
       },
     ];

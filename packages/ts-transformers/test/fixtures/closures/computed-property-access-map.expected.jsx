@@ -1,141 +1,153 @@
-import * as __ctHelpers from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 /**
  * Regression: .map() on a property access of a computed result inside
  * another computed() should NOT be transformed to .mapWithPattern().
  *
- * Inside a derive callback, OpaqueRef values are unwrapped to plain JS,
+ * Inside a lift-applied callback, OpaqueRef values are unwrapped to plain JS,
  * so `result.tasks` is a plain array.
  */
-import { computed, pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Item {
     name: string;
     done: boolean;
 }
-// FIXTURE: computed-property-access-map
-// Verifies: .map() on a property access of a computed result inside another computed() is NOT transformed to .mapWithPattern()
-//   computed(() => result.tasks.map(fn)) → derive(..., { result: { tasks: result.key("tasks") } }, ({ result }) => result.tasks.map(fn))
-// Context: Inside a derive callback, OpaqueRef values are unwrapped to plain JS,
-//   so `result.tasks` is a plain array. The .map() must remain untransformed.
-//   This is a negative test for reactive .map() detection on property access paths.
-//   Note the captures use result.key("tasks") to extract the needed sub-property.
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
-    const result = __ctHelpers.derive({
-        type: "object",
-        properties: {
+const __cfLift_1 = __cfHelpers.lift<{
+    items: {
+        done: boolean;
+    }[];
+}, { tasks: Item[]; view: string; }>(({ items }) => ({
+    tasks: items.filter((i) => !i.done),
+    view: "inbox",
+}), {
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
             items: {
-                type: "array",
-                items: {
-                    $ref: "#/$defs/Item"
-                },
-                asOpaque: true
-            }
-        },
-        required: ["items"],
-        $defs: {
-            Item: {
                 type: "object",
                 properties: {
-                    name: {
-                        type: "string"
-                    },
                     done: {
                         type: "boolean"
                     }
                 },
-                required: ["name", "done"]
+                required: ["done"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            tasks: {
-                type: "array",
-                items: {
-                    $ref: "#/$defs/Item",
-                    asOpaque: true
+    },
+    required: ["items"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        tasks: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item"
+            }
+        },
+        view: {
+            type: "string"
+        }
+    },
+    required: ["tasks", "view"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                done: {
+                    type: "boolean"
                 }
             },
-            view: {
-                type: "string"
-            }
-        },
-        required: ["tasks", "view"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean"
-                    }
-                },
-                required: ["name", "done"]
-            }
+            required: ["name", "done"]
         }
-    } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => ({
-        tasks: items.filter((i) => !i.done),
-        view: "inbox",
-    }));
-    return {
-        [UI]: (<div>
-        {__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    result: {
-                        type: "object",
-                        properties: {
-                            tasks: {
-                                type: "array",
-                                items: {
-                                    $ref: "#/$defs/Item",
-                                    asOpaque: true
-                                },
-                                asOpaque: true
-                            }
-                        },
-                        required: ["tasks"]
-                    }
-                },
-                required: ["result"],
-                $defs: {
-                    Item: {
+    }
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_2 = __cfHelpers.lift<{
+    result: {
+        tasks: {
+            name: string;
+        }[];
+    };
+}, __cfHelpers.JSXElement[]>(({ result }) => {
+    return result.tasks.map((task) => <li>{task.name}</li>);
+}, {
+    type: "object",
+    properties: {
+        result: {
+            type: "object",
+            properties: {
+                tasks: {
+                    type: "array",
+                    items: {
                         type: "object",
                         properties: {
                             name: {
                                 type: "string"
-                            },
-                            done: {
-                                type: "boolean"
                             }
                         },
-                        required: ["name", "done"]
+                        required: ["name"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "array",
-                items: {
+            },
+            required: ["tasks"]
+        }
+    },
+    required: ["result"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        $ref: "#/$defs/JSXElement"
+    },
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
                     $ref: "#/$defs/UIRenderable"
-                },
-                asOpaque: true,
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
+                }, {
+                    type: "object",
+                    properties: {}
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
                 }
-            } as const satisfies __ctHelpers.JSONSchema, { result: {
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
+// FIXTURE: computed-property-access-map
+// Verifies: .map() on a property access of a computed result inside another computed() is NOT transformed to .mapWithPattern()
+//   computed(() => result.tasks.map(fn)) → lift(({ result }) => result.tasks.map(fn))({ result: { tasks: result.key("tasks") } })
+// Context: Inside a lift-applied callback, OpaqueRef values are unwrapped to plain JS,
+//   so `result.tasks` is a plain array. The .map() must remain untransformed.
+//   This is a negative test for reactive .map() detection on property access paths.
+//   Note the captures use result.key("tasks") to extract the needed sub-property.
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
+    const result = __cfLift_1({ items: items }).for("result", true);
+    return {
+        [UI]: (<div>
+        {__cfLift_2({ result: {
                     tasks: result.key("tasks")
-                } }, ({ result }) => {
-                return result.tasks.map((task) => <li>{task.name}</li>);
-            })}
+                } })}
       </div>),
     };
 }, {
@@ -163,7 +175,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["name", "done"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -176,11 +188,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -193,8 +204,11 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2
+});

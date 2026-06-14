@@ -1,4 +1,4 @@
-import { PieceManager } from "@commontools/piece";
+import { PieceManager } from "@commonfabric/piece";
 import {
   Cell,
   type ConsoleHandler,
@@ -8,15 +8,15 @@ import {
   isStream,
   Runtime,
   Stream,
-} from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+} from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import {
   createSession,
   type DID,
   Identity,
   Session,
-} from "@commontools/identity";
+} from "@commonfabric/identity";
 import {
   InitializationData,
   isWorkerIPCRequest,
@@ -102,7 +102,7 @@ async function initialize(
     apiUrl: new URL(toolshedUrl),
     storageManager: StorageManager.open({
       as: identity,
-      address: new URL("/api/storage/memory", toolshedUrl),
+      memoryHost: new URL(toolshedUrl),
     }),
     patternEnvironment: { apiUrl },
     consoleHandler: consoleHandler,
@@ -170,7 +170,7 @@ async function runCharm(data: RunData): Promise<void> {
       console.log(`Loading charm ${pieceId} for the first time`);
       runningCharm = await manager.get(charmsEntryCell, true, {
         type: "object",
-        properties: { bgUpdater: { asStream: true } },
+        properties: { bgUpdater: { asCell: ["stream"] } },
         required: ["bgUpdater"],
       });
 

@@ -1,5 +1,16 @@
-import * as __ctHelpers from "commontools";
-import { Cell, handler, pattern } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { Cell, handler, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // Updated 2025-09-03: String literal unions now generate correct JSON Schema
 // (enum instead of array) due to schema-generator UnionFormatter improvements
 interface UserEvent {
@@ -39,9 +50,13 @@ const userHandler = handler({
         }
     },
     required: ["user", "action"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
+        count: {
+            type: "number",
+            asCell: ["cell"]
+        },
         users: {
             type: "array",
             items: {
@@ -59,19 +74,15 @@ const userHandler = handler({
                 },
                 required: ["id", "name", "email"]
             },
-            asCell: true
+            asCell: ["writeonly"]
         },
         lastAction: {
             type: "string",
-            asCell: true
-        },
-        count: {
-            type: "number",
-            asCell: true
+            asCell: ["writeonly"]
         }
     },
-    required: ["users", "lastAction", "count"]
-} as const satisfies __ctHelpers.JSONSchema, (event, state) => {
+    required: ["count", "users", "lastAction"]
+} as const satisfies __cfHelpers.JSONSchema, (event, state) => {
     if (event.action === "create") {
         state.users.push({
             id: Date.now().toString(),
@@ -99,7 +110,7 @@ const _updateTags = handler({
         }
     },
     required: ["detail"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         tags: {
@@ -107,11 +118,11 @@ const _updateTags = handler({
             items: {
                 type: "string"
             },
-            asCell: true
+            asCell: ["writeonly"]
         }
     },
     required: ["tags"]
-} as const satisfies __ctHelpers.JSONSchema, ({ detail }, state) => {
+} as const satisfies __cfHelpers.JSONSchema, ({ detail }, state) => {
     state.tags.set(detail?.tags ?? []);
 });
 export { userHandler };
@@ -123,16 +134,18 @@ export { userHandler };
 // Context: also tests a second handler (_updateTags) with Cell<string[]>; pattern wraps handler as asStream output
 export default pattern(() => {
     return { userHandler };
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         userHandler: {
-            asStream: true
+            asCell: ["stream"]
         }
     },
     required: ["userHandler"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    _updateTags
+});

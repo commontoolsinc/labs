@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Calendar Viewer
  *
@@ -9,15 +8,14 @@
  *   ./tools/apple-sync.ts calendar
  */
 import {
+  computed,
   Default,
-  derive,
   handler,
-  ifElse,
   NAME,
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Confidential<T> = T;
 
@@ -108,62 +106,45 @@ const toggleCalendar = handler<
 });
 
 export default pattern<{
-  events: Default<Confidential<CalendarEvent[]>, []>;
+  events: Confidential<CalendarEvent[]> | Default<[]>;
 }>(({ events }) => {
-  const hiddenCalendars = Writable.of<string[]>([]);
+  const hiddenCalendars = new Writable<string[]>([]);
 
-  const eventCount = derive(
-    events,
-    (evts: CalendarEvent[]) => evts?.length ?? 0,
-  );
+  const eventCount = events?.length ?? 0;
 
   // Extract unique calendar names for the filter bar
   // Refactored to use filter/map after CT-1102 fix
-  const uniqueCalendars = derive(
-    events,
-    (evts: CalendarEvent[]) =>
-      [
-        ...new Set(
-          (evts || []).filter((evt) => evt?.calendarName).map((evt) =>
-            evt.calendarName
-          ),
+  const uniqueCalendars = computed(() =>
+    [
+      ...new Set(
+        (events || []).filter((evt) => evt?.calendarName).map((evt) =>
+          evt.calendarName
         ),
-      ].sort(),
+      ),
+    ].sort()
   );
 
   // Upcoming events (sorted by start date, filtered by hidden calendars)
-  const upcomingEvents = derive(
-    { events, hiddenCalendars },
-    ({
-      events: evts,
-      hiddenCalendars: hidden,
-    }: {
-      events: CalendarEvent[];
-      hiddenCalendars: string[];
-    }) => {
-      const now = new Date();
-      const hiddenSet = new Set(hidden || []);
-      return [...(evts || [])]
-        .filter((e: CalendarEvent) =>
-          e?.startDate &&
-          new Date(e.startDate) >= now &&
-          !hiddenSet.has(e.calendarName)
-        )
-        .sort((a: CalendarEvent, b: CalendarEvent) =>
-          new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
-        );
-    },
-  );
+  const upcomingEvents = computed(() => {
+    const now = new Date();
+    const hiddenSet = new Set(hiddenCalendars.get() || []);
+    return [...(events || [])]
+      .filter((e: CalendarEvent) =>
+        e?.startDate &&
+        new Date(e.startDate) >= now &&
+        !hiddenSet.has(e.calendarName)
+      )
+      .sort((a: CalendarEvent, b: CalendarEvent) =>
+        new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
+      );
+  });
 
-  const totalUpcoming = derive(
-    upcomingEvents,
-    (evts: CalendarEvent[]) => evts.length,
-  );
+  const totalUpcoming = upcomingEvents.length;
 
   return {
-    [NAME]: derive(eventCount, (count: number) => `Calendar (${count} events)`),
+    [NAME]: `Calendar (${eventCount} events)`,
     [UI]: (
-      <ct-screen
+      <cf-screen
         style={{
           display: "flex",
           flexDirection: "column",
@@ -185,34 +166,26 @@ export default pattern<{
         </div>
 
         {/* Calendar Filter Bar */}
-        {ifElse(
-          derive(eventCount, (c: number) => c > 0),
-          <div
-            style={{
-              padding: "8px 16px",
-              backgroundColor: "#fff",
-              borderBottom: "1px solid #e0e0e0",
-              display: "flex",
-              gap: "8px",
-              flexWrap: "wrap",
-            }}
-          >
-            {derive(
-              { uniqueCalendars, hiddenCalendars },
-              ({
-                uniqueCalendars: calendars,
-                hiddenCalendars: hiddenList,
-              }: {
-                uniqueCalendars: string[];
-                hiddenCalendars: string[];
-              }) =>
-                (calendars || []).map((name: string) => {
-                  const isHidden = (hiddenList || []).includes(name);
+        {eventCount > 0
+          ? (
+            <div
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#fff",
+                borderBottom: "1px solid #e0e0e0",
+                display: "flex",
+                gap: "8px",
+                flexWrap: "wrap",
+              }}
+            >
+              {computed(() =>
+                (uniqueCalendars || []).map((name: string) => {
+                  const isHidden = (hiddenCalendars.get() || []).includes(name);
                   const color = getCalendarColor(name);
                   return (
                     <button
                       type="button"
-                      // Pass the Cell from outer scope, not the destructured value
+                      // Pass the Cell from outer scope so the handler binds the live cell
                       onClick={toggleCalendar({
                         calendarName: name,
                         hiddenCalendars,
@@ -241,56 +214,57 @@ export default pattern<{
                       {name}
                     </button>
                   );
-                }),
-            )}
-          </div>,
-          <></>,
-        )}
+                })
+              )}
+            </div>
+          )
+          : <></>}
 
         {/* Content */}
         <div style={{ flex: 1, overflow: "auto" }}>
-          {ifElse(
-            derive(eventCount, (c: number) => c === 0),
+          {eventCount === 0
             // Empty state
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                height: "100%",
-                color: "#666",
-                padding: "20px",
-                textAlign: "center",
-              }}
-            >
-              <div style={{ fontSize: "48px", marginBottom: "16px" }}>
-                Calendar
-              </div>
+            ? (
               <div
                 style={{
-                  fontSize: "18px",
-                  fontWeight: "bold",
-                  marginBottom: "8px",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  height: "100%",
+                  color: "#666",
+                  padding: "20px",
+                  textAlign: "center",
                 }}
               >
-                No Events Yet
-              </div>
-              <div style={{ fontSize: "14px", maxWidth: "300px" }}>
-                Run the apple-sync CLI to import your calendar events:
-                <pre
+                <div style={{ fontSize: "48px", marginBottom: "16px" }}>
+                  Calendar
+                </div>
+                <div
                   style={{
-                    backgroundColor: "#e0e0e0",
-                    padding: "8px 12px",
-                    borderRadius: "4px",
-                    marginTop: "12px",
-                    fontSize: "12px",
+                    fontSize: "18px",
+                    fontWeight: "bold",
+                    marginBottom: "8px",
                   }}
                 >
+                  No Events Yet
+                </div>
+                <div style={{ fontSize: "14px", maxWidth: "300px" }}>
+                  Run the apple-sync CLI to import your calendar events:
+                  <pre
+                    style={{
+                      backgroundColor: "#e0e0e0",
+                      padding: "8px 12px",
+                      borderRadius: "4px",
+                      marginTop: "12px",
+                      fontSize: "12px",
+                    }}
+                  >
                   ./tools/apple-sync.ts calendar
-                </pre>
+                  </pre>
+                </div>
               </div>
-            </div>,
+            )
             /*
              * Paginated event preview - showing 10 events at a time.
              *
@@ -305,72 +279,77 @@ export default pattern<{
              * The full event data is still available via the `events` output for
              * other patterns to access via linking.
              */
-            <div style={{ padding: "20px" }}>
-              <div
-                style={{
-                  fontSize: "18px",
-                  fontWeight: "bold",
-                  marginBottom: "8px",
-                }}
-              >
-                Upcoming Events ({totalUpcoming} total)
-              </div>
+            : (
+              <div style={{ padding: "20px" }}>
+                <div
+                  style={{
+                    fontSize: "18px",
+                    fontWeight: "bold",
+                    marginBottom: "8px",
+                  }}
+                >
+                  Upcoming Events ({totalUpcoming} total)
+                </div>
 
-              {derive(upcomingEvents, (evts: CalendarEvent[]) => {
-                if (!evts || evts.length === 0) {
+                {computed(() => {
+                  if (!upcomingEvents || upcomingEvents.length === 0) {
+                    return (
+                      <div style={{ color: "#999" }}>No upcoming events</div>
+                    );
+                  }
+
+                  // Show first 10 events (simplified - no pagination)
+                  const displayEvents = upcomingEvents.slice(0, 10);
+
                   return (
-                    <div style={{ color: "#999" }}>No upcoming events</div>
-                  );
-                }
-
-                // Show first 10 events (simplified - no pagination)
-                const displayEvents = evts.slice(0, 10);
-
-                return (
-                  <div>
-                    {displayEvents.map((evt: CalendarEvent, idx: number) => (
-                      <div
-                        key={idx}
-                        style={{
-                          padding: "12px 16px",
-                          backgroundColor: "#fff",
-                          borderBottom: "1px solid #f0f0f0",
-                          display: "flex",
-                          gap: "12px",
-                        }}
-                      >
+                    <div>
+                      {displayEvents.map((evt: CalendarEvent, idx: number) => (
                         <div
+                          key={idx}
                           style={{
-                            width: "4px",
-                            backgroundColor: getCalendarColor(evt.calendarName),
-                            borderRadius: "2px",
-                            flexShrink: 0,
+                            padding: "12px 16px",
+                            backgroundColor: "#fff",
+                            borderBottom: "1px solid #f0f0f0",
+                            display: "flex",
+                            gap: "12px",
                           }}
-                        />
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: "600" }}>{evt.title}</div>
-                          <div style={{ fontSize: "14px", color: "#666" }}>
-                            {getRelativeLabel(evt.startDate)} {evt.isAllDay
-                              ? "(All day)"
-                              : formatTime(evt.startDate)}
+                        >
+                          <div
+                            style={{
+                              width: "4px",
+                              backgroundColor: getCalendarColor(
+                                evt.calendarName,
+                              ),
+                              borderRadius: "2px",
+                              flexShrink: 0,
+                            }}
+                          />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: "600" }}>{evt.title}</div>
+                            <div style={{ fontSize: "14px", color: "#666" }}>
+                              {getRelativeLabel(evt.startDate)} {evt.isAllDay
+                                ? "(All day)"
+                                : formatTime(evt.startDate)}
+                            </div>
+                            {evt.location
+                              ? (
+                                <div
+                                  style={{ fontSize: "13px", color: "#999" }}
+                                >
+                                  {evt.location}
+                                </div>
+                              )
+                              : <></>}
                           </div>
-                          {evt.location
-                            ? (
-                              <div style={{ fontSize: "13px", color: "#999" }}>
-                                {evt.location}
-                              </div>
-                            )
-                            : <></>}
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })}
-            </div>,
-          )}
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
         </div>
-      </ct-screen>
+      </cf-screen>
     ),
     events,
   };

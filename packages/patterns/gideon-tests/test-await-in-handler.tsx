@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: Verify "Never use await in handlers" claim
  *
@@ -38,15 +37,16 @@
  */
 
 import {
+  computed,
   Default,
-  derive,
   fetchData,
   handler,
   NAME,
   pattern,
+  safeDateNow,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Handler WITH await (supposedly blocks UI)
 const testWithAwait = handler<
@@ -89,7 +89,7 @@ const testWithoutAwait = handler<
 
   // Trigger by updating a cell - handler returns IMMEDIATELY
   // The actual async work happens in fetchData in the pattern body
-  state.fetchTrigger.set(Date.now());
+  state.fetchTrigger.set(safeDateNow());
 });
 
 // Simple counter increment to test UI responsiveness
@@ -121,24 +121,23 @@ const resetAll = handler<
 
 interface PatternState {
   // State for await test
-  awaitStatus: Default<string, "Ready">;
-  awaitResult: Default<string, "">;
-  awaitCount: Default<number, 0>;
+  awaitStatus: string | Default<"Ready">;
+  awaitResult: string | Default<"">;
+  awaitCount: number | Default<0>;
 
   // State for reactive/fetchData test
-  fetchTrigger: Default<number, 0>;
-  fetchCount: Default<number, 0>;
+  fetchTrigger: number | Default<0>;
+  fetchCount: number | Default<0>;
 
   // Interactive counter to test responsiveness
-  counter: Default<number, 0>;
+  counter: number | Default<0>;
 }
 
 export default pattern<PatternState>((state) => {
   // Build URL reactively from trigger - uses local /_health endpoint with delay
-  const fetchUrl = derive(
-    state.fetchTrigger,
-    (trigger) => trigger ? `/_health?delay=3000&_=${trigger}` : "",
-  );
+  const fetchUrl = state.fetchTrigger
+    ? `/_health?delay=3000&_=${state.fetchTrigger}`
+    : "";
 
   // fetchData runs in the reactive layer - doesn't block the handler
   const fetchDataResult = fetchData<Record<string, unknown>>({
@@ -146,24 +145,20 @@ export default pattern<PatternState>((state) => {
     mode: "json",
   });
 
-  const fetchStatus = derive(
-    [fetchDataResult.pending, fetchDataResult.error, state.fetchTrigger],
-    ([pending, error, trigger]) => {
-      if (pending) return "Fetching...";
-      if (error) return "Error";
-      if (trigger) return "Completed";
-      return "Ready";
-    },
-  );
+  const fetchStatus = computed(() => {
+    if (fetchDataResult.pending) return "Fetching...";
+    if (fetchDataResult.error) return "Error";
+    if (state.fetchTrigger) return "Completed";
+    return "Ready";
+  });
 
-  const fetchResultText = derive(
-    [fetchDataResult.error, fetchDataResult.result, state.fetchCount],
-    ([error, result, count]) => {
-      if (error) return String(error);
-      if (result) return `Fetched successfully (${count} triggers)`;
-      return "(none)";
-    },
-  );
+  const fetchResultText = computed(() => {
+    if (fetchDataResult.error) return String(fetchDataResult.error);
+    if (fetchDataResult.result) {
+      return `Fetched successfully (${state.fetchCount} triggers)`;
+    }
+    return "(none)";
+  });
 
   return {
     [NAME]: "Test: Await in Handlers",
@@ -177,21 +172,21 @@ export default pattern<PatternState>((state) => {
             Test Buttons (click test, then spam counter)
           </h3>
           <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <ct-button id="test-with-await" onClick={testWithAwait(state)}>
+            <cf-button id="test-with-await" onClick={testWithAwait(state)}>
               WITH await (3s)
-            </ct-button>
-            <ct-button
+            </cf-button>
+            <cf-button
               id="test-without-await"
               onClick={testWithoutAwait(state)}
             >
               WITHOUT await (3s)
-            </ct-button>
-            <ct-button id="increment-counter" onClick={incrementCounter(state)}>
+            </cf-button>
+            <cf-button id="increment-counter" onClick={incrementCounter(state)}>
               Counter: {state.counter}
-            </ct-button>
-            <ct-button id="reset-all" onClick={resetAll(state)}>
+            </cf-button>
+            <cf-button id="reset-all" onClick={resetAll(state)}>
               Reset
-            </ct-button>
+            </cf-button>
           </div>
           <p style="margin: 10px 0 0 0; font-size: 13px; color: #666;">
             Click a test button, then immediately spam the Counter button to

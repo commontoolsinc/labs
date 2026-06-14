@@ -2,7 +2,7 @@ import type { CompilerOptions } from "typescript";
 import { JsxEmit, ModuleKind, ScriptTarget } from "typescript";
 
 export const TARGET_TYPE_LIB = "es2023";
-export const MODULE_KIND = ModuleKind.AMD;
+export const MODULE_KIND = ModuleKind.CommonJS;
 export const TARGET = ScriptTarget.ES2023;
 
 export const getCompilerOptions = (): CompilerOptions => {
@@ -19,9 +19,8 @@ export const getCompilerOptions = (): CompilerOptions => {
      * Module
      */
 
-    // Emitting a concatenated/bundled output requires
-    // a compatible module type (AMD and SystemJS). Using
-    // AMD for ease of writing an inline bundler.
+    // Per-module CommonJS bodies — the inputs the ESM module-record loader
+    // and verifier consume.
     module: MODULE_KIND,
 
     /**
@@ -47,6 +46,14 @@ export const getCompilerOptions = (): CompilerOptions => {
      */
 
     allowJs: true,
+    // Authored `.js` sources emit their compiled body under the SAME name
+    // (`/math.js` in → `/math.js` out). TypeScript vetoes that as an input
+    // overwrite, but compilation runs against `VirtualFs`, which keeps reads
+    // (`fsRead`) and writes (`fsWrite`) in separate stores — the input is never
+    // clobbered. Suppress the check so `allowJs` works on the per-module emit
+    // path. (`compileToModules` still fails loudly when two DIFFERENT sources
+    // collide on one output, e.g. `/a.ts` + `/a.js`.)
+    suppressOutputPathCheck: true,
 
     /**
      * Interop
@@ -62,7 +69,7 @@ export const getCompilerOptions = (): CompilerOptions => {
 
     jsx: JsxEmit.React,
     jsxFactory: "h",
-    jsxFragmentFactory: "h.fragment",
+    jsxFragmentFactory: "__cfHelpers.h.fragment",
     target: TARGET,
     // `lib` should autoapply, but we need to manage default libraries since
     // we are running outside of node. Ensure this lib matches `target`.

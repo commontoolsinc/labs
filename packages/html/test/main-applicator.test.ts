@@ -1,19 +1,30 @@
 /**
  * Tests for the main-thread DOM applicator.
  *
- * Note: Some tests are skipped because they require a real DOM environment
- * (HTMLElement instanceof checks). These would need to be run in a browser
- * or with a DOM library like jsdom/happy-dom.
+ * Note: Some tests are still omitted because the mock document here only
+ * covers the DOM surface the applicator needs in unit tests.
  */
 
-import { assertEquals, assertExists } from "@std/assert";
+import {
+  assertEquals,
+  assertExists,
+  assertNotStrictEquals,
+  assertStrictEquals,
+} from "@std/assert";
 import { createDomApplicator } from "../src/main/applicator.ts";
 import type { DomEventMessage } from "../src/main/events.ts";
 import type { VDomBatch } from "../src/vdom-ops.ts";
+import { $conn, type CellRef } from "@commonfabric/runtime-client";
 
 // Mock RuntimeClient for testing
 const createMockRuntimeClient = () => {
+  const conn = {
+    request: () => Promise.resolve({}),
+    subscribe: () => Promise.resolve(),
+    unsubscribe: () => Promise.resolve(),
+  };
   return {
+    [$conn]: () => conn,
     getConnection: () => ({
       subscribe: () => Promise.resolve(),
       unsubscribe: () => Promise.resolve(),
@@ -37,6 +48,20 @@ function createMockDocument() {
       nodeType: 1, // ELEMENT_NODE
       parentNode: null,
       childNodes,
+      get dataset() {
+        const dataset: Record<string, string> = {};
+        for (const [name, value] of attributes.entries()) {
+          if (!name.startsWith("data-")) {
+            continue;
+          }
+          const key = name.slice(5).replace(
+            /-([a-z])/g,
+            (_, char: string) => char.toUpperCase(),
+          );
+          dataset[key] = value;
+        }
+        return dataset;
+      },
 
       setAttribute(name: string, value: string) {
         attributes.set(name, value);
@@ -193,6 +218,33 @@ Deno.test("DomApplicator - create elements", async (t) => {
     assertEquals((applicator.getNode(2) as any).tagName, "SPAN");
     assertEquals((applicator.getNode(3) as any).textContent, "Hello");
   });
+
+  await t.step("updates text nodes without DOM globals", () => {
+    const doc = createMockDocument();
+    const applicator = createDomApplicator({
+      document: doc,
+      runtimeClient: createMockRuntimeClient(),
+      onEvent: () => {},
+    });
+
+    applicator.applyBatch({
+      batchId: 1,
+      ops: [
+        { op: "create-element", nodeId: 1, tagName: "span" },
+        { op: "create-text", nodeId: 2, text: "0" },
+        { op: "insert-child", parentId: 1, childId: 2, beforeId: null },
+      ],
+    });
+
+    applicator.applyBatch({
+      batchId: 2,
+      ops: [{ op: "update-text", nodeId: 2, text: "1" }],
+    });
+
+    const textNode = applicator.getNode(2) as any;
+    assertExists(textNode);
+    assertEquals(textNode.textContent, "1");
+  });
 });
 
 Deno.test("DomApplicator - child operations", async (t) => {
@@ -327,13 +379,126 @@ Deno.test("DomApplicator - event handling", async (t) => {
 
     // Simulate a click
     const node = applicator.getNode(1) as any;
-    node.dispatchEvent({ type: "click", target: node });
+    node.dispatchEvent({ type: "click", target: node, isTrusted: true });
 
     assertEquals(events.length, 1);
     assertEquals(events[0].type, "dom-event");
     assertEquals(events[0].handlerId, 42);
     assertEquals(events[0].nodeId, 1);
     assertEquals(events[0].event.type, "click");
+    assertEquals(events[0].event.provenance, {
+      origin: "dom",
+      trusted: true,
+    });
+  });
+
+  await t.step("serializes data-ui dataset markers with trusted events", () => {
+    const doc = createMockDocument();
+    const events: DomEventMessage[] = [];
+    const applicator = createDomApplicator({
+      document: doc,
+      runtimeClient: createMockRuntimeClient(),
+      onEvent: (msg) => events.push(msg),
+      setProp: (target, key, value) => {
+        if (
+          key.startsWith("data-") &&
+          typeof target === "object" &&
+          target !== null &&
+          "setAttribute" in target &&
+          typeof target.setAttribute === "function"
+        ) {
+          target.setAttribute(key, String(value));
+          return;
+        }
+        (target as Record<string, unknown>)[key] = value;
+      },
+    });
+
+    applicator.applyBatch({
+      batchId: 1,
+      ops: [
+        { op: "create-element", nodeId: 1, tagName: "button" },
+        {
+          op: "set-attrs",
+          nodeId: 1,
+          attrs: { "data-ui-action": "SubmitDirectCommand" },
+        },
+        { op: "set-event", nodeId: 1, eventType: "click", handlerId: 42 },
+      ],
+    });
+
+    const node = applicator.getNode(1) as any;
+    node.dispatchEvent({ type: "click", target: node, isTrusted: true });
+
+    assertEquals(events[0].event.target?.dataset, {
+      uiAction: "SubmitDirectCommand",
+    });
+  });
+
+  await t.step("attests nearest trusted UI pattern provenance", () => {
+    const doc = createMockDocument();
+    const events: DomEventMessage[] = [];
+    const applicator = createDomApplicator({
+      document: doc,
+      runtimeClient: createMockRuntimeClient(),
+      onEvent: (msg) => events.push(msg),
+      setProp: (target, key, value) => {
+        if (
+          key.startsWith("data-") &&
+          typeof target === "object" &&
+          target !== null &&
+          "setAttribute" in target &&
+          typeof target.setAttribute === "function"
+        ) {
+          target.setAttribute(key, String(value));
+          return;
+        }
+        (target as Record<string, unknown>)[key] = value;
+      },
+    });
+
+    applicator.applyBatch({
+      batchId: 1,
+      ops: [
+        { op: "create-element", nodeId: 1, tagName: "section" },
+        {
+          op: "set-attrs",
+          nodeId: 1,
+          attrs: {
+            "data-ui-pattern": "TrustedDirectCommandSurface",
+            "data-ui-event-integrity": "TrustedDirectCommandSurface",
+          },
+        },
+        { op: "create-element", nodeId: 2, tagName: "button" },
+        {
+          op: "set-attrs",
+          nodeId: 2,
+          attrs: { "data-ui-action": "SubmitDirectCommand" },
+        },
+        {
+          op: "insert-child",
+          parentId: 1,
+          childId: 2,
+          beforeId: null,
+        },
+        { op: "set-event", nodeId: 2, eventType: "click", handlerId: 42 },
+      ],
+    });
+
+    const node = applicator.getNode(2) as any;
+    node.dispatchEvent({ type: "click", target: node, isTrusted: true });
+
+    assertEquals(events[0].event.provenance, {
+      origin: "dom",
+      trusted: true,
+      ui: {
+        pattern: "TrustedDirectCommandSurface",
+        eventIntegrity: ["TrustedDirectCommandSurface"],
+        uiContractDataset: {
+          uiAction: "SubmitDirectCommand",
+        },
+      },
+    });
   });
 
   await t.step("removes event listener", () => {
@@ -393,6 +558,56 @@ Deno.test("DomApplicator - event handling", async (t) => {
     // Should only have one event with the new handler ID
     assertEquals(events.length, 1);
     assertEquals(events[0].handlerId, 2);
+  });
+});
+
+Deno.test("DomApplicator - cell bindings", async (t) => {
+  const cellRef: CellRef = {
+    id: "of:test-cell" as CellRef["id"],
+    space: "did:key:test-space" as CellRef["space"],
+    scope: "space",
+    path: ["value"],
+    schema: { type: "string" },
+  };
+
+  await t.step("does not replace a binding for the same cell ref", () => {
+    const doc = createMockDocument();
+    const applicator = createDomApplicator({
+      document: doc,
+      runtimeClient: createMockRuntimeClient(),
+      onEvent: () => {},
+    });
+
+    applicator.applyBatch({
+      batchId: 1,
+      ops: [
+        { op: "create-element", nodeId: 1, tagName: "cf-cell-link" },
+        { op: "set-binding", nodeId: 1, propName: "cell", cellRef },
+      ],
+    });
+
+    const node = applicator.getNode(1) as any;
+    const firstHandle = node.cell;
+    assertExists(firstHandle);
+
+    applicator.applyBatch({
+      batchId: 2,
+      ops: [{ op: "set-binding", nodeId: 1, propName: "cell", cellRef }],
+    });
+
+    assertStrictEquals(node.cell, firstHandle);
+
+    applicator.applyBatch({
+      batchId: 3,
+      ops: [{
+        op: "set-binding",
+        nodeId: 1,
+        propName: "cell",
+        cellRef: { ...cellRef, schema: { type: "number" } },
+      }],
+    });
+
+    assertNotStrictEquals(node.cell, firstHandle);
   });
 });
 
@@ -557,6 +772,77 @@ Deno.test("DomApplicator - error handling", async (t) => {
     // Second op should still have worked
     assertExists(applicator.getNode(1));
   });
+});
+
+Deno.test("DomApplicator - bindings", async (t) => {
+  await t.step(
+    "requests a custom element update after assigning a CellHandle",
+    async () => {
+      const customElementsDescriptor = Object.getOwnPropertyDescriptor(
+        globalThis,
+        "customElements",
+      );
+      Object.defineProperty(globalThis, "customElements", {
+        configurable: true,
+        value: {
+          whenDefined: () => Promise.resolve(undefined),
+        },
+      });
+
+      const doc = createMockDocument();
+      const applicator = createDomApplicator({
+        document: doc,
+        runtimeClient: createMockRuntimeClient(),
+        onEvent: () => {},
+      });
+
+      applicator.applyBatch({
+        batchId: 1,
+        ops: [{ op: "create-element", nodeId: 1, tagName: "cf-cfc-label" }],
+      });
+
+      const node = applicator.getNode(1) as any;
+      const requested: PropertyKey[] = [];
+      node.localName = "cf-cfc-label";
+      node.requestUpdate = (name?: PropertyKey) => {
+        if (name !== undefined) {
+          requested.push(name);
+        }
+      };
+
+      try {
+        applicator.applyBatch({
+          batchId: 2,
+          ops: [{
+            op: "set-binding",
+            nodeId: 1,
+            propName: "value",
+            cellRef: {
+              space: "did:key:test",
+              scope: "space",
+              id: "of:test",
+              path: [],
+            },
+          }],
+        });
+
+        await Promise.resolve();
+
+        assertEquals(node.value.constructor.name, "CellHandle");
+        assertEquals(requested, ["value"]);
+      } finally {
+        if (customElementsDescriptor) {
+          Object.defineProperty(
+            globalThis,
+            "customElements",
+            customElementsDescriptor,
+          );
+        } else {
+          Reflect.deleteProperty(globalThis, "customElements");
+        }
+      }
+    },
+  );
 });
 
 // Note: The following tests require a real DOM environment because the applicator

@@ -1,29 +1,32 @@
 import { Command } from "@cliffy/command";
 import { resolve } from "@std/path";
 import { expandGlob } from "@std/fs";
+import { cliText } from "../lib/cli-name.ts";
 import { discoverTestFiles, runTests } from "../lib/test-runner.ts";
 
 export const test = new Command()
   .name("test")
   .description("Run pattern tests (.test.tsx files).")
   .example(
-    "ct test ./counter.test.tsx",
+    cliText("cf test ./counter.test.tsx"),
     "Run a single test pattern file.",
   )
   .example(
-    "ct test ./patterns/",
+    cliText("cf test ./patterns/"),
     "Run all .test.tsx files in a directory (recursive).",
   )
   .example(
-    "ct test './*.test.tsx'",
+    cliText("cf test './*.test.tsx'"),
     "Run all test files matching a glob pattern.",
   )
   .example(
-    "ct test ./counter.test.tsx --timeout 10000",
+    cliText("cf test ./counter.test.tsx --timeout 10000"),
     "Run with custom timeout (10 seconds).",
   )
   .example(
-    "ct test ./battleship/pass-and-play/main.test.tsx --root ./battleship",
+    cliText(
+      "cf test ./battleship/pass-and-play/main.test.tsx --root ./battleship",
+    ),
     "Run with custom root for resolving imports from sibling directories.",
   )
   .option(
@@ -43,6 +46,24 @@ export const test = new Command()
     "--stats-threshold <ms:number>",
     "Print logger stats for steps slower than this (ms). 0 = every step. Requires --verbose.",
     { default: 5000 },
+  )
+  .option(
+    "--stats-include <prefixes:string>",
+    "Comma-separated timing categories to always print in verbose stats output (exact or prefix match).",
+  )
+  .option(
+    "--stats-action-limit <count:number>",
+    "Number of per-step scheduler action deltas to print in verbose mode.",
+    { default: 10 },
+  )
+  .option(
+    "--storage-stats",
+    "Print storage-related logger timings and counts after each test file.",
+  )
+  .option(
+    "--storage-stats-limit <count:number>",
+    "Maximum number of storage timing/count entries to print with --storage-stats.",
+    { default: 16 },
   )
   .arguments("<paths...:string>")
   .action(async (options, ...paths) => {
@@ -102,6 +123,12 @@ export const test = new Command()
 
     // Resolve root path if provided
     const root = options.root ? resolve(Deno.cwd(), options.root) : undefined;
+    const statsInclude = options.statsInclude
+      ? String(options.statsInclude)
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)
+      : undefined;
 
     // Run tests
     const { failed } = await runTests(uniqueTestFiles, {
@@ -109,6 +136,10 @@ export const test = new Command()
       verbose: options.verbose,
       root,
       statsThreshold: options.statsThreshold,
+      statsInclude,
+      statsActionLimit: options.statsActionLimit,
+      storageStats: options.storageStats,
+      storageStatsLimit: options.storageStatsLimit,
     });
 
     // Exit with error code if any tests failed

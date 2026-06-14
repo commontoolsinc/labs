@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: Notebook
  *
@@ -20,10 +19,10 @@
  * The test harness sets up defaultPattern so wish("#default") resolves,
  * enabling tests for handlers that push to allPieces.
  *
- * Run: deno task ct test packages/patterns/notes/notebook.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/notes/notebook.test.tsx --verbose
  */
-import { action, computed, pattern } from "commontools";
-import { NAME } from "@commontools/runner";
+import { action, computed, pattern } from "commonfabric";
+import { NAME } from "commonfabric";
 import Notebook from "./notebook.tsx";
 import Note from "./note.tsx";
 
@@ -81,11 +80,11 @@ export default pattern(() => {
   // ==========================================================================
 
   const action_rename_notebook = action(() => {
-    notebook.setTitle.send({ newTitle: "Renamed Notebook" });
+    notebook.setTitle.send("Renamed Notebook");
   });
 
   const action_rename_again = action(() => {
-    notebook.setTitle.send({ newTitle: "Final Name" });
+    notebook.setTitle.send("Final Name");
   });
 
   const action_create_note_via_stream = action(() => {

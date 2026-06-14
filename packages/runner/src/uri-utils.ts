@@ -1,17 +1,17 @@
-import { refer } from "@commontools/memory/reference";
-import { isRecord } from "@commontools/utils/types";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { isRecord } from "@commonfabric/utils/types";
 import type { URI } from "./sigil-types.ts";
 
 /**
  * Convert an entity ID to URI format with "of:" prefix
  */
 export function toURI(value: unknown): URI {
-  if (isRecord(value)) {
-    // Converts EntityId to JSON
-    const parsed = JSON.parse(JSON.stringify(value)) as { "/": string };
-
-    // Handle EntityId object
-    if (typeof parsed["/"] === "string") return `of:${parsed["/"]}`;
+  if (value instanceof FabricHash) {
+    return `of:${value}`;
+  } else if (isRecord(value) && typeof value["/"] === "string") {
+    return `of:${value["/"]}`;
   } else if (typeof value === "string") {
     // Already has prefix with colon
     if (value.includes(":")) {
@@ -27,7 +27,9 @@ export function toURI(value: unknown): URI {
     }
   }
 
-  throw new Error(`Cannot convert value to URI: ${JSON.stringify(value)}`);
+  throw new Error(
+    `Cannot convert value to URI: ${toCompactDebugString(value)}`,
+  );
 }
 
 /**
@@ -39,7 +41,7 @@ export function fromURI(uri: URI | string): string {
   } else if (uri.startsWith("of:")) {
     return uri.slice(3);
   } else if (uri.startsWith("data:")) {
-    return refer(uri).toString();
+    return hashOf(uri).toString();
   } else {
     // TODO(seefeld): Remove this once we want to support any URI
     throw new Error(`Invalid URI: ${uri}`);

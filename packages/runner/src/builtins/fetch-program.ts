@@ -2,10 +2,15 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { JSONSchema } from "../builder/types.ts";
-import { HttpProgramResolver } from "@commontools/js-compiler";
-import { resolveProgram, TARGET } from "@commontools/js-compiler/typescript";
-import { computeInputHash } from "./fetch-utils.ts";
+import type { CellScope } from "../builder/types.ts";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { HttpProgramResolver } from "@commonfabric/js-compiler";
+import { resolveProgram, TARGET } from "@commonfabric/js-compiler/typescript";
+import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { computeInputHashFromValue } from "./fetch-utils.ts";
+import { setPatternCell, setResultCell } from "../result-utils.ts";
+import { scopedCell } from "./scope-policy.ts";
 
 const PROGRAM_REQUEST_TIMEOUT = 1000 * 10; // 10 seconds for program resolution
 
@@ -27,63 +32,82 @@ interface FetchCacheEntry {
   state: FetchState;
 }
 
+const fetchProgramInputSchema = internSchema(
+  {
+    type: "object",
+    properties: {
+      url: { type: "string" },
+    },
+  },
+);
+
+function snapshotFetchProgramInputs(
+  cell: Cell<{ url?: string; result?: ProgramResult }>,
+): { url?: string } {
+  const snapshot = cell.asSchema(fetchProgramInputSchema).get() ??
+    ({} as { url?: string });
+  return createFrozenRequestSnapshot({ url: snapshot.url });
+}
+
 // Full schema for cache structure to ensure proper validation when reading back
 // from storage. Without this, nested arrays may have undefined elements due to
 // incomplete schema-based transformation.
-const cacheSchema = {
-  type: "object",
-  default: {},
-  additionalProperties: {
+const cacheSchema = internSchema(
+  {
     type: "object",
-    properties: {
-      inputHash: { type: "string" },
-      state: {
-        anyOf: [
-          { type: "object", properties: { type: { const: "idle" } } },
-          {
-            type: "object",
-            properties: {
-              type: { const: "fetching" },
-              requestId: { type: "string" },
-              startTime: { type: "number" },
-            },
-          },
-          {
-            type: "object",
-            properties: {
-              type: { const: "success" },
-              data: {
-                type: "object",
-                properties: {
-                  files: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        name: { type: "string" },
-                        contents: { type: "string" },
-                      },
-                      required: ["name", "contents"],
-                    },
-                  },
-                  main: { type: "string" },
-                },
-                required: ["files", "main"],
+    default: {},
+    additionalProperties: {
+      type: "object",
+      properties: {
+        inputHash: { type: "string" },
+        state: {
+          anyOf: [
+            { type: "object", properties: { type: { const: "idle" } } },
+            {
+              type: "object",
+              properties: {
+                type: { const: "fetching" },
+                requestId: { type: "string" },
+                startTime: { type: "number" },
               },
             },
-          },
-          {
-            type: "object",
-            properties: {
-              type: { const: "error" },
-              message: { type: "string" },
+            {
+              type: "object",
+              properties: {
+                type: { const: "success" },
+                data: {
+                  type: "object",
+                  properties: {
+                    files: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          name: { type: "string" },
+                          contents: { type: "string" },
+                        },
+                        required: ["name", "contents"],
+                      },
+                    },
+                    main: { type: "string" },
+                  },
+                  required: ["files", "main"],
+                },
+              },
             },
-          },
-        ],
+            {
+              type: "object",
+              properties: {
+                type: { const: "error" },
+                message: { type: "string" },
+              },
+            },
+          ],
+        },
       },
     },
   },
-} as const satisfies JSONSchema;
+);
 
 /**
  * Fetch and resolve a program from a URL.
@@ -107,6 +131,7 @@ export function fetchProgram(
   let result: Cell<ProgramResult | undefined>;
   let error: Cell<any | undefined>;
   let cache: Cell<Record<string, FetchCacheEntry>>;
+  let cellScope: CellScope | undefined;
   let myRequestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
 
@@ -141,6 +166,7 @@ export function fetchProgram(
         cache.withTx(tx).update(updates);
       }
 
+      runtime.prepareTxForCommit(tx);
       tx.commit();
     } catch (_) {
       // Ignore errors during cleanup - the runtime might be shutting down
@@ -149,15 +175,20 @@ export function fetchProgram(
   });
 
   return (tx: IExtendedStorageTransaction) => {
-    if (!cellsInitialized) {
-      pending = runtime.getCell(
+    tx.resetNarrowestReadScope();
+    const requestSnapshot = snapshotFetchProgramInputs(inputsCell.withTx(tx));
+    const outputScope = tx.getNarrowestReadScope();
+
+    if (!cellsInitialized || cellScope !== outputScope) {
+      const basePending = runtime.getCell<boolean>(
         parentCell.space,
         { fetchProgram: { pending: cause } },
         undefined,
         tx,
       );
+      pending = scopedCell(runtime, tx, basePending, outputScope);
 
-      result = runtime.getCell<ProgramResult | undefined>(
+      const baseResult = runtime.getCell<ProgramResult | undefined>(
         parentCell.space,
         {
           fetchProgram: { result: cause },
@@ -165,8 +196,9 @@ export function fetchProgram(
         undefined,
         tx,
       );
+      result = scopedCell(runtime, tx, baseResult, outputScope);
 
-      error = runtime.getCell<any | undefined>(
+      const baseError = runtime.getCell<any | undefined>(
         parentCell.space,
         {
           fetchProgram: { error: cause },
@@ -174,18 +206,32 @@ export function fetchProgram(
         undefined,
         tx,
       );
+      error = scopedCell(runtime, tx, baseError, outputScope);
 
-      cache = runtime.getCell(
+      const baseCache = runtime.getCell(
         parentCell.space,
         { fetchProgram: { cache: cause } },
         cacheSchema,
         tx,
       ) as Cell<Record<string, FetchCacheEntry>>;
+      cache = scopedCell(
+        runtime,
+        tx,
+        baseCache,
+        outputScope,
+      ) as Cell<Record<string, FetchCacheEntry>>;
 
-      pending.setSourceCell(parentCell);
-      result.setSourceCell(parentCell);
-      error.setSourceCell(parentCell);
-      cache.setSourceCell(parentCell);
+      // Link the new result cells to the parent result cell
+      setResultCell(pending, parentCell);
+      setResultCell(result, parentCell);
+      setResultCell(error, parentCell);
+      setResultCell(cache, parentCell);
+      // Link the new result cells to the pattern cell too
+      const patternCellPtr = parentCell.key("pattern");
+      setPatternCell(pending, patternCellPtr);
+      setPatternCell(result, patternCellPtr);
+      setPatternCell(error, patternCellPtr);
+      setPatternCell(cache, patternCellPtr);
 
       // Kick off sync in the background
       pending.sync();
@@ -194,10 +240,11 @@ export function fetchProgram(
       cache.sync();
 
       cellsInitialized = true;
+      cellScope = outputScope;
     }
 
-    const { url } = inputsCell.getAsQueryResult([], tx);
-    const inputHash = computeInputHash(tx, inputsCell);
+    const { url } = requestSnapshot;
+    const inputHash = computeInputHashFromValue(requestSnapshot);
 
     if (!url) {
       // When URL is empty, clear outputs
@@ -216,7 +263,7 @@ export function fetchProgram(
     // State machine transitions
     if (state.type === "idle") {
       // Try to transition to fetching
-      const requestId = crypto.randomUUID();
+      const requestId = inputHash;
       cache.withTx(tx).update({
         [inputHash]: {
           inputHash,
@@ -224,16 +271,25 @@ export function fetchProgram(
         },
       });
 
-      // Start fetch asynchronously
-      myRequestId = requestId;
-      abortController = new AbortController();
-      startFetch(
-        runtime,
-        cache,
-        inputHash,
-        url,
-        requestId,
-        abortController.signal,
+      enqueueSinkRequestPostCommitEffect(
+        tx,
+        "fetchProgram",
+        `fetchProgram:${requestId}`,
+        requestSnapshot,
+        "fetchProgram-start",
+        () => {
+          // Start fetch asynchronously only after the transaction commits.
+          myRequestId = requestId;
+          abortController = new AbortController();
+          startFetch(
+            runtime,
+            cache,
+            inputHash,
+            url,
+            requestId,
+            abortController.signal,
+          );
+        },
       );
     } else if (state.type === "fetching") {
       // Check for timeout

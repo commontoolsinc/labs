@@ -1,13 +1,18 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { ALL_PIECES_ID } from "../src/builtins/well-known.ts";
 import { NAME, UI } from "../src/builder/types.ts";
 import { parseWishTarget, tagMatchesHashtag } from "../src/builtins/wish.ts";
+import {
+  getPatternEnvironment,
+  setPatternEnvironment,
+} from "../src/builder/env.ts";
 
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
@@ -16,8 +21,8 @@ describe("wish built-in", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: ReturnType<Runtime["edit"]>;
-  let wish: ReturnType<typeof createBuilder>["commontools"]["wish"];
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+  let wish: ReturnType<typeof createBuilder>["commonfabric"]["wish"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -28,8 +33,8 @@ describe("wish built-in", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
-    ({ wish, pattern } = commontools);
+    const { commonfabric } = createTrustedBuilder(runtime);
+    ({ wish, pattern } = commonfabric);
   });
 
   afterEach(async () => {
@@ -452,6 +457,7 @@ describe("wish built-in", () => {
       await tx.commit();
       tx = runtime.edit();
 
+      await runtime.idle();
       await result.pull();
 
       expect(result.key("allPieces").get()?.result).toEqual(piecesData);
@@ -505,6 +511,7 @@ describe("wish built-in", () => {
       await tx.commit();
       tx = runtime.edit();
 
+      await runtime.idle();
       await result.pull();
 
       expect(result.key("firstTitle").get()?.result).toEqual("First Title");
@@ -557,6 +564,7 @@ describe("wish built-in", () => {
       await tx.commit();
       tx = runtime.edit();
 
+      await runtime.idle();
       await result.pull();
 
       expect(result.key("firstTitle").get()?.result).toEqual("First Title");
@@ -588,6 +596,7 @@ describe("wish built-in", () => {
       await tx.commit();
       tx = runtime.edit();
 
+      await runtime.idle();
       await result.pull();
 
       expect(result.key("spaceResult").get()?.result).toEqual(spaceData);
@@ -708,7 +717,7 @@ describe("wish built-in", () => {
       expect(missingResult?.error).toMatch(/no query/);
     });
 
-    it("returns cell UI or ct-cell-link fallback on success", async () => {
+    it("returns cell UI or cf-cell-link fallback on success", async () => {
       const spaceCell = runtime.getCell(space, space).withTx(tx);
       const spaceData = { testField: "space cell value" };
       spaceCell.set(spaceData);
@@ -743,10 +752,10 @@ describe("wish built-in", () => {
       expect(wishResult?.error).toBeUndefined();
       expect(wishResult?.result).toEqual(spaceData);
 
-      // Plain data has no [UI], so falls back to ct-cell-link
+      // Plain data has no [UI], so falls back to cf-cell-link
       const ui = wishResult?.[UI] as { type: string; name: string; props: any };
       expect(ui?.type).toEqual("vnode");
-      expect(ui?.name).toEqual("ct-cell-link");
+      expect(ui?.name).toEqual("cf-cell-link");
       expect(ui?.props?.$cell).toBeDefined();
     });
 
@@ -847,8 +856,8 @@ describe("wish built-in", () => {
     let storageManager: ReturnType<typeof StorageManager.emulate>;
     let runtime: Runtime;
     let tx: ReturnType<Runtime["edit"]>;
-    let wish: ReturnType<typeof createBuilder>["commontools"]["wish"];
-    let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+    let wish: ReturnType<typeof createBuilder>["commonfabric"]["wish"];
+    let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
 
     beforeEach(async () => {
       userIdentity = await Identity.fromPassphrase("scope-test-user");
@@ -860,8 +869,8 @@ describe("wish built-in", () => {
       });
       tx = runtime.edit();
 
-      const { commontools } = createBuilder();
-      ({ wish, pattern } = commontools);
+      const { commonfabric } = createTrustedBuilder(runtime);
+      ({ wish, pattern } = commonfabric);
     });
 
     afterEach(async () => {
@@ -1582,6 +1591,7 @@ describe("wish built-in", () => {
         (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
         await tx.commit();
+        await runtime.storageManager.synced();
         await runtime.idle();
         tx = runtime.edit();
 
@@ -1620,6 +1630,7 @@ describe("wish built-in", () => {
         (otherSpaceCell as any).key("defaultPattern").set(otherDefaultPattern);
 
         await tx.commit();
+        await runtime.storageManager.synced();
         await runtime.idle();
         tx = runtime.edit();
 
@@ -1643,6 +1654,9 @@ describe("wish built-in", () => {
         );
         const result = runtime.run(tx, wishPattern, {}, resultCell);
         await tx.commit();
+        await runtime.idle();
+        await runtime.storageManager.synced();
+        await runtime.idle();
         tx = runtime.edit();
 
         await result.pull();
@@ -1681,6 +1695,7 @@ describe("wish built-in", () => {
         );
 
         await tx.commit();
+        await runtime.storageManager.synced();
         await runtime.idle();
         tx = runtime.edit();
 
@@ -1719,6 +1734,7 @@ describe("wish built-in", () => {
         (otherSpaceCell as any).key("defaultPattern").set(otherDefaultPattern);
 
         await tx.commit();
+        await runtime.storageManager.synced();
         await runtime.idle();
         tx = runtime.edit();
 
@@ -1742,6 +1758,9 @@ describe("wish built-in", () => {
         );
         const result = runtime.run(tx, wishPattern, {}, resultCell);
         await tx.commit();
+        await runtime.idle();
+        await runtime.storageManager.synced();
+        await runtime.idle();
         tx = runtime.edit();
 
         await result.pull();
@@ -2058,7 +2077,7 @@ describe("wish built-in", () => {
           {
             name: "/main.tsx",
             contents: [
-              "import { pattern, wish } from 'commontools';",
+              "import { pattern, wish } from 'commonfabric';",
               "export default pattern<{}>(() => {",
               "  const spaceResult = wish({ query: '/' });",
               "  return { spaceResult };",
@@ -2113,7 +2132,7 @@ describe("wish built-in", () => {
           {
             name: "/main.tsx",
             contents: [
-              "import { pattern, wish } from 'commontools';",
+              "import { pattern, wish } from 'commonfabric';",
               "export default pattern<{}>(() => {",
               "  const deepValue = wish({ query: '/', path: ['nested', 'deep', 'value'] });",
               "  return { deepValue };",
@@ -2158,8 +2177,8 @@ describe("wish built-in", () => {
     let storageManager: ReturnType<typeof StorageManager.emulate>;
     let runtime: Runtime;
     let tx: ReturnType<Runtime["edit"]>;
-    let wish: ReturnType<typeof createBuilder>["commontools"]["wish"];
-    let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+    let wish: ReturnType<typeof createBuilder>["commonfabric"]["wish"];
+    let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
 
     beforeEach(async () => {
       userIdentity = await Identity.fromPassphrase("user-home-space");
@@ -2173,8 +2192,8 @@ describe("wish built-in", () => {
       });
       tx = runtime.edit();
 
-      const { commontools } = createBuilder();
-      ({ wish, pattern } = commontools);
+      const { commonfabric } = createTrustedBuilder(runtime);
+      ({ wish, pattern } = commonfabric);
     });
 
     afterEach(async () => {
@@ -2233,6 +2252,554 @@ describe("wish built-in", () => {
       expect(favorites).toBeDefined();
       expect(Array.isArray(favorites)).toBe(true);
       expect((favorites as any[])[0].tag).toEqual("test favorite");
+    });
+
+    it("resolves well-known profile targets from the home default profile link", async () => {
+      const profileSpaceDid = (await Identity.fromPassphrase(
+        "wish-profile-space",
+      )).did();
+      const profileSpaceCell = runtime.getSpaceCell(
+        profileSpaceDid,
+        undefined,
+        tx,
+      );
+      const profileDefaultCell = runtime.getCell(
+        profileSpaceDid,
+        "profile-default",
+        undefined,
+        tx,
+      );
+      profileDefaultCell.set({
+        name: "Ada Lovelace",
+        initialNameApplied: "Ada Lovelace",
+        avatar: "ada.png",
+        elements: [],
+      });
+      profileSpaceCell.key("defaultPattern").set(profileDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-link",
+        undefined,
+        tx,
+      );
+      homeDefaultCell.key("profiles").set([profileDefaultCell]);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => {
+        return {
+          profile: wish({ query: "#profile" }),
+          profileName: wish({ query: "#profileName" }),
+          profileAvatar: wish({ query: "#profileAvatar" }),
+          profileSpace: wish({ query: "#profileSpace" }),
+        };
+      });
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-profile-targets-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      expect(result.key("profile").get()?.result?.name).toBe("Ada Lovelace");
+      expect(result.key("profileName").get()?.result).toBe("Ada Lovelace");
+      expect(result.key("profileAvatar").get()?.result).toBe("ada.png");
+      expect(result.key("profileSpace").get()?.result?.defaultPattern?.name)
+        .toBe("Ada Lovelace");
+    });
+
+    it("#profileDefault is not a well-known profile target", async () => {
+      const profileSpaceDid = (await Identity.fromPassphrase(
+        "wish-profile-default-removed-space",
+      )).did();
+      const profileDefaultCell = runtime.getCell(
+        profileSpaceDid,
+        "profile-default-removed",
+        undefined,
+        tx,
+      );
+      profileDefaultCell.set({
+        name: "Ada Lovelace",
+        initialNameApplied: "Ada Lovelace",
+        avatar: "ada.png",
+        elements: [],
+      });
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-default-removed",
+        undefined,
+        tx,
+      );
+      homeDefaultCell.key("profiles").set([profileDefaultCell]);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        profileDefault: wish({ query: "#profileDefault" }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-profile-default-removed-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      expect(result.key("profileDefault").get()?.result).toBeUndefined();
+      expect(String(result.key("profileDefault").get()?.error)).toContain(
+        "#profiledefault",
+      );
+    });
+
+    it("renders #profile wish UI as a link when the profile exists", async () => {
+      const profileSpaceDid = (await Identity.fromPassphrase(
+        "wish-profile-ui-space",
+      )).did();
+      const profileDefaultCell = runtime.getCell(
+        profileSpaceDid,
+        "profile-ui-default",
+        undefined,
+        tx,
+      );
+      profileDefaultCell.set({
+        name: "Ada Lovelace",
+        initialNameApplied: "Ada Lovelace",
+        avatar: "ada.png",
+        elements: [],
+      });
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-ui-link",
+        undefined,
+        tx,
+      );
+      homeDefaultCell.key("profiles").set([profileDefaultCell]);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        profile: wish({ query: "#profile" }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-profile-ui-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      const ui = result.key("profile").key(UI).get() as any;
+      expect(ui?.name).toBe("cf-cell-link");
+      expect(
+        result.key("profile").key(UI).key("props").key("$cell")
+          .resolveAsCell()
+          .get()?.name,
+      ).toBe("Ada Lovelace");
+    });
+
+    it("renders #profile wish UI as a create-profile input when the profile is missing", async () => {
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-create-ui",
+        undefined,
+        tx,
+      );
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        profile: wish({ query: "#profile" }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-missing-profile-ui-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      const state = result.key("profile").get();
+      const ui = result.key("profile").key(UI).get() as any;
+      expect(state?.result).toBeUndefined();
+      expect(String(state?.error)).toContain("profile");
+      expect(ui?.name).toBe("cf-render");
+      expect(ui?.props?.["data-profile-create-ui"]).toBe("wish");
+      expect(
+        result.key("profile").key(UI).key("props").key("$cell")
+          .resolveAsCell()
+          .getRaw(),
+      ).toBeUndefined();
+    });
+
+    it("fetches the profile-create pattern from the pattern environment apiUrl set after module load", async () => {
+      // Regression test: the sidecar pattern URLs (profile-create / picker /
+      // suggestion) must be resolved when the fetch happens, not at module
+      // import. In the browser worker, wish.ts is imported before the runtime
+      // calls setPatternEnvironment with the real API URL; a module-load-time
+      // const captures the default (the worker's own origin, i.e. the frontend
+      // server), whose SPA fallback serves index.html instead of the pattern.
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-create-fetch-url",
+        undefined,
+        tx,
+      );
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const recordedUrls: string[] = [];
+      const originalFetch = globalThis.fetch;
+      const originalEnvironment = getPatternEnvironment();
+      setPatternEnvironment({ apiUrl: new URL("https://pattern-env.test/") });
+      globalThis.fetch = ((input: Request | URL | string) => {
+        recordedUrls.push(
+          input instanceof Request ? input.url : String(input),
+        );
+        return Promise.resolve(new Response("not found", { status: 404 }));
+      }) as typeof fetch;
+
+      try {
+        const wishPattern = pattern(() => ({
+          profile: wish({ query: "#profile" }),
+        }));
+        const resultCell = runtime.getCell<Record<string, any>>(
+          patternSpace.did(),
+          "wish-profile-create-fetch-url-result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
+        await tx.commit();
+        tx = runtime.edit();
+
+        await result.pull();
+
+        // The missing-profile UI kicks off a deferred profile-create fetch.
+        const expectedUrl =
+          "https://pattern-env.test/api/patterns/system/profile-create.tsx";
+        const deadline = Date.now() + 5_000;
+        while (
+          !recordedUrls.includes(expectedUrl) && Date.now() < deadline
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(recordedUrls).toContain(expectedUrl);
+      } finally {
+        globalThis.fetch = originalFetch;
+        setPatternEnvironment(originalEnvironment);
+        await runtime.idle();
+      }
+    });
+
+    it("searches home default profile elements for hashtag wishes with profile scope", async () => {
+      const profileSpaceDid = (await Identity.fromPassphrase(
+        "wish-profile-hashtag-space",
+      )).did();
+      const profileDefaultCell = runtime.getCell(
+        profileSpaceDid,
+        "profile-default-hashtag",
+        undefined,
+        tx,
+      );
+      const profileCard = runtime.getCell(
+        profileSpaceDid,
+        "profile-card",
+        undefined,
+        tx,
+      );
+      profileCard.set({ title: "Profile Card", kind: "card" });
+      profileDefaultCell.set({
+        name: "Ada",
+        initialNameApplied: "Ada",
+        avatar: "",
+        elements: [{
+          cell: profileCard,
+          tag: "#profile-card",
+          userTags: ["person"],
+          title: "Profile Card",
+        }],
+      });
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-hashtag-link",
+        undefined,
+        tx,
+      );
+      homeDefaultCell.key("profiles").set([profileDefaultCell]);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        byUserTag: wish({ query: "#person", scope: ["profile"] }),
+        byTag: wish({ query: "#profile-card", scope: ["profile"] }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-profile-hashtag-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      expect(result.key("byUserTag").get()?.result?.title).toBe(
+        "Profile Card",
+      );
+      expect(result.key("byTag").get()?.result?.kind).toBe("card");
+    });
+
+    it("resolves headless #profile to the default profile (ordered first)", async () => {
+      // Both profiles live in one (non-home) space so the home write opens a
+      // single cross-space writer; the real create flow appends one space per
+      // transaction.
+      const profileSpaceDid = (await Identity.fromPassphrase(
+        "wish-multi-profile-space",
+      )).did();
+      const p1 = runtime.getCell(
+        profileSpaceDid,
+        "multi-profile-1",
+        undefined,
+        tx,
+      );
+      p1.set({
+        name: "Ada",
+        initialNameApplied: "Ada",
+        avatar: "ada.png",
+        elements: [],
+      });
+      const p2 = runtime.getCell(
+        profileSpaceDid,
+        "multi-profile-2",
+        undefined,
+        tx,
+      );
+      p2.set({
+        name: "Grace",
+        initialNameApplied: "Grace",
+        avatar: "grace.png",
+        elements: [],
+      });
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-multi-profile-default-link",
+        undefined,
+        tx,
+      );
+      // Two profiles; the default is the *second* one — it must still resolve
+      // first for headless callers.
+      homeDefaultCell.key("profiles").set([p1, p2]);
+      homeDefaultCell.key("defaultProfile").set(p2);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        profile: wish({ query: "#profile", headless: true }),
+        profileName: wish({ query: "#profileName" }),
+        profileAvatar: wish({ query: "#profileAvatar" }),
+      }));
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-multi-profile-default-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+      await result.pull();
+
+      expect(result.key("profile").get()?.result?.name).toBe("Grace");
+      expect(result.key("profileName").get()?.result).toBe("Grace");
+      expect(result.key("profileAvatar").get()?.result).toBe("grace.png");
+    });
+
+    it("orders headless #profile by MRU when no default is set", async () => {
+      const profileSpaceDid = (await Identity.fromPassphrase(
+        "wish-mru-profile-space",
+      )).did();
+      const p1 = runtime.getCell(
+        profileSpaceDid,
+        "mru-profile-1",
+        undefined,
+        tx,
+      );
+      p1.set({
+        name: "Ada",
+        initialNameApplied: "Ada",
+        avatar: "",
+        elements: [],
+      });
+      const p2 = runtime.getCell(
+        profileSpaceDid,
+        "mru-profile-2",
+        undefined,
+        tx,
+      );
+      p2.set({
+        name: "Grace",
+        initialNameApplied: "Grace",
+        avatar: "",
+        elements: [],
+      });
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-mru-profile-link",
+        undefined,
+        tx,
+      );
+      // No default set; MRU lists p2 first, so p2 must resolve first.
+      homeDefaultCell.key("profiles").set([p1, p2]);
+      homeDefaultCell.key("mru").set([p2]);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        profile: wish({ query: "#profile", headless: true }),
+      }));
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-mru-profile-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+      await result.pull();
+
+      expect(result.key("profile").get()?.result?.name).toBe("Grace");
+    });
+
+    it("does not parse profile scope as an arbitrary DID", async () => {
+      const wishPattern = pattern(() => ({
+        missing: wish({ query: "#missing", scope: ["profile"] }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-profile-scope-reserved-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      const state = result.key("missing").get();
+      expect(state?.result).toBeUndefined();
+      expect(String(state?.error)).toContain("profile");
+      expect(String(state?.error)).not.toContain("did");
+    });
+
+    it("returns an error state instead of throwing when profile space is missing", async () => {
+      const wishPattern = pattern(() => ({
+        profileName: wish({ query: "#profileName" }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-missing-profile-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      const state = result.key("profileName").get();
+      expect(state?.result).toBeUndefined();
+      expect(String(state?.error)).toContain("profile");
     });
 
     it("resolves #default from pattern space, not home space", async () => {
@@ -2364,7 +2931,7 @@ describe("wish built-in", () => {
 
     it("resolves hashtag using computed query (GoogleAuthManager pattern)", async () => {
       // This test mimics GoogleAuthManager which uses computed() for the wish query
-      const { commontools: { computed } } = createBuilder();
+      const { commonfabric: { computed } } = createTrustedBuilder(runtime);
 
       // Setup: Favorites with #googleAuth tag in home space
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
@@ -2488,15 +3055,12 @@ describe("wish built-in", () => {
     });
 
     it("starts piece automatically when accessed via cross-space wish", async () => {
-      // Setup 1: Create a simple counter pattern/piece
+      // Setup 1: Create a simple piece. The actual returned shape doesn't
+      // matter for this test — we only care that the piece can be started
+      // and that its result is reachable through a cross-space wish.
       const counterPattern = pattern<{ count: number }>(() => {
         const count = 0;
-        return {
-          count,
-          increment: () => {
-            return count + 1;
-          },
-        };
+        return { count };
       });
 
       // Setup 2: Store the piece in home space
@@ -2551,10 +3115,9 @@ describe("wish built-in", () => {
       expect(pieceData).toBeDefined();
       expect(typeof pieceData).toBe("object");
 
-      // The piece should be running and have its state accessible
-      // Note: This test may need adjustment based on actual piece startup behavior
+      // The piece should be running and have its state accessible.
       if (typeof pieceData === "object" && pieceData !== null) {
-        expect("count" in pieceData || "increment" in pieceData).toBe(true);
+        expect("count" in pieceData).toBe(true);
       }
     });
   });

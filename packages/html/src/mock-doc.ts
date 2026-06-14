@@ -7,6 +7,20 @@ import * as domserializer from "dom-serializer";
 import { RenderOptions } from "./render.ts";
 import { styleObjectToCssString } from "./render-utils.ts";
 
+const eventListeners = new WeakMap<
+  object,
+  Map<string, Array<(event: unknown) => void>>
+>();
+
+function getNodeEventListeners(node: object) {
+  let listeners = eventListeners.get(node);
+  if (!listeners) {
+    listeners = new Map<string, Array<(event: unknown) => void>>();
+    eventListeners.set(node, listeners);
+  }
+  return listeners;
+}
+
 function renderOptionsFromDoc(document: globalThis.Document): RenderOptions {
   return {
     document,
@@ -182,6 +196,35 @@ export class MockDoc {
           return dataset;
         },
       },
+      addEventListener: {
+        value(type: string, listener: (event: unknown) => void) {
+          const listeners = getNodeEventListeners(this as object);
+          const existing = listeners.get(type) ?? [];
+          existing.push(listener);
+          listeners.set(type, existing);
+        },
+      },
+      removeEventListener: {
+        value(type: string, listener: (event: unknown) => void) {
+          const listeners = getNodeEventListeners(this as object).get(type);
+          if (!listeners) return;
+          const index = listeners.indexOf(listener);
+          if (index >= 0) {
+            listeners.splice(index, 1);
+          }
+        },
+      },
+      dispatchEvent: {
+        value(event: { type?: string }) {
+          if (!event?.type) return;
+          const listeners = getNodeEventListeners(this as object).get(
+            event.type,
+          ) ?? [];
+          for (const listener of [...listeners]) {
+            listener(event);
+          }
+        },
+      },
     };
 
     // Extend `Document` with element creation methods
@@ -215,6 +258,26 @@ export class MockDoc {
 
     if (!("remove" in domhandler.Node.prototype)) {
       Object.defineProperties(domhandler.Node.prototype, nodeExt);
+    }
+    if (!("textContent" in domhandler.Text.prototype)) {
+      Object.defineProperties(domhandler.Text.prototype, {
+        textContent: {
+          get() {
+            return (this as domhandler.Text).data;
+          },
+          set(value: string) {
+            (this as domhandler.Text).data = value;
+          },
+        },
+        nodeValue: {
+          get() {
+            return (this as domhandler.Text).data;
+          },
+          set(value: string) {
+            (this as domhandler.Text).data = value;
+          },
+        },
+      });
     }
     if (!("getElementsByTagName" in domhandler.NodeWithChildren.prototype)) {
       Object.defineProperties(

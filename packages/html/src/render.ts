@@ -8,7 +8,7 @@ import {
   UI,
   useCancelGroup,
   type VNode,
-} from "@commontools/runtime-client";
+} from "@commonfabric/runtime-client";
 
 import {
   cleanEventProp,
@@ -26,7 +26,7 @@ import {
   stringifyText,
   styleObjectToCssString,
 } from "./render-utils.ts";
-import { rendererVDOMSchema } from "@commontools/runner/schemas";
+import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { VDomRenderer } from "./main/renderer.ts";
 //import { animate } from "./debug-element.ts";
 
@@ -251,7 +251,7 @@ function renderNode(
   }
 
   if (isCellHandle(node)) {
-    const wrapper = doc.createElement("ct-internal-fill-element");
+    const wrapper = doc.createElement("cf-internal-fill-element");
     addCancel(
       effect(node as CellHandle<VNode>, (resolvedNode) => {
         wrapper.innerHTML = "";
@@ -291,7 +291,7 @@ function renderNode(
   }
 
   if (cellForContext && element) {
-    const wrapper = doc.createElement("ct-cell-context") as HTMLElement & {
+    const wrapper = doc.createElement("cf-cell-context") as HTMLElement & {
       cell?: CellHandle<VNode>;
     };
     wrapper.cell = cellForContext;

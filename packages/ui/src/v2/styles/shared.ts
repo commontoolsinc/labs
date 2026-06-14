@@ -28,7 +28,7 @@ export const resetStyles = `
  */
 export const focusStyles = `
   :focus {
-    outline: 2px solid var(--ct-colors-primary-500);
+    outline: 2px solid var(--cf-colors-primary-500);
     outline-offset: 2px;
   }
   
@@ -37,7 +37,7 @@ export const focusStyles = `
   }
   
   :focus-visible {
-    outline: 2px solid var(--ct-colors-primary-500);
+    outline: 2px solid var(--cf-colors-primary-500);
     outline-offset: 2px;
   }
 `;
@@ -47,18 +47,18 @@ export const focusStyles = `
  */
 export const buttonStyles = `
   button {
-    font-family: var(--ct-font-family-sans);
-    font-size: var(--ct-font-size-base);
-    font-weight: var(--ct-font-weight-medium);
-    line-height: var(--ct-line-height-normal);
-    padding: var(--ct-spacing-2) var(--ct-spacing-4);
+    font-family: var(--cf-font-family-sans);
+    font-size: var(--cf-font-size-base);
+    font-weight: var(--cf-font-weight-medium);
+    line-height: var(--cf-line-height-normal);
+    padding: var(--cf-spacing-2) var(--cf-spacing-4);
     border: none;
-    border-radius: var(--ct-border-radius-md);
+    border-radius: var(--cf-border-radius-md);
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: all var(--ct-transition-duration-base) var(--ct-transition-timing-ease);
+    transition: all var(--cf-transition-duration-base) var(--cf-transition-timing-ease);
     user-select: none;
   }
   
@@ -75,35 +75,35 @@ export const inputStyles = `
   input,
   textarea,
   select {
-    font-family: var(--ct-font-family-sans);
-    font-size: var(--ct-font-size-base);
-    line-height: var(--ct-line-height-normal);
-    padding: var(--ct-spacing-2) var(--ct-spacing-3);
-    border: 1px solid var(--ct-colors-gray-300);
-    border-radius: var(--ct-border-radius-md);
+    font-family: var(--cf-font-family-sans);
+    font-size: var(--cf-font-size-base);
+    line-height: var(--cf-line-height-normal);
+    padding: var(--cf-spacing-2) var(--cf-spacing-3);
+    border: 1px solid var(--cf-colors-gray-300);
+    border-radius: var(--cf-border-radius-md);
     background-color: white;
-    transition: all var(--ct-transition-duration-fast) var(--ct-transition-timing-ease);
+    transition: all var(--cf-transition-duration-fast) var(--cf-transition-timing-ease);
     width: 100%;
   }
   
   input:hover,
   textarea:hover,
   select:hover {
-    border-color: var(--ct-colors-gray-400);
+    border-color: var(--cf-colors-gray-400);
   }
   
   input:focus,
   textarea:focus,
   select:focus {
     outline: none;
-    border-color: var(--ct-colors-primary-500);
-    box-shadow: 0 0 0 3px var(--ct-colors-primary-100);
+    border-color: var(--cf-colors-primary-500);
+    box-shadow: 0 0 0 3px var(--cf-colors-primary-100);
   }
   
   input:disabled,
   textarea:disabled,
   select:disabled {
-    background-color: var(--ct-colors-gray-100);
+    background-color: var(--cf-colors-gray-100);
     cursor: not-allowed;
     opacity: 0.6;
   }

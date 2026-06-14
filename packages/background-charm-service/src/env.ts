@@ -1,5 +1,21 @@
 import { z } from "zod";
 
+/**
+ * Results in `true` (on), `false` (off), or `undefined` (default).
+ */
+function flagValue() {
+  return z.string().default("default").transform((v) => {
+    switch (v) {
+      case "default":
+        return undefined;
+      case "false":
+        return false;
+      default:
+        return true;
+    }
+  });
+}
+
 const envSchema = z.object({
   // Job queue settings
   //MAX_CONCURRENT_JOBS: z.coerce.number().positive().default(5),
@@ -22,23 +38,13 @@ const envSchema = z.object({
   // Toolshed configuration
   API_URL: z.string().default("http://localhost:8000"),
 
-  // Experimental space-model feature flags (see ExperimentalOptions in runner)
-  // Note: We intentionally avoid z.coerce.boolean() here. Zod's coerce uses
-  // Boolean(), which treats any non-empty string as truthy -- so setting an
-  // env var to "false" would incorrectly enable the flag. The other boolean
-  // env vars in this file have the same latent bug.
-  EXPERIMENTAL_RICH_STORABLE_VALUES: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
-  EXPERIMENTAL_STORABLE_PROTOCOL: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
-  EXPERIMENTAL_UNIFIED_JSON_ENCODING: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
-  EXPERIMENTAL_CANONICAL_HASHING: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
+  // Experimental feature flags. See `ExperimentalOptions` in `runner`.
+  // Note: We intentionally avoid `z.coerce.boolean()` here. Zod's coerce uses
+  // `Boolean()`, which treats any non-empty string as truthy -- so setting an
+  // env var to the string `"false"` would incorrectly enable the flag. The
+  // other boolean env vars in this file have the same latent bug.
+  EXPERIMENTAL_MODERN_CELL_REP: flagValue(),
+  EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: flagValue(),
   // Background Charm Service: default is public space "toolshed-system"
   //SERVICE_DID: z.string().default(
   //  "did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88",

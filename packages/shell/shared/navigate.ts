@@ -1,5 +1,11 @@
-import { App, AppView, appViewToUrlPath, urlToAppView } from "./app/mod.ts";
-import { getLogger } from "@commontools/utils/logger";
+import {
+  App,
+  AppView,
+  appViewToUrlPath,
+  preserveAppViewMode,
+  urlToAppView,
+} from "./app/mod.ts";
+import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("shell.navigation", {
   enabled: false,
@@ -8,7 +14,8 @@ const logger = getLogger("shell.navigation", {
 
 export type NavigationCommand = AppView;
 
-const NavigationEventName = "ct-navigate";
+const NavigationEventName = "cf-navigate";
+const ReplaceNavigationEventName = "cf-replace-navigation";
 
 class NavigationEvent extends CustomEvent<NavigationCommand> {
   command: NavigationCommand;
@@ -22,7 +29,19 @@ export function navigate(command: NavigationCommand) {
   globalThis.dispatchEvent(new NavigationEvent(command));
 }
 
-const UpdatePageTitleEventName = "ct-update-page-title";
+class ReplaceNavigationEvent extends CustomEvent<NavigationCommand> {
+  command: NavigationCommand;
+  constructor(command: NavigationCommand) {
+    super(ReplaceNavigationEventName, { detail: command });
+    this.command = command;
+  }
+}
+
+export function replaceNavigation(command: NavigationCommand) {
+  globalThis.dispatchEvent(new ReplaceNavigationEvent(command));
+}
+
+const UpdatePageTitleEventName = "cf-update-page-title";
 
 class UpdatePageTitleEvent extends CustomEvent<string> {
   title: string;
@@ -49,6 +68,10 @@ export class Navigation {
     this.#app = app;
 
     globalThis.addEventListener(NavigationEventName, this.onNavigate);
+    globalThis.addEventListener(
+      ReplaceNavigationEventName,
+      this.onReplaceNavigate,
+    );
     globalThis.addEventListener(
       UpdatePageTitleEventName,
       this.onUpdatePageTitle,
@@ -86,6 +109,14 @@ export class Navigation {
     logger.log("Navigate", command);
     command = mapNavigationView(this.#app, command);
     this.push(command);
+    this.apply(command);
+  };
+
+  private onReplaceNavigate = (e: Event) => {
+    let command = (e as ReplaceNavigationEvent).command;
+    logger.log("ReplaceNavigate", command);
+    command = mapNavigationView(this.#app, command);
+    this.replace(command);
     this.apply(command);
   };
 
@@ -129,10 +160,12 @@ function mapNavigationView(
     "spaceDid" in view && view.spaceDid && currentSpaceName &&
     view.spaceDid === currentSpaceDID
   ) {
-    return {
+    view = {
       ...("pieceId" in view ? { pieceId: view.pieceId } : undefined),
+      ...("pieceSlug" in view ? { pieceSlug: view.pieceSlug } : undefined),
+      ...("mode" in view ? { mode: view.mode } : undefined),
       spaceName: currentSpaceName,
     };
   }
-  return view;
+  return preserveAppViewMode(currentView, view);
 }

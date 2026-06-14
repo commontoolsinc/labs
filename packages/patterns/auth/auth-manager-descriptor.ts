@@ -1,5 +1,5 @@
 /**
- * Descriptor interface for auth manager factory.
+ * Descriptor interface for the shared auth manager base pattern.
  *
  * Each OAuth provider supplies a descriptor that parameterizes the
  * generic auth manager logic (wish tags, token field, scope handling, UI).
@@ -32,11 +32,11 @@ export interface AuthManagerDescriptor {
 
 /** Status colors shared across all auth managers */
 export const STATUS_COLORS: Record<AuthState, string> = {
-  loading: "var(--ct-color-yellow-500, #eab308)",
-  "needs-login": "var(--ct-color-red-500, #ef4444)",
-  "missing-scopes": "var(--ct-color-orange-500, #f97316)",
-  "token-expired": "var(--ct-color-red-500, #ef4444)",
-  ready: "var(--ct-color-green-500, #22c55e)",
+  loading: "var(--cf-colors-warning, #eab308)",
+  "needs-login": "var(--cf-colors-red-500, #ef4444)",
+  "missing-scopes": "var(--cf-colors-coral, #f97316)",
+  "token-expired": "var(--cf-colors-red-500, #ef4444)",
+  ready: "var(--cf-colors-green-500, #22c55e)",
 };
 
 /** Status messages shared across all auth managers */

@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   action,
   computed,
@@ -7,7 +6,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import {
   areAllShipsSunk,
@@ -51,7 +50,7 @@ interface BoardCell {
 
 type Input = Record<string, never>;
 
-interface Output {
+export interface Output {
   game: Writable<GameState>;
   fireShot: Stream<{ row: number; col: number }>;
   passDevice: Stream<void>;
@@ -60,7 +59,7 @@ interface Output {
 }
 
 export default pattern<Input, Output>((_input) => {
-  const game = Writable.of<GameState>(createInitialState());
+  const game = new Writable<GameState>(createInitialState());
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -324,9 +323,9 @@ export default pattern<Input, Output>((_input) => {
       <p style={{ color: "#94a3b8", fontSize: "18px", margin: "0" }}>
         Make sure the other player isn't looking!
       </p>
-      <ct-button onClick={playerReady}>
+      <cf-button onClick={playerReady}>
         I'm Player {gameStatus.currentTurn} - Ready!
-      </ct-button>
+      </cf-button>
     </div>
   );
 
@@ -351,7 +350,7 @@ export default pattern<Input, Output>((_input) => {
       <p style={{ color: "#94a3b8", fontSize: "18px", margin: "0" }}>
         All enemy ships have been sunk!
       </p>
-      <ct-button onClick={resetGame}>Play Again</ct-button>
+      <cf-button onClick={resetGame}>Play Again</cf-button>
     </div>
   );
 
@@ -390,9 +389,9 @@ export default pattern<Input, Output>((_input) => {
           borderRadius: "8px",
         }}
       >
-        <ct-button onClick={passDevice}>
+        <cf-button onClick={passDevice}>
           Pass to Player {gameStatus.currentTurn}
-        </ct-button>
+        </cf-button>
       </div>
 
       {/* Game boards */}
@@ -584,7 +583,7 @@ export default pattern<Input, Output>((_input) => {
 
         {/* Reset button (always visible) */}
         <div style={{ textAlign: "center", marginTop: "30px" }}>
-          <ct-button onClick={resetGame}>Reset Game</ct-button>
+          <cf-button onClick={resetGame}>Reset Game</cf-button>
         </div>
       </div>
     ),

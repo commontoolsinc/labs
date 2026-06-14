@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   type BuiltInLLMMessage,
   computed,
@@ -7,6 +6,7 @@ import {
   handler,
   ifElse,
   llmDialog,
+  nonPrivateRandom,
   pattern,
   patternTool,
   type Stream,
@@ -16,17 +16,18 @@ import {
   wish,
   type WishState,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import {
   bash,
   fetchAndRunPattern,
   listMentionable,
   listRecent,
-} from "./common-tools.tsx";
+} from "./common-fabric.tsx";
 import {
   searchPattern as summarySearchPattern,
   type SummaryIndexEntry,
 } from "./summary-index.tsx";
+import SuggestionHistory from "./suggestion-history.tsx";
 import { type MentionablePiece } from "./backlinks-index.tsx";
 
 const triggerGeneration = handler<
@@ -86,13 +87,13 @@ export default pattern<
   {
     situation: string;
     context: { [id: string]: any };
-    initialResults: Default<Writable<unknown>[], []>;
+    initialResults: Writable<unknown>[] | Default<[]>;
   },
   WishState<Writable<any>> & { [UI]: VNode }
 >(({ situation, context, initialResults }) => {
   // --- Picker state (used when initialResults is non-empty) ---
-  const selectedIndex = Writable.of(0);
-  const userConfirmedIndex = Writable.of<number | null>(null);
+  const selectedIndex = new Writable(0);
+  const userConfirmedIndex = new Writable<number | null>(null);
 
   const confirmedIndex = computed(() => {
     if (initialResults.length === 1) return 0;
@@ -107,7 +108,7 @@ export default pattern<
   });
 
   // --- LLM state (freeform query path) ---
-  const profile = wish<string>({ query: "#profile" });
+  const profile = wish<string>({ query: "#learnedSummary" });
 
   const mentionable = wish<MentionablePiece[]>({
     query: "#mentionable",
@@ -115,12 +116,14 @@ export default pattern<
   const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
   const { entries: summaryEntries } = wish<{
     entries: SummaryIndexEntry[];
-  }>({ query: "#summaryIndex" }).result;
+  }>({ query: "#summaryIndex" }).result!;
+
+  const suggestionHistory = SuggestionHistory({});
 
   const patternIndexUrl = wish<{ url: Writable<string> }>({
     query: "#pattern-index",
   });
-  const resolvedPatternUrl = Writable.of<string>("/api/patterns/index.md");
+  const resolvedPatternUrl = new Writable<string>("/api/patterns/index.md");
   computed(() => {
     const urlRef = patternIndexUrl?.result?.url;
     const urlValue = typeof urlRef?.get === "function"
@@ -141,8 +144,8 @@ export default pattern<
     return profileText ? `\n\n--- User Context ---\n${profileText}\n---` : "";
   });
 
-  const sandboxId = Writable.of(
-    `suggestion-${Math.random().toString(36).slice(2, 10)}`,
+  const sandboxId = new Writable(
+    `suggestion-${nonPrivateRandom().toString(36).slice(2, 10)}`,
   );
 
   const systemPrompt = computed(() => {
@@ -155,6 +158,7 @@ export default pattern<
 Your textual responses are invisible to the user — they can only see the presented result.
 
 Strategy:
+0. Before generating anything new, call searchHistory to check if a similar result was already created. If a match is found, presentResult with it directly.
 1. If the request is ambiguous or you need user preferences, call askUserQuestion first. After calling it, STOP — the user's answer will arrive as the next message. Then resume from step 2 with that context.
 2. Review the available patterns listed above to find the best match for the user's request.
 3. Search the space for existing relevant content using searchSpace.
@@ -165,9 +169,9 @@ The final result you present is almost always either an existing cell or a patte
 Use the user context above to personalize your suggestions when relevant.`;
   });
 
-  const messages = Writable.of<BuiltInLLMMessage[]>([]);
-  const showRefine = Writable.of(false);
-  const pendingQuestion = Writable.of<
+  const messages = new Writable<BuiltInLLMMessage[]>([]);
+  const showRefine = new Writable(false);
+  const pendingQuestion = new Writable<
     {
       question: string;
       options: string[];
@@ -188,6 +192,7 @@ Use the user context above to personalize your suggestions when relevant.`;
       searchSpace: patternTool(summarySearchPattern, {
         entries: summaryEntries,
       }),
+      searchHistory: suggestionHistory.search,
       listMentionable: patternTool(listMentionable, { mentionable }),
       listRecent: patternTool(listRecent, { recentPieces }),
       askUserQuestion: {
@@ -199,6 +204,7 @@ Use the user context above to personalize your suggestions when relevant.`;
     model: "anthropic:claude-sonnet-4-5",
     context,
     resultSchema: toSchema<{ cell: Writable<any> }>(),
+    queue: "suggestions",
   });
 
   const llmResult = computed(() => suggestionResult?.cell);
@@ -216,72 +222,68 @@ Use the user context above to personalize your suggestions when relevant.`;
   // reconciler to re-mount the DOM, losing inner subscriptions).
   const freeformUI = (
     <div style="display:contents">
-      <ct-autostart
+      <cf-autostart
         onstart={triggerGeneration({
           addMessage,
           situation,
           result: llmResult,
         })}
       />
-      <ct-cell-link
+      <cf-cell-link
         $cell={llmResult}
         style={computed(() => (llmResult ? "" : "display:none"))}
       />
-      <ct-cell-context $cell={llmResult}>
+      <cf-cell-context $cell={llmResult}>
         {ifElse(
           computed(() => !!llmResult),
           computed(() => llmResult),
           undefined,
         )}
-      </ct-cell-context>
-      <ct-message-beads
+      </cf-cell-context>
+      <cf-message-beads
         label="suggestion"
         $messages={messages}
         pending={pending}
-        onct-refine={showRefineInput({ showRefine })}
+        oncf-refine={showRefineInput({ showRefine })}
       />
 
-      <ct-question
+      <cf-question
         question={computed(() => pendingQuestion.get()?.question ?? "")}
         options={computed(() => pendingQuestion.get()?.options ?? [])}
         allow-custom
         style={computed(() => (hasPendingQuestion ? "" : "display:none"))}
-        onct-answer={onQuestionAnswer({ addMessage, pendingQuestion })}
+        oncf-answer={onQuestionAnswer({ addMessage, pendingQuestion })}
       />
-      <ct-prompt-input
+      <cf-prompt-input
         placeholder="Refine suggestion..."
         pending={pending}
         style={computed(() => (showRefine.get() ? "" : "display:none"))}
-        onct-send={sendMessage({ addMessage })}
+        oncf-send={sendMessage({ addMessage })}
       />
     </div>
   );
 
   const pickerUI = (
-    <ct-card>
+    <cf-card>
       <h2>Choose Result ({initialResults.length})</h2>
-      <ct-picker $items={initialResults} $selectedIndex={selectedIndex} />
-      <ct-button
+      <cf-picker $items={initialResults} $selectedIndex={selectedIndex} />
+      <cf-button
         variant="primary"
         onClick={() => userConfirmedIndex.set(selectedIndex.get())}
       >
         Confirm Selection
-      </ct-button>
-    </ct-card>
+      </cf-button>
+    </cf-card>
   );
 
   return {
     result,
     candidates: initialResults,
     // [UI] must be a static VNode — the reconciler breaks if it's a computed.
-    // Use ifElse as a child to switch between modes at the reactive level.
+    // Switch between modes at the child level instead.
     [UI]: (
       <div style="display:contents">
-        {ifElse(
-          computed(() => initialResults.length > 0),
-          pickerUI,
-          freeformUI,
-        )}
+        {computed(() => initialResults.length > 0) ? pickerUI : freeformUI}
       </div>
     ),
   };

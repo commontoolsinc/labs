@@ -1,11 +1,17 @@
-/// <cts-enable />
 /**
  * Birthday Module - Pattern for birthday/date of birth tracking
  *
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Tracks birthday with separate month, day, and year fields.
  */
-import { computed, type Default, NAME, pattern, UI } from "commontools";
+import {
+  computed,
+  type Default,
+  NAME,
+  pattern,
+  safeDateNow,
+  UI,
+} from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -51,7 +57,7 @@ const DAY_ITEMS = Array.from({ length: 31 }, (_, i) => ({
 }));
 
 function generateYearItems(): Array<{ value: string; label: string }> {
-  const currentYear = new Date().getFullYear();
+  const currentYear = new Date(safeDateNow()).getFullYear();
   const years: Array<{ value: string; label: string }> = [];
   for (let year = currentYear; year >= 1920; year--) {
     years.push({ value: String(year), label: String(year) });
@@ -69,11 +75,11 @@ const getMonthName = (month: string): string => {
 // ===== Types =====
 export interface BirthdayModuleInput {
   /** Birth month (1-12 as string) */
-  birthMonth: Default<string, "">;
+  birthMonth: string | Default<"">;
   /** Birth day (1-31 as string) */
-  birthDay: Default<string, "">;
+  birthDay: string | Default<"">;
   /** Birth year (e.g., "1990") */
-  birthYear: Default<string, "">;
+  birthYear: string | Default<"">;
 }
 
 // ===== The Pattern =====
@@ -100,7 +106,7 @@ export const BirthdayModule = pattern<BirthdayModuleInput, BirthdayModuleInput>(
         `${MODULE_METADATA.icon} Birthday: ${displayText}`
       ),
       [UI]: (
-        <ct-vstack style={{ gap: "12px" }}>
+        <cf-vstack style={{ gap: "12px" }}>
           <div
             style={{
               display: "grid",
@@ -108,42 +114,42 @@ export const BirthdayModule = pattern<BirthdayModuleInput, BirthdayModuleInput>(
               gap: "8px",
             }}
           >
-            <ct-vstack style={{ gap: "4px" }}>
+            <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 Month
               </label>
-              <ct-autocomplete
+              <cf-autocomplete
                 $value={birthMonth}
                 items={MONTH_ITEMS}
                 placeholder="Month"
                 allowCustom
                 maxVisible={12}
               />
-            </ct-vstack>
+            </cf-vstack>
 
-            <ct-vstack style={{ gap: "4px" }}>
+            <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>Day</label>
-              <ct-autocomplete
+              <cf-autocomplete
                 $value={birthDay}
                 items={DAY_ITEMS}
                 placeholder="Day"
                 allowCustom
                 maxVisible={10}
               />
-            </ct-vstack>
+            </cf-vstack>
 
-            <ct-vstack style={{ gap: "4px" }}>
+            <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>Year</label>
-              <ct-autocomplete
+              <cf-autocomplete
                 $value={birthYear}
                 items={YEAR_ITEMS}
                 placeholder="Year"
                 allowCustom
                 maxVisible={10}
               />
-            </ct-vstack>
+            </cf-vstack>
           </div>
-        </ct-vstack>
+        </cf-vstack>
       ),
       birthMonth,
       birthDay,

@@ -2,7 +2,7 @@
  * Tests for FormFieldController
  *
  * Tests the "write gate" pattern where form fields buffer writes locally
- * when inside a ct-form, and flush atomically on submit.
+ * when inside a cf-form, and flush atomically on submit.
  */
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

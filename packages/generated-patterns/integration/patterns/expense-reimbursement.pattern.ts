@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   type Cell,
   cell,
@@ -7,7 +6,7 @@ import {
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 type ClaimStatus = "submitted" | "approved" | "rejected" | "paid";
 
@@ -51,6 +50,9 @@ interface StatusHandlerContext {
   history: Cell<string[]>;
   latestAction: Cell<string>;
   sequence: Cell<number>;
+  kind: ActionKind;
+  nextStatus: ClaimStatus;
+  allowed: readonly ClaimStatus[];
 }
 
 const defaultClaims: ExpenseClaimInput[] = [
@@ -252,41 +254,39 @@ const buildActionMessage = (
   return `Recorded payment for ${claim.id} (${amount})`;
 };
 
-const buildStatusChangeHandler = (
-  kind: ActionKind,
-  nextStatus: ClaimStatus,
-  allowed: readonly ClaimStatus[],
-) =>
-  handler(
-    (event: StatusChangeEvent | undefined, context: StatusHandlerContext) => {
-      const id = typeof event?.id === "string" ? event.id.trim() : "";
-      if (id.length === 0) return;
+const statusChangeHandler = handler(
+  (event: StatusChangeEvent | undefined, context: StatusHandlerContext) => {
+    const id = typeof event?.id === "string" ? event.id.trim() : "";
+    if (id.length === 0) return;
 
-      const sanitized = sanitizeClaimList(context.claims.get());
-      const index = sanitized.findIndex((claim) => claim.id === id);
-      if (index === -1) return;
+    const sanitized = sanitizeClaimList(context.claims.get());
+    const index = sanitized.findIndex((claim) => claim.id === id);
+    if (index === -1) return;
 
-      const target = sanitized[index];
-      if (!allowed.includes(target.status)) return;
+    const target = sanitized[index];
+    if (!context.allowed.includes(target.status)) return;
 
-      const updatedClaim: ExpenseClaim = { ...target, status: nextStatus };
-      const nextClaims = sanitized.map((claim, claimIndex) =>
-        claimIndex === index ? updatedClaim : claim
-      );
-      context.claims.set(nextClaims.map((claim) => ({ ...claim })));
+    const updatedClaim: ExpenseClaim = {
+      ...target,
+      status: context.nextStatus,
+    };
+    const nextClaims = sanitized.map((claim, claimIndex) =>
+      claimIndex === index ? updatedClaim : claim
+    );
+    context.claims.set(nextClaims.map((claim) => ({ ...claim })));
 
-      const message = buildActionMessage(kind, updatedClaim);
-      context.latestAction.set(message);
+    const message = buildActionMessage(context.kind, updatedClaim);
+    context.latestAction.set(message);
 
-      const previousHistory = context.history.get() ?? [];
-      const appended = [...previousHistory, message];
-      const trimmed = appended.length > 5 ? appended.slice(-5) : appended;
-      context.history.set(trimmed);
+    const previousHistory = context.history.get() ?? [];
+    const appended = [...previousHistory, message];
+    const trimmed = appended.length > 5 ? appended.slice(-5) : appended;
+    context.history.set(trimmed);
 
-      const sequence = (context.sequence.get() ?? 0) + 1;
-      context.sequence.set(sequence);
-    },
-  );
+    const sequence = (context.sequence.get() ?? 0) + 1;
+    context.sequence.set(sequence);
+  },
+);
 
 const liftSanitizeClaimList = lift(sanitizeClaimList);
 const liftCalculateTotals = lift(calculateTotals);
@@ -335,21 +335,24 @@ export const expenseReimbursement = pattern<ExpenseReimbursementArgs>(
       statusHeadline,
       latestAction,
       activityLog: history,
-      approveClaim: buildStatusChangeHandler(
-        "approved",
-        "approved",
-        ["submitted"],
-      )(handlerContext),
-      recordPayment: buildStatusChangeHandler(
-        "paid",
-        "paid",
-        ["approved"],
-      )(handlerContext),
-      rejectClaim: buildStatusChangeHandler(
-        "rejected",
-        "rejected",
-        ["submitted", "approved"],
-      )(handlerContext),
+      approveClaim: statusChangeHandler({
+        ...handlerContext,
+        kind: "approved",
+        nextStatus: "approved",
+        allowed: ["submitted"],
+      }),
+      recordPayment: statusChangeHandler({
+        ...handlerContext,
+        kind: "paid",
+        nextStatus: "paid",
+        allowed: ["approved"],
+      }),
+      rejectClaim: statusChangeHandler({
+        ...handlerContext,
+        kind: "rejected",
+        nextStatus: "rejected",
+        allowed: ["submitted", "approved"],
+      }),
     };
   },
 );

@@ -1,11 +1,10 @@
-/// <cts-enable />
 /**
  * Shared type definitions for the contacts pattern family.
  *
  * Extracted to break circular dependencies between contacts.tsx,
  * person.tsx, and family-member.tsx.
  */
-import { type Default, NAME, UI, type VNode } from "commontools";
+import { type Default, NAME, UI, type VNode } from "commonfabric";
 
 // ============================================================================
 // PersonLike - Schelling point for person data (structural type)
@@ -28,17 +27,17 @@ export interface PersonLike {
 // ============================================================================
 
 export interface Address {
-  label: Default<string, "">; // "Home", "Work", etc.
-  street: Default<string, "">;
-  city: Default<string, "">;
-  state: Default<string, "">;
-  zip: Default<string, "">;
-  country: Default<string, "">;
+  label: string | Default<"">; // "Home", "Work", etc.
+  street: string | Default<"">;
+  city: string | Default<"">;
+  state: string | Default<"">;
+  zip: string | Default<"">;
+  country: string | Default<"">;
 }
 
 export interface SocialProfile {
-  platform: Default<string, "">; // "LinkedIn", "Twitter", etc.
-  url: Default<string, "">;
+  platform: string | Default<"">; // "LinkedIn", "Twitter", etc.
+  url: string | Default<"">;
 }
 
 // ============================================================================
@@ -46,9 +45,9 @@ export interface SocialProfile {
 // ============================================================================
 
 export interface Birthday {
-  month: Default<number, 0>; // 1-12, 0 = unset
-  day: Default<number, 0>; // 1-31, 0 = unset
-  year: Default<number, 0>; // 4-digit year, 0 = unknown
+  month: number | Default<0>; // 1-12, 0 = unset
+  day: number | Default<0>; // 1-31, 0 = unset
+  year: number | Default<0>; // 4-digit year, 0 = unknown
 }
 
 // ============================================================================
@@ -59,21 +58,21 @@ export interface Person extends PersonLike {
   firstName: string;
   lastName: string;
   // Name extensions
-  middleName: Default<string, "">;
-  nickname: Default<string, "">; // preferred name / what they go by
-  prefix: Default<string, "">; // Dr., Mr., Prof.
-  suffix: Default<string, "">; // Jr., III, Ph.D.
+  middleName: string | Default<"">;
+  nickname: string | Default<"">; // preferred name / what they go by
+  prefix: string | Default<"">; // Dr., Mr., Prof.
+  suffix: string | Default<"">; // Jr., III, Ph.D.
   // Identity metadata
-  pronouns: Default<string, "">; // freeform: "he/him", "they/them"
-  birthday: Default<Birthday, { month: 0; day: 0; year: 0 }>;
-  photo: Default<string, "">; // URL or data reference
+  pronouns: string | Default<"">; // freeform: "he/him", "they/them"
+  birthday: Birthday | Default<{ month: 0; day: 0; year: 0 }>;
+  photo: string | Default<"">; // URL or data reference
   // Contact fields
-  email: Default<string, "">;
-  phone: Default<string, "">;
-  notes: Default<string, "">;
-  tags: Default<string[], []>;
-  addresses: Default<Address[], []>;
-  socialProfiles: Default<SocialProfile[], []>;
+  email: string | Default<"">;
+  phone: string | Default<"">;
+  notes: string | Default<"">;
+  tags: string[] | Default<[]>;
+  addresses: Address[] | Default<[]>;
+  socialProfiles: SocialProfile[] | Default<[]>;
 }
 
 // ============================================================================
@@ -83,13 +82,13 @@ export interface Person extends PersonLike {
 export interface FamilyMember extends PersonLike {
   firstName: string;
   lastName: string;
-  relationship: Default<string, "">;
-  birthday: Default<string, "">; // ISO date string (YYYY-MM-DD)
-  dietaryRestrictions: Default<string[], []>;
-  notes: Default<string, "">;
-  tags: Default<string[], []>;
-  allergies: Default<string[], []>;
-  giftIdeas: Default<string[], []>;
+  relationship: string | Default<"">;
+  birthday: string | Default<"">; // ISO date string (YYYY-MM-DD)
+  dietaryRestrictions: string[] | Default<[]>;
+  notes: string | Default<"">;
+  tags: string[] | Default<[]>;
+  allergies: string[] | Default<[]>;
+  giftIdeas: string[] | Default<[]>;
 }
 
 // ============================================================================
@@ -112,8 +111,8 @@ export interface ContactPiece {
 
 export interface ContactGroup {
   name: string;
-  contactIndices: Default<number[], []>; // indices into contacts[]
+  contactIndices: number[] | Default<[]>; // indices into contacts[]
 }
 
-// Default export required by ct check infrastructure
+// Default export required by cf check infrastructure
 export default undefined;

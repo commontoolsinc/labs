@@ -1,14 +1,16 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import "@commontools/utils/equal-ignoring-symbols";
+import "@commonfabric/utils/equal-ignoring-symbols";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -73,7 +75,7 @@ describe("Cell Static Methods", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;
-  let Cell: ReturnType<typeof createBuilder>["commontools"]["Cell"];
+  let Cell: ReturnType<typeof createBuilder>["commonfabric"]["Cell"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -85,14 +87,75 @@ describe("Cell Static Methods", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
-    ({ Cell } = commontools);
+    const { commonfabric } = createTrustedBuilder(runtime);
+    ({ Cell } = commonfabric);
   });
 
   afterEach(async () => {
     await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
+  });
+
+  describe("cell constructors", () => {
+    it("should create a cell with a primitive value", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const cell = new Cell(42);
+        expect(cell).toBeDefined();
+        expect(cell.get()).toBe(42);
+      });
+    });
+
+    it("should create cells for every cell constructor", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const { commonfabric } = createTrustedBuilder(runtime);
+        const constructors = [
+          commonfabric.Cell,
+          commonfabric.Writable,
+          commonfabric.OpaqueCell,
+          commonfabric.Stream,
+          commonfabric.ComparableCell,
+          commonfabric.ReadonlyCell,
+          commonfabric.WriteonlyCell,
+        ] as Array<new (value?: string, schema?: JSONSchema) => any>;
+
+        for (const constructor of constructors) {
+          const cell = new constructor("Ada", { type: "string" }) as any;
+          expect(cell.schema).toEqual({
+            type: "string",
+            default: "Ada",
+          });
+        }
+      });
+    });
+
+    it("should create scoped cells with defaults", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const { commonfabric } = createTrustedBuilder(runtime);
+        const cell = new commonfabric.Writable.perUser("Ada", {
+          type: "string",
+        }) as any;
+
+        expect(cell.schema).toEqual({
+          type: "string",
+          scope: "user",
+          default: "Ada",
+        });
+      });
+    });
+
+    it("should support constructor results chained with .for()", () => {
+      withinLiftContext(runtime, space, tx, () => {
+        const cell = new Cell("Ada", { type: "string" }).for("name") as any;
+
+        expect(cell.get()).toBe("Ada");
+        expect(cell.getAsNormalizedFullLink()).toBeDefined();
+        expect(cell.schema).toEqual({
+          type: "string",
+          default: "Ada",
+        });
+      });
+    });
   });
 
   describe("Cell.of()", () => {
@@ -287,6 +350,65 @@ describe("Cell Static Methods", () => {
     });
   });
 
+  describe("scoped cell constructors", () => {
+    it("should create scoped cells with defaults for every cell constructor", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const { commonfabric } = createTrustedBuilder(runtime);
+        const constructors = [
+          commonfabric.Cell,
+          commonfabric.Writable,
+          commonfabric.OpaqueCell,
+          commonfabric.Stream,
+          commonfabric.ComparableCell,
+          commonfabric.ReadonlyCell,
+          commonfabric.WriteonlyCell,
+        ];
+
+        for (const constructor of constructors) {
+          const cell = constructor.perUser.of("Ada", {
+            type: "string",
+          }) as any;
+          expect(cell.schema).toEqual({
+            type: "string",
+            scope: "user",
+            default: "Ada",
+          });
+        }
+      });
+    });
+
+    it("should create scoped cells with causes", () => {
+      withinLiftContext(runtime, space, tx, () => {
+        const cell = Cell.perSession.for<string>("draft") as any;
+        expect(cell).toBeDefined();
+        expect(cell.schema).toEqual({ scope: "session" });
+      });
+    });
+
+    it("should apply schema scopes to plain constructor links", () => {
+      withinLiftContext(runtime, space, tx, () => {
+        const { commonfabric } = createTrustedBuilder(runtime);
+        const cell = commonfabric.Writable.of("Ada", {
+          type: "string",
+          scope: "user",
+        } as JSONSchema).for("contextual", true) as any;
+
+        expect(cell.getAsNormalizedFullLink().scope).toBe("user");
+      });
+    });
+
+    it("should reject conflicting schema scopes", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        expect(() =>
+          Cell.perUser.of("Ada", {
+            type: "string",
+            scope: "space",
+          } as JSONSchema)
+        ).toThrow('Cannot use perUser with schema scope "space".');
+      });
+    });
+  });
+
   describe("Cell.equals()", () => {
     it("should return true for the same cell", () => {
       const cell = runtime.getCell<number>(
@@ -358,6 +480,7 @@ describe("Cell Static Methods", () => {
       );
       expect(Cell.equals(cell, null as any)).toBe(false);
       expect(Cell.equals(null as any, cell)).toBe(false);
+      expect(Cell.equals(undefined, undefined)).toBe(false);
     });
 
     it("should resolve links before comparing", () => {
@@ -533,6 +656,7 @@ describe("Cell Static Methods", () => {
       );
       expect(Cell.equalLinks(cell, null as any)).toBe(false);
       expect(Cell.equalLinks(null as any, cell)).toBe(false);
+      expect(Cell.equalLinks(undefined, undefined)).toBe(false);
     });
 
     it("should handle comparison with non-cell objects", () => {
@@ -796,18 +920,100 @@ describe("Cell Static Methods", () => {
       });
     });
 
-    it("should handle creating cell with Date object", () => {
+    it("should round-trip a FabricEpochNsec timestamp value", () => {
+      // `FabricEpochNsec` is the fabric representation of a timestamp; it
+      // round-trips faithfully as an atomic leaf.
       withinHandlerContext(runtime, space, tx, () => {
-        const date = new Date("2024-01-01");
-        const cell = Cell.of(date);
-        expect(cell.get()).toEqual(date);
+        const epoch = new FabricEpochNsec(
+          BigInt(Date.parse("2024-01-01T00:00:00Z")) * 1_000_000n,
+        );
+        const cell = Cell.of(epoch);
+        const got = cell.get() as FabricEpochNsec;
+        expect(got.value).toBe(epoch.value);
       });
     });
+
+    // A native `Date` written via `set()` is normalized to a `FabricEpochNsec`
+    // (top-level and nested alike). These use a self-contained runtime that
+    // drains the storage sync before dispose: the shared `afterEach` disposes
+    // without awaiting the sync a commit triggers, which races for writes that
+    // persist (a latent harness fragility unrelated to this behavior).
+    const DATE_ISO = "2024-01-01T00:00:00Z";
+    const DATE_NS = BigInt(Date.parse(DATE_ISO)) * 1_000_000n;
+    const assertEpochNsec = (got: unknown) => {
+      const v = got as { value?: bigint };
+      expect(v?.value).toBe(DATE_NS);
+    };
+    const inFreshRuntime = async (
+      fn: (
+        cellApi: typeof Cell,
+        rt: Runtime,
+        localTx: IExtendedStorageTransaction,
+      ) => void,
+    ) => {
+      const sm = StorageManager.emulate({ as: signer });
+      const rt = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+      });
+      const localTx = rt.edit();
+      const cellApi = createTrustedBuilder(rt).commonfabric.Cell;
+      try {
+        withinHandlerContext(
+          rt,
+          space,
+          localTx,
+          () => fn(cellApi, rt, localTx),
+        );
+        await localTx.commit();
+        await sm.synced();
+      } finally {
+        await rt.dispose().catch(() => {});
+        await sm.close().catch(() => {});
+      }
+    };
+
+    it("normalizes a top-level Date to FabricEpochNsec (set)", async () => {
+      await inFreshRuntime((Cell) => {
+        const cell = Cell.of<unknown>(0);
+        cell.set(new Date(DATE_ISO));
+        assertEpochNsec(cell.get());
+      });
+    });
+
+    it("normalizes a nested Date to FabricEpochNsec (set)", async () => {
+      await inFreshRuntime((Cell) => {
+        const cell = Cell.of<unknown>(0);
+        cell.set([new Date(DATE_ISO)]);
+        assertEpochNsec((cell.get() as unknown[])[0]);
+      });
+    });
+
+    // TODO(danfuzz): the `Cell.of(new Date(...))` cases (top-level and nested)
+    // are intentionally absent: unlike `set()`, the `Cell.of` initial-value path
+    // doesn't normalize native values (see the TODO in `createWithDefault` in
+    // `cell.ts`), so the raw `Date` reaches encode and throws under the strict
+    // codec. `get()` *appears* to convert (read-side projection), but the
+    // committed form is still raw. Add `... (Cell.of)` cases once that path
+    // normalizes its initial value the way `set()` does.
 
     it("should handle creating cell with mixed type array", () => {
       withinHandlerContext(runtime, space, tx, () => {
         const mixed = [1, "two", { three: 3 }, [4], true, null];
         const cell = Cell.of(mixed);
+        expect(cell.get()).toEqual(mixed);
+      });
+    });
+
+    it("should handle creating cell with mixed type array from set", () => {
+      // Using Cell.of, like the other tests, means that we can't use a proxy
+      // since the value isn't set. Using cell.set, we can use a query result
+      // proxy. I don't have a good way of verifying that in a unit test, but
+      // I can at least verify that it returns the correct value.
+      withinHandlerContext(runtime, space, tx, () => {
+        const mixed = [1, "two", { three: 3 }, [4], true, null];
+        const cell = Cell.of(mixed);
+        cell.set(mixed);
         expect(cell.get()).toEqual(mixed);
       });
     });

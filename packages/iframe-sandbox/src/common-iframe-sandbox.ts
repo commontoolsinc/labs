@@ -1,4 +1,4 @@
-import { css, html, LitElement, PropertyValues } from "lit";
+import { css, html, LitElement } from "lit";
 import { property } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
 import * as IPC from "./ipc.ts";
@@ -9,7 +9,7 @@ import {
   HealthCheckAbort,
   HealthCheckTimeout,
 } from "./health-check.ts";
-import { sleep } from "@commontools/utils/sleep";
+import { sleep } from "@commonfabric/utils/sleep";
 
 let FRAME_IDS = 0;
 
@@ -40,17 +40,28 @@ type CommonIframeLoadState = "" | "loading" | "loaded";
 // @event {CustomEvent} error - An error from the iframe.
 // @event {CustomEvent} load - The iframe was successfully loaded.
 export class CommonIframeSandboxElement extends LitElement {
-  @property()
-  src = "";
+  get src() {
+    return this.#src;
+  }
 
   @property()
-  context?: object;
+  set src(value: string) {
+    const previousValue = this.#src;
+    this.#src = value;
+    this.requestUpdate("src", previousValue);
+    if (this.initialized && value !== previousValue) {
+      this.loadInnerDoc();
+    }
+  }
 
   @property()
-  crashed = false;
+  accessor context: object | undefined = undefined;
+
+  @property()
+  accessor crashed = false;
 
   @property({ attribute: "load-state", reflect: true })
-  loadState: CommonIframeLoadState = "";
+  accessor loadState: CommonIframeLoadState = "";
 
   static override styles = css`
     :host {
@@ -79,6 +90,7 @@ export class CommonIframeSandboxElement extends LitElement {
 
   // Static id for this component for its lifetime.
   private frameId: number = ++FRAME_IDS;
+  #src = "";
   // An incrementing id for each new page load to disambiguate
   // requests between inner page loads.
   private instanceId: number = 0;
@@ -482,12 +494,6 @@ export class CommonIframeSandboxElement extends LitElement {
   override disconnectedCallback() {
     super.disconnectedCallback();
     globalThis.removeEventListener("message", this.boundOnMessage);
-  }
-
-  override willUpdate(changedProperties: PropertyValues<this>) {
-    if (changedProperties.has("src") && this.initialized) {
-      this.loadInnerDoc();
-    }
   }
 
   override render() {

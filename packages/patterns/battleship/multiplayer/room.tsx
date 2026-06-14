@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Battleship Multiplayer - Game Room Pattern
  *
@@ -13,7 +12,7 @@
  * See: lobby.tsx for the lobby entry point
  */
 
-import { action, computed, NAME, pattern, UI } from "commontools";
+import { action, computed, NAME, pattern, UI } from "commonfabric";
 
 import {
   areAllShipsSunk,
@@ -24,6 +23,7 @@ import {
   getInitials,
   GRID_INDICES,
   isShipSunk,
+  normalizePlayerNumber,
   type RoomInput,
   type RoomOutput,
   ROWS,
@@ -80,12 +80,16 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
     myName,
     myPlayerNumber,
   }) => {
-    // Cast once for use throughout
-    const playerNum = myPlayerNumber as 1 | 2;
+    const myNameValue = computed(() => myName.get());
+    const myPlayerNumberValue = computed(() =>
+      normalizePlayerNumber(myPlayerNumber.get())
+    );
 
     // Fire shot action - closes over pattern state directly
     const fireShot = action<{ row: number; col: number }>(({ row, col }) => {
       const state = gameState.get();
+      const playerNum = normalizePlayerNumber(myPlayerNumber.get());
+      if (playerNum === null) return;
 
       // Can't fire if game is over
       if (state.phase === "finished") return;
@@ -199,7 +203,8 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
 
     // Board cells computed directly
     const myBoardCells = computed(() => {
-      const playerNum = myPlayerNumber as 1 | 2;
+      const playerNum = normalizePlayerNumber(myPlayerNumber.get());
+      if (playerNum === null) return [];
       const playerData = playerNum === 1 ? player1.get() : player2.get();
       const currentShots = shots.get();
 
@@ -242,7 +247,8 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
     });
 
     const enemyBoardCells = computed(() => {
-      const playerNum = myPlayerNumber as 1 | 2;
+      const playerNum = normalizePlayerNumber(myPlayerNumber.get());
+      if (playerNum === null) return [];
       const gs = gameState.get();
       const currentShots = shots.get();
 
@@ -282,7 +288,12 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
 
     // Consolidated computed values - reduces subscription overhead
     const myColor = computed(() => {
-      const data = myPlayerNumber === 1 ? player1.get() : player2.get();
+      const playerNum = normalizePlayerNumber(myPlayerNumber.get());
+      const data = playerNum === 1
+        ? player1.get()
+        : playerNum === 2
+        ? player2.get()
+        : null;
       return data?.color || "#3b82f6";
     });
 
@@ -324,8 +335,9 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
         };
       }
       const finished = gs.phase === "finished";
-      const won = gs.winner === myPlayerNumber;
-      const myTurn = gs.currentTurn === myPlayerNumber;
+      const playerNum = normalizePlayerNumber(myPlayerNumber.get());
+      const won = gs.winner === playerNum;
+      const myTurn = gs.currentTurn === playerNum;
       return {
         showTurnIndicator: myTurn && !finished ? "block" : "none",
         bgColor: finished
@@ -345,7 +357,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
     });
 
     return {
-      [NAME]: computed(() => `Battleship: ${myName}`),
+      [NAME]: computed(() => `Battleship: ${myName.get() || "Joining"}`),
       [UI]: (
         <div
           style={{
@@ -399,7 +411,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                     fontWeight: "bold",
                   }}
                 >
-                  {getInitials(myName)}
+                  {getInitials(myName.get())}
                 </div>
                 <span style={{ fontWeight: "600" }}>{myName}</span>
               </div>
@@ -628,7 +640,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                 padding: "8px 16px",
                 backgroundColor: player1Display.bgColor,
                 borderRadius: "8px",
-                border: myPlayerNumber === 1
+                border: myPlayerNumberValue === 1
                   ? "2px solid #fbbf24"
                   : "2px solid transparent",
               }}
@@ -651,7 +663,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
               <div>
                 <div style={{ fontWeight: "600", fontSize: "14px" }}>
                   {player1Display.name}
-                  {myPlayerNumber === 1 ? " (you)" : ""}
+                  {myPlayerNumberValue === 1 ? " (you)" : ""}
                 </div>
                 <div style={{ fontSize: "12px", color: "#94a3b8" }}>
                   {player1Display.status}
@@ -679,7 +691,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                 padding: "8px 16px",
                 backgroundColor: player2Display.bgColor,
                 borderRadius: "8px",
-                border: myPlayerNumber === 2
+                border: myPlayerNumberValue === 2
                   ? "2px solid #fbbf24"
                   : "2px solid transparent",
               }}
@@ -702,7 +714,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
               <div>
                 <div style={{ fontWeight: "600", fontSize: "14px" }}>
                   {player2Display.name}
-                  {myPlayerNumber === 2 ? " (you)" : ""}
+                  {myPlayerNumberValue === 2 ? " (you)" : ""}
                 </div>
                 <div style={{ fontSize: "12px", color: "#94a3b8" }}>
                   {player2Display.status}
@@ -727,8 +739,8 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
           </div>
         </div>
       ),
-      myName,
-      myPlayerNumber,
+      myName: myNameValue,
+      myPlayerNumber: myPlayerNumberValue,
       fireShot,
     };
   },

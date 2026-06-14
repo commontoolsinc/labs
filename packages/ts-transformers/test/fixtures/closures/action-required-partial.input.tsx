@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { Cell, pattern, action } from "commontools";
+import { Cell, pattern, action } from "commonfabric";
 
 interface BaseState {
   a?: Cell<string>;

@@ -12,6 +12,22 @@ function parseCliArgs(): Record<string, string> {
   return overrides;
 }
 
+/**
+ * Results in `true` (on), `false` (off), or `undefined` (default).
+ */
+function flagValue() {
+  return z.string().default("default").transform((v) => {
+    switch (v) {
+      case "default":
+        return undefined;
+      case "false":
+        return false;
+      default:
+        return true;
+    }
+  });
+}
+
 // NOTE: This is where we define the environment variable types and defaults.
 const EnvSchema = z.object({
   ENV: z.string().default("development"),
@@ -42,24 +58,26 @@ const EnvSchema = z.object({
   // ===========================================================================
   // (/routes/ai/llm) Environment variables for LLM Providers
   // ===========================================================================
-  CTTS_AI_LLM_ANTHROPIC_API_KEY: z.string().default(""),
-  CTTS_AI_LLM_GROQ_API_KEY: z.string().default(""),
-  CTTS_AI_LLM_OPENAI_API_KEY: z.string().default(""),
-  CTTS_AI_LLM_CEREBRAS_API_KEY: z.string().default(""),
-  CTTS_AI_LLM_PERPLEXITY_API_KEY: z.string().default(""),
-  CTTS_AI_LLM_AWS_ACCESS_KEY_ID: z.string().default(""),
-  CTTS_AI_LLM_AWS_SECRET_ACCESS_KEY: z.string().default(""),
-  CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS: z.string().default(""),
-  CTTS_AI_LLM_GOOGLE_VERTEX_PROJECT: z.string().default(""),
-  CTTS_AI_LLM_GOOGLE_VERTEX_LOCATION: z.string().default(""),
-  CTTS_AI_LLM_XAI_API_KEY: z.string().default(""),
-  CTTS_AI_GATEWAY_URL: z.string().default(""),
+  CFTS_AI_LLM_ANTHROPIC_API_KEY: z.string().default(""),
+  CFTS_AI_LLM_GROQ_API_KEY: z.string().default(""),
+  CFTS_AI_LLM_OPENAI_API_KEY: z.string().default(""),
+  CFTS_AI_LLM_CEREBRAS_API_KEY: z.string().default(""),
+  CFTS_AI_LLM_PERPLEXITY_API_KEY: z.string().default(""),
+  CFTS_AI_LLM_AWS_ACCESS_KEY_ID: z.string().default(""),
+  CFTS_AI_LLM_AWS_SECRET_ACCESS_KEY: z.string().default(""),
+  CFTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS: z.string().default(""),
+  CFTS_AI_LLM_GOOGLE_VERTEX_PROJECT: z.string().default(""),
+  CFTS_AI_LLM_GOOGLE_VERTEX_LOCATION: z.string().default(""),
+  CFTS_AI_LLM_XAI_API_KEY: z.string().default(""),
+  // The gateway is reachable only on Tailscale; toolshed falls back cleanly
+  // when the URL is unreachable (see `loadGatewayModels` in routes/ai/llm/models.ts).
+  CFTS_AI_GATEWAY_URL: z.string().default("https://llm.stage.commontools.dev"),
 
   // LLM Observability Tool
-  CTTS_AI_LLM_PHOENIX_PROJECT: z.string().default(""),
-  CTTS_AI_LLM_PHOENIX_URL: z.string().default(""),
-  CTTS_AI_LLM_PHOENIX_API_URL: z.string().default(""),
-  CTTS_AI_LLM_PHOENIX_API_KEY: z.string().default(""),
+  CFTS_AI_LLM_PHOENIX_PROJECT: z.string().default(""),
+  CFTS_AI_LLM_PHOENIX_URL: z.string().default(""),
+  CFTS_AI_LLM_PHOENIX_API_URL: z.string().default(""),
+  CFTS_AI_LLM_PHOENIX_API_KEY: z.string().default(""),
   // ===========================================================================
 
   // ===========================================================================
@@ -177,45 +195,32 @@ const EnvSchema = z.object({
   // Path to an identity key.
   IDENTITY: z.string().default(""),
 
+  // Space ACL enforcement on the memory v2 server: off | observe | enforce.
+  // `observe` evaluates the policy and counts/logs would-denies without
+  // blocking (the rollout signal); `enforce` denies. See the `acl` option in
+  // packages/memory/v2/server.ts for the policy.
+  MEMORY_ACL_MODE: z.enum(["off", "observe", "enforce"]).default("off"),
+
+  // Comma-separated DIDs with implicit OWNER on every space (e.g. the
+  // background service operator identity).
+  MEMORY_SERVICE_DIDS: z.string().default(""),
+
   // In development, you can optionally proxy the upstream SHELL
   SHELL_URL: z.string().optional(),
 
   // ===========================================================================
-  // Experimental space-model feature flags (see ExperimentalOptions in runner)
+  // Experimental feature flags (see ExperimentalOptions in runner)
   // Note: We intentionally avoid z.coerce.boolean() here. Zod's coerce uses
   // Boolean(), which treats any non-empty string as truthy -- so setting an
   // env var to "false" would incorrectly enable the flag. The other boolean
   // env vars in this file have the same latent bug.
   // ===========================================================================
-  EXPERIMENTAL_RICH_STORABLE_VALUES: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
-  EXPERIMENTAL_STORABLE_PROTOCOL: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
-  EXPERIMENTAL_UNIFIED_JSON_ENCODING: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
-  EXPERIMENTAL_CANONICAL_HASHING: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
+  EXPERIMENTAL_MODERN_CELL_REP: flagValue(),
+  EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: flagValue(),
 
-  // ===========================================================================
-  // Compilation cache flags (see docs/specs/compilation-cache.md)
-  // ===========================================================================
-  COMPILATION_CACHE_SERVER: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
-  // COMPILATION_CACHE_CLIENT is read by the shell's felt.config.ts via
-  // Deno.env.get() at build time (esbuild define), not by toolshed code.
-  // It's defined here so the start scripts can pass it through consistently.
-  COMPILATION_CACHE_CLIENT: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
-  // Directory for the server-side filesystem compilation cache.
-  // Must be writable. In multi-process environments (e.g. common-cluster),
-  // use distinct directories per process to avoid conflicts.
-  COMPILATION_CACHE_FS_DIR: z.string().default("/tmp/ct-compilation-cache"),
+  // Git SHA of the deployed commit. Set at deploy time; takes priority over
+  // the build-baked SHA (see lib/build-info.ts).
+  TOOLSHED_GIT_SHA: z.string().optional(),
 
   // ===========================================================================
   // Sandbox Service
@@ -226,7 +231,7 @@ const EnvSchema = z.object({
   ),
 
   // URL that sandboxes should use to reach the toolshed API (injected as
-  // CT_API_URL into every sandbox exec). Defaults to API_URL if not set.
+  // CF_API_URL into every sandbox exec). Defaults to API_URL if not set.
   SANDBOX_TOOLSHED_URL: z.string().optional(),
 });
 

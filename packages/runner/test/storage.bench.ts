@@ -1,11 +1,12 @@
 /**
  * Storage layer benchmarks - measuring raw transaction read/write performance
  */
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { deepEqual } from "@commontools/utils/deep-equal";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import type { FabricValue } from "@commonfabric/memory/interface";
 import {
   largeStringA,
   largeStringB,
@@ -25,12 +26,13 @@ const space = signer.did();
 
 // Setup helper
 function setup() {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
   });
-  runtime.scheduler.disablePullMode();
   const tx = runtime.edit();
   return { runtime, storageManager, tx };
 }
@@ -46,6 +48,31 @@ async function cleanup(
   await storageManager.close();
 }
 
+const writeDocument = (
+  tx: IExtendedStorageTransaction,
+  id: string,
+  value: FabricValue,
+) => {
+  tx.writeValueOrThrow({
+    space,
+    scope: "space",
+    id: id as `test:${string}`,
+    path: [],
+  }, value);
+};
+
+const readDocument = (
+  tx: IExtendedStorageTransaction,
+  id: string,
+) => {
+  tx.readValueOrThrow({
+    space,
+    scope: "space",
+    id: id as `test:${string}`,
+    path: [],
+  });
+};
+
 // ============================================================================
 // Write operations
 // ============================================================================
@@ -60,8 +87,8 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:raw-w-${i}`,
-          type: "application/json",
           path: ["value"],
         },
         i,
@@ -82,8 +109,8 @@ Deno.bench(
       tx.writeOrThrow(
         {
           space,
+          scope: "space",
           id: `test:throw-w-${i}`,
-          type: "application/json",
           path: ["value"],
         },
         i,
@@ -104,8 +131,8 @@ Deno.bench(
       tx.writeValueOrThrow(
         {
           space,
+          scope: "space",
           id: `test:value-w-${i}`,
-          type: "application/json",
           path: [],
         },
         i,
@@ -126,13 +153,57 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:root-write-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
       );
     }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
+
+Deno.bench(
+  "Storage - tx.writeValueOrThrow nested loop (100x)",
+  { group: "write-batch" },
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    for (let i = 0; i < 100; i++) {
+      tx.writeValueOrThrow(
+        {
+          space,
+          scope: "space",
+          id: `test:nested-loop-${i}`,
+          path: ["profile", "name"],
+        },
+        `user-${i}`,
+      );
+    }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
+
+Deno.bench(
+  "Storage - tx.writeValuesOrThrow nested batch (100x)",
+  { group: "write-batch" },
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    tx.writeValuesOrThrow?.(
+      Array.from({ length: 100 }, (_, i) => ({
+        address: {
+          space,
+          scope: "space",
+          id: `test:nested-batch-${i}`,
+          path: ["profile", "name"],
+        },
+        value: `user-${i}`,
+      })),
+    );
 
     await cleanup(runtime, storageManager, tx);
   },
@@ -153,8 +224,8 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:read-raw-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -165,8 +236,8 @@ Deno.bench(
     for (let i = 0; i < 100; i++) {
       tx.read({
         space,
+        scope: "space",
         id: `test:read-raw-${i}`,
-        type: "application/json",
         path: ["value"],
       });
     }
@@ -186,8 +257,8 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:read-throw-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -198,8 +269,8 @@ Deno.bench(
     for (let i = 0; i < 100; i++) {
       tx.readOrThrow({
         space,
+        scope: "space",
         id: `test:read-throw-${i}`,
-        type: "application/json",
         path: ["value"],
       });
     }
@@ -219,8 +290,8 @@ Deno.bench(
       tx.writeValueOrThrow(
         {
           space,
+          scope: "space",
           id: `test:read-value-${i}`,
-          type: "application/json",
           path: [],
         },
         i,
@@ -231,8 +302,8 @@ Deno.bench(
     for (let i = 0; i < 100; i++) {
       tx.readValueOrThrow({
         space,
+        scope: "space",
         id: `test:read-value-${i}`,
-        type: "application/json",
         path: [],
       });
     }
@@ -252,8 +323,8 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:prewrite-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -264,8 +335,8 @@ Deno.bench(
     for (let j = 0; j < 1000; j++) {
       tx.read({
         space,
+        scope: "space",
         id: `test:prewrite-${j % 100}`,
-        type: "application/json",
         path: ["value"],
       });
     }
@@ -289,11 +360,11 @@ Deno.bench(
       const result = tx.write(
         {
           space,
+          scope: "space",
           id: `test:create-${i}`,
-          type: "application/json",
           path: [],
         },
-        i,
+        { value: i },
       );
       if (result.error) throw new Error("Write failed");
     }
@@ -312,8 +383,8 @@ Deno.bench(
     tx.write(
       {
         space,
+        scope: "space",
         id: "test:same-entity-repeat",
-        type: "application/json",
         path: [],
       },
       { value: 0 },
@@ -324,8 +395,8 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: "test:same-entity-repeat",
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -347,8 +418,8 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:existing-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: 0 },
@@ -360,8 +431,8 @@ Deno.bench(
       const result = tx.write(
         {
           space,
+          scope: "space",
           id: `test:existing-${i}`,
-          type: "application/json",
           path: ["value"],
         },
         i,
@@ -388,8 +459,8 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:path-${i}`,
-          type: "application/json",
           path: [],
         },
         { a: { b: { c: { d: { e: { f: i } } } } } },
@@ -400,8 +471,8 @@ Deno.bench(
     for (let i = 0; i < 100; i++) {
       tx.read({
         space,
+        scope: "space",
         id: `test:path-${i}`,
-        type: "application/json",
         path: ["a"],
       });
     }
@@ -421,8 +492,8 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:deep-path-${i}`,
-          type: "application/json",
           path: [],
         },
         { a: { b: { c: { d: { e: { f: i } } } } } },
@@ -433,8 +504,8 @@ Deno.bench(
     for (let i = 0; i < 100; i++) {
       tx.read({
         space,
+        scope: "space",
         id: `test:deep-path-${i}`,
-        type: "application/json",
         path: ["a", "b", "c", "d", "e", "f"],
       });
     }
@@ -469,8 +540,8 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:commit-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -494,8 +565,8 @@ Deno.bench(
     for (let i = 0; i < 1000; i++) {
       const _addr = {
         space,
+        scope: "space",
         id: `test:obj-${i}`,
-        type: "application/json",
         path: ["value", "nested"],
       };
     }
@@ -508,8 +579,8 @@ Deno.bench(
   () => {
     const base = {
       space,
+      scope: "space",
       id: "test:base",
-      type: "application/json",
       path: [] as string[],
     };
     for (let i = 0; i < 1000; i++) {
@@ -550,8 +621,8 @@ Deno.bench(
       activity.push({
         read: {
           space,
+          scope: "space",
           id: `test:activity-${i}`,
-          type: "application/json",
           path: ["value"],
           meta: {},
         },
@@ -575,8 +646,8 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:first-write-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -597,8 +668,8 @@ Deno.bench(
     tx.write(
       {
         space,
+        scope: "space",
         id: "test:single-entity",
-        type: "application/json",
         path: [],
       },
       { value: 0 },
@@ -609,8 +680,8 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: "test:single-entity",
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -632,8 +703,8 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:ten-entities-${i % 10}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -655,8 +726,8 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:nested-${i}`,
-          type: "application/json",
           path: [],
         },
         { data: { nested: { value: 0 } } },
@@ -668,8 +739,8 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:nested-${i}`,
-          type: "application/json",
           path: ["data", "nested", "value"],
         },
         i,
@@ -782,8 +853,8 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:wvc-new-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -806,8 +877,8 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: "test:wvc-same",
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -829,8 +900,8 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:wvc-commit-new-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -856,8 +927,8 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: "test:wvc-commit-same",
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -888,15 +959,7 @@ Deno.bench(
 
     // Write 100 entities with medianComplexityA, then "update" with equal value
     for (let i = 0; i < 100; i++) {
-      tx.write(
-        {
-          space,
-          id: `test:realistic-eq-${i}`,
-          type: "application/json",
-          path: [],
-        },
-        medianComplexityA,
-      );
+      writeDocument(tx, `test:realistic-eq-${i}`, medianComplexityA);
     }
     // Commit first batch
     await tx.commit();
@@ -904,15 +967,7 @@ Deno.bench(
     // Start new transaction and write identical values
     const tx2 = runtime.edit();
     for (let i = 0; i < 100; i++) {
-      tx2.write(
-        {
-          space,
-          id: `test:realistic-eq-${i}`,
-          type: "application/json",
-          path: [],
-        },
-        medianComplexityB, // identical to A
-      );
+      writeDocument(tx2, `test:realistic-eq-${i}`, medianComplexityB);
     }
 
     b.start();
@@ -932,30 +987,14 @@ Deno.bench(
 
     // Write 100 entities with medianComplexityA
     for (let i = 0; i < 100; i++) {
-      tx.write(
-        {
-          space,
-          id: `test:realistic-late-${i}`,
-          type: "application/json",
-          path: [],
-        },
-        medianComplexityA,
-      );
+      writeDocument(tx, `test:realistic-late-${i}`, medianComplexityA);
     }
     await tx.commit();
 
     // Update with values that differ at end of structure
     const tx2 = runtime.edit();
     for (let i = 0; i < 100; i++) {
-      tx2.write(
-        {
-          space,
-          id: `test:realistic-late-${i}`,
-          type: "application/json",
-          path: [],
-        },
-        medianComplexityC, // differs in items[4].done
-      );
+      writeDocument(tx2, `test:realistic-late-${i}`, medianComplexityC);
     }
 
     b.start();
@@ -975,30 +1014,14 @@ Deno.bench(
 
     // Write 100 entities with medianComplexityA
     for (let i = 0; i < 100; i++) {
-      tx.write(
-        {
-          space,
-          id: `test:realistic-early-${i}`,
-          type: "application/json",
-          path: [],
-        },
-        medianComplexityA,
-      );
+      writeDocument(tx, `test:realistic-early-${i}`, medianComplexityA);
     }
     await tx.commit();
 
     // Update with values that differ at start of structure
     const tx2 = runtime.edit();
     for (let i = 0; i < 100; i++) {
-      tx2.write(
-        {
-          space,
-          id: `test:realistic-early-${i}`,
-          type: "application/json",
-          path: [],
-        },
-        medianComplexityD, // differs in items[0].done
-      );
+      writeDocument(tx2, `test:realistic-early-${i}`, medianComplexityD);
     }
 
     b.start();
@@ -1026,30 +1049,14 @@ Deno.bench(
 
     // Write 50 entities with largeStringA (contains 100k string)
     for (let i = 0; i < 50; i++) {
-      tx.write(
-        {
-          space,
-          id: `test:large-eq-${i}`,
-          type: "application/json",
-          path: [],
-        },
-        largeStringA,
-      );
+      writeDocument(tx, `test:large-eq-${i}`, largeStringA);
     }
     await tx.commit();
 
     // "Update" with identical values
     const tx2 = runtime.edit();
     for (let i = 0; i < 50; i++) {
-      tx2.write(
-        {
-          space,
-          id: `test:large-eq-${i}`,
-          type: "application/json",
-          path: [],
-        },
-        largeStringB, // identical to A
-      );
+      writeDocument(tx2, `test:large-eq-${i}`, largeStringB);
     }
 
     b.start();
@@ -1069,30 +1076,14 @@ Deno.bench(
 
     // Write 50 entities with largeStringA
     for (let i = 0; i < 50; i++) {
-      tx.write(
-        {
-          space,
-          id: `test:large-diff-${i}`,
-          type: "application/json",
-          path: [],
-        },
-        largeStringA,
-      );
+      writeDocument(tx, `test:large-diff-${i}`, largeStringA);
     }
     await tx.commit();
 
     // Update with values where 100k string differs only at last char
     const tx2 = runtime.edit();
     for (let i = 0; i < 50; i++) {
-      tx2.write(
-        {
-          space,
-          id: `test:large-diff-${i}`,
-          type: "application/json",
-          path: [],
-        },
-        largeStringC, // 100k string differs at last character
-      );
+      writeDocument(tx2, `test:large-diff-${i}`, largeStringC);
     }
 
     b.start();
@@ -1120,27 +1111,14 @@ Deno.bench(
 
     // Write 50 entities with large strings
     for (let i = 0; i < 50; i++) {
-      tx.write(
-        {
-          space,
-          id: `test:read-val-${i}`,
-          type: "application/json",
-          path: [],
-        },
-        largeStringA,
-      );
+      writeDocument(tx, `test:read-val-${i}`, largeStringA);
     }
     await tx.commit();
 
     // New transaction: read all entities (creates read invariants)
     const tx2 = runtime.edit();
     for (let i = 0; i < 50; i++) {
-      tx2.read({
-        space,
-        id: `test:read-val-${i}`,
-        type: "application/json",
-        path: [],
-      });
+      readDocument(tx2, `test:read-val-${i}`);
     }
 
     // Commit validates each read invariant via attestation.claim()

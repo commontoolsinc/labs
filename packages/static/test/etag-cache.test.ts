@@ -3,8 +3,8 @@ import {
   compareETags,
   createCacheHeaders,
   generateETag,
-} from "@commontools/static/etag";
-import { decode } from "@commontools/utils/encoding";
+} from "@commonfabric/static/etag";
+import { decode } from "@commonfabric/utils/encoding";
 import { TestStaticCache } from "../utils.ts";
 
 Deno.test("ETag Generation - generates same ETag for same content", async () => {

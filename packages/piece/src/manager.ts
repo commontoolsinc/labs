@@ -1,8 +1,9 @@
 import {
   type Cell,
-  Classification,
+  cellEntityIdString,
   EntityId,
   getEntityId,
+  getMetaLink,
   isCell,
   isLink,
   isStream,
@@ -14,20 +15,28 @@ import {
   Runtime,
   type Schema,
   type SpaceCellContents,
-  TYPE,
   URI,
-} from "@commontools/runner";
-import { type Session } from "@commontools/identity";
-import { isRecord } from "@commontools/utils/types";
-import { ensureNotRenderThread } from "@commontools/utils/env";
+} from "@commonfabric/runner";
+import type { CellScope } from "@commonfabric/api";
+import { cfcAtom } from "@commonfabric/api/cfc";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { type Session } from "@commonfabric/identity";
+import { isRecord } from "@commonfabric/utils/types";
+import { ensureNotRenderThread } from "@commonfabric/utils/env";
 import {
   NameSchema,
   nameSchema,
   pieceListSchema,
-  pieceSourceCellSchema,
-  processSchema,
-} from "@commontools/runner/schemas";
+} from "@commonfabric/runner/schemas";
+import { getResultCellWithSourceSchema } from "../../runner/src/piece-helpers.ts";
 ensureNotRenderThread();
+
+const PRIVILEGED_PIECE_LIST_SCHEMA = internSchema({
+  type: "array",
+  items: { type: "unknown", asCell: ["cell"] },
+  default: [],
+  ifc: { confidentiality: [cfcAtom.resource("PrivilegedPieceList")] },
+});
 
 /**
  * Extracts the ID from a piece.
@@ -35,10 +44,7 @@ ensureNotRenderThread();
  * @returns The piece ID string, or undefined if no ID is found
  */
 export function pieceId(piece: Cell<unknown>): string | undefined {
-  const id = piece.entityId;
-  if (!id) return undefined;
-  const idValue = id["/"];
-  return typeof idValue === "string" ? idValue : undefined;
+  return cellEntityIdString(piece);
 }
 
 /**
@@ -52,6 +58,25 @@ function filterOutCell(
   return list.get().filter((piece) =>
     !piece.resolveAsCell().equals(resolvedTarget)
   );
+}
+
+const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
+  Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
+
+async function timePiecePhase<T>(
+  label: string,
+  run: () => T | Promise<T>,
+): Promise<T> {
+  if (!PIECE_TRACE_TIMINGS) {
+    return await run();
+  }
+  const start = performance.now();
+  try {
+    return await run();
+  } finally {
+    const elapsed = Math.round(performance.now() - start);
+    console.error(`[piece-phase] ${elapsed}ms :: ${label}`);
+  }
 }
 
 export class PieceManager {
@@ -134,15 +159,36 @@ export class PieceManager {
    * Get the default pattern cell from the space cell.
    * @returns The default pattern cell, or undefined if not set
    */
-  async getDefaultPattern(): Promise<Cell<NameSchema> | undefined> {
-    const cell = await this.spaceCell.key("defaultPattern").sync();
-    if (!cell.get().get()) {
+  async getDefaultPattern(
+    runIt: boolean = true,
+  ): Promise<Cell<NameSchema> | undefined> {
+    const cell = await timePiecePhase(
+      "getDefaultPattern.spaceCell.sync",
+      () => this.spaceCell.key("defaultPattern").sync(),
+    );
+    const defaultPattern = cell.get();
+    if (!defaultPattern) {
       return undefined;
     }
-    return this.get(
-      cell.get(),
-      true,
-      nameSchema,
+
+    await timePiecePhase(
+      "getDefaultPattern.defaultPattern.sync",
+      () => defaultPattern.sync(),
+    );
+    if (
+      defaultPattern.getRaw() === undefined &&
+      defaultPattern.getMetaRaw("pattern") === undefined
+    ) {
+      return undefined;
+    }
+    return await timePiecePhase(
+      `getDefaultPattern.get(runIt=${runIt})`,
+      () =>
+        this.get(
+          defaultPattern,
+          runIt,
+          nameSchema,
+        ),
     );
   }
 
@@ -151,9 +197,15 @@ export class PieceManager {
    * Reads from the default pattern's allPieces export.
    */
   async getPieces(): Promise<Cell<Cell<unknown>[]>> {
-    const defaultPattern = await this.getDefaultPattern();
+    const defaultPattern = await this.getDefaultPattern(true);
     if (!defaultPattern) {
-      // Return empty array cell if no default pattern
+      // Return empty array cell if no default pattern. Loud on purpose: any
+      // subscription made against this placeholder never fires again, so a
+      // cold-cache miss here silently freezes piece listings (e.g. FUSE).
+      console.warn(
+        `getPieces: no default pattern found for space ${this.space}; ` +
+          "returning detached empty piece list",
+      );
       return this.runtime.getCell(this.space, "empty-pieces", pieceListSchema);
     }
 
@@ -169,7 +221,10 @@ export class PieceManager {
   }
 
   async add(newPieces: Cell<unknown>[]): Promise<void> {
-    const defaultPattern = await this.getDefaultPattern();
+    const defaultPattern = await timePiecePhase(
+      "add.getDefaultPattern",
+      () => this.getDefaultPattern(true),
+    );
     if (!defaultPattern) {
       throw new Error("Cannot add pieces: default pattern not available");
     }
@@ -177,11 +232,11 @@ export class PieceManager {
     const cell = defaultPattern.asSchema({
       type: "object",
       properties: {
-        addPiece: { asStream: true },
+        addPiece: { asCell: ["stream"] },
       },
     });
 
-    const addPieceHandler = cell.key("addPiece").get();
+    const addPieceHandler = await cell.key("addPiece").pull();
     if (!isStream(addPieceHandler)) {
       throw new Error(
         "Cannot add pieces: addPiece handler not found on default pattern",
@@ -194,69 +249,85 @@ export class PieceManager {
     // distinguish the two — otherwise pieces are silently dropped.
     // Retries are handled by the scheduler internally.
     for (const piece of newPieces) {
-      await new Promise<void>((resolve, reject) => {
-        addPieceHandler.send({ piece }, (tx) => {
-          const txStatus = tx.status();
-          if (txStatus.status === "error") {
-            console.error(
-              "Piece registration failed: addPiece transaction error:",
-              txStatus.error,
-            );
-            reject(
-              new Error(
-                "Piece registration failed: addPiece transaction aborted after retries",
-              ),
-            );
-          } else {
-            resolve();
-          }
-        });
-      });
+      await timePiecePhase(
+        "add.send",
+        () =>
+          new Promise<void>((resolve, reject) => {
+            addPieceHandler.send({ piece }, (tx) => {
+              const txStatus = tx.status();
+              if (txStatus.status === "error") {
+                console.error(
+                  "Piece registration failed: addPiece transaction error:",
+                  txStatus.error,
+                );
+                reject(
+                  new Error(
+                    "Piece registration failed: addPiece transaction aborted after retries",
+                  ),
+                );
+              } else {
+                resolve();
+              }
+            });
+          }),
+      );
     }
 
-    await this.runtime.idle();
-    await this.synced();
+    await timePiecePhase("add.runtime.idle", () => this.runtime.idle());
+    await timePiecePhase("add.synced", () => this.synced());
   }
 
   syncPieces(cell: Cell<Cell<unknown>[]>) {
     // TODO(@ubik2) We use elevated permissions here temporarily.
     // Our request for the piece list will walk the schema tree, and that will
-    // take us into classified data of pieces. If that happens, we still want
+    // take us into confidential data of pieces. If that happens, we still want
     // this bit to work, so we elevate this request.
-    const privilegedSchema = {
-      ...pieceListSchema,
-      ifc: { classification: [Classification.Secret] },
-    } as const satisfies JSONSchema;
-    return cell.asSchema(privilegedSchema).sync();
+    return cell.asSchema(PRIVILEGED_PIECE_LIST_SCHEMA).pull();
   }
 
   async get<S extends JSONSchema = JSONSchema>(
     id: string | Cell<unknown>,
     runIt: boolean,
     asSchema: S,
+    scope?: CellScope,
   ): Promise<Cell<Schema<S>>>;
   async get<T = unknown>(
     id: string | Cell<unknown>,
     runIt?: boolean,
     asSchema?: JSONSchema,
+    scope?: CellScope,
   ): Promise<Cell<T>>;
   async get<T = unknown>(
     id: string | Cell<unknown>,
     runIt: boolean = false,
     asSchema?: JSONSchema,
+    scope?: CellScope,
   ): Promise<Cell<T>> {
     // Get the piece cell
     const piece: Cell<unknown> = isCell(id)
       ? id
-      : this.runtime.getCellFromEntityId(this.space, { "/": id });
+      : this.runtime.getCellFromEntityId(
+        this.space,
+        { "/": id },
+        [],
+        undefined,
+        undefined,
+        scope,
+      );
 
     if (runIt) {
-      // start() handles sync, pattern loading, and running
-      // It's idempotent - no effect if already running
-      await this.runtime.start(piece);
+      // Load persisted result/metadata before start() decides whether this is a
+      // resumed piece that needs dependency sync before scheduler wiring.
+      await timePiecePhase("get.piece.sync", () => piece.sync());
+      // start() handles pattern loading and running. It's idempotent - no
+      // effect if already running.
+      await timePiecePhase(
+        "get.runtime.start",
+        () => this.runtime.start(piece),
+      );
     } else {
       // Just sync the cell if not running
-      await piece.sync();
+      await timePiecePhase("get.piece.sync", () => piece.sync());
     }
 
     // If caller provided a schema, use it
@@ -264,28 +335,8 @@ export class PieceManager {
       return piece.asSchema<T>(asSchema);
     }
 
-    // Otherwise, get result cell with schema from processCell.resultRef
-    // The resultRef was created with includeSchema: true during setup
-    const processCell = piece.getSourceCell();
-    if (processCell) {
-      const resultRefCell = processCell.key("resultRef").resolveAsCell();
-      if (resultRefCell?.schema) {
-        return piece.asSchema<T>(resultRefCell.schema);
-      }
-    }
-
-    // Fallback: return piece without schema
-    return piece as Cell<T>;
-  }
-
-  getLineage(piece: Cell<unknown>) {
-    return piece.getSourceCell(pieceSourceCellSchema)?.key("lineage").get() ??
-      [];
-  }
-
-  getLLMTrace(piece: Cell<unknown>): string | undefined {
-    return piece.getSourceCell(pieceSourceCellSchema)?.key("llmRequestId")
-      .get() ?? undefined;
+    // Otherwise, recover the result schema from the cell's metadata if present.
+    return getResultCellWithSourceSchema(piece as Cell<T>);
   }
 
   /**
@@ -352,49 +403,6 @@ export class PieceManager {
         }
       };
 
-      // Helper function to follow alias chain to its source
-      const followSourceToResultRef = (
-        cell: Cell<unknown>,
-        visited = new Set<string>(),
-        depth = 0,
-      ): EntityId | undefined => {
-        if (depth > maxDepth) return undefined; // Prevent infinite recursion
-
-        try {
-          const docId = cell.entityId;
-          if (!docId || !docId["/"]) return undefined;
-
-          const docIdStr = typeof docId["/"] === "string"
-            ? docId["/"]
-            : JSON.stringify(docId["/"]);
-
-          // Prevent cycles
-          if (visited.has(docIdStr)) return undefined;
-          visited.add(docIdStr);
-
-          try {
-            // If document has a sourceCell, follow it
-            const value = cell.getRaw();
-            const sourceCell = cell.getSourceCell();
-            if (sourceCell) {
-              return followSourceToResultRef(sourceCell, visited, depth + 1);
-            } else if (isRecord(value) && value.resultRef) {
-              // If we've reached the end and have a resultRef, return it
-              const { id: source } = parseLink(value.resultRef, cell)!;
-              if (source) return getEntityId(source);
-            }
-          } catch (err) {
-            // Ignore errors getting doc value
-            console.debug("Error getting doc value:", err);
-          }
-
-          return docId; // Return the current document's ID if no further references
-        } catch (err) {
-          console.debug("Error in followSourceToResultRef:", err);
-          return undefined;
-        }
-      };
-
       // Find references in the argument structure
       const processValue = (
         value: unknown,
@@ -416,12 +424,12 @@ export class PieceManager {
               addMatchingPiece(getEntityId(link.id)!);
             }
 
-            const sourceRefId = followSourceToResultRef(
+            const resultCell = followCellToResult(
               this.runtime.getCellFromLink(link),
               new Set(),
               0,
             );
-            if (sourceRefId) addMatchingPiece(sourceRefId);
+            if (resultCell !== undefined) addMatchingPiece(resultCell.entityId);
           } else if (Array.isArray(value)) {
             // Safe recursive processing of arrays
             for (let i = 0; i < value.length; i++) {
@@ -527,35 +535,6 @@ export class PieceManager {
       }
     };
 
-    // Helper function to follow alias chain to its source
-    const followSourceToResultRef = (
-      cell: Cell<unknown>,
-      visited = new Set<string>(),
-      depth = 0,
-    ): URI | undefined => {
-      if (depth > maxDepth) return undefined; // Prevent infinite recursion
-
-      const cellURI = cell.sourceURI;
-
-      // Prevent cycles
-      if (visited.has(cellURI)) return undefined;
-      visited.add(cellURI);
-
-      // If document has a sourceCell, follow it
-      const value = cell.getRaw();
-      const sourceCell = cell.getSourceCell();
-      if (sourceCell) {
-        return followSourceToResultRef(sourceCell, visited, depth + 1);
-      }
-
-      // If we've reached the end and have a resultRef, return it
-      if (isRecord(value) && value.resultRef) {
-        return parseLink(value.resultRef, cell)?.id;
-      }
-
-      return cellURI; // Return the current document's ID if no further references
-    };
-
     // Helper to check if a document refers to our target piece
     const checkRefersToTarget = (
       value: unknown,
@@ -578,19 +557,19 @@ export class PieceManager {
             if (link.id === piece.sourceURI) return true;
 
             // Check if cell link's source chain leads to our target
-            const sourceResultRefURI = followSourceToResultRef(
+            const resultCell = followCellToResult(
               this.runtime.getCellFromLink(link),
               new Set(),
               0,
             );
-            if (sourceResultRefURI === piece.sourceURI) return true;
+            if (resultCell?.sourceURI === piece.sourceURI) return true;
           } catch (err) {
             console.debug(
               "Error handling cell link in checkRefersToTarget:",
               err,
             );
           }
-          return false; // Don't process cell link contents
+          return false; // Don't traverse runtime metadata link contents
         }
 
         // Safe recursive processing of arrays
@@ -681,43 +660,37 @@ export class PieceManager {
     id: EntityId | string,
     path: string[] = [],
     schema?: JSONSchema,
+    scope?: CellScope,
   ): Promise<Cell<T>> {
     const cell = this.runtime.getCellFromEntityId<T>(
       this.space,
       id,
       path,
       schema,
+      undefined,
+      scope,
     );
     await cell.sync();
     return cell;
   }
 
   // Return Cell with argument content, loading the pattern if needed.
-  async getArgument<T = unknown>(
+  getArgument<T = unknown>(
     piece: Cell<unknown | T>,
-  ): Promise<Cell<T>> {
-    const source = piece.getSourceCell(processSchema);
-    const patternId = source?.get()?.[TYPE]!;
-    if (!patternId) throw new Error("piece missing pattern ID");
-    const pattern = await this.runtime.patternManager.loadPattern(
-      patternId,
-      this.space,
-    );
-    return source.key("argument").asSchema<T>(pattern.argumentSchema);
+  ): Cell<T> {
+    // The piece is a result cell; read its argument metadata link directly.
+    // With this approach, we aren't using the argumentSchema from the pattern
+    // but that should have been written into the Result Cell's argument link.
+    const argumentLink = getMetaLink(piece, "argument", {});
+    if (argumentLink === undefined) {
+      throw new Error("piece missing argument cell");
+    }
+    return this.runtime.getCellFromLink(argumentLink);
   }
 
   getResult<T = unknown>(
     piece: Cell<T>,
   ): Cell<T> {
-    // Get result cell with schema from processCell.resultRef
-    const processCell = piece.getSourceCell();
-    if (processCell) {
-      const resultRefCell = processCell.key("resultRef").resolveAsCell();
-      if (resultRefCell?.schema) {
-        return piece.asSchema<T>(resultRefCell.schema);
-      }
-    }
-    // Fallback: return piece without schema
     return piece;
   }
 
@@ -727,7 +700,7 @@ export class PieceManager {
     await this.syncPieces(piecesCell);
 
     // Check if this is the default pattern and clear the link
-    const defaultPattern = await this.getDefaultPattern();
+    const defaultPattern = await this.getDefaultPattern(false);
     if (
       defaultPattern &&
       piece.resolveAsCell().equals(defaultPattern.resolveAsCell())
@@ -755,7 +728,6 @@ export class PieceManager {
     pattern: Pattern | Module,
     inputs?: unknown,
     cause?: unknown,
-    llmRequestId?: string,
     options?: { start?: boolean },
   ): Promise<Cell<T>> {
     const start = options?.start ?? true;
@@ -763,7 +735,6 @@ export class PieceManager {
       pattern,
       inputs,
       cause,
-      llmRequestId,
     );
     if (start) {
       await this.startPiece(piece);
@@ -789,9 +760,12 @@ export class PieceManager {
     if (start) {
       await this.runtime.runSynced(piece, pattern, inputs);
     } else {
-      this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
+      await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
     }
     await this.syncPattern(piece);
+    if (start) {
+      await this.getResult(piece).pull();
+    }
 
     return piece;
   }
@@ -804,24 +778,34 @@ export class PieceManager {
     pattern: Pattern | Module,
     inputs?: unknown,
     cause?: unknown,
-    llmRequestId?: string,
   ): Promise<Cell<T>> {
-    await this.runtime.idle();
+    await timePiecePhase(
+      "setupPersistent.runtime.idle",
+      () => this.runtime.idle(),
+    );
     const piece = this.runtime.getCell<T>(
       this.space,
       cause ?? { space: this.space, random: crypto.randomUUID() },
       pattern.resultSchema,
     );
-    this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
-    await this.syncPattern(piece);
-
-    if (llmRequestId) {
-      this.runtime.editWithRetry((tx) => {
-        piece.getSourceCell(pieceSourceCellSchema)?.key("llmRequestId")
-          .withTx(tx)
-          .set(llmRequestId);
-      });
-    }
+    const knownPatternId = (() => {
+      try {
+        return this.runtime.patternManager.getPatternId(pattern);
+      } catch {
+        return undefined;
+      }
+    })();
+    await timePiecePhase(
+      "setupPersistent.runtime.setup",
+      () => this.runtime.setup(undefined, pattern, inputs ?? {}, piece),
+    );
+    await timePiecePhase(
+      "setupPersistent.syncPattern",
+      () =>
+        knownPatternId
+          ? this.syncPatternById(knownPatternId)
+          : this.syncPattern(piece),
+    );
 
     return piece;
   }
@@ -829,12 +813,18 @@ export class PieceManager {
   /** Start scheduling and running a prepared piece. */
   async startPiece<T = unknown>(pieceOrId: string | Cell<T>): Promise<void> {
     const piece = typeof pieceOrId === "string"
-      ? await this.get<T>(pieceOrId)
+      ? await timePiecePhase("startPiece.get", () => this.get<T>(pieceOrId))
       : pieceOrId;
     if (!piece) throw new Error("Piece not found");
-    await this.runtime.start(piece);
-    await this.runtime.idle();
-    await this.synced();
+    await timePiecePhase(
+      "startPiece.runtime.start",
+      () => this.runtime.start(piece),
+    );
+    await timePiecePhase(
+      "startPiece.result.pull",
+      () => this.getResult(piece).pull(),
+    );
+    await timePiecePhase("startPiece.synced", () => this.synced());
   }
 
   /** Stop a running piece (no-op if not running). */
@@ -849,21 +839,28 @@ export class PieceManager {
 
   // FIXME(JA): this really really really needs to be revisited
   async syncPattern(piece: Cell<unknown>) {
-    await piece.sync();
+    await timePiecePhase("syncPattern.piece.sync", () => piece.sync());
 
-    // When we subscribe to a doc, our subscription includes the doc's source,
+    // When we subscribe to a doc, our subscription includes the doc's pattern,
     // so get that.
-    const sourceCell = piece.getSourceCell();
-    if (!sourceCell) throw new Error("piece missing source cell");
-    await sourceCell.sync();
-
-    const patternId = sourceCell.get()?.[TYPE];
+    let patternId = getMetaLink(piece, "pattern")?.id;
+    if (!patternId) {
+      // Under remote sync, metadata can transiently lag the result value even
+      // though setup just wrote both. Wait for storage to settle and retry once
+      // before treating the pattern metadata as missing.
+      await timePiecePhase("syncPattern.retry.synced", () => this.synced());
+      await timePiecePhase("syncPattern.retry.piece.sync", () => piece.sync());
+      patternId = getMetaLink(piece, "pattern")?.id;
+    }
     if (!patternId) throw new Error("piece missing pattern ID");
 
-    return await this.syncPatternById(patternId);
+    return await timePiecePhase(
+      "syncPattern.loadPattern",
+      () => this.syncPatternById(patternId),
+    );
   }
 
-  async syncPatternById(patternId: string) {
+  async syncPatternById(patternId: URI) {
     if (!patternId) throw new Error("patternId is required");
     const pattern = await this.runtime.patternManager.loadPattern(
       patternId,
@@ -886,19 +883,40 @@ export class PieceManager {
     );
   }
 
+  /**
+   * Set the target cell's argument cell at target path to be a link to the
+   * link cell's content at linkPath.
+   *
+   * @param linkPieceId
+   * @param linkPath
+   * @param targetPieceId
+   * @param targetPath
+   * @param options
+   */
   async link(
     linkPieceId: string,
     linkPath: (string | number)[],
     targetPieceId: string,
     targetPath: (string | number)[],
-    options?: { start?: boolean },
+    options?: {
+      start?: boolean;
+      sourceScope?: CellScope;
+      targetScope?: CellScope;
+    },
   ): Promise<void> {
-    let linkCell = this.runtime.getCellFromEntityId(this.space, {
-      "/": linkPieceId,
-    });
+    const start = options?.start ?? true;
+    let linkCell = this.runtime.getCellFromEntityId(
+      this.space,
+      { "/": linkPieceId },
+      [],
+      undefined,
+      undefined,
+      options?.sourceScope,
+    );
     await linkCell.sync();
     linkCell = linkCell.asSchemaFromLinks(); // Make sure we have the full schema
     linkCell = linkCell.key(...linkPath);
+    linkCell = linkCell.resolveAsCell();
 
     // Get target cell (piece or arbitrary cell)
     const { cell: targetCell, isPiece: targetIsPiece } =
@@ -909,18 +927,26 @@ export class PieceManager {
         options,
       );
 
-    await this.runtime.editWithRetry((tx) => {
+    const result = await this.runtime.editWithRetry((tx) => {
       let targetInputCell = targetCell.withTx(tx);
       if (targetIsPiece) {
-        // For pieces, target fields are in the source cell's argument
-        const sourceCell = targetInputCell.getSourceCell(processSchema);
-        if (!sourceCell) {
-          throw new Error("Target piece has no source cell");
+        // For pieces, target fields are in the result cell's argument
+        const resultCell = followCellToResult(targetInputCell);
+        if (!resultCell) {
+          throw new Error("Target piece has no result cell");
         }
-        targetInputCell = sourceCell.key("argument");
+        const targetArgumentLink = getMetaLink(resultCell, "argument");
+        if (targetArgumentLink === undefined) {
+          throw new Error("Target piece has no argument cell");
+        }
+        targetInputCell = resultCell.runtime.getCellFromLink(
+          targetArgumentLink,
+          undefined,
+          tx,
+        );
       }
 
-      targetInputCell.key(...targetPath).resolveAsCell().setRawUntyped(
+      targetInputCell.key(...targetPath).setRawUntyped(
         linkCell.getAsLink({
           base: targetInputCell,
           includeSchema: true,
@@ -928,36 +954,51 @@ export class PieceManager {
         }),
       );
     });
+    if (result.error) throw result.error;
 
-    await this.runtime.idle();
+    if (targetIsPiece && start) {
+      await this.getResult(targetCell).pull();
+    }
     await this.synced();
   }
 }
-
-export const getPatternIdFromPiece = (piece: Cell<unknown>): string => {
-  const sourceCell = piece.getSourceCell(processSchema);
-  if (!sourceCell) throw new Error("piece missing source cell");
-  return sourceCell.get()?.[TYPE]!;
-};
 
 async function getCellByIdOrPiece(
   manager: PieceManager,
   cellId: string,
   label: string,
-  options?: { start?: boolean },
+  options?: { start?: boolean; targetScope?: CellScope },
 ): Promise<{ cell: Cell<unknown>; isPiece: boolean }> {
   const start = options?.start ?? true;
   try {
     // Try to get as a piece first
-    const piece = await manager.get(cellId, start);
+    const piece = await manager.get(
+      cellId,
+      start,
+      undefined,
+      options?.targetScope,
+    );
     if (!piece) {
       throw new Error(`Piece ${cellId} not found`);
+    }
+    if (
+      getMetaLink(piece, "result") === undefined &&
+      getMetaLink(piece, "pattern") === undefined
+    ) {
+      throw new Error(
+        `Piece ${cellId} has neither a parent result nor a pattern`,
+      );
     }
     return { cell: piece, isPiece: true };
   } catch (_) {
     // If manager.get() fails (e.g., "patternId is required"), try as arbitrary cell ID
     try {
-      const cell = await manager.getCellById({ "/": cellId });
+      const cell = await manager.getCellById(
+        { "/": cellId },
+        [],
+        undefined,
+        options?.targetScope,
+      );
 
       // Check if this cell is actually a piece by looking at the pieces list
       const piecesCell = await manager.getPieces();
@@ -968,10 +1009,49 @@ async function getCellByIdOrPiece(
         if (!id) return false;
         return id === cellId;
       });
-
       return { cell, isPiece: isActuallyPiece };
     } catch (_) {
       throw new Error(`${label} "${cellId}" not found as piece or cell`);
     }
+  }
+}
+
+// Helper function to follow alias chain to its source
+const MAX_DEPTH = 10;
+function followCellToResult(
+  cell: Cell<unknown>,
+  visited = new Set<string>(),
+  depth = 0,
+): Cell<unknown> | undefined {
+  if (depth > MAX_DEPTH) return undefined; // Prevent infinite recursion
+
+  try {
+    const docId = cell.entityId;
+    if (!docId || !docId["/"]) return undefined;
+
+    const docIdStr = typeof docId["/"] === "string"
+      ? docId["/"]
+      : JSON.stringify(docId["/"]);
+
+    // Prevent cycles
+    if (visited.has(docIdStr)) return undefined;
+    visited.add(docIdStr);
+
+    try {
+      // If document has result metadata, follow it to the owning result cell.
+      const resultLink = getMetaLink(cell, "result");
+      if (resultLink !== undefined) {
+        const resultCell = cell.runtime.getCellFromLink(resultLink);
+        return followCellToResult(resultCell, visited, depth + 1);
+      }
+    } catch (err) {
+      // Ignore errors getting doc value
+      console.debug("Error getting doc value:", err);
+    }
+
+    return cell; // Return the current document's ID if no further references
+  } catch (err) {
+    console.debug("Error in followCellToResult:", err);
+    return undefined;
   }
 }

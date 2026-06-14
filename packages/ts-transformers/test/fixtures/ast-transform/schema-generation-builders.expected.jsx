@@ -1,5 +1,16 @@
-import * as __ctHelpers from "commontools";
-import { Cell, handler, pattern, UI } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { Cell, handler, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 type TodoState = {
     items: Cell<string[]>;
 };
@@ -14,7 +25,7 @@ const addTodo = handler({
         }
     },
     required: ["add"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         items: {
@@ -22,13 +33,49 @@ const addTodo = handler({
             items: {
                 type: "string"
             },
-            asCell: true
+            asCell: ["writeonly"]
         }
     },
     required: ["items"]
-} as const satisfies __ctHelpers.JSONSchema, (event, state) => {
+} as const satisfies __cfHelpers.JSONSchema, (event, state) => {
     state.items.push(event.add);
 });
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const index = __cf_pattern_input.key("index");
+    return <li key={index}>{item}</li>;
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "string"
+        },
+        index: {
+            type: "number"
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: schema-generation-builders
 // Verifies: handler with generic type args generates event+state schemas; .map() becomes .mapWithPattern()
 //   handler<TodoEvent, { items: Cell<string[]> }>(fn) → handler(eventSchema, stateSchema, fn)
@@ -41,43 +88,7 @@ export default pattern((state) => {
           Add
         </button>
         <ul>
-          {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
-            const index = __ct_pattern_input.key("index");
-            return <li key={index}>{item}</li>;
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "string"
-                },
-                index: {
-                    type: "number"
-                }
-            },
-            required: ["element"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema), {})}
+          {state.key("items").mapWithPattern(__cfPattern_1, {})}
         </ul>
       </div>),
     };
@@ -89,11 +100,11 @@ export default pattern((state) => {
             items: {
                 type: "string"
             },
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["items"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -106,11 +117,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -123,8 +133,11 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    addTodo,
+    __cfPattern_1
+});

@@ -3,9 +3,9 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import "@commontools/utils/equal-ignoring-symbols";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import "@commonfabric/utils/equal-ignoring-symbols";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { isCell, isStream } from "../src/cell.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -35,7 +35,7 @@ describe("Schema - Streams and Promises", () => {
   });
 
   describe("Stream Support", () => {
-    it("should create a stream for properties marked with asStream", () => {
+    it("should create a stream for properties marked with asCell stream", () => {
       const c = runtime.getCell<{
         name: string;
         events: { $stream: boolean };
@@ -56,7 +56,7 @@ describe("Schema - Streams and Promises", () => {
           name: { type: "string" },
           events: {
             type: "object",
-            asStream: true,
+            asCell: ["stream"],
           },
         },
       } as const satisfies JSONSchema;
@@ -103,7 +103,7 @@ describe("Schema - Streams and Promises", () => {
                   name: { type: "string" },
                   notifications: {
                     type: "object",
-                    asStream: true,
+                    asCell: ["stream"],
                   },
                 },
               },
@@ -140,7 +140,7 @@ describe("Schema - Streams and Promises", () => {
           name: { type: "string" },
           events: {
             type: "object",
-            asStream: true,
+            asCell: ["stream"],
           },
         },
       } as const satisfies JSONSchema;
@@ -152,13 +152,13 @@ describe("Schema - Streams and Promises", () => {
       expect(isStream(value.events)).toBe(false);
     });
 
-    it("should behave correctly when both asCell and asStream are in the schema", () => {
+    it("should behave correctly when both asCell cell and asCell stream are in the schema", () => {
       const c = runtime.getCell<{
         cellData: { value: number };
         streamData: { $stream: boolean };
       }>(
         space,
-        "should behave correctly when both asCell and asStream are in the schema 1",
+        "should behave correctly when both asCell and asCell stream are in the schema 1",
         undefined,
         tx,
       );
@@ -172,11 +172,11 @@ describe("Schema - Streams and Promises", () => {
         properties: {
           cellData: {
             type: "object",
-            asCell: true,
+            asCell: ["cell"],
           },
           streamData: {
             type: "object",
-            asStream: true,
+            asCell: ["stream"],
           },
         },
       } as const satisfies JSONSchema;

@@ -1,9 +1,10 @@
-import { isRecord } from "@commontools/utils/types";
-import { deepEqual } from "@commontools/utils/deep-equal";
-import type { StorableValue } from "@commontools/memory/interface";
+import { isRecord } from "@commonfabric/utils/types";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { isPrimitiveCellLink } from "./link-utils.ts";
+import { normalizeCellScope } from "./scope.ts";
 import { arrayEqual } from "./path-utils.ts";
-import type { Action, SpaceAndURI } from "./scheduler.ts";
+import type { Action, SpaceScopeAndURI } from "./scheduler.ts";
 import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
@@ -20,7 +21,7 @@ export interface DetermineTriggeredActionsOptions {
   nonRecursive?: boolean;
 }
 
-type Keyable = Record<MemoryAddressPathComponent, StorableValue>;
+type Keyable = Record<MemoryAddressPathComponent, FabricValue>;
 
 /**
  * Sorts and compactifies the paths.
@@ -38,28 +39,22 @@ export function sortAndCompactPaths(
 ): IMemorySpaceAddress[] {
   if (unsorted.length === 0) return [];
 
-  const sorted = unsorted.toSorted((a, b) =>
-    a.space === b.space
-      ? a.id === b.id
-        ? a.type === b.type
-          ? comparePaths(a.path, b.path)
-          : a.type < b.type
-          ? -1
-          : 1
-        : a.id < b.id
-        ? -1
-        : 1
-      : a.space < b.space
-      ? -1
-      : 1
-  );
+  const sorted = unsorted.toSorted((a, b) => {
+    if (a.space !== b.space) return a.space < b.space ? -1 : 1;
+    if (a.id !== b.id) return a.id < b.id ? -1 : 1;
+    const aScope = normalizeCellScope(a.scope);
+    const bScope = normalizeCellScope(b.scope);
+    if (aScope !== bScope) return aScope < bScope ? -1 : 1;
+    return comparePaths(a.path, b.path);
+  });
   const result: IMemorySpaceAddress[] = [sorted[0]];
   let previous = sorted[0];
   for (let i = 1; i < sorted.length; i++) {
     if (
       sorted[i].space === previous.space &&
       sorted[i].id === previous.id &&
-      sorted[i].type === previous.type &&
+      normalizeCellScope(sorted[i].scope) ===
+        normalizeCellScope(previous.scope) &&
       // Is the previous path a prefix of the current path?
       previous.path.every((value, index) => value === sorted[i].path[index]) &&
       // If we compactifyChildren, or the paths are identical, skip this
@@ -81,11 +76,12 @@ export function sortAndCompactPaths(
  */
 export function addressesToPathByEntity(
   addresses: IMemorySpaceAddress[],
-): Map<SpaceAndURI, SortedAndCompactPaths> {
-  const map = new Map<SpaceAndURI, SortedAndCompactPaths>();
+): Map<SpaceScopeAndURI, SortedAndCompactPaths> {
+  const map = new Map<SpaceScopeAndURI, SortedAndCompactPaths>();
   for (const address of addresses) {
-    if (address.type !== "application/json") continue;
-    const key: SpaceAndURI = `${address.space}/${address.id}`;
+    const key: SpaceScopeAndURI = `${address.space}/${
+      normalizeCellScope(address.scope)
+    }/${address.id}`;
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(address.path);
   }
@@ -106,8 +102,8 @@ export function addressesToPathByEntity(
  */
 export function determineTriggeredActions(
   dependencies: Map<Action, SortedAndCompactPaths>,
-  before: StorableValue,
-  after: StorableValue,
+  before: FabricValue,
+  after: FabricValue,
   startPath: readonly MemoryAddressPathComponent[] = [],
   options?: DetermineTriggeredActionsOptions,
 ): Action[] {
@@ -139,8 +135,8 @@ export function determineTriggeredActions(
   let currentPath: readonly MemoryAddressPathComponent[] = [];
 
   // *Values: An array of data values along currentPath
-  const beforeValues: StorableValue[] = [before];
-  const afterValues: StorableValue[] = [after];
+  const beforeValues: FabricValue[] = [before];
+  const afterValues: FabricValue[] = [after];
 
   // *LastObject: Last key-able object along currentPath
   let beforeLastObject = isRecord(before) ? 0 : -1;
@@ -241,6 +237,14 @@ export function arraysOverlap(
     : a.every((value, index) => value === b[index]);
 }
 
+export function nonRecursiveReadMayOverlapWrite(
+  readPath: readonly MemoryAddressPathComponent[],
+  writePath: readonly MemoryAddressPathComponent[],
+): boolean {
+  return writePath.length <= readPath.length + 1 &&
+    arraysOverlap(writePath, readPath);
+}
+
 function commonPrefixLength(
   a: readonly MemoryAddressPathComponent[],
   b: readonly MemoryAddressPathComponent[],
@@ -266,8 +270,8 @@ function commonPrefixLength(
  * - Primitives: changed iff the value changed.
  */
 function shallowEqual(
-  before: StorableValue,
-  after: StorableValue,
+  before: FabricValue,
+  after: FabricValue,
 ): boolean {
   // Links compare by full identity — a different link target matters.
   if (isPrimitiveCellLink(before) || isPrimitiveCellLink(after)) {

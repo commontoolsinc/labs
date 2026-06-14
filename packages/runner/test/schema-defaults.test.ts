@@ -3,9 +3,9 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import "@commontools/utils/equal-ignoring-symbols";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import "@commonfabric/utils/equal-ignoring-symbols";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { isCell } from "../src/cell.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -174,7 +174,7 @@ describe("Schema - Default Values", () => {
               avatar: { type: "string" },
             },
             default: { bio: "Default bio", avatar: "default.png" },
-            asCell: true,
+            asCell: ["cell"],
           },
         },
         required: ["name", "profile"],
@@ -221,7 +221,7 @@ describe("Schema - Default Values", () => {
             type: "array",
             items: { type: "string" },
             default: ["default", "tags"],
-            asCell: true,
+            asCell: ["cell"],
           },
         },
         required: ["name", "tags"],
@@ -264,7 +264,7 @@ describe("Schema - Default Values", () => {
                       color: { type: "string" },
                     },
                     default: { mode: "dark", color: "blue" },
-                    asCell: true,
+                    asCell: ["cell"],
                   },
                   notifications: { type: "boolean", default: true },
                 },
@@ -272,7 +272,7 @@ describe("Schema - Default Values", () => {
                   theme: { mode: "light", color: "red" },
                   notifications: true,
                 },
-                asCell: true,
+                asCell: ["cell"],
               },
             },
             required: ["name", "settings"],
@@ -365,7 +365,7 @@ describe("Schema - Default Values", () => {
                   properties: {
                     createdAt: { type: "string" },
                   },
-                  asCell: true,
+                  asCell: ["cell"],
                 },
               },
             },
@@ -454,7 +454,7 @@ describe("Schema - Default Values", () => {
                 value: { type: "string" },
               },
               default: { enabled: true, value: "default" },
-              asCell: true,
+              asCell: ["cell"],
             },
             default: {
               knownProp: "default",
@@ -546,7 +546,7 @@ describe("Schema - Default Values", () => {
                   enabled: { type: "boolean" },
                   value: { type: "string" },
                 },
-                asCell: true,
+                asCell: ["cell"],
               },
               required: ["knownProp"],
             },
@@ -599,7 +599,7 @@ describe("Schema - Default Values", () => {
           name: "Default User",
           settings: { theme: "light" },
         },
-        asCell: true,
+        asCell: ["cell"],
       } as const satisfies JSONSchema;
 
       const c = runtime.getCell<any>(
@@ -638,7 +638,7 @@ describe("Schema - Default Values", () => {
       const schema = {
         type: "object",
         properties: {
-          name: { type: "string", default: "Default Name", asCell: true },
+          name: { type: "string", default: "Default Name", asCell: ["cell"] },
         },
         default: {},
       } as const satisfies JSONSchema;
@@ -667,7 +667,7 @@ describe("Schema - Default Values", () => {
       const schema = {
         type: "object",
         properties: {
-          name: { type: "string", default: "Default Name", asCell: true },
+          name: { type: "string", default: "Default Name", asCell: ["cell"] },
         },
         default: { name: "First default name" },
       } as const satisfies JSONSchema;
@@ -688,6 +688,42 @@ describe("Schema - Default Values", () => {
 
       // Expect the cell to be immutable
       expect(value.name.get()).toBe("Updated Name");
+    });
+
+    it("should make immutable cells if they provide the default value", () => {
+      const schema = {
+        $defs: {
+          NameEntry: {
+            type: "string",
+            default: "Default Name",
+            asCell: ["cell"],
+          },
+        },
+        type: "object",
+        properties: {
+          name: { $ref: "#/$defs/NameEntry" },
+        },
+        default: {},
+      } as const satisfies JSONSchema;
+
+      const c = runtime.getCell<any>(
+        space,
+        "should make immutable cells if they provide the default value 1",
+        undefined,
+        tx,
+      );
+      c.set(undefined);
+      const cell = c.asSchema(schema);
+      const value = cell.get();
+      expect(isCell(value.name)).toBe(true);
+      expect(value?.name?.get()).toBe("Default Name");
+
+      cell.set(
+        runtime.getImmutableCell(space, { name: "Updated Name" }),
+      );
+
+      // Expect the cell to be immutable
+      expect(value?.name?.get()).toBe("Default Name");
     });
   });
 });

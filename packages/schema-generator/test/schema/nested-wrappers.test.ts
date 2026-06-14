@@ -32,7 +32,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
     const v = s.properties?.value as any;
     expect(v.type).toBe("string");
     expect(v.default).toBe("default");
-    expect(v.asCell).toBe(true);
+    expect(v.asCell).toEqual(["cell"]);
   });
 
   it("Stream<Default<string,'initial'>>", async () => {
@@ -47,7 +47,8 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
     const ev = s.properties?.events as any;
     expect(ev.type).toBe("string");
     expect(ev.default).toBe("initial");
-    expect(ev.asStream).toBe(true);
+    expect(ev.asStream).toBeUndefined();
+    expect(ev.asCell).toEqual(["stream"]);
   });
 
   it("Stream<Default<string[], ['a']>> yields array schema with default", async () => {
@@ -64,7 +65,8 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
     const evItems = ev.items as any;
     expect(evItems?.type).toBe("string");
     expect(ev.default).toEqual(["a"]);
-    expect(ev.asStream).toBe(true);
+    expect(ev.asCell).toEqual(["stream"]);
+    expect(ev.asStream).toBeUndefined();
   });
 
   it("array of Cell<string>", async () => {
@@ -81,7 +83,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
     expect(itemsItems?.type).toBe("string");
     // Items may carry asCell depending on formatter; assert if present
     if (Object.prototype.hasOwnProperty.call(itemsItems, "asCell")) {
-      expect(itemsItems.asCell).toBe(true);
+      expect(itemsItems.asCell).toEqual(["cell"]);
     }
   });
 
@@ -97,7 +99,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
     expect(tags.type).toBe("array");
     const tagsItems = tags.items as any;
     expect(tagsItems?.type).toBe("string");
-    expect(tags.asCell).toBe(true);
+    expect(tags.asCell).toEqual(["cell"]);
   });
 
   it("complex nesting: Cell<Default<string,'d'>> and Default<string[], ['a','b']>", async () => {
@@ -115,7 +117,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
     const c = s.properties?.cellOfDefault as any;
     expect(c.type).toBe("string");
     expect(c.default).toBe("d");
-    expect(c.asCell).toBe(true);
+    expect(c.asCell).toEqual(["cell"]);
     const da = s.properties?.defaultArray as any;
     expect(da.type).toBe("array");
     const daItems = da.items as any;

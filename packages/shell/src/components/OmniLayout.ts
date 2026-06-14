@@ -116,7 +116,7 @@ export class XOmniLayout extends LitElement {
 
     .fab {
       position: fixed;
-      bottom: 4px;
+      bottom: calc(4px + env(safe-area-inset-bottom, 0px));
       left: 50%;
       transform: translateX(-50%);
       z-index: 1000;
@@ -124,16 +124,16 @@ export class XOmniLayout extends LitElement {
   `;
 
   @property({ type: Boolean })
-  sidebarOpen = false;
+  accessor sidebarOpen = false;
 
   @state()
-  private hasSidebarContent = false;
+  private accessor hasSidebarContent = false;
 
   @state()
-  private sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
+  private accessor sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
 
   @state()
-  private isResizing = false;
+  private accessor isResizing = false;
 
   private resizeStartX = 0;
   private resizeStartWidth = 0;

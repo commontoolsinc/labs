@@ -1,37 +1,56 @@
 // Push-triggered filtering and parent-child action ordering tests.
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { expect } from "@std/expect";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { Runtime } from "../src/runtime.ts";
-import { type Action } from "../src/scheduler.ts";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import {
+  afterEach,
+  beforeEach,
+  createSchedulerTestRuntime,
+  describe,
+  disposeSchedulerTestRuntime,
+  expect,
+  it,
+  Runtime,
+  space,
+  toMemorySpaceAddress,
+} from "./scheduler-test-utils.ts";
+import type {
+  Action,
+  IExtendedStorageTransaction,
+  SchedulerTestStorageManager,
+} from "./scheduler-test-utils.ts";
+import { topologicalSort } from "../src/scheduler/topology.ts";
+import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
 
-const signer = await Identity.fromPassphrase("test operator");
-const space = signer.did();
+type SchedulerTestScope = "space" | "user" | "session";
+
+function scopedAddress(
+  scope: SchedulerTestScope | undefined,
+  path: readonly string[],
+): IMemorySpaceAddress {
+  return {
+    space,
+    id: "of:scheduler-scope-shared",
+    type: "application/json",
+    scope,
+    path,
+  };
+}
 
 describe("push-triggered filtering", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
-    tx = runtime.edit();
+    ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
+      import.meta.url,
+    ));
   });
 
   afterEach(async () => {
-    await tx.commit();
-    await runtime?.dispose();
-    await storageManager?.close();
+    await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
   });
 
-  it("should track mightWrite from actual writes", async () => {
+  it("should track mightWrite from the static surface at subscribe", async () => {
     const cell = runtime.getCell<number>(
       space,
       "mightwrite-test",
@@ -42,28 +61,33 @@ describe("push-triggered filtering", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    const action: Action = (actionTx) => {
-      cell.withTx(actionTx).send(42);
-    };
+    const declaredWrite = cell.getAsNormalizedFullLink();
+    const action = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        cell.withTx(actionTx).send(42);
+      }) as Action,
+      {
+        writes: [declaredWrite],
+      },
+    );
 
-    // Initially no mightWrite
     expect(runtime.scheduler.getMightWrite(action)).toBeUndefined();
-
-    // Run action
     runtime.scheduler.subscribe(
       action,
-      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(declaredWrite)],
+      },
       {},
     );
-    await cell.pull();
 
-    // mightWrite should now include the cell
-    const mightWrite = runtime.scheduler.getMightWrite(action);
-    expect(mightWrite).toBeDefined();
-    expect(mightWrite!.length).toBeGreaterThan(0);
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([
+      toMemorySpaceAddress(declaredWrite),
+    ]);
   });
 
-  it("should accumulate mightWrite over multiple runs", async () => {
+  it("should keep the static surface over multiple resubscriptions", async () => {
     const cell1 = runtime.getCell<number>(space, "mw-accum-1", undefined, tx);
     const cell2 = runtime.getCell<number>(space, "mw-accum-2", undefined, tx);
     cell1.set(0);
@@ -71,48 +95,230 @@ describe("push-triggered filtering", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    let writeToCell2 = false;
-    const action: Action = (actionTx) => {
-      cell1.withTx(actionTx).send(1);
-      if (writeToCell2) {
-        cell2.withTx(actionTx).send(2);
-      }
-    };
-
-    // First run - writes only to cell1
+    const declaredWrite = cell1.getAsNormalizedFullLink();
+    const action = Object.assign((() => {}) as Action, {
+      writes: [declaredWrite],
+    });
     runtime.scheduler.subscribe(
       action,
       {
         reads: [],
         shallowReads: [],
-        writes: [cell1.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(declaredWrite)],
       },
       {},
     );
-    await cell1.pull();
 
-    const mightWrite1 = runtime.scheduler.getMightWrite(action);
-    const initialLength = mightWrite1?.length || 0;
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([
+      toMemorySpaceAddress(declaredWrite),
+    ]);
 
-    // Second run - writes to both cells
-    writeToCell2 = true;
+    runtime.scheduler.resubscribe(action, {
+      reads: [],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(cell2.getAsNormalizedFullLink())],
+    });
+
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([
+      toMemorySpaceAddress(declaredWrite),
+    ]);
+  });
+
+  it("should keep declared writes in current-known writes after empty resubscribe", async () => {
+    const output = runtime.getCell<number>(
+      space,
+      "mw-declared-output",
+      undefined,
+      tx,
+    );
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const declaredWrite = output.getAsNormalizedFullLink();
+    const action = Object.assign((() => {}) as Action, {
+      writes: [declaredWrite],
+    });
+
     runtime.scheduler.subscribe(
       action,
       {
         reads: [],
         shallowReads: [],
-        writes: [
-          cell1.getAsNormalizedFullLink(),
-          cell2.getAsNormalizedFullLink(),
-        ],
+        writes: [toMemorySpaceAddress(declaredWrite)],
       },
       {},
     );
-    await cell2.pull();
 
-    // mightWrite should have grown
-    const mightWrite2 = runtime.scheduler.getMightWrite(action);
-    expect(mightWrite2!.length).toBeGreaterThan(initialLength);
+    runtime.scheduler.resubscribe(action, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    });
+
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([
+      toMemorySpaceAddress(declaredWrite),
+    ]);
+  });
+
+  it("should keep the declared surface when a run only writes metadata", async () => {
+    const declared = runtime.getCell<number>(
+      space,
+      "mw-declared-surface-output",
+      undefined,
+      tx,
+    );
+    const metadata = runtime.getCell<number>(
+      space,
+      "mw-observed-metadata-write",
+      undefined,
+      tx,
+    );
+    declared.set(0);
+    metadata.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const declaredWrite = declared.getAsNormalizedFullLink();
+    const metadataWrite = metadata.getAsNormalizedFullLink();
+    const action = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        metadata.withTx(actionTx).set(1);
+      }) as Action,
+      {
+        writes: [declaredWrite],
+      },
+    );
+
+    runtime.scheduler.subscribe(
+      action,
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(declaredWrite)],
+      },
+      {},
+    );
+
+    await runtime.scheduler.run(action);
+
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([
+      toMemorySpaceAddress(declaredWrite),
+    ]);
+    expect(runtime.scheduler.getMightWrite(action)).not.toEqual([
+      toMemorySpaceAddress(metadataWrite),
+    ]);
+  });
+
+  it("should not broaden current-known writes to structural parent paths", async () => {
+    const root = runtime.getCell<Record<string, unknown>>(
+      space,
+      "mw-structural-parent-root",
+      undefined,
+      tx,
+    );
+    root.set({ internal: {} });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const child = root.key("internal").key("__#0");
+    const declaredWrite = child.getAsNormalizedFullLink();
+    const action = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        child.withTx(actionTx).set({ result: "ready" });
+      }) as Action,
+      {
+        writes: [declaredWrite],
+      },
+    );
+
+    runtime.scheduler.subscribe(
+      action,
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(declaredWrite)],
+      },
+      {},
+    );
+
+    await runtime.scheduler.run(action);
+
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([
+      toMemorySpaceAddress(declaredWrite),
+    ]);
+  });
+
+  it("should keep dynamic collection parent writes for numeric children", async () => {
+    const root = runtime.getCell<{ list: Record<string, unknown> }>(
+      space,
+      "mw-dynamic-collection-root",
+      undefined,
+      tx,
+    );
+    root.set({ list: {} });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const list = root.key("list");
+    const declaredWrite = list.getAsNormalizedFullLink();
+    const firstChild = list.key("0").getAsNormalizedFullLink();
+    const action = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        list.withTx(actionTx).key("0").set({ label: "first" });
+      }) as Action,
+      {
+        writes: [declaredWrite],
+      },
+    );
+
+    runtime.scheduler.subscribe(
+      action,
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(declaredWrite)],
+      },
+      {},
+    );
+
+    await runtime.scheduler.run(action);
+
+    expect(runtime.scheduler.getMightWrite(action)).toEqual([
+      toMemorySpaceAddress(declaredWrite),
+    ]);
+    expect(runtime.scheduler.getMightWrite(action)).not.toEqual([
+      toMemorySpaceAddress(firstChild),
+    ]);
+  });
+
+  it("should not order materializer writes before readers in other scopes", () => {
+    const materializer: Action = () => {};
+    const reader: Action = () => {};
+    const order = topologicalSort(
+      new Set([reader, materializer]),
+      new WeakMap<Action, {
+        reads: IMemorySpaceAddress[];
+        shallowReads: IMemorySpaceAddress[];
+        writes: IMemorySpaceAddress[];
+      }>([
+        [reader, {
+          reads: [scopedAddress("space", ["value"])],
+          shallowReads: [],
+          writes: [],
+        }],
+        [materializer, { reads: [], shallowReads: [], writes: [] }],
+      ]),
+      new WeakMap<Action, IMemorySpaceAddress[]>(),
+      undefined,
+      undefined,
+      (action) =>
+        action === materializer
+          ? [scopedAddress("session", ["value"])]
+          : undefined,
+    );
+
+    expect(order).toEqual([reader, materializer]);
   });
 
   it("should track filter stats", async () => {
@@ -140,7 +346,6 @@ describe("push-triggered filtering", () => {
   });
 
   it("should allow first run even without pushTriggered (default scheduling)", async () => {
-    runtime.scheduler.enablePullMode();
     runtime.scheduler.resetFilterStats();
 
     const cell = runtime.getCell<number>(
@@ -154,15 +359,25 @@ describe("push-triggered filtering", () => {
     tx = runtime.edit();
 
     let runCount = 0;
-    const action: Action = (actionTx) => {
-      runCount++;
-      cell.withTx(actionTx).send(runCount);
-    };
+    const cellLink = cell.getAsNormalizedFullLink();
+    const action = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        runCount++;
+        cell.withTx(actionTx).send(runCount);
+      }) as Action,
+      {
+        writes: [cellLink],
+      },
+    );
 
     // First run with default scheduling should work
     runtime.scheduler.subscribe(
       action,
-      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(cellLink)],
+      },
       {},
     );
     await cell.pull();
@@ -174,8 +389,6 @@ describe("push-triggered filtering", () => {
   });
 
   it("should use pushTriggered to track storage-triggered actions", async () => {
-    runtime.scheduler.enablePullMode();
-
     const cell = runtime.getCell<number>(
       space,
       "push-triggered-test",
@@ -197,9 +410,9 @@ describe("push-triggered filtering", () => {
     runtime.scheduler.subscribe(
       action,
       {
-        reads: [cell.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
         shallowReads: [],
-        writes: [cell.getAsNormalizedFullLink()],
+        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
       },
       { isEffect: true },
     );
@@ -223,8 +436,6 @@ describe("push-triggered filtering", () => {
   });
 
   it("should not filter actions scheduled with default scheduling", async () => {
-    runtime.scheduler.enablePullMode();
-
     const cell = runtime.getCell<number>(
       space,
       "schedule-immed-filter",
@@ -236,15 +447,25 @@ describe("push-triggered filtering", () => {
     tx = runtime.edit();
 
     let runCount = 0;
-    const action: Action = (actionTx) => {
-      runCount++;
-      cell.withTx(actionTx).send(runCount);
-    };
+    const cellLink = cell.getAsNormalizedFullLink();
+    const action = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        runCount++;
+        cell.withTx(actionTx).send(runCount);
+      }) as Action,
+      {
+        writes: [cellLink],
+      },
+    );
 
     // Run once to establish mightWrite
     runtime.scheduler.subscribe(
       action,
-      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(cellLink)],
+      },
       {},
     );
     await cell.pull();
@@ -255,7 +476,11 @@ describe("push-triggered filtering", () => {
     // Run again with default scheduling - should bypass filter
     runtime.scheduler.subscribe(
       action,
-      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(cellLink)],
+      },
       {},
     );
     await cell.pull();
@@ -274,26 +499,18 @@ describe("push-triggered filtering", () => {
 });
 
 describe("parent-child action ordering", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
-    // Use push mode for parent-child ordering tests since these test
-    // execution ordering when all pending actions run in the same cycle
-    runtime.scheduler.disablePullMode();
-    tx = runtime.edit();
+    ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
+      import.meta.url,
+    ));
   });
 
   afterEach(async () => {
-    await tx.commit();
-    await runtime?.dispose();
-    await storageManager?.close();
+    await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
   });
 
   it("should execute parent actions before child actions", async () => {
@@ -387,7 +604,7 @@ describe("parent-child action ordering", () => {
     runtime.scheduler.subscribe(
       parentAction,
       {
-        reads: [toggle.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(toggle.getAsNormalizedFullLink())],
         shallowReads: [],
         writes: [],
       },
@@ -561,7 +778,7 @@ describe("parent-child action ordering", () => {
         childCanceler = runtime.scheduler.subscribe(
           childAction,
           {
-            reads: [source.getAsNormalizedFullLink()],
+            reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
             shallowReads: [],
             writes: [],
           },
@@ -578,7 +795,7 @@ describe("parent-child action ordering", () => {
     const parentCanceler = runtime.scheduler.subscribe(
       parentAction,
       {
-        reads: [source.getAsNormalizedFullLink()],
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
         writes: [],
       },

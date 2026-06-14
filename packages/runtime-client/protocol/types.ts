@@ -1,18 +1,30 @@
 import type {
+  ActionRunTraceEntry,
   JSONSchema,
   JSONValue,
   NormalizedFullLink,
   SchedulerDiagnosisResult,
   SchedulerGraphSnapshot,
-} from "@commontools/runner/shared";
-import type { DID, KeyPairRaw } from "@commontools/identity";
-import { type Program } from "@commontools/js-compiler/interface";
-import { RuntimeTelemetryMarkerResult } from "@commontools/runtime-client";
+  SettleStats,
+  SettleStatsHistoryEntry,
+  TriggerTraceEntry,
+  WriteStackTraceEntry,
+  WriteStackTraceMatcher,
+} from "@commonfabric/runner/shared";
+import type { CfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
+import type { DID, KeyPairRaw } from "@commonfabric/identity";
+import { type Program } from "@commonfabric/js-compiler/interface";
+import { RuntimeTelemetryMarkerResult } from "@commonfabric/runtime-client";
+import type { MetaField } from "@commonfabric/api";
 export type { JSONSchema, JSONValue, Program };
+
+export type { CfcLabelView };
 
 export type MessageId = number;
 
-export type CellRef = NormalizedFullLink;
+export type CellRef = NormalizedFullLink & {
+  cfcLabelView?: CfcLabelView;
+};
 
 export type PageRef = {
   cell: CellRef;
@@ -30,26 +42,42 @@ export enum RequestType {
   CellSubscribe = "cell:subscribe",
   CellUnsubscribe = "cell:unsubscribe",
   CellResolveAsCell = "cell:resolveAsCell",
+  CellGetCfcLabel = "cell:getCfcLabel",
 
   // Runtime operations
   GetCell = "runtime:getCell",
   GetHomeSpaceCell = "runtime:getHomeSpaceCell",
   EnsureHomePatternRunning = "runtime:ensureHomePatternRunning",
   Idle = "runtime:idle",
+  RuntimeSynced = "runtime:synced",
+  RegisterSpaceHost = "runtime:registerSpaceHost",
+  FlushCompileCacheWrites = "runtime:flushCompileCacheWrites",
   GetGraphSnapshot = "runtime:getGraphSnapshot",
-  SetPullMode = "runtime:setPullMode",
   GetLoggerCounts = "runtime:getLoggerCounts",
   SetLoggerLevel = "runtime:setLoggerLevel",
   SetLoggerEnabled = "runtime:setLoggerEnabled",
   SetTelemetryEnabled = "runtime:setTelemetryEnabled",
   ResetLoggerBaselines = "runtime:resetLoggerBaselines",
+  GetSettleStats = "runtime:getSettleStats",
+  GetSettleStatsHistory = "runtime:getSettleStatsHistory",
+  SetSettleStatsEnabled = "runtime:setSettleStatsEnabled",
+  GetActionRunTrace = "runtime:getActionRunTrace",
+  SetActionRunTraceEnabled = "runtime:setActionRunTraceEnabled",
+  GetTriggerTrace = "runtime:getTriggerTrace",
+  SetTriggerTraceEnabled = "runtime:setTriggerTraceEnabled",
+  GetWriteStackTrace = "runtime:getWriteStackTrace",
+  SetWriteStackTraceMatchers = "runtime:setWriteStackTraceMatchers",
   DetectNonIdempotent = "runtime:detectNonIdempotent",
+  GetPatternSources = "runtime:getPatternSources",
+  SetBreakpoints = "runtime:setBreakpoints",
+  UploadBlob = "runtime:uploadBlob",
 
   // Page operations (main -> worker)
   GetSpaceRootPattern = "pattern:getSpaceRoot",
   RecreateSpaceRootPattern = "pattern:recreateSpaceRoot",
   PageCreate = "page:create",
   PageGet = "page:get",
+  PageGetSlug = "page:getSlug",
   PageRemove = "page:remove",
   PageStart = "page:start",
   PageStop = "page:stop",
@@ -91,8 +119,15 @@ export interface BaseRequest {
 }
 
 export interface InitializationData {
-  // URL of backend server.
+  // URL of backend server. Also the default host for spaces absent from
+  // `spaceHostMap`.
   apiUrl: string;
+  // Optional space DID → host base URL map. A space listed here has its
+  // storage resolved against that host instead of `apiUrl`. Absent map or
+  // absent entry ⇒ `apiUrl`, byte-identical to the single-host behavior.
+  // Plain record: structured-clone-safe — no functions cross the worker
+  // IPC boundary. Fixed for the connection's lifetime.
+  spaceHostMap?: Record<string, string>;
   // Signer.
   identity: KeyPairRaw;
   // Identity of space.
@@ -105,14 +140,35 @@ export interface InitializationData {
   timeoutMs?: number;
   // Experimental space-model feature flags.
   experimental?: {
-    richStorableValues?: boolean;
-    storableProtocol?: boolean;
-    unifiedJsonEncoding?: boolean;
+    modernCellRep?: boolean;
+    persistentSchedulerState?: boolean;
   };
-  // Content hash of the worker bundle, used for compilation cache
-  // invalidation. If absent, the compilation cache is disabled.
-  // See docs/specs/compilation-cache.md Phase 3.
-  buildHash?: string;
+  // Commit-boundary CFC mode for the worker runtime.
+  cfcEnforcementMode?:
+    | "disabled"
+    | "observe"
+    | "enforce-explicit"
+    | "enforce-strict";
+  // Whether author-supplied render-boundary declassification is honored.
+  // Defaults to "allow" (current behavior). "deny" ignores author-supplied
+  // `declassifyConfidentiality` so a pattern can't release a secret upward
+  // through a render boundary (audit S15).
+  renderDeclassificationPolicy?: "allow" | "deny";
+  // Host-supplied default render ceiling (spec §8.10.6, S16 phase D):
+  // confidentiality a display surface admits by default — exact `atoms`
+  // (the place for acting-user identity atoms) plus Caveat `caveatKinds`
+  // (display-dischargeable classes). Undefined = no ceiling (current
+  // behavior).
+  renderConfidentialityCeiling?: {
+    atoms?: unknown[];
+    caveatKinds?: string[];
+  };
+  // Static trust snapshot applied to worker-owned transactions.
+  trustSnapshot?: {
+    id: string;
+    actingPrincipal?: string;
+    revision?: string;
+  };
 }
 
 export interface InitializeRequest extends BaseRequest {
@@ -127,6 +183,7 @@ export interface DisposeRequest extends BaseRequest {
 export interface CellGetRequest extends BaseRequest {
   type: RequestType.CellGet;
   cell: CellRef;
+  meta?: MetaField;
 }
 
 export interface CellSetRequest extends BaseRequest {
@@ -156,6 +213,11 @@ export interface CellResolveAsCellRequest extends BaseRequest {
   cell: CellRef;
 }
 
+export interface CellGetCfcLabelRequest extends BaseRequest {
+  type: RequestType.CellGetCfcLabel;
+  cell: CellRef;
+}
+
 // unused?
 export interface GetCellRequest extends BaseRequest {
   type: RequestType.GetCell;
@@ -176,13 +238,47 @@ export interface IdleRequest extends BaseRequest {
   type: RequestType.Idle;
 }
 
-export interface GetGraphSnapshotRequest extends BaseRequest {
-  type: RequestType.GetGraphSnapshot;
+/**
+ * Await storage/piece-manager convergence for EVERY space this worker
+ * has opened. Genuinely spaceless — like Idle — unlike PageSynced,
+ * which awaits one named space's piece context.
+ */
+export interface RuntimeSyncedRequest extends BaseRequest {
+  type: RequestType.RuntimeSynced;
 }
 
-export interface SetPullModeRequest extends BaseRequest {
-  type: RequestType.SetPullMode;
-  pullMode: boolean;
+/**
+ * Record a runtime-learned host hint for a space (site-table v0).
+ * The durable record is the home-space site table; this IPC lets an
+ * embedder make a just-learned hint (e.g. from a share link) effective
+ * on the live runtime without waiting for a sync round-trip. The
+ * worker's refusal semantics apply: seed wins, opened spaces are never
+ * re-pointed.
+ *
+ * ORDERING CONTRACT: an embedder that will mount a space it just
+ * learned the host for must send this BEFORE the first mount of that
+ * space — once a space opens against the default host, the
+ * opened-space rule pins it for the session. The table is the durable
+ * record; this IPC is the ordering guarantee.
+ */
+export interface RegisterSpaceHostRequest extends BaseRequest {
+  type: RequestType.RegisterSpaceHost;
+  space: DID;
+  host: string;
+}
+
+/**
+ * Await all in-flight compile-cache write-backs (persistence durability), as
+ * distinct from `Idle` (reactive/scheduler quiescence). Used by tests that
+ * assert a precompiled pattern loads without an in-client recompile: the cache
+ * write must be durable before a subsequent load reads it.
+ */
+export interface FlushCompileCacheWritesRequest extends BaseRequest {
+  type: RequestType.FlushCompileCacheWrites;
+}
+
+export interface GetGraphSnapshotRequest extends BaseRequest {
+  type: RequestType.GetGraphSnapshot;
 }
 
 export interface GetLoggerCountsRequest extends BaseRequest {
@@ -214,16 +310,114 @@ export interface ResetLoggerBaselinesRequest extends BaseRequest {
   type: RequestType.ResetLoggerBaselines;
 }
 
+export interface GetSettleStatsRequest extends BaseRequest {
+  type: RequestType.GetSettleStats;
+}
+
+export interface SetSettleStatsEnabledRequest extends BaseRequest {
+  type: RequestType.SetSettleStatsEnabled;
+  enabled: boolean;
+}
+
+export interface GetSettleStatsHistoryRequest extends BaseRequest {
+  type: RequestType.GetSettleStatsHistory;
+}
+
+export interface GetActionRunTraceRequest extends BaseRequest {
+  type: RequestType.GetActionRunTrace;
+}
+
+export interface SetActionRunTraceEnabledRequest extends BaseRequest {
+  type: RequestType.SetActionRunTraceEnabled;
+  enabled: boolean;
+}
+
+export interface GetTriggerTraceRequest extends BaseRequest {
+  type: RequestType.GetTriggerTrace;
+}
+
+export interface SetTriggerTraceEnabledRequest extends BaseRequest {
+  type: RequestType.SetTriggerTraceEnabled;
+  enabled: boolean;
+}
+
+export interface GetWriteStackTraceRequest extends BaseRequest {
+  type: RequestType.GetWriteStackTrace;
+}
+
+export interface SetWriteStackTraceMatchersRequest extends BaseRequest {
+  type: RequestType.SetWriteStackTraceMatchers;
+  matchers: WriteStackTraceMatcher[];
+}
+
 export interface DetectNonIdempotentRequest extends BaseRequest {
   type: RequestType.DetectNonIdempotent;
   durationMs?: number;
+}
+
+export interface SettleStatsResponse {
+  stats: SettleStats | null;
+}
+
+export interface SettleStatsHistoryResponse {
+  history: SettleStatsHistoryEntry[];
+}
+
+export interface ActionRunTraceResponse {
+  trace: ActionRunTraceEntry[];
+}
+
+export interface TriggerTraceResponse {
+  trace: TriggerTraceEntry[];
+}
+
+export interface WriteStackTraceResponse {
+  trace: WriteStackTraceEntry[];
 }
 
 export interface DetectNonIdempotentResponse {
   result: SchedulerDiagnosisResult;
 }
 
-// Logger count types for IPC (matches @commontools/utils/logger types)
+export interface GetPatternSourcesRequest extends BaseRequest {
+  type: RequestType.GetPatternSources;
+}
+
+export interface PatternSourceFile {
+  name: string;
+  contents: string;
+}
+
+export interface PatternSourceInfo {
+  patternId: string;
+  patternName?: string;
+  files: PatternSourceFile[];
+}
+
+export interface PatternSourcesResponse {
+  patterns: PatternSourceInfo[];
+}
+
+export interface SetBreakpointsRequest extends BaseRequest {
+  type: RequestType.SetBreakpoints;
+  actionIds: string[];
+}
+
+export interface UploadBlobRequest extends BaseRequest {
+  type: RequestType.UploadBlob;
+  /** The space the blob belongs to — uploads target ITS host. */
+  space: DID;
+  contentType: string;
+  body: number[];
+  suffix?: string;
+}
+
+export interface UploadBlobResponse {
+  id: string;
+  url: string;
+}
+
+// Logger count types for IPC (matches @commonfabric/utils/logger types)
 export interface LogCounts {
   debug: number;
   info: number;
@@ -249,7 +443,7 @@ export interface LoggerInfo {
 
 export type LoggerMetadata = Record<string, LoggerInfo>;
 
-// Timing stats types for IPC (matches @commontools/utils/logger types)
+// Timing stats types for IPC (matches @commonfabric/utils/logger types)
 export interface CDFPoint {
   x: number; // Latency in ms
   y: number; // Cumulative probability (0-1)
@@ -281,6 +475,8 @@ export type LoggerFlagsData = Record<
 
 export interface PageCreateRequest extends BaseRequest {
   type: RequestType.PageCreate;
+  /** The space the piece is created in — part of its address. */
+  space: DID;
   source: {
     url: string;
   } | {
@@ -291,41 +487,61 @@ export interface PageCreateRequest extends BaseRequest {
   run?: boolean;
 }
 
+/**
+ * Page operations resolve against one space's piece context, and every
+ * request names its space explicitly — there is no implicit/default
+ * space at this layer. The worker lazily builds a piece context per
+ * space, sharing the one runtime/storage connection.
+ */
 export interface PageGetSpaceDefault extends BaseRequest {
   type: RequestType.GetSpaceRootPattern;
+  space: DID;
 }
 
 export interface RecreateSpaceRootPatternRequest extends BaseRequest {
   type: RequestType.RecreateSpaceRootPattern;
+  space: DID;
 }
 
 export interface PageGetRequest extends BaseRequest {
   type: RequestType.PageGet;
   pageId: string;
   runIt?: boolean;
+  space: DID;
+}
+
+export interface PageGetSlugRequest extends BaseRequest {
+  type: RequestType.PageGetSlug;
+  pageId: string;
+  space: DID;
 }
 
 export interface PageRemoveRequest extends BaseRequest {
   type: RequestType.PageRemove;
   pageId: string;
+  space: DID;
 }
 
 export interface PageStartRequest extends BaseRequest {
   type: RequestType.PageStart;
   pageId: string;
+  space: DID;
 }
 
 export interface PageStopRequest extends BaseRequest {
   type: RequestType.PageStop;
   pageId: string;
+  space: DID;
 }
 
 export interface PageGetAllRequest extends BaseRequest {
   type: RequestType.PageGetAll;
+  space: DID;
 }
 
 export interface PageSyncedRequest extends BaseRequest {
   type: RequestType.PageSynced;
+  space: DID;
 }
 
 /**
@@ -348,6 +564,15 @@ export interface VDomEventRequest extends BaseRequest {
  */
 export interface SerializedDomEvent {
   type: string;
+  provenance?: {
+    origin?: string;
+    trusted?: boolean;
+    ui?: {
+      pattern?: string;
+      eventIntegrity?: string[];
+      uiContractDataset?: Record<string, string>;
+    };
+  };
   key?: string;
   code?: string;
   repeat?: boolean;
@@ -414,30 +639,46 @@ export type IPCClientRequest =
   | CellSubscribeRequest
   | CellUnsubscribeRequest
   | CellResolveAsCellRequest
+  | CellGetCfcLabelRequest
   | GetCellRequest
   | GetHomeSpaceCellRequest
   | EnsureHomePatternRunningRequest
   | GetGraphSnapshotRequest
-  | SetPullModeRequest
   | GetLoggerCountsRequest
   | SetLoggerLevelRequest
   | SetLoggerEnabledRequest
   | SetTelemetryEnabledRequest
   | ResetLoggerBaselinesRequest
+  | GetSettleStatsRequest
+  | GetSettleStatsHistoryRequest
+  | SetSettleStatsEnabledRequest
+  | GetActionRunTraceRequest
+  | SetActionRunTraceEnabledRequest
+  | GetTriggerTraceRequest
+  | SetTriggerTraceEnabledRequest
+  | GetWriteStackTraceRequest
+  | SetWriteStackTraceMatchersRequest
   | IdleRequest
+  | FlushCompileCacheWritesRequest
   | PageCreateRequest
   | PageGetSpaceDefault
   | RecreateSpaceRootPatternRequest
   | PageGetRequest
+  | PageGetSlugRequest
   | PageRemoveRequest
   | PageStartRequest
   | PageStopRequest
   | PageGetAllRequest
   | PageSyncedRequest
+  | RuntimeSyncedRequest
+  | RegisterSpaceHostRequest
   | VDomEventRequest
   | VDomMountRequest
   | VDomUnmountRequest
-  | DetectNonIdempotentRequest;
+  | DetectNonIdempotentRequest
+  | GetPatternSourcesRequest
+  | SetBreakpointsRequest
+  | UploadBlobRequest;
 
 export type NullResponse = null;
 
@@ -455,8 +696,16 @@ export interface CellResponse {
   cell: CellRef;
 }
 
+export interface CfcLabelViewResponse {
+  cfcLabel: CfcLabelView | undefined;
+}
+
 export interface PageResponse {
   page: PageRef;
+}
+
+export interface SlugResponse {
+  slug: string | undefined;
 }
 
 export interface GraphSnapshotResponse {
@@ -551,11 +800,20 @@ export type RemoteResponse =
   | BooleanResponse
   | JSONValueResponse
   | CellResponse
+  | CfcLabelViewResponse
   | GraphSnapshotResponse
   | LoggerCountsResponse
+  | SettleStatsResponse
+  | SettleStatsHistoryResponse
+  | ActionRunTraceResponse
+  | TriggerTraceResponse
+  | WriteStackTraceResponse
   | PageResponse
+  | SlugResponse
   | VDomMountResponse
-  | DetectNonIdempotentResponse;
+  | DetectNonIdempotentResponse
+  | PatternSourcesResponse
+  | UploadBlobResponse;
 
 export type IPCRemoteNotification =
   | CellUpdateNotification
@@ -590,13 +848,13 @@ export type Commands = {
     request: IdleRequest;
     response: EmptyResponse;
   };
+  [RequestType.FlushCompileCacheWrites]: {
+    request: FlushCompileCacheWritesRequest;
+    response: EmptyResponse;
+  };
   [RequestType.GetGraphSnapshot]: {
     request: GetGraphSnapshotRequest;
     response: GraphSnapshotResponse;
-  };
-  [RequestType.SetPullMode]: {
-    request: SetPullModeRequest;
-    response: EmptyResponse;
   };
   [RequestType.GetLoggerCounts]: {
     request: GetLoggerCountsRequest;
@@ -616,6 +874,42 @@ export type Commands = {
   };
   [RequestType.ResetLoggerBaselines]: {
     request: ResetLoggerBaselinesRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.GetSettleStats]: {
+    request: GetSettleStatsRequest;
+    response: SettleStatsResponse;
+  };
+  [RequestType.GetSettleStatsHistory]: {
+    request: GetSettleStatsHistoryRequest;
+    response: SettleStatsHistoryResponse;
+  };
+  [RequestType.SetSettleStatsEnabled]: {
+    request: SetSettleStatsEnabledRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.GetActionRunTrace]: {
+    request: GetActionRunTraceRequest;
+    response: ActionRunTraceResponse;
+  };
+  [RequestType.SetActionRunTraceEnabled]: {
+    request: SetActionRunTraceEnabledRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.GetTriggerTrace]: {
+    request: GetTriggerTraceRequest;
+    response: TriggerTraceResponse;
+  };
+  [RequestType.SetTriggerTraceEnabled]: {
+    request: SetTriggerTraceEnabledRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.GetWriteStackTrace]: {
+    request: GetWriteStackTraceRequest;
+    response: WriteStackTraceResponse;
+  };
+  [RequestType.SetWriteStackTraceMatchers]: {
+    request: SetWriteStackTraceMatchersRequest;
     response: EmptyResponse;
   };
   // Cell requests
@@ -643,6 +937,10 @@ export type Commands = {
     request: CellResolveAsCellRequest;
     response: CellResponse;
   };
+  [RequestType.CellGetCfcLabel]: {
+    request: CellGetCfcLabelRequest;
+    response: CfcLabelViewResponse;
+  };
   // Page requests
   [RequestType.PageCreate]: {
     request: PageCreateRequest;
@@ -652,9 +950,21 @@ export type Commands = {
     request: PageSyncedRequest;
     response: EmptyResponse;
   };
+  [RequestType.RuntimeSynced]: {
+    request: RuntimeSyncedRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.RegisterSpaceHost]: {
+    request: RegisterSpaceHostRequest;
+    response: BooleanResponse;
+  };
   [RequestType.PageGet]: {
     request: PageGetRequest;
     response: PageResponse | NullResponse;
+  };
+  [RequestType.PageGetSlug]: {
+    request: PageGetSlugRequest;
+    response: SlugResponse;
   };
   [RequestType.PageRemove]: {
     request: PageRemoveRequest;
@@ -684,6 +994,18 @@ export type Commands = {
   [RequestType.DetectNonIdempotent]: {
     request: DetectNonIdempotentRequest;
     response: DetectNonIdempotentResponse;
+  };
+  [RequestType.GetPatternSources]: {
+    request: GetPatternSourcesRequest;
+    response: PatternSourcesResponse;
+  };
+  [RequestType.SetBreakpoints]: {
+    request: SetBreakpointsRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.UploadBlob]: {
+    request: UploadBlobRequest;
+    response: UploadBlobResponse;
   };
   // VDOM requests
   [RequestType.VDomEvent]: {

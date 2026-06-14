@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   computed,
   type Default,
@@ -9,7 +8,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { type MentionablePiece } from "./backlinks-index.tsx";
 
 export type SummarizablePiece = MentionablePiece & { summary?: string };
@@ -22,16 +21,21 @@ export type SummaryIndexEntry = {
 
 type Input = Record<string, never>;
 
-type Output = {
+export type Output = {
   entries: SummaryIndexEntry[];
   search: PatternToolResult<{ entries: SummaryIndexEntry[] }>;
 };
+
+function isCellLike<T>(value: unknown): value is { get: () => T } {
+  return !!value && typeof value === "object" &&
+    typeof (value as { get?: unknown }).get === "function";
+}
 
 function extractSummary(piece: any): string | undefined {
   const summary = piece?.summary;
   if (!summary) return undefined;
 
-  if (typeof summary === "object" && "get" in summary) {
+  if (isCellLike<string>(summary)) {
     const value = summary.get();
     return typeof value === "string" && value.trim() ? value : undefined;
   }
@@ -40,8 +44,14 @@ function extractSummary(piece: any): string | undefined {
 }
 
 /** Search sub-pattern: filters entries by query matching summary or name. */
+interface SearchInput {
+  /** Substring to match against piece names and summaries. Pass an empty string to return all entries. */
+  query: string;
+  entries: Writable<SummaryIndexEntry>[];
+}
+
 export const searchPattern = pattern<
-  { query: string; entries: Writable<SummaryIndexEntry>[] },
+  SearchInput,
   Writable<SummaryIndexEntry>[]
 >(({ query, entries }) => {
   return computed(() => {
@@ -60,11 +70,11 @@ const SummaryIndex = pattern<Input, Output>(() => {
     query: "#mentionable",
   }).result;
 
-  const query = Writable.of("");
+  const query = new Writable("");
 
   const entries = computed(() => {
     const result: SummaryIndexEntry[] = [];
-    for (const piece of mentionable ?? []) {
+    for (const piece of (Array.isArray(mentionable) ? mentionable : [])) {
       if (!piece) continue;
       const value = piece.get();
       const summary = extractSummary(value);
@@ -91,33 +101,33 @@ const SummaryIndex = pattern<Input, Output>(() => {
   return {
     [NAME]: "SummaryIndex",
     [UI]: (
-      <ct-screen>
-        <ct-toolbar slot="header" sticky>
+      <cf-screen>
+        <cf-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Search</h2>
-        </ct-toolbar>
+        </cf-toolbar>
 
-        <ct-vstack gap="4" padding="6">
-          <ct-input $value={query} placeholder="Search summaries..." />
+        <cf-vstack gap="4" padding="6">
+          <cf-input $value={query} placeholder="Search summaries..." />
           <span
             style={{
               fontSize: "13px",
-              color: "var(--ct-color-text-secondary)",
+              color: "var(--cf-theme-color-text-secondary)",
             }}
           >
             {filteredCount} of {entryCount} pieces
           </span>
 
-          <ct-table full-width>
+          <cf-table full-width>
             <tbody>
               {filtered.map((entry) => (
                 <tr>
                   <td style={{ fontWeight: "500", whiteSpace: "nowrap" }}>
-                    <ct-cell-link $cell={entry.piece} />
+                    <cf-cell-link $cell={entry.piece} />
                   </td>
                   <td
                     style={{
                       fontSize: "13px",
-                      color: "var(--ct-color-text-secondary)",
+                      color: "var(--cf-theme-color-text-secondary)",
                     }}
                   >
                     {entry.summary}
@@ -125,9 +135,9 @@ const SummaryIndex = pattern<Input, Output>(() => {
                 </tr>
               ))}
             </tbody>
-          </ct-table>
-        </ct-vstack>
-      </ct-screen>
+          </cf-table>
+        </cf-vstack>
+      </cf-screen>
     ),
     entries,
     search: patternTool(searchPattern, { entries }),

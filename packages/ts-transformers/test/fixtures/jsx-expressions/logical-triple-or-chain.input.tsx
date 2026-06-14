@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { cell, pattern, UI } from "commontools";
+import { cell, pattern, UI } from "commonfabric";
 
 // Tests triple || chain: a || b || c
 // Should produce nested unless calls

@@ -1,220 +1,172 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern, UI, NAME } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { computed, pattern, UI, NAME } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // Represents a question that may or may not exist
 type Question = {
     question: string;
     category: string;
     priority: number;
 };
+const __cfLift_1 = __cfHelpers.lift((): Question | null => {
+    // In real code this would filter and return first match, or null
+    return null;
+}, false);
+const __cfLift_2 = __cfHelpers.lift<{
+    topQuestion: {
+        question: string;
+    } | null;
+}, string>(({ topQuestion }) => topQuestion?.question || "", {
+    type: "object",
+    properties: {
+        topQuestion: {
+            anyOf: [{
+                    type: "object",
+                    properties: {
+                        question: {
+                            type: "string"
+                        }
+                    },
+                    required: ["question"]
+                }, {
+                    type: "null"
+                }]
+        }
+    },
+    required: ["topQuestion"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_3 = __cfHelpers.lift<{
+    topQuestion: Question | null;
+}, string>(({ topQuestion }) => topQuestion === null ? "" : topQuestion.question, {
+    type: "object",
+    properties: {
+        topQuestion: {
+            anyOf: [{
+                    $ref: "#/$defs/Question"
+                }, {
+                    type: "null"
+                }]
+        }
+    },
+    required: ["topQuestion"],
+    $defs: {
+        Question: {
+            type: "object",
+            properties: {
+                question: {
+                    type: "string"
+                },
+                category: {
+                    type: "string"
+                },
+                priority: {
+                    type: "number"
+                }
+            },
+            required: ["question", "category", "priority"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_4 = __cfHelpers.lift<{
+    topQuestion: {
+        category: string;
+    } | null;
+}, string>(({ topQuestion }) => topQuestion?.category || "", {
+    type: "object",
+    properties: {
+        topQuestion: {
+            anyOf: [{
+                    type: "object",
+                    properties: {
+                        category: {
+                            type: "string"
+                        }
+                    },
+                    required: ["category"]
+                }, {
+                    type: "null"
+                }]
+        }
+    },
+    required: ["topQuestion"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_5 = __cfHelpers.lift<{
+    topQuestion: Question | null;
+}, string>(({ topQuestion }) => topQuestion === null ? "" : topQuestion.category, {
+    type: "object",
+    properties: {
+        topQuestion: {
+            anyOf: [{
+                    $ref: "#/$defs/Question"
+                }, {
+                    type: "null"
+                }]
+        }
+    },
+    required: ["topQuestion"],
+    $defs: {
+        Question: {
+            type: "object",
+            properties: {
+                question: {
+                    type: "string"
+                },
+                category: {
+                    type: "string"
+                },
+                priority: {
+                    type: "number"
+                }
+            },
+            required: ["question", "category", "priority"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-nullable-optional-chain
 // Verifies: computed() capturing a nullable computed result preserves anyOf [type, null] in schema
-//   computed(() => topQuestion?.question || "") → derive(..., { topQuestion }, ({ topQuestion }) => topQuestion?.question || "")
-//   computed(() => topQuestion === null ? "" : topQuestion.question) → derive(..., { topQuestion }, ({ topQuestion }) => ...)
+//   computed(() => topQuestion?.question || "") → lift(({ topQuestion }) => topQuestion?.question || "")({ topQuestion })
+//   computed(() => topQuestion === null ? "" : topQuestion.question) → lift(({ topQuestion }) => ...)({ topQuestion })
 // Context: Tests both optional chaining (?.) and explicit null-check patterns on
 //   a nullable OpaqueRef. The capture schema correctly uses anyOf [Question, null]
 //   with asOpaque: true for the topQuestion capture.
 export default pattern((_) => {
     // This computed can return null - simulates finding a question from a list
-    const topQuestion = __ctHelpers.derive({
-        type: "object",
-        properties: {}
-    } as const satisfies __ctHelpers.JSONSchema, {
-        anyOf: [{
-                $ref: "#/$defs/Question"
-            }, {
-                type: "null"
-            }],
-        $defs: {
-            Question: {
-                type: "object",
-                properties: {
-                    question: {
-                        type: "string"
-                    },
-                    category: {
-                        type: "string"
-                    },
-                    priority: {
-                        type: "number"
-                    }
-                },
-                required: ["question", "category", "priority"]
-            }
-        }
-    } as const satisfies __ctHelpers.JSONSchema, {}, (): Question | null => {
-        // In real code this would filter and return first match, or null
-        return null;
-    });
+    const topQuestion = __cfLift_1().for("topQuestion", true);
     return {
         [NAME]: "Computed Nullable Optional Chain",
         [UI]: (<div>
         {/* BUG CASE: Optional chaining loses nullability in schema inference */}
         {/* The input schema should have topQuestion as anyOf [Question, null] */}
         {/* but instead infers topQuestion as object with required "question" */}
-        <p>Optional chaining: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                topQuestion: {
-                    anyOf: [{
-                            $ref: "#/$defs/Question"
-                        }, {
-                            type: "null"
-                        }],
-                    asOpaque: true
-                }
-            },
-            required: ["topQuestion"],
-            $defs: {
-                Question: {
-                    type: "object",
-                    properties: {
-                        question: {
-                            type: "string"
-                        },
-                        category: {
-                            type: "string"
-                        },
-                        priority: {
-                            type: "number"
-                        }
-                    },
-                    required: ["question", "category", "priority"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "string",
-                    asOpaque: true
-                }, {
-                    type: "string",
-                    "enum": [""]
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, { topQuestion: topQuestion }, ({ topQuestion }) => topQuestion?.question || "")}</p>
+        <p>Optional chaining: {__cfLift_2({ topQuestion: topQuestion })}</p>
 
         {/* WORKAROUND: Explicit null check preserves nullability */}
         {/* This correctly generates anyOf [Question, null] in the schema */}
-        <p>Explicit check: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                topQuestion: {
-                    anyOf: [{
-                            $ref: "#/$defs/Question"
-                        }, {
-                            type: "null"
-                        }],
-                    asOpaque: true
-                }
-            },
-            required: ["topQuestion"],
-            $defs: {
-                Question: {
-                    type: "object",
-                    properties: {
-                        question: {
-                            type: "string"
-                        },
-                        category: {
-                            type: "string"
-                        },
-                        priority: {
-                            type: "number"
-                        }
-                    },
-                    required: ["question", "category", "priority"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "string",
-                    asOpaque: true
-                }, {
-                    type: "string",
-                    "enum": [""]
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, { topQuestion: topQuestion }, ({ topQuestion }) => topQuestion === null ? "" : topQuestion.question)}</p>
+        <p>Explicit check: {__cfLift_3({ topQuestion: topQuestion })}</p>
 
         {/* Same issue with category field */}
-        <span>Category (buggy): {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                topQuestion: {
-                    anyOf: [{
-                            $ref: "#/$defs/Question"
-                        }, {
-                            type: "null"
-                        }],
-                    asOpaque: true
-                }
-            },
-            required: ["topQuestion"],
-            $defs: {
-                Question: {
-                    type: "object",
-                    properties: {
-                        question: {
-                            type: "string"
-                        },
-                        category: {
-                            type: "string"
-                        },
-                        priority: {
-                            type: "number"
-                        }
-                    },
-                    required: ["question", "category", "priority"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "string",
-                    asOpaque: true
-                }, {
-                    type: "string",
-                    "enum": [""]
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, { topQuestion: topQuestion }, ({ topQuestion }) => topQuestion?.category || "")}</span>
-        <span>Category (works): {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                topQuestion: {
-                    anyOf: [{
-                            $ref: "#/$defs/Question"
-                        }, {
-                            type: "null"
-                        }],
-                    asOpaque: true
-                }
-            },
-            required: ["topQuestion"],
-            $defs: {
-                Question: {
-                    type: "object",
-                    properties: {
-                        question: {
-                            type: "string"
-                        },
-                        category: {
-                            type: "string"
-                        },
-                        priority: {
-                            type: "number"
-                        }
-                    },
-                    required: ["question", "category", "priority"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "string",
-                    asOpaque: true
-                }, {
-                    type: "string",
-                    "enum": [""]
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, { topQuestion: topQuestion }, ({ topQuestion }) => topQuestion === null ? "" : topQuestion.category)}</span>
+        <span>Category (buggy): {__cfLift_4({ topQuestion: topQuestion })}</span>
+        <span>Category (works): {__cfLift_5({ topQuestion: topQuestion })}</span>
       </div>),
     };
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
@@ -230,11 +182,10 @@ export default pattern((_) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -247,8 +198,14 @@ export default pattern((_) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2,
+    __cfLift_3,
+    __cfLift_4,
+    __cfLift_5
+});

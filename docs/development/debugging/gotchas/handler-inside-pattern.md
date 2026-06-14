@@ -16,7 +16,7 @@ export default pattern<Input, Input>(({ items }) => {
   });
 
   return {
-    [UI]: <ct-button onClick={addItem}>Add</ct-button>,
+    [UI]: <cf-button onClick={addItem}>Add</cf-button>,
     items,
   };
 });
@@ -54,7 +54,7 @@ const addItem = handler<unknown, { items: Writable<Item[]> }>(
 const formatDate = (d: string): string => new Date(d).toLocaleDateString();
 
 export default pattern<Input, Input>(({ items }) => ({
-  [UI]: <ct-button onClick={addItem({ items })}>Add</ct-button>,
+  [UI]: <cf-button onClick={addItem({ items })}>Add</cf-button>,
   items,
 }));
 ```
@@ -87,4 +87,4 @@ These are fine inside pattern context:
 ## See Also
 
 - [@handler](../../../common/concepts/handler.md) - Handler basics and module scope
-- [@lift](../../../common/concepts/lift.md) - Lift basics and module scope
+- [@computed](../../../common/concepts/computed/computed.md) - lift() basics and module scope (see "Reusable Computations: lift()")

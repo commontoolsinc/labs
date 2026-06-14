@@ -9,16 +9,22 @@
  * type argument: `Cell.of<MyType[]>([])`.
  */
 import ts from "typescript";
-import { TransformationContext, Transformer } from "../core/mod.ts";
-import { detectCallKind } from "../ast/call-kind.ts";
+import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
+import { detectCallKind, detectNewExpressionKind } from "../ast/call-kind.ts";
 
-export class EmptyArrayOfValidationTransformer extends Transformer {
+export class EmptyArrayOfValidationTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     const checker = context.checker;
 
     const visit = (node: ts.Node): ts.Node => {
       if (ts.isCallExpression(node)) {
         const callKind = detectCallKind(node, checker);
+        if (callKind?.kind === "cell-factory") {
+          this.validateNotEmptyArray(node, callKind.factoryName, context);
+        }
+      }
+      if (ts.isNewExpression(node)) {
+        const callKind = detectNewExpressionKind(node, checker);
         if (callKind?.kind === "cell-factory") {
           this.validateNotEmptyArray(node, callKind.factoryName, context);
         }
@@ -31,11 +37,11 @@ export class EmptyArrayOfValidationTransformer extends Transformer {
   }
 
   private validateNotEmptyArray(
-    call: ts.CallExpression,
+    call: ts.CallExpression | ts.NewExpression,
     factoryName: string,
     context: TransformationContext,
   ): void {
-    const firstArg = call.arguments[0];
+    const firstArg = call.arguments?.[0];
     if (!firstArg) return;
 
     if (
@@ -47,8 +53,10 @@ export class EmptyArrayOfValidationTransformer extends Transformer {
       // For `Cell.of([])` the expression is a PropertyAccessExpression → "Cell.of";
       // for the deprecated `cell([])` it's just an identifier → "cell".
       const callee = call.expression;
-      const displayName = ts.isPropertyAccessExpression(callee) &&
-          ts.isIdentifier(callee.expression)
+      const displayName = ts.isNewExpression(call)
+        ? `new ${factoryName}`
+        : ts.isPropertyAccessExpression(callee) &&
+            ts.isIdentifier(callee.expression)
         ? `${callee.expression.text}.${factoryName}`
         : factoryName;
 

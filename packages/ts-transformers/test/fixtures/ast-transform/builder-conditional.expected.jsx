@@ -1,55 +1,70 @@
-import * as __ctHelpers from "commontools";
-import { Default, NAME, pattern, UI } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { Default, NAME, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface PatternState {
     count: Default<number, 0>;
     label: Default<string, "">;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        count: number;
+    };
+}, boolean>(({ state }) => state.count > 0, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["count"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: builder-conditional
-// Verifies: ternary in JSX is transformed to ifElse() with derive() for the condition
-//   state.count > 0 ? <p>A</p> : <p>B</p> → __ctHelpers.ifElse(...schemas, derive(..., state.count > 0), <p>A</p>, <p>B</p>)
+// Verifies: ternary in JSX is transformed to ifElse() with a lift-applied condition
+//   state.count > 0 ? <p>A</p> : <p>B</p> → __cfHelpers.ifElse(...schemas, lift(...)({...}), <p>A</p>, <p>B</p>)
 //   pattern<PatternState>                  → pattern(..., inputSchema, outputSchema)
 //   state.label                            → state.key("label")
 export default pattern((state) => {
     return {
         [NAME]: state.key("label"),
         [UI]: (<section>
-        {__ctHelpers.ifElse({
+        {__cfHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["count"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count > 0), <p>Positive</p>, <p>Non-positive</p>)}
+            } }), <p>Positive</p>, <p>Non-positive</p>)}
       </section>),
     };
 }, {
@@ -65,12 +80,11 @@ export default pattern((state) => {
         }
     },
     required: ["count", "label"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
-            type: "string",
-            asOpaque: true
+            type: "string"
         },
         $UI: {
             $ref: "#/$defs/JSXElement"
@@ -82,11 +96,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -99,8 +112,10 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: Self-Improving Classifier
  *
@@ -12,7 +11,14 @@
  * instead of action() with closures to avoid "reactive reference outside
  * reactive context" errors when accessing proxy objects like subject.submitItem.
  */
-import { Cell, computed, handler, pattern, Stream } from "commontools";
+import {
+  Cell,
+  computed,
+  handler,
+  pattern,
+  safeDateNow,
+  Stream,
+} from "commonfabric";
 import SelfImprovingClassifier, {
   type ClassificationRule,
   type LabeledExample,
@@ -39,7 +45,7 @@ const setupTier4Rule = handler<
     falsePositives: 2,
     trueNegatives: 8,
     falseNegatives: 0,
-    createdAt: Date.now(),
+    createdAt: safeDateNow(),
     isShared: false,
   }]);
 });
@@ -84,7 +90,7 @@ const submitItem = handler<
 export default pattern(() => {
   // 1. Instantiate the classifier with empty initial state
   const subject = SelfImprovingClassifier({
-    config: Cell.of({
+    config: new Cell({
       question: "",
       minExamplesForRules: 5,
       autoClassifyThreshold: 0.85,
@@ -93,10 +99,10 @@ export default pattern(() => {
       harmAsymmetry: "equal" as const,
       enableLLMFallback: true,
     }),
-    examples: Cell.of<LabeledExample[]>([]),
-    rules: Cell.of<ClassificationRule[]>([]),
-    pendingClassifications: Cell.of<PendingClassification[]>([]),
-    currentItem: Cell.of(null),
+    examples: new Cell<LabeledExample[]>([]),
+    rules: new Cell<ClassificationRule[]>([]),
+    pendingClassifications: new Cell<PendingClassification[]>([]),
+    currentItem: new Cell(null),
   });
 
   // Bind setup handlers
@@ -208,5 +214,8 @@ export default pattern(() => {
     ],
     // Expose subject for debugging when deployed as piece
     subject,
+    // generateObject has no LLM endpoint in the unit-test environment; the
+    // llm builtin warns ("Invalid URL: '//api/ai/llm/generateObject'").
+    allowConsoleWarnings: true,
   };
 });

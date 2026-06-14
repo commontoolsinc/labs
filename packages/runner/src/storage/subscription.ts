@@ -1,23 +1,38 @@
+import { getLogger } from "@commonfabric/utils/logger";
 import {
+  IStorageNotification,
+  IStorageNotificationCapability,
   IStorageSubscription,
   IStorageSubscriptionCapability,
   StorageNotification,
 } from "./interface.ts";
 
-export const create = () => new StorageSubscription();
+export const createStorageNotificationRelay = () =>
+  new StorageNotificationRelay();
+export const create = createStorageNotificationRelay;
 
 /**
  * Storage subscription that can be used by consumers to subscribe to storage
  * notifications and by storage to broadcast them to all subscribers.
  */
-class StorageSubscription
-  implements IStorageSubscriptionCapability, IStorageSubscription {
-  #subscribers: Set<IStorageSubscription>;
-  constructor(subscribers: Set<IStorageSubscription> = new Set()) {
+export class StorageNotificationRelay
+  implements
+    IStorageNotificationCapability,
+    IStorageSubscriptionCapability,
+    IStorageNotification,
+    IStorageSubscription {
+  #subscribers: Set<IStorageNotification>;
+  constructor(subscribers: Set<IStorageNotification> = new Set()) {
     this.#subscribers = subscribers;
   }
-  subscribe(subscription: IStorageSubscription): void {
+  subscribe(subscription: IStorageNotification): void {
     this.#subscribers.add(subscription);
+  }
+  unsubscribe(subscription: IStorageNotification): void {
+    this.#subscribers.delete(subscription);
+  }
+  hasSubscribers(): boolean {
+    return this.#subscribers.size > 0;
   }
   next(notification: StorageNotification) {
     for (const subscriber of this.#subscribers) {
@@ -26,9 +41,13 @@ class StorageSubscription
           this.#subscribers.delete(subscriber);
         }
       } catch (error) {
-        console.error(`Storage subscription throw an error: ${error}`);
+        getLogger("storage.subscription").error(
+          `Storage subscription threw an error: ${error}`,
+        );
       }
     }
     return { done: false };
   }
 }
+
+export { StorageNotificationRelay as StorageSubscription };

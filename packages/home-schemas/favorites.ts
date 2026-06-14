@@ -3,18 +3,17 @@
  * These define the structure of user's favorited pieces.
  */
 
-import type { JSONSchema } from "@commontools/api";
-import type { Schema } from "@commontools/api/schema";
+import type { JSONSchema } from "@commonfabric/api";
+import type { Schema } from "@commonfabric/api/schema";
 
 export const favoriteEntrySchema = {
   type: "object",
   properties: {
     // we use type unknown to validate, but avoid including children
-    cell: { type: "unknown", asCell: true },
+    cell: { type: "unknown", asCell: ["cell"] },
     tag: { type: "string", default: "" },
     userTags: { type: "array", items: { type: "string" }, default: [] },
     spaceName: { type: "string" },
-    spaceDid: { type: "string" },
   },
   required: ["cell"],
 } as const satisfies JSONSchema;

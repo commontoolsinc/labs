@@ -11,8 +11,8 @@ import type {
   RequireDefaults,
   StripDefaultBrand,
 } from "../src/builder/types.ts";
-import type { Default } from "@commontools/api";
-import type { Cell } from "@commontools/runner";
+import type { DeepDefault, Default } from "@commonfabric/api";
+import type { Cell } from "@commonfabric/runner";
 
 // ============================================================================
 // Helpers
@@ -71,6 +71,14 @@ const _stripDefaultNumber: MustBeTrue<
 
 const _stripDefaultBoolean: MustBeTrue<
   AssertEqual<StripDefaultBrand<Default<boolean, true>>, boolean>
+> = true;
+
+const _stripDefaultNull: MustBeTrue<
+  AssertEqual<StripDefaultBrand<Default<null>>, null>
+> = true;
+
+const _stripUnionDefaultNull: MustBeTrue<
+  AssertEqual<StripDefaultBrand<string | Default<null>>, string | null>
 > = true;
 
 // Default<T|undefined, V> strips to T|undefined (brand removed, undefined kept)
@@ -185,6 +193,57 @@ const _unionDefault: MustBeTrue<
   >
 > = true;
 
+const _unionNullDefault: MustBeTrue<
+  AssertEqual<
+    Simplify<RequireDefaults<{ value?: string | Default<null> }>>,
+    { value: string | null }
+  >
+> = true;
+
+const _cellUnionNullDefaultRequired: MustBeTrue<
+  AssertEqual<
+    Simplify<RequireDefaults<{ value?: Cell<string | Default<null>> }>>,
+    { value: Cell<string | null> }
+  >
+> = true;
+
+const _arrayUnionEmptyDefaultRequired: MustBeTrue<
+  AssertEqual<
+    Simplify<RequireDefaults<{ items?: string[] | Default<[]> }>>,
+    { items: string[] }
+  >
+> = true;
+
+const _cellArrayUnionEmptyDefaultRequired: MustBeTrue<
+  AssertEqual<
+    Simplify<RequireDefaults<{ items?: Cell<string[] | Default<[]>> }>>,
+    { items: Cell<string[]> }
+  >
+> = true;
+
+const _nullDefaultRequired: MustBeTrue<
+  AssertEqual<
+    Simplify<RequireDefaults<{ value?: Default<null> }>>,
+    { value: null }
+  >
+> = true;
+
+type DeepDefaultConfig = {
+  theme: string;
+  retries: number;
+};
+
+const _deepDefaultUnion: MustBeTrue<
+  AssertEqual<
+    Simplify<
+      RequireDefaults<
+        { config?: DeepDefaultConfig | DeepDefault<{ theme: "dark" }> }
+      >
+    >,
+    { config: DeepDefaultConfig }
+  >
+> = true;
+
 // ============================================================================
 // RequireDefaults<T> — plain union (no Default) stays optional
 // ============================================================================
@@ -244,6 +303,38 @@ const _stripDefaultTuple: MustBeTrue<
   AssertEqual<
     StripDefaultBrand<Default<[string, number], ["a", 0]>>,
     [string, number]
+  >
+> = true;
+
+// CT-1640: the documented `T[] | Default<[]>` shape strips to exactly `T[]`,
+// NOT `T[] | never[]`. `Default<[]>` keeps only its branded arm, so the bare
+// empty-tuple member never enters the union and the sibling `T[]` supplies the
+// value type.
+const _stripArrayUnionEmptyDefault: MustBeTrue<
+  AssertEqual<StripDefaultBrand<string[] | Default<[]>>, string[]>
+> = true;
+
+// Consequence: parameter-position array methods keep the element type (not
+// `never`). This is the actual CT-1640 symptom. The body is type-checked but
+// never executed (these are static assertions; the `declare`d binding has no
+// runtime value).
+function _ct1640ParamPositionMethods(
+  ids: StripDefaultBrand<string[] | Default<[]>>,
+): void {
+  const _includes: boolean = ids.includes("a");
+  const _indexOf: number = ids.indexOf("a");
+  void _includes;
+  void _indexOf;
+}
+void _ct1640ParamPositionMethods;
+
+// The Default<[]> brand must still be detectable, so RequireDefaults<> makes
+// the field required (this is why we keep the branded arm rather than dropping
+// Default<[]> entirely).
+const _emptyArrayUnionDefaultRequired: MustBeTrue<
+  AssertEqual<
+    Simplify<RequireDefaults<{ items?: string[] | Default<[]> }>>,
+    { items: string[] }
   >
 > = true;
 

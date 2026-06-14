@@ -15,10 +15,10 @@ import type { VDomOp } from "../src/vdom-ops.ts";
 import type { WorkerVNode } from "../src/worker/types.ts";
 
 // Import the actual Cell implementation to create test cells
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Runtime } from "@commontools/runner";
-import type { Cell } from "@commontools/runner";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Runtime } from "@commonfabric/runner";
+import type { Cell } from "@commonfabric/runner";
 import type { IExtendedStorageTransaction } from "../../runner/src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test reconciler diffing");

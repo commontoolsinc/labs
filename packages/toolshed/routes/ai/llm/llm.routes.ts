@@ -11,13 +11,16 @@ import { createRoute } from "@hono/zod-openapi";
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import { jsonContent } from "stoker/openapi/helpers";
 import { z } from "zod";
-import { toZod } from "@commontools/utils/zod-utils";
+import { toZod } from "@commonfabric/utils/zod-utils";
 import {
+  LLM_NATIVE_MODEL_TOOL_IDS,
   type LLMGenerateObjectRequest,
   type LLMRequest,
-} from "@commontools/llm/types";
+} from "@commonfabric/llm/types";
 
 const tags = ["AI Language Models"];
+
+const NativeModelToolIdSchema = z.enum(LLM_NATIVE_MODEL_TOOL_IDS);
 
 const TextPartSchema = z.object({
   type: z.literal("text"),
@@ -54,6 +57,13 @@ const MessageContentSchema = z.discriminatedUnion("type", [
 export const MessageSchema = z.object({
   role: z.enum(["system", "user", "assistant", "tool"]),
   content: z.union([z.string(), z.array(MessageContentSchema)]),
+  nativeModelToolResults: z.array(z.object({
+    type: z.literal("cf-harness.native-model-tool-result"),
+    toolId: NativeModelToolIdSchema,
+    provider: z.string().optional(),
+    providerMetadata: z.any().optional(),
+    sources: z.any().optional(),
+  })).optional(),
 });
 
 export const LLMRequestSchema = toZod<LLMRequest>().with({
@@ -77,6 +87,7 @@ export const LLMRequestSchema = toZod<LLMRequest>().with({
         "Function handler for tool execution (not serialized in API)",
     }),
   })).optional(),
+  nativeModelToolIds: z.array(NativeModelToolIdSchema).optional(),
 });
 
 export const GenerateObjectRequestSchema = toZod<LLMGenerateObjectRequest>()
@@ -100,6 +111,7 @@ export const ModelInfoSchema = z.object({
     stopSequences: z.boolean(),
     prefill: z.boolean(),
     images: z.boolean(),
+    nativeModelToolIds: z.array(NativeModelToolIdSchema).optional(),
   }),
   name: z.string(),
   aliases: z.array(z.string()),

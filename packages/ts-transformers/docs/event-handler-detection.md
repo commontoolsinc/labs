@@ -16,7 +16,7 @@ Handler = function with 0 or 1 parameter
 
 ### Why This Criterion?
 
-In Common Tools JSX, any function passed to an element is treated as an
+In Common Fabric JSX, any function passed to an element is treated as an
 action/handler. We don't need complex heuristics about return types because you
 can't pass arbitrary data-transformer functions to elements - if you could,
 they'd be patterns.
@@ -26,7 +26,7 @@ they'd be patterns.
 - 0 params: `callback: () => void` - simple notification
 - 1 param: `onClick: (e: Event) => void` - standard event handler
 
-In Common Tools, the `handler()` function wraps 2-param callbacks
+In Common Fabric, the `handler()` function wraps 2-param callbacks
 `(event, state) => ...` and produces 0-param functions for JSX. So JSX event
 handlers themselves never need more than 1 parameter.
 
@@ -46,7 +46,7 @@ Functions with 2+ parameters:
 | `filter: (item: T) => boolean` | 1 param      | Data filter predicate |
 | `mapper: (x: T) => Y`          | 1 param      | Data transformation   |
 
-These could cause unnecessary wrapping if encountered, but in Common Tools JSX
+These could cause unnecessary wrapping if encountered, but in Common Fabric JSX
 any function is intended to be an action anyway.
 
 ### False Negatives (real handlers missed)
@@ -58,10 +58,10 @@ any function is intended to be an action anyway.
 ## Alternatives Considered
 
 1. **Return type checking**: Original implementation checked for void/boolean
-   returns. Removed because it's not necessary in Common Tools JSX where all
+   returns. Removed because it's not necessary in Common Fabric JSX where all
    functions are actions.
 
-2. **Higher arity (0-2 params)**: Considered but unnecessary for Common Tools
+2. **Higher arity (0-2 params)**: Considered but unnecessary for Common Fabric
    where `handler()` abstracts multi-param callbacks.
 
 3. **Any function**: Simplest approach but would incorrectly capture 2+ param

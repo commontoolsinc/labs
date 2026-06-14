@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TypePicker Module - Controller pattern for selecting record type
  *
@@ -8,7 +7,6 @@
  * Key architecture:
  * - Receives Cells (entries, trashedEntries) as TOP-LEVEL pattern inputs
  * - CTS handles Cell serialization correctly when they're top-level props
- * - linkPatternJson is a serializable string (no functions!)
  * - Can call .get() and .set() on input Cells from handlers
  * - Trashes itself after applying a template
  *
@@ -23,16 +21,16 @@ import {
   handler,
   NAME,
   pattern,
+  safeDateNow,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 import {
   createTemplateModules,
   getTemplateList,
   type TemplateDefinition,
 } from "./record/template-registry.ts";
-import Note from "./notes/note.tsx";
 import type { SubPieceEntry, TrashedSubPieceEntry } from "./record/types.ts";
 
 // Filter function at module scope to avoid transformer errors
@@ -53,13 +51,12 @@ interface TypePickerInput {
   // (When nested inside a plain object, serialization fails)
   entries: Writable<SubPieceEntry[]>;
   trashedEntries: Writable<TrashedSubPieceEntry[]>;
-  linkPatternJson?: string;
   // Internal state
-  dismissed?: Default<boolean, false>;
+  dismissed?: boolean | Default<false>;
 }
 
-interface TypePickerOutput {
-  dismissed?: Default<boolean, false>;
+export interface TypePickerOutput {
+  dismissed?: boolean | Default<false>;
 }
 
 // ===== Handlers =====
@@ -72,10 +69,9 @@ const applyTemplate = handler<
   {
     entries: Writable<SubPieceEntry[]>;
     trashedEntries: Writable<TrashedSubPieceEntry[]>;
-    linkPatternJson: string | undefined;
     templateId: string;
   }
->((_event, { entries, trashedEntries, linkPatternJson, templateId }) => {
+>((_event, { entries, trashedEntries, templateId }) => {
   const current = entries.get() || [];
 
   // Find and keep the notes module (should be first)
@@ -88,11 +84,8 @@ const applyTemplate = handler<
   // Find self by type (there should only be one type-picker)
   const selfEntry = current.find((e) => e?.type === "type-picker");
 
-  // Create factory for Notes that uses the linkPatternJson for wiki-links
-  const createNotesPiece = () => Note({ linkPattern: linkPatternJson });
-
   // Create template modules (skip notes since we keep existing one)
-  const templateEntries = createTemplateModules(templateId, createNotesPiece);
+  const templateEntries = createTemplateModules(templateId);
   const newModules = templateEntries.filter((e) => e.type !== "notes");
 
   // Build new list: notes + new template modules (excluding type-picker)
@@ -108,7 +101,7 @@ const applyTemplate = handler<
   if (selfEntry) {
     const trashedSelf: TrashedSubPieceEntry = {
       ...selfEntry,
-      trashedAt: new Date().toISOString(),
+      trashedAt: new Date(safeDateNow()).toISOString(),
     };
     trashedEntries.push(trashedSelf);
   }
@@ -135,7 +128,7 @@ const dismiss = handler<
   // Add to trash
   const trashedSelf: TrashedSubPieceEntry = {
     ...selfEntry,
-    trashedAt: new Date().toISOString(),
+    trashedAt: new Date(safeDateNow()).toISOString(),
   };
   trashedEntries.push(trashedSelf);
 });
@@ -143,7 +136,7 @@ const dismiss = handler<
 // ===== The Pattern =====
 
 export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
-  ({ entries, trashedEntries, linkPatternJson, dismissed }) => {
+  ({ entries, trashedEntries, dismissed }) => {
     // Props are now at top level - CTS handles Cell serialization correctly
 
     // Get templates to display (excluding blank)
@@ -199,7 +192,6 @@ export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
                 onClick={applyTemplate({
                   entries,
                   trashedEntries,
-                  linkPatternJson,
                   templateId: template.id,
                 })}
                 style={{

@@ -1,13 +1,8 @@
 import app from "@/app.ts";
 import env from "@/env.ts";
 import { identity } from "@/lib/identity.ts";
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import {
-  CachedCompiler,
-  computeGitFingerprint,
-  FileSystemCompilationCache,
-} from "@commontools/runner/compilation-cache";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { memory } from "@/routes/storage/memory.ts";
 
 // Create a global runtime instance for the server
@@ -15,48 +10,24 @@ let runtime: Runtime;
 
 // Initialize runtime with storage and signer
 // FIXME(ja): should we do this even on memory-only toolsheds?
-const initializeRuntime = async () => {
+const initializeRuntime = () => {
   try {
     console.log(`Initializing runtime with signer ${identity.did()}...`);
 
-    // Construct server-side compilation cache if enabled.
-    // Fingerprint is derived from git state; returns undefined when not
-    // in a git repo (e.g. Docker), which also disables the cache.
-    let cachedCompiler: CachedCompiler | undefined;
-    if (env.COMPILATION_CACHE_SERVER) {
-      const fingerprint = await computeGitFingerprint();
-      if (fingerprint) {
-        cachedCompiler = new CachedCompiler(
-          new FileSystemCompilationCache(env.COMPILATION_CACHE_FS_DIR),
-          fingerprint,
-        );
-        console.log(
-          `Compilation cache enabled (server), fingerprint=${
-            fingerprint.substring(0, 8)
-          }`,
-        );
-      } else {
-        console.log("Compilation cache disabled (server): no git fingerprint");
-      }
-    } else {
-      console.log(
-        "Compilation cache disabled (server): COMPILATION_CACHE_SERVER not set",
-      );
-    }
-
     runtime = new Runtime({
       apiUrl: new URL(env.MEMORY_URL),
+      // Patterns running in this runtime (e.g. handlers doing `fetch`) target
+      // this toolshed's API base, not the hardcoded `localhost:<ports.toolshed>`
+      // default in builder/env.ts (wrong for any non-default port).
+      patternEnvironment: { apiUrl: new URL(env.API_URL) },
       storageManager: StorageManager.open({
-        address: new URL("/api/storage/memory", env.MEMORY_URL),
+        memoryHost: new URL(env.MEMORY_URL),
         as: identity,
       }),
       experimental: {
-        richStorableValues: env.EXPERIMENTAL_RICH_STORABLE_VALUES,
-        storableProtocol: env.EXPERIMENTAL_STORABLE_PROTOCOL,
-        unifiedJsonEncoding: env.EXPERIMENTAL_UNIFIED_JSON_ENCODING,
-        canonicalHashing: env.EXPERIMENTAL_CANONICAL_HASHING,
+        modernCellRep: env.EXPERIMENTAL_MODERN_CELL_REP,
+        persistentSchedulerState: env.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE,
       },
-      cachedCompiler,
     });
     console.log("Runtime initialized successfully");
     console.log("Configured to remote storage:", env.MEMORY_URL);
@@ -102,7 +73,7 @@ const handleShutdown = async () => {
 
         console.log("Closing memory system...");
         const result = await memory.close();
-        if (result.error) {
+        if ("error" in result) {
           console.error("Error closing memory:", result.error);
         } else {
           console.log("Memory system closed successfully");
@@ -119,9 +90,9 @@ const handleShutdown = async () => {
 };
 
 // Start server with the abort controller
-async function startServer() {
+function startServer() {
   console.log(`Server is starting on port http://${env.HOST}:${env.PORT}`);
-  await initializeRuntime();
+  initializeRuntime();
 
   const serverOptions = {
     hostname: env.HOST,
@@ -141,7 +112,9 @@ async function startServer() {
   } catch (err) {
     if (err instanceof Deno.errors.AddrInUse) {
       console.error(`Port ${env.PORT} is already in use`);
-      Deno.exit(1);
+      // Distinct exit code so callers can tell a port collision from other
+      // startup failures and retry on a different port.
+      Deno.exit(3);
     }
     console.error("Failed to start server:", err);
     Deno.exit(1);

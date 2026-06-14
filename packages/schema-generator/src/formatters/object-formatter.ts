@@ -1,24 +1,28 @@
 import ts from "typescript";
 import type {
-  GenerationContext,
-  SchemaDefinition,
-  TypeFormatter,
-} from "../interface.ts";
+  JSONSchemaMutable,
+  JSONSchemaObjMutable,
+} from "@commonfabric/api";
+import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import {
   cloneSchemaDefinition,
   getNativeTypeSchema,
+  getPropertyNameText,
   isFunctionLike,
   safeGetPropertyType,
 } from "../type-utils.ts";
-import { getCellWrapperInfo } from "../typescript/cell-brand.ts";
+import {
+  getCellWrapperInfo,
+  isCellInternalMarkerName,
+} from "../typescript/cell-brand.ts";
 import {
   isDefaultNodeWithUndefined,
   isOptionalSymbol,
 } from "../typescript/property-optionality.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { extractDocFromSymbolAndDecls, getDeclDocs } from "../doc-utils.ts";
-import { getLogger } from "@commontools/utils/logger";
-import { isRecord } from "@commontools/utils/types";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isRecord } from "@commonfabric/utils/types";
 
 const logger = getLogger("schema-generator.object", {
   enabled: true,
@@ -28,15 +32,15 @@ const logger = getLogger("schema-generator.object", {
 /**
  * Check if a callable type (like ModuleFactory or HandlerFactory) returns a wrapper type.
  * ModuleFactory<T, R> when called returns OpaqueRef<R>.
- * If R is Stream<T>, we should generate { asStream: true } instead of skipping.
- * If R is Cell<T>, we should generate { asCell: true } instead of skipping.
+ * If R is Stream<T>, we should generate { asCell: ["stream"] } instead of skipping.
+ * If R is Cell<T>, we should generate { asCell: ["cell"] } instead of skipping.
  *
  * Returns the schema definition for the wrapper if detected, undefined otherwise.
  */
 function getWrapperSchemaFromCallable(
   type: ts.Type,
   checker: ts.TypeChecker,
-): SchemaDefinition | undefined {
+): JSONSchemaObjMutable | undefined {
   const callSignatures = type.getCallSignatures();
   if (callSignatures.length === 0) return undefined;
 
@@ -46,10 +50,13 @@ function getWrapperSchemaFromCallable(
   // Check if the return type is a wrapper (Stream<T>, Cell<T>, or OpaqueRef<...>)
   const wrapperInfo = getCellWrapperInfo(callReturnType, checker);
   if (wrapperInfo?.kind === "Stream") {
-    return { asStream: true };
+    return { asCell: ["stream"] };
   }
   if (wrapperInfo?.kind === "Cell") {
-    return { asCell: true };
+    return { asCell: ["cell"] };
+  }
+  if (wrapperInfo?.kind === "SqliteDb") {
+    return { asCell: ["sqlite"] };
   }
 
   // Also check if it's an OpaqueRef wrapping a Stream or Cell
@@ -61,15 +68,130 @@ function getWrapperSchemaFromCallable(
       const innerType = typeArgs[0]!;
       const innerWrapperInfo = getCellWrapperInfo(innerType, checker);
       if (innerWrapperInfo?.kind === "Stream") {
-        return { asStream: true };
+        return { asCell: ["stream"] };
       }
       if (innerWrapperInfo?.kind === "Cell") {
-        return { asCell: true };
+        return { asCell: ["cell"] };
+      }
+      if (innerWrapperInfo?.kind === "SqliteDb") {
+        return { asCell: ["sqlite"] };
       }
     }
   }
 
   return undefined;
+}
+
+function typeNodeExplicitlyDeclaresProperty(
+  typeNode: ts.TypeNode | undefined,
+  propName: string,
+  checker?: ts.TypeChecker,
+): boolean {
+  if (!typeNode) return false;
+
+  if (ts.isParenthesizedTypeNode(typeNode)) {
+    return typeNodeExplicitlyDeclaresProperty(typeNode.type, propName, checker);
+  }
+
+  if (ts.isUnionTypeNode(typeNode)) {
+    return typeNode.types.some((member) =>
+      typeNodeExplicitlyDeclaresProperty(member, propName, checker)
+    );
+  }
+
+  if (!ts.isTypeLiteralNode(typeNode)) {
+    return false;
+  }
+
+  return typeNode.members.some((member) =>
+    (ts.isPropertySignature(member) || ts.isPropertyDeclaration(member)) &&
+    !!member.name &&
+    getPropertyNameText(member.name, checker) === propName
+  );
+}
+
+function getExplicitPropertyTypeNode(
+  typeNode: ts.TypeNode | undefined,
+  propName: string,
+  checker?: ts.TypeChecker,
+): ts.TypeNode | undefined {
+  if (!typeNode) return undefined;
+
+  if (ts.isParenthesizedTypeNode(typeNode)) {
+    return getExplicitPropertyTypeNode(typeNode.type, propName, checker);
+  }
+
+  if (ts.isUnionTypeNode(typeNode)) {
+    for (const member of typeNode.types) {
+      const nested = getExplicitPropertyTypeNode(member, propName, checker);
+      if (nested) {
+        return nested;
+      }
+    }
+    return undefined;
+  }
+
+  if (!ts.isTypeLiteralNode(typeNode)) {
+    return undefined;
+  }
+
+  for (const member of typeNode.members) {
+    if (
+      (ts.isPropertySignature(member) || ts.isPropertyDeclaration(member)) &&
+      !!member.name &&
+      getPropertyNameText(member.name, checker) === propName
+    ) {
+      return member.type;
+    }
+  }
+
+  return undefined;
+}
+
+function isExplicitPropertyShapeTypeNode(
+  typeNode: ts.TypeNode | undefined,
+): boolean {
+  if (!typeNode) return false;
+
+  if (ts.isParenthesizedTypeNode(typeNode)) {
+    return isExplicitPropertyShapeTypeNode(typeNode.type);
+  }
+
+  if (ts.isUnionTypeNode(typeNode)) {
+    return typeNode.types.some((member) =>
+      isExplicitPropertyShapeTypeNode(member)
+    );
+  }
+
+  return ts.isTypeLiteralNode(typeNode);
+}
+
+function shouldSkipInternalProperty(
+  propName: string,
+  propDecl: ts.Declaration | undefined,
+  context: GenerationContext,
+): boolean {
+  if (propName.startsWith("__@")) {
+    return true;
+  }
+
+  if (isCellInternalMarkerName(propName)) {
+    return true;
+  }
+
+  if (!propName.startsWith("__")) {
+    return false;
+  }
+
+  if (propDecl) {
+    return false;
+  }
+
+  return !typeNodeExplicitlyDeclaresProperty(
+    context.typeNode,
+    propName,
+    context.typeChecker,
+  );
 }
 
 /**
@@ -86,7 +208,10 @@ export class ObjectFormatter implements TypeFormatter {
     return context.typeChecker.typeToString(type) === "object";
   }
 
-  formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
+  formatType(
+    type: ts.Type,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
     const checker = context.typeChecker;
 
     // If this is the TS `object` type (unknown object shape), emit a permissive
@@ -103,15 +228,21 @@ export class ObjectFormatter implements TypeFormatter {
     // Do not early-return for empty object types. Instead, try to enumerate
     // properties via the checker to allow type literals to surface members.
 
-    const properties: Record<string, SchemaDefinition> = {};
+    const properties: Record<string, JSONSchemaMutable> = {};
     const required: string[] = [];
+    const shouldRespectExplicitPropertyShape = isExplicitPropertyShapeTypeNode(
+      context.typeNode,
+    );
 
     const props = checker.getPropertiesOfType(type);
     for (const prop of props) {
       const propName = prop.getName();
-      if (propName.startsWith("__")) continue; // Skip internal properties
 
-      let propTypeNode: ts.TypeNode | undefined;
+      let propTypeNode = getExplicitPropertyTypeNode(
+        context.typeNode,
+        propName,
+        checker,
+      );
       const propDecl = prop.valueDeclaration ??
         (prop.declarations?.[0] as ts.Declaration | undefined);
 
@@ -124,8 +255,21 @@ export class ObjectFormatter implements TypeFormatter {
         if (
           ts.isPropertySignature(propDecl) || ts.isPropertyDeclaration(propDecl)
         ) {
-          if (propDecl.type) propTypeNode = propDecl.type as ts.TypeNode;
+          if (!propTypeNode && propDecl.type) {
+            propTypeNode = propDecl.type as ts.TypeNode;
+          }
         }
+      }
+
+      if (shouldSkipInternalProperty(propName, propDecl, context)) {
+        continue;
+      }
+
+      if (
+        shouldRespectExplicitPropertyShape &&
+        !typeNodeExplicitlyDeclaresProperty(context.typeNode, propName, checker)
+      ) {
+        continue;
       }
 
       if ((prop.flags & ts.SymbolFlags.Method) !== 0) continue;
@@ -140,7 +284,7 @@ export class ObjectFormatter implements TypeFormatter {
 
       if (isFunctionLike(resolvedPropType)) {
         // Special case: ModuleFactory/HandlerFactory types that return Stream or Cell
-        // should generate { asStream: true } or { asCell: true } instead of being skipped
+        // should generate { asCell: ["stream"] } or { asCell: ["cell"] } instead of being skipped
         const wrapperSchema = getWrapperSchemaFromCallable(
           resolvedPropType,
           checker,
@@ -166,7 +310,7 @@ export class ObjectFormatter implements TypeFormatter {
       }
 
       // Delegate to the main generator (specific formatters handle wrappers/defaults)
-      const generated: SchemaDefinition = this.schemaGenerator.formatChildType(
+      const generated = this.schemaGenerator.formatChildType(
         resolvedPropType,
         context,
         propTypeNode,
@@ -190,10 +334,17 @@ export class ObjectFormatter implements TypeFormatter {
           );
         }
       }
+      if (propName === "$UI") {
+        const uiContract = getUiContractHint(context, propTypeNode);
+        if (uiContract) {
+          properties[propName] = attachUiContract(generated, uiContract);
+          continue;
+        }
+      }
       properties[propName] = generated;
     }
 
-    const schema: SchemaDefinition = { type: "object", properties };
+    const schema: JSONSchemaObjMutable = { type: "object", properties };
 
     // Handle string/number index signatures → additionalProperties with description
     const stringIndex = checker.getIndexTypeOfType(type, ts.IndexKind.String);
@@ -238,7 +389,7 @@ export class ObjectFormatter implements TypeFormatter {
         }
       }
       (schema as Record<string, unknown>).additionalProperties =
-        apSchema as SchemaDefinition;
+        apSchema as JSONSchemaObjMutable;
     }
     if (required.length > 0) schema.required = required;
 
@@ -248,8 +399,56 @@ export class ObjectFormatter implements TypeFormatter {
   private lookupBuiltInSchema(
     type: ts.Type,
     checker: ts.TypeChecker,
-  ): SchemaDefinition | boolean | undefined {
+  ): JSONSchemaMutable | undefined {
     const builtin = getNativeTypeSchema(type, checker);
     return builtin === undefined ? undefined : cloneSchemaDefinition(builtin);
   }
+}
+
+function getUiContractHint(
+  context: GenerationContext,
+  typeNode: ts.TypeNode | undefined = context.typeNode,
+): {
+  helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+  action?: string;
+  surface?: string;
+  role?: string;
+  kind?: string;
+  trustedPattern?: string;
+  requiredEventIntegrity?: string[];
+} | undefined {
+  if (!context.schemaHints || !typeNode) {
+    return undefined;
+  }
+
+  return context.schemaHints.get(typeNode)?.cfcUiContract ??
+    context.schemaHints.get(ts.getOriginalNode(typeNode))?.cfcUiContract;
+}
+
+function attachUiContract(
+  schema: JSONSchemaMutable,
+  uiContract: {
+    helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+    action?: string;
+    surface?: string;
+    role?: string;
+    kind?: string;
+    trustedPattern?: string;
+    requiredEventIntegrity?: string[];
+  },
+): JSONSchemaMutable {
+  if (typeof schema === "boolean") {
+    return schema === false ? { not: true, ifc: { uiContract } } : {
+      ifc: { uiContract },
+    };
+  }
+
+  const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
+  return {
+    ...schema,
+    ifc: {
+      ...existingIfc,
+      uiContract,
+    },
+  };
 }

@@ -1,5 +1,5 @@
-import { defer } from "@commontools/utils/defer";
-import { isDeno } from "@commontools/utils/env";
+import { defer } from "@commonfabric/utils/defer";
+import { isDeno } from "@commonfabric/utils/env";
 import {
   ErrorNotification,
   IPCClientMessage,
@@ -81,10 +81,27 @@ export class WebWorkerRuntimeTransport
   private _handleError = (event: ErrorEvent): void => {
     event.preventDefault();
 
+    const error = new Error(
+      typeof event.error?.message === "string"
+        ? event.error.message
+        : event.message || "Web worker failed before initialization",
+    );
+    if (typeof event.error?.name === "string") {
+      error.name = event.error.name;
+    }
+    if (typeof event.error?.stack === "string") {
+      error.stack = event.error.stack;
+    }
+
+    if (!this._ready) {
+      this._readyPromise.reject(error);
+      return;
+    }
+
     this.emit("message", {
       type: NotificationType.ErrorReport,
-      message: `${event.error}`,
-      stackTrace: event.error?.stack,
+      message: `${error}`,
+      stackTrace: error.stack,
     } as ErrorNotification);
   };
 }

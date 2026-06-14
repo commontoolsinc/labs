@@ -3,14 +3,31 @@ import {
   isFunction,
   isObject,
   isRecord,
-} from "@commontools/utils/types";
+} from "@commonfabric/utils/types";
 import {
   cloneIfNecessary,
-  isArrayIndexPropertyName,
-  shallowStorableFromNativeValue,
-} from "@commontools/memory/storable-value";
-import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
-import { getTopFrame, pattern } from "./builder/pattern.ts";
+  FabricInstance,
+  FabricSpecialObject,
+  type FabricValue,
+  shallowFabricFromNativeValue,
+} from "@commonfabric/data-model/fabric-value";
+import { codecOf } from "@commonfabric/data-model/codec-common";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import {
+  internSchema,
+  isInternedSchema,
+} from "@commonfabric/data-model/schema-hash";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { SqliteParamsWire } from "@commonfabric/memory/v2";
+import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
+import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
+import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
+import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
+import { checkSqliteRowLabelWrite } from "./builtins/sqlite/row-label-write.ts";
+import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
+import { cfcLabelViewForCell } from "./cfc/label-view.ts";
+import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
+import { getTopFrame } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import {
   type AnyCell,
@@ -18,6 +35,7 @@ import {
   type Apply,
   type Cell,
   type CellKind,
+  type CellScope,
   type CellTypeConstructor,
   type Frame,
   type HKT,
@@ -29,6 +47,7 @@ import {
   type IsThisObject,
   type IStreamable,
   type JSONSchema,
+  type Module,
   type NodeFactory,
   type NodeRef,
   type Opaque,
@@ -39,7 +58,6 @@ import {
   SELF,
   type Stream,
   type StripDefaultBrand,
-  TYPE,
 } from "./builder/types.ts";
 import { toCell } from "./back-to-cell.ts";
 import { isOpaqueRefMarker } from "./builder/types.ts";
@@ -50,18 +68,25 @@ import {
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { diffAndUpdate } from "./data-updating.ts";
-import { resolveLink } from "./link-resolution.ts";
+import { type LastNode, resolveLink } from "./link-resolution.ts";
 import {
   type Action,
   ignoreReadForScheduling,
   txToReactivityLog,
 } from "./scheduler.ts";
+import { internalVerifierRead } from "./storage/reactivity-log.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import {
+  type CellViewRef,
   processDefaultValue,
   resolveSchema,
+  schemaHasIfc,
   validateAndTransform,
 } from "./schema.ts";
+import {
+  readStoredCfcMetadata,
+  storedCfcMetadataAppliesToPath,
+} from "./cfc/metadata.ts";
 import { toURI } from "./uri-utils.ts";
 import { createRef } from "./create-ref.ts";
 import {
@@ -79,10 +104,15 @@ import {
   isCellLink,
   type NormalizedFullLink,
   type NormalizedLink,
+  parseLink,
+  type SanitizeSchemaForLinksOptions,
+  toMemorySpaceAddress,
 } from "./link-utils.ts";
+import { isCellScope, normalizeCellScope } from "./scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
+  IMemorySpaceAddress,
   IReadOptions,
 } from "./storage/interface.ts";
 import {
@@ -91,8 +121,20 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { getLogger } from "@commontools/utils/logger";
-import { ensureNotRenderThread } from "@commontools/utils/env";
+import {
+  type CfcLabelView,
+  cfcLabelViewForDereferenceTraces,
+  cfcLabelViewSymbol,
+  cloneCfcLabelView,
+  getCarriedCfcLabelView,
+  mergeCfcLabelViews,
+  rebaseCfcLabelView,
+} from "./cfc/label-view-state.ts";
+import { listResultSchema } from "./builtins/list-result-schema.ts";
+import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+import { ensureNotRenderThread } from "@commonfabric/utils/env";
+import { MetaField } from "@commonfabric/api";
 ensureNotRenderThread();
 
 const logger = getLogger("cell", { level: "warn" });
@@ -101,20 +143,116 @@ type SinkOptions = {
   changeGroup?: ChangeGroup;
 };
 
+export type RawCellReadOptions = IReadOptions & {
+  /**
+   * Controls whether `getRaw()` follows a final link at the cell's target.
+   *
+   * Defaults to `"value"`, which preserves the historical raw-read behavior:
+   * resolve links on the way to the target, but return a final link as data.
+   */
+  lastNode?: LastNode;
+};
+
 // Shared factory instances for all cells
 let mapFactory: NodeFactory<any, any> | undefined;
 let filterFactory: NodeFactory<any, any> | undefined;
 let flatMapFactory: NodeFactory<any, any> | undefined;
 
+/**
+ * Error thrown by the function-form `.map`/`.filter`/`.flatMap` on an
+ * OpaqueRef/Cell. These wrapped the callback in an anonymous inline pattern,
+ * which has no stable content-addressed `{ identity, symbol }` and so cannot be
+ * passed/persisted by identity (CT-1623). Authored pattern code is always
+ * lowered by the TS transformer to the `*WithPattern(pattern(...), params)` form
+ * (with the pattern hoisted to a module export); direct builder-API callers must
+ * use the `*WithPattern` variant explicitly.
+ */
+function throwOpFunctionFormMessage(
+  method: "map" | "filter" | "flatMap",
+): string {
+  return `OpaqueRef.${method}(fn) is no longer supported: an inline pattern has ` +
+    `no stable identity. Authored \`.${method}(...)\` is lowered by the TS ` +
+    `transformer to \`.${method}WithPattern(pattern(...), { params })\`; if you ` +
+    `are calling the builder API directly, use \`.${method}WithPattern(op, params)\`.`;
+}
+
 // WeakMap to store connected nodes for each cell instance
 const cellNodes = new WeakMap<OpaqueCell<unknown>, Set<NodeRef>>();
+
+const recordSchemaWritePolicyInput = (
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  schema: JSONSchema | undefined,
+): void => {
+  const resolvedSchema = resolveSchema(schema) ??
+    storedSchemaForWritePolicyInput(tx, link);
+  if (resolvedSchema === undefined) {
+    return;
+  }
+  const schemaAndHash = internSchema(resolvedSchema, true);
+  tx.recordCfcWritePolicyInput({
+    kind: "schema",
+    target: {
+      space: link.space,
+      id: link.id,
+      scope: link.scope,
+      path: [...link.path],
+    },
+    schemaHash: schemaAndHash.taggedHashString,
+    schema: schemaAndHash.schema,
+  });
+};
+
+const storedSchemaForWritePolicyInput = (
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+): JSONSchema | undefined => {
+  const metadata = readStoredCfcMetadata(tx, link);
+  if (metadata === undefined) {
+    return undefined;
+  }
+  const stored = tx.readOrThrow({
+    space: link.space,
+    id: `cid:${metadata.schemaHash}` as URI,
+    type: "application/json",
+    path: [],
+  }, {
+    meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+  });
+  if (!isRecord(stored) || stored.value === undefined) {
+    return undefined;
+  }
+  return new ContextualFlowControl().getSchemaAtPath(
+    stored.value as JSONSchema,
+    [...link.path],
+  );
+};
+
+export const recordRelevantSchemaWritePolicyInput = (
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  schema: JSONSchema | undefined,
+): void => {
+  const resolvedSchema = resolveSchema(schema);
+  const cfcRelevant = schemaHasIfc(resolvedSchema) ||
+    storedCfcMetadataAppliesToPath(tx, link);
+  if (!cfcRelevant) {
+    return;
+  }
+  tx.markCfcRelevant(`schema-ifc-write:${link.id}`);
+  recordSchemaWritePolicyInput(
+    tx,
+    link,
+    schemaHasIfc(resolvedSchema) ? resolvedSchema : undefined,
+  );
+};
 
 /**
  * Module augmentation for runtime-specific cell methods.
  * These augmentations add implementation details specific to the runner runtime.
  */
 
-declare module "@commontools/api" {
+declare module "@commonfabric/api" {
   /**
    * Augment Writable to add runtime-specific write methods with onCommit callbacks
    */
@@ -159,6 +297,11 @@ declare module "@commontools/api" {
       callback: (value: Readonly<T>) => Cancel | undefined | void,
       options?: SinkOptions,
     ): Cancel;
+    sinkMeta(
+      metaField: MetaField,
+      callback: (value: Immutable<FabricValue>) => Cancel | undefined | void,
+      options?: SinkOptions,
+    ): Cancel;
     sync(): Promise<Cell<T>> | Cell<T>;
     pull(): Promise<Readonly<T>>;
     getAsQueryResult<Path extends PropertyKey[]>(
@@ -172,9 +315,7 @@ declare module "@commontools/api" {
         base?: Cell<any>;
         baseSpace?: MemorySpace;
         includeSchema?: boolean;
-        keepStreams?: boolean;
-        keepAsCell?: boolean;
-      },
+      } & SanitizeSchemaForLinksOptions,
     ): SigilLink;
     getAsWriteRedirectLink(
       options?: {
@@ -183,46 +324,35 @@ declare module "@commontools/api" {
         includeSchema?: boolean;
       },
     ): SigilWriteRedirectLink;
-    getRaw(options?: IReadOptions): Immutable<T> | undefined;
+    getRaw(options?: RawCellReadOptions): Immutable<T> | undefined;
     /**
-     * Reads the cell's raw storable value as `Immutable<StorableValue>`, bypassing the
+     * Reads the cell's raw fabric value as `FabricValue`, bypassing the
      * cell's type parameter `T`. Use this when the stored data may not
      * conform to `T` (e.g., `SigilLink` references, stream markers).
      *
+     * By default (or with `{ frozen: true }`), returns a deep-frozen
+     * `Immutable<FabricValue>`. Pass `{ frozen: false }` to get a mutable
+     * deep copy instead.
+     *
      * Prefer `getRaw()` when the value is expected to match `T`.
      */
-    getRawUntyped(options?: IReadOptions): Immutable<StorableValue>;
-    /** Read the cell's raw storable value as a mutable deep copy. */
-    getRawUntypedMutable(options?: IReadOptions): StorableValue;
-    setRaw(value: (NoInfer<T> & StorableValue) | undefined): void;
+    getRawUntyped(
+      options?: RawCellReadOptions & { frozen?: true },
+    ): Immutable<FabricValue>;
+    getRawUntyped(
+      options: RawCellReadOptions & { frozen: false },
+    ): FabricValue;
+    getRawUntyped(options?: RawCellReadOptions): FabricValue;
+    setRaw(value: (NoInfer<T> & FabricValue) | undefined): void;
     /**
-     * Sets the raw cell value to any `StorableValue`, bypassing the cell's
-     * type parameter `T`. Use this when writing pre-formed storable data
+     * Sets the raw cell value to any `FabricValue`, bypassing the cell's
+     * type parameter `T`. Use this when writing pre-formed fabric data
      * (e.g., `SigilLink` references, stream markers) that is valid at the
      * storage layer but does not conform to the cell's schema type.
      *
      * Prefer `setRaw()` when the value matches `T`.
      */
-    setRawUntyped(value: StorableValue): void;
-    getSourceCell<T>(
-      schema?: JSONSchema,
-    ):
-      | Cell<
-        & T
-        & { [TYPE]: string | undefined }
-        & ("argument" extends keyof T ? unknown : { argument: any })
-      >
-      | undefined;
-    getSourceCell<S extends JSONSchema = JSONSchema>(
-      schema: S,
-    ):
-      | Cell<
-        & Schema<S>
-        & { [TYPE]: string | undefined }
-        & ("argument" extends keyof Schema<S> ? unknown : { argument: any })
-      >
-      | undefined;
-    setSourceCell(sourceCell: Cell<any>): void;
+    setRawUntyped(value: FabricValue): void;
     freeze(reason: string): void;
     isFrozen(): boolean;
     setSchema(newSchema: JSONSchema): void;
@@ -231,10 +361,11 @@ declare module "@commontools/api" {
       cell: OpaqueCell<any>;
       path: readonly PropertyKey[];
       schema?: JSONSchema;
+      scope?: CellScope;
       nodes: Set<NodeRef>;
       frame: Frame;
       value?: Opaque<T> | T;
-      name?: string;
+      name?: unknown;
       external?: unknown;
     };
     getAsOpaqueRefProxy(
@@ -252,9 +383,6 @@ declare module "@commontools/api" {
     path: readonly PropertyKey[];
     copyTrap: boolean;
 
-    // TODO(seefeld): Remove once default schemas are properly propagated
-    setInitialValue(value: T): void;
-
     /** Set the self-reference for SELF symbol support in patterns */
     setSelfRef(selfRef: OpaqueRef<any>): void;
   }
@@ -264,9 +392,9 @@ declare module "@commontools/api" {
   }
 }
 
-export type { AnyCell, Cell, Stream } from "@commontools/api";
+export type { AnyCell, Cell, Stream } from "@commonfabric/api";
 
-export type { MemorySpace } from "@commontools/memory/interface";
+export type { MemorySpace } from "@commonfabric/memory/interface";
 
 const cellMethods = new Set<
   | keyof ICell<unknown>
@@ -275,6 +403,8 @@ const cellMethods = new Set<
   | "filterWithPattern"
   | "flatMap"
   | "flatMapWithPattern"
+  | "exec"
+  | "query"
 >([
   "get",
   "sample",
@@ -308,11 +438,8 @@ const cellMethods = new Set<
   "getAsWriteRedirectLink",
   "getRaw",
   "getRawUntyped",
-  "getRawUntypedMutable",
   "setRaw",
   "setRawUntyped",
-  "getSourceCell",
-  "setSourceCell",
   "getArgumentCell",
   "freeze",
   "isFrozen",
@@ -320,9 +447,102 @@ const cellMethods = new Set<
   "connect",
   "export",
   "getAsOpaqueRefProxy",
-  "setInitialValue",
   "setSelfRef",
+  "exec",
+  "query",
 ]);
+
+/** Parse the explicit column list from `INSERT INTO t (a, b, c) VALUES ...`,
+ *  used to map positional `_cf_link` params. Returns undefined when there is no
+ *  explicit column list (columnless `INSERT … VALUES (…)`, `UPDATE`, opaque
+ *  SQL). The capture must be immediately followed by `VALUES`, so a columnless
+ *  insert's VALUES tuple is NOT mistaken for a column list. */
+function parseSqliteInsertColumns(sql: string): string[] | undefined {
+  const m = sql.match(
+    /\binsert\b[\s\S]*?\binto\b\s+[^()]+?\(([^)]*)\)\s*values\b/i,
+  );
+  if (!m) return undefined;
+  return m[1].split(",").map((c) => c.trim().replace(/^["'`\[]|["'`\]]$/g, ""));
+}
+
+/**
+ * Encode SQLite bind params for the wire: a cell bound to a `_cf_link` column is
+ * encoded to an absolute sigil-link string; a cell bound to any other column
+ * throws; an `undefined` value throws (the pending-value guard — `null` is
+ * allowed for SQL NULL). Shared by `db.exec` (CellImpl) and the `sqliteQuery`
+ * builtin so the encode rules and the undefined guard cannot drift.
+ *
+ * Positional params are validated against the statement's explicit `INSERT`
+ * column list (cycled across multi-row `VALUES` tuples). When the target column
+ * of a positional `?` can't be determined (columnless INSERT, UPDATE, opaque
+ * SQL), a Cell binding cannot be verified to land in a `_cf_link` column, so it
+ * is REJECTED with an actionable error rather than blindly sigil-encoded (which
+ * would corrupt a non-link column). Use an explicit column list or named params
+ * (`:col`) to bind a Cell in those statements.
+ */
+/**
+ * Recover a Cell from a value that is a Cell or carries a `toCell` back-pointer
+ * (delegating the back-pointer case to query-result-proxy's `getCellOrThrow`).
+ * Shared by the write path (`encodeSqliteParams`) and `cf-link.ts`'s
+ * `encodeCfLinkValue` so `db.exec` and the `sqliteQuery` builtin agree on what
+ * counts as a bound cell. (Lives here because it needs `isCell` /
+ * `instanceof CellImpl`; cf-link.ts already imports from cell.ts.)
+ */
+export function asBoundCell(value: unknown): Cell<unknown> | undefined {
+  if (isCell(value)) return value as Cell<unknown>;
+  if (isCellResultForDereferencing(value)) return getCellOrThrow(value);
+  return undefined;
+}
+
+export function encodeSqliteParams(
+  sql: string,
+  params?: ReadonlyArray<unknown> | Record<string, unknown>,
+): SqliteParamsWire | undefined {
+  if (params === undefined) return undefined;
+  const assertDefined = (value: unknown): void => {
+    if (value === undefined) {
+      throw new TypeError(
+        "sqlite: param is undefined (it may be a value that isn't ready yet); " +
+          "pass a resolved value, or null for SQL NULL",
+      );
+    }
+  };
+  const encodeOne = (value: unknown, isLinkCol: boolean): unknown => {
+    assertDefined(value);
+    const cell = asBoundCell(value);
+    if (cell) {
+      if (!isLinkCol) {
+        throw new TypeError("cells may only be bound to _cf_link columns");
+      }
+      return encodeCellToSigilString(cell);
+    }
+    return value;
+  };
+  if (Array.isArray(params)) {
+    const cols = parseSqliteInsertColumns(sql);
+    return params.map((v, i) => {
+      if (cols) {
+        // Cycle the column list across multi-row `VALUES (?),(?)` tuples.
+        return encodeOne(v, isCfLinkColumn(cols[i % cols.length] ?? ""));
+      }
+      assertDefined(v);
+      if (asBoundCell(v)) {
+        throw new TypeError(
+          "sqlite: a Cell parameter must bind to a _cf_link column, but the " +
+            "target column can't be determined from this statement. Use an " +
+            "explicit column list (INSERT INTO t (col) VALUES (?)) or named " +
+            "params (:col) so the binding can be verified.",
+        );
+      }
+      return v;
+    }) as SqliteParamsWire;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(params)) {
+    out[k] = encodeOne(v, isCfLinkColumn(k));
+  }
+  return out as SqliteParamsWire;
+}
 
 export function createCell<T>(
   runtime: Runtime,
@@ -330,6 +550,7 @@ export function createCell<T>(
   tx?: IExtendedStorageTransaction,
   synced = false,
   kind?: CellKind,
+  cfcLabelView?: CfcLabelView,
 ): Cell<T> {
   return new CellImpl(
     runtime,
@@ -338,6 +559,7 @@ export function createCell<T>(
     synced,
     undefined, // No shared causeContainer
     kind,
+    cfcLabelView,
   ) as unknown as Cell<T>; // Cast to set brand
 }
 
@@ -361,7 +583,7 @@ interface CauseContainer {
  * CellImpl - Unified cell implementation that handles both regular cells and
  * streams.
  */
-export class CellImpl<T extends StorableValue>
+export class CellImpl<T extends FabricValue>
   implements ICell<T>, IStreamable<T> {
   private readOnlyReason: string | undefined;
 
@@ -391,14 +613,17 @@ export class CellImpl<T extends StorableValue>
     private synced: boolean = false,
     causeContainer?: CauseContainer,
     kind?: CellKind,
+    private _cfcLabelView?: CfcLabelView,
   ) {
     this._frame = getTopFrame();
 
     // Store this cell's own link
-    this._link = link ?? { path: [], type: "application/json" };
-    if (!this._link.type) {
-      this._link = { ...this._link, type: "application/json" };
-    }
+    this._link = {
+      ...(link ?? { path: [] }),
+      scope: isCellScope(link?.scope) ? link.scope : normalizeCellScope(
+        undefined,
+      ),
+    };
 
     // Use provided container or create one
     // If link has an id, extract it to the container
@@ -410,6 +635,11 @@ export class CellImpl<T extends StorableValue>
     };
 
     this._kind = kind ?? "cell";
+    this._cfcLabelView = cloneCfcLabelView(_cfcLabelView);
+  }
+
+  [cfcLabelViewSymbol](): CfcLabelView | undefined {
+    return cloneCfcLabelView(this._cfcLabelView);
   }
 
   /**
@@ -433,6 +663,13 @@ export class CellImpl<T extends StorableValue>
 
     // Combine causeContainer id with link's space/path/schema
     return this._link as NormalizedFullLink;
+  }
+
+  private get viewRef(): CellViewRef {
+    return {
+      link: this.link,
+      cfcLabelView: this._cfcLabelView,
+    };
   }
 
   /**
@@ -468,6 +705,25 @@ export class CellImpl<T extends StorableValue>
     this._causeContainer.cause = cause;
 
     return this as unknown as Cell<T>;
+  }
+
+  /**
+   * Pins this (not-yet-linked) cell to a space before its id exists, and routes
+   * any pattern nodes attached to it into that target space. Used by the pattern
+   * builder to implement `PatternFactory.inSpace(...)`. Throws if the cell has
+   * already been linked.
+   */
+  setUnlinkedSpace(space: MemorySpace): void {
+    if (this._causeContainer.id || this._link.id) {
+      throw new Error(
+        "Cannot set space: cell already has a link.",
+      );
+    }
+    this._causeContainer.space = space;
+    this._link = { ...this._link, space };
+    for (const node of cellNodes.get(this._causeContainer.cell) ?? []) {
+      (node.module as Module).targetSpace = space;
+    }
   }
 
   /**
@@ -571,10 +827,21 @@ export class CellImpl<T extends StorableValue>
    * Check if this cell contains a stream value
    */
   private isStream(resolvedToValueLink?: NormalizedFullLink): boolean {
+    if (this._kind === "stream") return true;
+
     const tx = this.runtime.readTx(this.tx);
 
     if (!resolvedToValueLink) {
       resolvedToValueLink = resolveLink(this.runtime, tx, this.link);
+    }
+
+    if (
+      ContextualFlowControl.getAsCellValues(resolvedToValueLink.schema).at(
+        0,
+      ) ===
+        "stream"
+    ) {
+      return true;
     }
 
     const value = tx.readValueOrThrow(resolvedToValueLink, {
@@ -585,11 +852,36 @@ export class CellImpl<T extends StorableValue>
 
   get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>> {
     if (!this.synced) this.sync(); // No await, just kicking this off
+
+    // Per-transaction read cache: within one ready transaction, repeatedly
+    // reading the same cell with no intervening write recomputes an identical
+    // result -- same value, the same reactive reads already registered on the
+    // tx, and the same CFC state. Reuse the prior result when the tx supports
+    // caching (the non-reactive sample() wrapper does not) and is still open.
+    // The tx clears this cache on any write, so a hit only happens when nothing
+    // has changed since the last read. Keyed on the cell's link identity, which
+    // is stable per cell; `variant` separates reads that differ in options.
+    const tx = this.tx;
+    const cacheable = tx !== undefined &&
+      tx.getCachedReadResult !== undefined &&
+      tx.status().status === "ready" &&
+      // Once CFC is prepared, the real read path's `read-after-prepare`
+      // invalidation is load-bearing: bypass the cache so a post-prepare read
+      // still goes through readOrThrow() and invalidates the prepared digest.
+      tx.getCfcState().prepare.status !== "prepared";
+    const variant = `${options?.traverseCells ?? false}|${this.synced}`;
+    if (cacheable) {
+      const cached = tx.getCachedReadResult!(this._link, variant);
+      if (cached !== undefined) {
+        return cached.value as Readonly<StripDefaultBrand<T>>;
+      }
+    }
+
     logger.timeStart("cell", "get");
     const value = validateAndTransform(
       this.runtime,
       this.tx,
-      this.link,
+      this.viewRef,
       [],
       { ...options, synced: this.synced },
     );
@@ -600,6 +892,12 @@ export class CellImpl<T extends StorableValue>
         `get() took ${Math.floor(elapsed)}ms`,
         this.link,
       );
+    }
+    if (cacheable) {
+      // Re-read this._link: validateAndTransform (via viewRef -> link) may have
+      // run ensureLink() and replaced it with the completed link object, which
+      // is the identity subsequent get()s will key on.
+      tx.setCachedReadResult!(this._link, variant, value);
     }
     return value;
   }
@@ -621,7 +919,7 @@ export class CellImpl<T extends StorableValue>
     const readTx = this.runtime.readTx(this.tx);
     const nonReactiveTx = createNonReactiveTransaction(readTx);
 
-    return validateAndTransform(this.runtime, nonReactiveTx, this.link);
+    return validateAndTransform(this.runtime, nonReactiveTx, this.viewRef);
   }
 
   /**
@@ -665,7 +963,7 @@ export class CellImpl<T extends StorableValue>
 
       const action: Action = (tx) => {
         // Read the value inside the effect - this ensures dependencies are pulled
-        result = validateAndTransform(this.runtime, tx, this.link);
+        result = validateAndTransform(this.runtime, tx, this.viewRef);
 
         // If no schema or TrueSchema, traverse the result to register all
         // nested values as read dependencies.
@@ -684,18 +982,174 @@ export class CellImpl<T extends StorableValue>
       // Subscribe as an effect so it runs in the next cycle.
       const cancel = this.runtime.scheduler.subscribe(action, action, {
         isEffect: true,
+        noDebounce: true,
       });
 
-      // Wait for the scheduler to process all pending work, then resolve
-      this.runtime.scheduler.idle().then(() => {
+      // Wait for the scheduler to process all pending work, then resolve.
+      // If the read kicked async loads of cross-space link targets, await
+      // them and re-idle — each arrival re-runs the read and can reveal the
+      // next hop — bounded. Pulls that kicked nothing take the
+      // zero-iteration path and keep their previous timing.
+      this.runtime.scheduler.idle().then(async () => {
+        const storage = this.runtime.storageManager;
+        // The pending pool is manager-global (same semantics as `synced()`):
+        // this pull may also wait on loads kicked by concurrent readers.
+        let round = 0;
+        for (; round < 10; round++) {
+          if ((storage.pendingCrossSpacePromiseCount?.() ?? 0) === 0) break;
+          await (storage.crossSpaceSettled?.() ?? Promise.resolve());
+          await this.runtime.scheduler.idle();
+        }
+        if (
+          round === 10 && (storage.pendingCrossSpacePromiseCount?.() ?? 0) > 0
+        ) {
+          logger.warn("pull", () => [
+            "pull() convergence bound exhausted with cross-space loads still",
+            `pending: ${this.sourceURI}`,
+          ]);
+        }
         cancel?.();
         resolve(result);
       });
     });
   }
 
+  /**
+   * SqliteDb write (`db.exec`): records a SQLite write op onto THIS cell's
+   * transaction so it commits ATOMICALLY with surrounding cell writes (one
+   * commit = cell ops + a `sqlite` op). On SQL failure the whole commit aborts.
+   * Only valid on a `"sqlite"`-kind cell and inside a transaction (e.g. a
+   * handler). Throws on an `undefined` param (it may be a value that isn't ready
+   * yet — pass a resolved value, or `null` for SQL NULL). See
+   * docs/specs/sqlite-builtin/plans/sqlitedb-cell-type-exploration.md.
+   */
+  exec(
+    sql: string,
+    params?: ReadonlyArray<unknown> | Record<string, unknown>,
+  ): void {
+    if (!this.tx) {
+      throw new Error(
+        ".exec() must be called within a transaction (e.g. inside a handler)",
+      );
+    }
+    if (!this.tx.recordSqliteWrite) {
+      throw new Error("storage transaction does not support sqlite writes");
+    }
+    // `"sqlite"` is a type-level kind (the public `SqliteDb` type restricts who
+    // can call `.exec`); at runtime we validate the actual handle value rather
+    // than `_kind`, since handler-input materialization doesn't always stamp the
+    // kind onto the delivered cell. Read the handle with `getRaw()` (NOT `get()`):
+    // the delivered cell's schema is the `SqliteDatabase` shape (no declared
+    // properties), so `get()` would shape the handle down to `{}` and drop the
+    // `id`/`tables` fields. Use `lastNode: "value"` so the FINAL link is still
+    // resolved (a handler-delivered handle may sit behind a link at its target) —
+    // getRaw's default `"top"` would stop at the link object and miss `id`.
+    const handle = this.getRaw({ lastNode: "value" }) as
+      | { id?: unknown; tables?: unknown; scope?: unknown }
+      | undefined;
+    if (!handle || typeof handle.id !== "string") {
+      throw new TypeError(
+        ".exec() is only available on a SqliteDb cell (invalid database handle)",
+      );
+    }
+    // Materialize `tables` through a RESOLVING read: a rowLabel rule's term
+    // lists (arrays of objects) split into per-element entity docs when the
+    // handle value is stored, so `getRaw` sees doc LINKS where the rule's AST
+    // nodes should be. The permissive schema bypasses the SqliteDb shape (no
+    // declared properties) that would shape `get()` down to `{}`.
+    const materialized = this.asSchema(
+      { type: "object", additionalProperties: true } as JSONSchema,
+    ).withTx(this.tx).get() as { tables?: unknown } | undefined;
+    const tables = materialized?.tables !== undefined
+      ? cloneIfNecessary(
+        materialized.tables as Parameters<typeof cloneIfNecessary>[0],
+        { frozen: false },
+      ) as Record<string, unknown>
+      : handle.tables as Record<string, unknown> | undefined;
+    // CFC write-ceiling (Phase 2): a value bound to a labeled column must fit the
+    // column's `ifc.maxConfidentiality`. The label rides the bound value (a Cell
+    // or any carried-label value); fail closed when a labeled value's target
+    // column can't be determined. No-op until a column declares `ifc`.
+    const confidentialityOf = (value: unknown): readonly unknown[] => {
+      const view = cfcLabelViewForCell(value);
+      return view
+        ? cfcConfidentialityForObservationNode({ labelView: view })
+        : [];
+    };
+    const ceilingViolation = checkSqliteWriteCeiling(
+      sql,
+      params,
+      tables as Parameters<typeof checkSqliteWriteCeiling>[2],
+      confidentialityOf,
+    );
+    if (ceilingViolation) throw new TypeError(ceilingViolation);
+
+    // CFC per-row rule gate (Phase 3): an attributable INSERT into a
+    // rule-bearing table computes the prospective row label from its bound
+    // values; labeled inputs must be captured by it (no-laundering), and the
+    // computed per-row labels are recorded as this write's CFC policy input
+    // (sink-request) before the commit. Unattributable shapes fail closed.
+    // No-op (zero cost) until a table declares a rule.
+    const rowGate = checkSqliteRowLabelWrite({
+      sql,
+      params,
+      tables,
+      owner: typeof (handle as { owner?: unknown }).owner === "string"
+        ? (handle as { owner: string }).owner
+        : undefined,
+      confidentialityOf,
+    });
+    if ("error" in rowGate) throw new TypeError(rowGate.error);
+    if (rowGate.policies !== undefined && rowGate.policies.length > 0) {
+      this.tx.markCfcRelevant(`sqlite-row-label:${handle.id}`);
+      recordSinkRequestPolicyInput(
+        this.tx,
+        `sqlite:${handle.id}`,
+        `sqlite-exec:${handle.id}:${sql}:${
+          JSON.stringify(encodeSqliteParams(sql, params) ?? null)
+        }`,
+        {
+          table: rowGate.policies[0].table,
+          rows: rowGate.policies.map((p) => p.label),
+        } as Parameters<typeof recordSinkRequestPolicyInput>[3],
+      );
+    }
+
+    this.tx.recordSqliteWrite(this.space, {
+      op: "sqlite",
+      db: {
+        id: handle.id,
+        // Materialized (link-free) — the server's write path must see the
+        // same plain schema JSON the read path's provenance gate keys off.
+        tables,
+        // Carry the db's declared scope so the write lands in the same per-user
+        // / per-session on-disk file the read path resolves (stamped by
+        // sqliteDatabase onto the handle value).
+        scope: isCellScope(handle.scope) ? handle.scope : undefined,
+      },
+      sql,
+      params: encodeSqliteParams(sql, params),
+    });
+    // Bump a write counter on the DB handle cell in THIS SAME commit. Two
+    // effects, both intended:
+    //  - `reactOn: db` queries re-run after a write (the handle value changed).
+    //  - it serializes concurrent writers: each does a read-modify-write of
+    //    `rev`, so two in-flight `db.exec` commits conflict on this cell's
+    //    revision (optimistic-concurrency mutex) and one retries.
+    const rev = ((handle as { rev?: unknown }).rev as number | undefined) ?? 0;
+    this.withTx(this.tx).set(
+      { ...(handle as Record<string, unknown>), rev: rev + 1 } as unknown as T,
+    );
+  }
+
   set(
     newValue: AnyCellWrapping<T> | T,
+    /**
+     * Internal-only commit callback. This runs after this transaction's final
+     * commit result, including failure, so it must remain non-effectful. Use
+     * the post-commit outbox for external side effects that must happen only
+     * after success.
+     */
     onCommit?: (tx: IExtendedStorageTransaction) => void,
   ): Cell<T> {
     const resolvedToValueLink = resolveLink(
@@ -708,6 +1162,7 @@ export class CellImpl<T extends StorableValue>
     if (this.isStream(resolvedToValueLink)) {
       // Stream behavior
       const event = convertCellsToLinks(newValue) as AnyCellWrapping<T>;
+      propagateRendererTrustedEvent(newValue, event);
 
       // Trigger on fully resolved link
       this.runtime.scheduler.queueEvent(
@@ -715,6 +1170,8 @@ export class CellImpl<T extends StorableValue>
         event,
         undefined,
         onCommit,
+        false,
+        { originTx: this.tx ?? undefined },
       );
 
       this.cleanup?.();
@@ -737,8 +1194,13 @@ export class CellImpl<T extends StorableValue>
 
       // Looks for arrays and makes sure each object gets its own doc.
       const transformedValue = recursivelyAddIDIfNeeded(newValue, this._frame);
+      recordRelevantSchemaWritePolicyInput(
+        this.tx,
+        resolvedToValueLink,
+        resolvedToValueLink.schema ?? this.schema,
+      );
 
-      // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
+      // TODO(@ubik2) investigate whether i need to check confidential as i walk down my own obj
       diffAndUpdate(
         this.runtime,
         this.tx,
@@ -747,9 +1209,15 @@ export class CellImpl<T extends StorableValue>
         this._frame?.cause,
       );
 
-      // Register commit callback if provided
+      // Register commit callback if provided.
       if (onCommit) {
-        this.tx.addCommitCallback(onCommit);
+        this.tx.addCommitCallback((committedTx) => {
+          try {
+            onCommit(committedTx);
+          } catch (error) {
+            console.error("Error in cell onCommit callback:", error);
+          }
+        });
       }
     }
 
@@ -759,10 +1227,22 @@ export class CellImpl<T extends StorableValue>
   send(
     ...args: T extends void ? [] | [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
+        /**
+         * Internal-only commit callback. This runs after the final commit
+         * result, including failure, so it must remain non-effectful. Use the
+         * post-commit outbox for external side effects that must happen only
+         * after success.
+         */
         (tx: IExtendedStorageTransaction) => void,
       ]
       : [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
+        /**
+         * Internal-only commit callback. This runs after the final commit
+         * result, including failure, so it must remain non-effectful. Use the
+         * post-commit outbox for external side effects that must happen only
+         * after success.
+         */
         (tx: IExtendedStorageTransaction) => void,
       ]
   ): void {
@@ -792,6 +1272,11 @@ export class CellImpl<T extends StorableValue>
 
     // Get current value, following aliases and references
     const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    recordRelevantSchemaWritePolicyInput(
+      this.tx,
+      resolvedLink,
+      resolvedLink.schema ?? this.schema,
+    );
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
 
     // If there's no current value, initialize based on schema, even if there is
@@ -803,7 +1288,7 @@ export class CellImpl<T extends StorableValue>
       // just wants to know whether the value could be an object.
       const allowsObject = resolvedSchema === undefined ||
         ContextualFlowControl.isTrueSchema(resolvedSchema) ||
-        (isObject(resolvedSchema) &&
+        (isRecord(resolvedSchema) &&
           (resolvedSchema.type === "object" ||
             (Array.isArray(resolvedSchema.type) &&
               resolvedSchema.type.includes("object")) ||
@@ -818,6 +1303,8 @@ export class CellImpl<T extends StorableValue>
         );
       }
 
+      // This initialization write only occurs after the read above proved the
+      // value is absent, so no-op attempted-target coverage is not relevant.
       this.tx.writeValueOrThrow(resolvedLink, {});
     }
 
@@ -846,6 +1333,11 @@ export class CellImpl<T extends StorableValue>
     // Follow aliases and references, since we want to get to an assumed
     // existing array.
     const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    recordRelevantSchemaWritePolicyInput(
+      this.tx,
+      resolvedLink,
+      resolvedLink.schema ?? this.schema,
+    );
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
     const cause = this._frame?.cause;
 
@@ -869,7 +1361,7 @@ export class CellImpl<T extends StorableValue>
         cause,
       );
       const resolvedSchema = resolveSchema(this.schema);
-      array = isObject(resolvedSchema) && Array.isArray(resolvedSchema?.default)
+      array = isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
         ? processDefaultValue(
           this.runtime,
           this.tx,
@@ -979,6 +1471,7 @@ export class CellImpl<T extends StorableValue>
   key(...keys: PropertyKey[]): Cell<any> {
     let currentLink = this._link;
     let childSchema: JSONSchema | undefined;
+    const childPath = keys.map((key) => key.toString());
 
     for (const key of keys) {
       // Get child schema if we have one
@@ -989,6 +1482,13 @@ export class CellImpl<T extends StorableValue>
       // Create a child link with extended path
       // When we have a childSchema, we need to preserve the schema that contains $defs
       // for resolving $ref references. If schema wasn't set, fall back to the parent schema.
+      //
+      // key() only extends the path and walks the schema. It must NOT change the
+      // link's scope: scope lives in the schema (top-level and asCell entries)
+      // and is resolved later as a follow cap during reads and as the target
+      // scope during writes. Stamping schema scope onto this link here would
+      // re-address the value to the wrong scoped instance of the container doc
+      // (see CT-1623).
       currentLink = {
         ...currentLink,
         path: [...currentLink.path, key.toString()] as string[],
@@ -998,11 +1498,15 @@ export class CellImpl<T extends StorableValue>
 
     // Determine the kind based on schema flags
     let kind: CellKind = this._kind;
-    if (isObject(childSchema)) {
-      if (childSchema.asStream) {
-        kind = "stream";
-      } else if (childSchema.asCell) {
-        kind = "cell";
+    if (isRecord(childSchema)) {
+      const asCellValues = ContextualFlowControl.getAsCellValues(childSchema);
+      // we can override the kind of cell we use for a key
+      if (asCellValues.length > 0) {
+        const asCellEntry = asCellValues[0];
+        const asCellKind = ContextualFlowControl.getAsCellKind(asCellEntry);
+        if (asCellKind !== undefined) {
+          kind = asCellKind;
+        }
       }
     }
 
@@ -1013,6 +1517,7 @@ export class CellImpl<T extends StorableValue>
       this.synced,
       this._causeContainer,
       kind,
+      rebaseCfcLabelView(this._cfcLabelView, childPath),
     ) as unknown as Cell<any>;
   }
 
@@ -1023,11 +1528,12 @@ export class CellImpl<T extends StorableValue>
     schema?: JSONSchema,
   ): Cell<T>;
   asSchema(schema?: JSONSchema): Cell<any> {
-    // asSchema creates a sibling with same identity but different schema
-    // Create a new link with modified schema
+    // asSchema creates a sibling with same identity but different schema.
+    // Create a new link with the modified schema, interned so downstream
+    // identity-keyed schema caches hit (see `internCellLinkSchema`).
     const siblingLink: NormalizedLink = {
       ...this._link,
-      schema: schema,
+      schema: internCellLinkSchema(schema),
     };
 
     return new CellImpl(
@@ -1037,6 +1543,7 @@ export class CellImpl<T extends StorableValue>
       false, // Reset synced flag, since schema is changing
       this._causeContainer, // Share the causeContainer with siblings
       this._kind,
+      this._cfcLabelView,
     ) as unknown as Cell<any>;
   }
 
@@ -1056,25 +1563,11 @@ export class CellImpl<T extends StorableValue>
   asSchemaFromLinks<T = unknown>(): Cell<T> {
     if (!this.synced) this.sync(); // Auto-sync like .get() - matches framework pattern
 
-    let { schema } = resolveLink(
+    const { schema } = resolveLink(
       this.runtime,
       this.runtime.readTx(this.tx),
       this.link,
     );
-
-    if (!schema) {
-      const sourceCell = this.getSourceCell<{ resultRef: Cell<unknown> }>({
-        type: "object",
-        properties: { resultRef: { asCell: true } },
-      });
-      const sourceCellSchema = sourceCell?.key("resultRef").get()?.schema;
-      if (sourceCellSchema !== undefined) {
-        schema = this.runtime.cfc.schemaAtPath(
-          sourceCellSchema,
-          this._link.path,
-        );
-      }
-    }
 
     return new CellImpl(
       this.runtime,
@@ -1086,6 +1579,7 @@ export class CellImpl<T extends StorableValue>
       false, // Reset synced flag, since schema is changing
       this._causeContainer, // Share the causeContainer with siblings
       this._kind,
+      this._cfcLabelView,
     ) as unknown as Cell<T>;
   }
 
@@ -1099,6 +1593,7 @@ export class CellImpl<T extends StorableValue>
       this.synced,
       this._causeContainer, // Share the causeContainer with siblings
       this._kind,
+      this._cfcLabelView,
     ) as unknown as Cell<T>;
   }
 
@@ -1122,7 +1617,7 @@ export class CellImpl<T extends StorableValue>
       return subscribeToReferencedDocs(
         callback,
         this.runtime,
-        this.link,
+        this.viewRef,
         options,
       );
     }
@@ -1134,16 +1629,51 @@ export class CellImpl<T extends StorableValue>
     return this.runtime.storageManager.syncCell<T>(this as unknown as Cell<T>);
   }
 
+  sinkMeta(
+    metaField: MetaField,
+    callback: (value: Immutable<FabricValue>) => Cancel | undefined | void,
+    options: SinkOptions = {},
+  ): Cancel {
+    if (!this.synced) this.sync();
+
+    const sink: SinkAction = {
+      cleanup: undefined,
+      action: (tx) => {
+        if (isCancel(sink.cleanup)) sink.cleanup();
+
+        const value = this.withTx(tx).getMetaRaw(metaField);
+        sink.cleanup = callback(value);
+      },
+    };
+
+    return sinkHelper(sink, this.runtime, {
+      ...this.link,
+      path: [String(metaField)],
+    }, options);
+  }
+
   resolveAsCell(): Cell<T> {
     const readTx = this.runtime.readTx(this.tx);
+    const tracesBefore = readTx.getCfcState().dereferenceTraces.length;
     let link: NormalizedFullLink = resolveLink(
       this.runtime,
       readTx,
       this.link,
     );
+    const dereferenceView = cfcLabelViewForDereferenceTraces(
+      readTx,
+      readTx.getCfcState().dereferenceTraces.slice(tracesBefore),
+    );
     const nonReactiveTx = createNonReactiveTransaction(readTx);
     link = maybeConvertArrayPathToDataURILink(nonReactiveTx, link);
-    return createCell(this.runtime, link, this.tx, this.synced);
+    return createCell(
+      this.runtime,
+      link,
+      this.tx,
+      this.synced,
+      undefined,
+      mergeCfcLabelViews([this._cfcLabelView, dereferenceView]),
+    );
   }
 
   getAsQueryResult<Path extends PropertyKey[]>(
@@ -1162,6 +1692,10 @@ export class CellImpl<T extends StorableValue>
       },
       0,
       writable,
+      rebaseCfcLabelView(
+        this._cfcLabelView,
+        subPath.map((p) => p.toString()),
+      ),
     );
   }
 
@@ -1174,9 +1708,7 @@ export class CellImpl<T extends StorableValue>
       base?: Cell<any>;
       baseSpace?: MemorySpace;
       includeSchema?: boolean;
-      keepStreams?: boolean;
-      keepAsCell?: boolean;
-    },
+    } & SanitizeSchemaForLinksOptions,
   ): SigilLink {
     return createSigilLinkFromParsedLink(this.link, {
       ...options,
@@ -1197,135 +1729,79 @@ export class CellImpl<T extends StorableValue>
     }) as SigilWriteRedirectLink;
   }
 
-  getRaw(options?: IReadOptions): Immutable<T> | undefined {
+  /**
+   * Read the cell's value at the fabric layer (no native unwrapping, no
+   * Proxy wrapping). By default returns a deep-frozen `FabricValue`
+   * snapshot; pass `{ frozen: false }` for a mutable deep copy.
+   *
+   * **Frozenness contract:** Defaults to `{ frozen: true }`, returning a
+   * deep-frozen `FabricValue` snapshot via `cloneIfNecessary()`. The underlying
+   * storage already holds a deep-frozen tree, so the clone is typically a
+   * no-op. The `{ frozen: false }` variant returns a fresh mutable deep copy
+   * and never aliases storage state.
+   */
+  getRaw(options?: RawCellReadOptions): Immutable<T> | undefined {
     return this.getRawUntyped(options) as Immutable<T> | undefined;
   }
 
-  getRawUntyped(options?: IReadOptions): Immutable<StorableValue> {
-    return this._getRawUntyped(options, true);
-  }
-
-  getRawUntypedMutable(options?: IReadOptions): StorableValue {
-    return this._getRawUntyped(options, false);
-  }
-
-  private _getRawUntyped(
-    options: IReadOptions | undefined,
-    frozen: true,
-  ): Immutable<StorableValue>;
-  private _getRawUntyped(
-    options: IReadOptions | undefined,
-    frozen: false,
-  ): StorableValue;
-  private _getRawUntyped(
-    options: IReadOptions | undefined,
-    frozen: boolean,
-  ): StorableValue {
+  /**
+   * Untyped variant of `getRaw()`; same frozenness contract.
+   */
+  getRawUntyped(
+    options?: RawCellReadOptions & { frozen?: true },
+  ): Immutable<FabricValue>;
+  getRawUntyped(
+    options: RawCellReadOptions & { frozen: false },
+  ): FabricValue;
+  getRawUntyped(
+    options?: RawCellReadOptions & { frozen?: boolean },
+  ): FabricValue {
+    const { frozen = true, lastNode = "top", ...readOptions } = options ?? {};
     if (!this.synced) this.sync(); // No await, just kicking this off
     const tx = this.runtime.readTx(this.tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final
     // link.
     const value = tx.readValueOrThrow(
-      resolveLink(this.runtime, tx, this.link, "top"),
-      options,
+      resolveLink(this.runtime, tx, this.link, lastNode),
+      readOptions,
     );
     // Deep-copy with desired frozenness, without native unwrapping — getRaw()
-    // and getRawUntyped() return storable-layer values, not native ("wild
+    // and getRawUntyped() return fabric-layer values, not native ("wild
     // west") values.
     return cloneIfNecessary(value, { frozen });
   }
 
-  setRaw(value: (NoInfer<T> & StorableValue) | undefined): void {
+  setRaw(value: (NoInfer<T> & FabricValue) | undefined): void {
     this.setRawUntyped(value);
   }
 
-  setRawUntyped(value: StorableValue): void {
+  setRawUntyped(value: FabricValue): void {
     if (!this.tx) throw new Error("Transaction required for setRaw");
 
     // No await for the sync, just kicking this off, so we have the data to
     // retry on conflict.
     if (!this.synced) this.sync();
 
+    // Raw writes bypass diff-based attempted-target capture. Same-value direct
+    // writes through this internal path are therefore outside phase-1 CFC
+    // attempted-target coverage unless a caller establishes it separately.
+    recordRelevantSchemaWritePolicyInput(
+      this.tx,
+      this.link,
+      this.link.schema ?? this.schema,
+    );
     this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 
-  getSourceCell<T>(
-    schema?: JSONSchema,
-  ):
-    | Cell<
-      & T
-      // Add default types for TYPE and `argument`. A more specific type in T will
-      // take precedence.
-      & { [TYPE]: string | undefined }
-      & ("argument" extends keyof T ? unknown : { argument: any })
-    >
-    | undefined;
-  getSourceCell<S extends JSONSchema = JSONSchema>(
-    schema: S,
-  ):
-    | Cell<
-      & Schema<S>
-      // Add default types for TYPE and `argument`. A more specific type in
-      // `schema` will take precedence.
-      & { [TYPE]: string | undefined }
-      & ("argument" extends keyof Schema<S> ? unknown
-        : { argument: any })
-    >
-    | undefined;
-  getSourceCell(schema?: JSONSchema): Cell<any> | undefined {
-    if (!this.synced) this.sync(); // No await, just kicking this off
-    let sourceCellId = this.runtime.readTx(this.tx).readOrThrow(
-      { ...this.link, path: ["source"] },
-    ) as string | undefined;
-    if (!sourceCellId) return undefined;
-    if (isRecord(sourceCellId)) {
-      sourceCellId = toURI(sourceCellId);
-    } else if (
-      typeof sourceCellId === "string" && sourceCellId.startsWith('{"/":')
-    ) {
-      sourceCellId = toURI(JSON.parse(sourceCellId));
-    }
-
-    if (typeof sourceCellId !== "string" || !sourceCellId.startsWith("of:")) {
-      throw new Error("Source cell ID must start with 'of:'");
-    }
-    return createCell(this.runtime, {
-      space: this.link.space,
-      path: [],
-      id: toURI(sourceCellId),
-      type: "application/json",
-      schema: schema,
-    }, this.tx) as Cell<any>;
-  }
-
-  setSourceCell(sourceCell: Cell<any>): void {
-    if (!this.tx) throw new Error("Transaction required for setSourceCell");
-
-    // No await for the sync, just kicking this off, so we have the data to
-    // retry on conflict.
-    if (!this.synced) this.sync();
-
-    const sourceLink = sourceCell.getAsNormalizedFullLink();
-    if (sourceLink.path.length > 0) {
-      throw new Error("Source cell must have empty path for now");
-    }
-    this.tx.writeOrThrow(
-      { ...this.link, path: ["source"] },
-      // TODO(@ubik2): Transition source links to sigil links?
-      { "/": fromURI(sourceLink.id) },
-    );
-  }
-
   getArgumentCell<U>(schema?: JSONSchema): Cell<U> | undefined {
-    const sourceCell = this.getSourceCell();
-    if (!sourceCell) return undefined;
-    // Kick off sync, since when used in a pattern, this wasn't automatically
-    // subscribed to yet. So we might still get a conflict on first write, but will
-    // get the correct version on retry.
-    sourceCell.sync();
-    // TODO(seefeld): Ideally we intersect this schema with the actual argument
-    // schema, so that get isn't for any.
-    return sourceCell.key("argument").asSchema<U>(schema);
+    const metaReadOptions = {
+      meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+    };
+    const linkObj = this.getMetaRaw("argument", metaReadOptions);
+    if (linkObj === undefined) return undefined;
+    const link = parseLink(linkObj, this._link);
+    if (link === undefined) return undefined;
+    return this.runtime.getCellFromLink(link).asSchema<U>(schema);
   }
 
   freeze(reason: string): void {
@@ -1334,6 +1810,34 @@ export class CellImpl<T extends StorableValue>
 
   isFrozen(): boolean {
     return !!this.readOnlyReason;
+  }
+
+  getMetaRaw(
+    metaField: MetaField,
+    options?: IReadOptions,
+  ): FabricValue | undefined {
+    if (!this.synced) this.sync(); // No await, just kicking this off
+    const metaAddr = {
+      space: this.link.space,
+      id: this.link.id,
+      path: [metaField],
+      ...(this.link.scope !== undefined && { scope: this.link.scope }),
+    };
+    return this.runtime.readTx(this.tx).readOrThrow(metaAddr, options);
+  }
+
+  setMetaRaw(metaField: MetaField, value: FabricValue): void {
+    if (!this.tx) throw new Error("Transaction required for setMetaRaw");
+    // No await for the sync, just kicking this off, so we have the data to
+    // retry on conflict.
+    if (!this.synced) this.sync();
+    const metaAddr = {
+      space: this.link.space,
+      id: this.link.id,
+      path: [metaField],
+      ...(this.link.scope !== undefined && { scope: this.link.scope }),
+    };
+    this.tx.writeOrThrow(metaAddr, value as FabricValue);
   }
 
   /**
@@ -1366,12 +1870,6 @@ export class CellImpl<T extends StorableValue>
     cellNodes.get(top)!.add(node);
   }
 
-  // TODO(seefeld): Remove once default schemas are properly propagated
-  private _initialValue?: T;
-  setInitialValue(value: T): void {
-    this._initialValue = value;
-  }
-
   /**
    * Export cell metadata for introspection, similar to OpaqueRef's export method.
    * If the cell has a link, it's included as 'external'.
@@ -1380,10 +1878,11 @@ export class CellImpl<T extends StorableValue>
     cell: OpaqueCell<unknown>;
     path: readonly PropertyKey[];
     schema?: JSONSchema;
+    scope?: CellScope;
     nodes: Set<NodeRef>;
     frame: Frame;
     value?: Opaque<T> | T;
-    name?: string;
+    name?: unknown;
     external?: unknown;
   } {
     if (!this._frame) {
@@ -1393,13 +1892,14 @@ export class CellImpl<T extends StorableValue>
       cell: this._causeContainer.cell,
       path: this.path,
       schema: this.schema,
+      scope: isCellScope(this._link.scope) ? this._link.scope : undefined,
       nodes: cellNodes.get(this._causeContainer.cell) ?? new Set(),
       frame: this._frame,
       // Cast needed: stream sentinel marker isn't actually of type T
       value: this._kind === "stream"
         ? { $stream: true } as unknown as T
-        : this._initialValue,
-      name: this._causeContainer.cause as string | undefined,
+        : undefined,
+      name: this._causeContainer.cause,
       external: this._link.id
         ? this.getAsWriteRedirectLink({
           baseSpace: this._frame.space,
@@ -1428,6 +1928,10 @@ export class CellImpl<T extends StorableValue>
     boundTarget?: (...args: unknown[]) => unknown,
   ): OpaqueRef<T> {
     const self = this as unknown as Cell<T>;
+    // `query`/`exec` are SqliteDb-only methods whose names are also common data
+    // fields (e.g. wish's `query`). Only forward them as methods on a
+    // `"sqlite"`-kind cell; otherwise treat `.query`/`.exec` as data navigation.
+    const cellKind = this._kind;
     const proxy = new Proxy(boundTarget ?? this, {
       get(target, prop) {
         if (prop === Symbol.iterator) {
@@ -1458,8 +1962,13 @@ export class CellImpl<T extends StorableValue>
           // Recursive property access - wrap the child cell
           const nestedCell = self.key(prop) as Cell<T>;
 
-          // Check if this is a method on the cell
-          if (cellMethods.has(prop as keyof ICell<T>)) {
+          // Check if this is a method on the cell. `query`/`exec` are gated to
+          // SqliteDb cells so they don't shadow same-named data fields.
+          const isSqliteOnlyMethod = prop === "query" || prop === "exec";
+          if (
+            cellMethods.has(prop as keyof ICell<T>) &&
+            (!isSqliteOnlyMethod || cellKind === "sqlite")
+          ) {
             return nestedCell.getAsOpaqueRefProxy(
               (self as unknown as Record<
                 string,
@@ -1482,28 +1991,49 @@ export class CellImpl<T extends StorableValue>
    * Map over an array cell, creating a new derived array.
    * Similar to Array.prototype.map but works with OpaqueRefs.
    */
+  /**
+   * SqliteDb reactive read (`db.query<Row>`): builds a `sqliteQuery` node with
+   * this DB handle as the `db` input (sugar over the `sqliteQuery` factory,
+   * mirroring how `.map` threads `this` as `list`). The `<Row>` result schema is
+   * injected by the transformer (method-call lowering), not set here. Like
+   * `.map`, this is a build-time node constructor with no `_kind` guard: at
+   * pattern-build time `this` is an opaque builder ref (the `"sqlite"` kind only
+   * materializes at runtime via the asCell schema), and the public `SqliteDb`
+   * type already restricts who can call it. A wrong handle fails at runtime in
+   * `readDbRef`.
+   */
+  query<Row = Record<string, unknown>>(
+    sql: string,
+    options?: {
+      params?: ReadonlyArray<unknown> | Record<string, unknown>;
+      reactOn?: unknown;
+      maxConfidentiality?: ReadonlyArray<unknown>;
+      onExceed?: "fail" | "skip";
+    },
+  ): OpaqueRef<{ pending: boolean; result?: Row[]; error?: unknown }> {
+    return sqliteQueryNodeFactory({
+      db: this,
+      sql,
+      params: options?.params,
+      reactOn: options?.reactOn,
+      // CFC Phase 3 read surface: the declared output ceiling + exceed mode.
+      maxConfidentiality: options?.maxConfidentiality,
+      onExceed: options?.onExceed,
+      // Forward the transformer-injected `<Row>` schema (lowered into the
+      // options object) to the node so the builtin can decode `_cf_link`
+      // columns. Read loosely — it is not part of the public options type.
+      rowSchema: (options as { rowSchema?: unknown } | undefined)?.rowSchema,
+    }) as OpaqueRef<{ pending: boolean; result?: Row[]; error?: unknown }>;
+  }
+
   map<S>(
-    fn: (
+    _fn: (
       element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
       index: OpaqueRef<number>,
       array: OpaqueRef<T>,
     ) => Opaque<S>,
   ): OpaqueRef<S[]> {
-    // Create the factory if it doesn't exist
-    if (!mapFactory) {
-      mapFactory = createNodeFactory({
-        type: "ref",
-        implementation: "map",
-      });
-    }
-
-    // Use the cell directly as an OpaqueRef (since cells are now also OpaqueRefs)
-    return mapFactory({
-      list: this as unknown as OpaqueRef<T>,
-      op: pattern(
-        ({ element, index, array }: Opaque<any>) => fn(element, index, array),
-      ),
-    });
+    throw new Error(throwOpFunctionFormMessage("map"));
   }
 
   /**
@@ -1523,11 +2053,13 @@ export class CellImpl<T extends StorableValue>
       });
     }
 
-    return mapFactory({
+    const result = mapFactory({
       list: this as unknown as OpaqueRef<T>,
       op: op,
       params: params,
     });
+    result.setSchema(listResultSchema(op.resultSchema));
+    return result;
   }
 
   /**
@@ -1586,25 +2118,13 @@ export class CellImpl<T extends StorableValue>
    * Output contains cell references to the original elements.
    */
   filter(
-    fn: (
+    _fn: (
       element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
       index: OpaqueRef<number>,
       array: OpaqueRef<T>,
     ) => Opaque<boolean>,
   ): OpaqueRef<(T extends Array<infer U> ? U : T)[]> {
-    if (!filterFactory) {
-      filterFactory = createNodeFactory({
-        type: "ref",
-        implementation: "filter",
-      });
-    }
-
-    return filterFactory({
-      list: this as unknown as OpaqueRef<T>,
-      op: pattern(
-        ({ element, index, array }: Opaque<any>) => fn(element, index, array),
-      ),
-    });
+    throw new Error(throwOpFunctionFormMessage("filter"));
   }
 
   /**
@@ -1623,11 +2143,13 @@ export class CellImpl<T extends StorableValue>
       });
     }
 
-    return filterFactory({
+    const result = filterFactory({
       list: this as unknown as OpaqueRef<T>,
       op: op,
       params: params,
     });
+    result.setSchema(listResultSchema());
+    return result;
   }
 
   /**
@@ -1636,25 +2158,13 @@ export class CellImpl<T extends StorableValue>
    * Each callback should return an array; results are concatenated one level deep.
    */
   flatMap<S>(
-    fn: (
+    _fn: (
       element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
       index: OpaqueRef<number>,
       array: OpaqueRef<T>,
     ) => Opaque<S[]>,
   ): OpaqueRef<S[]> {
-    if (!flatMapFactory) {
-      flatMapFactory = createNodeFactory({
-        type: "ref",
-        implementation: "flatMap",
-      });
-    }
-
-    return flatMapFactory({
-      list: this as unknown as OpaqueRef<T>,
-      op: pattern(
-        ({ element, index, array }: Opaque<any>) => fn(element, index, array),
-      ),
-    });
+    throw new Error(throwOpFunctionFormMessage("flatMap"));
   }
 
   /**
@@ -1673,11 +2183,13 @@ export class CellImpl<T extends StorableValue>
       });
     }
 
-    return flatMapFactory({
+    const result = flatMapFactory({
       list: this as unknown as OpaqueRef<T>,
       op: op,
       params: params,
     });
+    result.setSchema(listResultSchema());
+    return result;
   }
 
   toJSON(): SigilLink | null {
@@ -1713,50 +2225,97 @@ export class CellImpl<T extends StorableValue>
   }
 }
 
+export function setCellUnlinkedSpace(
+  cell: unknown,
+  space: MemorySpace,
+): void {
+  asCellImpl(cell)?.setUnlinkedSpace(space);
+}
+
+function asCellImpl(cell: unknown): CellImpl<FabricValue> | undefined {
+  if (cell === null || cell === undefined) return undefined;
+  const maybeToCell = (cell as { [toCell]?: () => Cell<unknown> })[toCell];
+  const unproxied = typeof maybeToCell === "function"
+    ? maybeToCell.call(cell)
+    : cell;
+  if (!isCell(unproxied)) return undefined;
+  return unproxied as unknown as CellImpl<FabricValue>;
+}
+
 function subscribeToReferencedDocs<T>(
   callback: (value: T) => Cancel | undefined | void,
   runtime: Runtime,
-  link: NormalizedFullLink,
+  ref: CellViewRef,
   options: SinkOptions = {},
 ): Cancel {
-  let cleanup: Cancel | undefined | void;
+  const link = ref.link;
+  const sink: SinkAction = {
+    cleanup: undefined,
+    action: (tx) => {
+      if (isCancel(sink.cleanup)) sink.cleanup();
 
-  const action: Action = (tx) => {
-    if (isCancel(cleanup)) cleanup();
+      // Using a new transaction for child cells, as we're only interested in
+      // dependencies for the initial get, not further cells the callback might
+      // read. The callback is responsible for calling sink on those cells if it
+      // wants to stay updated.
+      const extraTx = runtime.edit();
+      const wrappedTx = createChildCellTransaction(tx, extraTx);
+      const schema = link.schema;
+      const needsTraversal = schema === undefined ||
+        ContextualFlowControl.isTrueSchema(schema);
+      const newValue = validateAndTransform(runtime, wrappedTx, ref);
+      if (needsTraversal && newValue !== undefined && newValue !== null) {
+        deepTraverse(newValue);
+      }
+      sink.cleanup = callback(newValue);
 
-    // Using a new transaction for child cells, as we're only interested in
-    // dependencies for the initial get, not further cells the callback might
-    // read. The callback is responsible for calling sink on those cells if it
-    // wants to stay updated.
-    const extraTx = runtime.edit();
-    const wrappedTx = createChildCellTransaction(tx, extraTx);
-
-    const newValue = validateAndTransform(runtime, wrappedTx, link);
-    cleanup = callback(newValue);
-
-    // no async await here, but that also means no retry. TODO(seefeld): Should
-    // we add a retry? So far all sinks are read-only, so they get re-triggered
-    // on changes already.
-    extraTx.commit();
+      // no async await here, but that also means no retry. TODO(seefeld): Should
+      // we add a retry? So far all sinks are read-only, so they get re-triggered
+      // on changes already.
+      runtime.prepareTxForCommit(extraTx);
+      extraTx.commit();
+    },
   };
-  // Name the action for debugging
-  const sinkName = `sink:${link.space}/${link.id}/${link.path.join("/")}`;
-  Object.defineProperty(action, "name", {
+  return sinkHelper(
+    sink,
+    runtime,
+    toMemorySpaceAddress(link),
+    options,
+  );
+}
+
+type SinkAction = {
+  action: Action;
+  cleanup: Cancel | undefined | void;
+};
+
+function sinkHelper(
+  sink: SinkAction,
+  runtime: Runtime,
+  address: IMemorySpaceAddress,
+  options: SinkOptions = {},
+) {
+  // Attach a name to the sink action
+  const sinkName = `sink:${address.space}/${address.id}/${
+    address.path.join("/")
+  }`;
+  Object.defineProperty(sink.action, "name", {
     value: sinkName,
     configurable: true,
   });
-  (action as Action & { src?: string }).src = sinkName;
+  (sink.action as Action & { src?: string }).src = sinkName;
 
   // Call action once immediately, which also defines what docs need to be
   // subscribed to. Wrap with withExecutingAction so that any child sinks
   // created during the callback see this action as their parent.
   const tx = runtime.edit();
-  runtime.scheduler.withExecutingAction(action, () => action(tx));
+  runtime.scheduler.withExecutingAction(sink.action, () => sink.action(tx));
   const log = txToReactivityLog(tx);
 
   // Technically unnecessary since we don't expect/allow callbacks to sink to
   // write to other cells, and we retry by design anyway below when read data
   // changed. But ideally we enforce read-only as well.
+  runtime.prepareTxForCommit(tx);
   tx.commit();
 
   // Mark as effect since sink() is a side-effectful consumer (FRP effect/sink)
@@ -1767,11 +2326,12 @@ function subscribeToReferencedDocs<T>(
       changeGroup: options.changeGroup,
     }),
   };
-  runtime.scheduler.resubscribe(action, log, resubscribeOptions);
+  runtime.scheduler.resubscribe(sink.action, log, resubscribeOptions);
 
   return () => {
-    runtime.scheduler.unsubscribe(action);
-    if (isCancel(cleanup)) cleanup();
+    runtime.scheduler.unsubscribe(sink.action);
+    if (isCancel(sink.cleanup)) sink.cleanup();
+    sink.cleanup = undefined;
   };
 }
 
@@ -1960,6 +2520,14 @@ function validateStaticData(value: unknown): void {
  * This ensures that mutable arrays only consist of links to documents, at least
  * when written to only via .set, .update and .push above.
  *
+ * **Frozenness contract:** This function sits at the write boundary into
+ * runner/memory storage. The returned tree is always a valid deep-frozen
+ * `FabricValue`: the shallow fabric conversion freezes the sub-trees it visits,
+ * and the function freezes the freshly-built top-level container before
+ * returning. If the input is already a deep-frozen valid `FabricValue`, the
+ * shallow conversion returns it as-is and reference identity is preserved
+ * end-to-end.
+ *
  * TODO(seefeld): When an array has default entries and is rewritten as [...old,
  * new], this will still break, because the previous entries will point back to
  * the array itself instead of being new entries.
@@ -1976,7 +2544,7 @@ export function recursivelyAddIDIfNeeded<T>(
   if (!frame) return value;
 
   // Already seen, return previously annotated result. Check this before
-  // shallowStorableFromNativeValue() to handle circular references properly.
+  // shallowFabricFromNativeValue() to handle circular references properly.
   if (seen.has(value)) return seen.get(value) as T;
 
   // Cell links pass through unchanged.
@@ -1984,69 +2552,146 @@ export function recursivelyAddIDIfNeeded<T>(
     return value;
   }
 
-  // Convert value to storable form. This handles:
-  // - Primitives (e.g., -0 → 0, reject NaN/Infinity/Symbol/BigInt)
-  // - Instances (e.g., Error → @Error wrapper)
-  // - Objects/arrays with toJSON() methods
-  // - Sparse arrays (densified with null in holes)
-  const converted = shallowStorableFromNativeValue(value);
-  const convertedIsRecord = isRecord(converted);
+  // `FabricInstance`s are opaque with respect to plain-object-like property
+  // access; they have class-defined identity. Iterating their own-enumerable
+  // properties via the generic walker would descend into wrapper internals
+  // meaninglessly. Instead, walk the observable internal structure via the
+  // class's `[CODEC]` `encode()` (the same mechanism the serialization system
+  // uses) for side effects only — tracking shared references in `seen` and
+  // populating `frame.generatedIdCounter` for any objects-in-arrays nested
+  // inside — then return the original instance unchanged.
+  if (value instanceof FabricInstance) {
+    seen.set(value, value);
 
-  // If conversion changed the value, cache the result so shared references
-  // are preserved and we avoid redundant toJSON() calls.
-  if (converted !== value) {
-    const result = convertedIsRecord
-      ? recursivelyAddIDIfNeeded(converted as T, frame, seen)
-      : converted as T;
-    seen.set(value, result);
-    return result;
+    const state = codecOf(value).encode(value);
+    if (isRecord(state) || Array.isArray(state)) {
+      recursivelyAddIDIfNeeded(state, frame, seen);
+    }
+    return value;
   }
 
-  // Primitives that didn't need conversion don't need further processing.
-  if (!convertedIsRecord) {
+  // Convert value to fabric form. This handles:
+  // - Primitives (e.g., pass -0/NaN/Infinity/bigint through, reject unique
+  //   symbols)
+  // - Instances (e.g., Error → FabricError, Date → FabricEpochNsec)
+  // - Objects/arrays with toJSON() methods
+  // - Sparse arrays (holes preserved)
+  const converted = shallowFabricFromNativeValue(value);
+
+  // A `FabricSpecialObject` returned by the conversion step (e.g. `FabricError`
+  // wrapping a native `Error`, or `FabricEpochNsec` wrapping a native `Date`).
+  // These are atomic fabric values and must be returned unchanged rather than
+  // walked as records (their state is private, so the record branch below would
+  // flatten them to `{}`). Only `FabricInstance`s carry nested `FabricValue`s
+  // that need `[ID]` assignment via the codec's `encode()`; `FabricPrimitive`s
+  // are leaves.
+  if (converted instanceof FabricSpecialObject) {
+    seen.set(value, converted);
+
+    if (converted instanceof FabricInstance) {
+      const state = codecOf(converted).encode(converted);
+      if (isRecord(state) || Array.isArray(state)) {
+        recursivelyAddIDIfNeeded(state, frame, seen);
+      }
+    }
     return converted as T;
   }
 
-  if (Array.isArray(value)) {
-    const result = new Array<unknown>(value.length);
+  // Primitives need no further processing. Cache the conversion when it
+  // produced a different value (e.g. an object whose `toJSON()` returns a
+  // primitive) so callers see consistent results.
+  if (!isRecord(converted)) {
+    if (converted !== value) seen.set(value, converted);
+    return converted as T;
+  }
 
-    // Set before traversing, otherwise we'll infinite recurse.
+  // From here `converted` is an array or record. The result container is
+  // pre-registered in `seen` against the original `value` BEFORE descending
+  // into entries, so circular back-references to `value` resolve correctly.
+  // Without this, a cycle would re-enter `shallowFabricFromNativeValue(value)`
+  // on every pass and recurse forever.
+  const convertedDiffers = converted !== value;
+
+  if (Array.isArray(converted)) {
+    // Typed as `any[]` (not `unknown[]`) to preserve the original code's
+    // looser inference inside the iteration body, where `{...v}` and
+    // `ID in v` operate post-narrowing without explicit casts.
+    const sourceArray = converted as any[];
+    const result = new Array<unknown>(sourceArray.length);
+    let changed = convertedDiffers;
+
     seen.set(value, result);
+    if (convertedDiffers) seen.set(converted, result);
 
-    value.forEach((el, i) => {
+    sourceArray.forEach((el, i) => {
       const v = recursivelyAddIDIfNeeded(el, frame, seen);
-      // For objects on arrays only: Add ID if not already present.
+      // For objects on arrays only: Add ID if not already present. A
+      // `FabricSpecialObject` is an atomic fabric leaf, not a plain container —
+      // `{ [ID]: …, ...v }` would spread away its private state (flattening e.g.
+      // a `FabricEpochNsec` to `{[ID]: …}`), so it must be left intact.
       if (
-        isObject(v) && !isCellLink(v) && !(ID in v)
+        isObject(v) && !isCellLink(v) && !(ID in v) &&
+        !(v instanceof FabricSpecialObject)
       ) {
-        result[i] = { [ID]: frame.generatedIdCounter++, ...v };
+        changed = true;
+        const withId = { [ID]: frame.generatedIdCounter++, ...v };
+        // The ID-wrapped object is a freshly-built container that must also be
+        // deep-frozen.
+        Object.freeze(withId);
+        result[i] = withId;
       } else {
+        if (!Object.is(v, el)) {
+          changed = true;
+        }
         result[i] = v;
       }
     });
-    return result as T;
+
+    if (!changed) {
+      seen.set(value, value);
+      return value;
+    }
+
+    // The value enters a write-boundary that expects deep-frozen `FabricValue`
+    // trees. Children are already frozen by `shallowFabricFromNativeValue()`
+    // above; freeze the freshly-built top-level container so the returned tree
+    // is deep-frozen as a whole.
+    return Object.freeze(result) as T;
   } else {
-    // At this point we know `value` is a non-array record (we returned early
-    // for primitives and `Array.isArray` was false).
-    const valueRecord = value as Record<string, unknown>;
+    const sourceRecord = converted as Record<string, unknown>;
     const result: Record<string, unknown> = {};
+    let changed = convertedDiffers;
 
-    // Set before traversing, otherwise we'll infinite recurse.
     seen.set(value, result);
+    if (convertedDiffers) seen.set(converted, result);
 
-    Object.entries(valueRecord).forEach(([key, v]) => {
-      result[key] = recursivelyAddIDIfNeeded(v, frame, seen);
-    });
-
-    // Copy supported symbols from original value.
-    [ID, ID_FIELD].forEach((symbol) => {
-      if (symbol in valueRecord) {
-        (result as IDFields)[symbol as keyof IDFields] =
-          (valueRecord as IDFields)[symbol as keyof IDFields];
+    Object.entries(sourceRecord).forEach(([key, v]) => {
+      const next = recursivelyAddIDIfNeeded(v, frame, seen);
+      if (!Object.is(next, v)) {
+        changed = true;
       }
+      result[key] = next;
     });
 
-    return result as T;
+    // Copy supported symbols from the original value. Symbols are not
+    // enumerable via `Object.entries()` and are not preserved by the
+    // shallow fabric conversion.
+    if (isRecord(value)) {
+      const valueRecord = value as Record<string, unknown>;
+      [ID, ID_FIELD].forEach((symbol) => {
+        if (symbol in valueRecord) {
+          (result as IDFields)[symbol as keyof IDFields] =
+            (valueRecord as IDFields)[symbol as keyof IDFields];
+        }
+      });
+    }
+
+    if (!changed) {
+      seen.set(value, value);
+      return value;
+    }
+
+    return Object.freeze(result) as T;
   }
 }
 
@@ -2060,10 +2705,9 @@ export function convertCellsToLinks(
   value: readonly any[] | Record<string, any> | any,
   options: {
     includeSchema?: boolean;
-    keepStreams?: boolean;
-    keepAsCell?: boolean;
     doNotConvertCellResults?: boolean;
-  } = {},
+    includeCfcLabelView?: boolean;
+  } & SanitizeSchemaForLinksOptions = {},
   path: string[] = [],
   seen: Map<any, string[]> = new Map(),
 ): any {
@@ -2077,9 +2721,26 @@ export function convertCellsToLinks(
 
   // Early-return cases
   if (!options.doNotConvertCellResults && isCellResultForDereferencing(value)) {
-    return getCellOrThrow(value).getAsLink(options);
+    const cell = getCellOrThrow(value);
+    const link = cell.getAsLink(options);
+    if (options.includeCfcLabelView) {
+      const cfcLabelView = getCarriedCfcLabelView(cell);
+      if (cfcLabelView) {
+        (link["/"][LINK_V1_TAG] as { cfcLabelView?: CfcLabelView })
+          .cfcLabelView = cfcLabelView;
+      }
+    }
+    return link;
   } else if (isCell(value)) {
-    return value.getAsLink(options);
+    const link = value.getAsLink(options);
+    if (options.includeCfcLabelView) {
+      const cfcLabelView = getCarriedCfcLabelView(value);
+      if (cfcLabelView) {
+        (link["/"][LINK_V1_TAG] as { cfcLabelView?: CfcLabelView })
+          .cfcLabelView = cfcLabelView;
+      }
+    }
+    return link;
   } else if (!(isRecord(value) || isFunction(value))) {
     return value;
   }
@@ -2088,14 +2749,14 @@ export function convertCellsToLinks(
 
   seen.set(value, path); // ...which needs to be tracked for circularity.
 
-  // Convert the (top level of) the value to something JSON-encodable if not
-  // already JSON-encodable, or throw if it's neither already valid nor
+  // Convert the (top level of) the value to fabric form (a valid `FabricValue`)
+  // if it isn't already, or throw if it's neither already valid nor
   // convertible.
-  value = shallowStorableFromNativeValue(value);
+  value = shallowFabricFromNativeValue(value);
 
   // Recursively process arrays and objects, if we ended up with one of those.
   if (!isRecord(value)) {
-    // `shallowStorableFromNativeValue()` converted this into a primitive value of some sort.
+    // `shallowFabricFromNativeValue()` converted this into a primitive value of some sort.
     return value;
   } else if (Array.isArray(value)) {
     return value.map((value, index) =>
@@ -2148,19 +2809,115 @@ export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
     : any
   : any;
 
+const scopedConstructorNames = {
+  space: "perSpace",
+  user: "perUser",
+  session: "perSession",
+} as const satisfies Record<CellScope, string>;
+
+type ConstructableCellFactory<Wrap extends HKT> = {
+  new <T>(value?: T, providedSchema?: JSONSchema): Apply<Wrap, T>;
+  of<T>(value?: T, providedSchema?: JSONSchema): Apply<Wrap, T>;
+  for<T>(cause: unknown): Apply<Wrap, T>;
+};
+
+function mergeSchemaScope(
+  providedSchema: JSONSchema | undefined,
+  scope: CellScope | undefined,
+): JSONSchema | undefined {
+  if (!scope) return providedSchema;
+
+  const schema = ContextualFlowControl.toSchemaObj(providedSchema);
+  if (schema.scope !== undefined && schema.scope !== scope) {
+    throw new Error(
+      `Cannot use ${
+        scopedConstructorNames[scope]
+      } with schema scope "${schema.scope}".`,
+    );
+  }
+  return { ...schema, scope };
+}
+
+function schemaWithDefaultAndScope<T>(
+  value: T | undefined,
+  providedSchema: JSONSchema | undefined,
+  scope: CellScope | undefined,
+): JSONSchema | undefined {
+  const scopedSchema = mergeSchemaScope(providedSchema, scope);
+  if (value !== undefined && !isCell(value)) {
+    return {
+      ...ContextualFlowControl.toSchemaObj(scopedSchema),
+      default: value as any,
+    };
+  }
+  return scopedSchema;
+}
+
+export function schemaCellScope(
+  schema: JSONSchema | undefined,
+): CellScope | undefined {
+  return isRecord(schema) && isCellScope(schema.scope)
+    ? schema.scope
+    : undefined;
+}
+
+/**
+ * Returns `true` if the value is, or transitively contains, a query-result
+ * proxy. Schemas are plain JSON, so the walk is acyclic; visiting plain
+ * objects is trap-free, and a proxy is detected before recursing into it.
+ */
+function containsCellResult(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return false;
+  if (isCellResultForDereferencing(value)) return true;
+  for (const v of Object.values(value)) {
+    if (containsCellResult(v)) return true;
+  }
+  return false;
+}
+
+/**
+ * Interns a schema for attachment to a cell link, so the link carries the
+ * canonical deep-frozen instance and the downstream identity-keyed schema
+ * caches (cfc.schemaAtPath, schema-ref memos, selector standardization,
+ * value-hash) hit instead of staying cold for mutable schema literals.
+ *
+ * Interning deep-freezes the caller's schema object in place — the same
+ * contract `resolveSchema()` already applies to cell schemas on every
+ * read/write-policy path.
+ *
+ * Exception: schemas read through a query-result proxy (e.g. the wish
+ * builtin's `schema` argument) must NOT be frozen in place — `Object.freeze`
+ * forwards through the proxy and would freeze the underlying stored value,
+ * breaking the proxy's object invariants (and any later `JSON.stringify` of
+ * it). Those are round-tripped to a plain value first, the documented
+ * convention for proxy-wrapped schemas (see `cloneSchemaMutable`'s note in
+ * data-model's schema-utils).
+ */
+export function internCellLinkSchema(schema: JSONSchema): JSONSchema;
+export function internCellLinkSchema(
+  schema?: JSONSchema,
+): JSONSchema | undefined;
+export function internCellLinkSchema(
+  schema?: JSONSchema,
+): JSONSchema | undefined {
+  if (schema === undefined) return undefined;
+  // Already canonical (covers boolean schemas): skip the proxy scan.
+  if (isInternedSchema(schema)) return schema;
+  if (containsCellResult(schema)) {
+    return internSchema(JSON.parse(JSON.stringify(schema)) as JSONSchema);
+  }
+  return internSchema(schema);
+}
+
 /**
  * Factory function to create Cell constructor with static methods for a specific cell kind
  */
 export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
-  return {
-    /**
-     * Create a Cell wrapping a value with optional schema.
-     * This is a convenience method that creates a cell with a schema that has a default value.
-     * @param value - The value to wrap in a Cell
-     * @param providedSchema - Optional JSON schema for the cell
-     * @returns A new Cell wrapping the value
-     */
-    of<T>(value?: T, providedSchema?: JSONSchema): Apply<Wrap, T> {
+  const createCellConstructor = (scope?: CellScope) => {
+    const createWithDefault = <T>(
+      value?: T,
+      providedSchema?: JSONSchema,
+    ): Apply<Wrap, T> => {
       const frame = getTopFrame();
       if (!frame || !frame.runtime) {
         throw new Error(
@@ -2173,19 +2930,24 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
         validateStaticData(value);
       }
 
+      // TODO(danfuzz): native values in a `Cell.of(...)` initial value are NOT
+      // normalized to their fabric form (e.g. a `Date` stays a raw `Date`
+      // instead of becoming a `FabricEpochNsec`), unlike the `set()` write path
+      // (which runs `recursivelyAddIDIfNeeded`). The raw value flows both into
+      // `setInitialValue()` and into the schema `default` via
+      // `schemaWithDefaultAndScope()` above, and reaches storage/encode from
+      // there -- so a `Cell.of(new Date())` throws under the strict codec.
+      // (Normalizing only the `setInitialValue()` arg is insufficient; the
+      // schema-`default` copy still leaks the raw value, and embedding a
+      // `FabricSpecialObject` in a hashed schema `default` is its own hazard.)
+      // Fixing this cleanly is entangled with the initial-value / schema-default
+      // materialization path; left for that follow-up.
+
       // Convert schema to object form and merge default value if value is defined
       // BUT: Don't embed Cell objects in the schema's default property, as this
       // causes infinite recursion when the schema is serialized
-      // TODO(ubik2): Use Cell links for default here once that's supported
-      const schema: JSONSchema | undefined =
-        value !== undefined && !isCell(value)
-          ? {
-            ...ContextualFlowControl.toSchemaObj(providedSchema),
-            default: value as any,
-          }
-          : providedSchema === undefined
-          ? undefined
-          : ContextualFlowControl.toSchemaObj(providedSchema);
+      const schema = schemaWithDefaultAndScope(value, providedSchema, scope);
+      const linkScope = scope ?? schemaCellScope(schema);
 
       // Create a cell without a link - it will be created on demand via .for()
       const cell = createCell<T>(
@@ -2194,19 +2956,74 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
           path: [],
           ...(schema !== undefined && { schema }),
           ...(frame.space && { space: frame.space }),
+          ...(linkScope !== undefined && { scope: linkScope }),
         },
         frame.tx,
         false,
         kind,
       );
 
-      // Set the initial value only if value is defined
-      if (value !== undefined) {
-        cell.setInitialValue(value);
+      return cell;
+    };
+
+    const createWithCause = <T>(cause: unknown): Apply<Wrap, T> => {
+      const frame = getTopFrame();
+      if (!frame || !frame.runtime) {
+        throw new Error(
+          "Can't invoke Cell.for() outside of a pattern/handler/lift context",
+        );
       }
 
+      const schema = mergeSchemaScope(undefined, scope);
+      const linkScope = scope ?? schemaCellScope(schema);
+
+      // Create a cell without a link
+      const cell = createCell<T>(
+        frame.runtime,
+        {
+          path: [],
+          ...(schema !== undefined && { schema }),
+          ...(frame.space && { space: frame.space }),
+          ...(linkScope !== undefined && { scope: linkScope }),
+        },
+        frame.tx,
+        false,
+        kind,
+      );
+
+      // Associate it with the cause
+      cell.for(cause);
+
       return cell;
-    },
+    };
+
+    const constructor = function <T>(
+      this: unknown,
+      value?: T,
+      providedSchema?: JSONSchema,
+    ): Apply<Wrap, T> {
+      return createWithDefault(value, providedSchema);
+    };
+
+    return Object.assign(constructor, {
+      of: createWithDefault,
+      for: createWithCause,
+    }) as unknown as ConstructableCellFactory<Wrap>;
+  };
+
+  const baseConstructor = createCellConstructor();
+  return Object.assign(baseConstructor, {
+    perSpace: createCellConstructor("space") as unknown as CellTypeConstructor<
+      Wrap
+    >["perSpace"],
+    perUser: createCellConstructor("user") as unknown as CellTypeConstructor<
+      Wrap
+    >["perUser"],
+    perSession: createCellConstructor(
+      "session",
+    ) as unknown as CellTypeConstructor<
+      Wrap
+    >["perSession"],
 
     /**
      * Compare two cells or values for equality, after resolving them.
@@ -2214,7 +3031,10 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
      * @param b - Second cell or value to compare
      * @returns true if the values are equal
      */
-    equals(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean {
+    equals(
+      a: AnyCell<any> | object | undefined,
+      b: AnyCell<any> | object | undefined,
+    ): boolean {
       const frame = getTopFrame();
       return areLinksSame(
         a,
@@ -2232,39 +3052,11 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
      * @param b - Second cell or value to compare
      * @returns true if the values are equal
      */
-    equalLinks(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean {
+    equalLinks(
+      a: AnyCell<any> | object | undefined,
+      b: AnyCell<any> | object | undefined,
+    ): boolean {
       return areLinksSame(a, b);
     },
-
-    /**
-     * Create a Cell with an optional cause.
-     * @param cause - The cause to associate with this cell
-     * @returns A new Cell
-     */
-    for<T>(cause: unknown): Apply<Wrap, T> {
-      const frame = getTopFrame();
-      if (!frame || !frame.runtime) {
-        throw new Error(
-          "Can't invoke Cell.for() outside of a pattern/handler/lift context",
-        );
-      }
-
-      // Create a cell without a link
-      const cell = createCell<T>(
-        frame.runtime,
-        {
-          path: [],
-          ...(frame.space && { space: frame.space }),
-        },
-        frame.tx,
-        false,
-        kind,
-      );
-
-      // Associate it with the cause
-      cell.for(cause);
-
-      return cell;
-    },
-  } satisfies CellTypeConstructor<Wrap>;
+  }) as unknown as CellTypeConstructor<Wrap>;
 }

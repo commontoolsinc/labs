@@ -2,77 +2,361 @@
 //
 // Usage:
 //   deno run --unstable-ffi --allow-ffi --allow-read --allow-write --allow-env --allow-net \
-//     packages/fuse/mod.ts /tmp/ct-fuse [--api-url URL --space NAME --identity PATH]
+//     packages/fuse/mod.ts /tmp/cf-fuse [--api-url URL --space NAME --identity PATH]
 //
 // Supports multiple spaces. --space can be repeated or omitted (defaults to "home").
 // Unknown space names are resolved on-demand via lookup.
 
 import { parseArgs } from "@std/cli/parse-args";
-import { CellBridge } from "./cell-bridge.ts";
-import { openFuse } from "./ffi.ts";
 import {
-  createFuseArgs,
+  CellBridge,
+  type HandlerTarget,
+  type SourceWritePath,
+  type WritePath,
+} from "./cell-bridge.ts";
+import {
+  type CfcXattrNamespace,
+  getCfcXattrValue,
+  listCfcXattrNames,
+} from "./annotations.ts";
+import {
+  applyPreparedCreate,
+  applyPreparedExistingWrite,
+  applyPreparedMetadataMutation,
+  applyPreparedParent,
+  applyPreparedSymlink,
+  authorizeCreateWriteback,
+  authorizeExistingWriteback,
+  authorizeMetadataWriteback,
+  authorizeNamespaceMutationWriteback,
+  authorizeSymlinkWriteback,
+  CFC_WRITEBACK_FINALIZE_XATTR,
+  CFC_WRITEBACK_PREPARE_XATTR,
+  type CfcEnforcementMode,
+  type CfcExistingWritebackOperation,
+  type CfcMetadataLabelKey,
+  type CfcNamespaceMutationWritebackOperation,
+  type CfcPreparedWriteback,
+  CfcWritebackStore,
+  isCfcEnforcing,
+  metadataFieldsForSetattrFlags,
+  normalizeCfcWritebackXattrName,
+  parseCfcMode,
+  resolveCfcMode,
+  safeReconcileCfcWritebacks,
+  shouldEnableCfcAnnotations,
+} from "./cfc-writeback.ts";
+import {
   DIR_MODE,
   EACCES,
+  EFBIG,
   EINVAL,
   EIO,
   EISDIR,
-  ENODATA,
   ENOENT,
   ENOTDIR,
-  ENTRY_PARAM_SIZE,
   ERANGE,
+  EROFS,
   EXDEV,
-  FILE_MODE,
   FILE_MODE_RW,
-  FILE_MODE_WO,
   FUSE_SET_ATTR_SIZE,
+  getPlatform,
   O_RDWR,
-  O_TRUNC,
   O_WRONLY,
-  OPS_OFFSETS,
-  OPS_SIZE,
   readCString,
-  readFileInfo,
-  STAT_SIZE,
-  SYMLINK_MODE,
-  writeEntryParam,
-  writeFileInfo,
-  writeStat,
-} from "./ffi-types.ts";
+} from "./platform.ts";
 import { FsTree } from "./tree.ts";
-import { HandleMap } from "./handles.ts";
+import {
+  handleHasBufferedContent,
+  handleHasPendingChanges,
+  HandleMap,
+  type HandleState,
+  validateVirtualFileRange,
+} from "./handles.ts";
+import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
+import { buildNodeStat, getMountOwnership, nodeMode } from "./stat.ts";
 
 const encoder = new TextEncoder();
+// Operation ring buffer — last 50 ops for crash diagnostics
+const OP_RING: string[] = [];
+const OP_RING_SIZE = 50;
+function logOp(name: string, detail: string): void {
+  const entry = `${Date.now()} ${name} ${detail}`;
+  if (OP_RING.length >= OP_RING_SIZE) OP_RING.shift();
+  OP_RING.push(entry);
+}
+function dumpOpRing(): void {
+  console.error("[fuse:crash] Last operations:");
+  for (const e of OP_RING) console.error("  " + e);
+}
 
 // Prevent uncaught errors from crashing the FUSE daemon.
 // Pattern recomputation and cell operations can throw from setTimeout
 // callbacks (e.g. "Cannot create cell link - space required"). These
 // errors should be logged, not fatal.
 globalThis.addEventListener("unhandledrejection", (e) => {
+  dumpOpRing();
   console.error("[FUSE] Unhandled promise rejection:", e.reason);
   e.preventDefault();
 });
 
 globalThis.addEventListener("error", (e) => {
+  dumpOpRing();
   console.error("[FUSE] Uncaught error:", e.error ?? e.message);
   e.preventDefault();
 });
 
-async function main() {
-  const args = parseArgs(Deno.args, {
-    string: ["api-url", "space", "identity"],
-    boolean: ["debug"],
+type FusePromiseRejectionEvent = Event & {
+  readonly reason?: unknown;
+  preventDefault(): void;
+};
+
+type FuseErrorEvent = Event & {
+  readonly error?: unknown;
+  readonly message?: string;
+  preventDefault(): void;
+};
+
+type HandleWriteTarget =
+  | { kind: "handler"; target: HandlerTarget }
+  | { kind: "value"; target: WritePath }
+  | { kind: "source"; target: SourceWritePath }
+  | { kind: "ignored" };
+
+export const DEFAULT_CFC_XATTR_NAMESPACE: CfcXattrNamespace = "both";
+
+export function parseCfcXattrNamespace(
+  value: string,
+): CfcXattrNamespace | undefined {
+  if (value === "trusted" || value === "compat" || value === "both") {
+    return value;
+  }
+  return undefined;
+}
+
+type EnvReader = Pick<typeof Deno.env, "get">;
+
+function envValue(env: EnvReader, name: string): string | undefined {
+  const value = env.get(name);
+  return value && value.trim() !== "" ? value : undefined;
+}
+
+export function defaultCfcWritebackStatePath(
+  mountpoint: string,
+  env: EnvReader = Deno.env,
+): string {
+  const explicitStateDir = envValue(env, "CF_CFC_WRITEBACK_STATE_DIR");
+  const xdgStateHome = envValue(env, "XDG_STATE_HOME");
+  const home = envValue(env, "HOME");
+  const stateDir = explicitStateDir ??
+    (xdgStateHome
+      ? `${xdgStateHome}/commonfabric-fuse`
+      : `${home ?? "."}/.cache/commonfabric-fuse`);
+  const safeMount = encodeURIComponent(mountpoint)
+    .replace(/[^A-Za-z0-9_.-]/g, "_")
+    .slice(0, 120) || "mount";
+  return `${stateDir}/cfc-writeback-${safeMount}.json`;
+}
+
+export function decodeFuseNamespaceName(name: string): string {
+  return decodeFuseComponent(name);
+}
+
+export function appendDecodedJsonPath(
+  basePath: readonly (string | number)[],
+  name: string,
+): (string | number)[] {
+  return [...basePath, decodeFuseNamespaceName(name)];
+}
+
+export function sourceRelPathToTreeSegments(relPath: string): string[] {
+  return encodeFusePathSegments(relPath.split("/"));
+}
+
+export function bufferForNoHandleTruncate(
+  content: Uint8Array,
+  newSize: number,
+): Uint8Array {
+  if (newSize <= 0) return new Uint8Array(0);
+  return content.slice(0, Math.min(newSize, content.length));
+}
+
+export function writeUnavailableErrno(
+  bridge: Pick<CellBridge, "disconnected"> | null | undefined,
+): number {
+  return bridge?.disconnected ? EROFS : EACCES;
+}
+
+export function disconnectedWriteErrno(
+  bridge: Pick<CellBridge, "disconnected"> | null | undefined,
+): number | null {
+  return bridge?.disconnected ? EROFS : null;
+}
+
+export function isConnectionWriteFailure(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return msg.includes("transport closed") ||
+    msg.includes("ConnectionError") ||
+    msg.includes("connection refused") ||
+    msg.includes("failed to connect to WebSocket");
+}
+
+export function cfcWritebackXattrResultErrno(
+  result: { ok: true } | { ok: false; reason: string },
+  errnos: { enotsup: number },
+): number {
+  if (result.ok) return 0;
+  return result.reason === "unsupported writeback xattr"
+    ? errnos.enotsup
+    : EINVAL;
+}
+
+export function rootSpaceLookupNames(name: string): {
+  spaceName: string;
+  directoryName: string;
+} {
+  const spaceName = decodeFuseNamespaceName(name);
+  return {
+    spaceName,
+    directoryName: encodeFusePathSegments([spaceName])[0],
+  };
+}
+
+function readBuffer(ptr: Deno.PointerValue, size: bigint): Uint8Array {
+  const length = Number(size);
+  const data = new Uint8Array(length);
+  if (!ptr || length === 0) return data;
+  new Deno.UnsafePointerView(ptr).copyInto(data);
+  return data;
+}
+
+type SupervisorStatusState =
+  | "starting"
+  | "mounted"
+  | "failed"
+  | "exiting"
+  | "exited";
+
+export async function writeFailedSupervisorStartupStatus(
+  error: unknown,
+  writeSupervisorStatus: (
+    state: "failed",
+    extra?: Record<string, unknown>,
+  ) => Promise<void>,
+): Promise<void> {
+  console.error(String(error));
+  await writeSupervisorStatus("failed", { error: String(error) }).catch(() => {
+    // Best effort; startup failure is already being reported by process exit.
+  });
+}
+
+export async function main(argv: string[] = Deno.args) {
+  const args = parseArgs(argv, {
+    string: [
+      "api-url",
+      "space",
+      "identity",
+      "exec-cli",
+      "log-file",
+      "supervisor-status",
+      "supervisor-token",
+      "cfc-xattr-namespace",
+      "cfc-mode",
+      "cfc-writeback-state",
+    ],
+    boolean: [
+      "debug",
+      "cfc-annotations",
+      "cfc-writeback-xattrs",
+      "allow-other",
+    ],
     collect: ["space"],
     default: {
-      "api-url": Deno.env.get("CT_API_URL") ?? "",
+      "api-url": Deno.env.get("CF_API_URL") ?? "",
       space: [] as string[],
-      identity: Deno.env.get("CT_IDENTITY") ?? "",
+      identity: Deno.env.get("CF_IDENTITY") ?? "",
+      "exec-cli": "",
+      "log-file": "",
+      "supervisor-status": "",
+      "supervisor-token": "",
+      "cfc-xattr-namespace": DEFAULT_CFC_XATTR_NAMESPACE,
+      "cfc-mode": "",
+      "cfc-writeback-state": "",
       debug: false,
+      "cfc-annotations": false,
+      "cfc-writeback-xattrs": false,
+      "allow-other": false,
     },
   });
 
-  const debug = args.debug;
+  // Redirect (or tee) console output to a log file.
+  // Background mounts: replace console entirely (no TTY).
+  // Foreground mounts: tee to both log file and original stderr (TTY present).
+  const logFilePath = args["log-file"] as string;
+  if (logFilePath) {
+    const logFile = await Deno.open(logFilePath, {
+      create: true,
+      append: true,
+    });
+    const enc = new TextEncoder();
+    const writeLog = (msg: string) => {
+      try {
+        logFile.writeSync(enc.encode(msg + "\n"));
+      } catch {
+        // Ignore write errors (disk full, etc.)
+      }
+    };
+    const isTTY = Deno.stderr.isTerminal();
+    const origLog = console.log;
+    const origError = console.error;
+    const origWarn = console.warn;
+    console.log = (...a: unknown[]) => {
+      const msg = a.map(String).join(" ");
+      writeLog(msg);
+      if (isTTY) origLog.call(console, ...a);
+    };
+    console.error = (...a: unknown[]) => {
+      const msg = a.map(String).join(" ");
+      writeLog(msg);
+      if (isTTY) origError.call(console, ...a);
+    };
+    console.warn = (...a: unknown[]) => {
+      const msg = a.map(String).join(" ");
+      writeLog(msg);
+      if (isTTY) origWarn.call(console, ...a);
+    };
+  }
+
+  // CF_FUSE_DEBUG=1 enables debug logging even when --debug isn't passed.
+  // The background supervisor doesn't forward --debug to the daemon child,
+  // but env vars are inherited, so this is the reliable switch in CI.
+  const debug = args.debug || Deno.env.get("CF_FUSE_DEBUG") === "1";
+  const requestedCfcMode = String(args["cfc-mode"] ?? "");
+  if (requestedCfcMode && !parseCfcMode(requestedCfcMode)) {
+    console.warn(
+      `[FUSE] Unknown --cfc-mode=${requestedCfcMode}; using runner default`,
+    );
+  }
+  const cfcMode: CfcEnforcementMode = resolveCfcMode({
+    cliMode: requestedCfcMode || undefined,
+    envMode: Deno.env.get("CF_CFC_MODE") ?? undefined,
+  });
+  const cfcAnnotationsEnabled = shouldEnableCfcAnnotations({
+    annotationsRequested: Boolean(args["cfc-annotations"]),
+    mode: cfcMode,
+  });
+  const cfcWritebackXattrs = Boolean(args["cfc-writeback-xattrs"]);
+  const cfcXattrNamespace = parseCfcXattrNamespace(
+    String(args["cfc-xattr-namespace"] ?? DEFAULT_CFC_XATTR_NAMESPACE),
+  );
+  if (!cfcXattrNamespace) {
+    console.error(
+      `[FUSE] Unknown --cfc-xattr-namespace=${
+        args["cfc-xattr-namespace"]
+      }; expected trusted, compat, or both`,
+    );
+    Deno.exit(1);
+  }
 
   const mountpoint = args._[0] as string;
   if (!mountpoint) {
@@ -81,43 +365,198 @@ async function main() {
     );
     Deno.exit(1);
   }
-
-  // Ensure mountpoint exists
-  try {
-    Deno.statSync(mountpoint);
-  } catch {
-    Deno.mkdirSync(mountpoint, { recursive: true });
+  const supervisorStatusPath = String(args["supervisor-status"] ?? "");
+  const supervisorToken = String(args["supervisor-token"] ?? "");
+  const supervisorStatusStartedAt = new Date().toISOString();
+  async function writeSupervisorStatus(
+    state: SupervisorStatusState,
+    extra: Record<string, unknown> = {},
+  ): Promise<void> {
+    if (!supervisorStatusPath) return;
+    await Deno.writeTextFile(
+      supervisorStatusPath,
+      JSON.stringify(
+        {
+          state,
+          pid: Deno.pid,
+          mountpoint,
+          token: supervisorToken || undefined,
+          startedAt: supervisorStatusStartedAt,
+          updatedAt: new Date().toISOString(),
+          ...extra,
+        },
+        null,
+        2,
+      ),
+    );
   }
+  try {
+    await writeSupervisorStatus("starting");
+  } catch (error) {
+    console.error(`[FUSE] Unable to write supervisor status: ${error}`);
+    Deno.exit(1);
+  }
+  const requestedCfcWritebackState = String(args["cfc-writeback-state"] ?? "");
+  const cfcWritebackStatePath = requestedCfcWritebackState ||
+    (cfcWritebackXattrs || cfcMode !== "disabled"
+      ? defaultCfcWritebackStatePath(mountpoint)
+      : undefined);
+  let bridge: CellBridge | null = null;
+  const cfcWritebacks = new CfcWritebackStore({
+    storagePath: cfcWritebackStatePath,
+    onChange: () => bridge?.refreshStatus(),
+  });
+  const cfcDiagnostics: string[] = [];
 
-  // Open libfuse
-  const fuse = openFuse();
+  let platform: Awaited<ReturnType<typeof getPlatform>>;
+  let fuse: ReturnType<Awaited<ReturnType<typeof getPlatform>>["openFuse"]>;
+  try {
+    // Ensure mountpoint exists
+    try {
+      Deno.statSync(mountpoint);
+    } catch {
+      Deno.mkdirSync(mountpoint, { recursive: true });
+    }
+
+    // Open libfuse via platform abstraction
+    platform = await getPlatform();
+    fuse = platform.openFuse();
+  } catch (e) {
+    await writeFailedSupervisorStartupStatus(e, writeSupervisorStatus);
+    Deno.exit(1);
+  }
+  const {
+    STAT_SIZE,
+    ENTRY_PARAM_SIZE,
+    OPS_SIZE,
+    OPS_OFFSETS,
+    STAT_ST_SIZE_OFFSET,
+    writeStat,
+    writeEntryParam,
+    readFileInfo,
+    writeFileInfo,
+    O_TRUNC,
+    ENODATA,
+    ENOTSUP,
+  } = platform;
 
   // Create filesystem tree
   const tree = new FsTree();
+  const mountOwnership = getMountOwnership();
 
-  let bridge: CellBridge | null = null;
+  const scheduledFlushes = new WeakMap<
+    HandleState,
+    ReturnType<typeof setTimeout>
+  >();
+
+  const writeStats = {
+    opened: 0,
+    written: 0,
+    flushed: 0,
+    flushErrors: 0,
+    lastError: null as string | null,
+    lastErrorAt: null as string | null,
+  };
+
+  function noteWriteFailure(e: unknown): string {
+    const msg = e instanceof Error ? e.message : String(e);
+    writeStats.flushErrors++;
+    writeStats.lastError = msg;
+    writeStats.lastErrorAt = new Date().toISOString();
+    if (bridge && !bridge.disconnected && isConnectionWriteFailure(e)) {
+      bridge.markDisconnected(msg);
+    }
+    return msg;
+  }
+
+  function recordAsyncWriteFailure(context: string, e: unknown): void {
+    const msg = noteWriteFailure(e);
+    console.error(`[fuse] ${context}: ${msg}`);
+  }
+
+  function failIfDisconnectedWrite(req: Deno.PointerValue): boolean {
+    const errno = disconnectedWriteErrno(bridge);
+    if (errno === null) return false;
+    fuse.symbols.fuse_reply_err(req, errno);
+    return true;
+  }
+
+  globalThis.addEventListener("unhandledrejection", (event: Event) => {
+    const rejection = event as FusePromiseRejectionEvent;
+    if (!isConnectionWriteFailure(rejection.reason)) return;
+    recordAsyncWriteFailure("unhandled async write failure", rejection.reason);
+    rejection.preventDefault();
+  });
+
+  globalThis.addEventListener("error", (event: Event) => {
+    const errorEvent = event as FuseErrorEvent;
+    const error = errorEvent.error ?? errorEvent.message;
+    if (!isConnectionWriteFailure(error)) return;
+    recordAsyncWriteFailure("uncaught async write failure", error);
+    errorEvent.preventDefault();
+  });
+
+  // Number of FUSE requests whose reply is intentionally delayed while async
+  // bridge work runs. Reverse invalidations are unsafe while these requests are
+  // outstanding because the kernel may still be waiting in request_wait_answer.
+  let pendingFuseReplies = 0;
+  let onPendingFuseRepliesDrained: (() => void) | undefined;
+
+  function trackPendingFuseReply(): () => void {
+    pendingFuseReplies++;
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      pendingFuseReplies--;
+      if (pendingFuseReplies === 0) {
+        onPendingFuseRepliesDrained?.();
+      }
+    };
+  }
 
   // Populate tree
-  const apiUrl = args["api-url"];
-  if (apiUrl) {
-    bridge = new CellBridge(tree);
-    bridge.init({
-      apiUrl,
-      identity: args.identity || "",
-    });
-    bridge.initStatus();
+  try {
+    const apiUrl = args["api-url"];
+    if (apiUrl) {
+      bridge = new CellBridge(tree, args["exec-cli"] || "", {
+        cfcAnnotations: cfcAnnotationsEnabled,
+        statusProvider: () => ({
+          writes: { ...writeStats },
+          logFile: logFilePath || null,
+          cfc: {
+            mode: cfcMode,
+            annotations: cfcAnnotationsEnabled,
+            writebackXattrs: cfcWritebackXattrs,
+            writeback: cfcWritebacks.status(),
+            diagnostics: cfcDiagnostics.slice(-50),
+          },
+        }),
+        onCfcProjectionRebuilt: reconcileCfcWritebacks,
+      });
+      bridge.init({
+        apiUrl,
+        identity: args.identity || "",
+      });
+      bridge.setDebug(debug);
+      bridge.initStatus();
 
-    // Connect initial spaces (default: "home")
-    const spaces = (args.space as string[]).length > 0
-      ? (args.space as string[])
-      : ["home"];
-    for (const spaceName of spaces) {
-      await bridge.connectSpace(spaceName);
-      console.log(`Connected space: ${spaceName}`);
+      // Connect initial spaces (default: "home")
+      const spaces = (args.space as string[]).length > 0
+        ? (args.space as string[])
+        : ["home"];
+      for (const spaceName of spaces) {
+        await bridge.connectSpace(spaceName);
+        reconcileCfcWritebacks();
+        console.log(`Connected space: ${spaceName}`);
+      }
+    } else {
+      tree.addFile(tree.rootIno, "hello.txt", "Hello from FUSE!\n", "string");
+      console.log("Static mode: hello.txt");
     }
-  } else {
-    tree.addFile(tree.rootIno, "hello.txt", "Hello from FUSE!\n", "string");
-    console.log("Static mode: hello.txt");
+  } catch (e) {
+    await writeFailedSupervisorStartupStatus(e, writeSupervisorStatus);
+    Deno.exit(1);
   }
 
   // --- Callbacks ---
@@ -128,24 +567,338 @@ async function main() {
   // File handle tracking for write support
   const handles = new HandleMap();
 
-  function nodeMode(node: ReturnType<typeof tree.getNode>, ino?: bigint) {
-    if (!node) return 0;
-    if (node.kind === "dir") return DIR_MODE;
-    if (node.kind === "symlink") return SYMLINK_MODE;
-    if (node.kind === "handler") return FILE_MODE_WO;
-    // Files in writable piece data get 644, others stay 444
-    if (bridge && ino !== undefined && bridge.resolveWritePath(ino)) {
-      return FILE_MODE_RW;
-    }
-    return FILE_MODE;
+  function virtualFileRangeErrno(
+    offset: number,
+    length: number,
+  ): number | null {
+    const validation = validateVirtualFileRange(offset, length);
+    if (validation.ok) return null;
+    return validation.reason === "too-large" ? EFBIG : EINVAL;
   }
 
-  function nodeSize(node: ReturnType<typeof tree.getNode>) {
-    if (!node) return 0;
-    if (node.kind === "file") return node.content.length;
-    if (node.kind === "symlink") return node.target.length;
-    if (node.kind === "handler") return 0;
-    return 0;
+  function buildStat(
+    node: NonNullable<ReturnType<typeof tree.getNode>>,
+    ino: bigint,
+  ) {
+    return buildNodeStat(node, ino, {
+      // When the backend transport is dead, report all files as read-only
+      // so writes fail with EACCES instead of silently succeeding.
+      isWritable: !bridge?.disconnected && Boolean(
+        cfcWritebackXattrs ||
+          bridge?.resolveWritePath(ino) || bridge?.resolveSourceWritePath(ino),
+      ),
+      ownership: mountOwnership,
+    });
+  }
+
+  function recordCfcDiagnostics(messages: string[]): void {
+    for (const message of messages) {
+      if (cfcDiagnostics.length >= 200) {
+        cfcDiagnostics.splice(0, cfcDiagnostics.length - 100);
+      }
+      cfcDiagnostics.push(message);
+      console.warn(`[FUSE:CFC] ${message}`);
+    }
+  }
+
+  function reconcileCfcWritebacks(context = "CFC writeback"): boolean {
+    return safeReconcileCfcWritebacks({
+      context,
+      reconcile: () => cfcWritebacks.reconcileTree(tree),
+      recordDiagnostics: recordCfcDiagnostics,
+    });
+  }
+
+  function authorizeExistingCfcWrite(
+    ino: bigint,
+    operation: CfcExistingWritebackOperation,
+  ): boolean {
+    const node = tree.getNode(ino);
+    const diagnostics: string[] = [];
+    const authorization = authorizeExistingWriteback({
+      mode: cfcMode,
+      operation,
+      annotation: node?.cfc,
+      prepared: cfcWritebacks.getPrepared(ino, operation),
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(`[FUSE:CFC] denied ${operation}: ${authorization.reason}`);
+      return false;
+    }
+    if (authorization.prepared) {
+      applyPreparedExistingWrite(tree, ino, authorization.prepared);
+      cfcWritebacks.markMutationApplied(ino, operation);
+    }
+    return true;
+  }
+
+  function authorizeHandleCfcWrite(
+    fh: bigint,
+    handle: NonNullable<ReturnType<typeof handles.get>>,
+    operation: CfcExistingWritebackOperation,
+  ): boolean {
+    if (handles.hasCfcAuthorization(fh, operation)) return true;
+    const node = tree.getNode(handle.ino);
+    const diagnostics: string[] = [];
+    const authorization = authorizeExistingWriteback({
+      mode: cfcMode,
+      operation,
+      annotation: handle.cfcAuthorizationAnnotation ?? node?.cfc,
+      prepared: cfcWritebacks.getPrepared(handle.ino, operation),
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(`[FUSE:CFC] denied ${operation}: ${authorization.reason}`);
+      return false;
+    }
+    if (authorization.prepared) {
+      applyPreparedExistingWrite(tree, handle.ino, authorization.prepared);
+      cfcWritebacks.markMutationApplied(handle.ino, operation);
+    }
+    handles.authorizeCfcOperation(fh, operation);
+    return true;
+  }
+
+  function getExistingCfcWriteAuthorization(
+    ino: bigint,
+    operation: CfcExistingWritebackOperation,
+  ): ReturnType<typeof authorizeExistingWriteback> {
+    const node = tree.getNode(ino);
+    const diagnostics: string[] = [];
+    const authorization = authorizeExistingWriteback({
+      mode: cfcMode,
+      operation,
+      annotation: node?.cfc,
+      prepared: cfcWritebacks.getPrepared(ino, operation),
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(`[FUSE:CFC] denied ${operation}: ${authorization.reason}`);
+    }
+    return authorization;
+  }
+
+  function authorizeMetadataCfcWrite(
+    ino: bigint,
+    requestedFields: CfcMetadataLabelKey[],
+  ): ReturnType<typeof authorizeMetadataWriteback> {
+    const node = tree.getNode(ino);
+    const diagnostics: string[] = [];
+    const authorization = authorizeMetadataWriteback({
+      mode: cfcMode,
+      annotation: node?.cfc,
+      prepared: cfcWritebacks.getPrepared(ino, "setattr-metadata"),
+      requestedFields,
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(
+        `[FUSE:CFC] denied setattr-metadata: ${authorization.reason}`,
+      );
+    }
+    return authorization;
+  }
+
+  function finalizeMetadataCfcMutation(
+    ino: bigint,
+    prepared: CfcPreparedWriteback | undefined,
+  ): void {
+    if (!prepared || !bridge) return;
+    const writePath = bridge.resolveWritePath(ino);
+    if (writePath) {
+      cfcWritebacks.markReadyForExactRecomputation(ino, "setattr-metadata");
+      bridge.finalizeWritePath(writePath).then(() => {
+        cfcWritebacks.markFinalizedPendingCleanup(ino, "setattr-metadata");
+        cfcWritebacks.deletePrepared(ino, "setattr-metadata");
+      }).catch((e) => {
+        cfcWritebacks.markRunnerCommitFailed(
+          ino,
+          "setattr-metadata",
+          String(e),
+        );
+        console.error(`[fuse] metadata finalize error: ${e}`);
+      });
+      return;
+    }
+    const sourceWritePath = bridge.resolveSourceWritePath(ino);
+    if (sourceWritePath) {
+      cfcWritebacks.markReadyForExactRecomputation(ino, "setattr-metadata");
+      bridge.finalizeSourceWritePath(sourceWritePath).then(() => {
+        cfcWritebacks.markFinalizedPendingCleanup(ino, "setattr-metadata");
+        cfcWritebacks.deletePrepared(ino, "setattr-metadata");
+      }).catch((e) => {
+        cfcWritebacks.markRunnerCommitFailed(
+          ino,
+          "setattr-metadata",
+          String(e),
+        );
+        console.error(`[fuse] metadata source finalize error: ${e}`);
+      });
+    }
+  }
+
+  function authorizeCreateCfcWrite(
+    parentIno: bigint,
+    operation: "create" | "mkdir",
+    name: string,
+  ): boolean {
+    const parent = tree.getNode(parentIno);
+    const diagnostics: string[] = [];
+    const authorization = authorizeCreateWriteback({
+      mode: cfcMode,
+      operation,
+      parentAnnotation: parent?.cfc,
+      prepared: cfcWritebacks.getPrepared(parentIno, operation, name),
+      name,
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(
+        `[FUSE:CFC] denied ${operation} ${name}: ${authorization.reason}`,
+      );
+      return false;
+    }
+    if (authorization.prepared) {
+      applyPreparedParent(tree, parentIno, authorization.prepared);
+    }
+    return true;
+  }
+
+  function authorizeNamespaceCfcWrite(
+    parentIno: bigint,
+    operation: CfcNamespaceMutationWritebackOperation,
+    name: string,
+    options: {
+      prepared?: CfcPreparedWriteback;
+      pairedName?: string;
+      allowPairedRenamePrepare?: boolean;
+    } = {},
+  ): ReturnType<typeof authorizeNamespaceMutationWriteback> {
+    const parent = tree.getNode(parentIno);
+    const diagnostics: string[] = [];
+    const authorization = authorizeNamespaceMutationWriteback({
+      mode: cfcMode,
+      operation,
+      parentAnnotation: parent?.cfc,
+      prepared: options.prepared ??
+        cfcWritebacks.getPrepared(parentIno, operation, name),
+      name,
+      pairedName: options.pairedName,
+      allowPairedRenamePrepare: options.allowPairedRenamePrepare,
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(
+        `[FUSE:CFC] denied ${operation} ${name}: ${authorization.reason}`,
+      );
+    }
+    return authorization;
+  }
+
+  function applyNamespacePreparation(
+    parentIno: bigint,
+    authorization: ReturnType<typeof authorizeNamespaceMutationWriteback>,
+  ): void {
+    if (authorization.allowed && authorization.prepared) {
+      applyPreparedParent(tree, parentIno, authorization.prepared);
+    }
+  }
+
+  function authorizeRenameCfcWrite(
+    oldParent: bigint,
+    oldName: string,
+    newParent: bigint,
+    newName: string,
+  ):
+    | {
+      allowed: true;
+      source: Extract<
+        ReturnType<typeof authorizeNamespaceMutationWriteback>,
+        { allowed: true }
+      >;
+      destination: Extract<
+        ReturnType<typeof authorizeNamespaceMutationWriteback>,
+        { allowed: true }
+      >;
+    }
+    | { allowed: false } {
+    const sameParent = oldParent === newParent;
+    const directSource = cfcWritebacks.getPrepared(
+      oldParent,
+      "rename-source",
+      oldName,
+    );
+    const directDestination = cfcWritebacks.getPrepared(
+      newParent,
+      "rename-destination",
+      newName,
+    );
+    const sourcePrepared = directSource ??
+      (sameParent ? directDestination : undefined);
+    const destinationPrepared = directDestination ??
+      (sameParent ? directSource : undefined);
+
+    const source = authorizeNamespaceCfcWrite(
+      oldParent,
+      "rename-source",
+      oldName,
+      {
+        prepared: sourcePrepared,
+        pairedName: newName,
+        allowPairedRenamePrepare: sameParent,
+      },
+    );
+    const destination = authorizeNamespaceCfcWrite(
+      newParent,
+      "rename-destination",
+      newName,
+      {
+        prepared: destinationPrepared,
+        pairedName: oldName,
+        allowPairedRenamePrepare: sameParent,
+      },
+    );
+    if (!source.allowed || !destination.allowed) {
+      return { allowed: false };
+    }
+    return { allowed: true, source, destination };
+  }
+
+  function authorizeSymlinkCfcWrite(
+    parentIno: bigint,
+    name: string,
+    targetText: string,
+    options: {
+      targetIdentity?: unknown;
+      allowDeferredTargetIdentity?: boolean;
+    } = {},
+  ): ReturnType<typeof authorizeSymlinkWriteback> {
+    const parent = tree.getNode(parentIno);
+    const diagnostics: string[] = [];
+    const authorization = authorizeSymlinkWriteback({
+      mode: cfcMode,
+      parentAnnotation: parent?.cfc,
+      prepared: cfcWritebacks.getPrepared(parentIno, "symlink", name),
+      name,
+      targetText,
+      targetIdentity: options.targetIdentity,
+      allowDeferredTargetIdentity: options.allowDeferredTargetIdentity,
+      diagnostics,
+    });
+    recordCfcDiagnostics(diagnostics);
+    if (!authorization.allowed) {
+      console.warn(
+        `[FUSE:CFC] denied symlink ${name}: ${authorization.reason}`,
+      );
+    }
+    return authorization;
   }
 
   function replyEntry(
@@ -153,22 +906,41 @@ async function main() {
     ino: bigint,
     node: ReturnType<typeof tree.getNode>,
   ) {
+    // FUSE-T (macOS NFS translation) ignores notify_inval_entry and
+    // notify_inval_inode, so the only way to ensure reads see fresh data
+    // after writes is to keep cache timeouts short. Piece content inodes
+    // (under pieces/ and entities/) use 0 so every read hits our callbacks.
+    // Static inodes (root, space.json, .status) use 1s.
+    const isDynamic = bridge?.shouldPrepareDirectory(ino) ||
+      bridge?.shouldPrepareLookup(
+        tree.parents.get(ino) ?? 0n,
+        tree.getPath(ino).split("/").pop() ?? "",
+      );
+    const timeout = isDynamic ? 0 : 1.0;
     const entryBuf = new ArrayBuffer(ENTRY_PARAM_SIZE);
     writeEntryParam(entryBuf, {
       ino,
-      attr: {
-        ino,
-        mode: nodeMode(node, ino),
-        nlink: node!.kind === "dir" ? 2 : 1,
-        size: nodeSize(node),
-      },
-      attrTimeout: 1.0,
-      entryTimeout: 1.0,
+      attr: buildStat(node!, ino),
+      attrTimeout: timeout,
+      entryTimeout: timeout,
     });
     fuse.symbols.fuse_reply_entry(
       req,
       Deno.UnsafePointer.of(new Uint8Array(entryBuf)),
     );
+  }
+
+  function replyLookupFromTree(
+    req: Deno.PointerValue,
+    parent: bigint,
+    name: string,
+  ): boolean {
+    const ino = tree.lookup(parent, name);
+    if (ino === undefined) return false;
+    const node = tree.getNode(ino);
+    if (!node) return false;
+    replyEntry(req, ino, node);
+    return true;
   }
 
   // lookup(req, parent_ino, name_ptr)
@@ -181,54 +953,57 @@ async function main() {
       parentIno: number | bigint,
       namePtr: Deno.PointerValue,
     ) => {
+      logOp("lookup", parentIno.toString());
       const name = readCString(namePtr);
       const parent = BigInt(parentIno);
-      const ino = tree.lookup(parent, name);
 
-      if (ino !== undefined) {
-        const node = tree.getNode(ino);
-        if (node) {
-          replyEntry(req, ino, node);
+      // If at root and bridge is available, try async space connection.
+      // Reply from tree synchronously if space is already connected.
+      if (parent === tree.rootIno && bridge && !name.startsWith(".")) {
+        const lookup = rootSpaceLookupNames(name);
+        if (replyLookupFromTree(req, parent, lookup.directoryName)) {
           return;
         }
-      }
-
-      // If at root and bridge is available, try async space connection
-      if (parent === tree.rootIno && bridge && !name.startsWith(".")) {
-        // Fire off async connection — FUSE req stays valid until replied
-        bridge.connectSpace(name).then(() => {
-          const newIno = tree.lookup(parent, name);
-          if (newIno !== undefined) {
-            const newNode = tree.getNode(newIno);
-            if (newNode) {
-              replyEntry(req, newIno, newNode);
-              return;
-            }
+        const finishPendingReply = trackPendingFuseReply();
+        bridge.connectSpace(lookup.spaceName).then(() => {
+          if (!replyLookupFromTree(req, parent, lookup.directoryName)) {
+            fuse.symbols.fuse_reply_err(req, ENOENT);
           }
-          fuse.symbols.fuse_reply_err(req, ENOENT);
+          finishPendingReply();
         }).catch(() => {
           fuse.symbols.fuse_reply_err(req, ENOENT);
+          finishPendingReply();
         });
         return;
       }
 
-      // On-demand entity resolution under <space>/entities/
-      if (bridge && !name.startsWith(".") && bridge.isEntitiesDir(parent)) {
-        bridge.resolveEntity(parent, name).then((resolved) => {
-          if (resolved) {
-            const newIno = tree.lookup(parent, name);
-            if (newIno !== undefined) {
-              const newNode = tree.getNode(newIno);
-              if (newNode) {
-                replyEntry(req, newIno, newNode);
-                return;
-              }
-            }
+      if (bridge && bridge.shouldPrepareLookup(parent, name)) {
+        const mustSynchronize = bridge.shouldSynchronizeLookup?.(parent) ??
+          false;
+        // Fast path: if entry is already in the tree (stubs, meta.json,
+        // previously hydrated data), reply immediately and trigger
+        // hydration in the background for not-yet-populated entries.
+        if (!mustSynchronize && replyLookupFromTree(req, parent, name)) {
+          setTimeout(() => {
+            bridge.prepareLookup(parent, name).catch(() => {});
+          }, 0);
+          return;
+        }
+        // Slow path: entry not in tree, must hydrate before replying.
+        const finishPendingReply = trackPendingFuseReply();
+        bridge.prepareLookup(parent, name).then(() => {
+          if (!replyLookupFromTree(req, parent, name)) {
+            fuse.symbols.fuse_reply_err(req, ENOENT);
           }
-          fuse.symbols.fuse_reply_err(req, ENOENT);
+          finishPendingReply();
         }).catch(() => {
           fuse.symbols.fuse_reply_err(req, ENOENT);
+          finishPendingReply();
         });
+        return;
+      }
+
+      if (replyLookupFromTree(req, parent, name)) {
         return;
       }
 
@@ -245,6 +1020,7 @@ async function main() {
       _ino: number | bigint,
       _nlookup: number | bigint,
     ) => {
+      logOp("forget", _ino.toString());
       fuse.symbols.fuse_reply_none(req);
     },
   );
@@ -254,6 +1030,7 @@ async function main() {
   const getattrCb = new Deno.UnsafeCallback(
     { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
     (req: Deno.PointerValue, ino: number | bigint, _fi: Deno.PointerValue) => {
+      logOp("getattr", ino.toString());
       const inode = BigInt(ino);
       const node = tree.getNode(inode);
 
@@ -263,17 +1040,18 @@ async function main() {
       }
 
       const statBuf = new ArrayBuffer(STAT_SIZE);
-      writeStat(statBuf, {
-        ino: inode,
-        mode: nodeMode(node, inode),
-        nlink: node.kind === "dir" ? 2 : 1,
-        size: nodeSize(node),
-      });
+      writeStat(statBuf, buildStat(node, inode));
 
+      const parentIno = tree.parents.get(inode) ?? 0n;
+      const isDynamic = bridge?.shouldPrepareDirectory(inode) ||
+        bridge?.shouldPrepareLookup(
+          parentIno,
+          tree.getPath(inode).split("/").pop() ?? "",
+        );
       fuse.symbols.fuse_reply_attr(
         req,
         Deno.UnsafePointer.of(new Uint8Array(statBuf)),
-        1.0,
+        isDynamic ? 0 : 1.0,
       );
     },
   );
@@ -283,6 +1061,7 @@ async function main() {
   const readlinkCb = new Deno.UnsafeCallback(
     { parameters: ["pointer", "u64"], result: "void" } as const,
     (req: Deno.PointerValue, ino: number | bigint) => {
+      logOp("readlink", ino.toString());
       const node = tree.getNode(BigInt(ino));
       if (!node || node.kind !== "symlink") {
         fuse.symbols.fuse_reply_err(req, ENOENT);
@@ -304,6 +1083,7 @@ async function main() {
       ino: number | bigint,
       fi: Deno.PointerValue,
     ) => {
+      logOp("open", ino.toString());
       const inode = BigInt(ino);
       const node = tree.getNode(inode);
       if (!node) {
@@ -315,42 +1095,114 @@ async function main() {
         return;
       }
 
-      // Handler files: write-only, no read
-      if (node.kind === "handler") {
-        const { flags: hFlags } = readFileInfo(fi);
-        const isWriting = (hFlags & O_WRONLY) !== 0 ||
-          (hFlags & O_RDWR) !== 0;
-        if (!isWriting) {
+      const { flags } = readFileInfo(fi);
+      const isWriting = (flags & O_WRONLY) !== 0 || (flags & O_RDWR) !== 0;
+
+      if (node.kind === "callable") {
+        if (node.callableKind === "tool" && isWriting) {
           fuse.symbols.fuse_reply_err(req, EACCES);
           return;
         }
-        const fh = handles.open(inode, hFlags, new Uint8Array(0));
+
+        let writeTarget: HandleWriteTarget | undefined;
+        if (node.callableKind === "handler" && isWriting) {
+          if (failIfDisconnectedWrite(req)) return;
+          if (isCfcEnforcing(cfcMode)) {
+            fuse.symbols.fuse_reply_err(req, EACCES);
+            return;
+          }
+          const handlerTarget = bridge?.resolveHandlerTarget(inode);
+          if (!handlerTarget) {
+            fuse.symbols.fuse_reply_err(req, EACCES);
+            return;
+          }
+          writeTarget = { kind: "handler", target: handlerTarget };
+        }
+        const truncate = (flags & O_TRUNC) !== 0;
+        const initialBuffer = node.callableKind === "handler" && isWriting
+          ? new Uint8Array(0)
+          : truncate
+          ? new Uint8Array(0)
+          : node.script;
+        const fh = handles.open(
+          inode,
+          flags,
+          initialBuffer,
+          { writeTarget },
+        );
+        if (isWriting) {
+          writeStats.opened++;
+          console.log(
+            `[write-trace] open ino=${inode} fh=${fh} target=${
+              writeTarget?.kind ?? "none"
+            }`,
+          );
+        }
+        if (truncate) {
+          handles.markTruncated(fh);
+        }
         writeFileInfo(fi, fh);
         fuse.symbols.fuse_reply_open(req, fi);
         return;
       }
 
-      const { flags } = readFileInfo(fi);
-      const isWriting = (flags & O_WRONLY) !== 0 || (flags & O_RDWR) !== 0;
-
+      let writeTarget: HandleWriteTarget | undefined;
+      const cfcAuthorizedOperations: CfcExistingWritebackOperation[] = [];
+      const cfcAuthorizationAnnotation = node.cfc;
       if (isWriting && bridge) {
-        const writePath = bridge.resolveWritePath(inode);
-        if (!writePath) {
-          fuse.symbols.fuse_reply_err(req, EACCES);
-          return;
+        const nodeName = tree.getNameForIno(inode) ?? "";
+        const sourceWritePath = bridge.resolveSourceWritePath(inode);
+        if (nodeName.startsWith("._")) {
+          writeTarget = { kind: "ignored" };
+        } else if (sourceWritePath) {
+          writeTarget = { kind: "source", target: sourceWritePath };
+        } else {
+          const writePath = bridge.resolveWritePath(inode);
+          if (!writePath) {
+            fuse.symbols.fuse_reply_err(req, EACCES);
+            return;
+          }
+          writeTarget = { kind: "value", target: writePath };
         }
+      }
+
+      if (isWriting && writeTarget?.kind !== "ignored") {
+        if (failIfDisconnectedWrite(req)) return;
       }
 
       // Get current content for the handle buffer
       const content = node.kind === "file" ? node.content : new Uint8Array(0);
       const truncate = (flags & O_TRUNC) !== 0;
+      if (isWriting && writeTarget?.kind !== "ignored") {
+        const operation: CfcExistingWritebackOperation = truncate
+          ? "truncate"
+          : "write";
+        if (!authorizeExistingCfcWrite(inode, operation)) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+        cfcAuthorizedOperations.push(operation);
+      }
       const fh = handles.open(
         inode,
         flags,
         truncate ? new Uint8Array(0) : content,
+        { writeTarget, cfcAuthorizedOperations, cfcAuthorizationAnnotation },
       );
+      if (isWriting) {
+        writeStats.opened++;
+        console.log(
+          `[write-trace] open ino=${inode} fh=${fh} target=${
+            writeTarget?.kind ?? "none"
+          }`,
+        );
+      }
       if (truncate) {
-        handles.get(fh)!.dirty = true;
+        if (!handles.truncateByIno(inode, 0, { pendingFh: fh })) {
+          handles.close(fh);
+          fuse.symbols.fuse_reply_err(req, EIO);
+          return;
+        }
       }
       writeFileInfo(fi, fh);
       fuse.symbols.fuse_reply_open(req, fi);
@@ -371,22 +1223,16 @@ async function main() {
       offset: number | bigint,
       fi: Deno.PointerValue,
     ) => {
+      logOp("read", ino.toString());
       const inode = BigInt(ino);
-
-      // Handler files are write-only
-      const handlerNode = tree.getNode(inode);
-      if (handlerNode?.kind === "handler") {
-        fuse.symbols.fuse_reply_err(req, EACCES);
-        return;
-      }
 
       // If we have an open handle with a buffer, read from it
       const { fh } = readFileInfo(fi);
       const handle = handles.get(fh);
-      if (handle && (handle.buffer.length > 0 || handle.dirty)) {
+      if (handleHasBufferedContent(handle)) {
         const off = Number(offset);
         const sz = Number(size);
-        const data = handle.buffer;
+        const data = handle!.buffer;
         if (off >= data.length) {
           fuse.symbols.fuse_reply_buf(req, null, 0n);
           return;
@@ -403,14 +1249,14 @@ async function main() {
       }
 
       const node = tree.getNode(inode);
-      if (!node || node.kind !== "file") {
+      if (!node || (node.kind !== "file" && node.kind !== "callable")) {
         fuse.symbols.fuse_reply_err(req, ENOENT);
         return;
       }
 
       const off = Number(offset);
       const sz = Number(size);
-      const data = node.content;
+      const data = node.kind === "file" ? node.content : node.script;
 
       if (off >= data.length) {
         // EOF — empty reply
@@ -438,6 +1284,7 @@ async function main() {
       ino: number | bigint,
       fi: Deno.PointerValue,
     ) => {
+      logOp("opendir", ino.toString());
       const node = tree.getNode(BigInt(ino));
       if (!node || node.kind !== "dir") {
         fuse.symbols.fuse_reply_err(req, ENOENT);
@@ -461,71 +1308,94 @@ async function main() {
       offset: number | bigint,
       _fi: Deno.PointerValue,
     ) => {
+      logOp("readdir", ino.toString());
       const inode = BigInt(ino);
-      const node = tree.getNode(inode);
-      if (!node || node.kind !== "dir") {
-        fuse.symbols.fuse_reply_err(req, ENOENT);
+      const sendDirectoryReply = () => {
+        const node = tree.getNode(inode);
+        if (!node || node.kind !== "dir") {
+          fuse.symbols.fuse_reply_err(req, ENOENT);
+          return;
+        }
+
+        const bufSize = Number(size);
+        const startOffset = Number(offset);
+
+        type DirEntry = { name: string; ino: bigint; mode: number };
+        const entries: DirEntry[] = [
+          { name: ".", ino: inode, mode: DIR_MODE },
+          {
+            name: "..",
+            ino: tree.parents.get(inode) ?? 1n,
+            mode: DIR_MODE,
+          },
+        ];
+
+        for (const [childName, childIno] of tree.getChildren(inode)) {
+          const childNode = tree.getNode(childIno);
+          if (!childNode) continue;
+          entries.push({
+            name: childName,
+            ino: childIno,
+            mode: nodeMode(
+              childNode,
+              Boolean(
+                bridge?.resolveWritePath(childIno) ||
+                  bridge?.resolveSourceWritePath(childIno),
+              ),
+            ),
+          });
+        }
+
+        const buf = new Uint8Array(bufSize);
+        let pos = 0;
+
+        for (let i = startOffset; i < entries.length; i++) {
+          const entry = entries[i];
+          const nameBuf = encoder.encode(entry.name + "\0");
+          const statBuf = new ArrayBuffer(STAT_SIZE);
+          writeStat(statBuf, {
+            ino: entry.ino,
+            mode: entry.mode,
+            nlink: 1,
+            size: 0,
+            uid: mountOwnership.uid,
+            gid: mountOwnership.gid,
+          });
+
+          const remaining = bufSize - pos;
+          const entrySize = fuse.symbols.fuse_add_direntry(
+            req,
+            Deno.UnsafePointer.of(buf.subarray(pos)),
+            BigInt(remaining),
+            nameBuf,
+            Deno.UnsafePointer.of(new Uint8Array(statBuf)),
+            BigInt(i + 1),
+          );
+
+          if (Number(entrySize) > remaining) break;
+          pos += Number(entrySize);
+        }
+
+        fuse.symbols.fuse_reply_buf(
+          req,
+          Deno.UnsafePointer.of(buf),
+          BigInt(pos),
+        );
+      };
+
+      if (bridge?.shouldPrepareDirectory(inode)) {
+        const finishPendingReply = trackPendingFuseReply();
+        bridge.prepareDirectory(inode).then(() => {
+          sendDirectoryReply();
+          finishPendingReply();
+        }).catch(() => {
+          fuse.symbols.fuse_reply_err(req, ENOENT);
+          finishPendingReply();
+        });
         return;
       }
 
-      const bufSize = Number(size);
-      const startOffset = Number(offset);
-
-      // Build entry list: ".", "..", then children
-      type DirEntry = { name: string; ino: bigint; mode: number };
-      const entries: DirEntry[] = [
-        { name: ".", ino: inode, mode: DIR_MODE },
-        {
-          name: "..",
-          ino: tree.parents.get(inode) ?? 1n,
-          mode: DIR_MODE,
-        },
-      ];
-
-      for (const [childName, childIno] of tree.getChildren(inode)) {
-        const childNode = tree.getNode(childIno);
-        if (!childNode) continue;
-        entries.push({
-          name: childName,
-          ino: childIno,
-          mode: nodeMode(childNode),
-        });
-      }
-
-      // Fill buffer starting from startOffset
-      const buf = new Uint8Array(bufSize);
-      let pos = 0;
-
-      for (let i = startOffset; i < entries.length; i++) {
-        const entry = entries[i];
-        const nameBuf = encoder.encode(entry.name + "\0");
-        const statBuf = new ArrayBuffer(STAT_SIZE);
-        writeStat(statBuf, {
-          ino: entry.ino,
-          mode: entry.mode,
-          nlink: 1,
-          size: 0,
-        });
-
-        const remaining = bufSize - pos;
-        const entrySize = fuse.symbols.fuse_add_direntry(
-          req,
-          Deno.UnsafePointer.of(buf.subarray(pos)),
-          BigInt(remaining),
-          nameBuf,
-          Deno.UnsafePointer.of(new Uint8Array(statBuf)),
-          BigInt(i + 1), // next offset
-        );
-
-        if (Number(entrySize) > remaining) break;
-        pos += Number(entrySize);
-      }
-
-      fuse.symbols.fuse_reply_buf(
-        req,
-        Deno.UnsafePointer.of(buf),
-        BigInt(pos),
-      );
+      sendDirectoryReply();
     },
   );
   callbacks.push(readdirCb);
@@ -537,29 +1407,240 @@ async function main() {
   async function flushHandle(
     handle: ReturnType<typeof handles.get>,
   ): Promise<number> {
-    if (!handle || !handle.dirty || !bridge) return 0;
-
-    // Handler files: parse JSON and send to stream cell
-    const handlerNode = tree.getNode(handle.ino);
-    if (handlerNode?.kind === "handler") {
-      try {
-        const text = new TextDecoder().decode(handle.buffer);
-        const value = JSON.parse(text.trim());
-        await bridge.sendToHandler(handle.ino, value);
-        handle.dirty = false;
-        handle.buffer = new Uint8Array(0); // fire-and-forget
-        return 0;
-      } catch (e) {
-        console.error(`[fuse] handler flush error: ${e}`);
-        return EIO;
-      }
+    if (
+      !handle || !handleHasPendingChanges(handle) || !bridge || handle.flushing
+    ) {
+      return 0;
     }
+    handle.flushing = true;
+    const flushVersion = handle.version;
+    const buffer = handle.buffer.slice();
+    const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
+    const existingWriteOperation: CfcExistingWritebackOperation =
+      handle.truncatePending ? "truncate" : "write";
 
-    const writePath = bridge.resolveWritePath(handle.ino);
-    if (!writePath) return EACCES;
-
+    const callableNode = tree.getNode(handle.ino);
+    const cfcExistingWriteOperations = new Set<CfcExistingWritebackOperation>([
+      existingWriteOperation,
+    ]);
+    if (
+      existingWriteOperation === "write" &&
+      handle.cfcAuthorizedOperations.has("truncate")
+    ) {
+      cfcExistingWriteOperations.add("truncate");
+    }
+    const markExistingReady = () => {
+      for (const operation of cfcExistingWriteOperations) {
+        cfcWritebacks.markReadyForExactRecomputation(handle.ino, operation);
+      }
+    };
+    const markExistingFinalized = () => {
+      for (const operation of cfcExistingWriteOperations) {
+        cfcWritebacks.markFinalizedPendingCleanup(handle.ino, operation);
+        cfcWritebacks.deletePrepared(handle.ino, operation);
+      }
+    };
+    const markExistingFailed = (reason: string) => {
+      for (const operation of cfcExistingWriteOperations) {
+        cfcWritebacks.markRunnerCommitFailed(handle.ino, operation, reason);
+      }
+    };
     try {
-      const text = new TextDecoder().decode(handle.buffer);
+      if (writeTarget?.kind === "ignored") {
+        if (handle.version === flushVersion) {
+          handle.dirty = false;
+          handle.truncatePending = false;
+          handle.buffer = new Uint8Array(0);
+          handle.bufferValid = false;
+        }
+        return 0;
+      }
+
+      const disconnectedErrno = disconnectedWriteErrno(bridge);
+      if (disconnectedErrno !== null) {
+        markExistingFailed("backend disconnected");
+        return disconnectedErrno;
+      }
+
+      if (writeTarget?.kind === "handler") {
+        const text = new TextDecoder().decode(buffer);
+        const trimmed = text.trim();
+        let value: unknown;
+        try {
+          value = JSON.parse(trimmed);
+        } catch {
+          // Bare string — treat as string value so callers don't need
+          // to double-quote (e.g. `echo book > addItem.handler`).
+          value = trimmed;
+        }
+        await bridge.sendToHandlerTarget(writeTarget.target, value);
+        // Don't invalidate here — sendToHandlerTarget waits for
+        // runtime.idle() + synced(), but the downstream reactive graph
+        // may not have settled yet. The cell.sink subscription in
+        // subscribePiece fires when the result cell actually updates,
+        // which triggers invalidateRootPropCache at the right time.
+        if (handle.version === flushVersion) {
+          handle.dirty = false;
+          handle.truncatePending = false;
+          handle.buffer = new Uint8Array(0); // fire-and-forget
+          handle.bufferValid = false;
+        }
+        writeStats.flushed++;
+        console.log(`[write-trace] flush-ok ino=${handle.ino} kind=handler`);
+        return 0;
+      }
+
+      if (writeTarget?.kind === "source") {
+        const { piece, relPath, srcIno } = writeTarget.target;
+        const text = new TextDecoder().decode(buffer);
+
+        // Optimistically update the file content in the tree
+        let fileIno: bigint | undefined = srcIno;
+        for (const part of sourceRelPathToTreeSegments(relPath)) {
+          fileIno = fileIno !== undefined
+            ? tree.lookup(fileIno, part)
+            : undefined;
+        }
+        if (fileIno !== undefined) {
+          try {
+            tree.updateFile(fileIno, text);
+          } catch {
+            // Ignore stale inode
+          }
+        }
+
+        // Get current meta to build the updated program
+        let meta: Awaited<ReturnType<typeof piece.getPatternMeta>> | undefined;
+        try {
+          meta = await piece.getPatternMeta();
+        } catch (e) {
+          console.error(`[source] Failed to get pattern meta: ${e}`);
+          const errorMsg = isConnectionWriteFailure(e)
+            ? noteWriteFailure(e)
+            : String(e);
+          markExistingFailed(errorMsg);
+          return isConnectionWriteFailure(e) ? EROFS : EACCES;
+        }
+
+        // Normalise to a files array, mirroring buildSourceTree:
+        // multi-file programs use program.files, single-file use meta.src.
+        let baseMain: string;
+        let baseMainExport: string | undefined;
+        let baseFiles: { name: string; contents: string }[];
+        if (meta?.program?.files?.length) {
+          baseMain = meta.program.main;
+          baseMainExport = meta.program.mainExport;
+          baseFiles = meta.program.files;
+        } else {
+          console.error(
+            `[source] No program or src in pattern meta for ${relPath}`,
+          );
+          markExistingFailed("no source program metadata");
+          return EACCES;
+        }
+
+        // Replace the written file's content in the files array
+        let matched = false;
+        const updatedFiles = baseFiles.map((f) => {
+          const fRelPath = f.name.startsWith("/") ? f.name.slice(1) : f.name;
+          if (fRelPath === relPath) {
+            matched = true;
+            return { ...f, contents: text };
+          }
+          return f;
+        });
+
+        if (!matched) {
+          console.error(
+            `[source] File "${relPath}" not found in pattern files: [${
+              baseFiles.map((f) => f.name).join(", ")
+            }]`,
+          );
+          markExistingFailed(`source file not found: ${relPath}`);
+          return EACCES;
+        }
+
+        try {
+          await piece.setPattern({
+            main: baseMain,
+            mainExport: baseMainExport,
+            files: updatedFiles,
+          });
+          // Clear error.log on success
+          const errorLogIno = tree.lookup(srcIno, "error.log");
+          if (errorLogIno !== undefined) {
+            tree.updateFile(errorLogIno, "");
+          }
+          markExistingReady();
+          await bridge.finalizeSourceWritePath(writeTarget.target);
+          reconcileCfcWritebacks("source flush post-finalize");
+          markExistingFinalized();
+          if (handle.version === flushVersion) {
+            handle.dirty = false;
+            handle.truncatePending = false;
+          }
+          writeStats.flushed++;
+          console.log(`[write-trace] flush-ok ino=${handle.ino} kind=source`);
+          return 0;
+        } catch (e) {
+          // Write compile error to error.log
+          const errorMsg = e instanceof Error ? e.message : String(e);
+          if (isConnectionWriteFailure(e)) {
+            noteWriteFailure(e);
+            markExistingFailed(errorMsg);
+            return EROFS;
+          }
+          const errorLogIno = tree.lookup(srcIno, "error.log");
+          if (errorLogIno !== undefined) {
+            tree.updateFile(errorLogIno, errorMsg);
+          }
+          console.error(`[source] Compile error in ${relPath}: ${errorMsg}`);
+          markExistingFailed(errorMsg);
+          return EACCES;
+        }
+      }
+
+      if (
+        callableNode?.kind === "callable" &&
+        callableNode.callableKind === "tool"
+      ) {
+        return EACCES;
+      }
+
+      const writePath = writeTarget?.kind === "value"
+        ? writeTarget.target
+        : bridge.resolveWritePath(handle.ino);
+      if (!writePath) return EACCES;
+
+      const text = new TextDecoder().decode(buffer);
+
+      // [FS] projection index file: parse and write back to cells
+      if (writePath.fsProjection) {
+        const ok = await bridge.writeFsFile(writePath, text);
+        if (!ok) return EINVAL;
+        markExistingReady();
+        await bridge.finalizeWritePath(writePath);
+        reconcileCfcWritebacks("fs projection flush post-finalize");
+        markExistingFinalized();
+        if (handle.version === flushVersion) {
+          handle.dirty = false;
+          handle.truncatePending = false;
+        }
+        try {
+          const node = tree.getNode(handle.ino);
+          if (node && node.kind === "file") {
+            tree.updateFile(handle.ino, text);
+          }
+        } catch {
+          // Stale inode after subscription rebuild — ignore.
+        }
+        writeStats.flushed++;
+        console.log(
+          `[write-trace] flush-ok ino=${handle.ino} kind=fsProjection`,
+        );
+        return 0;
+      }
+
       let value: unknown;
 
       if (writePath.isJsonFile) {
@@ -593,7 +1674,14 @@ async function main() {
       }
 
       await bridge.writeValue(writePath, value);
-      handle.dirty = false;
+      markExistingReady();
+      await bridge.finalizeWritePath(writePath);
+      reconcileCfcWritebacks("value flush post-finalize");
+      markExistingFinalized();
+      if (handle.version === flushVersion) {
+        handle.dirty = false;
+        handle.truncatePending = false;
+      }
 
       // Optimistic tree update: update the file node content immediately.
       // The inode may have been invalidated by the subscription rebuild
@@ -608,11 +1696,76 @@ async function main() {
         // rebuilt the tree with the correct data.
       }
 
+      writeStats.flushed++;
+      console.log(`[write-trace] flush-ok ino=${handle.ino} kind=value`);
       return 0;
     } catch (e) {
-      console.error(`[fuse] flush error: ${e}`);
-      return EIO;
+      const logPrefix = writeTarget?.kind === "handler" ||
+          (callableNode?.kind === "callable" &&
+            callableNode.callableKind === "handler")
+        ? "[fuse] handler flush error"
+        : "[fuse] flush error";
+      console.error(`${logPrefix}: ${e}`);
+
+      const isConnectionFailure = isConnectionWriteFailure(e);
+      const msg = isConnectionFailure
+        ? noteWriteFailure(e)
+        : e instanceof Error
+        ? e.message
+        : String(e);
+      if (!isConnectionFailure) {
+        writeStats.flushErrors++;
+        writeStats.lastError = msg;
+        writeStats.lastErrorAt = new Date().toISOString();
+      }
+      console.error(
+        `[write-trace] flush-err ino=${handle.ino} err=${
+          e instanceof Error ? e.stack ?? e.message : String(e)
+        }`,
+      );
+
+      markExistingFailed(msg);
+      return isConnectionFailure ? EROFS : EIO;
+    } finally {
+      handle.flushing = false;
+      if (handleHasPendingChanges(handle) && handle.version !== flushVersion) {
+        queueMicrotask(() => {
+          flushHandle(handle).catch((e) => {
+            recordAsyncWriteFailure("flush retry error", e);
+          });
+        });
+      }
     }
+  }
+
+  function clearScheduledFlush(
+    handle: NonNullable<ReturnType<typeof handles.get>>,
+  ): void {
+    const timer = scheduledFlushes.get(handle);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      scheduledFlushes.delete(handle);
+    }
+  }
+
+  function scheduleFlush(
+    handle: NonNullable<ReturnType<typeof handles.get>>,
+    delayMs: number,
+  ): void {
+    clearScheduledFlush(handle);
+    const timer = setTimeout(() => {
+      scheduledFlushes.delete(handle);
+      if (handle.flushing) {
+        // A flush is already in flight; retry shortly so we commit the latest
+        // stable buffer rather than an intermediate chunk from a multi-write save.
+        scheduleFlush(handle, 10);
+        return;
+      }
+      flushHandle(handle).catch((e) => {
+        recordAsyncWriteFailure("scheduled flush error", e);
+      });
+    }, delayMs);
+    scheduledFlushes.set(handle, timer);
   }
 
   // write(req, ino, buf_ptr, size, offset, fi_ptr)
@@ -629,6 +1782,7 @@ async function main() {
       offset: number | bigint,
       fi: Deno.PointerValue,
     ) => {
+      logOp("write", _ino.toString());
       const { fh } = readFileInfo(fi);
       const handle = handles.get(fh);
       if (!handle) {
@@ -638,6 +1792,11 @@ async function main() {
 
       const sz = Number(size);
       const off = Number(offset);
+      const rangeErrno = virtualFileRangeErrno(off, sz);
+      if (rangeErrno !== null) {
+        fuse.symbols.fuse_reply_err(req, rangeErrno);
+        return;
+      }
 
       // Read data from the FUSE-provided buffer
       const data = new Uint8Array(sz);
@@ -646,8 +1805,36 @@ async function main() {
         view.copyInto(data);
       }
 
-      handles.write(fh, data, off);
+      const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
+      if (writeTarget?.kind !== "ignored") {
+        const errno = disconnectedWriteErrno(bridge);
+        if (errno !== null) {
+          fuse.symbols.fuse_reply_err(req, errno);
+          return;
+        }
+      }
+      if (
+        writeTarget?.kind !== "ignored" &&
+        !authorizeHandleCfcWrite(fh, handle, "write")
+      ) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
+      if (!handles.write(fh, data, off)) {
+        fuse.symbols.fuse_reply_err(req, EIO);
+        return;
+      }
+      writeStats.written++;
+      console.log(`[write-trace] write fh=${fh} size=${sz} offset=${off}`);
       fuse.symbols.fuse_reply_write(req, BigInt(sz));
+
+      // Safety-net: schedule a deferred flush in case flush()/release() never
+      // arrive. Docker Desktop's VirtioFS on macOS doesn't forward these
+      // through FUSE-T/NFS mounts, leaving writes buffered forever. The timer
+      // is reset on each write, so rapid multi-write sequences coalesce
+      // naturally and only flush after the writes settle.
+      scheduleFlush(handle, 500);
     },
   );
   callbacks.push(writeCb);
@@ -660,23 +1847,46 @@ async function main() {
       _ino: number | bigint,
       fi: Deno.PointerValue,
     ) => {
+      logOp("flush", _ino.toString());
       const { fh } = readFileInfo(fi);
       const handle = handles.get(fh);
 
-      if (!handle || !handle.dirty) {
+      if (!handle || !handleHasPendingChanges(handle) || handle.flushing) {
         fuse.symbols.fuse_reply_err(req, 0);
         return;
+      }
+
+      const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
+      if (writeTarget?.kind !== "ignored") {
+        const errno = disconnectedWriteErrno(bridge);
+        if (errno !== null) {
+          fuse.symbols.fuse_reply_err(req, errno);
+          return;
+        }
       }
 
       // Reply immediately — the subscription rebuild triggered by writeValue
       // must not run while a FUSE reply is still pending (it invalidates
       // inodes via notify_inval_entry which crashes FUSE-T mid-callback).
       fuse.symbols.fuse_reply_err(req, 0);
+      console.log(`[write-trace] flush-fire fh=${fh}`);
 
       // Fire-and-forget the actual write to the cell
-      flushHandle(handle).catch((e) => {
-        console.error(`[fuse] flush write error: ${e}`);
-      });
+      const shouldDelay = handle.truncatePending ||
+        (writeTarget?.kind === "value" &&
+          writeTarget.target.fsProjection === "markdown");
+      if (shouldDelay) {
+        // Markdown saves often arrive as several small writes plus flushes.
+        // Empty O_TRUNC opens can also flush before the writer sends content.
+        // Delay slightly so we commit settled data instead of an intermediate
+        // empty/truncated buffer.
+        scheduleFlush(handle, 25);
+      } else {
+        clearScheduledFlush(handle);
+        flushHandle(handle).catch((e) => {
+          recordAsyncWriteFailure("flush write error", e);
+        });
+      }
     },
   );
   callbacks.push(flushCb);
@@ -694,48 +1904,173 @@ async function main() {
       toSet: number,
       fi: Deno.PointerValue,
     ) => {
+      logOp("setattr", ino.toString());
       const inode = BigInt(ino);
       const node = tree.getNode(inode);
       if (!node) {
         fuse.symbols.fuse_reply_err(req, ENOENT);
         return;
       }
+      if ((tree.getNameForIno(inode) ?? "").startsWith("._")) {
+        const statBuf = new ArrayBuffer(STAT_SIZE);
+        writeStat(statBuf, buildStat(node, inode));
+        fuse.symbols.fuse_reply_attr(
+          req,
+          Deno.UnsafePointer.of(new Uint8Array(statBuf)),
+          0,
+        );
+        return;
+      }
+      const sizeChange = (toSet & FUSE_SET_ATTR_SIZE) !== 0;
+      const metadataFlags = toSet & ~FUSE_SET_ATTR_SIZE;
+      const metadataChange = metadataFlags !== 0;
+      const metadataFields = metadataChange
+        ? metadataFieldsForSetattrFlags(metadataFlags)
+        : [];
+      if ((sizeChange || metadataChange) && failIfDisconnectedWrite(req)) {
+        return;
+      }
+      let newSize = 0;
+      if (sizeChange) {
+        const attrView = new Deno.UnsafePointerView(_attrPtr!);
+        newSize = Number(attrView.getBigInt64(STAT_ST_SIZE_OFFSET));
+        const rangeErrno = virtualFileRangeErrno(0, newSize);
+        if (rangeErrno !== null) {
+          fuse.symbols.fuse_reply_err(req, rangeErrno);
+          return;
+        }
+      }
+
+      let truncateAuthorization = undefined as
+        | ReturnType<typeof authorizeExistingWriteback>
+        | undefined;
+      let metadataAuthorization = undefined as
+        | ReturnType<typeof authorizeMetadataWriteback>
+        | undefined;
+
+      if (sizeChange) {
+        truncateAuthorization = getExistingCfcWriteAuthorization(
+          inode,
+          "truncate",
+        );
+        if (!truncateAuthorization.allowed) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+      }
+      if (metadataChange) {
+        metadataAuthorization = authorizeMetadataCfcWrite(
+          inode,
+          metadataFields,
+        );
+        if (!metadataAuthorization.allowed) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+      }
+
+      if (truncateAuthorization?.allowed && truncateAuthorization.prepared) {
+        applyPreparedExistingWrite(tree, inode, truncateAuthorization.prepared);
+        cfcWritebacks.markMutationApplied(inode, "truncate");
+      }
+      if (metadataAuthorization?.allowed && metadataAuthorization.prepared) {
+        applyPreparedMetadataMutation(
+          tree,
+          inode,
+          metadataAuthorization.prepared,
+          metadataFields,
+        );
+        cfcWritebacks.markMutationApplied(
+          inode,
+          "setattr-metadata",
+          undefined,
+          { requestedFields: metadataFields },
+        );
+      }
 
       // Handle truncate / size change
-      if (toSet & FUSE_SET_ATTR_SIZE) {
-        // Read new size from attr struct (st_size @ offset 96)
-        const attrView = new Deno.UnsafePointerView(_attrPtr!);
-        const newSize = Number(attrView.getBigInt64(96));
+      if (sizeChange) {
         const { fh } = readFileInfo(fi);
         const handle = handles.get(fh);
         if (handle) {
-          handles.truncate(fh, newSize);
+          const truncated = node.kind === "file"
+            ? handles.truncateByIno(inode, newSize, { pendingFh: fh })
+            : handles.truncate(fh, newSize);
+          if (!truncated) {
+            fuse.symbols.fuse_reply_err(req, EIO);
+            return;
+          }
         } else {
-          // No valid fh — NFS/FUSE-T calls setattr(size=0) separately.
-          // Truncate all open handles for this inode and the tree node.
-          handles.truncateByIno(inode, newSize);
-          if (node.kind === "file") {
-            tree.updateFile(
+          if (node.kind === "callable" && node.callableKind === "handler") {
+            // FUSE-T may issue O_TRUNC as a separate setattr without a file
+            // handle. Handler contents are delivered through write/flush, so
+            // this size-only setattr is just the shell clearing the send buffer.
+          } else if (!bridge || node.kind !== "file") {
+            fuse.symbols.fuse_reply_err(req, EACCES);
+            return;
+          } else {
+            const sourceWritePath = bridge.resolveSourceWritePath(inode);
+            const valueWritePath = sourceWritePath === null
+              ? bridge.resolveWritePath(inode)
+              : null;
+            const writeTarget: HandleWriteTarget | undefined = sourceWritePath
+              ? { kind: "source", target: sourceWritePath }
+              : valueWritePath
+              ? { kind: "value", target: valueWritePath }
+              : undefined;
+            if (!writeTarget) {
+              fuse.symbols.fuse_reply_err(req, EACCES);
+              return;
+            }
+
+            const truncateFh = handles.open(
               inode,
-              newSize === 0 ? "" : node.content.slice(0, newSize),
+              O_WRONLY,
+              bufferForNoHandleTruncate(node.content, newSize),
+              {
+                writeTarget,
+                cfcAuthorizedOperations: ["truncate"],
+                cfcAuthorizationAnnotation: node.cfc,
+              },
             );
+            if (
+              !handles.truncateByIno(inode, newSize, {
+                pendingFh: truncateFh,
+              })
+            ) {
+              handles.close(truncateFh);
+              fuse.symbols.fuse_reply_err(req, EIO);
+              return;
+            }
+            const truncateHandle = handles.get(truncateFh);
+            if (!truncateHandle) {
+              fuse.symbols.fuse_reply_err(req, EIO);
+              return;
+            }
+            tree.updateFile(inode, truncateHandle.buffer, node.jsonType);
+            flushHandle(truncateHandle).catch((e) => {
+              recordAsyncWriteFailure("truncate write error", e);
+            }).finally(() => {
+              handles.close(truncateFh);
+            });
           }
         }
       }
 
       // Reply with current attrs (silently accept chmod/chown/times)
       const statBuf = new ArrayBuffer(STAT_SIZE);
-      writeStat(statBuf, {
-        ino: inode,
-        mode: nodeMode(node, inode),
-        nlink: node.kind === "dir" ? 2 : 1,
-        size: nodeSize(node),
-      });
+      writeStat(statBuf, buildStat(node, inode));
       fuse.symbols.fuse_reply_attr(
         req,
         Deno.UnsafePointer.of(new Uint8Array(statBuf)),
         1.0,
       );
+      if (
+        metadataAuthorization?.allowed &&
+        metadataAuthorization.prepared
+      ) {
+        finalizeMetadataCfcMutation(inode, metadataAuthorization.prepared);
+      }
     },
   );
   callbacks.push(setattrCb);
@@ -744,18 +2079,61 @@ async function main() {
   const releaseCb = new Deno.UnsafeCallback(
     { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
     (req: Deno.PointerValue, _ino: number | bigint, fi: Deno.PointerValue) => {
+      logOp("release", _ino.toString());
       const { fh } = readFileInfo(fi);
       const handle = handles.get(fh);
-
-      // Reply immediately and close the handle.
-      // Fire-and-forget the write if dirty.
-      if (handle && handle.dirty && bridge) {
-        flushHandle(handle).catch((e) => {
-          console.error(`[fuse] release flush error: ${e}`);
-        });
+      if (handle) {
+        console.log(
+          `[write-trace] release fh=${fh} dirty=${handle.dirty} flushing=${handle.flushing} pending=${
+            handleHasPendingChanges(handle)
+          }`,
+        );
       }
-      handles.close(fh);
-      fuse.symbols.fuse_reply_err(req, 0);
+
+      // Reply immediately. Fire-and-forget the write if dirty.
+      // Defer handles.close() until after the flush settles so
+      // flushHandle can still read handle state (writeTarget, buffer).
+      if (handle && handleHasPendingChanges(handle) && bridge) {
+        const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
+        if (writeTarget?.kind !== "ignored") {
+          const errno = disconnectedWriteErrno(bridge);
+          if (errno !== null) {
+            handles.close(fh);
+            fuse.symbols.fuse_reply_err(req, errno);
+            return;
+          }
+        }
+
+        fuse.symbols.fuse_reply_err(req, 0);
+        let flushPromise: Promise<unknown> | undefined;
+        if (
+          handle.truncatePending && !handle.dirty && !handle.flushing
+        ) {
+          flushPromise = flushHandle(handle).catch((e) => {
+            recordAsyncWriteFailure("release flush error", e);
+          });
+        } else if (
+          writeTarget?.kind === "value" &&
+          writeTarget.target.fsProjection === "markdown"
+        ) {
+          scheduleFlush(handle, 0);
+        } else if (!handle.flushing) {
+          flushPromise = flushHandle(handle).catch((e) => {
+            recordAsyncWriteFailure("release flush error", e);
+          });
+        }
+        if (flushPromise) {
+          flushPromise.finally(() => handles.close(fh));
+        } else {
+          // scheduleFlush path — close after the scheduled timer fires.
+          // The handle stays alive until then; scheduleFlush already
+          // captures the handle reference.
+          queueMicrotask(() => handles.close(fh));
+        }
+      } else {
+        fuse.symbols.fuse_reply_err(req, 0);
+        handles.close(fh);
+      }
     },
   );
   callbacks.push(releaseCb);
@@ -764,27 +2142,23 @@ async function main() {
   const releasedirCb = new Deno.UnsafeCallback(
     { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
     (req: Deno.PointerValue, _ino: number | bigint, _fi: Deno.PointerValue) => {
+      logOp("releasedir", _ino.toString());
       fuse.symbols.fuse_reply_err(req, 0); // success
     },
   );
   callbacks.push(releasedirCb);
 
-  // getxattr(req, ino, name_ptr, size, position)
-  // macOS FUSE has an extra `position` parameter (uint32_t) — always ignored for user attrs
-  const getxattrCb = new Deno.UnsafeCallback(
-    {
-      parameters: ["pointer", "u64", "pointer", "usize", "u32"],
-      result: "void",
-    } as const,
+  // getxattr — platform factory handles macOS extra `position` param vs Linux 4-param signature
+  const getxattrCb = platform.createGetxattrCallback(
     (
       req: Deno.PointerValue,
-      ino: number | bigint,
+      ino: bigint,
       namePtr: Deno.PointerValue,
-      size: number | bigint,
-      _position: number,
+      size: bigint,
     ) => {
+      logOp("getxattr", ino.toString());
       const attrName = readCString(namePtr);
-      const node = tree.getNode(BigInt(ino));
+      const node = tree.getNode(ino);
 
       // Determine the xattr value (if any)
       let attrValue: Uint8Array | null = null;
@@ -797,6 +2171,13 @@ async function main() {
         if (jsonType) {
           attrValue = encoder.encode(jsonType);
         }
+      }
+      if (!attrValue) {
+        reconcileCfcWritebacks("getxattr");
+        attrValue = getCfcXattrValue(tree, ino, attrName, {
+          enabled: cfcAnnotationsEnabled,
+          namespace: cfcXattrNamespace,
+        });
       }
 
       if (!attrValue) {
@@ -833,16 +2214,30 @@ async function main() {
       ino: number | bigint,
       size: number | bigint,
     ) => {
-      const node = tree.getNode(BigInt(ino));
+      const inode = BigInt(ino);
+      const node = tree.getNode(inode);
+      const xattrNames: string[] = [];
 
-      // Build null-separated list of xattr names
       const jsonType = node?.kind === "file"
         ? node.jsonType
         : node?.kind === "dir"
         ? node.jsonType
         : undefined;
+      if (jsonType) {
+        xattrNames.push("user.json.type");
+      }
 
-      if (!jsonType) {
+      if (cfcAnnotationsEnabled) {
+        reconcileCfcWritebacks("listxattr");
+      }
+      xattrNames.push(
+        ...listCfcXattrNames(tree, inode, {
+          enabled: cfcAnnotationsEnabled,
+          namespace: cfcXattrNamespace,
+        }),
+      );
+
+      if (xattrNames.length === 0) {
         // No xattrs — empty list
         const sz = Number(size);
         if (sz === 0) {
@@ -853,8 +2248,7 @@ async function main() {
         return;
       }
 
-      // "user.json.type\0"
-      const listBuf = encoder.encode("user.json.type\0");
+      const listBuf = encoder.encode(`${xattrNames.join("\0")}\0`);
       const sz = Number(size);
 
       if (sz === 0) {
@@ -872,6 +2266,79 @@ async function main() {
   );
   callbacks.push(listxattrCb);
 
+  const setxattrCb = platform.createSetxattrCallback(
+    (
+      req: Deno.PointerValue,
+      ino: bigint,
+      namePtr: Deno.PointerValue,
+      valuePtr: Deno.PointerValue,
+      size: bigint,
+      _flags: number,
+    ) => {
+      logOp("setxattr", ino.toString());
+      if (!cfcWritebackXattrs) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      if (failIfDisconnectedWrite(req)) return;
+      const name = readCString(namePtr);
+      const normalizedName = normalizeCfcWritebackXattrName(name);
+      const value = new TextDecoder().decode(readBuffer(valuePtr, size));
+      let result:
+        | ReturnType<CfcWritebackStore["setPreparedXattr"]>
+        | ReturnType<CfcWritebackStore["setFinalizeXattr"]>;
+      if (normalizedName === CFC_WRITEBACK_PREPARE_XATTR) {
+        result = cfcWritebacks.setPreparedXattr(ino, name, value);
+      } else if (normalizedName === CFC_WRITEBACK_FINALIZE_XATTR) {
+        result = cfcWritebacks.setFinalizeXattr(ino, name, value);
+      } else {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      if (!result.ok) {
+        console.warn(`[FUSE:CFC] rejected ${name}: ${result.reason}`);
+        bridge?.refreshStatus();
+        fuse.symbols.fuse_reply_err(
+          req,
+          cfcWritebackXattrResultErrno(result, { enotsup: ENOTSUP }),
+        );
+        return;
+      }
+      bridge?.refreshStatus();
+      fuse.symbols.fuse_reply_err(req, 0);
+    },
+  );
+  callbacks.push(setxattrCb);
+
+  const removexattrCb = new Deno.UnsafeCallback(
+    { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
+    (
+      req: Deno.PointerValue,
+      ino: number | bigint,
+      namePtr: Deno.PointerValue,
+    ) => {
+      logOp("removexattr", ino.toString());
+      if (!cfcWritebackXattrs) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      if (failIfDisconnectedWrite(req)) return;
+      const name = readCString(namePtr);
+      const normalizedName = normalizeCfcWritebackXattrName(name);
+      if (
+        normalizedName !== CFC_WRITEBACK_PREPARE_XATTR &&
+        normalizedName !== CFC_WRITEBACK_FINALIZE_XATTR
+      ) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      cfcWritebacks.deleteAllForIno(BigInt(ino));
+      bridge?.refreshStatus();
+      fuse.symbols.fuse_reply_err(req, 0);
+    },
+  );
+  callbacks.push(removexattrCb);
+
   // create(req, parent_ino, name_ptr, mode, fi_ptr)
   const createCb = new Deno.UnsafeCallback(
     {
@@ -885,6 +2352,7 @@ async function main() {
       _mode: number,
       fi: Deno.PointerValue,
     ) => {
+      logOp("create", parentIno.toString());
       if (!bridge) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -893,9 +2361,29 @@ async function main() {
       const parent = BigInt(parentIno);
       const name = readCString(namePtr);
 
-      // Reject macOS resource fork / metadata files
       if (name.startsWith("._")) {
-        fuse.symbols.fuse_reply_err(req, EACCES);
+        // FUSE-T/macOS may create AppleDouble sidecars before opening the real
+        // file. Keep them local so they don't block writes or persist into cells.
+        const existingIno = tree.lookup(parent, name);
+        const ino = existingIno ?? tree.addFile(parent, name, "", "string");
+        const fh = handles.open(ino, O_RDWR, new Uint8Array(0), {
+          writeTarget: { kind: "ignored" } satisfies HandleWriteTarget,
+        });
+        writeFileInfo(fi, fh);
+
+        const node = tree.getNode(ino);
+        const entryBuf = new ArrayBuffer(ENTRY_PARAM_SIZE);
+        writeEntryParam(entryBuf, {
+          ino,
+          attr: buildStat(node!, ino),
+          attrTimeout: 0,
+          entryTimeout: 0,
+        });
+        fuse.symbols.fuse_reply_create(
+          req,
+          Deno.UnsafePointer.of(new Uint8Array(entryBuf)),
+          fi,
+        );
         return;
       }
 
@@ -905,10 +2393,33 @@ async function main() {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
+      if (!authorizeCreateCfcWrite(parent, "create", name)) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
 
-      // Optimistic: create file node and reply immediately, then write to cell.
-      const ino = tree.addFile(parent, name, "", "string");
-      const fh = handles.open(ino, O_RDWR, new Uint8Array(0));
+      const prepared = cfcWritebacks.getPrepared(parent, "create", name);
+      const ino = prepared
+        ? applyPreparedCreate(tree, parent, name, "file", prepared)
+        : tree.addFile(parent, name, "", "string");
+      if (prepared) {
+        cfcWritebacks.markMutationApplied(parent, "create", name);
+      }
+      const fh = handles.open(
+        ino,
+        O_RDWR,
+        new Uint8Array(0),
+        {
+          writeTarget: {
+            kind: "value",
+            target: {
+              ...parentPath,
+              jsonPath: appendDecodedJsonPath(parentPath.jsonPath, name),
+            },
+          } satisfies HandleWriteTarget,
+        },
+      );
       writeFileInfo(fi, fh);
 
       const entryBuf = new ArrayBuffer(ENTRY_PARAM_SIZE);
@@ -919,6 +2430,8 @@ async function main() {
           mode: FILE_MODE_RW,
           nlink: 1,
           size: 0,
+          uid: mountOwnership.uid,
+          gid: mountOwnership.gid,
         },
         attrTimeout: 1.0,
         entryTimeout: 1.0,
@@ -931,12 +2444,18 @@ async function main() {
       );
 
       // Fire-and-forget write to cell
-      const newPath = [...parentPath.jsonPath, name];
+      const newPath = appendDecodedJsonPath(parentPath.jsonPath, name);
       bridge.writeValue(
         { ...parentPath, jsonPath: newPath },
         "",
-      ).catch((e) => {
-        console.error(`[fuse] create write error: ${e}`);
+      ).then(async () => {
+        cfcWritebacks.markReadyForExactRecomputation(parent, "create", name);
+        await bridge.finalizeWritePath(parentPath);
+        cfcWritebacks.markFinalizedPendingCleanup(parent, "create", name);
+        cfcWritebacks.deletePrepared(parent, "create", name);
+      }).catch((e) => {
+        cfcWritebacks.markRunnerCommitFailed(parent, "create", String(e), name);
+        recordAsyncWriteFailure("create write error", e);
       });
     },
   );
@@ -954,6 +2473,7 @@ async function main() {
       namePtr: Deno.PointerValue,
       _mode: number,
     ) => {
+      logOp("mkdir", parentIno.toString());
       if (!bridge) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -967,19 +2487,35 @@ async function main() {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
+      if (!authorizeCreateCfcWrite(parent, "mkdir", name)) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
 
-      // Optimistic: create dir and reply immediately, then write to cell.
-      const ino = tree.addDir(parent, name, "object");
+      const prepared = cfcWritebacks.getPrepared(parent, "mkdir", name);
+      const ino = prepared
+        ? applyPreparedCreate(tree, parent, name, "dir", prepared)
+        : tree.addDir(parent, name, "object");
+      if (prepared) {
+        cfcWritebacks.markMutationApplied(parent, "mkdir", name);
+      }
       const node = tree.getNode(ino);
       replyEntry(req, ino, node);
 
       // Fire-and-forget write to cell
-      const newPath = [...parentPath.jsonPath, name];
+      const newPath = appendDecodedJsonPath(parentPath.jsonPath, name);
       bridge.writeValue(
         { ...parentPath, jsonPath: newPath },
         {},
-      ).catch((e) => {
-        console.error(`[fuse] mkdir write error: ${e}`);
+      ).then(async () => {
+        cfcWritebacks.markReadyForExactRecomputation(parent, "mkdir", name);
+        await bridge.finalizeWritePath(parentPath);
+        cfcWritebacks.markFinalizedPendingCleanup(parent, "mkdir", name);
+        cfcWritebacks.deletePrepared(parent, "mkdir", name);
+      }).catch((e) => {
+        cfcWritebacks.markRunnerCommitFailed(parent, "mkdir", String(e), name);
+        recordAsyncWriteFailure("mkdir write error", e);
       });
     },
   );
@@ -993,6 +2529,7 @@ async function main() {
       parentIno: number | bigint,
       namePtr: Deno.PointerValue,
     ) => {
+      logOp("unlink", parentIno.toString());
       if (!bridge) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -1000,6 +2537,29 @@ async function main() {
 
       const parent = BigInt(parentIno);
       const name = readCString(namePtr);
+      if (name.startsWith("._")) {
+        tree.removeChild(parent, name);
+        fuse.symbols.fuse_reply_err(req, 0);
+        return;
+      }
+
+      let parentPath = null as ReturnType<CellBridge["resolveWritePath"]>;
+      let authorization = undefined as
+        | ReturnType<typeof authorizeNamespaceMutationWriteback>
+        | undefined;
+      if (isCfcEnforcing(cfcMode)) {
+        parentPath = bridge.resolveWritePath(parent);
+        if (!parentPath) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+        authorization = authorizeNamespaceCfcWrite(parent, "unlink", name);
+        if (!authorization.allowed) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+      }
+
       const childIno = tree.lookup(parent, name);
       if (childIno === undefined) {
         fuse.symbols.fuse_reply_err(req, ENOENT);
@@ -1012,10 +2572,27 @@ async function main() {
         return;
       }
 
+      parentPath ??= bridge.resolveWritePath(parent);
+      if (!parentPath) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      if (failIfDisconnectedWrite(req)) return;
+      authorization ??= authorizeNamespaceCfcWrite(parent, "unlink", name);
+      if (!authorization.allowed) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
       // For array parents: read parent array, splice, write back
       const parentNode = tree.getNode(parent);
       const isArrayParent = parentNode?.kind === "dir" &&
         parentNode.jsonType === "array";
+
+      applyNamespacePreparation(parent, authorization);
+      if (authorization.prepared) {
+        cfcWritebacks.markMutationApplied(parent, "unlink", name);
+      }
 
       // Optimistic: remove from tree and reply immediately
       tree.removeChild(parent, name);
@@ -1033,21 +2610,29 @@ async function main() {
       // since we already did them above)
       (async () => {
         if (isArrayParent) {
-          const parentPath = bridge!.resolveWritePath(parent);
-          if (!parentPath) return;
           const currentValue = await writePath.piece[writePath.cell].get(
             parentPath.jsonPath.length > 0 ? parentPath.jsonPath : undefined,
           );
           if (Array.isArray(currentValue)) {
-            const idx = Number(name);
+            const idx = Number(decodeFuseNamespaceName(name));
             if (!isNaN(idx) && idx >= 0 && idx < currentValue.length) {
               currentValue.splice(idx, 1);
               await bridge!.writeValue(parentPath, currentValue);
+              cfcWritebacks.markReadyForExactRecomputation(
+                parent,
+                "unlink",
+                name,
+              );
+              await bridge!.finalizeWritePath(parentPath);
+              cfcWritebacks.markFinalizedPendingCleanup(
+                parent,
+                "unlink",
+                name,
+              );
+              cfcWritebacks.deletePrepared(parent, "unlink", name);
             }
           }
         } else {
-          const parentPath = bridge!.resolveWritePath(parent);
-          if (!parentPath) return;
           const currentValue = await writePath.piece[writePath.cell].get(
             parentPath.jsonPath.length > 0 ? parentPath.jsonPath : undefined,
           );
@@ -1056,12 +2641,25 @@ async function main() {
             !Array.isArray(currentValue)
           ) {
             const obj = { ...(currentValue as Record<string, unknown>) };
-            delete obj[name];
+            delete obj[decodeFuseNamespaceName(name)];
             await bridge!.writeValue(parentPath, obj);
+            cfcWritebacks.markReadyForExactRecomputation(
+              parent,
+              "unlink",
+              name,
+            );
+            await bridge!.finalizeWritePath(parentPath);
+            cfcWritebacks.markFinalizedPendingCleanup(
+              parent,
+              "unlink",
+              name,
+            );
+            cfcWritebacks.deletePrepared(parent, "unlink", name);
           }
         }
       })().catch((e) => {
-        console.error(`[fuse] unlink write error: ${e}`);
+        cfcWritebacks.markRunnerCommitFailed(parent, "unlink", String(e), name);
+        recordAsyncWriteFailure("unlink write error", e);
       });
     },
   );
@@ -1075,6 +2673,7 @@ async function main() {
       parentIno: number | bigint,
       namePtr: Deno.PointerValue,
     ) => {
+      logOp("rmdir", parentIno.toString());
       if (!bridge) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -1082,6 +2681,24 @@ async function main() {
 
       const parent = BigInt(parentIno);
       const name = readCString(namePtr);
+
+      let parentPath = null as ReturnType<CellBridge["resolveWritePath"]>;
+      let authorization = undefined as
+        | ReturnType<typeof authorizeNamespaceMutationWriteback>
+        | undefined;
+      if (isCfcEnforcing(cfcMode)) {
+        parentPath = bridge.resolveWritePath(parent);
+        if (!parentPath) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+        authorization = authorizeNamespaceCfcWrite(parent, "rmdir", name);
+        if (!authorization.allowed) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+      }
+
       const childIno = tree.lookup(parent, name);
       if (childIno === undefined) {
         fuse.symbols.fuse_reply_err(req, ENOENT);
@@ -1100,10 +2717,27 @@ async function main() {
         return;
       }
 
+      parentPath ??= bridge.resolveWritePath(parent);
+      if (!parentPath) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      if (failIfDisconnectedWrite(req)) return;
+      authorization ??= authorizeNamespaceCfcWrite(parent, "rmdir", name);
+      if (!authorization.allowed) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
       // Same removal logic as unlink but for a directory
       const parentNode = tree.getNode(parent);
       const isArrayParent = parentNode?.kind === "dir" &&
         parentNode.jsonType === "array";
+
+      applyNamespacePreparation(parent, authorization);
+      if (authorization.prepared) {
+        cfcWritebacks.markMutationApplied(parent, "rmdir", name);
+      }
 
       // Optimistic: remove from tree and reply immediately
       tree.removeChild(parent, name);
@@ -1114,21 +2748,29 @@ async function main() {
       // Fire-and-forget the cell write
       (async () => {
         if (isArrayParent) {
-          const parentPath = bridge!.resolveWritePath(parent);
-          if (!parentPath) return;
           const currentValue = await writePath.piece[writePath.cell].get(
             parentPath.jsonPath.length > 0 ? parentPath.jsonPath : undefined,
           );
           if (Array.isArray(currentValue)) {
-            const idx = Number(name);
+            const idx = Number(decodeFuseNamespaceName(name));
             if (!isNaN(idx) && idx >= 0 && idx < currentValue.length) {
               currentValue.splice(idx, 1);
               await bridge!.writeValue(parentPath, currentValue);
+              cfcWritebacks.markReadyForExactRecomputation(
+                parent,
+                "rmdir",
+                name,
+              );
+              await bridge!.finalizeWritePath(parentPath);
+              cfcWritebacks.markFinalizedPendingCleanup(
+                parent,
+                "rmdir",
+                name,
+              );
+              cfcWritebacks.deletePrepared(parent, "rmdir", name);
             }
           }
         } else {
-          const parentPath = bridge!.resolveWritePath(parent);
-          if (!parentPath) return;
           const currentValue = await writePath.piece[writePath.cell].get(
             parentPath.jsonPath.length > 0 ? parentPath.jsonPath : undefined,
           );
@@ -1137,39 +2779,79 @@ async function main() {
             !Array.isArray(currentValue)
           ) {
             const obj = { ...(currentValue as Record<string, unknown>) };
-            delete obj[name];
+            delete obj[decodeFuseNamespaceName(name)];
             await bridge!.writeValue(parentPath, obj);
+            cfcWritebacks.markReadyForExactRecomputation(
+              parent,
+              "rmdir",
+              name,
+            );
+            await bridge!.finalizeWritePath(parentPath);
+            cfcWritebacks.markFinalizedPendingCleanup(
+              parent,
+              "rmdir",
+              name,
+            );
+            cfcWritebacks.deletePrepared(parent, "rmdir", name);
           }
         }
       })().catch((e) => {
-        console.error(`[fuse] rmdir write error: ${e}`);
+        cfcWritebacks.markRunnerCommitFailed(parent, "rmdir", String(e), name);
+        recordAsyncWriteFailure("rmdir write error", e);
       });
     },
   );
   callbacks.push(rmdirCb);
 
-  // rename(req, parent_ino, name_ptr, newparent_ino, newname_ptr)
-  const renameCb = new Deno.UnsafeCallback(
-    {
-      parameters: ["pointer", "u64", "pointer", "u64", "pointer"],
-      result: "void",
-    } as const,
+  // rename — platform factory handles Linux v3 extra `flags` param
+  const renameCb = platform.createRenameCallback(
     (
       req: Deno.PointerValue,
-      parentIno: number | bigint,
+      parentIno: bigint,
       namePtr: Deno.PointerValue,
-      newParentIno: number | bigint,
+      newParentIno: bigint,
       newNamePtr: Deno.PointerValue,
     ) => {
+      logOp("rename", parentIno.toString());
       if (!bridge) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
 
-      const oldParent = BigInt(parentIno);
+      const oldParent = parentIno;
       const oldName = readCString(namePtr);
-      const newParent = BigInt(newParentIno);
+      const newParent = newParentIno;
       const newName = readCString(newNamePtr);
+
+      let oldParentWritePath = null as ReturnType<
+        CellBridge["resolveWritePath"]
+      >;
+      let newParentPath = null as ReturnType<CellBridge["resolveWritePath"]>;
+      let renameAuthorization = undefined as
+        | ReturnType<typeof authorizeRenameCfcWrite>
+        | undefined;
+      if (isCfcEnforcing(cfcMode)) {
+        oldParentWritePath = bridge.resolveWritePath(oldParent);
+        if (!oldParentWritePath) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+        newParentPath = bridge.resolveWritePath(newParent);
+        if (!newParentPath) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+        renameAuthorization = authorizeRenameCfcWrite(
+          oldParent,
+          oldName,
+          newParent,
+          newName,
+        );
+        if (!renameAuthorization.allowed) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+      }
 
       const childIno = tree.lookup(oldParent, oldName);
       if (childIno === undefined) {
@@ -1183,8 +2865,7 @@ async function main() {
         return;
       }
 
-      // Check new parent is in the same cell
-      const newParentPath = bridge.resolveWritePath(newParent);
+      newParentPath ??= bridge.resolveWritePath(newParent);
       if (!newParentPath) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -1199,6 +2880,23 @@ async function main() {
         return;
       }
 
+      oldParentWritePath ??= bridge.resolveWritePath(oldParent);
+      if (!oldParentWritePath) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+      if (failIfDisconnectedWrite(req)) return;
+      renameAuthorization ??= authorizeRenameCfcWrite(
+        oldParent,
+        oldName,
+        newParent,
+        newName,
+      );
+      if (!renameAuthorization.allowed) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
       const doRename = async () => {
         // Read value at old path
         const value = await oldWritePath.piece[oldWritePath.cell].get(
@@ -1206,36 +2904,110 @@ async function main() {
         );
 
         // Write at new path
-        const destPath = [...newParentPath.jsonPath, newName];
+        const destPath = appendDecodedJsonPath(
+          newParentPath.jsonPath,
+          newName,
+        );
         await bridge!.writeValue(
           { ...newParentPath, jsonPath: destPath },
           value,
         );
 
         // Delete old path: read parent, delete key, write back
-        const oldParentWritePath = bridge!.resolveWritePath(oldParent);
-        if (oldParentWritePath) {
-          const parentValue = await oldWritePath.piece[oldWritePath.cell].get(
-            oldParentWritePath.jsonPath.length > 0
-              ? oldParentWritePath.jsonPath
-              : undefined,
-          );
-          if (
-            parentValue && typeof parentValue === "object" &&
-            !Array.isArray(parentValue)
-          ) {
-            const obj = { ...(parentValue as Record<string, unknown>) };
-            delete obj[oldName];
-            await bridge!.writeValue(oldParentWritePath, obj);
-          } else if (Array.isArray(parentValue)) {
-            const idx = Number(oldName);
-            if (!isNaN(idx)) {
-              parentValue.splice(idx, 1);
-              await bridge!.writeValue(oldParentWritePath, parentValue);
-            }
+        const parentValue = await oldWritePath.piece[oldWritePath.cell].get(
+          oldParentWritePath.jsonPath.length > 0
+            ? oldParentWritePath.jsonPath
+            : undefined,
+        );
+        if (
+          parentValue && typeof parentValue === "object" &&
+          !Array.isArray(parentValue)
+        ) {
+          const obj = { ...(parentValue as Record<string, unknown>) };
+          delete obj[decodeFuseNamespaceName(oldName)];
+          await bridge!.writeValue(oldParentWritePath, obj);
+        } else if (Array.isArray(parentValue)) {
+          const idx = Number(decodeFuseNamespaceName(oldName));
+          if (!isNaN(idx)) {
+            parentValue.splice(idx, 1);
+            await bridge!.writeValue(oldParentWritePath, parentValue);
           }
         }
+
+        if (oldParent === newParent) {
+          cfcWritebacks.markReadyForExactRecomputation(
+            oldParent,
+            "rename-source",
+            oldName,
+          );
+          cfcWritebacks.markReadyForExactRecomputation(
+            newParent,
+            "rename-destination",
+            newName,
+          );
+          await bridge!.finalizeWritePath(oldParentWritePath);
+        } else {
+          cfcWritebacks.markReadyForExactRecomputation(
+            oldParent,
+            "rename-source",
+            oldName,
+          );
+          cfcWritebacks.markReadyForExactRecomputation(
+            newParent,
+            "rename-destination",
+            newName,
+          );
+          await bridge!.finalizeWritePath(newParentPath);
+          await bridge!.finalizeWritePath(oldParentWritePath);
+        }
+        cfcWritebacks.markFinalizedPendingCleanup(
+          oldParent,
+          "rename-source",
+          oldName,
+        );
+        cfcWritebacks.markFinalizedPendingCleanup(
+          newParent,
+          "rename-destination",
+          newName,
+        );
+        cfcWritebacks.deletePrepared(oldParent, "rename-source", oldName);
+        cfcWritebacks.deletePrepared(
+          newParent,
+          "rename-destination",
+          newName,
+        );
       };
+
+      applyNamespacePreparation(oldParent, renameAuthorization.source);
+      if (renameAuthorization.source.prepared) {
+        cfcWritebacks.markMutationApplied(
+          oldParent,
+          "rename-source",
+          oldName,
+        );
+      }
+      if (newParent !== oldParent) {
+        applyNamespacePreparation(newParent, renameAuthorization.destination);
+        if (renameAuthorization.destination.prepared) {
+          cfcWritebacks.markMutationApplied(
+            newParent,
+            "rename-destination",
+            newName,
+          );
+        }
+      } else if (
+        renameAuthorization.destination.prepared !==
+          renameAuthorization.source.prepared
+      ) {
+        applyNamespacePreparation(newParent, renameAuthorization.destination);
+        if (renameAuthorization.destination.prepared) {
+          cfcWritebacks.markMutationApplied(
+            newParent,
+            "rename-destination",
+            newName,
+          );
+        }
+      }
 
       // Optimistic: rename in tree and reply immediately
       tree.rename(oldParent, oldName, newParent, newName);
@@ -1243,7 +3015,19 @@ async function main() {
 
       // Fire-and-forget the cell writes
       doRename().catch((e) => {
-        console.error(`[fuse] rename write error: ${e}`);
+        cfcWritebacks.markRunnerCommitFailed(
+          oldParent,
+          "rename-source",
+          String(e),
+          oldName,
+        );
+        cfcWritebacks.markRunnerCommitFailed(
+          newParent,
+          "rename-destination",
+          String(e),
+          newName,
+        );
+        recordAsyncWriteFailure("rename write error", e);
       });
     },
   );
@@ -1275,6 +3059,20 @@ async function main() {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
+
+      let authorization = undefined as
+        | ReturnType<typeof authorizeSymlinkWriteback>
+        | undefined;
+      if (cfcMode !== "disabled") {
+        authorization = authorizeSymlinkCfcWrite(parent, name, target, {
+          allowDeferredTargetIdentity: true,
+        });
+        if (!authorization.allowed) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+      }
 
       // Parse target into sigil link components
       const sigil = bridge.parseSymlinkTarget(parent, target);
@@ -1283,22 +3081,66 @@ async function main() {
         return;
       }
 
+      const needsTargetIdentityValidation = authorization?.allowed &&
+        authorization.prepared?.target.targetText === undefined &&
+        authorization.prepared?.target.targetIdentity !== undefined;
+      if (needsTargetIdentityValidation) {
+        authorization = authorizeSymlinkCfcWrite(parent, name, target, {
+          targetIdentity: sigil,
+        });
+        if (!authorization.allowed) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+      }
+
       // Construct sigil link value and write to cell
       const sigilValue = { "/": { "link@1": sigil } };
       const writePath = {
         ...parentPath,
-        jsonPath: [...parentPath.jsonPath, name],
+        jsonPath: appendDecodedJsonPath(parentPath.jsonPath, name),
       };
 
       // Optimistic: add to tree and reply immediately, then write to cell.
       // The subscription rebuild will eventually replace this node.
-      const ino = tree.addSymlink(parent, name, target);
+      const prepared = authorization?.allowed
+        ? authorization.prepared
+        : undefined;
+      const ino = prepared
+        ? applyPreparedSymlink(tree, parent, name, target, prepared)
+        : tree.addSymlink(parent, name, target);
+      if (prepared) {
+        cfcWritebacks.markMutationApplied(parent, "symlink", name);
+      }
       const node = tree.getNode(ino);
       replyEntry(req, ino, node);
 
       // Fire-and-forget write to cell
-      bridge.writeValue(writePath, sigilValue).catch((e) => {
-        console.error(`[fuse] symlink write error: ${e}`);
+      bridge.writeValue(writePath, sigilValue).then(async () => {
+        if (prepared) {
+          cfcWritebacks.markReadyForExactRecomputation(
+            parent,
+            "symlink",
+            name,
+          );
+        }
+        if (cfcAnnotationsEnabled) {
+          await bridge.finalizeWritePath(parentPath);
+        } else {
+          bridge.invalidateWritePath(parentPath);
+        }
+        if (prepared) {
+          cfcWritebacks.markFinalizedPendingCleanup(parent, "symlink", name);
+          cfcWritebacks.deletePrepared(parent, "symlink", name);
+        }
+      }).catch((e) => {
+        cfcWritebacks.markRunnerCommitFailed(
+          parent,
+          "symlink",
+          String(e),
+          name,
+        );
+        recordAsyncWriteFailure("symlink write error", e);
       });
     },
   );
@@ -1335,83 +3177,177 @@ async function main() {
   setOp(OPS_OFFSETS.opendir, opendirCb);
   setOp(OPS_OFFSETS.readdir, readdirCb);
   setOp(OPS_OFFSETS.releasedir, releasedirCb);
+  if (cfcWritebackXattrs) {
+    setOp(OPS_OFFSETS.setxattr, setxattrCb);
+  }
   setOp(OPS_OFFSETS.getxattr, getxattrCb);
   setOp(OPS_OFFSETS.listxattr, listxattrCb);
+  if (cfcWritebackXattrs) {
+    setOp(OPS_OFFSETS.removexattr, removexattrCb);
+  }
   setOp(OPS_OFFSETS.create, createCb);
 
   // --- Mount ---
-  const { argsBuf, argv: _argv, encodedArgs: _ea } = createFuseArgs([
-    "fuse_ct",
-  ]);
+  const fuseArgs = ["fuse_ct"];
+  if (Deno.build.os === "linux" && args["allow-other"]) {
+    fuseArgs.push("-o", "allow_other");
+    if (!cfcWritebackXattrs) {
+      fuseArgs.push("-o", "default_permissions");
+    }
+  }
+  const { argsBuf, argv: _argv, encodedArgs: _ea } = platform.createFuseArgs(
+    fuseArgs,
+  );
 
   const mountpointBuf = encoder.encode(mountpoint + "\0");
 
-  const chan = fuse.symbols.fuse_mount(
-    mountpointBuf,
-    Deno.UnsafePointer.of(new Uint8Array(argsBuf)),
-  );
-
-  if (!chan) {
-    console.error(
-      "fuse_mount failed. Is the mountpoint valid? Is macFUSE installed?",
+  let handle: ReturnType<typeof platform.mount>;
+  try {
+    handle = platform.mount(
+      fuse,
+      mountpointBuf,
+      argsBuf,
+      opsBuf,
+      BigInt(OPS_SIZE),
     );
+  } catch (e) {
+    console.error(String(e));
+    await writeSupervisorStatus("failed", { error: String(e) }).catch(() => {
+      // Best effort; mount failure is already being reported by process exit.
+    });
     Deno.exit(1);
   }
-
-  const session = fuse.symbols.fuse_lowlevel_new(
-    Deno.UnsafePointer.of(new Uint8Array(argsBuf)),
-    Deno.UnsafePointer.of(new Uint8Array(opsBuf)),
-    BigInt(OPS_SIZE),
-    null,
-  );
-
-  if (!session) {
-    console.error("fuse_lowlevel_new failed");
-    fuse.symbols.fuse_unmount(mountpointBuf, chan);
-    Deno.exit(1);
-  }
-
-  fuse.symbols.fuse_session_add_chan(session, chan);
+  // handle is guaranteed assigned — Deno.exit(1) never returns
 
   let unmounting = false;
 
-  // Wire up kernel cache invalidation for subscriptions
+  // Wire up kernel cache invalidation for subscriptions.
+  //
+  // libfuse reverse invalidation can block while the kernel answers the notify
+  // request. Some bridge paths run while a FUSE request is still awaiting its
+  // reply (for example, lookup -> connectSpace -> syncPieceList). Calling
+  // notify inline from those paths can deadlock the daemon against the kernel's
+  // pending request. Queue notifications onto a timer and wait for all tracked
+  // async replies to drain before issuing reverse invalidations.
   if (bridge) {
-    let notifySupported = true;
-    bridge.onInvalidate = (parentIno: bigint, names: string[]) => {
-      if (!notifySupported || unmounting) return;
-      for (const name of names) {
-        const nameBuf = encoder.encode(name + "\0");
-        const rc = fuse.symbols.fuse_lowlevel_notify_inval_entry(
-          chan,
-          parentIno,
-          nameBuf,
-          BigInt(name.length),
-        );
-        if (rc === -38) {
-          // ENOSYS — FUSE-T doesn't support notify_inval_entry
-          console.log(
-            "notify_inval_entry not supported (FUSE-T); relying on short timeouts",
-          );
-          notifySupported = false;
-          break;
+    let entryNotifySupported = true;
+    let inodeNotifySupported = true;
+    const pendingEntryInvalidations = new Map<
+      string,
+      { parentIno: bigint; names: Set<string> }
+    >();
+    const pendingInodeInvalidations = new Set<bigint>();
+    let invalidationTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const scheduleInvalidationFlush = () => {
+      if (invalidationTimer !== undefined) return;
+      invalidationTimer = setTimeout(() => {
+        invalidationTimer = undefined;
+        if (pendingFuseReplies > 0) return;
+        flushDeferredInvalidations();
+      }, 0);
+    };
+    onPendingFuseRepliesDrained = scheduleInvalidationFlush;
+
+    const flushDeferredInvalidations = () => {
+      if (unmounting) {
+        pendingEntryInvalidations.clear();
+        pendingInodeInvalidations.clear();
+        return;
+      }
+
+      if (entryNotifySupported) {
+        for (const { parentIno, names } of pendingEntryInvalidations.values()) {
+          for (const name of names) {
+            const nameBuf = encoder.encode(name + "\0");
+            try {
+              const rc = fuse.symbols.fuse_lowlevel_notify_inval_entry(
+                handle.notifyTarget,
+                parentIno,
+                nameBuf,
+                BigInt(nameBuf.length - 1),
+              );
+              if (rc === -38) {
+                // ENOSYS — FUSE-T doesn't support notify_inval_entry.
+                console.log(
+                  "notify_inval_entry not supported (FUSE-T); relying on short timeouts",
+                );
+                entryNotifySupported = false;
+                break;
+              }
+              if (debug && rc !== 0) {
+                console.log(
+                  `notify_inval_entry(parent=${parentIno}, name=${name}) => ${rc}`,
+                );
+              }
+            } catch (e) {
+              console.warn(`notify_inval_entry failed: ${e}`);
+              entryNotifySupported = false;
+              break;
+            }
+          }
+          if (!entryNotifySupported) break;
         }
       }
+      pendingEntryInvalidations.clear();
+
+      if (inodeNotifySupported) {
+        for (const ino of pendingInodeInvalidations) {
+          try {
+            // Invalidate all cached data for this inode (off=0, len=-1 means all)
+            const ret = fuse.symbols.fuse_lowlevel_notify_inval_inode(
+              handle.notifyTarget,
+              ino,
+              0n,
+              -1n,
+            );
+            if (ret === -38) {
+              // ENOSYS — FUSE-T doesn't support notify_inval_inode.
+              inodeNotifySupported = false;
+              break;
+            }
+            if (debug) {
+              console.log(`notify_inval_inode(ino=${ino}) => ${ret}`);
+            }
+          } catch (e) {
+            console.warn(`notify_inval_inode failed: ${e}`);
+            inodeNotifySupported = false;
+            break;
+          }
+        }
+      }
+      pendingInodeInvalidations.clear();
+    };
+
+    bridge.onInvalidate = (parentIno: bigint, names: string[]) => {
+      if (!entryNotifySupported || unmounting) return;
+      const key = parentIno.toString();
+      let pending = pendingEntryInvalidations.get(key);
+      if (!pending) {
+        pending = { parentIno, names: new Set<string>() };
+        pendingEntryInvalidations.set(key, pending);
+      }
+      for (const name of names) {
+        pending.names.add(name);
+      }
+      scheduleInvalidationFlush();
     };
     bridge.onInvalidateInode = (ino: bigint) => {
-      if (unmounting) return;
-      // Invalidate all cached data for this inode (off=0, len=-1 means all)
-      const ret = fuse.symbols.fuse_lowlevel_notify_inval_inode(
-        chan,
-        ino,
-        0n,
-        -1n,
-      );
-      if (debug) {
-        console.log(`notify_inval_inode(ino=${ino}) => ${ret}`);
-      }
+      if (!inodeNotifySupported || unmounting) return;
+      pendingInodeInvalidations.add(ino);
+      scheduleInvalidationFlush();
     };
   }
+
+  await writeSupervisorStatus("mounted").catch((error) => {
+    console.warn(`[FUSE] Unable to write mounted supervisor status: ${error}`);
+  });
+  const supervisorHeartbeat = supervisorStatusPath
+    ? setInterval(() => {
+      if (unmounting) return;
+      writeSupervisorStatus("mounted").catch(() => undefined);
+    }, 1_000)
+    : undefined;
 
   console.log(`Mounted at ${mountpoint}`);
   console.log("Press Ctrl+C to unmount");
@@ -1421,7 +3357,8 @@ async function main() {
     if (unmounting) return;
     unmounting = true;
     console.log("\nUnmounting...");
-    fuse.symbols.fuse_unmount(mountpointBuf, chan);
+    writeSupervisorStatus("exiting").catch(() => undefined);
+    platform.unmount(fuse, handle, mountpointBuf);
   }
 
   Deno.addSignalListener("SIGINT", () => {
@@ -1432,17 +3369,19 @@ async function main() {
   });
 
   // Run FUSE event loop (nonblocking: true → returns Promise)
-  const result = await fuse.symbols.fuse_session_loop(session);
+  const result = await fuse.symbols.fuse_session_loop(handle.session);
   console.log(`FUSE loop exited (code ${result})`);
+  if (supervisorHeartbeat !== undefined) clearInterval(supervisorHeartbeat);
+  await writeSupervisorStatus("exited", { exitCode: result }).catch(() => {
+    // Best effort during shutdown.
+  });
 
   // Final cleanup
-  fuse.symbols.fuse_session_remove_chan(chan);
-  fuse.symbols.fuse_session_destroy(session);
-  if (!unmounting) {
-    fuse.symbols.fuse_unmount(mountpointBuf, chan);
-  }
+  platform.cleanup(fuse, handle, mountpointBuf, unmounting);
   for (const cb of callbacks) cb.close();
   console.log("Cleaned up.");
 }
 
-main();
+if (import.meta.main) {
+  await main();
+}

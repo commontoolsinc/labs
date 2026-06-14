@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: Cross-Piece Stream Client
  *
@@ -10,9 +9,9 @@
  *    - The blessed doc's "auto-unwrap via Stream<T> signature" explanation is WRONG
  *    - Event must be an object (runtime calls preventDefault), can have data props but NO functions
  *
- * 2. ct.render Forces Piece Execution - VERIFIED
+ * 2. <cf-render> Forces Piece Execution - VERIFIED
  *    - Just wishing for a piece doesn't make it run
- *    - Use <ct-render $cell={...} /> to force execution
+ *    - Use <cf-render $cell={...} /> to force execution
  *
  * PREREQUISITES DISCOVERED:
  *    - Wish tags must be in JSDoc on Output type (not file-level comments)
@@ -21,34 +20,35 @@
  * TESTING:
  *    1. Deploy server piece first, favorite it
  *    2. Deploy this client piece
- *    3. Toggle to Mode B (ct.render active)
+ *    3. Toggle to Mode B (<cf-render> active)
  *    4. Click "Invoke Server Stream" - server counter should increment
  */
 import {
   Default,
-  derive,
   handler,
   NAME,
   pattern,
   Stream,
+  toCompactDebugString,
+  toIndentedDebugString,
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface Input {
-  // Toggle between Mode A (wish only) and Mode B (wish + ct.render)
-  useCtRender: Default<boolean, false>;
+  // Toggle between Mode A (wish only) and Mode B (wish + <cf-render>)
+  useCfRender: boolean | Default<false>;
 
   // Track last invocation result
-  lastInvocationStatus: Default<string, "Not invoked yet">;
+  lastInvocationStatus: string | Default<"Not invoked yet">;
 
   // Track invocation count
-  invocationCount: Default<number, 0>;
+  invocationCount: number | Default<0>;
 }
 
-interface Output {
-  useCtRender: boolean;
+export interface Output {
+  useCfRender: boolean;
   lastInvocationStatus: string;
   invocationCount: number;
 }
@@ -80,7 +80,7 @@ const invokeServerStream = handler<
       );
     } else {
       state.lastInvocationStatus.set(
-        `Stream not found or invalid: ${JSON.stringify(innerValue)}`,
+        `Stream not found or invalid: ${toCompactDebugString(innerValue)}`,
       );
     }
   } catch (error) {
@@ -89,14 +89,14 @@ const invokeServerStream = handler<
 });
 
 // Handler for toggling the render mode
-const toggleMode = handler<unknown, { useCtRender: Writable<boolean> }>(
-  (_event, { useCtRender }) => {
-    useCtRender.set(!useCtRender.get());
+const toggleMode = handler<unknown, { useCfRender: Writable<boolean> }>(
+  (_event, { useCfRender }) => {
+    useCfRender.set(!useCfRender.get());
   },
 );
 
 export default pattern<Input, Output>(
-  ({ useCtRender, lastInvocationStatus, invocationCount }) => {
+  ({ useCfRender, lastInvocationStatus, invocationCount }) => {
     // Wish for the server piece by tag
     const wishResult = wish<{
       counter: number;
@@ -109,11 +109,8 @@ export default pattern<Input, Output>(
     // Access the result from the wish (WishState has a result property)
     const serverPiece = wishResult.result;
 
-    // Extract the stream using derive
-    const serverStream = derive(
-      serverPiece,
-      (piece) => piece?.incrementCounter,
-    );
+    // Extract the stream via a plain projection (auto-wraps reactively)
+    const serverStream = serverPiece?.incrementCounter;
 
     return {
       [NAME]: "Cross-Piece Test Client",
@@ -137,22 +134,22 @@ export default pattern<Input, Output>(
             }}
           >
             <h3 style={{ marginTop: 0 }}>
-              Claim 2 Test: ct.render Forces Execution
+              Claim 2 Test: {"<cf-render>"} Forces Execution
             </h3>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <span>Current Mode:</span>
-              <strong style={{ color: useCtRender ? "#4CAF50" : "#FF9800" }}>
-                {useCtRender
-                  ? "Mode B: Wish + ct.render"
-                  : "Mode A: Wish Only (no ct.render)"}
+              <strong style={{ color: useCfRender ? "#4CAF50" : "#FF9800" }}>
+                {useCfRender
+                  ? "Mode B: Wish + <cf-render>"
+                  : "Mode A: Wish Only (no <cf-render>)"}
               </strong>
             </div>
-            <ct-button
-              onClick={toggleMode({ useCtRender })}
+            <cf-button
+              onClick={toggleMode({ useCfRender })}
               style="margin-top: 8px;"
             >
               Toggle Mode
-            </ct-button>
+            </cf-button>
             <p style={{ fontSize: "12px", marginTop: "8px", marginBottom: 0 }}>
               In Mode A, server piece should NOT execute. In Mode B, it should
               execute.
@@ -169,13 +166,13 @@ export default pattern<Input, Output>(
             }}
           >
             <h3 style={{ marginTop: 0 }}>Server Piece Status</h3>
-            {useCtRender
+            {useCfRender
               ? (
                 <div>
                   <p style={{ color: "#4CAF50", fontWeight: "bold" }}>
-                    Mode B Active: Rendering server piece with ct.render
+                    Mode B Active: Rendering server piece with {"<cf-render>"}
                   </p>
-                  {/* Use ct.render to force execution - even hidden, this makes the piece active */}
+                  {/* Use <cf-render> to force execution, even when hidden. */}
                   <div
                     style={{
                       border: "1px dashed #999",
@@ -183,7 +180,7 @@ export default pattern<Input, Output>(
                       marginTop: "8px",
                     }}
                   >
-                    <ct-render $cell={wishResult.result} />
+                    <cf-render $cell={wishResult.result} />
                   </div>
                 </div>
               )
@@ -208,16 +205,16 @@ export default pattern<Input, Output>(
             <div style={{ marginBottom: "8px" }}>
               <strong>Last Invocation Status:</strong> {lastInvocationStatus}
             </div>
-            <ct-button
+            <cf-button
               onClick={invokeServerStream({
-                stream: serverStream,
+                stream: serverStream!,
                 lastInvocationStatus,
                 invocationCount,
               })}
               style="margin-top: 8px;"
             >
               Invoke Server Stream
-            </ct-button>
+            </cf-button>
             <p style={{ fontSize: "12px", marginTop: "8px", marginBottom: 0 }}>
               Click to invoke the incrementCounter stream from the server piece.
               Check the server piece to see if the counter incremented.
@@ -238,23 +235,21 @@ export default pattern<Input, Output>(
                 Debug Info
               </summary>
               <pre style={{ fontSize: "10px", overflow: "auto" }}>
-              {JSON.stringify(
+              {toIndentedDebugString(
                 {
-                  useCtRender,
+                  useCfRender,
                   invocationCount,
                   lastInvocationStatus,
                   serverPieceExists: serverPiece !== undefined && serverPiece !== null,
                   serverStreamExists: serverStream !== undefined && serverStream !== null,
                 },
-                null,
-                2
               )}
               </pre>
             </details>
           </div>
         </div>
       ),
-      useCtRender,
+      useCfRender,
       lastInvocationStatus,
       invocationCount,
     };

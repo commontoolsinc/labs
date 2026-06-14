@@ -1,5 +1,16 @@
-import * as __ctHelpers from "commontools";
-import { type Cell, Default, handler, pattern } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { type Cell, Default, handler, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface OptionalBranch {
     counter?: number;
     label?: string;
@@ -14,12 +25,12 @@ interface NestedOptionalArgs {
     // deno-lint-ignore ban-types
     state: Default<NestedOptionalState, {}>;
 }
-const increment = handler(false as const satisfies __ctHelpers.JSONSchema, {
+const increment = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         state: {
             $ref: "#/$defs/NestedOptionalState",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["state"],
@@ -52,7 +63,7 @@ const increment = handler(false as const satisfies __ctHelpers.JSONSchema, {
             }
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, (_, context: {
+} as const satisfies __cfHelpers.JSONSchema, (_, context: {
     state: Cell<NestedOptionalState>;
 }) => {
     const current = context.state.get() ?? {};
@@ -67,11 +78,11 @@ const increment = handler(false as const satisfies __ctHelpers.JSONSchema, {
 //   handler() → injects event/context schemas with asCell annotations
 //   pattern<Args>() → generates input schema, output schema (with asOpaque/asStream)
 // Context: deeply nested optional types (OptionalBranch inside OptionalNested inside NestedOptionalState)
-export default pattern((__ct_pattern_input) => {
-    const state = __ct_pattern_input.key("state");
+export default pattern((__cf_pattern_input) => {
+    const state = __cf_pattern_input.key("state");
     return {
         state,
-        increment: increment({ state }),
+        increment: increment({ state }).for({ stream: ["__patternResult", "increment"] }, true)
     };
 }, {
     type: "object",
@@ -111,15 +122,16 @@ export default pattern((__ct_pattern_input) => {
             }
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         state: {
             $ref: "#/$defs/NestedOptionalState",
-            asOpaque: true
+            "default": {}
         },
         increment: {
-            asStream: true
+            type: "unknown",
+            asCell: ["stream"]
         }
     },
     required: ["state", "increment"],
@@ -152,8 +164,10 @@ export default pattern((__ct_pattern_input) => {
             }
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    increment
+});

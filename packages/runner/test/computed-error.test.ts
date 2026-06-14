@@ -1,10 +1,10 @@
-/// <cts-enable />
 import { assertEquals } from "@std/assert";
 import { Runtime } from "../src/runtime.ts";
 import { lift } from "../src/builder/module.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
-import { Identity } from "@commontools/identity";
+import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { trustPattern } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -23,18 +23,24 @@ Deno.test("computed throws error", async () => {
     runtime,
   });
 
-  const testPattern = pattern<{ input: number }>(({ input }) => {
-    const poisoned = lift((val: number) => {
-      if (val > 1) throw new Error("Poisoned!");
-      return `got: ${val}`;
-    })(input).for("poisoned");
+  const testPattern = trustPattern(
+    runtime,
+    pattern<{ input: number }>(({ input }) => {
+      // deno-lint-ignore no-explicit-any
+      const poisoned = (lift((val: number) => {
+        if (val > 1) throw new Error("Poisoned!");
+        return `got: ${val}`;
+      })(input) as any).for("poisoned");
 
-    const healthy = lift((p: string) => `healthy: ${p}`)(poisoned).for(
-      "healthy",
-    );
+      // deno-lint-ignore no-explicit-any
+      const healthy = (lift((p: string) => `healthy: ${p}`)(poisoned) as any)
+        .for(
+          "healthy",
+        );
 
-    return { poisoned, healthy };
-  });
+      return { poisoned, healthy };
+    }),
+  );
 
   const resultCell = runtime.getCell(space, "test-instance");
 
@@ -68,13 +74,10 @@ Deno.test("computed throws error", async () => {
   argumentCell.withTx(tx2).set({ input: 2 });
   await tx2.commit();
 
-  await runtime.scheduler.idle();
+  const afterError = (await resultCell.pull()) as any;
 
-  // What is the value of poisoned now?
-  const proxy: any = resultCell.getAsQueryResult();
-
-  assertEquals(proxy.poisoned, undefined);
-  assertEquals(proxy.healthy, undefined);
+  assertEquals(afterError.poisoned, undefined);
+  assertEquals(afterError.healthy, undefined);
 
   assertEquals(errorCaught, true);
 

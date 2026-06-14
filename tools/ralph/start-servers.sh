@@ -2,7 +2,8 @@
 
 # Start toolshed server in background
 echo "Starting toolshed server..."
-cd /app/labs/packages/toolshed && SHELL_URL=http://localhost:5173 deno task dev &
+SHELL_PORT=$(jq -e '.shell' /app/labs/ports.json) || { echo "Error: ports.json missing .shell" >&2; exit 1; }
+cd /app/labs/packages/toolshed && SHELL_URL=http://localhost:$SHELL_PORT deno task dev &
 TOOLSHED_PID=$!
 
 # Start shell server in background

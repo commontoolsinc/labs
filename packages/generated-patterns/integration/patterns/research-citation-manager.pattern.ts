@@ -1,25 +1,23 @@
-/// <cts-enable />
 import {
   type Cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
   str,
-  toSchema,
-} from "commontools";
+  type Writable,
+} from "commonfabric";
 
 type CitationStyle = "APA" | "MLA" | "Chicago";
 
 interface CitationInput {
-  id?: unknown;
-  title?: unknown;
-  authors?: unknown;
-  topic?: unknown;
-  year?: unknown;
-  style?: unknown;
-  summary?: unknown;
+  id?: string;
+  title?: string;
+  authors?: string[];
+  topic?: string;
+  year?: number;
+  style?: CitationStyle | string;
+  summary?: string;
 }
 
 interface CitationRecord {
@@ -52,19 +50,19 @@ interface BibliographySnapshot {
 }
 
 interface AddCitationEvent {
-  id?: unknown;
-  title?: unknown;
-  authors?: unknown;
-  topic?: unknown;
-  year?: unknown;
-  style?: unknown;
-  summary?: unknown;
+  id?: string;
+  title?: string;
+  authors?: string[];
+  topic?: string;
+  year?: number;
+  style?: CitationStyle | string;
+  summary?: string;
 }
 
 interface RetagCitationEvent {
-  id?: unknown;
-  topic?: unknown;
-  style?: unknown;
+  id?: string;
+  topic?: string;
+  style?: CitationStyle | string;
 }
 
 const allowedStyles: readonly CitationStyle[] = [
@@ -316,7 +314,7 @@ const retagCitation = handler(
 
 const updateActiveStyle = handler(
   (
-    event: { style?: unknown } | string | undefined,
+    event: { style?: string } | string | undefined,
     context: { style: Cell<CitationStyle | string> },
   ) => {
     const requested = typeof event === "string"
@@ -334,18 +332,12 @@ const liftActiveStyle = lift(
   (value: CitationStyle | string | undefined) => normalizeStyle(value, "APA"),
 );
 
-const liftCitationCatalog = lift(
-  toSchema<{
-    entries: Cell<CitationInput[]>;
-    fallback: Cell<CitationStyle>;
-  }>(),
-  toSchema<CitationRecord[]>(),
-  ({ entries, fallback }) => sanitizeCitations(entries.get(), fallback.get()),
-);
+const liftCitationCatalog = lift<{
+  entries: Writable<CitationInput[]>;
+  fallback: Writable<CitationStyle>;
+}>(({ entries, fallback }) => sanitizeCitations(entries.get(), fallback.get()));
 
-const liftGroups = lift(
-  toSchema<{ entries: Cell<CitationRecord[]> }>(),
-  toSchema<BibliographyGroups>(),
+const liftGroups = lift<{ entries: Writable<CitationRecord[]> }>(
   ({ entries }) => buildGroups(entries.get() ?? []),
 );
 
@@ -369,44 +361,39 @@ const liftStyleBibliographies = lift(
   },
 );
 
-const liftActiveBibliography = lift(
-  toSchema<
-    { style: Cell<CitationStyle>; catalog: Cell<Record<string, string[]>> }
-  >(),
-  toSchema<string[]>(),
-  ({ style: active, catalog }) => {
-    const current = active.get();
-    const mapping = catalog.get() ?? {};
-    return mapping[current] ?? [];
-  },
-);
+const liftActiveBibliography = lift<
+  {
+    style: Writable<CitationStyle>;
+    catalog: Writable<Record<string, string[]>>;
+  }
+>(({ style: active, catalog }) => {
+  const current = active.get();
+  const mapping = catalog.get() ?? {};
+  return mapping[current] ?? [];
+});
 
-const liftSnapshot = lift(
-  toSchema<{
-    entries: Cell<CitationRecord[]>;
-    topics: Cell<Record<string, CitationRecord[]>>;
-    styles: Cell<Record<string, CitationRecord[]>>;
-    active: Cell<CitationStyle>;
-    bibliography: Cell<string[]>;
-  }>(),
-  toSchema<BibliographySnapshot>(),
-  ({ entries, topics, styles, active, bibliography }) => {
-    const catalog = entries.get() ?? [];
-    const topicKeys = Object.keys(topics.get() ?? {});
-    const styleKeys = Object.keys(styles.get() ?? {});
-    const activeStyleValue = active.get();
-    const headline =
-      `${catalog.length} citations across ${topicKeys.length} topics using ${styleKeys.length} styles.`;
-    return {
-      total: catalog.length,
-      topics: topicKeys.length,
-      styles: styleKeys.length,
-      activeStyle: activeStyleValue,
-      activeBibliography: bibliography.get() ?? [],
-      headline,
-    };
-  },
-);
+const liftSnapshot = lift<{
+  entries: Writable<CitationRecord[]>;
+  topics: Writable<Record<string, CitationRecord[]>>;
+  styles: Writable<Record<string, CitationRecord[]>>;
+  active: Writable<CitationStyle>;
+  bibliography: Writable<string[]>;
+}>(({ entries, topics, styles, active, bibliography }) => {
+  const catalog = entries.get() ?? [];
+  const topicKeys = Object.keys(topics.get() ?? {});
+  const styleKeys = Object.keys(styles.get() ?? {});
+  const activeStyleValue = active.get();
+  const headline =
+    `${catalog.length} citations across ${topicKeys.length} topics using ${styleKeys.length} styles.`;
+  return {
+    total: catalog.length,
+    topics: topicKeys.length,
+    styles: styleKeys.length,
+    activeStyle: activeStyleValue,
+    activeBibliography: bibliography.get() ?? [],
+    headline,
+  };
+});
 
 export const researchCitationManager = pattern<CitationArgs>(
   ({ citations, style }) => {
@@ -419,8 +406,8 @@ export const researchCitationManager = pattern<CitationArgs>(
 
     const groups = liftGroups({ entries: citationCatalog });
 
-    const groupedByTopic = derive(groups, (result) => result.byTopic);
-    const groupedByStyle = derive(groups, (result) => result.byStyle);
+    const groupedByTopic = groups.byTopic;
+    const groupedByStyle = groups.byStyle;
 
     const topicBibliographies = liftTopicBibliographies(groupedByTopic);
 

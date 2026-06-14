@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   getGlobalLogFloor,
+  getGlobalTimingOutputConfig,
   getLogger,
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
@@ -11,6 +12,7 @@ import {
   resetAllLoggerCounts,
   resetAllTimingStats,
   setGlobalLogFloor,
+  setGlobalTimingOutputConfig,
 } from "../src/logger.ts";
 
 describe("logger", () => {
@@ -19,16 +21,20 @@ describe("logger", () => {
     log.level = "info";
     // Clear global floor so it doesn't interfere with tests
     setGlobalLogFloor(undefined);
+    setGlobalTimingOutputConfig(undefined);
+    performance.clearMeasures();
   });
 
   afterEach(() => {
     // Clean up global logger registry after each test
     const global = globalThis as unknown as {
-      commontools?: { logger?: Record<string, unknown> };
+      commonfabric?: { logger?: Record<string, unknown> };
     };
-    if (global.commontools?.logger) {
-      global.commontools.logger = {};
+    if (global.commonfabric?.logger) {
+      global.commonfabric.logger = {};
     }
+    setGlobalTimingOutputConfig(undefined);
+    performance.clearMeasures();
   });
 
   // Helper to check styled timestamp format
@@ -775,13 +781,13 @@ describe("logger", () => {
       expect(logger2.level).toBe("info"); // Original options preserved
     });
 
-    it("should be accessible via globalThis.commontools.logger", () => {
+    it("should be accessible via globalThis.commonfabric.logger", () => {
       const logger = getLogger("global-test");
       const global = globalThis as unknown as {
-        commontools: { logger: Record<string, typeof logger> };
+        commonfabric: { logger: Record<string, typeof logger> };
       };
 
-      expect(global.commontools.logger["global-test"]).toBe(logger);
+      expect(global.commonfabric.logger["global-test"]).toBe(logger);
     });
   });
 
@@ -819,10 +825,10 @@ describe("logger", () => {
     it("should handle empty logger registry gracefully", () => {
       // Clean up registry
       const global = globalThis as unknown as {
-        commontools?: { logger?: Record<string, unknown> };
+        commonfabric?: { logger?: Record<string, unknown> };
       };
-      if (global.commontools?.logger) {
-        global.commontools.logger = {};
+      if (global.commonfabric?.logger) {
+        global.commonfabric.logger = {};
       }
 
       // Should not throw
@@ -884,10 +890,10 @@ describe("logger", () => {
     it("should return 0 when no loggers exist", () => {
       // Clean up registry
       const global = globalThis as unknown as {
-        commontools?: { logger?: Record<string, unknown> };
+        commonfabric?: { logger?: Record<string, unknown> };
       };
-      if (global.commontools?.logger) {
-        global.commontools.logger = {};
+      if (global.commonfabric?.logger) {
+        global.commonfabric.logger = {};
       }
 
       expect(getTotalLoggerCounts()).toBe(0);
@@ -956,10 +962,10 @@ describe("logger", () => {
     it("should return empty breakdown with 0 total when no loggers exist", () => {
       // Clean up registry
       const global = globalThis as unknown as {
-        commontools?: { logger?: Record<string, unknown> };
+        commonfabric?: { logger?: Record<string, unknown> };
       };
-      if (global.commontools?.logger) {
-        global.commontools.logger = {};
+      if (global.commonfabric?.logger) {
+        global.commonfabric.logger = {};
       }
 
       const breakdown = getLoggerCountsBreakdown();
@@ -1442,6 +1448,80 @@ describe("logger", () => {
         expect(stats1?.count).toBe(1);
         expect(stats2?.count).toBe(1);
       });
+
+      it("should emit performance measures for matching timings when enabled", () => {
+        const logger = getLogger("timing-measure");
+        setGlobalTimingOutputConfig({
+          include: ["timing-measure:operation"],
+          measure: true,
+        });
+
+        logger.time(10, 25, "operation");
+
+        const measures = performance.getEntriesByType("measure").filter((
+          entry,
+        ) => entry.name === "logger:timing-measure:operation");
+
+        expect(measures).toHaveLength(1);
+        expect(measures[0].duration).toBe(15);
+      });
+
+      it("should not emit performance measures when timing config does not match", () => {
+        const logger = getLogger("timing-measure-filter");
+        setGlobalTimingOutputConfig({
+          include: ["other-prefix"],
+          measure: true,
+        });
+
+        logger.time(10, 25, "operation");
+
+        const measures = performance.getEntriesByType("measure").filter((
+          entry,
+        ) => entry.name.includes("timing-measure-filter"));
+
+        expect(measures).toHaveLength(0);
+      });
+
+      it("should emit console timing output for matching timings when enabled", () => {
+        const logger = getLogger("timing-console");
+        setGlobalTimingOutputConfig({
+          include: ["timing-console"],
+          console: true,
+          measure: false,
+        });
+
+        const { calls } = captureConsole("log", () => {
+          logger.time(0, 12.5, "operation");
+        });
+
+        expect(calls).toHaveLength(1);
+        expect(calls[0][0]).toMatch(
+          /^\%c\[TIMING\]\[timing-console::\d{2}:\d{2}:\d{2}\.\d{3}\]$/,
+        );
+        expect(calls[0][1]).toBe(LOG_COLORS.debug);
+        expect(calls[0][2]).toBe("operation");
+        expect(calls[0][3]).toBe("12.500ms");
+      });
+
+      it("should respect minimum duration threshold for timing output", () => {
+        const logger = getLogger("timing-min-threshold");
+        setGlobalTimingOutputConfig({
+          include: ["timing-min-threshold"],
+          console: true,
+          measure: true,
+          minMs: 10,
+        });
+
+        const { calls } = captureConsole("log", () => {
+          logger.time(0, 5, "operation");
+        });
+
+        expect(calls).toHaveLength(0);
+        const measures = performance.getEntriesByType("measure").filter((
+          entry,
+        ) => entry.name.includes("timing-min-threshold"));
+        expect(measures).toHaveLength(0);
+      });
     });
 
     describe("time() direct recording", () => {
@@ -1646,13 +1726,47 @@ describe("logger", () => {
       it("should handle empty logger registry gracefully", () => {
         // Clean up registry
         const global = globalThis as unknown as {
-          commontools?: { logger?: Record<string, unknown> };
+          commonfabric?: { logger?: Record<string, unknown> };
         };
-        if (global.commontools?.logger) {
-          global.commontools.logger = {};
+        if (global.commonfabric?.logger) {
+          global.commonfabric.logger = {};
         }
 
         expect(() => resetAllTimingStats()).not.toThrow();
+      });
+    });
+
+    describe("timing baselines", () => {
+      it("should track exact timing totals since baseline", () => {
+        const logger = getLogger("timing-baseline-total");
+
+        logger.time(0, 10, "op");
+        logger.time(0, 20, "op");
+        logger.resetTimingBaseline();
+        logger.time(0, 30, "op");
+        logger.time(0, 40, "op");
+
+        const stats = logger.getTimeStats("op");
+        expect(stats?.count).toBe(4);
+        expect(stats?.totalTime).toBe(100);
+        expect(stats?.countSinceBaseline).toBe(2);
+        expect(stats?.totalTimeSinceBaseline).toBe(70);
+        expect(stats?.averageSinceBaseline).toBe(35);
+        expect(stats?.cdfSinceBaseline).not.toBeNull();
+      });
+
+      it("should include timing keys first seen after baseline reset", () => {
+        const logger = getLogger("timing-baseline-new-key");
+
+        logger.resetTimingBaseline();
+        logger.time(0, 15, "new-op");
+
+        const stats = logger.getTimeStats("new-op");
+        expect(stats?.count).toBe(1);
+        expect(stats?.countSinceBaseline).toBe(1);
+        expect(stats?.totalTimeSinceBaseline).toBe(15);
+        expect(stats?.averageSinceBaseline).toBe(15);
+        expect(stats?.cdfSinceBaseline).not.toBeNull();
       });
     });
 
@@ -1890,6 +2004,26 @@ describe("logger", () => {
       expect(logger.counts.info).toBe(1);
       expect(logger.counts.warn).toBe(1);
       expect(logger.counts.error).toBe(1);
+    });
+  });
+
+  describe("global timing output config", () => {
+    it("should expose timing output config getters and setters", () => {
+      expect(getGlobalTimingOutputConfig()).toBeUndefined();
+
+      setGlobalTimingOutputConfig({
+        include: ["scheduler/execute"],
+        measure: true,
+        console: true,
+        minMs: 5,
+      });
+
+      expect(getGlobalTimingOutputConfig()).toEqual({
+        include: ["scheduler/execute"],
+        measure: true,
+        console: true,
+        minMs: 5,
+      });
     });
   });
 });

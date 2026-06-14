@@ -1,14 +1,13 @@
-/// <cts-enable />
 import {
   type Cell,
   cell,
+  computed,
   Default,
-  derive,
   handler,
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface NestedHandlerArgs {
   value: Default<number, 0>;
@@ -185,10 +184,10 @@ export const counterWithNestedHandlerComposition = pattern<NestedHandlerArgs>(
     const appliedView = liftAppliedView(appliedCount);
     const historyView = liftHistoryView(history);
     const lastPreparedView = liftLastPreparedView(lastPrepared);
-    const stageStatus = derive(
-      stage,
-      (current) => current.get() ? `staged:${current.get()!.tag}` : "idle",
-    );
+    const stageStatus = computed(() => {
+      const current = stage.get();
+      return current ? `staged:${current.tag}` : "idle";
+    });
     const label = str`${preparedView} prepared, ${appliedView} applied`;
 
     return {

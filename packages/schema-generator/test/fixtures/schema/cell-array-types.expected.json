@@ -1,14 +1,18 @@
 {
   "properties": {
     "v": {
-      "asCell": true,
+      "asCell": [
+        "cell"
+      ],
       "items": {
         "type": "number"
       },
       "type": "array"
     },
     "w": {
-      "asCell": true,
+      "asCell": [
+        "cell"
+      ],
       "items": {
         "properties": {
           "id": {

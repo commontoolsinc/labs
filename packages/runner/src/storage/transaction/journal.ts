@@ -1,4 +1,4 @@
-import type { StorableDatum } from "@commontools/memory/interface";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type {
   Activity,
   IAttestation,
@@ -12,6 +12,7 @@ import type {
   ITransactionJournal,
   ITransactionReader,
   ITransactionWriter,
+  IWriteOptions,
   JournalArchive,
   MemorySpace,
   ReadError,
@@ -109,12 +110,25 @@ export const read = (
   if (error) {
     return { error };
   } else {
+    const meta = options?.trackReadWithoutLoad === true
+      ? { ...(options?.meta ?? {}) }
+      : (() => {
+        const loaded = branch.load({
+          id: address.id,
+          type: address.type ?? "application/json",
+        }) as { since?: number };
+        return {
+          ...(options?.meta ?? {}),
+          ...(typeof loaded.since === "number" ? { seq: loaded.since } : {}),
+        };
+      })();
+
     // Track read activity with metadata
     journal.state.activity.push({
       read: {
         ...address,
         space,
-        meta: options?.meta ?? {},
+        meta,
         ...(options?.nonRecursive === true && { nonRecursive: true }),
       },
     });
@@ -141,13 +155,14 @@ export const write = (
   journal: IJournal,
   space: MemorySpace,
   address: IMemoryAddress,
-  value?: StorableDatum,
+  value?: FabricValue,
+  options?: IWriteOptions,
 ): Result<IAttestation, WriteError> => {
   const { ok: branch, error } = checkout(journal, space);
   if (error) {
     return { error };
   } else {
-    const result = branch.write(address, value);
+    const result = branch.write(address, value, options);
     if (result.error) {
       return { error: result.error.from(space) };
     } else {
@@ -352,9 +367,10 @@ export class TransactionWriter implements ITransactionWriter {
    */
   write(
     address: IMemoryAddress,
-    value?: StorableDatum,
+    value?: FabricValue,
+    options?: IWriteOptions,
   ) {
-    return write(this.#journal, this.#space, address, value);
+    return write(this.#journal, this.#space, address, value, options);
   }
 }
 

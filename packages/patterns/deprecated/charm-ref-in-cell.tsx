@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   computed,
   Default,
@@ -11,7 +10,7 @@ import {
   toSchema,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // full pattern state
 interface PatternState {
@@ -26,7 +25,7 @@ const PatternStateSchema = toSchema<PatternState>();
 // instead of storing the piece directly. This avoids a "pointer of pointers"
 // error that occurs when a Cell directly contains another Cell/piece reference.
 type PatternInOutput = {
-  cellRef: Default<{ piece: any }, { piece: null }>;
+  cellRef: { piece: any } | Default<{ piece: null }>;
 };
 
 // the simple piece (to which we'll store a reference within a cell)
@@ -118,18 +117,18 @@ export default pattern<PatternInOutput, PatternInOutput>(
               return cellRef.piece[UI] || "piece has no UI";
             })}
           </div>
-          <ct-button
+          <cf-button
             onClick={createSimplePiece({ cellRef })}
           >
             Create Sub Piece
-          </ct-button>
+          </cf-button>
 
           {ifElse(
             cellRef.piece,
             (
-              <ct-button onClick={goToStoredPiece({ cellRef })}>
+              <cf-button onClick={goToStoredPiece({ cellRef })}>
                 Go to Stored Piece
-              </ct-button>
+              </cf-button>
             ),
             (
               <div>no subpiece</div>

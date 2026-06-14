@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Location Track Module - GPS coordinate tracking over time
  *
@@ -11,7 +10,7 @@
  * TODO: Consider increasing remove button tap target to 44x44px for mobile accessibility (currently 32x32px)
  * TODO: Add export functionality (GPX, GeoJSON, CSV)
  * TODO: Add virtualization for large point lists (100+ points)
- * TODO: Expose continuous tracking mode from ct-location
+ * TODO: Expose continuous tracking mode from cf-location
  * TODO: Add schema fields for altitudeAccuracy, heading, speed
  * TODO: Consider adding to "place" template or creating "trip" template
  */
@@ -24,7 +23,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Types =====
@@ -82,15 +81,15 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Module Input Type =====
 export interface LocationTrackModuleInput {
   /** Array of captured location points */
-  locations: Default<LocationPoint[], []>;
+  locations: LocationPoint[] | Default<[]>;
   /** Optional label for this track (e.g., "Morning run", "Commute") */
-  label: Default<string, "">;
+  label: string | Default<"">;
 }
 
 // ===== Handlers =====
 
 /**
- * Handler for when ct-location emits a new location
+ * Handler for when cf-location emits a new location
  * Appends the location to the array
  */
 const handleLocationUpdate = handler<
@@ -170,8 +169,8 @@ export const LocationTrackModule = pattern<
   LocationTrackModuleInput,
   LocationTrackModuleInput
 >(({ locations, label }) => {
-  // Local writable cell for ct-location binding (not stored)
-  const currentCapture = Writable.of<LocationPoint | null>(null);
+  // Local writable cell for cf-location binding (not stored)
+  const currentCapture = new Writable<LocationPoint | null>(null);
 
   // Computed display text
   const displayText = computed(() => {
@@ -197,31 +196,31 @@ export const LocationTrackModule = pattern<
   return {
     [NAME]: computed(() => `${MODULE_METADATA.icon} Track: ${displayText}`),
     [UI]: (
-      <ct-vstack style={{ gap: "12px" }}>
+      <cf-vstack style={{ gap: "12px" }}>
         {/* Label input */}
-        <ct-vstack style={{ gap: "4px" }}>
+        <cf-vstack style={{ gap: "4px" }}>
           <label style={{ fontSize: "12px", color: "#6b7280" }}>
             Track Label (optional)
           </label>
-          <ct-input
+          <cf-input
             $value={label}
             placeholder="e.g., Morning walk, Commute..."
           />
-        </ct-vstack>
+        </cf-vstack>
 
         {/* Location capture button */}
-        <ct-vstack style={{ gap: "4px" }}>
+        <cf-vstack style={{ gap: "4px" }}>
           <label style={{ fontSize: "12px", color: "#6b7280" }}>
             Capture Location
           </label>
-          <ct-location
+          <cf-location
             $location={currentCapture}
-            onct-location-update={handleLocationUpdate({ locations })}
+            oncf-location-update={handleLocationUpdate({ locations })}
           />
-        </ct-vstack>
+        </cf-vstack>
 
         {/* Points summary */}
-        <ct-hstack
+        <cf-hstack
           style={{
             justifyContent: "space-between",
             alignItems: "center",
@@ -239,7 +238,7 @@ export const LocationTrackModule = pattern<
           </span>
           {ifElse(
             hasPoints,
-            <ct-button
+            <cf-button
               variant="ghost"
               size="sm"
               onClick={clearLocations({ locations })}
@@ -251,21 +250,21 @@ export const LocationTrackModule = pattern<
               }}
             >
               Clear All
-            </ct-button>,
+            </cf-button>,
             null,
           )}
-        </ct-hstack>
+        </cf-hstack>
 
         {/* Points list (collapsible for many points) */}
         {ifElse(
           hasMultiplePoints,
-          <ct-collapsible>
+          <cf-collapsible>
             <span slot="trigger" style={{ fontSize: "12px", color: "#6b7280" }}>
               View all points
             </span>
-            <ct-vstack style={{ gap: "0", marginTop: "8px" }}>
+            <cf-vstack style={{ gap: "0", marginTop: "8px" }}>
               {validLocationsWithIndex.map(({ point, index }) => (
-                <ct-hstack
+                <cf-hstack
                   key={index}
                   gap="3"
                   style={{
@@ -296,7 +295,7 @@ export const LocationTrackModule = pattern<
                   </span>
 
                   {/* Main content: coords + metadata stacked */}
-                  <ct-vstack style={{ flex: "1", gap: "2px", minWidth: "0" }}>
+                  <cf-vstack style={{ flex: "1", gap: "2px", minWidth: "0" }}>
                     {/* Coordinates */}
                     <span
                       style={{
@@ -313,7 +312,7 @@ export const LocationTrackModule = pattern<
                       <span style={{ color: "#d1d5db" }}>·</span>{" "}
                       {formatAccuracy(point.accuracy)}
                     </span>
-                  </ct-vstack>
+                  </cf-vstack>
 
                   {/* Delete button - more visible */}
                   <button
@@ -333,13 +332,13 @@ export const LocationTrackModule = pattern<
                   >
                     ×
                   </button>
-                </ct-hstack>
+                </cf-hstack>
               ))}
-            </ct-vstack>
-          </ct-collapsible>,
+            </cf-vstack>
+          </cf-collapsible>,
           null,
         )}
-      </ct-vstack>
+      </cf-vstack>
     ),
     locations,
     label,

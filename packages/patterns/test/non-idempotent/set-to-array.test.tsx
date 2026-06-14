@@ -1,27 +1,40 @@
-/// <cts-enable />
 /**
  * Test that exercises a non-idempotent Set-to-Array computation.
- * Random sort before Set insertion changes iteration order each run.
- * The idempotency check in ct test should warn about it.
+ * Insertion order into the Set depends on the previous output (a cell this
+ * computation also writes), so the Set's first-occurrence iteration order —
+ * and the array written from it — flips on every run. expectNonIdempotent
+ * asserts the idempotency check detects this; the test FAILS if no
+ * violation is reported.
  *
- * Run: deno task ct test packages/patterns/test/non-idempotent/set-to-array.test.tsx --verbose
+ * Deliberately NOT a random shuffle: with only two distinct tags a random
+ * order repeats itself about half the time, letting the detector's
+ * synchronous recheck see identical writes and miss. Deriving the order
+ * from the previous output makes consecutive runs differ with certainty
+ * (module-level mutable state would be the obvious alternative, but SES
+ * mode rejects top-level `let`).
+ *
+ * Run: deno task cf test packages/patterns/test/non-idempotent/set-to-array.test.tsx --verbose
  */
-import { computed, pattern, Writable } from "commontools";
+import { computed, pattern, Writable } from "commonfabric";
 
 export default pattern(() => {
-  const items = Writable.of([
+  const items = new Writable([
     { title: "Apples", tag: "fruit" },
     { title: "Carrots", tag: "vegetable" },
     { title: "Bananas", tag: "fruit" },
     { title: "Broccoli", tag: "vegetable" },
   ]);
-  const uniqueTags = Writable.of<string[]>([]);
+  const uniqueTags = new Writable<string[]>([]);
 
-  // Non-idempotent: random sort before Set changes iteration order
+  // Non-idempotent: insertion order flips whenever the previous output
+  // already starts with the natural first tag, so the Set's iteration
+  // order alternates [fruit, vegetable] / [vegetable, fruit] between
+  // consecutive runs.
   computed(() => {
     const tags = items.get().map((i) => i.tag);
-    const shuffled = tags.sort(() => Math.random() - 0.5);
-    const set = new Set(shuffled);
+    const previousFirst = uniqueTags.get()[0];
+    const ordered = previousFirst === tags[0] ? [...tags].reverse() : tags;
+    const set = new Set(ordered);
     uniqueTags.set([...set]);
   });
 

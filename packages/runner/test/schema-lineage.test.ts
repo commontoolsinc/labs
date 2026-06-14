@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import "@commontools/utils/equal-ignoring-symbols";
+import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { type JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -194,7 +195,7 @@ describe("Schema Lineage", () => {
       expect(cell.get()).toBe(5);
     });
 
-    it("should correctly handle aliases with asCell:true in schema", () => {
+    it("should correctly handle aliases with asCell cell in schema", () => {
       // Create a cell with nested objects that will be accessed with asCell
       const nestedCell = runtime.getCell<{
         items: Array<{ id: number; name: string }>;
@@ -239,7 +240,7 @@ describe("Schema Lineage", () => {
       // Access the items with a schema that specifies array items should be cells
       const itemsCellWithSchema = itemsCell.asSchema(
         {
-          asCell: true,
+          asCell: ["cell"],
         } as const satisfies JSONSchema,
       );
 
@@ -260,8 +261,8 @@ describe("Schema propagation end-to-end example", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
-  let UI: ReturnType<typeof createBuilder>["commontools"]["UI"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+  let UI: ReturnType<typeof createBuilder>["commonfabric"]["UI"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -272,8 +273,8 @@ describe("Schema propagation end-to-end example", () => {
       storageManager,
     });
     tx = runtime.edit();
-    const { commontools } = createBuilder();
-    ({ pattern, UI } = commontools);
+    const { commonfabric } = createTrustedBuilder(runtime);
+    ({ pattern, UI } = commonfabric);
   });
 
   afterEach(async () => {
@@ -332,7 +333,7 @@ describe("Schema propagation end-to-end example", () => {
           name: { type: "string" },
           props: {
             type: "object",
-            additionalProperties: { asCell: true },
+            additionalProperties: { asCell: ["cell"] },
           },
         },
       } as const satisfies JSONSchema,

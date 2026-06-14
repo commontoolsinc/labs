@@ -1,13 +1,12 @@
-/// <cts-enable />
 import {
   type Cell,
+  computed,
   Default,
-  derive,
   handler,
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 export interface ReactionMessageInput {
   id?: string;
@@ -304,9 +303,9 @@ export const chatReactionTracker = pattern<ChatReactionTrackerArgs>(
 
     const reactionTotals = liftReactionTotals(normalizedMessages);
 
-    const reactionMatrix = derive(normalizedMessages, (entries) => {
+    const reactionMatrix = computed(() => {
       const rows: ReactionMatrixRow[] = [];
-      for (const message of entries) {
+      for (const message of normalizedMessages) {
         const reactions = Object.entries(message.reactions).sort((a, b) => {
           if (a[0] < b[0]) return -1;
           if (a[0] > b[0]) return 1;

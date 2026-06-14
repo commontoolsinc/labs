@@ -1,4 +1,4 @@
-import type { StorableValue } from "@commontools/memory/interface";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type {
   AuthorizationError,
   ConflictError,
@@ -14,7 +14,7 @@ import type {
   TransactionError,
   UCAN,
   Variant,
-} from "@commontools/memory/interface";
+} from "@commonfabric/memory/interface";
 
 export type Status<Pending extends object, Ready = Pending> =
   | { pending: Pending; ready?: void; time: Time }
@@ -88,7 +88,7 @@ export interface Model {
     source: Subscribe | SchemaQuery;
     opened: Time;
     updated?: Time;
-    value: StorableValue;
+    value: FabricValue;
   }>;
 }
 
@@ -100,7 +100,7 @@ export class Model {
     source: Subscribe | SchemaQuery;
     opened: Time;
     updated?: Time;
-    value: StorableValue;
+    value: FabricValue;
   }>;
   constructor(
     connection: Status<Result<Connect, ConnectionError>>,
@@ -110,7 +110,7 @@ export class Model {
       source: Subscribe | SchemaQuery;
       opened: Time;
       updated?: Time;
-      value: StorableValue;
+      value: FabricValue;
     }>,
   ) {
     this.connection = connection;
@@ -194,7 +194,7 @@ export type Connect = {
 export type RawCommand = Variant<{
   send: UCAN<ConsumerCommandInvocation<Protocol>>;
   receive: ProviderCommand<Protocol>;
-  integrate: { url: string; value: StorableValue };
+  integrate: { url: string; value: FabricValue };
   disconnect: Disconnect;
   connect: Connect;
 }>;
@@ -309,7 +309,7 @@ const receive = (
     case "task/effect":
       return integrate(state, time, {
         url: receipt.of,
-        value: receipt.is as unknown as StorableValue,
+        value: receipt.is as unknown as FabricValue,
       });
     case "task/return":
       return complete(state, time, receipt);
@@ -354,7 +354,7 @@ const complete = (
 const integrate = (
   state: Model,
   time: Time,
-  { url, value }: { url: string; value: StorableValue },
+  { url, value }: { url: string; value: FabricValue },
 ) => {
   const subscription = state.subscriptions[url];
   if (subscription) {

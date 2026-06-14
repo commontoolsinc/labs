@@ -14,17 +14,17 @@
  */
 
 import { parseArgs } from "@std/cli/parse-args";
-import type { Cell } from "@commontools/runner";
+import type { Cell } from "@commonfabric/runner";
 import { cellConstructorFactory } from "../../runner/src/cell.ts";
 import { loadManager } from "../../cli/lib/piece.ts";
-import { PiecesController } from "@commontools/piece/ops";
+import { PiecesController } from "@commonfabric/piece/ops";
 import { runSyncLoop } from "./daemon.ts";
 import type { Edit, FailedEdit, Todo } from "./types.ts";
 
-// Build a Cell constructor with .of() — must be called inside a reactive frame,
+// Build a Cell constructor with .for() — must be called inside a reactive frame,
 // which the daemon's doSync() provides via pushFrameFromCause.
 const CellConstructor = cellConstructorFactory("cell") as unknown as {
-  of: (value: unknown) => Cell<unknown>;
+  for: (cause: unknown) => Cell<unknown>;
 };
 
 // ---------------------------------------------------------------------------

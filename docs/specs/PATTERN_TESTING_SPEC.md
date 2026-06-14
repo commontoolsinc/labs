@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-This specification defines a **pattern-native testing system** where tests are themselves patterns. Test patterns (`.test.tsx` files) import and instantiate the patterns they test, define test steps using a **discriminated union format** (`{ action: ... }` or `{ assertion: ... }`), and are run via `ct test`.
+This specification defines a **pattern-native testing system** where tests are themselves patterns. Test patterns (`.test.tsx` files) import and instantiate the patterns they test, define test steps using a **discriminated union format** (`{ action: ... }` or `{ assertion: ... }`), and are run via `cf test`.
 
 **Key insight:** Tests should be patterns too. This dogfoods the pattern system, keeps testing infrastructure in userland, and allows test patterns to be inspected via CLI for debugging.
 
@@ -14,7 +14,7 @@ This specification defines a **pattern-native testing system** where tests are t
 
 1. **Patterns all the way down** - Tests are patterns, proving the system works
 2. **Fast feedback loops** - Tests run with emulated storage (~10ms setup)
-3. **Debuggability** - Inspect test patterns via CLI (`ct piece inspect`, `ct piece get`)
+3. **Debuggability** - Inspect test patterns via CLI (`cf piece inspect`, `cf piece get`)
 4. **Minimal infrastructure** - Reuse existing `piece step` machinery
 5. **Self-contained tests** - Test logic lives inside actions, not external scripts
 
@@ -31,7 +31,7 @@ This specification defines a **pattern-native testing system** where tests are t
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     ct test <pattern.test.tsx>              │
+│                     cf test <pattern.test.tsx>              │
 │  (compiles, runs, and validates test pattern results)       │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -84,15 +84,16 @@ This format keeps `action()` streams and `computed()` cells separate in the type
 ### Example Test Pattern
 
 ```tsx
-/// <cts-enable />
-import { action, computed, pattern, Writable } from "commontools";
+import { action, computed, pattern, Writable } from "commonfabric";
 import ExpenseTracker from "./expense-tracker.tsx";
+
+type Expense = { description: string; amount: number; category: string };
 
 // Test pattern for expense tracker
 export default pattern(() => {
   // 1. Instantiate the pattern under test with initial state
   const subject = ExpenseTracker({
-    expenses: Writable.of([]),
+    expenses: new Writable<Expense[]>([]),
   });
 
   // 2. Define test actions using action() - triggers events on the pattern
@@ -135,7 +136,7 @@ export default pattern(() => {
 
 ### Test Execution Flow
 
-The `ct test` runner processes the `tests` array **in order**:
+The `cf test` runner processes the `tests` array **in order**:
 
 1. For each item in `tests`:
    - If it has `action` key: call `.send()`, then `await runtime.idle()`
@@ -169,7 +170,7 @@ The `ct test` runner processes the `tests` array **in order**:
 
 ## Test Isolation
 
-**Each test group gets a fresh pattern instance.** For now, a test pattern = one test group. Each run of `ct test` creates:
+**Each test group gets a fresh pattern instance.** For now, a test pattern = one test group. Each run of `cf test` creates:
 
 1. Fresh `StorageManager.emulate()`
 2. Fresh `Runtime`
@@ -185,13 +186,13 @@ This ensures tests don't have interdependencies.
 
 ```bash
 # Run a specific test pattern
-ct test ./expense-tracker.test.tsx
+cf test ./expense-tracker.test.tsx
 
 # Run all test patterns in a directory
-ct test ./patterns/
+cf test ./patterns/
 
 # Run with timeout override
-ct test ./slow-test.test.tsx --timeout 10000
+cf test ./slow-test.test.tsx --timeout 10000
 ```
 
 ### Options
@@ -204,7 +205,7 @@ ct test ./slow-test.test.tsx --timeout 10000
 ### Output
 
 ```
-$ ct test ./expense-tracker.test.tsx
+$ cf test ./expense-tracker.test.tsx
 
 expense-tracker.test.tsx
   ✓ assert_has_one_expense (after action_add_expense)
@@ -405,7 +406,7 @@ return {
 ### Phase 1: Core Runner (MVP) ✅ COMPLETE
 
 **Deliverables:**
-- [x] `ct test` command in CLI
+- [x] `cf test` command in CLI
 - [x] Test pattern compilation and execution
 - [x] Stream/Cell detection and processing
 - [x] Basic pass/fail reporting
@@ -430,7 +431,7 @@ return {
 
 **Deliverables:**
 - [ ] `--watch` mode for TDD
-- [ ] Test pattern scaffolding (`ct test --scaffold pattern.tsx`)
+- [ ] Test pattern scaffolding (`cf test --scaffold pattern.tsx`)
 - [ ] Parallel test execution
 - [ ] Test coverage reporting (which pattern paths were exercised)
 
@@ -438,13 +439,13 @@ return {
 
 ## Migration from v1
 
-The v1 approach (external test harness with `@commontools/pattern-testing` package) has been deprecated and removed. The pattern-native approach provides:
+The v1 approach (external test harness with `@commonfabric/pattern-testing` package) has been deprecated and removed. The pattern-native approach provides:
 
 - **Better debugging** - Deploy test pattern as piece
 - **Consistency** - Tests use the same patterns as production
 - **Simplicity** - No separate test harness to maintain
 
-The `@commontools/pattern-testing` package has been removed from the codebase.
+The `@commonfabric/pattern-testing` package has been removed from the codebase.
 
 ---
 
@@ -499,8 +500,7 @@ The `@commontools/pattern-testing` package has been removed from the codebase.
 
 ```tsx
 // counter.tsx
-/// <cts-enable />
-import { Cell, Default, handler, NAME, pattern, UI, type Stream } from "commontools";
+import { Cell, Default, handler, NAME, pattern, UI, type Stream } from "commonfabric";
 
 const increment = handler<void, { value: Cell<number> }>(
   (_, { value }) => value.set(value.get() + 1)
@@ -510,7 +510,7 @@ const decrement = handler<void, { value: Cell<number> }>(
   (_, { value }) => value.set(value.get() - 1)
 );
 
-interface Input { value: Default<number, 0>; }
+interface Input { value: number | Default<0>; }
 interface Output { value: number; increment: Stream<void>; decrement: Stream<void>; }
 
 export default pattern<Input, Output>(({ value }) => ({
@@ -526,13 +526,12 @@ export default pattern<Input, Output>(({ value }) => ({
 
 ```tsx
 // counter.test.tsx
-/// <cts-enable />
-import { Writable, action, computed, pattern } from "commontools";
+import { Writable, action, computed, pattern } from "commonfabric";
 import Counter from "./counter.tsx";
 
 export default pattern(() => {
   // Instantiate counter with initial value
-  const counter = Counter({ value: Writable.of(0) });
+  const counter = Counter({ value: new Writable(0) });
 
   // Test actions - use action() to create void streams
   const action_increment = action(() => {
@@ -571,7 +570,7 @@ export default pattern(() => {
 ### Running the Test
 
 ```bash
-$ deno task ct test ./counter.test.tsx
+$ deno task cf test ./counter.test.tsx
 
 counter.test.tsx
   ✓ assertion_1

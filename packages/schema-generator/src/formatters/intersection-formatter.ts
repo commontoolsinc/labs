@@ -1,13 +1,13 @@
 import ts from "typescript";
 import type {
-  GenerationContext,
-  SchemaDefinition,
-  TypeFormatter,
-} from "../interface.ts";
+  JSONSchemaMutable,
+  JSONSchemaObjMutable,
+} from "@commonfabric/api";
+import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { cloneSchemaDefinition, getNativeTypeSchema } from "../type-utils.ts";
-import { getLogger } from "@commontools/utils/logger";
-import { isRecord } from "@commontools/utils/types";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isRecord } from "@commonfabric/utils/types";
 import { extractDocFromType } from "../doc-utils.ts";
 import { isCellType } from "../typescript/cell-brand.ts";
 
@@ -19,14 +19,17 @@ export class IntersectionFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
-    // Don't handle cell types - they are intersection types but should be handled by CommonToolsFormatter
+    // Don't handle cell types - they are intersection types but should be handled by CommonFabricFormatter
     if (isCellType(type, context.typeChecker)) {
       return false;
     }
     return (type.flags & ts.TypeFlags.Intersection) !== 0;
   }
 
-  formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
+  formatType(
+    type: ts.Type,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
     const checker = context.typeChecker;
     const native = getNativeTypeSchema(type, checker);
     if (native !== undefined) {
@@ -151,12 +154,12 @@ export class IntersectionFormatter implements TypeFormatter {
     parts: readonly ts.Type[],
     context: GenerationContext,
   ): {
-    schema: SchemaDefinition;
+    schema: JSONSchemaObjMutable;
     docTexts: string[];
     documentedSources: string[];
     missingSources: string[];
   } {
-    const mergedProps: Record<string, SchemaDefinition> = {};
+    const mergedProps: Record<string, JSONSchemaMutable> = {};
     const requiredSet = new Set<string>();
 
     const docTexts: string[] = [];
@@ -205,7 +208,7 @@ export class IntersectionFormatter implements TypeFormatter {
             );
             continue;
           }
-          mergedProps[key] = value as SchemaDefinition;
+          mergedProps[key] = value;
         }
       }
 
@@ -216,7 +219,7 @@ export class IntersectionFormatter implements TypeFormatter {
       }
     }
 
-    const result: SchemaDefinition = {
+    const result: JSONSchemaObjMutable = {
       type: "object",
       properties: mergedProps,
     };
@@ -229,11 +232,8 @@ export class IntersectionFormatter implements TypeFormatter {
   }
 
   private isObjectSchema(
-    schema: SchemaDefinition,
-  ): schema is SchemaDefinition & {
-    properties?: Record<string, SchemaDefinition>;
-    required?: string[];
-  } {
+    schema: JSONSchemaMutable,
+  ): schema is JSONSchemaObjMutable & { type: "object" } {
     return (
       typeof schema === "object" &&
       schema !== null &&
@@ -242,14 +242,9 @@ export class IntersectionFormatter implements TypeFormatter {
   }
 
   private resolveObjectSchema(
-    schema: SchemaDefinition,
+    schema: JSONSchemaMutable,
     context: GenerationContext,
-  ):
-    | (SchemaDefinition & {
-      properties?: Record<string, SchemaDefinition>;
-      required?: string[];
-    })
-    | undefined {
+  ): (JSONSchemaObjMutable & { type: "object" }) | undefined {
     if (this.isObjectSchema(schema)) return schema;
     if (
       typeof schema === "object" &&
@@ -269,12 +264,12 @@ export class IntersectionFormatter implements TypeFormatter {
 
   private applyIntersectionDocs(
     data: {
-      schema: SchemaDefinition;
+      schema: JSONSchemaObjMutable;
       docTexts: string[];
       documentedSources: string[];
       missingSources: string[];
     },
-  ): SchemaDefinition {
+  ): JSONSchemaObjMutable {
     const { schema, docTexts, documentedSources, missingSources } = data;
     if (!isRecord(schema)) return schema;
 

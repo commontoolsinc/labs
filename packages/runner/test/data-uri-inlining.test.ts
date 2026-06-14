@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
@@ -182,6 +182,45 @@ describe("data URI inlining", () => {
 
       const result = findAndInlineDataURILinks(link);
       expect(result).toBe(link);
+    });
+
+    it("should preserve object identity when no data URI links are present", () => {
+      const value = {
+        name: "Ada",
+        nested: {
+          count: 3,
+          tags: ["math", "logic"],
+        },
+      };
+
+      const result = findAndInlineDataURILinks(value);
+      expect(result).toBe(value);
+      expect(result.nested).toBe(value.nested);
+      expect(result.nested.tags).toBe(value.nested.tags);
+    });
+
+    it("should preserve unchanged branches when inlining nested data URI links", () => {
+      const dataURI = createDataCellURI("inline me");
+      const untouched = {
+        keep: true,
+        nested: { count: 1 },
+      };
+      const value = {
+        untouched,
+        change: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: dataURI,
+              path: [],
+            },
+          },
+        },
+      };
+
+      const result = findAndInlineDataURILinks(value);
+      expect(result).not.toBe(value);
+      expect(result.untouched).toBe(untouched);
+      expect(result.change).toBe("inline me");
     });
 
     it("should handle primitives", () => {

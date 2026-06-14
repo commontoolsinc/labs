@@ -1,16 +1,27 @@
-import * as __ctHelpers from "commontools";
-import { handler, pattern, UI } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { handler, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 declare global {
     namespace JSX {
         interface IntrinsicElements {
-            "ct-button": any;
+            "cf-button": any;
         }
     }
 }
 interface State {
     count: number;
 }
-const existing = handler(false as const satisfies __ctHelpers.JSONSchema, {
+const existing = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         state: {
@@ -29,7 +40,7 @@ const existing = handler(false as const satisfies __ctHelpers.JSONSchema, {
             required: ["count"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, (_event, { state }: {
+} as const satisfies __cfHelpers.JSONSchema, (_event, { state }: {
     state: State;
 }) => {
     console.log(state.count);
@@ -41,9 +52,9 @@ const existing = handler(false as const satisfies __ctHelpers.JSONSchema, {
 // Context: handler() declared outside the pattern; the transform adds schemas but does not re-extract
 export default pattern((state) => {
     return {
-        [UI]: (<ct-button onClick={existing({ state })}>
+        [UI]: (<cf-button onClick={existing({ state })}>
         Existing
-      </ct-button>),
+      </cf-button>),
     };
 }, {
     type: "object",
@@ -53,7 +64,7 @@ export default pattern((state) => {
         }
     },
     required: ["count"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -66,11 +77,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -83,8 +93,10 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    existing
+});

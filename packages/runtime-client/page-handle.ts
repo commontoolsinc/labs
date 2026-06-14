@@ -1,4 +1,4 @@
-import { NAME, UI } from "@commontools/runner/shared";
+import { NAME, UI } from "@commonfabric/runner/shared";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
 import { PageRef, RequestType } from "./protocol/mod.ts";
 import { InitializedRuntimeConnection } from "./client/connection.ts";
@@ -41,6 +41,9 @@ export class PageHandle<T = PageType> {
     const res = await this._conn.request<RequestType.PageStart>({
       type: RequestType.PageStart,
       pageId: this.id(),
+      // The page's cell knows its space — start/stop route to that
+      // space's piece context.
+      space: this._cell.space(),
     });
     return res.value;
   }
@@ -49,6 +52,7 @@ export class PageHandle<T = PageType> {
     const res = await this._conn.request<RequestType.PageStop>({
       type: RequestType.PageStop,
       pageId: this.id(),
+      space: this._cell.space(),
     });
     return res.value;
   }

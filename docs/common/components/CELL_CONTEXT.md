@@ -1,14 +1,14 @@
 <!-- @reviewed 2025-12-10 docs-rationalization -->
 
-`<ct-cell-context>` designates a region of the page as pertaining to a particular cell. This creates a tree of cells annotating the entire interaction—like an accessibility tree, but for data. Currently used for debugging and inspection; future features will build on this structure.
+`<cf-cell-context>` designates a region of the page as pertaining to a particular cell. This creates a tree of cells annotating the entire interaction—like an accessibility tree, but for data. Currently used for debugging and inspection; future features will build on this structure.
 
 # Automatic Injection
 
-Every `[UI]` render is automatically wrapped in `ct-cell-context`. You get top-level piece debugging for free without any code changes.
+Every `[UI]` render is automatically wrapped in `cf-cell-context`. You get top-level piece debugging for free without any code changes.
 
 # When to Use Manually
 
-Add `ct-cell-context` sparingly—typically 1-2 per pattern at most. Use it for values that are:
+Add `cf-cell-context` sparingly—typically 1-2 per pattern at most. Use it for values that are:
 
 - Important but otherwise difficult to access
 - Intermediate calculations or API responses
@@ -17,9 +17,9 @@ Add `ct-cell-context` sparingly—typically 1-2 per pattern at most. Use it for 
 This is better than adding a `computed` with `console.log` because inspection is conditional—users can watch and unwatch values on demand rather than flooding the console.
 
 ```tsx
-<ct-cell-context $cell={result} label="Calculation Result">
+<cf-cell-context $cell={result} label="Calculation Result">
   <div>{result.value}</div>
-</ct-cell-context>
+</cf-cell-context>
 ```
 
 # API

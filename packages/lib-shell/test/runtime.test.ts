@@ -1,0 +1,495 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import type { DID } from "@commonfabric/identity";
+
+type MockRuntimeClientEvents = {
+  console: [unknown];
+  navigaterequest: [{ cell: { id(): string; space(): DID } }];
+  error: [unknown];
+  telemetry: [unknown];
+};
+
+class MockRuntimeClient {
+  idleCalls = 0;
+  syncedCalls = 0;
+  slugByPageId = new Map<string, string | undefined>();
+  private handlers = new Map<
+    keyof MockRuntimeClientEvents,
+    Array<(...args: unknown[]) => void>
+  >();
+
+  on<K extends keyof MockRuntimeClientEvents>(
+    event: K,
+    handler: (...args: MockRuntimeClientEvents[K]) => void,
+  ): void {
+    const handlers = this.handlers.get(event) ?? [];
+    handlers.push(handler as (...args: unknown[]) => void);
+    this.handlers.set(event, handlers);
+  }
+
+  emit<K extends keyof MockRuntimeClientEvents>(
+    event: K,
+    ...args: MockRuntimeClientEvents[K]
+  ): void {
+    for (const handler of this.handlers.get(event) ?? []) {
+      handler(...args);
+    }
+  }
+
+  idle(): Promise<void> {
+    this.idleCalls += 1;
+    return Promise.resolve();
+  }
+
+  synced(): Promise<void> {
+    this.syncedCalls += 1;
+    return Promise.resolve();
+  }
+
+  getPageSlug(pageId: string): Promise<string | undefined> {
+    return Promise.resolve(this.slugByPageId.get(pageId));
+  }
+
+  /** Records which space each root-pattern request targeted. */
+  spaceRootCalls: DID[] = [];
+
+  getSpaceRootPattern(space: DID): Promise<never> {
+    this.spaceRootCalls.push(space);
+    // Reject so registerNavigatedPiece's try/catch absorbs it — the
+    // tests only assert WHERE the registration was addressed.
+    return Promise.reject(new Error("no root pattern in mock"));
+  }
+
+  /** Records every (pageId, runIt, space) so tests can assert which calls
+   * START the piece (CT-1623: name listings must not start every piece) and
+   * which space each call targets. */
+  getPageCalls: Array<
+    { pageId: string; runIt: boolean | undefined; space: DID }
+  > = [];
+
+  getPage(
+    pageId: string,
+    space: DID,
+    runIt?: boolean,
+  ): Promise<{ id: () => string }> {
+    this.getPageCalls.push({ pageId, runIt, space });
+    return Promise.resolve({ id: () => pageId });
+  }
+
+  dispose(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+};
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+type NavigationDetail = {
+  spaceDid: DID;
+  pieceId: string;
+};
+
+describe("RuntimeInternals", () => {
+  it("exposes page slug metadata", async () => {
+    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+    const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav" as DID;
+    const client = new MockRuntimeClient();
+    client.slugByPageId.set("piece-789", "demo");
+    const runtime = new RuntimeInternals(client as any);
+
+    try {
+      await expect(runtime.getSlug(spaceDid, "piece-789")).resolves.toBe(
+        "demo",
+      );
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("guards removePage after dispose", async () => {
+    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+    const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav" as DID;
+    const client = new MockRuntimeClient();
+    const runtime = new RuntimeInternals(client as any);
+
+    await runtime.dispose();
+
+    await expect(runtime.removePage(spaceDid, "piece-789")).rejects.toThrow(
+      "RuntimeInternals disposed.",
+    );
+  });
+
+  it("uses the default navigation event when no navigation callback is injected", async () => {
+    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+    const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav-current" as DID;
+    const client = new MockRuntimeClient();
+    const runtime = new RuntimeInternals(client as any);
+
+    runtime.registerNavigatedPiece = async () => {};
+
+    let navigation: NavigationDetail | undefined;
+    const navigationReceived = deferred<NavigationDetail>();
+    const onNavigate = (event: Event) => {
+      navigation = (event as CustomEvent<typeof navigation>).detail;
+      navigationReceived.resolve(navigation!);
+    };
+    globalThis.addEventListener("cf-navigate", onNavigate);
+
+    try {
+      client.emit("navigaterequest", {
+        cell: {
+          id: () => "piece-123",
+          space: () => spaceDid,
+        },
+      });
+
+      await navigationReceived.promise;
+      expect(client.idleCalls).toBe(1);
+      expect(client.syncedCalls).toBe(1);
+      expect(navigation).toEqual({
+        spaceDid,
+        pieceId: "piece-123",
+      });
+    } finally {
+      globalThis.removeEventListener("cf-navigate", onNavigate);
+      await runtime.dispose();
+    }
+  });
+
+  it("uses an injected navigation callback", async () => {
+    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+    const nextSpace = "did:key:z6Mk-lib-shell-runtime-next" as DID;
+    const client = new MockRuntimeClient();
+    const navigationReceived = deferred<NavigationDetail>();
+    const runtime = new RuntimeInternals(
+      client as any,
+      {
+        navigate: (navigation: unknown) => {
+          navigationReceived.resolve(navigation as NavigationDetail);
+        },
+      },
+    );
+
+    try {
+      client.emit("navigaterequest", {
+        cell: {
+          id: () => "piece-456",
+          space: () => nextSpace,
+        },
+      });
+
+      await expect(navigationReceived.promise).resolves.toEqual({
+        spaceDid: nextSpace,
+        pieceId: "piece-456",
+      });
+      expect(client.idleCalls).toBe(1);
+      expect(client.syncedCalls).toBe(1);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("defaults worker runtime options to shell-compatible CFC policy and principal trust", async () => {
+    const { createRuntimeClientOptions } = await import(
+      "@commonfabric/lib-shell"
+    );
+    const { createSession, Identity } = await import(
+      "@commonfabric/identity"
+    );
+
+    const identity = await Identity.generate({ implementation: "noble" });
+    const session = await createSession({
+      identity,
+      spaceName: "lib-shell-cfc-runtime-options",
+    });
+
+    const experimental = {
+      modernCellRep: true,
+      persistentSchedulerState: false,
+    };
+    const options = createRuntimeClientOptions({
+      session,
+      apiUrl: new URL("http://shell.test/"),
+      experimental,
+    });
+
+    expect(options.cfcEnforcementMode).toBe("enforce-explicit");
+    expect(options.trustSnapshot).toEqual({
+      id: `principal:${session.as.did()}`,
+      actingPrincipal: session.as.did(),
+    });
+    expect(options.spaceDid).toBe(session.space);
+    expect(options.spaceName).toBe(session.spaceName);
+    expect(options.experimental).toBe(experimental);
+  });
+
+  it("allows hosts to override CFC policy and trust snapshot", async () => {
+    const { createRuntimeClientOptions } = await import(
+      "@commonfabric/lib-shell"
+    );
+    const { createSession, Identity } = await import(
+      "@commonfabric/identity"
+    );
+
+    const identity = await Identity.generate({ implementation: "noble" });
+    const session = await createSession({
+      identity,
+      spaceName: "lib-shell-cfc-runtime-options",
+    });
+    const trustSnapshot = {
+      id: "principal:loom-host",
+      actingPrincipal: "did:key:z6MkLoomHost",
+      revision: "loom-policy-v1",
+    };
+
+    const options = createRuntimeClientOptions({
+      session,
+      apiUrl: new URL("http://shell.test/"),
+      cfcEnforcementMode: "observe",
+      trustSnapshot,
+    });
+
+    expect(options.cfcEnforcementMode).toBe("observe");
+    expect(options.trustSnapshot).toBe(trustSnapshot);
+
+    const withoutTrust = createRuntimeClientOptions({
+      session,
+      apiUrl: new URL("http://shell.test/"),
+      trustSnapshot: null,
+    });
+    expect(withoutTrust.trustSnapshot).toBeUndefined();
+  });
+
+  // A deploy must always load the fresh worker bundle: the worker URL is
+  // cache-busted with `?v=<buildHash>` whenever the build manifest provides
+  // a hash (no feature gate).
+  describe("worker URL versioning", () => {
+    async function workerUrlFromCreate(
+      getBuildHash: () => Promise<string | undefined>,
+    ): Promise<URL> {
+      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+      const { Identity } = await import("@commonfabric/identity");
+      const identity = await Identity.generate({ implementation: "noble" });
+
+      const capturedUrls: string[] = [];
+      class StubWorker extends EventTarget {
+        constructor(url: URL | string) {
+          super();
+          capturedUrls.push(String(url));
+          // Error out before READY so create() aborts right after the worker
+          // URL is built — this test only covers URL construction, not the
+          // worker protocol.
+          queueMicrotask(() => {
+            this.dispatchEvent(
+              new ErrorEvent("error", { message: "stub worker" }),
+            );
+          });
+        }
+        postMessage(): void {}
+        terminate(): void {}
+      }
+
+      const OriginalWorker = globalThis.Worker;
+      (globalThis as { Worker: unknown }).Worker = StubWorker;
+      try {
+        await expect(RuntimeInternals.create({
+          identity,
+          apiUrl: new URL("http://shell.test/"),
+          workerUrl: new URL("http://shell.test/scripts/worker-runtime.js"),
+          getBuildHash,
+        })).rejects.toThrow("stub worker");
+      } finally {
+        (globalThis as { Worker: unknown }).Worker = OriginalWorker;
+      }
+      expect(capturedUrls).toHaveLength(1);
+      return new URL(capturedUrls[0]);
+    }
+
+    it("always consults getBuildHash and sets ?v= when a hash is present", async () => {
+      let calls = 0;
+      const url = await workerUrlFromCreate(() => {
+        calls += 1;
+        return Promise.resolve("hash-123");
+      });
+      expect(calls).toBe(1);
+      expect(url.pathname).toBe("/scripts/worker-runtime.js");
+      expect(url.searchParams.get("v")).toBe("hash-123");
+    });
+
+    it("omits ?v= when the build manifest provides no hash", async () => {
+      const url = await workerUrlFromCreate(() => Promise.resolve(undefined));
+      expect(url.searchParams.has("v")).toBe(false);
+    });
+  });
+
+  // CT-1623: starting a piece is expensive (pattern instantiation + eager
+  // dependency collection in the worker). Read-only consumers like the header
+  // pieces menu must be able to resolve page handles WITHOUT starting, and a
+  // non-started cache entry must not block a later display-path start.
+  describe("getPattern start semantics", () => {
+    const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-pattern" as DID;
+
+    async function makeRuntime() {
+      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+      const client = new MockRuntimeClient();
+      const runtime = new RuntimeInternals(client as any);
+      return { client, runtime };
+    }
+
+    it("starts by default (display path)", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern(spaceDid, "piece-1");
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: true, space: spaceDid },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("does not start when start: false (name listings)", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern(spaceDid, "piece-1", { start: false });
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: false, space: spaceDid },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("upgrades a non-started cache entry when a starting caller asks", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern(spaceDid, "piece-1", { start: false });
+        await runtime.getPattern(spaceDid, "piece-1");
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: false, space: spaceDid },
+          { pageId: "piece-1", runIt: true, space: spaceDid },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("serves started entries from cache for both kinds of callers", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern(spaceDid, "piece-1");
+        await runtime.getPattern(spaceDid, "piece-1");
+        await runtime.getPattern(spaceDid, "piece-1", { start: false });
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: true, space: spaceDid },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("serves repeated non-started requests from cache", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern(spaceDid, "piece-1", { start: false });
+        await runtime.getPattern(spaceDid, "piece-1", { start: false });
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: false, space: spaceDid },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+  });
+
+  // A navigated piece registers in ITS OWN space's root pattern — the
+  // cell's space, not any notion of a current space.
+  describe("registerNavigatedPiece", () => {
+    it("targets the navigated cell's space", async () => {
+      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+      const client = new MockRuntimeClient();
+      const runtime = new RuntimeInternals(client as any);
+      const cellSpace = "did:key:z6Mk-lib-shell-runtime-foreign" as DID;
+      try {
+        await runtime.registerNavigatedPiece(
+          {
+            id: () => "piece-9",
+            space: () => cellSpace,
+          } as any,
+        );
+        expect(client.spaceRootCalls).toEqual([cellSpace]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+  });
+
+  // One runtime serves every space; a pattern's address is (space, id)
+  // and the cache is keyed by that address.
+  describe("getPattern multi-space", () => {
+    const homeDid = "did:key:z6Mk-lib-shell-runtime-home" as DID;
+    const otherDid = "did:key:z6Mk-lib-shell-runtime-other" as DID;
+
+    async function makeRuntime() {
+      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+      const client = new MockRuntimeClient();
+      const runtime = new RuntimeInternals(client as any);
+      return { client, runtime };
+    }
+
+    it("passes the space through to the client", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern(otherDid, "piece-1");
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: true, space: otherDid },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("caches per (space, id) — same id in two spaces are distinct", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern(homeDid, "piece-1");
+        await runtime.getPattern(otherDid, "piece-1");
+        await runtime.getPattern(otherDid, "piece-1");
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: true, space: homeDid },
+          { pageId: "piece-1", runIt: true, space: otherDid },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("invalidates per space", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern(homeDid, "piece-1");
+        await runtime.getPattern(otherDid, "piece-1");
+        runtime.invalidatePattern(otherDid, "piece-1");
+        await runtime.getPattern(homeDid, "piece-1"); // still cached
+        await runtime.getPattern(otherDid, "piece-1"); // re-fetched
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: true, space: homeDid },
+          { pageId: "piece-1", runIt: true, space: otherDid },
+          { pageId: "piece-1", runIt: true, space: otherDid },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+  });
+});

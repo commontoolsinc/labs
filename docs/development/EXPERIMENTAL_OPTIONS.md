@@ -1,21 +1,31 @@
 # Experimental Options
 
 `ExperimentalOptions` are feature flags that gate incremental rollout of
-space-model data-layer changes. Each flag independently enables a piece of the
-new storable-value pipeline so features can be activated one at a time without
-affecting users who haven't opted in.
+various major features.
 
 ## Available Flags
 
 | Flag | Env Var | Description |
 |------|---------|-------------|
-| `richStorableValues` | `EXPERIMENTAL_RICH_STORABLE_VALUES` | Enables the new storable value type system (`bigint`, `Map`, `Set`, `Uint8Array`, `Date`, `StorableInstance`). |
-| `storableProtocol` | `EXPERIMENTAL_STORABLE_PROTOCOL` | Enables the storable protocol (`[DECONSTRUCT]`/`[RECONSTRUCT]`) and `SerializationContext`-based boundary serialization. |
-| `unifiedJsonEncoding` | `EXPERIMENTAL_UNIFIED_JSON_ENCODING` | Enables a unified JSON encoding scheme for all storable values. |
-| `canonicalHashing` | `EXPERIMENTAL_CANONICAL_HASHING` | Enables canonical hashing, replacing merkle-reference CID-based hashing (see Section 6 of the formal spec). |
+| `modernCellRep` | `EXPERIMENTAL_MODERN_CELL_REP` | Enables new "cell representation" classes |
+| `persistentSchedulerState` | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` | Enables durable scheduler observations, dirty state, and scheduler rehydration through memory-v2. |
+| `schedulerHistoricalMightWrite` | n/a (`RuntimeOptions` only) | Preserves the scheduler's legacy cumulative write history for dependency scheduling instead of the default current-known write set. |
 
-All flags default to `false`. Setting any flag to `true` activates the
-corresponding experimental behavior.
+All flags default to `undefined` which means they take on the default value
+defined for the flag. The default is generally `false` unless the flag is in the
+process of being "graduated." Setting any flag to `true` activates the
+corresponding experimental behavior, and setting it to `false` suppresses the
+experimental behavior (if it happened to be on by default).
+
+Most flags are controlled by environment variables. Flags marked `n/a` in the
+table are internal runtime options and currently have to be passed through
+`new Runtime({ experimental: { ... } })`.
+
+## Defining a new flag
+
+Unfortunately, there is no single unified "source of truth" for the set of
+flags. You pretty much need to search the codebase for an existing flag, and
+tweak all the spots that turn up.
 
 ## Enabling Flags Locally
 
@@ -25,11 +35,11 @@ and when **running the server** (for server-side flags):
 
 ```bash
 # Enable a single flag (build + run)
-EXPERIMENTAL_RICH_STORABLE_VALUES=true deno task dev
+EXPERIMENTAL_EXAMPLE_NAME=true deno task dev
 
 # Enable multiple flags
-EXPERIMENTAL_RICH_STORABLE_VALUES=true \
-EXPERIMENTAL_STORABLE_PROTOCOL=true \
+EXPERIMENTAL_EXAMPLE_NAME_1=true \
+EXPERIMENTAL_EXAMPLE_NAME_2=true \
 deno task dev
 ```
 
@@ -41,7 +51,7 @@ The same env vars work for all entry points:
   `felt.config.ts` defines, read from globals in `src/lib/env.ts`.
 - **Background charm service** (`packages/background-charm-service`): parsed in
   `src/env.ts` and threaded to worker processes via IPC.
-- **CT CLI** (`packages/cli`): the `ct` CLI reads experimental flags from the
+- **CF CLI** (`packages/cli`): the `cf` CLI reads experimental flags from the
   environment when constructing its `Runtime` instance.
 
 **Important:** Because the shell uses build-time injection, toggling flags for
@@ -58,12 +68,15 @@ directly to `new Runtime({ experimental: { ... } })`.
 ```
 Server Process (Deno)
   |
-  +-- ENV: EXPERIMENTAL_RICH_STORABLE_VALUES=true
+  +-- ENV: EXPERIMENTAL_EXAMPLE_NAME_1=<value>
+  |        EXPERIMENTAL_EXAMPLE_NAME_2=<value>
+  |        ...
   |
   +-- toolshed/env.ts        --> Zod parses env vars
   +-- toolshed/index.ts      --> new Runtime({ experimental: { ... } })
-                                    +-- setStorableValueConfig(...)
-                                    +-- setCanonicalHashConfig(...)
+                                    +-- setExperimentName1Config(...)
+                                    +-- setExperimentName2Config(...)
+                                    ...
 ```
 
 ### Browser-side (build-time injection)
@@ -74,10 +87,12 @@ via the IPC protocol:
 ```
 Build Time (shell)
   |
-  +-- ENV: EXPERIMENTAL_RICH_STORABLE_VALUES=true
+  +-- ENV: EXPERIMENTAL_EXAMPLE_NAME_1=<value>
+  |        EXPERIMENTAL_EXAMPLE_NAME_2=<value>
+  |        ...
   |
-  +-- felt.config.ts          --> esbuild define: $EXPERIMENTAL_RICH_STORABLE_VALUES
-  +-- src/lib/env.ts           --> EXPERIMENTAL.richStorableValues = true
+  +-- felt.config.ts          --> esbuild define: $EXPERIMENTAL_*
+  +-- src/lib/env.ts          --> EXPERIMENTAL.exampleName* = true
   |
 Browser (Main Thread)
   |
@@ -86,31 +101,28 @@ Browser (Main Thread)
   +-- RuntimeClient.initialize(transport, { ..., experimental: EXPERIMENTAL })
         |
         | postMessage (IPC)
-        | InitializationData { ..., experimental: { richStorableValues: true } }
+        | InitializationData { ..., experimental: { exampleName*: true } }
         |
         v
 Browser Web Worker
   |
   +-- RuntimeProcessor.initialize(data)
         +-- new Runtime({ ..., experimental: data.experimental })
-              +-- setStorableValueConfig(...)
-              |    +-- currentConfig.richStorableValues = true
-              |         +-- toStorableValue() checks currentConfig
-              +-- setCanonicalHashConfig(...)
-                   +-- canonicalHashingEnabled = true
-                        +-- refer() dispatches to canonicalHash()
+              +-- setExperimentName1Config(...)
+              +-- setExperimentName2Config(...)
+              ...
 ```
 
 Key points:
 
-1. The **env vars** are the single source of truth. They must be set at build
-   time (for the shell) and at server start time (for toolshed).
+1. For env-backed flags, the **env vars** are the single source of truth. They
+   must be set at build time (for the shell) and at server start time (for
+   toolshed).
 2. The **shell build** bakes the flags into the JS bundle via esbuild defines.
 3. The **IPC protocol** carries the flags from the main thread to the Web Worker
    via `InitializationData`.
-4. The **Runtime constructor** calls `setStorableValueConfig()`, which
-   sets the module-level ambient config used by `toStorableValue()` and related
-   functions.
+4. The **Runtime constructor** calls experiment configuration functions, which
+   collectively set up the ambient config for the system.
 
 ## Background Charm Service
 
@@ -133,11 +145,11 @@ service.
 
 ### Check the logs
 
-When any experimental flags are enabled, the `Runtime` constructor logs them on
-startup. Look for a line like:
+When any experimental flags are explicitly overridden, the `Runtime`
+constructor logs them on startup. Look for a line like:
 
 ```
-Experimental flags enabled: richStorableValues, unifiedJsonEncoding, canonicalHashing
+Experimental flag overrides: someFlag=true, someOtherFlag=false
 ```
 
 - **Server-side (toolshed):** Check `packages/toolshed/local-dev-toolshed.log`.
@@ -157,8 +169,7 @@ deno test --allow-ffi --allow-env --allow-read test/experimental-options.test.ts
 ```
 
 These tests verify that `Runtime` construction correctly sets and resets the
-ambient config, and that `toStorableValue()` dispatches based on the
-`richStorableValues` flag.
+ambient config.
 
 ## Implementation Details
 
@@ -167,16 +178,8 @@ The flags are defined in `packages/runner/src/runtime.ts` as the
 with defaults (all `false`) and stores the resolved result as
 `runtime.experimental` (type `Required<ExperimentalOptions>`).
 
-The memory layer uses module-level ambient config variables:
-`currentConfig` in `packages/memory/storable-value.ts` (set by
-`setStorableValueConfig()`) and `canonicalHashingEnabled` in
-`packages/memory/reference.ts` (set by `setCanonicalHashConfig()`). This means:
-
 - Only one set of experimental flags is active per JavaScript context at a time.
 - In the browser, the Web Worker is a separate JS context, so its flags are
   independent of the main thread.
 - Creating a new `Runtime` overwrites the ambient config; disposing it resets
   to defaults.
-
-See the formal spec at `docs/specs/space-model-formal-spec/` for the full
-data model specification that these flags gate.

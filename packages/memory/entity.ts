@@ -1,4 +1,6 @@
-import { contentIdFromJSON, refer } from "./reference.ts";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 export interface Entity<T extends null | NonNullable<unknown>> {
   "@": ToString<Entity<T>>;
@@ -12,7 +14,7 @@ export type ToString<T> = string & { toString(): ToString<T> };
 export const entity = <T extends null | NonNullable<unknown>>(
   description: NonNullable<unknown> | null,
 ): Entity<T> => {
-  return { "@": refer(description).toJSON()["/"] };
+  return { "@": hashOf(description).toJSON()["/"] };
 };
 
 export const toString = <T extends null | NonNullable<unknown>>(
@@ -25,13 +27,11 @@ export const fromString = <T extends null | NonNullable<unknown>>(
   if (!source.startsWith("@")) {
     throw new TypeError(
       `Expected formatted entity which starts with @ character instead got ${
-        JSON.stringify(
-          source,
-        )
+        toCompactDebugString(source)
       }`,
     );
   } else {
-    return { "@": contentIdFromJSON({ "/": source.slice(1) }).toJSON()["/"] };
+    return { "@": FabricHash.fromJson({ "/": source.slice(1) }).toJSON()["/"] };
   }
 };
 

@@ -4,15 +4,17 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Cell, type JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
 import { isCell } from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { getMetaLink } from "@commonfabric/runner";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -21,10 +23,9 @@ describe("Pattern Runner - Lift", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
-  let Cell: ReturnType<typeof createBuilder>["commontools"]["Cell"];
-  let TYPE: ReturnType<typeof createBuilder>["commontools"]["TYPE"];
+  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+  let Cell: ReturnType<typeof createBuilder>["commonfabric"]["Cell"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -35,13 +36,12 @@ describe("Pattern Runner - Lift", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({
       lift,
       pattern,
       Cell,
-      TYPE,
-    } = commontools);
+    } = commonfabric);
   });
 
   afterEach(async () => {
@@ -78,44 +78,44 @@ describe("Pattern Runner - Lift", () => {
     };
 
     const multiply = lift(
-      {
-        type: "object",
-        properties: { x: { type: "number" }, y: { type: "number" } },
-        required: ["x", "y"],
-      } as const satisfies JSONSchema,
-      { type: "number" } as const satisfies JSONSchema,
       ({ x, y }) => {
         runCounts.multiply++;
         return x * y;
       },
+      {
+        type: "object",
+        properties: { x: { type: "number" }, y: { type: "number" } },
+        required: ["x", "y"],
+      } as const satisfies JSONSchema,
+      { type: "number" } as const satisfies JSONSchema,
     );
 
     const multiplyGenerator = lift(
-      {
-        type: "object",
-        properties: { x: { type: "number" }, y: { type: "number" } },
-        required: ["x", "y"],
-      } as const satisfies JSONSchema,
-      { type: "number" } as const satisfies JSONSchema,
-      (args) => {
+      (args: { x: number; y: number }) => {
         runCounts.multiplyGenerator++;
         return multiply(args);
       },
-    );
-
-    const multiplyGenerator2 = lift(
       {
         type: "object",
         properties: { x: { type: "number" }, y: { type: "number" } },
         required: ["x", "y"],
       } as const satisfies JSONSchema,
       { type: "number" } as const satisfies JSONSchema,
+    );
+
+    const multiplyGenerator2 = lift(
       ({ x, y }) => {
         runCounts.multiplyGenerator2++;
         // Now passing literals, so will hardcode values in pattern and hence
         // re-run when values change
         return multiply({ x, y });
       },
+      {
+        type: "object",
+        properties: { x: { type: "number" }, y: { type: "number" } },
+        required: ["x", "y"],
+      } as const satisfies JSONSchema,
+      { type: "number" } as const satisfies JSONSchema,
     );
 
     const multiplyPattern = pattern<{ x: number; y: number }>(
@@ -152,7 +152,7 @@ describe("Pattern Runner - Lift", () => {
       result2: 6,
     });
 
-    // We mark the process cell dirty, run, then mark the process cell dirty again.
+    // We mark the owning result cell dirty, run, then mark it dirty again.
     expect(runCounts).toMatchObject({
       multiply: 2,
       multiplyGenerator: 1,
@@ -241,7 +241,7 @@ describe("Pattern Runner - Lift", () => {
     expect(errors).toBe(1);
     expect(value.result).toBeUndefined();
 
-    const patternId = piece.getSourceCell()?.get()?.[TYPE];
+    const patternId = getMetaLink(piece, "pattern")?.id;
     expect(patternId).toBeDefined();
     expect(lastError?.patternId).toBe(patternId);
     expect(lastError?.space).toBe(space);
@@ -255,9 +255,6 @@ describe("Pattern Runner - Lift", () => {
     tx = runtime.edit();
 
     value = await piece.pull();
-    expect((piece.getRaw() as any).result.$alias.cell).toEqual(
-      piece.getSourceCell()?.entityId,
-    );
     expect(value).toMatchObject({ result: 5 });
   });
 
@@ -287,7 +284,7 @@ describe("Pattern Runner - Lift", () => {
       "should create and use a named cell inside a lift",
       {
         type: "object",
-        properties: { value: { type: "number", asCell: true } },
+        properties: { value: { type: "number", asCell: ["cell"] } },
         required: ["value"],
       },
     );
@@ -337,23 +334,21 @@ describe("Pattern Runner - Lift", () => {
     // - second: a Cell that we'll read with sample() (non-reactive)
     const computeWithSample = lift(
       // Input schema: first is reactive, second is asCell
-      {
-        type: "object",
-        properties: {
-          first: { type: "number" },
-          second: { type: "number", asCell: true },
-        },
-        required: ["first", "second"],
-      } as const satisfies JSONSchema,
-      // Output schema
-      { type: "number" },
-      // The lift function
       ({ first, second }) => {
         liftRunCount++;
         // Use sample() to read the second cell non-reactively
         const secondValue = second.sample();
         return first + secondValue;
       },
+      {
+        type: "object",
+        properties: {
+          first: { type: "number" },
+          second: { type: "number", asCell: ["cell"] },
+        },
+        required: ["first", "second"],
+      } as const satisfies JSONSchema,
+      { type: "number" },
     );
 
     const sampleP = pattern<{ first: number; second: number }>(
@@ -441,12 +436,12 @@ describe("Pattern Runner - Lift", () => {
     const pattern1 = pattern<{ value: number }>(
       ({ value }) => {
         const doubled = lift(
-          { type: "number" } as const satisfies JSONSchema,
-          { type: "number" } as const satisfies JSONSchema,
           (x: number) => {
             lift1Runs++;
             return x * 2;
           },
+          { type: "number" } as const satisfies JSONSchema,
+          { type: "number" } as const satisfies JSONSchema,
         )(value);
         return { result: doubled };
       },
@@ -455,12 +450,12 @@ describe("Pattern Runner - Lift", () => {
     const pattern2 = pattern<{ value: number }>(
       ({ value }) => {
         const tripled = lift(
-          { type: "number" } as const satisfies JSONSchema,
-          { type: "number" } as const satisfies JSONSchema,
           (x: number) => {
             lift2Runs++;
             return x * 3;
           },
+          { type: "number" } as const satisfies JSONSchema,
+          { type: "number" } as const satisfies JSONSchema,
         )(value);
         return { result: tripled };
       },
@@ -493,9 +488,9 @@ describe("Pattern Runner - Lift", () => {
     const value1 = await result1.pull();
     expect(value1).toMatchObject({ result: 10 });
 
-    // Both lifts run because the scheduler flushes everything
+    // Only the pulled pattern should run in pull mode.
     expect(lift1Runs).toBe(1);
-    expect(lift2Runs).toBe(1);
+    expect(lift2Runs).toBe(0);
 
     // Now pull on pattern 2's result
     const value2 = await result2.pull();

@@ -1,6 +1,6 @@
-# CT Protocol Implementation Plan
+# CF Protocol Implementation Plan
 
-This document tracks implementation status of the CT Protocol specification.
+This document tracks implementation status of the CF Protocol specification.
 See `docs/specs/verifiable-execution/README.md` for the spec index.
 
 ## Status Legend
@@ -357,7 +357,7 @@ The activity tracking from Phase 2 enables intelligent reactive scheduling.
 ## Phase 7: Domain Bootstrap (Future)
 
 - [ ] DNS TXT record support (`_ct.domain.com`)
-- [ ] Well-known endpoint (`/.well-known/ct-space-did`)
+- [ ] Well-known endpoint (`/.well-known/cf-space-did`)
 - [ ] did:web document generation
 - [ ] Domain verification algorithm
 
@@ -429,7 +429,7 @@ The activity tracking from Phase 2 enables intelligent reactive scheduling.
 | Fact/Receipt types | `packages/memory/interface.ts` |
 | Commit creation | `packages/memory/commit.ts` |
 | Fact operations | `packages/memory/fact.ts` |
-| Merkle hashing | `packages/memory/reference.ts` |
+| Merkle hashing | `packages/data-model/value-hash.ts` |
 | Transaction interface | `packages/runner/src/storage/interface.ts` |
 | Transaction impl | `packages/runner/src/storage/transaction.ts` |
 | Journal | `packages/runner/src/storage/transaction/journal.ts` |

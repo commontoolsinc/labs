@@ -1,0 +1,2261 @@
+import ts from "typescript";
+import { isRecord } from "@commonfabric/utils/types";
+import {
+  type CellWrapperKind,
+  getCellBrand,
+  getCellWrapperInfo,
+  isCellBrand,
+  wrapperKindToBrand,
+} from "../typescript/cell-brand.ts";
+import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
+import type {
+  AsCellEntry,
+  JSONSchemaMutable,
+  JSONSchemaObjMutable,
+  SchemaScope,
+} from "@commonfabric/api";
+import type { GenerationContext, TypeFormatter } from "../interface.ts";
+import type { SchemaGenerator } from "../schema-generator.ts";
+import {
+  detectWrapperViaNode,
+  getArrayElementInfo,
+  getPropertyNameText,
+  resolveWrapperNode,
+  type TypeWithInternals,
+} from "../type-utils.ts";
+import { CFC_CANONICAL_ALIAS_NAMES } from "@commonfabric/api/cfc";
+
+type WrapperKind = CellWrapperKind;
+const CFC_ALIAS_NAMES: ReadonlySet<string> = new Set(CFC_CANONICAL_ALIAS_NAMES);
+const SCOPE_WRAPPER_SCOPES: Readonly<Record<string, SchemaScope>> = {
+  PerSpace: "space",
+  PerUser: "user",
+  PerSession: "session",
+  PerAny: "any",
+};
+type ResolvedCfcAlias = {
+  readonly aliasName: string;
+  readonly aliasArgs: readonly ts.Type[];
+  readonly aliasArgNodes?: readonly ts.TypeNode[];
+};
+
+type ResolvedScopeWrapper = {
+  readonly scope: SchemaScope;
+  readonly node: ts.TypeReferenceNode;
+};
+
+const scopeForWrapperName = (
+  name: string | undefined,
+): SchemaScope | undefined =>
+  name === undefined ? undefined : SCOPE_WRAPPER_SCOPES[name];
+
+// The capability subset of `CellWrapperKind`: brands that all wrap the SAME
+// structural inner `T` and differ only in read/write capability. The transformer
+// narrows one to another (e.g. `Cell<T>` → `ReadonlyCell<T>`) to reflect usage,
+// so a node-vs-type brand mismatch among these is a capability narrowing, not a
+// structural change. `Stream`/`SqliteDb`/`OpaqueRef` are excluded: they carry a
+// distinct structural contract, not a read/write variant of a plain cell.
+//
+// Derived as an exhaustive map over `CellWrapperKind` so that adding a new kind
+// to that union is a compile error here until it's deliberately classified.
+//
+// NB: distinct from `type-utils.ts`'s `CELL_LIKE_WRAPPER_NAMES`, which keys off
+// raw type-node NAMES (where `Writable` is a separate spelling and `OpaqueCell`
+// is split out). This set keys off RESOLVED `CellWrapperKind` values, where
+// `Writable` has already normalized to `Cell` and `OpaqueCell` belongs with the
+// rest.
+const CELL_CAPABILITY_KIND_MAP: Readonly<Record<CellWrapperKind, boolean>> = {
+  Cell: true,
+  ReadonlyCell: true,
+  WriteonlyCell: true,
+  ComparableCell: true,
+  OpaqueCell: true,
+  Stream: false,
+  SqliteDb: false,
+  OpaqueRef: false,
+};
+const isCellCapabilityKind = (kind: WrapperKind): boolean =>
+  CELL_CAPABILITY_KIND_MAP[kind];
+
+const resolveScopeWrapperNode = (
+  typeNode: ts.TypeNode | undefined,
+): ResolvedScopeWrapper | undefined => {
+  if (!typeNode || !ts.isTypeReferenceNode(typeNode)) {
+    return undefined;
+  }
+  const name = ts.isIdentifier(typeNode.typeName)
+    ? typeNode.typeName.text
+    : typeNode.typeName.right.text;
+  const scope = scopeForWrapperName(name);
+  return scope === undefined ? undefined : { scope, node: typeNode };
+};
+
+const applyScopeToAsCellEntry = (
+  entry: AsCellEntry,
+  scope: SchemaScope,
+): AsCellEntry => {
+  if (typeof entry === "string") {
+    return { kind: entry, scope };
+  }
+  if (isRecord(entry)) {
+    return { ...entry, scope };
+  }
+  return entry;
+};
+
+/**
+ * Formatter for Common Fabric-specific types (Cell<T>, Stream<T>, OpaqueRef<T>, Default<T,V>)
+ *
+ * TypeScript handles alias resolution automatically and we don't need to
+ * manually traverse alias chains.
+ */
+export class CommonFabricFormatter implements TypeFormatter {
+  constructor(private schemaGenerator: SchemaGenerator) {
+    if (!schemaGenerator) {
+      throw new Error(
+        "CommonFabricFormatter requires a SchemaGenerator instance",
+      );
+    }
+  }
+
+  supportsType(type: ts.Type, context: GenerationContext): boolean {
+    const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
+    if (scopeForWrapperName(aliasName) !== undefined) {
+      return true;
+    }
+
+    if (resolveScopeWrapperNode(context.typeNode)) {
+      return true;
+    }
+
+    if (aliasName && CFC_ALIAS_NAMES.has(aliasName)) {
+      return true;
+    }
+
+    if (this.resolveCfcAliasInstantiation(type as TypeWithInternals, context)) {
+      return true;
+    }
+
+    // Check via typeNode for Default (erased at type-level)
+    const wrapperViaNode = detectWrapperViaNode(
+      context.typeNode,
+      context.typeChecker,
+    );
+    if (wrapperViaNode) {
+      return true;
+    }
+
+    // Fallback: check via aliasSymbol for Default<T> when typeToTypeNode expanded the alias.
+    // typeToTypeNode expands Default<T,V> to its branded union representation, losing the
+    // "Default" type node. The type object itself still carries aliasSymbol = Default.
+    if (isDefaultAliasSymbol((type as TypeWithInternals).aliasSymbol)) {
+      return true;
+    }
+
+    // Check if this is an Opaque<T> union (T | OpaqueRef<T>)
+    if (this.isOpaqueUnion(type, context.typeChecker)) {
+      return true;
+    }
+
+    // Check if union contains wrapper types via node inspection
+    // This must come before the blanket union rejection to handle
+    // cases like OpaqueRef<T> | undefined without expanding conditionals
+    if (this.isWrapperUnion(type, context)) {
+      return true; // Take ownership of wrapper unions
+    }
+
+    if ((type.flags & ts.TypeFlags.Union) !== 0) {
+      return false;
+    }
+
+    // Check if this is a wrapper type (Cell/Stream/OpaqueRef) via type structure
+    const wrapperInfo = getCellWrapperInfo(type, context.typeChecker);
+    return wrapperInfo !== undefined;
+  }
+
+  formatType(
+    type: ts.Type,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
+    const n = context.typeNode;
+    const resolvedScopeWrapper = resolveScopeWrapperNode(n);
+    if (resolvedScopeWrapper) {
+      return this.formatScopeWrapperTypeFromNode(
+        resolvedScopeWrapper.node,
+        context,
+        resolvedScopeWrapper.scope,
+      );
+    }
+
+    const aliasType = type as TypeWithInternals;
+    const aliasScope = scopeForWrapperName(aliasType.aliasSymbol?.name);
+    if (aliasScope !== undefined) {
+      const innerType = aliasType.aliasTypeArguments?.[0];
+      if (!innerType) {
+        throw new Error(
+          `${aliasType.aliasSymbol?.name}<T> requires type argument`,
+        );
+      }
+      const innerSchema = this.schemaGenerator.formatChildType(
+        innerType,
+        context,
+        undefined,
+      );
+      return this.applyScopeWrapperSemantics(innerSchema, aliasScope);
+    }
+
+    const resolvedCfcAlias = this.resolveCfcAliasInstantiation(
+      aliasType,
+      context,
+    );
+    if (resolvedCfcAlias) {
+      return this.formatResolvedCfcAlias(resolvedCfcAlias, context);
+    }
+
+    // Handle wrapper unions first (before Opaque<T> union check)
+    // This catches cases like OpaqueRef<T> | undefined and processes them
+    // via node inspection to avoid conditional type expansion
+    if (
+      (type.flags & ts.TypeFlags.Union) !== 0 &&
+      this.isWrapperUnion(type, context)
+    ) {
+      return this.formatWrapperUnion(type as ts.UnionType, context);
+    }
+
+    // Check if this is an Opaque<T> union and handle it first
+    // This prevents the UnionFormatter from creating an anyOf
+    const opaqueUnionInfo = this.getOpaqueUnionInfo(type, context.typeChecker);
+    if (opaqueUnionInfo) {
+      // Format the base type T and add asCell: ["opaque"]
+      const innerSchema = this.schemaGenerator.formatChildType(
+        opaqueUnionInfo.baseType,
+        context,
+        undefined, // Don't pass typeNode since we're working with the unwrapped type
+      );
+
+      return this.applyWrapperSemantics(innerSchema, "OpaqueCell");
+    }
+
+    // Check via typeNode for all wrapper types (handles both direct usage and aliases)
+    const resolvedWrapper = n
+      ? resolveWrapperNode(n, context.typeChecker)
+      : undefined;
+
+    // Handle Default via node (direct or alias)
+    if (resolvedWrapper?.kind === "Default") {
+      // For Default, we need the node with concrete type arguments.
+      // If the original node has type arguments, use it.
+      // Otherwise, use the resolved node (for direct Default references).
+      const nodeForDefault = n && ts.isTypeReferenceNode(n) && n.typeArguments
+        ? n // Original has type args, use it for concrete types
+        : resolvedWrapper.node; // Direct reference or fallback
+
+      if (nodeForDefault && ts.isTypeReferenceNode(nodeForDefault)) {
+        return this.formatDefaultType(nodeForDefault, context);
+      }
+    }
+
+    // Fallback: handle Default<T> detected via aliasSymbol when no type node is available.
+    // When typeToTypeNode expands Default<T,V), the node no longer says "Default" but
+    // the type object still carries aliasSymbol. Extract T from aliasTypeArguments[0]
+    // and V from aliasTypeArguments[1] so the default value is preserved in the schema.
+    const typeWithAlias = type as TypeWithInternals;
+    if (
+      isDefaultAliasSymbol(typeWithAlias.aliasSymbol) &&
+      typeWithAlias.aliasTypeArguments &&
+      typeWithAlias.aliasTypeArguments.length >= 1
+    ) {
+      const innerType = typeWithAlias.aliasTypeArguments[0]!;
+      const valueSchema = this.schemaGenerator.formatChildType(
+        innerType,
+        context,
+        undefined,
+      );
+
+      if (typeWithAlias.aliasTypeArguments.length >= 2) {
+        const defaultType = typeWithAlias.aliasTypeArguments[1]!;
+        const defaultValue = this.extractDefaultValue(defaultType, context);
+        if (defaultValue !== undefined) {
+          if (typeof valueSchema === "boolean") {
+            return (valueSchema === false
+              ? { not: true, default: defaultValue }
+              : { default: defaultValue }) as JSONSchemaObjMutable;
+          }
+          (valueSchema as Record<string, unknown>).default = defaultValue;
+        }
+      }
+
+      return valueSchema;
+    }
+
+    const wrapperInfo = getCellWrapperInfo(type, context.typeChecker);
+    if (
+      resolvedWrapper &&
+      resolvedWrapper.kind !== "Default" &&
+      wrapperInfo &&
+      wrapperInfo.kind !== resolvedWrapper.kind &&
+      this.isSyntheticWrapperNode(resolvedWrapper.node)
+    ) {
+      return this.formatWrapperTypeFromNode(
+        resolvedWrapper.node,
+        context,
+        resolvedWrapper.kind,
+        // The synthetic node narrows the resolved type's capability brand (e.g.
+        // the transformer re-wrapped `Cell<T>` as `ReadonlyCell<T>` for read-only
+        // usage). Both brands wrap the SAME structural inner. When the node's own
+        // inner has no source position and degrades to `any`, fall back to the
+        // resolved type's inner so the inner `$ref`/`$defs` survives the re-wrap.
+        isCellCapabilityKind(wrapperInfo.kind)
+          ? wrapperInfo.typeRef
+          : undefined,
+      );
+    }
+
+    if (wrapperInfo && !(type.flags & ts.TypeFlags.Union)) {
+      const nodeToPass = this.selectWrapperTypeNode(
+        n,
+        resolvedWrapper,
+        wrapperInfo.kind,
+      );
+      return this.formatWrapperType(
+        wrapperInfo.typeRef,
+        nodeToPass,
+        context,
+        wrapperInfo.kind,
+      );
+    }
+
+    // Synthetic wrapper nodes (for example __cfHelpers.ReadonlyCell<...>) may
+    // resolve to `any` in checker contexts created before helper injection.
+    // In that case, fall back to node-driven wrapper formatting.
+    if (
+      resolvedWrapper &&
+      resolvedWrapper.kind !== "Default" &&
+      !wrapperInfo
+    ) {
+      return this.formatWrapperTypeFromNode(
+        resolvedWrapper.node,
+        context,
+        resolvedWrapper.kind,
+      );
+    }
+
+    // If we detected a wrapper syntactically but the current type is wrapped in
+    // additional layers (e.g., Opaque<OpaqueRef<...>>), recursively unwrap using
+    // brand information until we reach the underlying wrapper.
+    const wrapperKinds: WrapperKind[] = [
+      "OpaqueCell",
+      "Cell",
+      "Stream",
+      "SqliteDb",
+      "ReadonlyCell",
+      "WriteonlyCell",
+      "ComparableCell",
+    ];
+    for (const kind of wrapperKinds) {
+      const unwrappedType = this.recursivelyUnwrapOpaqueRef(
+        type,
+        kind,
+        context.typeChecker,
+      );
+      if (unwrappedType) {
+        const nodeToPass = this.selectWrapperTypeNode(
+          n,
+          resolvedWrapper,
+          unwrappedType.kind,
+        );
+        return this.formatWrapperType(
+          unwrappedType.typeRef,
+          nodeToPass,
+          context,
+          unwrappedType.kind,
+        );
+      }
+    }
+
+    const nodeName = this.getTypeRefIdentifierName(n);
+    throw new Error(
+      `Unexpected Common Fabric type: ${nodeName}`,
+    );
+  }
+
+  private formatWrapperTypeFromNode(
+    typeRefNode: ts.TypeReferenceNode,
+    context: GenerationContext,
+    wrapperKind: WrapperKind,
+    // When the synthetic node's own inner type degrades to `any`/`unknown` (no
+    // source position to resolve against), the inner type argument of this
+    // type — the capability re-wrap's source wrapper, e.g. `Cell<T>` for a node
+    // narrowed to `ReadonlyCell<T>` — supplies the precise inner so the inner
+    // `$ref`/`$defs` survives. Only consulted as a fallback, so node-driven
+    // results that already resolve (including node-level unions like
+    // `string | undefined`) are left untouched.
+    fallbackInnerTypeRef?: ts.TypeReference,
+  ): JSONSchemaMutable {
+    const innerTypeNode = typeRefNode.typeArguments?.[0];
+    if (!innerTypeNode) {
+      throw new Error(`${wrapperKind}<T> requires type argument`);
+    }
+
+    const registeredWrapperType = context.typeRegistry?.get(typeRefNode);
+    const registeredWrapperInfo = registeredWrapperType
+      ? getCellWrapperInfo(registeredWrapperType, context.typeChecker)
+      : undefined;
+
+    let innerType: ts.Type;
+    try {
+      innerType = context.typeRegistry?.get(innerTypeNode) ??
+        registeredWrapperInfo?.typeRef.typeArguments?.[0] ??
+        context.typeChecker.getTypeFromTypeNode(innerTypeNode);
+    } catch {
+      innerType = context.typeChecker.getAnyType();
+    }
+
+    // Only adopt the resolved type's inner when the node's inner is a bare named
+    // reference (a `TypeReferenceNode`) that degrades to `any` — the case where
+    // node-driven formatting can recover NOTHING and would emit `{}`, dropping
+    // the inner `$ref`/`$defs`. Structured inner nodes (unions, literals, arrays)
+    // carry recoverable shape even when the checker resolves them to `any` from a
+    // synthetic position, so the node-driven result must win there (e.g. a
+    // `string | undefined` inner whose `| undefined` lives only on the node).
+    if (
+      this.isUnusableInnerType(innerType) && fallbackInnerTypeRef &&
+      ts.isTypeReferenceNode(innerTypeNode)
+    ) {
+      const fallbackInner = fallbackInnerTypeRef.typeArguments?.[0];
+      if (fallbackInner && !this.isUnusableInnerType(fallbackInner)) {
+        innerType = fallbackInner;
+      }
+    }
+
+    // Keep schema-hint propagation behavior aligned with type-based wrapper formatting.
+    let childContext = context;
+    if (context.schemaHints && context.typeNode) {
+      const hint = context.schemaHints.get(context.typeNode);
+      if (hint?.items === false) {
+        const itemsOverride = this.createArrayItemsOverride(
+          innerType,
+          innerTypeNode,
+          context,
+        );
+        childContext = { ...context, arrayItemsOverride: itemsOverride };
+      }
+    }
+
+    const innerSchema = this.schemaGenerator.formatChildType(
+      innerType,
+      childContext,
+      innerTypeNode,
+    );
+
+    if (wrapperKind === "Stream") {
+      if (typeof innerSchema === "boolean") {
+        return this.applyWrapperSemantics(innerSchema, "Stream");
+      }
+      return this.applyWrapperSemantics(
+        innerSchema as JSONSchemaObjMutable,
+        "Stream",
+      );
+    }
+
+    if (wrapperKind === "Cell") {
+      const innerWrapper = resolveWrapperNode(
+        innerTypeNode,
+        context.typeChecker,
+      );
+      if (
+        this.isStreamType(innerType, context.typeChecker) ||
+        innerWrapper?.kind === "Stream"
+      ) {
+        throw new Error(
+          "Cell<Stream<T>> is unsupported. Wrap the stream: Cell<{ stream: Stream<T> }>.",
+        );
+      }
+    }
+
+    return this.applyWrapperSemantics(innerSchema, wrapperKind);
+  }
+
+  private formatScopeWrapperTypeFromNode(
+    typeRefNode: ts.TypeReferenceNode,
+    context: GenerationContext,
+    scope: SchemaScope,
+  ): JSONSchemaMutable {
+    const innerTypeNode = typeRefNode.typeArguments?.[0];
+    if (!innerTypeNode) {
+      throw new Error(`Scoped wrapper requires type argument`);
+    }
+
+    let innerType: ts.Type;
+    try {
+      innerType = context.typeRegistry?.get(innerTypeNode) ??
+        context.typeChecker.getTypeFromTypeNode(innerTypeNode);
+    } catch {
+      innerType = context.typeChecker.getAnyType();
+    }
+
+    const innerSchema = this.schemaGenerator.formatChildType(
+      innerType,
+      context,
+      innerTypeNode,
+    );
+
+    return this.applyScopeWrapperSemantics(innerSchema, scope);
+  }
+
+  private applyScopeWrapperSemantics(
+    schema: JSONSchemaMutable,
+    scope: SchemaScope,
+  ): JSONSchemaMutable {
+    if (typeof schema === "boolean") {
+      return schema === false ? { not: true, scope } : { scope };
+    }
+
+    if (Array.isArray(schema.asCell) && schema.asCell.length > 0) {
+      const [first, ...rest] = schema.asCell;
+      return {
+        ...schema,
+        asCell: [applyScopeToAsCellEntry(first!, scope), ...rest],
+      };
+    }
+
+    if (schema.scope !== undefined) {
+      throw new Error(
+        "Nested scope wrappers require a cell boundary between scopes.",
+      );
+    }
+
+    return { ...schema, scope };
+  }
+
+  private formatWrapperType(
+    typeRef: ts.TypeReference,
+    typeRefNode: ts.TypeNode | undefined,
+    context: GenerationContext,
+    wrapperKind: WrapperKind,
+  ): JSONSchemaMutable {
+    const innerTypeFromType = typeRef.typeArguments?.[0];
+
+    // Only extract innerTypeNode if the typeRefNode has type arguments AND
+    // those arguments are not generic type parameters.
+    // If typeRefNode has no type arguments, or if the arguments are generic parameters
+    // (e.g., T from an alias declaration), we should NOT extract inner types from it.
+    let innerTypeNode: ts.TypeNode | undefined = undefined;
+    if (
+      typeRefNode && ts.isTypeReferenceNode(typeRefNode) &&
+      typeRefNode.typeArguments
+    ) {
+      const firstArg = typeRefNode.typeArguments[0];
+      if (firstArg) {
+        // Check if this node represents a type parameter
+        const argType = context.typeChecker.getTypeFromTypeNode(firstArg);
+        const isTypeParameter =
+          (argType.flags & ts.TypeFlags.TypeParameter) !== 0;
+        if (!isTypeParameter) {
+          // Not a type parameter, safe to use
+          innerTypeNode = firstArg;
+        }
+        // Otherwise leave innerTypeNode as undefined (don't use type parameter nodes)
+      }
+    }
+
+    // Resolve inner type, preferring type information but falling back to node
+    // when wrapper references degrade to unknown/any/type-parameter.
+    let innerType: ts.Type | undefined = innerTypeFromType;
+    if (
+      (!innerType || this.isUnusableInnerType(innerType)) &&
+      innerTypeNode
+    ) {
+      try {
+        const fromNode = context.typeRegistry?.get(innerTypeNode) ??
+          context.typeChecker.getTypeFromTypeNode(innerTypeNode);
+        if (fromNode && !this.isUnusableInnerType(fromNode)) {
+          innerType = fromNode;
+        }
+      } catch {
+        // Leave innerType as-is and continue with conservative fallback.
+      }
+    }
+    if (!innerType) {
+      throw new Error(
+        `${wrapperKind}<T> requires type argument`,
+      );
+    }
+
+    // When we resolve aliases (e.g., StringCell -> Cell<string>), the resolved node's
+    // type arguments may contain unbound generics (e.g., T) from the alias declaration.
+    // In that case, we must NOT pass the node, since the type information has the
+    // concrete types (e.g., string) from the usage site.
+    // We detect this by checking if the inner type is a type parameter.
+    const innerTypeIsGeneric =
+      (innerType.flags & ts.TypeFlags.TypeParameter) !== 0;
+
+    // Synthetic nodes have pos === -1 and end === -1.
+    const isSyntheticNode = innerTypeNode && innerTypeNode.pos === -1 &&
+      innerTypeNode.end === -1;
+
+    const syntheticNodeNeedsHelp = !!innerTypeNode && !!isSyntheticNode &&
+      this.innerTypeNeedsNodeAssistance(innerType, context.typeChecker);
+
+    // Prefer real source nodes, but allow synthetic nodes when the resolved type
+    // is widened/unusable and the node still carries useful structure.
+    const shouldPassTypeNode = innerTypeNode && !innerTypeIsGeneric &&
+      (!isSyntheticNode || syntheticNodeNeedsHelp);
+
+    // Check for schema hints on the current typeNode and propagate to child context.
+    // This allows identity-only/property-only array access patterns to avoid
+    // materializing full item schemas while preserving the wrapper on the array.
+    let childContext = context;
+    if (context.schemaHints && context.typeNode) {
+      const hint = context.schemaHints.get(context.typeNode);
+      if (hint?.items === false) {
+        // Pass the inner node even when it isn't used to build the inner schema
+        // (shouldPassTypeNode=false): the override only reads the element's
+        // capability from it. For an expanded `Default<[]> | Item[]` union the
+        // element's `comparable` capability lives ONLY on the synthetic node
+        // (the resolved union type can't express it), so the node is required to
+        // recover it. (CT-1639 Gap B)
+        const itemsOverride = this.createArrayItemsOverride(
+          innerType,
+          innerTypeNode,
+          context,
+        );
+        childContext = { ...context, arrayItemsOverride: itemsOverride };
+      }
+    }
+
+    const innerSchema = this.schemaGenerator.formatChildType(
+      innerType,
+      childContext,
+      shouldPassTypeNode ? innerTypeNode : undefined,
+    );
+
+    // Stream<T>: can also reflect inner Cell-ness
+    if (wrapperKind === "Stream") {
+      if (typeof innerSchema === "boolean") {
+        return this.applyWrapperSemantics(innerSchema, "Stream");
+      }
+      return this.applyWrapperSemantics(
+        innerSchema as JSONSchemaObjMutable,
+        "Stream",
+      );
+    }
+
+    // Cell<T>: disallow Cell<Stream<T>> to avoid ambiguous semantics
+    if (
+      wrapperKind === "Cell" &&
+      this.isStreamType(innerType, context.typeChecker)
+    ) {
+      throw new Error(
+        "Cell<Stream<T>> is unsupported. Wrap the stream: Cell<{ stream: Stream<T> }>.",
+      );
+    }
+
+    // Apply wrapper semantics (asCell/asOpaque) to the inner schema
+    return this.applyWrapperSemantics(innerSchema, wrapperKind);
+  }
+
+  private createArrayItemsOverride(
+    arrayType: ts.Type,
+    arrayTypeNode: ts.TypeNode | undefined,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
+    const base: JSONSchemaMutable = { type: "unknown" };
+    const elementInfo = getArrayElementInfo(
+      arrayType,
+      context.typeChecker,
+      arrayTypeNode,
+    );
+
+    let resolvedElementWrapperKind: "Default" | WrapperKind | undefined;
+    if (elementInfo) {
+      resolvedElementWrapperKind = elementInfo.elementNode
+        ? resolveWrapperNode(elementInfo.elementNode, context.typeChecker)?.kind
+        : getCellWrapperInfo(elementInfo.elementType, context.typeChecker)
+          ?.kind;
+    } else {
+      // No element info — e.g. an expanded `Default<[]> | Item[]` union, whose
+      // type is not array-like so getArrayElementInfo can't reach the element.
+      // The real array member's element capability (e.g. `comparable`) lives on
+      // the synthetic NODE, not the resolved union type, so recover it from the
+      // node by descending to the real array member's element. (CT-1639 Gap B)
+      resolvedElementWrapperKind = this.elementWrapperFromUnionNode(
+        arrayTypeNode,
+        context.typeChecker,
+      );
+    }
+
+    const elementWrapperKind = resolvedElementWrapperKind === "Default"
+      ? undefined
+      : resolvedElementWrapperKind;
+    return elementWrapperKind
+      ? this.applyWrapperSemantics(base, elementWrapperKind)
+      : base;
+  }
+
+  /**
+   * For a synthetic union type node like `ComparableCell<unknown>[] | Default<[]>`
+   * (the expanded form of `Writable<Item[] | Default<[]>>`'s inner), find the
+   * single real-array member and return the wrapper kind of its element node.
+   * Empty-array / `Default<...>` members are skipped. Returns undefined when the
+   * node is not a union, has no real array member, or the element is unwrapped.
+   */
+  private elementWrapperFromUnionNode(
+    node: ts.TypeNode | undefined,
+    checker: ts.TypeChecker,
+  ): "Default" | WrapperKind | undefined {
+    if (!node || !ts.isUnionTypeNode(node)) return undefined;
+    let elementNode: ts.TypeNode | undefined;
+    for (const member of node.types) {
+      const arrayElement = this.arrayElementNode(member);
+      if (!arrayElement) continue; // non-array member (e.g. Default<[]>) — skip
+      // Skip degenerate empty-array members (`never[]`) — they're the unbranded
+      // arm of an expanded `Default<[]>` and carry no real element. (The branded
+      // `[] & DefaultMarker` arm and the empty tuple `[]` are not ArrayTypeNodes,
+      // so arrayElementNode already returned undefined for them.)
+      if (arrayElement.kind === ts.SyntaxKind.NeverKeyword) continue;
+      if (elementNode) return undefined; // more than one real array member
+      elementNode = arrayElement;
+    }
+    if (!elementNode) return undefined;
+    return resolveWrapperNode(elementNode, checker)?.kind;
+  }
+
+  /** The element TypeNode of `T[]` or `Array<T>`/`ReadonlyArray<T>`, else undefined. */
+  private arrayElementNode(node: ts.TypeNode): ts.TypeNode | undefined {
+    if (ts.isArrayTypeNode(node)) return node.elementType;
+    if (
+      ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName) &&
+      (node.typeName.text === "Array" ||
+        node.typeName.text === "ReadonlyArray") &&
+      node.typeArguments && node.typeArguments.length > 0
+    ) {
+      return node.typeArguments[0];
+    }
+    return undefined;
+  }
+
+  private isUnusableInnerType(type: ts.Type): boolean {
+    return (type.flags &
+      (ts.TypeFlags.Any | ts.TypeFlags.Unknown |
+        ts.TypeFlags.TypeParameter)) !==
+      0;
+  }
+
+  private innerTypeNeedsNodeAssistance(
+    type: ts.Type,
+    checker: ts.TypeChecker,
+  ): boolean {
+    if (this.isUnusableInnerType(type)) {
+      return true;
+    }
+    const numericIndex = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
+    if (!numericIndex) {
+      return false;
+    }
+    return this.isUnusableInnerType(numericIndex);
+  }
+
+  /**
+   * Recursively unwrap OpaqueRef layers to find a wrapper type (Cell/Stream/OpaqueRef).
+   * This handles cases like Opaque<OpaqueRef<Stream<T>>> where the type is wrapped in
+   * multiple layers of OpaqueRef due to the Opaque type's recursive definition.
+   */
+  private recursivelyUnwrapOpaqueRef(
+    type: ts.Type,
+    targetWrapperKind: WrapperKind,
+    checker: ts.TypeChecker,
+    depth: number = 0,
+  ):
+    | { type: ts.Type; typeRef: ts.TypeReference; kind: WrapperKind }
+    | undefined {
+    // Prevent infinite recursion
+    if (depth > 10) {
+      return undefined;
+    }
+
+    // Check if this type itself is the target wrapper
+    if ((type.flags & ts.TypeFlags.Union) === 0) {
+      const wrapperInfo = getCellWrapperInfo(type, checker);
+      if (wrapperInfo && wrapperInfo.kind === targetWrapperKind) {
+        return { type, typeRef: wrapperInfo.typeRef, kind: wrapperInfo.kind };
+      }
+    }
+
+    // If this is a union (e.g., from Opaque<T>), check each member
+    if (type.flags & ts.TypeFlags.Union) {
+      const unionType = type as ts.UnionType;
+      for (const member of unionType.types) {
+        // Try to unwrap this member
+        const result = this.recursivelyUnwrapOpaqueRef(
+          member,
+          targetWrapperKind,
+          checker,
+          depth + 1,
+        );
+        if (result) return result;
+      }
+    }
+
+    // If this is an OpaqueRef type, extract its type argument and recurse
+    if (this.isOpaqueRefType(type, checker)) {
+      const innerType = this.extractOpaqueRefTypeArgument(type, checker);
+      if (innerType) {
+        return this.recursivelyUnwrapOpaqueRef(
+          innerType,
+          targetWrapperKind,
+          checker,
+          depth + 1,
+        );
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Check if a type is an Opaque<T> union (T | OpaqueRef<T>)
+   */
+  private isOpaqueUnion(type: ts.Type, checker: ts.TypeChecker): boolean {
+    return this.getOpaqueUnionInfo(type, checker) !== undefined;
+  }
+
+  /**
+   * Extract information from an Opaque<T> union type.
+   * Opaque<T> is defined as: T | OpaqueRef<T>
+   * This function detects this pattern and returns the base type T.
+   */
+  private getOpaqueUnionInfo(
+    type: ts.Type,
+    checker: ts.TypeChecker,
+  ): { baseType: ts.Type } | undefined {
+    // Must be a union type
+    if (!(type.flags & ts.TypeFlags.Union)) {
+      return undefined;
+    }
+
+    const unionType = type as ts.UnionType;
+    const members = unionType.types;
+
+    // Must have exactly 2 members
+    if (members.length !== 2) {
+      return undefined;
+    }
+
+    // One member should be OpaqueRef<T>, the other should be T
+    let opaqueRefMember: ts.Type | undefined;
+    let baseMember: ts.Type | undefined;
+
+    for (const member of members) {
+      // Check if this member is an OpaqueRef type (it will be an intersection)
+      const isOpaqueRef = this.isOpaqueRefType(member, checker);
+      if (isOpaqueRef) {
+        opaqueRefMember = member;
+      } else {
+        baseMember = member;
+      }
+    }
+
+    // Both members must be present for this to be an Opaque<T> union
+    if (!opaqueRefMember || !baseMember) {
+      return undefined;
+    }
+
+    // Verify that the OpaqueRef's type argument matches the base type
+    // Extract T from OpaqueRef<T>
+    const opaqueRefInnerType = this.extractOpaqueRefTypeArgument(
+      opaqueRefMember,
+      checker,
+    );
+    if (!opaqueRefInnerType) {
+      return undefined;
+    }
+
+    // The inner type of OpaqueRef should match the base member
+    // Use type equality check
+    const innerTypeString = checker.typeToString(opaqueRefInnerType);
+    const baseTypeString = checker.typeToString(baseMember);
+
+    if (innerTypeString !== baseTypeString) {
+      // Not a matching Opaque<T> pattern
+      return undefined;
+    }
+
+    return { baseType: baseMember };
+  }
+
+  private isOpaqueRefType(type: ts.Type, checker: ts.TypeChecker): boolean {
+    return isCellBrand(type, checker, "opaque");
+  }
+
+  /**
+   * Extract the type argument T from OpaqueRef<T> or OpaqueCell<T>
+   */
+  private extractOpaqueRefTypeArgument(
+    type: ts.Type,
+    checker: ts.TypeChecker,
+  ): ts.Type | undefined {
+    const wrapperInfo = getCellWrapperInfo(type, checker);
+    if (
+      !wrapperInfo ||
+      (wrapperInfo.kind !== "OpaqueRef" && wrapperInfo.kind !== "OpaqueCell")
+    ) {
+      return undefined;
+    }
+
+    const typeArgs = wrapperInfo.typeRef.typeArguments ??
+      checker.getTypeArguments(wrapperInfo.typeRef);
+    return typeArgs && typeArgs.length > 0 ? typeArgs[0] : undefined;
+  }
+
+  private selectWrapperTypeNode(
+    originalNode: ts.TypeNode | undefined,
+    resolvedWrapper:
+      | {
+        kind: "Default" | WrapperKind;
+        node: ts.TypeReferenceNode;
+      }
+      | undefined,
+    targetKind: WrapperKind,
+  ): ts.TypeReferenceNode | undefined {
+    if (
+      originalNode &&
+      ts.isTypeReferenceNode(originalNode) &&
+      originalNode.typeArguments
+    ) {
+      return originalNode;
+    }
+    if (resolvedWrapper?.kind === targetKind) {
+      return resolvedWrapper.node;
+    }
+    return undefined;
+  }
+
+  private isSyntheticWrapperNode(node: ts.Node): boolean {
+    return node.pos < 0 || node.end < 0;
+  }
+
+  private getTypeRefIdentifierName(
+    node?: ts.TypeNode,
+  ): string | undefined {
+    if (!node || !ts.isTypeReferenceNode(node)) return undefined;
+    const tn = node.typeName;
+    return ts.isIdentifier(tn) ? tn.text : undefined;
+  }
+
+  private isStreamType(type: ts.Type, checker: ts.TypeChecker): boolean {
+    return getCellBrand(type, checker) === "stream";
+  }
+
+  private formatDefaultType(
+    typeRefNode: ts.TypeReferenceNode,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
+    const typeArgs = typeRefNode.typeArguments;
+    if (!typeArgs || typeArgs.length < 1 || typeArgs.length > 2) {
+      throw new Error("Default<T,V> requires 1 or 2 type arguments");
+    }
+
+    const valueTypeNode = typeArgs[0];
+    const defaultTypeNode = typeArgs[1] ?? valueTypeNode;
+
+    if (!valueTypeNode || !defaultTypeNode) {
+      throw new Error("Default<T,V> type arguments cannot be undefined");
+    }
+    // Get the value type from the type nodes
+    const valueType = context.typeRegistry?.get(valueTypeNode) ??
+      context.typeChecker.getTypeFromTypeNode(valueTypeNode);
+    if (typeArgs.length === 1 && this.isUndefinedType(valueType)) {
+      throw new Error(
+        "Default<undefined> is unsupported; use an optional field or a JSON value default.",
+      );
+    }
+
+    // Generate schema for the value type
+    const valueSchema = this.schemaGenerator.formatChildType(
+      valueType,
+      context,
+      valueTypeNode,
+    );
+
+    // Extract default value from the default type node (this can handle complex literals)
+    const defaultValue = this.extractDefaultValueFromNode(
+      defaultTypeNode,
+      context,
+    );
+
+    if (defaultValue !== undefined) {
+      // JSON Schema Draft 2020-12 allows default as a sibling of $ref
+      // Simply add the default property directly to the schema
+      if (typeof valueSchema === "boolean") {
+        // Boolean schemas (true/false) cannot have properties directly
+        // For true: { default: value } (any value is valid)
+        // For false: { not: true, default: value } (no value is valid)
+        return (valueSchema === false
+          ? { not: true, default: defaultValue }
+          : { default: defaultValue }) as JSONSchemaObjMutable;
+      }
+      (valueSchema as any).default = defaultValue;
+    }
+
+    return valueSchema;
+  }
+
+  private formatCfcAlias(
+    typeWithAlias: TypeWithInternals,
+    context: GenerationContext,
+    aliasName: string,
+  ): JSONSchemaMutable {
+    const aliasArgs = typeWithAlias.aliasTypeArguments ?? [];
+    const baseType = aliasArgs[0];
+    if (!baseType) {
+      throw new Error(`${aliasName}<T> requires type argument`);
+    }
+
+    const baseTypeNode = this.getAliasTypeArgumentNode(context.typeNode, 0);
+    const baseSchema = this.schemaGenerator.formatChildType(
+      baseType,
+      context,
+      baseTypeNode,
+    );
+
+    const ifc = this.buildIfcMetadataForAlias(
+      aliasName,
+      aliasArgs,
+      context,
+    );
+    if (ifc === undefined) {
+      return baseSchema;
+    }
+
+    return this.mergeIfcMetadata(baseSchema, ifc);
+  }
+
+  private formatResolvedCfcAlias(
+    resolved: ResolvedCfcAlias,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
+    const baseType = resolved.aliasArgs[0];
+    if (!baseType) {
+      throw new Error(`${resolved.aliasName}<T> requires type argument`);
+    }
+
+    const baseTypeNode = resolved.aliasArgNodes?.[0];
+    const baseSchema = baseTypeNode
+      ? this.formatCfcAliasTypeNode(baseTypeNode, context) ??
+        this.schemaGenerator.formatChildType(baseType, context, baseTypeNode)
+      : this.schemaGenerator.formatChildType(baseType, context, undefined);
+
+    const ifc = this.buildIfcMetadataForAlias(
+      resolved.aliasName,
+      resolved.aliasArgs,
+      context,
+      resolved.aliasArgNodes,
+    );
+    if (ifc === undefined) {
+      return baseSchema;
+    }
+
+    return this.mergeIfcMetadata(baseSchema, ifc);
+  }
+
+  private formatCfcAliasTypeNode(
+    typeNode: ts.TypeNode,
+    context: GenerationContext,
+  ): JSONSchemaMutable | undefined {
+    if (
+      ts.isParenthesizedTypeNode(typeNode) || ts.isTypeOperatorNode(typeNode)
+    ) {
+      return this.formatCfcAliasTypeNode(typeNode.type, context);
+    }
+    if (
+      !ts.isTypeReferenceNode(typeNode) || !ts.isIdentifier(typeNode.typeName)
+    ) {
+      return undefined;
+    }
+
+    const aliasDeclaration = this.getTypeAliasDeclarationForSymbol(
+      context.typeChecker.getSymbolAtLocation(typeNode.typeName),
+      context,
+    );
+    if (!aliasDeclaration) {
+      return undefined;
+    }
+
+    const aliasArgNodes = typeNode.typeArguments
+      ? [...typeNode.typeArguments]
+      : undefined;
+    const aliasArgs = (aliasArgNodes ?? []).map((argNode) =>
+      this.resolveTypeNodeToType(argNode, context, new Map())
+    );
+    const resolved = this.resolveCfcAliasFromDeclaration(
+      aliasDeclaration,
+      aliasArgs,
+      aliasArgNodes,
+      { ...context, typeNode },
+      new Set([aliasDeclaration.name.text]),
+    );
+    return resolved
+      ? this.formatResolvedCfcAlias(resolved, context)
+      : undefined;
+  }
+
+  private resolveCfcAliasInstantiation(
+    typeWithAlias: TypeWithInternals,
+    context: GenerationContext,
+  ): ResolvedCfcAlias | undefined {
+    const aliasName = typeWithAlias.aliasSymbol?.name;
+    if (!aliasName) {
+      return undefined;
+    }
+    const aliasArgs = typeWithAlias.aliasTypeArguments ?? [];
+    if (CFC_ALIAS_NAMES.has(aliasName)) {
+      return { aliasName, aliasArgs };
+    }
+
+    const aliasSymbol = typeWithAlias.aliasSymbol;
+    const aliasDeclaration = this.getTypeAliasDeclarationForSymbol(
+      aliasSymbol,
+      context,
+    );
+    if (!aliasDeclaration) {
+      return undefined;
+    }
+
+    return this.resolveCfcAliasFromDeclaration(
+      aliasDeclaration,
+      aliasArgs,
+      this.getAliasTypeArgumentNodes(context.typeNode),
+      context,
+      new Set([aliasName]),
+    );
+  }
+
+  private resolveCfcAliasFromDeclaration(
+    aliasDeclaration: ts.TypeAliasDeclaration,
+    aliasArgs: readonly ts.Type[],
+    aliasArgNodes: readonly ts.TypeNode[] | undefined,
+    context: GenerationContext,
+    visited: Set<string>,
+  ): ResolvedCfcAlias | undefined {
+    const aliasName = aliasDeclaration.name.text;
+    if (CFC_ALIAS_NAMES.has(aliasName)) {
+      return {
+        aliasName,
+        aliasArgs,
+        ...(aliasArgNodes ? { aliasArgNodes } : {}),
+      };
+    }
+
+    const aliased = aliasDeclaration.type;
+    if (
+      !ts.isTypeReferenceNode(aliased) || !ts.isIdentifier(aliased.typeName)
+    ) {
+      return undefined;
+    }
+
+    const targetName = aliased.typeName.text;
+    if (visited.has(targetName)) {
+      return undefined;
+    }
+
+    const targetDeclaration = this.getTypeAliasDeclarationForSymbol(
+      context.typeChecker.getSymbolAtLocation(aliased.typeName),
+      context,
+    );
+    if (!targetDeclaration) {
+      return undefined;
+    }
+
+    const paramMap = new Map<string, ts.Type>();
+    const paramNodeMap = new Map<string, ts.TypeNode>();
+    for (let i = 0; i < (aliasDeclaration.typeParameters?.length ?? 0); i++) {
+      const paramName = aliasDeclaration.typeParameters?.[i]?.name.text;
+      const actualArg = aliasArgs[i];
+      if (paramName && actualArg) {
+        paramMap.set(paramName, actualArg);
+      }
+      const actualArgNode = aliasArgNodes?.[i];
+      if (paramName && actualArgNode) {
+        paramNodeMap.set(paramName, actualArgNode);
+      }
+    }
+
+    const resolvedArgs: ts.Type[] = [];
+    const resolvedArgNodes: ts.TypeNode[] = [];
+    for (const argNode of aliased.typeArguments ?? []) {
+      const resolvedArgNode = this.substituteTypeNode(argNode, paramNodeMap);
+      resolvedArgs.push(
+        this.resolveTypeNodeToType(resolvedArgNode, context, new Map()),
+      );
+      resolvedArgNodes.push(resolvedArgNode);
+    }
+
+    visited.add(aliasName);
+    return this.resolveCfcAliasFromDeclaration(
+      targetDeclaration,
+      resolvedArgs,
+      resolvedArgNodes,
+      context,
+      visited,
+    );
+  }
+
+  private resolveTypeNodeToType(
+    typeNode: ts.TypeNode,
+    context: GenerationContext,
+    paramMap: ReadonlyMap<string, ts.Type>,
+  ): ts.Type {
+    if (
+      ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)
+    ) {
+      const mapped = paramMap.get(typeNode.typeName.text);
+      if (mapped) {
+        return mapped;
+      }
+    }
+
+    const fromRegistry = context.typeRegistry?.get(typeNode);
+    if (fromRegistry) {
+      return fromRegistry;
+    }
+
+    try {
+      return context.typeChecker.getTypeFromTypeNode(typeNode);
+    } catch {
+      return context.typeChecker.getAnyType();
+    }
+  }
+
+  private getTypeAliasDeclarationForSymbol(
+    symbol: ts.Symbol | undefined,
+    context: GenerationContext,
+  ): ts.TypeAliasDeclaration | undefined {
+    let resolved = symbol;
+    if (resolved && (resolved.flags & ts.SymbolFlags.Alias) !== 0) {
+      try {
+        resolved = context.typeChecker.getAliasedSymbol(resolved);
+      } catch {
+        // Fall back to the original symbol; some synthetic test symbols do not
+        // round-trip cleanly through getAliasedSymbol.
+      }
+    }
+    return resolved?.declarations?.find(
+      (decl): decl is ts.TypeAliasDeclaration =>
+        ts.isTypeAliasDeclaration(decl),
+    );
+  }
+
+  private substituteTypeNode(
+    typeNode: ts.TypeNode,
+    paramMap: ReadonlyMap<string, ts.TypeNode>,
+  ): ts.TypeNode {
+    if (paramMap.size === 0) {
+      return typeNode;
+    }
+
+    if (
+      ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)
+    ) {
+      const mapped = paramMap.get(typeNode.typeName.text);
+      if (mapped && !typeNode.typeArguments?.length) {
+        return mapped;
+      }
+      if (typeNode.typeArguments?.length) {
+        return ts.factory.updateTypeReferenceNode(
+          typeNode,
+          typeNode.typeName,
+          ts.factory.createNodeArray(
+            typeNode.typeArguments.map((arg) =>
+              this.substituteTypeNode(arg, paramMap)
+            ),
+          ),
+        );
+      }
+      return typeNode;
+    }
+
+    if (ts.isTypeLiteralNode(typeNode)) {
+      return ts.factory.updateTypeLiteralNode(
+        typeNode,
+        ts.factory.createNodeArray(
+          typeNode.members.map((member) => {
+            if (ts.isPropertySignature(member) && member.type) {
+              return ts.factory.updatePropertySignature(
+                member,
+                member.modifiers,
+                member.name,
+                member.questionToken,
+                this.substituteTypeNode(member.type, paramMap),
+              );
+            }
+            return member;
+          }),
+        ),
+      );
+    }
+
+    if (ts.isTupleTypeNode(typeNode)) {
+      return ts.factory.updateTupleTypeNode(
+        typeNode,
+        typeNode.elements.map((element) =>
+          this.substituteTypeNode(element, paramMap) as ts.TypeNode
+        ),
+      );
+    }
+
+    if (ts.isArrayTypeNode(typeNode)) {
+      return ts.factory.updateArrayTypeNode(
+        typeNode,
+        this.substituteTypeNode(typeNode.elementType, paramMap),
+      );
+    }
+
+    if (ts.isTypeOperatorNode(typeNode)) {
+      return ts.factory.updateTypeOperatorNode(
+        typeNode,
+        this.substituteTypeNode(typeNode.type, paramMap),
+      );
+    }
+
+    if (ts.isParenthesizedTypeNode(typeNode)) {
+      return ts.factory.updateParenthesizedType(
+        typeNode,
+        this.substituteTypeNode(typeNode.type, paramMap),
+      );
+    }
+
+    return typeNode;
+  }
+
+  private buildIfcMetadataForAlias(
+    aliasName: string,
+    aliasArgs: readonly ts.Type[],
+    context: GenerationContext,
+    aliasArgNodes?: readonly ts.TypeNode[],
+  ): Record<string, unknown> | undefined {
+    const readValue = (index: number): unknown => {
+      return this.extractLiteralLikeValue(
+        aliasArgs[index],
+        aliasArgNodes?.[index] ??
+          this.getAliasTypeArgumentNode(context.typeNode, index),
+        context,
+      );
+    };
+
+    switch (aliasName) {
+      case "Cfc": {
+        const payload = readValue(1);
+        return isRecord(payload) ? { ...payload } : undefined;
+      }
+      case "Confidential":
+        return { confidentiality: readValue(1) };
+      case "Integrity":
+        return { integrity: readValue(1) };
+      case "AddIntegrity":
+        return { addIntegrity: readValue(1) };
+      case "RepresentsCurrentUser":
+        return {
+          addIntegrity: [{
+            kind: "represents-principal",
+            subject: { __ctCurrentPrincipal: true },
+          }],
+        };
+      case "AuthoredByCurrentUser":
+        return {
+          addIntegrity: [{
+            kind: "authored-by",
+            subject: { __ctCurrentPrincipal: true },
+          }],
+        };
+      case "RequiresIntegrity":
+        return { requiredIntegrity: readValue(1) };
+      case "MaxConfidentiality":
+        return { maxConfidentiality: readValue(1) };
+      case "ExactCopy":
+        return { exactCopyOf: readValue(1) };
+      case "OpaqueInput":
+        return {
+          opaque: aliasArgs.length > 1 ? readValue(1) : true,
+        };
+      case "WriteAuthorizedBy":
+        return this.buildWriteAuthorizedByMetadata(context, aliasArgNodes);
+      case "TrustedActionWriteWithIntegrity":
+        return this.buildTrustedActionWriteMetadata({
+          context,
+          aliasArgNodes,
+          action: readValue(2),
+          trustedPattern: readValue(3),
+          requiredEventIntegrity: readValue(4),
+        });
+      case "TrustedActionWrite": {
+        const trustedPattern = readValue(3);
+        return this.buildTrustedActionWriteMetadata({
+          context,
+          aliasArgNodes,
+          action: readValue(2),
+          trustedPattern,
+          requiredEventIntegrity: [trustedPattern],
+        });
+      }
+      case "TrustedActionUiContract": {
+        const trustedPattern = readValue(2);
+        return {
+          uiContract: {
+            helper: "UiAction",
+            action: readValue(1),
+            trustedPattern,
+            requiredEventIntegrity: aliasArgs.length > 3
+              ? readValue(3)
+              : [trustedPattern],
+          },
+        };
+      }
+      case "LengthPreservedFrom":
+        return {
+          collection: {
+            sourceCollection: readValue(1),
+            lengthPreserved: true,
+          },
+        };
+      case "FilteredFrom":
+        return {
+          collection: {
+            filteredFrom: readValue(1),
+          },
+        };
+      case "SubsetOf":
+        return {
+          collection: {
+            subsetOf: readValue(1),
+          },
+        };
+      case "PermutationOf":
+        return {
+          collection: {
+            permutationOf: readValue(1),
+          },
+        };
+      case "ProjectionPath":
+        return this.buildProjectionMetadata(aliasArgs, context, {
+          fromIndex: 1,
+          pathIndex: 2,
+          defaultFrom: undefined,
+        });
+      case "ProjectionOf":
+        return this.buildProjectionMetadata(aliasArgs, context, {
+          fromIndex: 1,
+          pathIndex: 1,
+          defaultFrom: "/",
+        });
+      case "Projection":
+        return this.buildProjectionMetadata(aliasArgs, context, {
+          fromIndex: 1,
+          pathIndex: 1,
+          defaultFrom: "/",
+        });
+      default:
+        return undefined;
+    }
+  }
+
+  private buildProjectionMetadata(
+    aliasArgs: readonly ts.Type[],
+    context: GenerationContext,
+    options: {
+      readonly fromIndex: number;
+      readonly pathIndex: number;
+      readonly defaultFrom: string | undefined;
+    },
+  ): Record<string, unknown> | undefined {
+    const readValue = (index: number): unknown => {
+      return this.extractLiteralLikeValue(
+        aliasArgs[index],
+        this.getAliasTypeArgumentNode(context.typeNode, index),
+        context,
+      );
+    };
+
+    const from = options.defaultFrom ?? readValue(options.fromIndex);
+    const directPath = this.encodeJsonPointerPath(readValue(options.pathIndex));
+    if (directPath !== undefined) {
+      return {
+        projection: {
+          from,
+          path: directPath,
+        },
+      };
+    }
+
+    const sourceRefType = aliasArgs[0] as TypeWithInternals | undefined;
+    const sourceRefNode = this.getAliasTypeArgumentNode(context.typeNode, 0);
+    const nestedPathType = sourceRefType?.aliasTypeArguments?.[1];
+    const nestedPathNode =
+      sourceRefNode && ts.isTypeReferenceNode(sourceRefNode)
+        ? sourceRefNode.typeArguments?.[1]
+        : undefined;
+    const nestedPath = this.encodeJsonPointerPath(
+      this.extractLiteralLikeValue(nestedPathType, nestedPathNode, context),
+    );
+    if (nestedPath === undefined) {
+      return undefined;
+    }
+
+    return {
+      projection: {
+        from,
+        path: nestedPath,
+      },
+    };
+  }
+
+  private buildWriteAuthorizedByMetadata(
+    context: GenerationContext,
+    aliasArgNodes?: readonly ts.TypeNode[],
+  ): Record<string, unknown> | undefined {
+    return this.buildWriteAuthorizedByMetadataForArg(
+      context,
+      aliasArgNodes,
+      1,
+    );
+  }
+
+  private buildTrustedActionWriteMetadata(
+    options: {
+      context: GenerationContext;
+      aliasArgNodes: readonly ts.TypeNode[] | undefined;
+      action: unknown;
+      trustedPattern: unknown;
+      requiredEventIntegrity: unknown;
+    },
+  ): Record<string, unknown> | undefined {
+    const writeMetadata = this.buildWriteAuthorizedByMetadataForArg(
+      options.context,
+      options.aliasArgNodes,
+      1,
+    );
+    return {
+      ...(writeMetadata ?? {}),
+      uiContract: {
+        helper: "UiAction",
+        action: options.action,
+        trustedPattern: options.trustedPattern,
+        requiredEventIntegrity: options.requiredEventIntegrity,
+      },
+    };
+  }
+
+  private buildWriteAuthorizedByMetadataForArg(
+    context: GenerationContext,
+    aliasArgNodes: readonly ts.TypeNode[] | undefined,
+    bindingIndex: number,
+  ): Record<string, unknown> | undefined {
+    const bindingNode = aliasArgNodes?.[bindingIndex] ??
+      this.getAliasTypeArgumentNode(context.typeNode, bindingIndex);
+    if (!bindingNode || !ts.isTypeQueryNode(bindingNode)) {
+      return undefined;
+    }
+    if (!ts.isIdentifier(bindingNode.exprName)) {
+      return undefined;
+    }
+
+    return {
+      writeAuthorizedBy: {
+        __ctWriterIdentityOf: this.writeAuthorizedByIdentityForBinding(
+          context,
+          bindingNode.exprName,
+        ),
+      },
+    };
+  }
+
+  private writeAuthorizedByIdentityForBinding(
+    context: GenerationContext,
+    bindingName: ts.Identifier,
+  ): { file: string; path: string[] } {
+    const symbol = context.typeChecker.getSymbolAtLocation(bindingName);
+    const declarationSymbol = symbol && (symbol.flags & ts.SymbolFlags.Alias)
+      ? context.typeChecker.getAliasedSymbol(symbol)
+      : symbol;
+    const declaration = declarationSymbol?.valueDeclaration ??
+      declarationSymbol?.declarations?.[0];
+    const declaredName = declaration && ts.isVariableDeclaration(declaration) &&
+        ts.isIdentifier(declaration.name)
+      ? declaration.name.text
+      : declaration && ts.isFunctionDeclaration(declaration) &&
+          declaration.name
+      ? declaration.name.text
+      : bindingName.text;
+    const sourceFileName = declaration?.getSourceFile().fileName ??
+      bindingName.getSourceFile().fileName ??
+      context.sourceFileName ??
+      "unknown";
+
+    return {
+      file: normalizeWriterIdentityFile(sourceFileName),
+      path: [declaredName],
+    };
+  }
+
+  private getAliasTypeArgumentNode(
+    typeNode: ts.TypeNode | undefined,
+    index: number,
+  ): ts.TypeNode | undefined {
+    if (!typeNode || !ts.isTypeReferenceNode(typeNode)) {
+      return undefined;
+    }
+    return typeNode.typeArguments?.[index];
+  }
+
+  private getAliasTypeArgumentNodes(
+    typeNode: ts.TypeNode | undefined,
+  ): readonly ts.TypeNode[] | undefined {
+    if (!typeNode || !ts.isTypeReferenceNode(typeNode)) {
+      return undefined;
+    }
+    return typeNode.typeArguments ? [...typeNode.typeArguments] : undefined;
+  }
+
+  private mergeIfcMetadata(
+    schema: JSONSchemaMutable,
+    ifc: Record<string, unknown>,
+  ): JSONSchemaMutable {
+    if (typeof schema === "boolean") {
+      return schema === false ? { not: true, ifc } : { ifc };
+    }
+
+    const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
+    return {
+      ...schema,
+      ifc: {
+        ...existingIfc,
+        ...ifc,
+      },
+    };
+  }
+
+  private encodeJsonPointerPath(value: unknown): string | undefined {
+    if (typeof value === "string") {
+      return value;
+    }
+    if (
+      Array.isArray(value) &&
+      value.every((segment) => typeof segment === "string")
+    ) {
+      if (value.length === 0) {
+        return "/";
+      }
+      return `/${
+        value.map((segment) =>
+          segment.replaceAll("~", "~0").replaceAll("/", "~1")
+        ).join("/")
+      }`;
+    }
+    return undefined;
+  }
+
+  private extractLiteralLikeValue(
+    type: ts.Type | undefined,
+    typeNode: ts.TypeNode | undefined,
+    context: GenerationContext,
+  ): unknown {
+    if (!typeNode && !type) {
+      return undefined;
+    }
+
+    if (typeNode) {
+      if (ts.isParenthesizedTypeNode(typeNode)) {
+        return this.extractLiteralLikeValue(type, typeNode.type, context);
+      }
+      if (ts.isTypeOperatorNode(typeNode)) {
+        return this.extractLiteralLikeValue(type, typeNode.type, context);
+      }
+      if (ts.isTypeQueryNode(typeNode)) {
+        return this.extractValueFromTypeQuery(typeNode, context);
+      }
+      if (ts.isLiteralTypeNode(typeNode)) {
+        const literal = typeNode.literal;
+        if (ts.isStringLiteral(literal)) return literal.text;
+        if (ts.isNumericLiteral(literal)) return Number(literal.text);
+        if (literal.kind === ts.SyntaxKind.TrueKeyword) return true;
+        if (literal.kind === ts.SyntaxKind.FalseKeyword) return false;
+        if (literal.kind === ts.SyntaxKind.NullKeyword) return null;
+      }
+      if (ts.isTupleTypeNode(typeNode)) {
+        return typeNode.elements.map((element) =>
+          this.extractLiteralLikeValue(undefined, element, context)
+        );
+      }
+      if (
+        ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)
+      ) {
+        const aliasDeclaration = this.getTypeAliasDeclarationForSymbol(
+          context.typeChecker.getSymbolAtLocation(typeNode.typeName),
+          context,
+        );
+        if (aliasDeclaration) {
+          const paramMap = new Map<string, ts.TypeNode>();
+          for (
+            let i = 0;
+            i < (aliasDeclaration.typeParameters?.length ?? 0);
+            i++
+          ) {
+            const paramName = aliasDeclaration.typeParameters?.[i]?.name.text;
+            const actualArgNode = typeNode.typeArguments?.[i];
+            if (paramName && actualArgNode) {
+              paramMap.set(paramName, actualArgNode);
+            }
+          }
+          return this.extractLiteralLikeValue(
+            undefined,
+            this.substituteTypeNode(aliasDeclaration.type, paramMap),
+            context,
+          );
+        }
+      }
+      if (ts.isTypeLiteralNode(typeNode)) {
+        const obj: Record<string, unknown> = {};
+        for (const member of typeNode.members) {
+          if (ts.isPropertySignature(member) && member.name && member.type) {
+            const propName = getPropertyNameText(member.name);
+            if (!propName) continue;
+            obj[propName] = this.extractLiteralLikeValue(
+              undefined,
+              member.type,
+              context,
+            );
+          }
+        }
+        return obj;
+      }
+      if (typeNode.kind === ts.SyntaxKind.TrueKeyword) return true;
+      if (typeNode.kind === ts.SyntaxKind.FalseKeyword) return false;
+      if (typeNode.kind === ts.SyntaxKind.NullKeyword) return null;
+      if (typeNode.kind === ts.SyntaxKind.UndefinedKeyword) return undefined;
+    }
+
+    if (!type) {
+      return undefined;
+    }
+
+    if (type.flags & ts.TypeFlags.StringLiteral) {
+      return (type as ts.StringLiteralType).value;
+    }
+    if (type.flags & ts.TypeFlags.NumberLiteral) {
+      return (type as ts.NumberLiteralType).value;
+    }
+    if (type.flags & ts.TypeFlags.BooleanLiteral) {
+      return (type as { intrinsicName?: string }).intrinsicName === "true";
+    }
+    if (type.flags & ts.TypeFlags.Null) {
+      return null;
+    }
+    if (type.flags & ts.TypeFlags.Undefined) {
+      return undefined;
+    }
+
+    const typeText = context.typeChecker.typeToString(type);
+    if (
+      typeText.length >= 2 &&
+      ((typeText.startsWith('"') && typeText.endsWith('"')) ||
+        (typeText.startsWith("'") && typeText.endsWith("'")))
+    ) {
+      return typeText.slice(1, -1);
+    }
+
+    if (context.typeChecker.isTupleType(type)) {
+      const tupleType = type as ts.TypeReference;
+      const elements = context.typeChecker.getTypeArguments(tupleType);
+      if (elements.length > 0) {
+        return elements.map((element) =>
+          this.extractLiteralLikeValue(element, undefined, context)
+        );
+      }
+    }
+
+    const objectFlags =
+      (type as { objectFlags?: ts.ObjectFlags }).objectFlags ??
+        0;
+    if ((objectFlags & ts.ObjectFlags.Tuple) !== 0) {
+      const tupleType = type as ts.TypeReference;
+      const elements = context.typeChecker.getTypeArguments(tupleType);
+      if (elements.length > 0) {
+        return elements.map((element) =>
+          this.extractLiteralLikeValue(element, undefined, context)
+        );
+      }
+    }
+
+    if ((type.flags & ts.TypeFlags.Object) !== 0) {
+      const properties = context.typeChecker.getPropertiesOfType(type);
+      if (properties.length > 0) {
+        const obj: Record<string, unknown> = {};
+        for (const property of properties) {
+          const propType = context.typeChecker.getTypeOfSymbolAtLocation(
+            property,
+            property.valueDeclaration ?? property.declarations?.[0] ??
+              context.typeNode ?? ({} as ts.Node),
+          );
+          obj[property.getName()] = this.extractLiteralLikeValue(
+            propType,
+            undefined,
+            context,
+          );
+        }
+        return obj;
+      }
+    }
+
+    return undefined;
+  }
+
+  private extractDefaultValueFromNode(
+    typeNode: ts.TypeNode,
+    context: GenerationContext,
+  ): unknown {
+    // Handle typeof expressions (TypeQuery nodes)
+    // These reference a variable's value, like: typeof defaultRoutes
+    if (ts.isTypeQueryNode(typeNode)) {
+      return this.extractValueFromTypeQuery(typeNode, context);
+    }
+
+    // Handle type references that represent empty objects
+    // This includes Record<string, never>, Record<K, never>, and similar mapped types
+    if (ts.isTypeReferenceNode(typeNode) && typeNode.typeArguments) {
+      // For mapped types like Record<K, V>, if V is never, the result is an empty object
+      // Check the last type argument (the value type in mapped types)
+      const lastTypeArg =
+        typeNode.typeArguments[typeNode.typeArguments.length - 1];
+      if (lastTypeArg) {
+        const lastType = context.typeRegistry?.get(lastTypeArg) ??
+          context.typeChecker.getTypeFromTypeNode(lastTypeArg);
+        // If the value type is never, this represents an empty object
+        if (lastType.flags & ts.TypeFlags.Never) {
+          return {};
+        }
+      }
+    }
+
+    // Handle literal types
+    if (ts.isLiteralTypeNode(typeNode)) {
+      const literal = typeNode.literal;
+      if (ts.isStringLiteral(literal)) return literal.text;
+      if (ts.isNumericLiteral(literal)) return Number(literal.text);
+      if (literal.kind === ts.SyntaxKind.TrueKeyword) return true;
+      if (literal.kind === ts.SyntaxKind.FalseKeyword) return false;
+      if (literal.kind === ts.SyntaxKind.NullKeyword) return null;
+    }
+
+    // Handle array literals (tuples) like [1, 2] or ["item1", "item2"]
+    if (ts.isTupleTypeNode(typeNode)) {
+      return typeNode.elements.map((element) =>
+        this.extractDefaultValueFromNode(element, context)
+      );
+    }
+
+    // Handle object literals like { theme: "dark", count: 10 }
+    if (ts.isTypeLiteralNode(typeNode)) {
+      const obj: Record<string, unknown> = {};
+      for (const member of typeNode.members) {
+        if (ts.isPropertySignature(member) && member.name && member.type) {
+          const propName = getPropertyNameText(
+            member.name,
+            context.typeChecker,
+          );
+          if (!propName) {
+            continue;
+          }
+          obj[propName] = this.extractDefaultValueFromNode(
+            member.type,
+            context,
+          );
+        }
+      }
+      return obj;
+    }
+
+    // Handle keywords
+    if (typeNode.kind === ts.SyntaxKind.NullKeyword) return null;
+    if (typeNode.kind === ts.SyntaxKind.UndefinedKeyword) return undefined;
+
+    // Fallback: try to get the type and extract from it
+    const type = context.typeRegistry?.get(typeNode) ??
+      context.typeChecker.getTypeFromTypeNode(typeNode);
+    return this.extractDefaultValue(type, context);
+  }
+
+  private extractDefaultValue(
+    type: ts.Type,
+    context: GenerationContext,
+  ): unknown {
+    // First try simple literal extraction
+    if (type.flags & ts.TypeFlags.StringLiteral) {
+      return (type as ts.StringLiteralType).value;
+    }
+    if (type.flags & ts.TypeFlags.NumberLiteral) {
+      return (type as ts.NumberLiteralType).value;
+    }
+    if (type.flags & ts.TypeFlags.BooleanLiteral) {
+      return (type as any).intrinsicName === "true";
+    }
+    if (type.flags & ts.TypeFlags.Null) {
+      return null;
+    }
+    if (type.flags & ts.TypeFlags.Undefined) {
+      return undefined;
+    }
+
+    // For complex values (arrays/objects), try to extract from the type's symbol
+    // This is a simplified approach that works for many cases
+    const symbol = type.getSymbol();
+    if (symbol && symbol.valueDeclaration) {
+      return this.extractComplexDefaultFromTypeSymbol(type, symbol, context);
+    }
+
+    return undefined;
+  }
+
+  private extractValueFromTypeQuery(
+    typeQueryNode: ts.TypeQueryNode,
+    context: GenerationContext,
+  ): unknown {
+    // Get the entity name being queried (e.g., "defaultRoutes" in "typeof defaultRoutes")
+    const exprName = typeQueryNode.exprName;
+
+    // Get the symbol for the referenced entity
+    let symbol = context.typeChecker.getSymbolAtLocation(exprName);
+    if (!symbol) {
+      return undefined;
+    }
+    if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+      try {
+        symbol = context.typeChecker.getAliasedSymbol(symbol);
+      } catch {
+        // Fall back to the import alias; local test programs can produce
+        // synthetic symbols that do not round-trip through getAliasedSymbol.
+      }
+    }
+
+    return this.extractValueFromSymbol(symbol, context);
+  }
+
+  /**
+   * Extract a runtime value from a symbol's value declaration.
+   * Works for variables with initializers like: const foo = [1, 2, 3]
+   */
+  private extractValueFromSymbol(
+    symbol: ts.Symbol,
+    context: GenerationContext,
+  ): unknown {
+    const valueDeclaration = symbol.valueDeclaration;
+    if (!valueDeclaration) {
+      return undefined;
+    }
+
+    // Check if it's a variable declaration with an initializer
+    if (
+      ts.isVariableDeclaration(valueDeclaration) &&
+      valueDeclaration.initializer
+    ) {
+      return this.extractValueFromExpression(
+        valueDeclaration.initializer,
+        context,
+      );
+    }
+
+    return undefined;
+  }
+
+  private extractValueFromExpression(
+    expr: ts.Expression,
+    context: GenerationContext,
+  ): unknown {
+    if (
+      ts.isAsExpression(expr) || ts.isTypeAssertionExpression(expr) ||
+      ts.isSatisfiesExpression(expr) || ts.isParenthesizedExpression(expr)
+    ) {
+      return this.extractValueFromExpression(expr.expression, context);
+    }
+
+    // Handle array literals like [1, 2, 3] or [{ id: "a" }, { id: "b" }]
+    if (ts.isArrayLiteralExpression(expr)) {
+      return expr.elements.map((element) =>
+        this.extractValueFromExpression(element, context)
+      );
+    }
+
+    // Handle object literals like { id: "a", name: "test" }
+    if (ts.isObjectLiteralExpression(expr)) {
+      const obj: Record<string, unknown> = {};
+      for (const property of expr.properties) {
+        if (
+          ts.isPropertyAssignment(property) && ts.isIdentifier(property.name)
+        ) {
+          const propName = property.name.text;
+          obj[propName] = this.extractValueFromExpression(
+            property.initializer,
+            context,
+          );
+        } else if (ts.isShorthandPropertyAssignment(property)) {
+          // Handle shorthand like { id } where id is a variable
+          const propName = property.name.text;
+          obj[propName] = this.extractValueFromExpression(
+            property.name,
+            context,
+          );
+        }
+      }
+      return obj;
+    }
+
+    // Handle string literals
+    if (ts.isStringLiteral(expr)) {
+      return expr.text;
+    }
+
+    // Handle numeric literals
+    if (ts.isNumericLiteral(expr)) {
+      return Number(expr.text);
+    }
+
+    // Handle boolean literals
+    if (expr.kind === ts.SyntaxKind.TrueKeyword) {
+      return true;
+    }
+    if (expr.kind === ts.SyntaxKind.FalseKeyword) {
+      return false;
+    }
+
+    // Handle null
+    if (expr.kind === ts.SyntaxKind.NullKeyword) {
+      return null;
+    }
+
+    // For more complex expressions, return undefined
+    return undefined;
+  }
+
+  private extractComplexDefaultFromTypeSymbol(
+    type: ts.Type,
+    symbol: ts.Symbol,
+    context: GenerationContext,
+  ): unknown {
+    // Try to extract from the symbol's value declaration initializer (AST-based)
+    const extracted = this.extractValueFromSymbol(symbol, context);
+    if (extracted !== undefined) {
+      return extracted;
+    }
+
+    // Check if this is an empty object type (no properties, object type)
+    // This handles cases like Record<string, never>
+    if (
+      (type.flags & ts.TypeFlags.Object) !== 0 &&
+      context.typeChecker.getPropertiesOfType(type).length === 0
+    ) {
+      return {};
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Check if a type is the undefined type.
+   * Extracted for clarity and consistency with UnionFormatter.
+   */
+  private isUndefinedType(type: ts.Type): boolean {
+    return (type.flags & ts.TypeFlags.Undefined) !== 0;
+  }
+
+  /**
+   * Apply wrapper semantics to a schema, handling boolean schemas correctly.
+   * Boolean schemas (true/false) can't have properties spread into them.
+   */
+  private applyWrapperSemantics(
+    schema: JSONSchemaMutable,
+    wrapperKind: WrapperKind,
+  ): JSONSchemaMutable {
+    const propertyValue = wrapperKindToBrand(wrapperKind);
+    // If we couldn't determine a valid wrapper brand, return the schema as-is
+    if (propertyValue === undefined) {
+      return schema;
+    }
+
+    if (typeof schema === "boolean") {
+      return schema === false
+        ? { asCell: [propertyValue], not: true }
+        : { asCell: [propertyValue] };
+    }
+    if (schema.asCell !== undefined) {
+      return { ...schema, asCell: [propertyValue, ...schema.asCell] };
+    }
+    return { ...schema, asCell: [propertyValue] };
+  }
+
+  /**
+   * Return a single schema or wrap multiple schemas in anyOf.
+   * Handles empty array by returning true (any value is valid).
+   * Deduplicates identical schemas before wrapping.
+   */
+  private maybeWrapInAnyOf(
+    schemas: JSONSchemaMutable[],
+  ): JSONSchemaMutable {
+    if (schemas.length === 0) {
+      return true;
+    } else if (schemas.length === 1) {
+      return schemas[0]!;
+    } else {
+      // Deduplicate identical schemas
+      const seen = new Set<string>();
+      const unique: JSONSchemaMutable[] = [];
+      for (const schema of schemas) {
+        const key = JSON.stringify(schema);
+        if (!seen.has(key)) {
+          seen.add(key);
+          unique.push(schema);
+        }
+      }
+
+      if (unique.length === 1) {
+        return unique[0]!;
+      }
+      return { anyOf: unique };
+    }
+  }
+
+  /**
+   * Format a union type that contains wrapper types (Cell/OpaqueRef/Stream).
+   * Handles cases like: OpaqueRef<T> | undefined, Cell<T> | null, etc.
+   * Uses nodes when available to preserve named type hoisting.
+   */
+  private formatWrapperUnion(
+    unionType: ts.UnionType,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
+    const members = unionType.types;
+    const schemas: JSONSchemaMutable[] = [];
+
+    // Check if we have a UnionTypeNode with member nodes
+    const hasUnionNode = context.typeNode &&
+      ts.isUnionTypeNode(context.typeNode);
+    const unionNode = hasUnionNode
+      ? context.typeNode as ts.UnionTypeNode
+      : undefined;
+
+    // Process each union member
+    for (let i = 0; i < members.length; i++) {
+      const memberType = members[i]!;
+      const memberNode = unionNode?.types[i];
+
+      // Include undefined as an explicit type in the schema
+      if (this.isUndefinedType(memberType)) {
+        schemas.push({ type: "undefined" });
+        continue;
+      }
+
+      // Skip conditional types - they come from type expansion internals and shouldn't be formatted
+      // Example: T extends (infer U)[] ? Opaque<U>[] : T extends object ? { [K in keyof T]: Opaque<T[K]>; } : T
+      if ((memberType.flags & ts.TypeFlags.Conditional) !== 0) {
+        continue;
+      }
+
+      // Skip type parameters - they're generic placeholders, not concrete types
+      if ((memberType.flags & ts.TypeFlags.TypeParameter) !== 0) {
+        continue;
+      }
+
+      // Handle null - it should be included in the schema as { type: "null" }
+      if ((memberType.flags & ts.TypeFlags.Null) !== 0) {
+        schemas.push({ type: "null" });
+        continue;
+      }
+
+      // Check if this member is a wrapper type via type structure
+      const wrapperInfo = getCellWrapperInfo(memberType, context.typeChecker);
+
+      if (wrapperInfo) {
+        // Format as a wrapper type
+        // Try to get the wrapper node for better processing
+        const wrapperNodeInfo = memberNode
+          ? resolveWrapperNode(memberNode, context.typeChecker)
+          : undefined;
+
+        const schema = this.formatWrapperType(
+          wrapperInfo.typeRef,
+          wrapperNodeInfo?.node, // Pass node if available for proper name hoisting
+          context,
+          wrapperInfo.kind,
+        );
+        schemas.push(schema);
+      } else {
+        // Not a wrapper - use standard formatting
+        // Pass the member node if available to preserve named type hoisting
+        const schema = this.schemaGenerator.formatChildType(
+          memberType,
+          context,
+          memberNode, // Pass node to preserve named type information
+        );
+        schemas.push(schema);
+      }
+    }
+
+    return this.maybeWrapInAnyOf(schemas);
+  }
+
+  /**
+   * Check if this is a wrapper union (WrapperType | null/undefined).
+   * Uses type-based detection which handles complex cases like intersection types
+   * and conditional type expansions.
+   * Returns true ONLY for unions where ALL non-null/undefined members are wrapper types.
+   * Examples that return true: OpaqueRef<T> | undefined, Cell<T> | null, Stream<T> | null | undefined
+   * Examples that return false: string | Cell | null (mixed union, should use UnionFormatter)
+   */
+  private isWrapperUnion(type: ts.Type, context: GenerationContext): boolean {
+    // Must be a union type
+    if ((type.flags & ts.TypeFlags.Union) === 0) {
+      return false;
+    }
+
+    const unionType = type as ts.UnionType;
+
+    // Check if ALL non-null/undefined members are wrapper types
+    // This ensures we only handle patterns like `Cell<T> | null`, not mixed unions like `string | Cell | null`
+    let hasWrapperMember = false;
+    let hasNonWrapperMember = false;
+
+    for (const memberType of unionType.types) {
+      // Skip undefined and null - they're modifiers, not members
+      if (
+        this.isUndefinedType(memberType) ||
+        (memberType.flags & ts.TypeFlags.Null) !== 0
+      ) {
+        continue;
+      }
+
+      // Skip conditional types and type parameters (from type expansion internals)
+      if (
+        (memberType.flags & ts.TypeFlags.Conditional) !== 0 ||
+        (memberType.flags & ts.TypeFlags.TypeParameter) !== 0
+      ) {
+        continue;
+      }
+
+      // Check if this member is a wrapper type
+      const wrapperInfo = getCellWrapperInfo(memberType, context.typeChecker);
+      if (wrapperInfo !== undefined) {
+        hasWrapperMember = true;
+      } else {
+        hasNonWrapperMember = true;
+      }
+    }
+
+    // Only handle as wrapper union if we have wrapper members and NO non-wrapper members
+    // This excludes mixed unions like `string | number | Cell | Stream | null`
+    return hasWrapperMember && !hasNonWrapperMember;
+  }
+}
+
+function normalizeWriterIdentityFile(fileName: string): string {
+  const normalized = fileName.replace(/\\/g, "/");
+  const strippedPrefixed = normalized.match(/^\/[^/]+(\/.+)$/)?.[1];
+  return strippedPrefixed ?? normalized;
+}

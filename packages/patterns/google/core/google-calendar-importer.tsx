@@ -1,18 +1,15 @@
-/// <cts-enable />
 import {
   computed,
   Default,
-  derive,
   getPatternEnvironment,
   handler,
-  ifElse,
   NAME,
   pattern,
   patternTool,
   str,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Secret<T> = T;
 type Confidential<T> = T;
@@ -24,62 +21,18 @@ import {
 
 // This is used by the various Google tokens created with tokenToAuthData
 export type Auth = {
-  token: Default<Secret<string>, "">;
-  tokenType: Default<string, "">;
-  scope: Default<string[], []>;
-  expiresIn: Default<number, 0>;
-  expiresAt: Default<number, 0>;
-  refreshToken: Default<Secret<string>, "">;
-  user: Default<{
+  token: Secret<string> | Default<"">;
+  tokenType: string | Default<"">;
+  scope: string[] | Default<[]>;
+  expiresIn: number | Default<0>;
+  expiresAt: number | Default<0>;
+  refreshToken: Secret<string> | Default<"">;
+  user: {
     email: string;
     name: string;
     picture: string;
-  }, { email: ""; name: ""; picture: "" }>;
+  } | Default<{ email: ""; name: ""; picture: "" }>;
 };
-
-const env = getPatternEnvironment();
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// ========== OPTIONAL DERIVE DEBUG INSTRUMENTATION ==========
-// Set DEBUG_DERIVE=true to enable derive() call counting for performance investigation.
-// IMPORTANT: Keep disabled in production - the setInterval has no cleanup mechanism.
-const DEBUG_DERIVE = false;
-
-let deriveCallCount = 0;
-let perRowDeriveCount = 0;
-let lastLogTime = Date.now();
-const startTime = Date.now();
-
-function logDeriveCall(name: string, isPerRow = false) {
-  if (!DEBUG_DERIVE) return;
-  deriveCallCount++;
-  if (isPerRow) perRowDeriveCount++;
-  const now = Date.now();
-  const elapsed = now - startTime;
-  // Log on milestones or every second
-  if (now - lastLogTime > 1000 || deriveCallCount % 100 === 0) {
-    console.log(
-      `[DERIVE DEBUG] ${name}: total=${deriveCallCount}, perRow=${perRowDeriveCount}, elapsed=${elapsed}ms`,
-    );
-    lastLogTime = now;
-  }
-}
-
-// Only start interval if debugging is enabled
-if (DEBUG_DERIVE) {
-  try {
-    setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      console.log(
-        `[DERIVE DEBUG SUMMARY] total=${deriveCallCount}, perRow=${perRowDeriveCount}, elapsed=${elapsed}ms`,
-      );
-    }, 5000);
-  } catch {
-    // Ignore if setInterval isn't available during compilation
-  }
-}
-// ========== END DEBUG INSTRUMENTATION ==========
 
 export type CalendarEvent = {
   id: string;
@@ -95,10 +48,9 @@ export type CalendarEvent = {
   htmlLink: string;
   calendarId: string;
   calendarName: string;
-  attendees: Default<
-    { email: string; displayName: string; responseStatus: string }[],
-    []
-  >;
+  attendees:
+    | { email: string; displayName: string; responseStatus: string }[]
+    | Default<[]>;
   organizer: { email: string; displayName: string };
 };
 
@@ -113,13 +65,13 @@ export type Calendar = {
 
 type Settings = {
   // Number of days in the past to fetch
-  daysBack: Default<number, 7>;
+  daysBack: number | Default<7>;
   // Number of days in the future to fetch
-  daysForward: Default<number, 30>;
+  daysForward: number | Default<30>;
   // Maximum number of events to fetch per calendar
-  maxResults: Default<number, 100>;
+  maxResults: number | Default<100>;
   // Enable verbose console logging for debugging
-  debugMode: Default<boolean, false>;
+  debugMode: boolean | Default<false>;
 };
 
 // Debug logging helpers
@@ -128,13 +80,6 @@ function debugLog(debugMode: boolean, ...args: unknown[]) {
 }
 function debugWarn(debugMode: boolean, ...args: unknown[]) {
   if (debugMode) console.warn(...args);
-}
-
-interface CalendarClientConfig {
-  retries?: number;
-  delay?: number;
-  delayIncrement?: number;
-  debugMode?: boolean;
 }
 
 // Helper function to parse calendar API response (extracted to module scope for compiler compliance)
@@ -147,137 +92,6 @@ function parseCalendarApiItem(apiItem: any): Calendar {
     backgroundColor: apiItem.backgroundColor || "#4285f4",
     foregroundColor: apiItem.foregroundColor || "#ffffff",
   };
-}
-
-class CalendarClient {
-  private auth: Writable<Auth>;
-  private retries: number;
-  private delay: number;
-  private delayIncrement: number;
-  private debugMode: boolean;
-
-  constructor(
-    auth: Writable<Auth>,
-    { retries = 3, delay = 1000, delayIncrement = 100, debugMode = false }:
-      CalendarClientConfig = {},
-  ) {
-    this.auth = auth;
-    this.retries = retries;
-    this.delay = delay;
-    this.delayIncrement = delayIncrement;
-    this.debugMode = debugMode;
-  }
-
-  private async refreshAuth() {
-    const body = {
-      refreshToken: this.auth.get().refreshToken,
-    };
-
-    debugLog(this.debugMode, "refreshAuthToken", body);
-
-    const res = await fetch(
-      new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      },
-    );
-    if (!res.ok) {
-      throw new Error("Could not acquire a refresh token.");
-    }
-    const json = await res.json();
-    const authData = json.tokenInfo as Auth;
-    this.auth.update(authData);
-  }
-
-  async getCalendarList(): Promise<Calendar[]> {
-    const url = new URL(
-      "https://www.googleapis.com/calendar/v3/users/me/calendarList",
-    );
-    const res = await this.googleRequest(url);
-    const json = await res.json();
-
-    if (!json.items || !Array.isArray(json.items)) {
-      debugLog(this.debugMode, "No calendars found:", json);
-      return [];
-    }
-
-    return json.items.map(parseCalendarApiItem);
-  }
-
-  async getEvents(
-    calendarId: string,
-    timeMin: Date,
-    timeMax: Date,
-    maxResults: number = 100,
-  ): Promise<any[]> {
-    const url = new URL(
-      `https://www.googleapis.com/calendar/v3/calendars/${
-        encodeURIComponent(calendarId)
-      }/events`,
-    );
-    url.searchParams.set("timeMin", timeMin.toISOString());
-    url.searchParams.set("timeMax", timeMax.toISOString());
-    url.searchParams.set("maxResults", maxResults.toString());
-    url.searchParams.set("singleEvents", "true");
-    url.searchParams.set("orderBy", "startTime");
-
-    debugLog(this.debugMode, "Fetching events from:", url.toString());
-
-    const res = await this.googleRequest(url);
-    const json = await res.json();
-
-    if (!json.items || !Array.isArray(json.items)) {
-      debugLog(this.debugMode, "No events found:", json);
-      return [];
-    }
-
-    return json.items;
-  }
-
-  private async googleRequest(
-    url: URL,
-    _options?: RequestInit,
-    _retries?: number,
-  ): Promise<Response> {
-    const token = this.auth.get().token;
-    if (!token) {
-      throw new Error("No authorization token.");
-    }
-
-    const retries = _retries ?? this.retries;
-    const options = _options ?? {};
-    options.headers = new Headers(options.headers);
-    options.headers.set("Authorization", `Bearer ${token}`);
-
-    const res = await fetch(url, options);
-    const { ok, status, statusText } = res;
-
-    if (ok) {
-      debugLog(this.debugMode, `${url}: ${status} ${statusText}`);
-      return res;
-    }
-
-    debugWarn(
-      this.debugMode,
-      `${url}: ${status} ${statusText}`,
-      `Remaining retries: ${retries}`,
-    );
-    if (retries === 0) {
-      throw new Error("Too many failed attempts.");
-    }
-
-    await sleep(this.delay);
-
-    if (status === 401) {
-      await this.refreshAuth();
-    } else if (status === 429) {
-      this.delay += this.delayIncrement;
-      debugLog(this.debugMode, `Incrementing delay to ${this.delay}`);
-      await sleep(this.delay);
-    }
-    return this.googleRequest(url, _options, retries - 1);
-  }
 }
 
 function parseCalendarEvent(
@@ -346,7 +160,122 @@ async function fetchCalendarEvents(state: FetchState): Promise<void> {
   }
 
   const settings = state.settings.get();
-  const client = new CalendarClient(state.auth, { debugMode });
+  const auth = state.auth;
+  const maxRetries = 3;
+  let retryDelay = 1000;
+  const retryDelayIncrement = 100;
+
+  const refreshAuth = async () => {
+    const body = {
+      refreshToken: auth.get().refreshToken,
+    };
+    const env = getPatternEnvironment();
+
+    debugLog(debugMode, "refreshAuthToken", body);
+
+    const res = await fetch(
+      new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+    if (!res.ok) {
+      throw new Error("Could not acquire a refresh token.");
+    }
+    const json = await res.json();
+    const authData = json.tokenInfo as Auth;
+    auth.update(authData);
+  };
+
+  const googleRequest = async (
+    url: URL,
+    _options?: RequestInit,
+    _retries?: number,
+  ): Promise<Response> => {
+    const token = auth.get().token;
+    if (!token) {
+      throw new Error("No authorization token.");
+    }
+
+    const retries = _retries ?? maxRetries;
+    const options = _options ?? {};
+    options.headers = new Headers(options.headers);
+    options.headers.set("Authorization", `Bearer ${token}`);
+
+    const res = await fetch(url, options);
+    const { ok, status, statusText } = res;
+
+    if (ok) {
+      debugLog(debugMode, `${url}: ${status} ${statusText}`);
+      return res;
+    }
+
+    debugWarn(
+      debugMode,
+      `${url}: ${status} ${statusText}`,
+      `Remaining retries: ${retries}`,
+    );
+    if (retries === 0) {
+      throw new Error("Too many failed attempts.");
+    }
+
+    if (status === 401) {
+      await refreshAuth();
+    } else if (status === 429) {
+      retryDelay += retryDelayIncrement;
+      debugLog(
+        debugMode,
+        `Incrementing retry delay to ${retryDelay}; SES retries continue immediately without timers`,
+      );
+    }
+    return googleRequest(url, _options, retries - 1);
+  };
+
+  const getCalendarList = async (): Promise<Calendar[]> => {
+    const url = new URL(
+      "https://www.googleapis.com/calendar/v3/users/me/calendarList",
+    );
+    const res = await googleRequest(url);
+    const json = await res.json();
+
+    if (!json.items || !Array.isArray(json.items)) {
+      debugLog(debugMode, "No calendars found:", json);
+      return [];
+    }
+
+    return json.items.map(parseCalendarApiItem);
+  };
+
+  const getEvents = async (
+    calendarId: string,
+    timeMin: Date,
+    timeMax: Date,
+    maxResults: number = 100,
+  ): Promise<any[]> => {
+    const url = new URL(
+      `https://www.googleapis.com/calendar/v3/calendars/${
+        encodeURIComponent(calendarId)
+      }/events`,
+    );
+    url.searchParams.set("timeMin", timeMin.toISOString());
+    url.searchParams.set("timeMax", timeMax.toISOString());
+    url.searchParams.set("maxResults", maxResults.toString());
+    url.searchParams.set("singleEvents", "true");
+    url.searchParams.set("orderBy", "startTime");
+
+    debugLog(debugMode, "Fetching events from:", url.toString());
+
+    const res = await googleRequest(url);
+    const json = await res.json();
+
+    if (!json.items || !Array.isArray(json.items)) {
+      debugLog(debugMode, "No events found:", json);
+      return [];
+    }
+
+    return json.items;
+  };
 
   try {
     // Get calendar list
@@ -356,7 +285,7 @@ async function fetchCalendarEvents(state: FetchState): Promise<void> {
     const previousCalendarCount = state.calendars.get().length;
     const currentSelected = state.selectedCalendarIds?.get() || [];
 
-    const calendars = await client.getCalendarList();
+    const calendars = await getCalendarList();
     debugLog(debugMode, `Found ${calendars.length} calendars`);
 
     // Only update calendars if the list actually changed (prevents reactive loop)
@@ -419,7 +348,7 @@ async function fetchCalendarEvents(state: FetchState): Promise<void> {
           debugMode,
           `Fetching events from calendar: ${calendar.summary} (${calendar.id})`,
         );
-        const rawEvents = await client.getEvents(
+        const rawEvents = await getEvents(
           calendar.id,
           timeMin,
           timeMax,
@@ -434,9 +363,6 @@ async function fetchCalendarEvents(state: FetchState): Promise<void> {
           `Found ${events.length} events in ${calendar.summary}`,
         );
         allEvents.push(...events);
-
-        // Small delay between calendar requests to avoid rate limiting
-        await sleep(200);
       } catch (error) {
         debugWarn(
           debugMode,
@@ -574,19 +500,21 @@ function formatEventDate(
 }
 
 interface GoogleCalendarImporterInput {
-  settings?: Default<Settings, {
-    daysBack: 7;
-    daysForward: 30;
-    maxResults: 100;
-    debugMode: false;
-  }>;
+  settings?:
+    | Settings
+    | Default<{
+      daysBack: 7;
+      daysForward: 30;
+      maxResults: 100;
+      debugMode: false;
+    }>;
   // Optional: Link auth directly from a Google Auth piece when wish() is unavailable
-  // Use: ct piece link googleAuthPiece/auth calendarImporterPiece/overrideAuth
+  // Use: cf piece link googleAuthPiece/auth calendarImporterPiece/overrideAuth
   overrideAuth?: Auth;
 }
 
 /** Google Calendar event importer. #calendarEvents */
-interface Output {
+export interface Output {
   events: CalendarEvent[];
   calendars: Calendar[];
   /** Number of events imported */
@@ -604,12 +532,12 @@ const toggleShowEvents = handler<unknown, { showEvents: Writable<boolean> }>(
 // Settings is not optional - we provide it with a default
 const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
   ({ settings, overrideAuth }) => {
-    const events = Writable.of<Confidential<CalendarEvent[]>>([]);
-    const calendars = Writable.of<Calendar[]>([]);
-    const fetching = Writable.of(false);
-    const currentPage = Writable.of(0);
-    const showEvents = Writable.of(false); // Collapsed by default
-    const selectedCalendarIds = Writable.of<string[]>([]); // Empty = all selected on first fetch
+    const events = new Writable<Confidential<CalendarEvent[]>>([]);
+    const calendars = new Writable<Calendar[]>([]);
+    const fetching = new Writable(false);
+    const currentPage = new Writable(0);
+    const showEvents = new Writable(false); // Collapsed by default
+    const selectedCalendarIds = new Writable<string[]>([]); // Empty = all selected on first fetch
     const PAGE_SIZE = 10;
 
     // Pre-compute calendar selection state for efficient lookup
@@ -652,13 +580,13 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
     });
 
     // Check if overrideAuth is provided (for manual linking when wish() is unavailable)
-    const hasLinkedAuth = computed(() => !!(overrideAuth?.token));
-    const overrideAuthEmail = computed(() => overrideAuth?.user?.email || "");
+    const hasLinkedAuth = !!(overrideAuth?.token);
+    const overrideAuthEmail = overrideAuth?.user?.email || "";
 
     // Use overrideAuth if provided, otherwise use wished auth
     // This allows manual linking via CLI when wish() is unavailable (e.g., favorites disabled)
-    // Note: We wrap overrideAuth in Writable.of outside of reactive context
-    const overrideAuthCell = Writable.of<Auth | null>(null);
+    // Note: We wrap overrideAuth in a local Writable outside of reactive context
+    const overrideAuthCell = new Writable<Auth | null>(null);
     computed(() => {
       if (overrideAuth?.token) {
         overrideAuthCell.set(overrideAuth as any);
@@ -666,18 +594,16 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
     });
 
     // Choose auth source based on overrideAuth availability
-    const auth = ifElse(hasLinkedAuth, overrideAuthCell, wishedAuth) as any;
-    const isReady = ifElse(hasLinkedAuth, hasLinkedAuth, wishedIsReady);
-    const currentEmail = ifElse(
-      hasLinkedAuth,
-      overrideAuthEmail,
-      wishedCurrentEmail,
-    );
+    // Keep the bare ternary so the chosen branch stays a live cell reference
+    // (preserves token writability for refresh); avoid projecting auth.
+    const auth = (hasLinkedAuth ? overrideAuthCell : wishedAuth) as any;
+    const isReady = hasLinkedAuth ? hasLinkedAuth : wishedIsReady;
+    const currentEmail = hasLinkedAuth ? overrideAuthEmail : wishedCurrentEmail;
 
     // Computed values for pagination
-    const upcomingEvents = derive(events, (evts: CalendarEvent[]) => {
+    const upcomingEvents = computed(() => {
       const now = new Date();
-      return [...evts]
+      return [...events.get()]
         .filter((e) => new Date(e.startDateTime || e.start) >= now)
         .sort((a, b) =>
           new Date(a.startDateTime || a.start).getTime() -
@@ -685,22 +611,14 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
         );
     });
 
-    const summary = derive(events, (eventList: CalendarEvent[]) => {
-      return eventList
-        .slice(0, 20)
-        .map((e) => `${e.summary || ""} ${e.start || ""}`.trim())
-        .filter((s) => s.length > 0)
-        .join(" | ");
-    });
+    const summary = events.get()
+      .slice(0, 20)
+      .map((e) => `${e.summary || ""} ${e.start || ""}`.trim())
+      .filter((s) => s.length > 0)
+      .join(" | ");
 
-    const totalUpcoming = derive(
-      upcomingEvents,
-      (evts: CalendarEvent[]) => evts.length,
-    );
-    const _maxPageNum = derive(
-      totalUpcoming,
-      (total: number) => Math.max(0, Math.ceil(total / PAGE_SIZE) - 1),
-    );
+    const totalUpcoming = upcomingEvents.length;
+    const _maxPageNum = Math.max(0, Math.ceil(totalUpcoming / PAGE_SIZE) - 1);
 
     // Paginated events for display - use computed with events Cell directly
     const _paginatedEvents = computed(() => {
@@ -723,27 +641,27 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
     return {
       [NAME]: str`Calendar Importer ${currentEmail}`,
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           <div slot="header">
-            <ct-hstack align="center" gap="2">
-              <ct-heading level={3}>Google Calendar Importer</ct-heading>
-            </ct-hstack>
+            <cf-hstack align="center" gap="2">
+              <cf-heading level={3}>Google Calendar Importer</cf-heading>
+            </cf-hstack>
           </div>
 
-          <ct-vscroll flex showScrollbar>
-            <ct-vstack padding="6" gap="4">
+          <cf-vscroll flex showScrollbar>
+            <cf-vstack padding="6" gap="4">
               {/* Auth status - handled by createGoogleAuth utility */}
               {fullUI}
 
               <h3 style={{ fontSize: "18px", fontWeight: "bold" }}>
-                Imported event count: {computed(() => events.get().length)}
+                Imported event count: {events.get().length}
               </h3>
 
               <div style={{ fontSize: "14px", color: "#666" }}>
-                Calendars found: {computed(() => calendars.get().length)}
+                Calendars found: {calendars.get().length}
               </div>
 
-              <ct-vstack gap="4">
+              <cf-vstack gap="4">
                 <div>
                   <label
                     style={{
@@ -754,7 +672,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                   >
                     Days Back
                   </label>
-                  <ct-input
+                  <cf-input
                     type="number"
                     $value={settings.daysBack}
                     placeholder="7"
@@ -771,7 +689,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                   >
                     Days Forward
                   </label>
-                  <ct-input
+                  <cf-input
                     type="number"
                     $value={settings.daysForward}
                     placeholder="30"
@@ -788,7 +706,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                   >
                     Max Results per Calendar
                   </label>
-                  <ct-input
+                  <cf-input
                     type="number"
                     $value={settings.maxResults}
                     placeholder="100"
@@ -812,38 +730,38 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                     Debug Mode (verbose console logging)
                   </label>
                 </div>
-                {ifElse(
-                  isReady,
-                  <ct-button
-                    type="button"
-                    onClick={calendarUpdater({
-                      events,
-                      calendars,
-                      auth,
-                      settings,
-                      fetching,
-                      selectedCalendarIds,
-                    })}
-                    disabled={fetching}
-                  >
-                    {ifElse(
-                      fetching,
-                      <span
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                        }}
-                      >
-                        <ct-loader size="sm" show-elapsed></ct-loader>
-                        Fetching...
-                      </span>,
-                      "Fetch Calendar Events",
-                    )}
-                  </ct-button>,
-                  null,
-                )}
-              </ct-vstack>
+                {isReady
+                  ? (
+                    <cf-button
+                      type="button"
+                      onClick={calendarUpdater({
+                        events,
+                        calendars,
+                        auth,
+                        settings,
+                        fetching,
+                        selectedCalendarIds,
+                      })}
+                      disabled={fetching}
+                    >
+                      {fetching
+                        ? (
+                          <span
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                            }}
+                          >
+                            <cf-loader size="sm" show-elapsed></cf-loader>
+                            Fetching...
+                          </span>
+                        )
+                        : "Fetch Calendar Events"}
+                    </cf-button>
+                  )
+                  : null}
+              </cf-vstack>
 
               {/* Calendar list with selection */}
               <div style={{ marginTop: "16px" }}>
@@ -856,7 +774,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                   }}
                 >
                   <h4 style={{ fontSize: "16px", margin: 0 }}>
-                    Your Calendars ({computed(() => calendars.get().length)})
+                    Your Calendars ({calendars.get().length})
                   </h4>
                   <div style={{ display: "flex", gap: "8px" }}>
                     <button
@@ -920,12 +838,10 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                           color: cal.foregroundColor,
                           fontSize: "12px",
                           cursor: "pointer",
-                          opacity: ifElse(calendarSelectionMap[cal.id], 1, 0.4),
-                          textDecoration: ifElse(
-                            calendarSelectionMap[cal.id],
-                            "none",
-                            "line-through",
-                          ),
+                          opacity: calendarSelectionMap[cal.id] ? 1 : 0.4,
+                          textDecoration: calendarSelectionMap[cal.id]
+                            ? "none"
+                            : "line-through",
                           transition: "opacity 0.15s, text-decoration 0.15s",
                         }}
                         onClick={toggleCalendarSelection({
@@ -938,11 +854,9 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                           fetching,
                         })}
                       >
-                        {ifElse(
-                          calendarSelectionMap[cal.id],
-                          <span>✓</span>,
-                          <span />,
-                        )}
+                        {calendarSelectionMap[cal.id]
+                          ? <span>✓</span>
+                          : <span />}
                         {cal.primary ? <span>★</span> : null}
                         {cal.summary}
                       </div>
@@ -973,102 +887,97 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                   onClick={toggleShowEvents({ showEvents })}
                 >
                   <span style={{ fontSize: "14px" }}>
-                    {ifElse(showEvents, "▼", "▶")}
+                    {showEvents ? "▼" : "▶"}
                   </span>
                   <h4 style={{ fontSize: "16px", margin: 0 }}>
-                    {derive(
-                      events,
-                      (evts: CalendarEvent[]) =>
-                        `${evts.length} events imported`,
-                    )}
+                    {`${events.get().length} events imported`}
                   </h4>
                 </div>
-                {ifElse(
-                  showEvents,
-                  <div
-                    style={{
-                      marginTop: "12px",
-                      maxHeight: "400px",
-                      overflowY: "auto",
-                      border: "1px solid #e5e7eb",
-                      borderRadius: "8px",
-                    }}
-                  >
-                    {events.map((event) => {
-                      // Use pre-computed colors map - direct indexing works with Cell values
-                      return (
-                        <div
-                          style={{
-                            padding: "8px 12px",
-                            borderBottom: "1px solid #f3f4f6",
-                            fontSize: "13px",
-                          }}
-                        >
+                {showEvents
+                  ? (
+                    <div
+                      style={{
+                        marginTop: "12px",
+                        maxHeight: "400px",
+                        overflowY: "auto",
+                        border: "1px solid #e5e7eb",
+                        borderRadius: "8px",
+                      }}
+                    >
+                      {events.map((event) => {
+                        // Use pre-computed colors map - direct indexing works with Cell values
+                        return (
                           <div
                             style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "8px",
+                              padding: "8px 12px",
+                              borderBottom: "1px solid #f3f4f6",
+                              fontSize: "13px",
                             }}
                           >
-                            <span
+                            <div
                               style={{
-                                padding: "2px 8px",
-                                borderRadius: "12px",
-                                backgroundColor:
-                                  calendarColorsMap[event.calendarId]?.bg ??
-                                    "#4285f4",
-                                color:
-                                  calendarColorsMap[event.calendarId]?.fg ??
-                                    "#ffffff",
-                                fontSize: "11px",
-                                whiteSpace: "nowrap",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
                               }}
                             >
-                              {event.calendarName}
-                            </span>
-                            <span style={{ fontWeight: "500" }}>
-                              {event.summary}
-                            </span>
+                              <span
+                                style={{
+                                  padding: "2px 8px",
+                                  borderRadius: "12px",
+                                  backgroundColor:
+                                    calendarColorsMap[event.calendarId]?.bg ??
+                                      "#4285f4",
+                                  color:
+                                    calendarColorsMap[event.calendarId]?.fg ??
+                                      "#ffffff",
+                                  fontSize: "11px",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {event.calendarName}
+                              </span>
+                              <span style={{ fontWeight: "500" }}>
+                                {event.summary}
+                              </span>
+                            </div>
+                            <div
+                              style={{
+                                color: "#6b7280",
+                                fontSize: "12px",
+                                marginTop: "4px",
+                              }}
+                            >
+                              {formatEventDate(
+                                event.startDateTime,
+                                event.endDateTime,
+                                event.isAllDay,
+                              )}
+                            </div>
                           </div>
-                          <div
-                            style={{
-                              color: "#6b7280",
-                              fontSize: "12px",
-                              marginTop: "4px",
-                            }}
-                          >
-                            {formatEventDate(
-                              event.startDateTime,
-                              event.endDateTime,
-                              event.isAllDay,
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>,
-                  <p
-                    style={{
-                      fontSize: "12px",
-                      color: "#666",
-                      marginTop: "8px",
-                    }}
-                  >
-                    Click to expand event list.
-                  </p>,
-                )}
+                        );
+                      })}
+                    </div>
+                  )
+                  : (
+                    <p
+                      style={{
+                        fontSize: "12px",
+                        color: "#666",
+                        marginTop: "8px",
+                      }}
+                    >
+                      Click to expand event list.
+                    </p>
+                  )}
               </div>
-            </ct-vstack>
-          </ct-vscroll>
-        </ct-screen>
+            </cf-vstack>
+          </cf-vscroll>
+        </cf-screen>
       ),
       events,
       calendars,
-      eventCount: derive(events, (list: CalendarEvent[]) => {
-        logDeriveCall(`eventCount (length=${list?.length})`);
-        return list?.length || 0;
-      }),
+      eventCount: events.get()?.length || 0,
       summary,
       bgUpdater: calendarUpdater({
         events,
@@ -1079,51 +988,55 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
       }),
       // Pattern tools for omnibot
       searchEvents: patternTool(
-        ({ query, events }: { query: string; events: CalendarEvent[] }) => {
-          return derive({ query, events }, ({ query, events }) => {
-            if (!query || !events) return [];
-            const lowerQuery = query.toLowerCase();
-            return events.filter((event) =>
-              event.summary?.toLowerCase().includes(lowerQuery) ||
-              event.description?.toLowerCase().includes(lowerQuery) ||
-              event.location?.toLowerCase().includes(lowerQuery)
-            );
-          });
-        },
+        pattern(
+          ({ query, events }: { query: string; events: CalendarEvent[] }) => {
+            return computed(() => {
+              if (!query || !events) return [];
+              const lowerQuery = query.toLowerCase();
+              return events.filter((event) =>
+                event.summary?.toLowerCase().includes(lowerQuery) ||
+                event.description?.toLowerCase().includes(lowerQuery) ||
+                event.location?.toLowerCase().includes(lowerQuery)
+              );
+            });
+          },
+        ),
         { events },
       ),
       getEventCount: patternTool(
-        ({ events }: { events: CalendarEvent[] }) => {
-          return derive(events, (list) => list?.length || 0);
-        },
+        pattern(({ events }: { events: CalendarEvent[] }) => {
+          return computed(() => events?.length || 0);
+        }),
         { events },
       ),
       getUpcomingEvents: patternTool(
-        ({ count, events }: { count: number; events: CalendarEvent[] }) => {
-          return derive({ count, events }, ({ count, events }) => {
-            if (!events || events.length === 0) return "No events";
-            const now = new Date();
-            const upcoming = events
-              .filter((e) => new Date(e.startDateTime || e.start) >= now)
-              .slice(0, count || 5);
-            return upcoming.map((event) =>
-              `${
-                formatEventDate(
-                  event.startDateTime,
-                  event.endDateTime,
-                  event.isAllDay,
-                )
-              }: ${event.summary}${
-                event.location ? ` @ ${event.location}` : ""
-              }`
-            ).join("\n");
-          });
-        },
+        pattern(
+          ({ count, events }: { count: number; events: CalendarEvent[] }) => {
+            return computed(() => {
+              if (!events || events.length === 0) return "No events";
+              const now = new Date();
+              const upcoming = events
+                .filter((e) => new Date(e.startDateTime || e.start) >= now)
+                .slice(0, count || 5);
+              return upcoming.map((event) =>
+                `${
+                  formatEventDate(
+                    event.startDateTime,
+                    event.endDateTime,
+                    event.isAllDay,
+                  )
+                }: ${event.summary}${
+                  event.location ? ` @ ${event.location}` : ""
+                }`
+              ).join("\n");
+            });
+          },
+        ),
         { events },
       ),
       getTodaysEvents: patternTool(
-        ({ events }: { events: CalendarEvent[] }) => {
-          return derive(events, (events) => {
+        pattern(({ events }: { events: CalendarEvent[] }) => {
+          return computed(() => {
             if (!events || events.length === 0) return "No events";
             const today = new Date().toISOString().split("T")[0];
             const todayEvents = events.filter((e) =>
@@ -1141,7 +1054,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
               }: ${event.summary}`
             ).join("\n");
           });
-        },
+        }),
         { events },
       ),
     };

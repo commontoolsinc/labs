@@ -1,5 +1,5 @@
 // Methods to stub out for Page#applyConsoleFormatter.
-// From `@commontools/runner` console patch
+// From `@commonfabric/runner` console patch
 export enum ConsoleMethod {
   Assert = "assert",
   Clear = "clear",

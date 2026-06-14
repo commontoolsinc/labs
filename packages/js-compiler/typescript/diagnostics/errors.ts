@@ -20,8 +20,8 @@ export interface ErrorDetails {
 }
 
 /**
- * Represents a diagnostic from the CommonTools transformer pipeline.
- * This mirrors TransformationDiagnostic from @commontools/ts-transformers.
+ * Represents a diagnostic from the Common Fabric transformer pipeline.
+ * This mirrors TransformationDiagnostic from @commonfabric/ts-transformers.
  */
 export interface TransformerDiagnosticInfo {
   readonly severity: "error" | "warning";

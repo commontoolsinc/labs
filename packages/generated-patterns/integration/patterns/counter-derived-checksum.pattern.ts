@@ -1,14 +1,12 @@
-/// <cts-enable />
 import {
   type Cell,
   cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface CounterChecksumArgs {
   value: Default<number, 0>;
@@ -111,7 +109,7 @@ const liftPrefixLabel = lift((text: string | undefined) =>
   typeof text === "string" && text.length > 0 ? text : "Checksum"
 );
 
-/** Pattern computing checksum of recorded counter values via derive. */
+/** Pattern computing checksum of recorded counter values. */
 export const counterWithDerivedChecksum = pattern<CounterChecksumArgs>(
   ({ value, values, prefix }) => {
     const updateCount = cell(0);
@@ -127,7 +125,7 @@ export const counterWithDerivedChecksum = pattern<CounterChecksumArgs>(
     });
 
     const valuesView = liftSanitizeNumbers(values);
-    const checksum = derive(valuesView, computeChecksum);
+    const checksum = computeChecksum(valuesView);
     const checksumView = liftDefaultNumber(checksum);
     const updatesView = liftDefaultNumber(updateCount);
     const lastEventView = liftDefaultSnapshot(lastEvent);

@@ -4,10 +4,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -18,8 +19,8 @@ describe("Pattern Runner - Schemas", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -30,11 +31,11 @@ describe("Pattern Runner - Schemas", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({
       lift,
       pattern,
-    } = commontools);
+    } = commonfabric);
   });
 
   afterEach(async () => {
@@ -64,9 +65,9 @@ describe("Pattern Runner - Schemas", () => {
       multiplier: number;
     }>(({ settings, multiplier }) => {
       const result = lift(
+        ({ settings, multiplier }) => settings.value * multiplier!,
         schema,
         { type: "number" },
-        ({ settings, multiplier }) => settings.value * multiplier!,
       )({ settings, multiplier });
       return { result };
     });
@@ -121,7 +122,7 @@ describe("Pattern Runner - Schemas", () => {
                 properties: {
                   value: { type: "number" },
                 },
-                asCell: true,
+                asCell: ["cell"],
               },
             },
           },
@@ -134,13 +135,13 @@ describe("Pattern Runner - Schemas", () => {
     const sumPattern = pattern<{ data: { items: Array<{ value: number }> } }>(
       ({ data }) => {
         const result = lift(
-          schema,
-          { type: "number" },
           ({ data }) =>
             data.items.reduce(
               (sum: number, item: any) => sum + item.get().value,
               0,
             ),
+          schema,
+          { type: "number" },
         )({ data });
         return { result };
       },
@@ -183,7 +184,7 @@ describe("Pattern Runner - Schemas", () => {
           type: "object",
           additionalProperties: {
             type: "number",
-            asCell: true,
+            asCell: ["cell"],
           },
         },
       },
@@ -194,13 +195,13 @@ describe("Pattern Runner - Schemas", () => {
     >(
       ({ context }) => {
         const result = lift(
-          schema,
-          { type: "number" },
-          ({ context }) =>
+          ({ context }: any) =>
             Object.values(context ?? {}).reduce(
-              (sum: number, val) => sum + val.get(),
+              (sum: number, val: any) => sum + val.get(),
               0,
             ),
+          schema,
+          { type: "number" },
         )({ context });
         return { result };
       },

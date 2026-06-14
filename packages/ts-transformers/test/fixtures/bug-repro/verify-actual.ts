@@ -1,5 +1,5 @@
 /**
- * Verify null elimination using actual commontools types
+ * Verify null elimination using actual commonfabric types
  * Run: deno run -A test/fixtures/bug-repro/verify-actual.ts
  */
 
@@ -22,7 +22,7 @@ const compilerOptions: ts.CompilerOptions = {
   noEmit: true,
   skipLibCheck: true,
   paths: {
-    "commontools": [join(projectRoot, "packages/api/index.ts")],
+    "commonfabric": [join(projectRoot, "packages/api/index.ts")],
   },
   baseUrl: projectRoot,
 };
@@ -47,7 +47,7 @@ const program = ts.createProgram([testFile], compilerOptions, host);
 const checker = program.getTypeChecker();
 const sourceFile = program.getSourceFile(testFile)!;
 
-console.log("=== NULL ELIMINATION - ACTUAL COMMONTOOLS TYPES ===\n");
+console.log("=== NULL ELIMINATION - ACTUAL COMMON FABRIC TYPES ===\n");
 
 const typesToCheck = [
   "Direct", "DirectInner", "DirectGet",

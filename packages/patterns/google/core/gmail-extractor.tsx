@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * GmailExtractor Building Block
  *
@@ -70,7 +69,7 @@ import {
   JSONSchema,
   pattern,
   Stream,
-} from "commontools";
+} from "commonfabric";
 import GmailImporter, { type Auth, type Email } from "./gmail-importer.tsx";
 import ProcessingStatus from "./processing-status.tsx";
 import {
@@ -116,13 +115,13 @@ export interface GmailExtractorInput {
   };
 
   /** Display title for the extractor (shown in UI) */
-  title?: Default<string, "Email Items">;
+  title?: string | Default<"Email Items">;
 
   /** Whether to resolve inline images (cid: references) to base64 */
-  resolveInlineImages?: Default<boolean, false>;
+  resolveInlineImages?: boolean | Default<false>;
 
   /** Maximum number of emails to fetch */
-  limit?: Default<number, 100>;
+  limit?: number | Default<100>;
 
   // Note: model parameter removed - hardcoded to fix HTTP 400 errors
   // when passing variables through building block input.
@@ -451,7 +450,7 @@ const GmailExtractor = pattern<GmailExtractorInput, GmailExtractorOutput>(
           const template = extractionPromptTemplate || "";
           if (!template) return undefined;
           return interpolateTemplate(template, email);
-        }),
+        }) as any,
         schema: extractionSchema as JSONSchema,
         model: "anthropic:claude-sonnet-4-5",
       });
@@ -494,7 +493,7 @@ const GmailExtractor = pattern<GmailExtractorInput, GmailExtractorOutput>(
     });
 
     // Note: Handler operations removed - they were unused and the authForHandlers wrapper
-    // was an anti-pattern (Writable.of + computed side effect).
+    // was an anti-pattern (local Writable + computed side effect).
     // GmailImporter already handles auth via wish() when overrideAuth isn't provided.
     // If write operations are needed in the future, pass overrideAuth directly to handlers.
 
@@ -597,7 +596,7 @@ const GmailExtractor = pattern<GmailExtractorInput, GmailExtractorOutput>(
               color: "#2563eb",
             }}
           >
-            <ct-loader size="sm" />
+            <cf-loader size="sm" />
             <span>{pendingCount} analyzing...</span>
           </div>
           <span style={{ color: "#059669" }}>

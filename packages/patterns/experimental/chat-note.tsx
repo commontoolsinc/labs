@@ -1,8 +1,6 @@
-/// <cts-enable />
 import {
   computed,
   type Default,
-  derive,
   generateText,
   handler,
   NAME,
@@ -14,7 +12,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Type for backlinks (inline to work around CLI path resolution bug)
 type MentionablePiece = {
@@ -41,16 +39,16 @@ const MODELS = [
 ] as const;
 
 type Input = {
-  title?: Writable<Default<string, "Chat Note">>;
-  content?: Writable<Default<string, "">>;
-  isHidden?: Default<boolean, false>;
-  noteId?: Default<string, "">;
+  title?: Writable<string | Default<"Chat Note">>;
+  content?: Writable<string | Default<"">>;
+  isHidden?: boolean | Default<false>;
+  noteId?: string | Default<"">;
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new ChatNotes. */
-  linkPattern?: Writable<Default<string, "">>;
+  linkPattern?: Writable<string | Default<"">>;
   /** Parent notebook reference (passed via SELF from notebook.tsx) */
   parentNotebook?: any;
   /** Selected model for generation. Defaults to Sonnet 4.5 */
-  model?: Writable<Default<string, "anthropic:claude-sonnet-4-5">>;
+  model?: Writable<string | Default<"anthropic:claude-sonnet-4-5">>;
 };
 
 type LLMMessage = {
@@ -59,15 +57,15 @@ type LLMMessage = {
 };
 
 /** Represents a chat-enabled note with inline LLM conversations. */
-type Output = {
+export type Output = {
   [NAME]?: string;
   [UI]: VNode;
-  mentioned: Default<Array<MentionablePiece>, []>;
+  mentioned: Array<MentionablePiece> | Default<[]>;
   backlinks: MentionablePiece[];
   parentNotebook: any;
-  content: Default<string, "">;
-  isHidden: Default<boolean, false>;
-  noteId: Default<string, "">;
+  content: string | Default<"">;
+  isHidden: boolean | Default<false>;
+  noteId: string | Default<"">;
   isGenerating: boolean;
   editContent: Stream<{ detail: { value: string } }>;
 };
@@ -257,7 +255,7 @@ const handleTitleKeydown = handler<
 });
 
 // Handler for Generate button - triggers LLM generation
-// Event type matches both onClick (unknown) and onct-submit ({ value: string })
+// Event type matches both onClick (unknown) and oncf-submit ({ value: string })
 const handleGenerate = handler<
   { value?: string },
   {
@@ -348,21 +346,22 @@ const ChatNote = pattern<Input, Output>(
     model,
     [SELF]: self,
   }) => {
-    const { allPieces } =
-      wish<{ allPieces: Default<MinimalPiece[], []> }>({ query: "/" }).result;
-    const { result: mentionable } = wish<Default<MentionablePiece[], []>>({
+    const { allPieces } = wish<{ allPieces: MinimalPiece[] | Default<[]> }>({
+      query: "/",
+    }).result!;
+    const mentionable = wish<MentionablePiece[] | Default<[]>>({
       query: "#mentionable",
-    });
-    const mentioned = Writable.of<MentionablePiece[]>([]);
-    const backlinks = Writable.of<MentionablePiece[]>([]);
+    }).result!;
+    const mentioned = new Writable<MentionablePiece[]>([]);
+    const backlinks = new Writable<MentionablePiece[]>([]);
 
     // State for inline title editing
-    const isEditingTitle = Writable.of<boolean>(false);
+    const isEditingTitle = new Writable<boolean>(false);
 
     // LLM state
-    const isGenerating = Writable.of<boolean>(false);
-    const llmSystem = Writable.of<string>("");
-    const llmMessages = Writable.of<LLMMessage[]>([]);
+    const isGenerating = new Writable<boolean>(false);
+    const llmSystem = new Writable<string>("");
+    const llmMessages = new Writable<LLMMessage[]>([]);
 
     // LLM call - reactive based on llmMessages
     const llmResponse = generateText({
@@ -372,38 +371,37 @@ const ChatNote = pattern<Input, Output>(
     });
 
     // Track content before AI insertion point for streaming display
-    const beforeAIInsert = Writable.of<string>("");
+    const beforeAIInsert = new Writable<string>("");
 
     // Watch for LLM streaming partial updates
-    // Use explicit dependency array for proper reactive tracking
-    derive(
-      [isGenerating, llmResponse.partial, beforeAIInsert],
-      () => {
-        const generating = isGenerating.get();
-        const partial = llmResponse.partial;
-        const prefix = beforeAIInsert.get();
-        if (generating && partial && prefix) {
-          content.set(prefix + partial);
-        }
-      },
-    );
+    // Side-effect-only reactive computation: tracks its reactive reads
+    // (isGenerating, llmResponse.partial, beforeAIInsert) automatically.
+    computed(() => {
+      const generating = isGenerating.get();
+      const partial = llmResponse.partial;
+      const prefix = beforeAIInsert.get();
+      if (generating && partial && prefix) {
+        content.set(prefix + partial);
+      }
+    });
 
     // Watch for LLM completion
-    derive(
-      [isGenerating, llmResponse.pending, llmResponse.result],
-      ([generating, pending, result]) => {
-        // When complete, finalize with result and closing separator
-        if (!pending && result && generating) {
-          const prefix = beforeAIInsert.get();
-          if (prefix) {
-            content.set(prefix + result + "\n---\n");
-          }
-          isGenerating.set(false);
-          llmMessages.set([]);
-          beforeAIInsert.set("");
+    // Side-effect-only reactive computation; reactive reads tracked automatically.
+    computed(() => {
+      const generating = isGenerating.get();
+      const pending = llmResponse.pending;
+      const result = llmResponse.result;
+      // When complete, finalize with result and closing separator
+      if (!pending && result && generating) {
+        const prefix = beforeAIInsert.get();
+        if (prefix) {
+          content.set(prefix + result + "\n---\n");
         }
-      },
-    );
+        isGenerating.set(false);
+        llmMessages.set([]);
+        beforeAIInsert.set("");
+      }
+    });
 
     // Compute parent notebook
     const parentNotebook = computed(() => {
@@ -420,10 +418,8 @@ const ChatNote = pattern<Input, Output>(
       return custom || JSON.stringify(ChatNote);
     });
 
-    // Computed for generation state display
-    const showGenerating = computed(
-      () => isGenerating.get() && llmResponse.pending,
-    );
+    // Generation state display (reactive expression auto-wraps at use sites)
+    const showGenerating = isGenerating.get() && llmResponse.pending;
 
     // Can generate when there's content and not already generating
     // Optimized to avoid splitting entire content on every keystroke
@@ -458,54 +454,47 @@ const ChatNote = pattern<Input, Output>(
     const modelChangeHandler = handleModelChange({ model });
 
     return {
-      [NAME]: computed(() => `💬 ${title.get()}`),
+      [NAME]: `💬 ${title.get()}`,
       [UI]: (
-        <ct-screen>
-          <ct-vstack
+        <cf-screen>
+          <cf-vstack
             slot="header"
             gap="2"
             padding="4"
             style={{
-              borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
+              borderBottom: "1px solid var(--cf-theme-color-border, #e5e5e7)",
             }}
           >
             {/* Parent notebook chip */}
-            <ct-hstack
+            <cf-hstack
               gap="2"
               align="center"
               style={{
-                display: computed(() => {
-                  const p = (self as any).parentNotebook;
-                  return p ? "flex" : "none";
-                }),
+                display: (self as any).parentNotebook ? "flex" : "none",
                 marginBottom: "4px",
               }}
             >
               <span
                 style={{
                   fontSize: "13px",
-                  color: "var(--ct-color-text-secondary)",
+                  color: "var(--cf-theme-color-text-secondary)",
                 }}
               >
                 In:
               </span>
-              <ct-chip
-                label={computed(() => {
-                  const p = (self as any).parentNotebook;
-                  return p?.[NAME] ?? p?.title ?? "Notebook";
-                })}
+              <cf-chip
+                label={(self as any).parentNotebook?.[NAME] ??
+                  (self as any).parentNotebook?.title ?? "Notebook"}
                 interactive
-                onct-click={goToParent({ self })}
+                oncf-click={goToParent({ self })}
               />
-            </ct-hstack>
+            </cf-hstack>
 
-            <ct-hstack gap="3" style={{ alignItems: "center" }}>
+            <cf-hstack gap="3" style={{ alignItems: "center" }}>
               {/* Editable Title - click to edit */}
               <div
                 style={{
-                  display: computed(() =>
-                    isEditingTitle.get() ? "none" : "flex"
-                  ),
+                  display: isEditingTitle.get() ? "none" : "flex",
                   alignItems: "center",
                   gap: "8px",
                   cursor: "pointer",
@@ -521,19 +510,17 @@ const ChatNote = pattern<Input, Output>(
               </div>
               <div
                 style={{
-                  display: computed(() =>
-                    isEditingTitle.get() ? "flex" : "none"
-                  ),
+                  display: isEditingTitle.get() ? "flex" : "none",
                   flex: 1,
                   marginRight: "12px",
                 }}
               >
-                <ct-input
+                <cf-input
                   $value={title}
                   placeholder="Chat note title..."
                   style={{ flex: 1 }}
-                  onct-blur={stopEditingTitle({ isEditingTitle })}
-                  onct-keydown={handleTitleKeydown({ isEditingTitle })}
+                  oncf-blur={stopEditingTitle({ isEditingTitle })}
+                  oncf-keydown={handleTitleKeydown({ isEditingTitle })}
                 />
               </div>
 
@@ -542,12 +529,12 @@ const ChatNote = pattern<Input, Output>(
                 value={model}
                 onChange={modelChangeHandler}
                 style={{
-                  display: computed(() => (showGenerating ? "none" : "block")),
+                  display: showGenerating ? "none" : "block",
                   padding: "4px 8px",
                   fontSize: "13px",
                   borderRadius: "6px",
-                  border: "1px solid var(--ct-color-border, #e5e5e7)",
-                  background: "var(--ct-color-bg, white)",
+                  border: "1px solid var(--cf-theme-color-border, #e5e5e7)",
+                  background: "var(--cf-theme-color-background, white)",
                   cursor: "pointer",
                 }}
               >
@@ -555,7 +542,7 @@ const ChatNote = pattern<Input, Output>(
               </select>
 
               {/* Generate button - shown when not generating */}
-              <ct-button
+              <cf-button
                 variant="primary"
                 size="sm"
                 onClick={handleGenerate({
@@ -566,26 +553,26 @@ const ChatNote = pattern<Input, Output>(
                   mentionable,
                   beforeAIInsert,
                 })}
-                disabled={computed(() => !canGenerate)}
+                disabled={!canGenerate}
                 style={{
-                  display: computed(() => (showGenerating ? "none" : "flex")),
+                  display: showGenerating ? "none" : "flex",
                 }}
                 title="Generate (Cmd+Enter)"
               >
                 Generate
-              </ct-button>
+              </cf-button>
 
               {/* Generation status / Cancel button - shown when generating */}
-              <ct-hstack
+              <cf-hstack
                 gap="2"
                 align="center"
                 style={{
-                  display: computed(() => (showGenerating ? "flex" : "none")),
+                  display: showGenerating ? "flex" : "none",
                   flexShrink: 0,
                 }}
               >
-                <ct-loader show-elapsed style={{ flexShrink: 0 }} />
-                <ct-button
+                <cf-loader show-elapsed style={{ flexShrink: 0 }} />
+                <cf-button
                   variant="secondary"
                   size="sm"
                   onClick={handleCancelGeneration({
@@ -595,17 +582,17 @@ const ChatNote = pattern<Input, Output>(
                   style={{ flexShrink: 0 }}
                 >
                   Cancel
-                </ct-button>
-              </ct-hstack>
-            </ct-hstack>
-          </ct-vstack>
+                </cf-button>
+              </cf-hstack>
+            </cf-hstack>
+          </cf-vstack>
 
           {/* Keyboard shortcut: Cmd+Enter to generate */}
-          <ct-keybind
+          <cf-keybind
             code="Enter"
             meta
             ignore-editable={false}
-            onct-keybind={handleGenerate({
+            oncf-keybind={handleGenerate({
               content,
               llmSystem,
               llmMessages,
@@ -615,11 +602,11 @@ const ChatNote = pattern<Input, Output>(
             })}
           />
           {/* Keyboard shortcut: Ctrl+Enter to generate (Windows/Linux) */}
-          <ct-keybind
+          <cf-keybind
             code="Enter"
             ctrl
             ignore-editable={false}
-            onct-keybind={handleGenerate({
+            oncf-keybind={handleGenerate({
               content,
               llmSystem,
               llmMessages,
@@ -630,7 +617,7 @@ const ChatNote = pattern<Input, Output>(
           />
 
           {/* Editor */}
-          <ct-code-editor
+          <cf-code-editor
             $value={content}
             $mentionable={mentionable}
             $mentioned={mentioned}
@@ -645,14 +632,14 @@ const ChatNote = pattern<Input, Output>(
             readonly={isGenerating}
           />
 
-          <ct-hstack slot="footer">
+          <cf-hstack slot="footer">
             {backlinks?.map((piece) => (
-              <ct-button onClick={handlePieceLinkClicked({ piece })}>
+              <cf-button onClick={handlePieceLinkClicked({ piece })}>
                 {piece?.[NAME]}
-              </ct-button>
+              </cf-button>
             ))}
-          </ct-hstack>
-        </ct-screen>
+          </cf-hstack>
+        </cf-screen>
       ),
       title,
       content,

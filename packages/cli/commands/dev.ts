@@ -2,10 +2,11 @@ import { Command } from "@cliffy/command";
 import { isAbsolute, join } from "@std/path";
 import { render } from "../lib/render.ts";
 import { process } from "../lib/dev.ts";
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
+import { cliText } from "../lib/cli-name.ts";
 
 const createDescription = (cmdName: string) =>
-  `Compile and execute patterns for debugging.
+  cliText(`Compile and execute patterns for debugging.
 
 The pattern is processed through ts-transformers, which converts reactive
 constructs (computed, handler, JSX) into runtime-compatible code.
@@ -14,30 +15,30 @@ By default, produces no output on success (like deno check). Use --pattern-json
 to print the evaluated pattern export.
 
 COMMON USAGE:
-  ct ${cmdName} ./pattern.tsx              # Compile, transform, and execute (quiet)
-  ct ${cmdName} ./a.tsx ./b.tsx            # Process multiple patterns
-  ct ${cmdName} ./pattern.tsx --pattern-json   # Print JSON result on success
-  ct ${cmdName} ./pattern.tsx --no-run     # Type-check only (fast validation)
-  ct ${cmdName} ./pattern.tsx --show-transformed   # See transformed output
+  cf ${cmdName} ./pattern.tsx              # Compile, transform, and execute (quiet)
+  cf ${cmdName} ./a.tsx ./b.tsx            # Process multiple patterns
+  cf ${cmdName} ./pattern.tsx --pattern-json   # Print JSON result on success
+  cf ${cmdName} ./pattern.tsx --no-run     # Type-check only (fast validation)
+  cf ${cmdName} ./pattern.tsx --show-transformed   # See transformed output
 
 TIPS:
   • Use --no-run for quick type-checking during development
   • Use --show-transformed to debug transformation issues - shows how
     ts-transformers converts your code (e.g., .map() → .mapWithPattern())
   • Transformation errors often stem from reactive constructs the compiler
-    doesn't recognize; inspecting transformed output helps identify these`;
+    doesn't recognize; inspecting transformed output helps identify these`);
 
 async function devAction(
   options: {
     check: boolean;
     run: boolean;
     output?: string;
-    filename?: string;
     showTransformed?: boolean;
     mainExport?: string;
     verboseErrors?: boolean;
     patternJson?: boolean;
     root?: string;
+    space?: string;
   },
   ...files: string[]
 ) {
@@ -57,10 +58,10 @@ async function devAction(
         check: options.check,
         run: options.run,
         output: files.length === 1 ? options.output : undefined,
-        filename: options.filename,
         showTransformed: options.showTransformed,
         mainExport: options.mainExport,
         verboseErrors: options.verboseErrors,
+        space: options.space,
       });
       // Only print JSON output when --pattern-json is used
       // (and not when --show-transformed is used, as that already prints to stdout)
@@ -106,23 +107,23 @@ function createDevCommand(cmdName: string): Command<any> {
     .name(cmdName)
     .description(createDescription(cmdName))
     .example(
-      `ct ${cmdName} ./pattern.tsx`,
+      cliText(`cf ${cmdName} ./pattern.tsx`),
       "Compile and evaluate a pattern (quiet on success).",
     )
     .example(
-      `ct ${cmdName} ./a.tsx ./b.tsx ./c.tsx`,
+      cliText(`cf ${cmdName} ./a.tsx ./b.tsx ./c.tsx`),
       "Compile and evaluate multiple patterns.",
     )
     .example(
-      `ct ${cmdName} ./pattern.tsx --pattern-json`,
+      cliText(`cf ${cmdName} ./pattern.tsx --pattern-json`),
       "Compile and evaluate a pattern, printing export default as JSON.",
     )
     .example(
-      `ct ${cmdName} ./pattern.tsx --no-run --output out.js`,
-      "Compile a pattern, storing the translated and bundled JavaScript to out.js without evaluating.",
+      cliText(`cf ${cmdName} ./pattern.tsx --no-run --output out.js`),
+      "Compile a pattern, storing the compiled per-module JavaScript to out.js without evaluating.",
     )
     .example(
-      `ct ${cmdName} ./pattern.tsx --no-check`,
+      cliText(`cf ${cmdName} ./pattern.tsx --no-check`),
       "Compile and evaluate pattern without typechecking.",
     )
     .option("--no-run", "Do not execute input, only type check.")
@@ -130,10 +131,6 @@ function createDevCommand(cmdName: string): Command<any> {
     .option(
       "--output <value:string>",
       "Store the compiled pattern at $output.",
-    )
-    .option(
-      "--filename <value:string>",
-      "The filename used when compiling the pattern, used in source maps.",
     )
     .option(
       "--show-transformed",
@@ -154,6 +151,10 @@ function createDevCommand(cmdName: string): Command<any> {
     .option(
       "--root <path:string>",
       "Root directory for resolving imports. Allows imports from parent directories within this root.",
+    )
+    .option(
+      "--space <did:string>",
+      "Space DID for resolving fabric imports.",
     )
     .arguments("<files...:string>")
     .action(devAction);

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read --allow-run --allow-env
+#!/usr/bin/env -S deno run --allow-read --allow-write --allow-run --allow-env
 
 /**
  * Integration test runner for the entire monorepo.
@@ -17,25 +17,43 @@
  */
 
 import * as path from "@std/path";
+import ports from "@commonfabric/ports" with { type: "json" };
 
-// Packages with integration tests that need a running server
-const PACKAGES_WITH_SERVER = [
+// Packages with integration tests that need a running server by default.
+const DEFAULT_PACKAGES_WITH_SERVER = [
   "runner",
   "runtime-client",
   "shell",
-  "background-charm-service",
   "patterns",
   "cli",
 ];
 
+// Opt-in suites that mirror CI jobs but rely on more platform-specific setup.
+const OPTIONAL_PACKAGES_WITH_SERVER = ["cli-fuse", "patterns-reload"];
+
 // Packages with integration tests that DON'T need a running server
 const PACKAGES_WITHOUT_SERVER = ["generated-patterns", "pattern-tests"];
 
-// All packages with integration tests
-const ALL_PACKAGES = [...PACKAGES_WITH_SERVER, ...PACKAGES_WITHOUT_SERVER];
+// Default `deno task integration` coverage.
+const DEFAULT_PACKAGES = [
+  ...DEFAULT_PACKAGES_WITH_SERVER,
+  ...PACKAGES_WITHOUT_SERVER,
+];
+
+const ALL_PACKAGES_WITH_SERVER = [
+  ...DEFAULT_PACKAGES_WITH_SERVER,
+  ...OPTIONAL_PACKAGES_WITH_SERVER,
+];
+
+// All valid integration targets, including opt-in platform-specific suites.
+const ALL_PACKAGES = [...DEFAULT_PACKAGES, ...OPTIONAL_PACKAGES_WITH_SERVER];
 
 // Packages that need HEADLESS=1 for browser tests
-const HEADLESS_PACKAGES = ["shell", "background-charm-service", "patterns"];
+const HEADLESS_PACKAGES = [
+  "shell",
+  "patterns",
+  "patterns-reload",
+];
 
 async function runCommand(
   cmd: string[],
@@ -74,36 +92,44 @@ async function stopServers(portOffset: number, rootDir: string): Promise<void> {
   );
 }
 
+// start-local-dev.sh exits with this code when a requested port is already in
+// use. Other failures use different codes and are not worth retrying.
+const PORT_IN_USE_EXIT = 3;
+
+// Starts the dev servers for the given offset. Returns the start-local-dev.sh
+// exit code: 0 on success, PORT_IN_USE_EXIT on a port collision, or another
+// non-zero code for any other startup failure.
 async function startServers(
   portOffset: number,
   rootDir: string,
-): Promise<boolean> {
+  env: Record<string, string> = {},
+): Promise<number> {
   console.log(`Starting servers with PORT_OFFSET=${portOffset}...`);
   const result = await runCommand(
     ["bash", "scripts/start-local-dev.sh", `--port-offset=${portOffset}`],
-    { cwd: rootDir, inheritStdio: true },
+    { cwd: rootDir, env, inheritStdio: true },
   );
 
   if (!result.success) {
     console.error("Failed to start servers");
-    return false;
+    return result.code;
   }
 
   // Wait a bit more for servers to be fully ready
   console.log("Waiting for servers to be fully ready...");
   await new Promise((resolve) => setTimeout(resolve, 3000));
 
-  return true;
+  return 0;
 }
 
 /**
- * Resolve the ct binary: CT_BINARY env var, or fall back to running
+ * Resolve the cf binary: CF_BINARY env var, or fall back to running
  * the CLI entrypoint via deno.
  */
-function getCtCommand(rootDir: string): string[] {
-  const ctBinary = Deno.env.get("CT_BINARY");
-  if (ctBinary) {
-    return [ctBinary];
+function getCfCommand(rootDir: string): string[] {
+  const cfBinary = Deno.env.get("CF_BINARY");
+  if (cfBinary) {
+    return [cfBinary];
   }
   return [
     "deno",
@@ -170,14 +196,16 @@ async function findPatternTests(
 }
 
 /**
- * Find and run all .test.tsx pattern tests via `ct test`.
+ * Find and run all .test.tsx pattern tests via `cf test`.
+ * Captures per-test timing and optionally writes JUnit XML.
  */
 async function runPatternTests(
   rootDir: string,
   filter?: string,
+  junitDir?: string,
 ): Promise<boolean> {
   const patternsDir = path.join(rootDir, "packages/patterns");
-  const ctCmd = getCtCommand(rootDir);
+  const cfCmd = getCfCommand(rootDir);
   const testFiles = await findPatternTests(rootDir, patternsDir, filter);
 
   if (testFiles.length === 0) {
@@ -189,8 +217,9 @@ async function runPatternTests(
   console.log(
     `Found ${testFiles.length} pattern test(s), running ${concurrency} at a time`,
   );
-
   const failed: string[] = [];
+  const testTimings: { file: string; durationMs: number; passed: boolean }[] =
+    [];
 
   // Run as a pool: always keep `concurrency` tests in flight
   let nextIndex = 0;
@@ -200,9 +229,10 @@ async function runPatternTests(
     while (running.size < concurrency && nextIndex < testFiles.length) {
       const testFile = testFiles[nextIndex++];
       const p = (async () => {
+        const startMs = performance.now();
         const result = await runCommand(
           [
-            ...ctCmd,
+            ...cfCmd,
             "test",
             "--timeout",
             "180000",
@@ -212,11 +242,22 @@ async function runPatternTests(
           ],
           { cwd: rootDir },
         );
+        const durationMs = performance.now() - startMs;
+
+        testTimings.push({
+          file: testFile,
+          durationMs,
+          passed: result.success,
+        });
 
         if (result.success) {
-          console.log(`✅ ${testFile}`);
+          console.log(
+            `✅ ${testFile} (${(durationMs / 1000).toFixed(1)}s)`,
+          );
         } else {
-          console.log(`❌ ${testFile}`);
+          console.log(
+            `❌ ${testFile} (${(durationMs / 1000).toFixed(1)}s)`,
+          );
           failed.push(testFile);
         }
         if (result.stdout) {
@@ -253,7 +294,57 @@ async function runPatternTests(
     }
   }
 
+  // Write JUnit XML with per-test timing
+  if (junitDir) {
+    await Deno.mkdir(junitDir, { recursive: true });
+    const xml = buildPatternTestJUnit(testTimings);
+    const junitPath = path.join(junitDir, "pattern-unit-tests.xml");
+    await Deno.writeTextFile(junitPath, xml);
+    console.log(`Wrote JUnit timing to ${junitPath}`);
+  }
+
   return failed.length === 0;
+}
+
+/** Build a JUnit XML document from per-test pattern test timings. */
+function buildPatternTestJUnit(
+  timings: { file: string; durationMs: number; passed: boolean }[],
+): string {
+  const escapeXml = (s: string) =>
+    s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  const totalTime = timings.reduce((s, t) => s + t.durationMs, 0) / 1000;
+  const failures = timings.filter((t) => !t.passed).length;
+
+  const lines = [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<testsuites>`,
+    `<testsuite name="pattern-unit-tests" tests="${timings.length}" failures="${failures}" time="${
+      totalTime.toFixed(3)
+    }">`,
+  ];
+
+  for (const t of timings) {
+    const timeSec = (t.durationMs / 1000).toFixed(3);
+    lines.push(
+      `  <testcase name="${escapeXml(t.file)}" time="${timeSec}"${
+        t.passed ? " />" : ">"
+      }`,
+    );
+    if (!t.passed) {
+      lines.push(`    <failure message="Test failed" />`);
+      lines.push(`  </testcase>`);
+    }
+  }
+
+  lines.push(`</testsuite>`);
+  lines.push(`</testsuites>`);
+
+  return lines.join("\n");
 }
 
 /** Recursively walk a directory yielding file paths. */
@@ -275,7 +366,16 @@ async function runPackageIntegration(
   filter?: string,
   junitDir?: string,
 ): Promise<boolean> {
-  const packageDir = path.join(rootDir, "packages", pkg);
+  const packageDirName = pkg === "cli-fuse"
+    ? "cli"
+    : pkg === "patterns-reload"
+    ? "patterns"
+    : pkg;
+  const packageDir = path.join(
+    rootDir,
+    "packages",
+    packageDirName,
+  );
   console.log(`\n${"=".repeat(60)}`);
   console.log(`Running integration tests for: ${pkg}`);
   console.log(`${"=".repeat(60)}`);
@@ -297,8 +397,12 @@ async function runPackageIntegration(
   }
 
   // Add API_URL for packages that need it
-  if (PACKAGES_WITH_SERVER.includes(pkg)) {
+  if (ALL_PACKAGES_WITH_SERVER.includes(pkg)) {
     env.API_URL = apiUrl;
+  }
+
+  if (pkg === "patterns-reload") {
+    env.CF_EXPECT_PERSISTENT_SCHEDULER_STATE = "1";
   }
 
   // For browser test packages, pass through HEADLESS and PIPE_CONSOLE
@@ -317,14 +421,29 @@ async function runPackageIntegration(
   let result: { success: boolean; code: number };
 
   if (pkg === "pattern-tests") {
-    return await runPatternTests(rootDir, filter);
+    return await runPatternTests(rootDir, filter, junitDir);
   } else if (pkg === "cli") {
     // CLI uses a special shell script
-    env.CT_CLI_INTEGRATION_USE_LOCAL = "1";
+    env.CF_CLI_INTEGRATION_USE_LOCAL = "1";
     result = await runCommand(
       ["bash", "./integration/integration.sh"],
       { cwd: packageDir, env, inheritStdio: true },
     );
+  } else if (pkg === "cli-fuse") {
+    // Mirror the dedicated GitHub Actions FUSE suite, but keep it opt-in
+    // locally because it depends on platform-specific FUSE setup.
+    env.CF_CLI_INTEGRATION_USE_LOCAL = "1";
+    env.FUSE_DEEP_ENTITY_PROBE = Deno.env.get("FUSE_DEEP_ENTITY_PROBE") ?? "0";
+    result = await runCommand(
+      ["bash", "./integration/fuse-exec.sh"],
+      { cwd: packageDir, env, inheritStdio: true },
+    );
+  } else if (pkg === "patterns-reload") {
+    result = await runCommand(["deno", "task", "integration:reload"], {
+      cwd: packageDir,
+      env,
+      inheritStdio: true,
+    });
   } else if (filter) {
     // Run with filter - find matching test files
     const globPattern = `./integration/*${filter}*.test.ts`;
@@ -388,28 +507,47 @@ Arguments:
   package   Optional. Run tests for a specific package only.
             Available: ${ALL_PACKAGES.join(", ")}
   filter    Optional. Filter test files by name pattern.
-            Only works with deno test packages (not cli).
+            Only works with deno test packages (not cli or cli-fuse).
 
 Examples:
   deno task integration                       # Run all, auto-cleanup
   deno task integration cli                   # Run only cli tests
+  deno task integration cli-fuse              # Run the opt-in CLI FUSE suite
   deno task integration patterns counter      # Filter by test name
+  deno task integration patterns-reload       # Run opt-in pattern reload tests
   deno task integration pattern-tests         # Run .test.tsx pattern unit tests
   deno task integration --port-offset=500     # Use specific port offset
   deno task integration --port-offset=500 cli # Combine options
 
-Environment:
-  CT_BINARY      - Path to the ct binary (for pattern-tests target).
-                   Falls back to running packages/cli/mod.ts via deno.
+Notes:
+  The default run omits platform-specific suites such as cli-fuse.
+  Use them explicitly when your machine is set up similarly to CI.
 
+Environment:
+  CF_BINARY      - Path to the cf binary (for pattern-tests target).
+                   Falls back to running packages/cli/mod.ts via deno.
 Server ports (with offset):
-  Toolshed:  8000 + offset
-  Shell:     5173 + offset
+  Toolshed:  ${ports.toolshed} + offset
+  Shell:     ${ports.shell} + offset
 
 Log files (after servers start):
   packages/shell/local-dev-shell.log
   packages/toolshed/local-dev-toolshed.log
 `);
+}
+
+/**
+ * Parse a port offset, exiting with a clear error if it is not a non-negative
+ * integer. Shared by --port-offset and the PORT_OFFSET env var so an invalid
+ * value fails fast instead of becoming NaN in URLs and command arguments.
+ */
+function parsePortOffset(value: string, source: string): number {
+  const offset = parseInt(value, 10);
+  if (Number.isNaN(offset) || offset < 0) {
+    console.error(`Invalid port offset from ${source}: "${value}"`);
+    Deno.exit(1);
+  }
+  return offset;
 }
 
 async function main(): Promise<void> {
@@ -428,11 +566,7 @@ async function main(): Promise<void> {
 
   for (const arg of args) {
     if (arg.startsWith("--port-offset=")) {
-      cliPortOffset = parseInt(arg.split("=")[1], 10);
-      if (isNaN(cliPortOffset) || cliPortOffset < 0) {
-        console.error(`Invalid port offset: ${arg}`);
-        Deno.exit(1);
-      }
+      cliPortOffset = parsePortOffset(arg.split("=")[1], "--port-offset");
     } else if (arg.startsWith("--junit-dir=")) {
       junitDir = arg.split("=")[1];
     } else if (!arg.startsWith("-")) {
@@ -457,25 +591,26 @@ async function main(): Promise<void> {
 
   const rootDir = Deno.cwd();
 
-  // Priority: CLI arg > env var > random
-  const envPortOffset = Deno.env.get("PORT_OFFSET");
+  // Priority: CLI arg > env var > generated. An explicit offset is reused as-is
+  // and its servers are left running; a generated offset is tried at random,
+  // retried on a port collision, and stopped after the run.
+  // An empty or whitespace PORT_OFFSET is treated as unset (use a generated
+  // offset); a non-empty value is validated so a typo fails fast.
+  const envPortOffsetRaw = Deno.env.get("PORT_OFFSET");
+  const envPortOffset =
+    envPortOffsetRaw !== undefined && envPortOffsetRaw.trim() !== ""
+      ? parsePortOffset(envPortOffsetRaw, "PORT_OFFSET")
+      : undefined;
   const portOffsetWasSet = cliPortOffset !== undefined ||
     envPortOffset !== undefined;
-  const portOffset = cliPortOffset ??
-    (envPortOffset ? parseInt(envPortOffset, 10) : undefined) ??
-    Math.floor(Math.random() * 901) + 100; // 100-1000
-
-  const apiUrl = `http://localhost:${8000 + portOffset}`;
-
-  console.log("Integration Test Runner");
-  console.log("=======================");
   const offsetSource = cliPortOffset !== undefined
     ? " (from --port-offset)"
     : envPortOffset !== undefined
     ? " (from env)"
     : " (generated)";
-  console.log(`PORT_OFFSET: ${portOffset}${offsetSource}`);
-  console.log(`API_URL: ${apiUrl}`);
+
+  console.log("Integration Test Runner");
+  console.log("=======================");
   if (packageFilter) {
     console.log(`Package filter: ${packageFilter}`);
   }
@@ -485,29 +620,96 @@ async function main(): Promise<void> {
   console.log();
 
   // Determine which packages to run
-  const packagesToRun = packageFilter ? [packageFilter] : ALL_PACKAGES;
+  const packagesToRun = packageFilter ? [packageFilter] : DEFAULT_PACKAGES;
 
   // Check if we need to start servers
   const needsServer = packagesToRun.some((pkg) =>
-    PACKAGES_WITH_SERVER.includes(pkg)
+    ALL_PACKAGES_WITH_SERVER.includes(pkg)
   );
 
+  // An explicit offset is used directly; a generated offset is replaced with a
+  // free one just before the servers start.
+  let portOffset = cliPortOffset ?? envPortOffset ?? 0;
+  let apiUrl = "";
+
+  // A generated-offset run owns the servers it starts and stops them on the way
+  // out, including after a failure. An explicit offset is left running.
+  let ownsServers = false;
   let serverStarted = false;
+  let cleanedUp = false;
+  let exitCode = 0;
+
+  const cleanup = async (): Promise<void> => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    if (ownsServers) {
+      console.log("\nCleaning up servers...");
+      await stopServers(portOffset, rootDir);
+    } else if (serverStarted) {
+      console.log("\nLeaving servers running (PORT_OFFSET was set).");
+    }
+  };
+
+  // A signal terminates the process without running `finally`, so stop the
+  // servers from the handler before exiting.
+  const onSignal = () => {
+    console.log("\nInterrupted, cleaning up...");
+    cleanup().finally(() => Deno.exit(130));
+  };
+  Deno.addSignalListener("SIGINT", onSignal);
+  Deno.addSignalListener("SIGTERM", onSignal);
 
   try {
     if (needsServer) {
-      // If PORT_OFFSET was set, stop existing servers first
-      if (portOffsetWasSet) {
-        await stopServers(portOffset, rootDir);
+      const serverEnv: Record<string, string> = {};
+      if (packagesToRun.includes("patterns-reload")) {
+        serverEnv.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE = "true";
       }
 
-      // Start servers
-      const started = await startServers(portOffset, rootDir);
-      if (!started) {
-        console.error("Failed to start servers, aborting.");
-        Deno.exit(1);
+      if (portOffsetWasSet) {
+        // Reuse the requested offset, stopping anything already on its ports.
+        await stopServers(portOffset, rootDir);
+        apiUrl = `http://localhost:${ports.toolshed + portOffset}`;
+        console.log(`PORT_OFFSET: ${portOffset}${offsetSource}`);
+        console.log(`API_URL: ${apiUrl}`);
+        if (await startServers(portOffset, rootDir, serverEnv) !== 0) {
+          console.error("Failed to start servers, aborting.");
+          exitCode = 1;
+          return;
+        }
+        serverStarted = true;
+      } else {
+        // Try a random offset and let the servers report a real port collision
+        // by failing to bind (PORT_IN_USE_EXIT); retry on a fresh offset only in
+        // that case. Any other failure is not port-related and would recur on
+        // every offset, so it stops the run.
+        const maxStartAttempts = 5;
+        for (let attempt = 1; attempt <= maxStartAttempts; attempt++) {
+          portOffset = Math.floor(Math.random() * 901) + 100; // 100-1000
+          apiUrl = `http://localhost:${ports.toolshed + portOffset}`;
+          console.log(`PORT_OFFSET: ${portOffset}${offsetSource}`);
+          console.log(`API_URL: ${apiUrl}`);
+          // Once an offset is chosen, this run is responsible for stopping
+          // anything started on it, including after a failed attempt.
+          ownsServers = true;
+          const startCode = await startServers(portOffset, rootDir, serverEnv);
+          if (startCode === 0) {
+            serverStarted = true;
+            break;
+          }
+          if (startCode !== PORT_IN_USE_EXIT) {
+            break;
+          }
+          console.warn(
+            `Offset ${portOffset} hit a port collision; retrying...`,
+          );
+        }
+        if (!serverStarted) {
+          console.error("Failed to start servers, aborting.");
+          exitCode = 1;
+          return;
+        }
       }
-      serverStarted = true;
     }
 
     // Run integration tests
@@ -515,7 +717,9 @@ async function main(): Promise<void> {
 
     // Run packages that need server first
     for (
-      const pkg of packagesToRun.filter((p) => PACKAGES_WITH_SERVER.includes(p))
+      const pkg of packagesToRun.filter((p) =>
+        ALL_PACKAGES_WITH_SERVER.includes(p)
+      )
     ) {
       const success = await runPackageIntegration(
         pkg,
@@ -560,17 +764,20 @@ async function main(): Promise<void> {
 
     if (failed.length > 0) {
       console.log(`Failed: ${failed.map((r) => r.pkg).join(", ")}`);
-      Deno.exit(1);
+      exitCode = 1;
     }
+  } catch (error) {
+    console.error("Integration run failed:", error);
+    exitCode = 1;
   } finally {
-    // Clean up: stop servers if we started them and PORT_OFFSET was NOT originally set
-    if (serverStarted && !portOffsetWasSet) {
-      console.log("\nCleaning up servers...");
-      await stopServers(portOffset, rootDir);
-    } else if (serverStarted && portOffsetWasSet) {
-      console.log("\nLeaving servers running (PORT_OFFSET was set).");
-    }
+    Deno.removeSignalListener("SIGINT", onSignal);
+    Deno.removeSignalListener("SIGTERM", onSignal);
+    await cleanup();
+    Deno.exit(exitCode);
   }
 }
 
-main();
+main().catch((error) => {
+  console.error("Integration run failed:", error);
+  Deno.exit(1);
+});

@@ -1,20 +1,18 @@
-/// <cts-enable />
 import {
   type Cell,
   cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface AlternateInitialStateSeed {
-  id?: unknown;
-  label?: unknown;
-  value?: unknown;
-  step?: unknown;
+  id?: string;
+  label?: string;
+  value?: number;
+  step?: number;
 }
 
 interface AlternateInitialState {
@@ -40,12 +38,12 @@ interface AlternateInitialStatesArgs {
 }
 
 interface SelectInitialEvent {
-  id?: unknown;
-  reason?: unknown;
+  id?: string;
+  reason?: string;
 }
 
 interface IncrementEvent {
-  amount?: unknown;
+  amount?: number;
 }
 
 const defaultInitialStateSeeds = [
@@ -212,14 +210,11 @@ export const counterWithAlternateInitialStates = pattern<
     active: activeStateId,
   });
 
-  const selectionCount = derive(
-    selectionLog,
-    (entries) => Array.isArray(entries.get()) ? entries.get().length : 0,
-  );
+  const selectionCount = Array.isArray(selectionLog.get())
+    ? selectionLog.get().length
+    : 0;
 
-  const label = str`State ${
-    activeState.key("label")
-  }=${valueCell} (step ${stepCell})`;
+  const label = str`State ${activeState.label}=${valueCell} (step ${stepCell})`;
 
   return {
     value: valueCell,

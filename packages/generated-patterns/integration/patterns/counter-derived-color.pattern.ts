@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { Cell, Default, derive, handler, pattern } from "commontools";
+import { Cell, Default, handler, pattern } from "commonfabric";
 
 interface DerivedColorArgs {
   value: Default<number, 0>;
@@ -25,7 +24,7 @@ function getColor(count: number): string {
 
 export const counterWithDerivedColor = pattern<DerivedColorArgs>(
   ({ value }) => {
-    const color = derive(value, (current) => getColor(current ?? 0));
+    const color = getColor(value ?? 0);
 
     return {
       value,

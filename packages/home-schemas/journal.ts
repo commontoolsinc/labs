@@ -3,8 +3,8 @@
  * These define the structure of user's activity journal.
  */
 
-import type { JSONSchema } from "@commontools/api";
-import type { Schema } from "@commontools/api/schema";
+import type { JSONSchema } from "@commonfabric/api";
+import type { Schema } from "@commonfabric/api/schema";
 
 /**
  * Journal entry event types - the significant events we track
@@ -46,7 +46,7 @@ export const journalEntrySchema = {
     },
     // Live cell reference (may update over time)
     // we use type unknown to validate, but avoid including children
-    subject: { type: "unknown", asCell: true },
+    subject: { type: "unknown", asCell: ["cell"] },
     // Frozen snapshot at entry time
     snapshot: journalSnapshotSchema,
     // LLM-generated narrative prose

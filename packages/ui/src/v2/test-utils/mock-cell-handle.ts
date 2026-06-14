@@ -20,14 +20,14 @@ import {
   type CellRef,
   type InitializedRuntimeConnection,
   type RuntimeClient,
-} from "@commontools/runtime-client";
+} from "@commonfabric/runtime-client";
 
 /** Default CellRef used when none is provided. */
 const DEFAULT_REF: CellRef = {
   id: "of:mock-cell" as CellRef["id"],
   space: "did:key:mock" as CellRef["space"],
+  scope: "space",
   path: [],
-  type: "application/json" as CellRef["type"],
   schema: { type: "object" },
 };
 

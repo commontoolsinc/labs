@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: Email Pattern Launcher
  *
@@ -11,9 +10,9 @@
  * Note: Since this pattern depends on Gmail API calls and pattern compilation,
  * we focus on testing the helper functions and initial state.
  *
- * Run: deno task ct test packages/patterns/google/extractors/email-pattern-launcher.test.tsx --root packages/patterns/google --verbose
+ * Run: deno task cf test packages/patterns/google/extractors/email-pattern-launcher.test.tsx --root packages/patterns/google --verbose
  */
-import { computed, pattern } from "commontools";
+import { computed, pattern } from "commonfabric";
 
 // =============================================================================
 // HELPER FUNCTIONS (duplicated for testing - same as in main pattern)

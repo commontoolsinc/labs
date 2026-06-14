@@ -1,21 +1,24 @@
-/// <cts-enable />
 import {
+  type Cell,
   computed,
   Default,
   handler,
   ifElse,
   ImageData,
   NAME,
+  nonPrivateRandom,
   pattern,
+  safeDateNow,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 /**
  * Group Chat Room Pattern v9
  *
- * New features:
- * 1. Click avatar to set/change avatar
+ * Features:
+ * 1. Avatars come from each user's shared profile (snapshotted on join in the
+ *    lobby) and render via cf-avatar
  * 2. Camera icon sends images to chat
  * 3. Emoji reactions on messages with hover UI
  */
@@ -33,42 +36,47 @@ export interface Message {
   timestamp: number;
   type: "chat" | "system" | "image";
   imageUrl?: string;
-  reactions: Reaction[]; // Required - workaround for transformer bug
+  reactions: Reaction[];
 }
 
+/**
+ * Stable identity for a user: the joiner's own `#profile` cell. Display names
+ * are mutable and not unique across users, so they must not be the identity
+ * key — compare profile cells with `equals()` instead (see
+ * `docs/specs/shared-profile-rosters.md`).
+ */
+export type ParticipantProfileCell = Cell<{ name?: string; avatar?: string }>;
+
 export interface User {
+  /**
+   * Display name shown in the room. Unique within this roster (the lobby
+   * disambiguates collisions) because messages/reactions key on it.
+   */
   name: string;
   joinedAt: number;
-  color: string;
-  avatarImage?: { url: string };
+  /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
+  avatar?: string;
+  /**
+   * Link to the joiner's profile cell — the stable identity key (optional so
+   * rosters written before the profile migration still load).
+   */
+  profile?: ParticipantProfileCell;
 }
 
 interface RoomInput {
-  messages: Writable<Default<Message[], []>>;
-  users: Writable<Default<User[], []>>;
-  myName: Default<string, "">;
-  mySessionId: Default<string, "">;
-  currentSessionId: Writable<Default<string, "">>;
+  messages: Writable<Message[] | Default<[]>>;
+  users: Writable<User[] | Default<[]>>;
+  myName: string | Default<"">;
+  mySessionId: string | Default<"">;
+  currentSessionId: Writable<string | Default<"">>;
 }
 
-interface RoomOutput {
-  myName: Default<string, "">;
+export interface RoomOutput {
+  myName: string | Default<"">;
 }
 
 // Common reaction emojis
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "😡"];
-
-// Utility function to get initials from a name
-function getInitials(name: string): string {
-  if (!name || typeof name !== "string") return "?";
-  return name
-    .trim()
-    .split(/\s+/)
-    .map((word) => word[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
-}
 
 // Handler to send a text message
 const sendMessage = handler<
@@ -83,10 +91,10 @@ const sendMessage = handler<
   if (!content || !myName) return;
 
   messages.push({
-    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: `msg-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2)}`,
     author: myName,
     content,
-    timestamp: Date.now(),
+    timestamp: safeDateNow(),
     type: "chat",
     reactions: [],
   });
@@ -108,11 +116,11 @@ const sendImageMessage = handler<
 
   const image = images[0];
   messages.push({
-    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: `msg-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2)}`,
     author: myName,
     content: "",
     imageUrl: image.url,
-    timestamp: Date.now(),
+    timestamp: safeDateNow(),
     type: "image",
     reactions: [],
   });
@@ -120,37 +128,28 @@ const sendImageMessage = handler<
   chatImages.set([]);
 });
 
-// Handler to confirm and save the avatar from avatarImages cell
-const confirmAvatar = handler<
+// Handler to clear pending images
+const clearImages = handler<
   unknown,
-  {
-    users: Writable<User[]>;
-    myName: string;
-    avatarImages: Writable<ImageData[]>;
-  }
->((_event, { users, myName, avatarImages }) => {
-  const images = avatarImages.get() || [];
-  if (images.length === 0) return;
-
-  const newImage = images[0];
-  const currentUsers = users.get() || [];
-  const myUser = currentUsers.find((usr: User) => usr.name === myName);
-
-  if (!myUser) return;
-
-  const updatedUsers = currentUsers.map((usr: User) =>
-    usr.name === myName ? { ...usr, avatarImage: { url: newImage.url } } : usr
-  );
-  users.set(updatedUsers);
-  avatarImages.set([]);
+  { images: Writable<ImageData[]> }
+>((_event, { images }) => {
+  images.set([]);
 });
 
-// Handler to cancel pending avatar
-const cancelAvatar = handler<
-  unknown,
-  { avatarImages: Writable<ImageData[]> }
->((_event, { avatarImages }) => {
-  avatarImages.set([]);
+type ImageUploadEvent = {
+  detail?: {
+    images?: ImageData[];
+    files?: ImageData[];
+  };
+};
+
+const setUploadedImage = handler<
+  ImageUploadEvent,
+  { images: Writable<ImageData[]> }
+>(({ detail }, { images }) => {
+  const uploaded = detail?.images ?? detail?.files ?? [];
+  const first = uploaded[0];
+  images.set(first ? [first] : []);
 });
 
 // Handler to toggle emoji picker for a message
@@ -212,26 +211,14 @@ const toggleReaction = handler<
 
 export default pattern<RoomInput, RoomOutput>(
   ({ messages, users, myName, mySessionId, currentSessionId }) => {
-    const contentInput = Writable.of("");
-    const avatarImages = Writable.of<ImageData[]>([]);
-    const chatImages = Writable.of<ImageData[]>([]);
-    const emojiPickerMessageId = Writable.of<string>("");
+    const contentInput = new Writable("");
+    const chatImages = new Writable<ImageData[]>([]);
+    const emojiPickerMessageId = new Writable<string>("");
 
     const userList = computed(
       () => (users.get() || []).filter((user: User) => user && user.name),
     );
     const myNameResolved = computed(() => myName || "");
-
-    const hasPendingAvatar = computed(
-      () => avatarImages.get() && avatarImages.get().length > 0,
-    );
-    const pendingAvatarUrl = computed(() => {
-      const imgs = avatarImages.get();
-      if (!imgs || imgs.length === 0) {
-        return "";
-      }
-      return imgs[0].url || imgs[0].data || "";
-    });
 
     const hasPendingChatImage = computed(
       () => chatImages.get() && chatImages.get().length > 0,
@@ -241,7 +228,7 @@ export default pattern<RoomInput, RoomOutput>(
       if (!imgs || imgs.length === 0) {
         return "";
       }
-      return imgs[0].url || imgs[0].data || "";
+      return imgs[0].url || "";
     });
 
     const isSessionValid = computed(() => {
@@ -255,8 +242,7 @@ export default pattern<RoomInput, RoomOutput>(
       return (users.get() || []).find((user: User) => user.name === resolved);
     });
 
-    const myAvatarUrl = computed(() => myUser?.avatarImage?.url || "");
-    const myColor = computed(() => myUser?.color || "#007AFF");
+    const myAvatar = computed(() => myUser?.avatar || "");
 
     return {
       [NAME]: computed(() => `Chat: ${myName}`),
@@ -310,63 +296,33 @@ export default pattern<RoomInput, RoomOutput>(
                       borderBottom: "1px solid #e5e5ea",
                     }}
                   >
-                    {userList.map((user) => {
-                      const hasAvatar = computed(() =>
-                        user && !!user.avatarImage?.url
-                      );
-                      return (
-                        <div
+                    {userList.map((user) => (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.5rem",
+                          padding: "0.5rem 0.75rem",
+                          backgroundColor: "#f2f2f7",
+                          borderRadius: "20px",
+                        }}
+                      >
+                        <cf-avatar
+                          src={user.avatar}
+                          name={user.name}
+                          size="xs"
+                        />
+                        <span
                           style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "0.5rem",
-                            padding: "0.5rem 0.75rem",
-                            backgroundColor: "#f2f2f7",
-                            borderRadius: "20px",
+                            fontSize: "0.875rem",
+                            fontWeight: "500",
+                            color: "#1c1c1e",
                           }}
                         >
-                          {ifElse(
-                            hasAvatar,
-                            <img
-                              src={user.avatarImage?.url}
-                              style={{
-                                width: "28px",
-                                height: "28px",
-                                borderRadius: "50%",
-                                objectFit: "cover",
-                              }}
-                            />,
-                            <div
-                              style={{
-                                width: "28px",
-                                height: "28px",
-                                borderRadius: "50%",
-                                backgroundColor: user.color,
-                                color: "white",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                fontWeight: "600",
-                                fontSize: "11px",
-                              }}
-                            >
-                              {computed(() =>
-                                user ? getInitials(user.name) : "?"
-                              )}
-                            </div>,
-                          )}
-                          <span
-                            style={{
-                              fontSize: "0.875rem",
-                              fontWeight: "500",
-                              color: "#1c1c1e",
-                            }}
-                          >
-                            {user.name}
-                          </span>
-                        </div>
-                      );
-                    })}
+                          {user.name}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
@@ -393,19 +349,12 @@ export default pattern<RoomInput, RoomOutput>(
                     const isImageMessage = computed(() =>
                       msg && msg.type === "image"
                     );
-                    const authorColor = computed(() => {
-                      if (!msg) return "#6b7280";
-                      const user = (users.get() || []).find((usr: User) =>
-                        usr && usr.name === msg.author
-                      );
-                      return user?.color || "#6b7280";
-                    });
-                    const authorAvatarUrl = computed(() => {
+                    const authorAvatar = computed(() => {
                       if (!msg) return "";
                       const user = (users.get() || []).find((usr: User) =>
                         usr && usr.name === msg.author
                       );
-                      return user?.avatarImage?.url || "";
+                      return user?.avatar || "";
                     });
                     const isFirstInAuthorBlock = computed(() => {
                       if (!msg) return true;
@@ -429,9 +378,6 @@ export default pattern<RoomInput, RoomOutput>(
                     const isPickerOpen = computed(
                       () => msg.id && emojiPickerMessageId.get() === msg.id,
                     );
-
-                    // Note: Use direct property access to avoid transformer bug
-                    // with || [] fallback (see computed-var-then-map.issue.md)
 
                     return (
                       <div
@@ -494,38 +440,12 @@ export default pattern<RoomInput, RoomOutput>(
                               null,
                               ifElse(
                                 shouldShowAvatar,
-                                ifElse(
-                                  authorAvatarUrl,
-                                  <img
-                                    src={authorAvatarUrl}
-                                    style={{
-                                      width: "32px",
-                                      height: "32px",
-                                      borderRadius: "50%",
-                                      objectFit: "cover",
-                                      flexShrink: "0",
-                                    }}
-                                  />,
-                                  <div
-                                    style={{
-                                      width: "32px",
-                                      height: "32px",
-                                      borderRadius: "50%",
-                                      backgroundColor: authorColor,
-                                      color: "white",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      fontWeight: "600",
-                                      fontSize: "12px",
-                                      flexShrink: "0",
-                                    }}
-                                  >
-                                    {computed(() =>
-                                      msg ? getInitials(msg.author) : "?"
-                                    )}
-                                  </div>,
-                                ),
+                                <cf-avatar
+                                  src={authorAvatar}
+                                  name={msg.author}
+                                  size="sm"
+                                  style={{ flexShrink: "0" }}
+                                />,
                                 <div
                                   style={{ width: "32px", flexShrink: "0" }}
                                 />,
@@ -743,49 +663,15 @@ export default pattern<RoomInput, RoomOutput>(
                       marginBottom: "0.5rem",
                     }}
                   >
-                    {/* Clickable Avatar - click to change */}
-                    <div style={{ position: "relative", cursor: "pointer" }}>
-                      {ifElse(
-                        myAvatarUrl,
-                        <img
-                          src={myAvatarUrl}
-                          style={{
-                            width: "40px",
-                            height: "40px",
-                            borderRadius: "50%",
-                            objectFit: "cover",
-                            border: "2px solid #bae6fd",
-                          }}
-                        />,
-                        <div
-                          style={{
-                            width: "40px",
-                            height: "40px",
-                            borderRadius: "50%",
-                            backgroundColor: myColor,
-                            color: "white",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontWeight: "600",
-                            fontSize: "14px",
-                            border: "2px solid #bae6fd",
-                          }}
-                        >
-                          {computed(() => getInitials(myNameResolved))}
-                        </div>,
-                      )}
-                      {/* Hidden ct-image-input overlaid on avatar */}
-                      <ct-image-input
-                        $images={avatarImages}
-                        maxImages={1}
-                        showPreview={false}
-                        buttonText=""
-                        variant="ghost"
-                        size="sm"
-                        style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;"
-                      />
-                    </div>
+                    {
+                      /* Profile avatar (snapshotted from the shared profile
+                        when the user joined in the lobby) */
+                    }
+                    <cf-avatar
+                      src={myAvatar}
+                      name={myNameResolved}
+                      size="md"
+                    />
 
                     <div style={{ flex: 1 }}>
                       <div
@@ -801,74 +687,14 @@ export default pattern<RoomInput, RoomOutput>(
                     </div>
 
                     {/* Attachment button for sending images to chat */}
-                    <ct-image-input
-                      $images={chatImages}
+                    <cf-image-input
                       maxImages={1}
                       showPreview={false}
                       buttonText="📎"
                       variant="ghost"
                       size="sm"
+                      oncf-change={setUploadedImage({ images: chatImages })}
                     />
-
-                    {/* Pending avatar preview */}
-                    {ifElse(
-                      hasPendingAvatar,
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "0.5rem",
-                        }}
-                      >
-                        <img
-                          src={pendingAvatarUrl}
-                          style={{
-                            width: "40px",
-                            height: "40px",
-                            borderRadius: "50%",
-                            objectFit: "cover",
-                            border: "2px solid #34C759",
-                          }}
-                        />
-                        <button
-                          type="button"
-                          style={{
-                            padding: "0.25rem 0.5rem",
-                            fontSize: "0.75rem",
-                            backgroundColor: "#34C759",
-                            color: "white",
-                            fontWeight: "600",
-                            border: "none",
-                            borderRadius: "4px",
-                            cursor: "pointer",
-                          }}
-                          onClick={confirmAvatar({
-                            users,
-                            myName,
-                            avatarImages,
-                          })}
-                        >
-                          ✓
-                        </button>
-                        <button
-                          type="button"
-                          style={{
-                            padding: "0.25rem 0.5rem",
-                            fontSize: "0.75rem",
-                            backgroundColor: "#FF3B30",
-                            color: "white",
-                            fontWeight: "600",
-                            border: "none",
-                            borderRadius: "4px",
-                            cursor: "pointer",
-                          }}
-                          onClick={cancelAvatar({ avatarImages })}
-                        >
-                          ✗
-                        </button>
-                      </div>,
-                      null,
-                    )}
 
                     {/* Pending chat image preview */}
                     {ifElse(
@@ -922,7 +748,7 @@ export default pattern<RoomInput, RoomOutput>(
                             borderRadius: "4px",
                             cursor: "pointer",
                           }}
-                          onClick={cancelAvatar({ avatarImages: chatImages })}
+                          onClick={clearImages({ images: chatImages })}
                         >
                           ✗
                         </button>
@@ -932,22 +758,22 @@ export default pattern<RoomInput, RoomOutput>(
                   </div>
 
                   <div style={{ display: "flex", gap: "0.5rem" }}>
-                    <ct-input
+                    <cf-input
                       $value={contentInput}
                       placeholder="Type your message..."
                       style="flex: 1;"
                       timingStrategy="immediate"
-                      onct-submit={sendMessage({
+                      oncf-submit={sendMessage({
                         messages,
                         myName,
                         contentInput,
                       })}
                     />
-                    <ct-button
+                    <cf-button
                       onClick={sendMessage({ messages, myName, contentInput })}
                     >
                       Send
-                    </ct-button>
+                    </cf-button>
                   </div>
                 </div>
               </div>

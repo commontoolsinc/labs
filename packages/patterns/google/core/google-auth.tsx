@@ -1,19 +1,19 @@
-/// <cts-enable />
 import {
+  __cf_data,
   computed,
   Default,
   handler,
-  ifElse,
   NAME,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Secret<T> = T;
 
-import { createRefreshFunction } from "../../auth/auth-refresh.ts";
+import { refreshOAuthToken } from "../../auth/auth-refresh.ts";
 import {
   REFRESH_THRESHOLD_MS,
   startReactiveClock,
@@ -27,30 +27,34 @@ import {
 } from "../../auth/auth-ui-helpers.tsx";
 
 // Scope mapping for Google APIs
-const SCOPE_MAP = {
-  gmail: "https://www.googleapis.com/auth/gmail.readonly",
-  gmailSend: "https://www.googleapis.com/auth/gmail.send",
-  gmailModify: "https://www.googleapis.com/auth/gmail.modify",
-  calendar: "https://www.googleapis.com/auth/calendar.readonly",
-  calendarWrite: "https://www.googleapis.com/auth/calendar.events",
-  drive: "https://www.googleapis.com/auth/drive",
-  docs: "https://www.googleapis.com/auth/documents.readonly",
-  contacts: "https://www.googleapis.com/auth/contacts.readonly",
-} as const;
+const SCOPE_MAP = __cf_data(
+  {
+    gmail: "https://www.googleapis.com/auth/gmail.readonly",
+    gmailSend: "https://www.googleapis.com/auth/gmail.send",
+    gmailModify: "https://www.googleapis.com/auth/gmail.modify",
+    calendar: "https://www.googleapis.com/auth/calendar.readonly",
+    calendarWrite: "https://www.googleapis.com/auth/calendar.events",
+    drive: "https://www.googleapis.com/auth/drive",
+    docs: "https://www.googleapis.com/auth/documents.readonly",
+    contacts: "https://www.googleapis.com/auth/contacts.readonly",
+  } as const,
+);
 
-const SCOPE_DESCRIPTIONS = {
-  gmail: "Gmail (read emails)",
-  gmailSend: "Gmail (send emails)",
-  gmailModify: "Gmail (add/remove labels)",
-  calendar: "Calendar (read events)",
-  calendarWrite: "Calendar (create/edit/delete events)",
-  drive: "Drive (read/write files & comments)",
-  docs: "Docs (read document content)",
-  contacts: "Contacts (read contacts)",
-} as const;
+const SCOPE_DESCRIPTIONS = __cf_data(
+  {
+    gmail: "Gmail (read emails)",
+    gmailSend: "Gmail (send emails)",
+    gmailModify: "Gmail (add/remove labels)",
+    calendar: "Calendar (read events)",
+    calendarWrite: "Calendar (create/edit/delete events)",
+    drive: "Drive (read/write files & comments)",
+    docs: "Docs (read document content)",
+    contacts: "Contacts (read contacts)",
+  } as const,
+);
 
 // Short names for scope summary display in previewUI
-const SCOPE_SHORT_NAMES: Record<string, string> = {
+const SCOPE_SHORT_NAMES: Record<string, string> = __cf_data({
   "https://www.googleapis.com/auth/gmail.readonly": "Gmail",
   "https://www.googleapis.com/auth/gmail.send": "Gmail Send",
   "https://www.googleapis.com/auth/gmail.modify": "Gmail",
@@ -59,10 +63,10 @@ const SCOPE_SHORT_NAMES: Record<string, string> = {
   "https://www.googleapis.com/auth/drive": "Drive",
   "https://www.googleapis.com/auth/documents.readonly": "Docs",
   "https://www.googleapis.com/auth/contacts.readonly": "Contacts",
-};
+});
 
 // Short names for scope keys (for configured scopes summary)
-const SCOPE_KEY_SHORT_NAMES: Record<string, string> = {
+const SCOPE_KEY_SHORT_NAMES: Record<string, string> = __cf_data({
   gmail: "Gmail",
   gmailSend: "Gmail",
   gmailModify: "Gmail",
@@ -71,13 +75,13 @@ const SCOPE_KEY_SHORT_NAMES: Record<string, string> = {
   drive: "Drive",
   docs: "Docs",
   contacts: "Contacts",
-};
+});
 
 /**
  * Helper to create preview UI for picker display.
  * Exported for use by wrapper patterns (google-auth-personal, google-auth-work).
  *
- * NOTE: Date.now() is captured at call time. This is intentional — the preview
+ * NOTE: safeDateNow() is captured at call time. This is intentional — the preview
  * is a snapshot shown in the picker card, not a live-updating display. The main
  * pattern UI has its own reactive clock for real-time expiry tracking.
  */
@@ -91,7 +95,7 @@ export function createPreviewUI(
   const name = auth?.user?.name;
   const isAuthenticated = !!email;
 
-  const now = Date.now();
+  const now = safeDateNow();
   const expiresAt = auth?.expiresAt || 0;
   const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
   const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
@@ -214,55 +218,59 @@ export function createPreviewUI(
  * Use direct property access: `googleAuthPiece.auth`
  */
 export type Auth = {
-  token: Default<Secret<string>, "">;
-  tokenType: Default<string, "">;
-  scope: Default<string[], []>;
-  expiresIn: Default<number, 0>;
-  expiresAt: Default<number, 0>;
-  refreshToken: Default<Secret<string>, "">;
-  user: Default<{
+  token: Secret<string> | Default<"">;
+  tokenType: string | Default<"">;
+  scope: string[] | Default<[]>;
+  expiresIn: number | Default<0>;
+  expiresAt: number | Default<0>;
+  refreshToken: Secret<string> | Default<"">;
+  user: {
     email: string;
     name: string;
     picture: string;
-  }, { email: ""; name: ""; picture: "" }>;
+  } | Default<{ email: ""; name: ""; picture: "" }>;
 };
 
 // Selected scopes configuration - exported for wrapper patterns
 export type SelectedScopes = {
-  gmail: Default<boolean, false>;
-  gmailSend: Default<boolean, false>;
-  gmailModify: Default<boolean, false>;
-  calendar: Default<boolean, false>;
-  calendarWrite: Default<boolean, false>;
-  drive: Default<boolean, false>;
-  docs: Default<boolean, false>;
-  contacts: Default<boolean, false>;
+  gmail: boolean | Default<false>;
+  gmailSend: boolean | Default<false>;
+  gmailModify: boolean | Default<false>;
+  calendar: boolean | Default<false>;
+  calendarWrite: boolean | Default<false>;
+  drive: boolean | Default<false>;
+  docs: boolean | Default<false>;
+  contacts: boolean | Default<false>;
 };
 
 interface Input {
-  selectedScopes: Default<SelectedScopes, {
-    gmail: true;
-    gmailSend: true;
-    gmailModify: true;
-    calendar: true;
-    calendarWrite: true;
-    drive: true;
-    docs: true;
-    contacts: true;
-  }>;
-  auth: Default<Auth, {
-    token: "";
-    tokenType: "";
-    scope: [];
-    expiresIn: 0;
-    expiresAt: 0;
-    refreshToken: "";
-    user: { email: ""; name: ""; picture: "" };
-  }>;
+  selectedScopes:
+    | SelectedScopes
+    | Default<{
+      gmail: true;
+      gmailSend: true;
+      gmailModify: true;
+      calendar: true;
+      calendarWrite: true;
+      drive: true;
+      docs: true;
+      contacts: true;
+    }>;
+  auth:
+    | Auth
+    | Default<{
+      token: "";
+      tokenType: "";
+      scope: [];
+      expiresIn: 0;
+      expiresAt: 0;
+      refreshToken: "";
+      user: { email: ""; name: ""; picture: "" };
+    }>;
 }
 
 /** Google OAuth authentication for Google APIs. #googleAuth */
-interface Output {
+export interface Output {
   auth: Auth;
   scopes: string[];
   selectedScopes: SelectedScopes;
@@ -278,28 +286,32 @@ interface Output {
   bgUpdater: Stream<Record<string, never>>;
 }
 
-// Create guarded refresh function for Google OAuth.
-// Module-scope singleton is intentional: google-auth is loaded once per provider
-// (google-auth-personal and google-auth-work are separate modules that compose
-// this one, so each provider gets its own guard instance).
-const refreshAuthToken = createRefreshFunction(
-  "/api/integrations/google-oauth/refresh",
-);
+async function refreshGoogleAuthToken(
+  auth: Writable<Auth>,
+  refreshInProgress: Writable<boolean>,
+): Promise<boolean> {
+  return await refreshOAuthToken(
+    auth,
+    "/api/integrations/google-oauth/refresh",
+    refreshInProgress,
+  );
+}
 
 // Handler for refreshing OAuth tokens from UI button
 const handleRefresh = handler<
   unknown,
   {
     auth: Writable<Auth>;
+    refreshInProgress: Writable<boolean>;
     refreshing: Writable<boolean>;
     refreshFailed: Writable<boolean>;
   }
 >(
-  async (_event, { auth, refreshing, refreshFailed }) => {
+  async (_event, { auth, refreshInProgress, refreshing, refreshFailed }) => {
     refreshing.set(true);
     refreshFailed.set(false);
     try {
-      const didRefresh = await refreshAuthToken(auth);
+      const didRefresh = await refreshGoogleAuthToken(auth, refreshInProgress);
       refreshing.set(false);
       if (!didRefresh) return;
       refreshFailed.set(false);
@@ -323,30 +335,36 @@ const getScopeFriendlyName = (scope: string): string => {
 // Handler for refreshing tokens from other pieces (cross-piece calling)
 const refreshTokenHandler = handler<
   Record<string, never>,
-  { auth: Writable<Auth> }
->(async (_event, { auth }) => {
-  await refreshAuthToken(auth);
+  {
+    auth: Writable<Auth>;
+    refreshInProgress: Writable<boolean>;
+  }
+>(async (_event, { auth, refreshInProgress }) => {
+  await refreshGoogleAuthToken(auth, refreshInProgress);
 });
 
 // Background updater handler for proactive token refresh
 const bgRefreshHandler = handler<
   Record<string, never>,
-  { auth: Writable<Auth> }
+  {
+    auth: Writable<Auth>;
+    refreshInProgress: Writable<boolean>;
+  }
 >(
-  async (_event, { auth }) => {
+  async (_event, { auth, refreshInProgress }) => {
     const currentAuth = auth.get();
     if (!currentAuth?.token || !currentAuth?.refreshToken) return;
 
     const expiresAt = currentAuth.expiresAt ?? 0;
     if (expiresAt <= 0) return;
 
-    const timeRemaining = expiresAt - Date.now();
+    const timeRemaining = expiresAt - safeDateNow();
     if (timeRemaining > REFRESH_THRESHOLD_MS) return;
 
     console.log("[google-auth bgUpdater] Token expiring soon, refreshing...");
 
     try {
-      await refreshAuthToken(auth);
+      await refreshGoogleAuthToken(auth, refreshInProgress);
       console.log("[google-auth bgUpdater] Token refreshed successfully");
     } catch (e) {
       const status = (e as { status?: number }).status;
@@ -405,7 +423,7 @@ export default pattern<Input, Output>(
       return false;
     });
 
-    const now = Writable.of(Date.now());
+    const now = new Writable(safeDateNow());
     startReactiveClock(now);
 
     const isTokenExpired = computed(() => {
@@ -420,8 +438,9 @@ export default pattern<Input, Output>(
     // PERFORMANCE FIX: Pre-compute disabled state (same for all checkboxes)
     const checkboxesDisabled = computed(() => !!auth?.user?.email);
 
-    const refreshing = Writable.of(false);
-    const refreshFailed = Writable.of(false);
+    const refreshInProgress = new Writable(false);
+    const refreshing = new Writable(false);
+    const refreshFailed = new Writable(false);
 
     const scopesDisplay = computed(() => scopes.join(", "));
 
@@ -430,56 +449,60 @@ export default pattern<Input, Output>(
     const hasPicture = computed(() => !!auth?.user?.picture);
     const hasUserName = computed(() => !!auth?.user?.name);
 
-    const userChipAvatar = ifElse(
-      hasPicture,
-      <img
-        src={auth.user.picture}
-        alt=""
-        style={{ width: "24px", height: "24px", borderRadius: "50%" }}
-      />,
-      <span
-        style={{
-          width: "24px",
-          height: "24px",
-          borderRadius: "50%",
-          backgroundColor: "#10b981",
-          display: "inline-block",
-        }}
-      />,
-    );
-
-    const userChipEmailLine = ifElse(
-      hasUserName,
-      <div style={{ fontSize: "12px", color: "#6b7280" }}>
-        {auth.user.email}
-      </div>,
-      null,
-    );
-
-    const userChip = ifElse(
-      hasEmail,
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-        {userChipAvatar}
-        <div>
-          <div style={{ fontWeight: 500, fontSize: "14px" }}>
-            {auth.user.name || auth.user.email}
-          </div>
-          {userChipEmailLine}
-        </div>
-      </div>,
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+    const userChipAvatar = hasPicture
+      ? (
+        <img
+          src={auth.user.picture}
+          alt=""
+          style={{ width: "24px", height: "24px", borderRadius: "50%" }}
+        />
+      )
+      : (
         <span
           style={{
             width: "24px",
             height: "24px",
             borderRadius: "50%",
-            backgroundColor: "#e5e7eb",
+            backgroundColor: "#10b981",
             display: "inline-block",
           }}
         />
-        <span style={{ color: "#6b7280" }}>Not signed in</span>
-      </div>,
-    );
+      );
+
+    const userChipEmailLine = hasUserName
+      ? (
+        <div style={{ fontSize: "12px", color: "#6b7280" }}>
+          {auth.user.email}
+        </div>
+      )
+      : null;
+
+    const userChip = hasEmail
+      ? (
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {userChipAvatar}
+          <div>
+            <div style={{ fontWeight: 500, fontSize: "14px" }}>
+              {auth.user.name || auth.user.email}
+            </div>
+            {userChipEmailLine}
+          </div>
+        </div>
+      )
+      : (
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span
+            style={{
+              width: "24px",
+              height: "24px",
+              borderRadius: "50%",
+              backgroundColor: "#e5e7eb",
+              display: "inline-block",
+            }}
+          />
+          <span style={{ color: "#6b7280" }}>Not signed in</span>
+        </div>
+      );
 
     // Minimal preview chip for picker display using shared helper
     const previewUI = computed(() =>
@@ -497,7 +520,7 @@ export default pattern<Input, Output>(
 
     const loggedIn = computed(() => !!auth?.user?.email);
 
-    // Compound conditions for ifElse in JSX
+    // Compound conditions for conditional UI
     const showScopePreview = computed(() => !loggedIn && hasSelectedScopes);
     const showTokenStatus = computed(() =>
       !!auth?.user?.email && !isTokenExpired
@@ -546,23 +569,25 @@ export default pattern<Input, Output>(
             }}
           >
             <h3 style={{ fontSize: "16px", marginTop: "0" }}>
-              Status: {ifElse(loggedIn, "Authenticated", "Not Authenticated")}
+              Status: {loggedIn ? "Authenticated" : "Not Authenticated"}
             </h3>
 
-            {ifElse(
-              loggedIn,
-              <div>
-                <p style={{ margin: "8px 0" }}>
-                  <strong>Email:</strong> {auth.user.email}
+            {loggedIn
+              ? (
+                <div>
+                  <p style={{ margin: "8px 0" }}>
+                    <strong>Email:</strong> {auth.user.email}
+                  </p>
+                  <p style={{ margin: "8px 0" }}>
+                    <strong>Name:</strong> {auth.user.name}
+                  </p>
+                </div>
+              )
+              : (
+                <p style={{ color: "#666" }}>
+                  Select permissions below and authenticate with Google
                 </p>
-                <p style={{ margin: "8px 0" }}>
-                  <strong>Name:</strong> {auth.user.name}
-                </p>
-              </div>,
-              <p style={{ color: "#666" }}>
-                Select permissions below and authenticate with Google
-              </p>,
-            )}
+              )}
           </div>
 
           {/* Permissions checkboxes */}
@@ -577,243 +602,363 @@ export default pattern<Input, Output>(
           >
             <h4 style={{ marginTop: "0", marginBottom: "12px" }}>
               Permissions
-              {ifElse(
-                loggedIn,
-                <span
-                  style={{
-                    fontWeight: "normal",
-                    fontSize: "12px",
-                    color: "#6b7280",
-                    marginLeft: "8px",
-                  }}
-                >
-                  (locked while authenticated)
-                </span>,
-                null,
-              )}
+              {loggedIn
+                ? (
+                  <span
+                    style={{
+                      fontWeight: "normal",
+                      fontSize: "12px",
+                      color: "#6b7280",
+                      marginLeft: "8px",
+                    }}
+                  >
+                    (locked while authenticated)
+                  </span>
+                )
+                : null}
             </h4>
             <div
               style={{ display: "flex", flexDirection: "column", gap: "10px" }}
             >
-              {Object.entries(SCOPE_DESCRIPTIONS).map(([key, description]) => (
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    cursor: loggedIn ? "not-allowed" : "pointer",
-                    color: loggedIn ? "#9ca3af" : "inherit",
-                  }}
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes.gmail}
+                  disabled={checkboxesDisabled}
                 >
-                  <ct-checkbox
-                    $checked={selectedScopes[key as keyof SelectedScopes]}
-                    disabled={checkboxesDisabled}
-                  >
-                    {description}
-                  </ct-checkbox>
-                </label>
-              ))}
+                  {SCOPE_DESCRIPTIONS.gmail}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes.gmailSend}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_DESCRIPTIONS.gmailSend}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes.gmailModify}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_DESCRIPTIONS.gmailModify}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes.calendar}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_DESCRIPTIONS.calendar}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes.calendarWrite}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_DESCRIPTIONS.calendarWrite}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes.drive}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_DESCRIPTIONS.drive}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes.docs}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_DESCRIPTIONS.docs}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes.contacts}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_DESCRIPTIONS.contacts}
+                </cf-checkbox>
+              </label>
             </div>
           </div>
 
           {/* Re-auth warning */}
-          {ifElse(
-            needsReauth,
-            <div
-              style={{
-                padding: "12px",
-                backgroundColor: "#fff3cd",
-                borderRadius: "8px",
-                border: "1px solid #ffc107",
-                fontSize: "14px",
-              }}
-            >
-              <strong>Note:</strong>{" "}
-              You've selected new permissions. Click "Sign in with Google" below
-              to grant access.
-            </div>,
-            null,
-          )}
-
-          {/* Favorite reminder */}
-          {ifElse(
-            loggedIn,
-            <div
-              style={{
-                padding: "15px",
-                backgroundColor: "#d4edda",
-                borderRadius: "8px",
-                border: "1px solid #28a745",
-                fontSize: "14px",
-              }}
-            >
-              <strong>Tip:</strong>{" "}
-              Favorite this piece (click ⭐) to share your Google auth across
-              all your patterns. Any pattern using{" "}
-              <code>wish({"{"} query: "#googleAuth" {"}"})</code>{" "}
-              will automatically find and use it.
-            </div>,
-            null,
-          )}
-
-          {/* Show selected scopes if no auth yet */}
-          {ifElse(
-            showScopePreview,
-            <div style={{ fontSize: "14px", color: "#666" }}>
-              Will request: {scopesDisplay}
-            </div>,
-            null,
-          )}
-
-          {/* Token expired warning with refresh button */}
-          {ifElse(
-            isTokenExpired,
-            <div
-              style={{
-                padding: "16px",
-                backgroundColor: "#fee2e2",
-                borderRadius: "8px",
-                border: "1px solid #ef4444",
-                marginBottom: "15px",
-              }}
-            >
-              <h4
-                style={{
-                  margin: "0 0 8px 0",
-                  color: "#dc2626",
-                  fontSize: "14px",
-                }}
-              >
-                Session Expired
-              </h4>
-              <p
-                style={{
-                  margin: "0 0 12px 0",
-                  fontSize: "13px",
-                  color: "#4b5563",
-                }}
-              >
-                Your Google token has expired. Click below to refresh it
-                automatically.
-              </p>
-              <button
-                type="button"
-                onClick={handleRefresh({ auth, refreshing, refreshFailed })}
-                disabled={refreshing}
-                style={{
-                  padding: "10px 20px",
-                  backgroundColor: refreshing ? "#93c5fd" : "#3b82f6",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "6px",
-                  cursor: refreshing ? "not-allowed" : "pointer",
-                  fontWeight: "500",
-                  fontSize: "14px",
-                }}
-              >
-                {ifElse(refreshing, "Refreshing...", "Refresh Token")}
-              </button>
-              {ifElse(
-                refreshFailed,
-                <p
-                  style={{
-                    margin: "8px 0 0 0",
-                    fontSize: "13px",
-                    color: "#dc2626",
-                    fontWeight: "500",
-                  }}
-                >
-                  Refresh failed — try signing in again below.
-                </p>,
-                null,
-              )}
-            </div>,
-            null,
-          )}
-
-          <ct-google-oauth
-            $auth={auth}
-            scopes={scopes}
-          />
-
-          {/* Show granted scopes if authenticated */}
-          {ifElse(
-            loggedIn,
-            <div
-              style={{
-                padding: "15px",
-                backgroundColor: "#e3f2fd",
-                borderRadius: "8px",
-                fontSize: "14px",
-              }}
-            >
-              <strong>Granted Scopes:</strong>
-              {grantedScopesUI}
-            </div>,
-            null,
-          )}
-
-          {/* Manual token refresh section - visible when authenticated and NOT expired */}
-          {ifElse(
-            showTokenStatus,
-            <div
-              style={{
-                padding: "16px",
-                backgroundColor: "#f0f9ff",
-                borderRadius: "8px",
-                border: "1px solid #0ea5e9",
-              }}
-            >
+          {needsReauth
+            ? (
               <div
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  gap: "12px",
+                  padding: "12px",
+                  backgroundColor: "#fff3cd",
+                  borderRadius: "8px",
+                  border: "1px solid #ffc107",
+                  fontSize: "14px",
                 }}
               >
-                <div>
-                  <h4
-                    style={{
-                      margin: "0 0 4px 0",
-                      fontSize: "14px",
-                      color: "#0369a1",
-                    }}
-                  >
-                    Token Status
-                  </h4>
-                  <p
-                    style={{
-                      margin: "0",
-                      fontSize: "13px",
-                      color: "#4b5563",
-                    }}
-                  >
-                    Expires in: <strong>{tokenExpiryDisplay}</strong>
-                  </p>
-                </div>
+                <strong>Note:</strong>{" "}
+                You've selected new permissions. Click "Sign in with Google"
+                below to grant access.
+              </div>
+            )
+            : null}
+
+          {/* Favorite reminder */}
+          {loggedIn
+            ? (
+              <div
+                style={{
+                  padding: "15px",
+                  backgroundColor: "#d4edda",
+                  borderRadius: "8px",
+                  border: "1px solid #28a745",
+                  fontSize: "14px",
+                }}
+              >
+                <strong>Tip:</strong>{" "}
+                Favorite this piece (click ⭐) to share your Google auth across
+                all your patterns. Any pattern using{" "}
+                <code>wish({"{"} query: "#googleAuth" {"}"})</code>{" "}
+                will automatically find and use it.
+              </div>
+            )
+            : null}
+
+          {/* Show selected scopes if no auth yet */}
+          {showScopePreview
+            ? (
+              <div style={{ fontSize: "14px", color: "#666" }}>
+                Will request: {scopesDisplay}
+              </div>
+            )
+            : null}
+
+          {/* Token expired warning with refresh button */}
+          {isTokenExpired
+            ? (
+              <div
+                style={{
+                  padding: "16px",
+                  backgroundColor: "#fee2e2",
+                  borderRadius: "8px",
+                  border: "1px solid #ef4444",
+                  marginBottom: "15px",
+                }}
+              >
+                <h4
+                  style={{
+                    margin: "0 0 8px 0",
+                    color: "#dc2626",
+                    fontSize: "14px",
+                  }}
+                >
+                  Session Expired
+                </h4>
+                <p
+                  style={{
+                    margin: "0 0 12px 0",
+                    fontSize: "13px",
+                    color: "#4b5563",
+                  }}
+                >
+                  Your Google token has expired. Click below to refresh it
+                  automatically.
+                </p>
                 <button
                   type="button"
-                  onClick={handleRefresh({ auth, refreshing, refreshFailed })}
+                  onClick={handleRefresh({
+                    auth,
+                    refreshInProgress,
+                    refreshing,
+                    refreshFailed,
+                  })}
                   disabled={refreshing}
                   style={{
-                    padding: "8px 16px",
-                    backgroundColor: refreshing ? "#7dd3fc" : "#0ea5e9",
+                    padding: "10px 20px",
+                    backgroundColor: refreshing ? "#93c5fd" : "#3b82f6",
                     color: "white",
                     border: "none",
                     borderRadius: "6px",
                     cursor: refreshing ? "not-allowed" : "pointer",
                     fontWeight: "500",
-                    fontSize: "13px",
+                    fontSize: "14px",
                   }}
                 >
-                  {ifElse(refreshing, "Refreshing...", "Refresh Now")}
+                  {refreshing ? "Refreshing..." : "Refresh Token"}
                 </button>
+                {refreshFailed
+                  ? (
+                    <p
+                      style={{
+                        margin: "8px 0 0 0",
+                        fontSize: "13px",
+                        color: "#dc2626",
+                        fontWeight: "500",
+                      }}
+                    >
+                      Refresh failed — try signing in again below.
+                    </p>
+                  )
+                  : null}
               </div>
-            </div>,
-            null,
-          )}
+            )
+            : null}
+
+          <cf-google-oauth
+            $auth={auth}
+            scopes={scopes}
+          />
+
+          {/* Show granted scopes if authenticated */}
+          {loggedIn
+            ? (
+              <div
+                style={{
+                  padding: "15px",
+                  backgroundColor: "#e3f2fd",
+                  borderRadius: "8px",
+                  fontSize: "14px",
+                }}
+              >
+                <strong>Granted Scopes:</strong>
+                {grantedScopesUI}
+              </div>
+            )
+            : null}
+
+          {/* Manual token refresh section - visible when authenticated and NOT expired */}
+          {showTokenStatus
+            ? (
+              <div
+                style={{
+                  padding: "16px",
+                  backgroundColor: "#f0f9ff",
+                  borderRadius: "8px",
+                  border: "1px solid #0ea5e9",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "12px",
+                  }}
+                >
+                  <div>
+                    <h4
+                      style={{
+                        margin: "0 0 4px 0",
+                        fontSize: "14px",
+                        color: "#0369a1",
+                      }}
+                    >
+                      Token Status
+                    </h4>
+                    <p
+                      style={{
+                        margin: "0",
+                        fontSize: "13px",
+                        color: "#4b5563",
+                      }}
+                    >
+                      Expires in: <strong>{tokenExpiryDisplay}</strong>
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRefresh({
+                      auth,
+                      refreshInProgress,
+                      refreshing,
+                      refreshFailed,
+                    })}
+                    disabled={refreshing}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: refreshing ? "#7dd3fc" : "#0ea5e9",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: refreshing ? "not-allowed" : "pointer",
+                      fontWeight: "500",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {refreshing ? "Refreshing..." : "Refresh Now"}
+                  </button>
+                </div>
+              </div>
+            )
+            : null}
 
           <div
             style={{
@@ -836,8 +981,8 @@ export default pattern<Input, Output>(
       selectedScopes,
       userChip,
       previewUI,
-      refreshToken: refreshTokenHandler({ auth }),
-      bgUpdater: bgRefreshHandler({ auth }),
+      refreshToken: refreshTokenHandler({ auth, refreshInProgress }),
+      bgUpdater: bgRefreshHandler({ auth, refreshInProgress }),
     };
   },
 );

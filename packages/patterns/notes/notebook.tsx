@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   action,
   computed,
@@ -14,7 +13,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import Note from "./note.tsx";
 import {
@@ -61,7 +60,7 @@ const removeFromAllNotebooks = (
 // ===== Output Type =====
 
 /** A #notebook that organizes notes into collections. */
-interface NotebookOutput extends NotebookPiece {
+export interface NotebookOutput extends NotebookPiece {
   [NAME]: string;
   [UI]: VNode;
   title: string;
@@ -74,7 +73,7 @@ interface NotebookOutput extends NotebookPiece {
   // LLM-callable streams for omnibot integration
   createNote: Stream<{ title: string; content: string }>;
   createNotes: Stream<{ notesData: Array<{ title: string; content: string }> }>;
-  setTitle: Stream<{ newTitle: string }>;
+  setTitle: Stream<string>;
   createNotebook: Stream<{
     title: string;
     notesData?: Array<{ title: string; content: string }>;
@@ -265,7 +264,7 @@ const deleteSelectedNotes = handler<
   {
     notes: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;
-    allPieces: Writable<Default<NotePiece[], []>>;
+    allPieces: Writable<NotePiece[] | Default<[]>>;
     notebooks: Writable<NotebookPiece[]>;
   }
 >((_, { notes, selectedNoteIndices, allPieces, notebooks }) => {
@@ -285,7 +284,7 @@ const deleteSelectedNotes = handler<
 
   // Remove from allPieces (permanent delete)
   allPieces.set(
-    allPieces.get().filter(
+    (allPieces.get() ?? []).filter(
       (piece) => !itemsToDelete.some((item) => equals(piece, item)),
     ),
   );
@@ -315,7 +314,7 @@ const addSelectedToNotebook = handler<
     pendingNotebookAction,
   },
 ) => {
-  // Handle both native select (target.value) and ct-select (detail.value)
+  // Handle both native select (target.value) and cf-select (detail.value)
   const value = event.target?.value ?? event.detail?.value ?? "";
   if (!value) return;
 
@@ -500,7 +499,19 @@ const toggleNoteCheckbox = handler<
 });
 
 const Notebook = pattern<NotebookInput, NotebookOutput>(
-  ({ title, notes, isNotebook, isHidden, parentNotebook, [SELF]: self }) => {
+  (
+    {
+      title,
+      notes,
+      isNotebook,
+      isHidden,
+      parentNotebook: _parentNotebook,
+      [SELF]: self,
+    },
+  ) => {
+    // Ensure parentNotebook is always a Writable (input is optional)
+    const parentNotebook = _parentNotebook ??
+      new Writable(null as NotebookPiece | null);
     // Type-based discovery for notebooks and "All Notes" piece
     const notebookWish = wish<NotebookPiece>({
       query: "#notebook",
@@ -513,7 +524,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     // Still need allPieces for write operations (push new notes/notebooks)
     const { allPieces } = wish<{ allPieces: Writable<NotePiece[]> }>(
       { query: "#default", headless: true },
-    ).result;
+    ).result!;
 
     // Use computed() for proper reactive tracking of notes.length
     const noteCount = computed(() => notes.get().length);
@@ -528,36 +539,36 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     });
 
     // Selection state for multi-select
-    const selectedNoteIndices = Writable.of<number[]>([]);
-    const lastSelectedNoteIndex = Writable.of<number>(-1);
-    const selectedAddNotebook = Writable.of<string>("");
-    const selectedMoveNotebook = Writable.of<string>("");
+    const selectedNoteIndices = new Writable<number[]>([]);
+    const lastSelectedNoteIndex = new Writable<number>(-1);
+    const selectedAddNotebook = new Writable<string>("");
+    const selectedMoveNotebook = new Writable<string>("");
 
     // Computed helpers for selection
     const selectedCount = computed(() => selectedNoteIndices.get().length);
     const hasSelection = computed(() => selectedNoteIndices.get().length > 0);
 
     // State for "New Notebook" prompt modal
-    const showNewNotebookPrompt = Writable.of<boolean>(false);
-    const newNotebookName = Writable.of<string>("");
-    const pendingNotebookAction = Writable.of<"add" | "move" | "">(""); // Track which action triggered the modal
+    const showNewNotebookPrompt = new Writable<boolean>(false);
+    const newNotebookName = new Writable<string>("");
+    const pendingNotebookAction = new Writable<"add" | "move" | "">(""); // Track which action triggered the modal
 
     // State for "New Note" prompt modal
-    const showNewNotePrompt = Writable.of<boolean>(false);
-    const newNoteTitle = Writable.of<string>("");
-    const usedCreateAnotherNote = Writable.of<boolean>(false); // Track if "Create Another" was used
+    const showNewNotePrompt = new Writable<boolean>(false);
+    const newNoteTitle = new Writable<string>("");
+    const usedCreateAnotherNote = new Writable<boolean>(false); // Track if "Create Another" was used
 
     // State for "New Nested Notebook" prompt modal (from dropdown menu)
-    const showNewNestedNotebookPrompt = Writable.of<boolean>(false);
-    const newNestedNotebookTitle = Writable.of<string>("");
+    const showNewNestedNotebookPrompt = new Writable<boolean>(false);
+    const newNestedNotebookTitle = new Writable<string>("");
 
-    const usedCreateAnotherNotebook = Writable.of<boolean>(false); // Track if "Create Another" was used
+    const usedCreateAnotherNotebook = new Writable<boolean>(false); // Track if "Create Another" was used
 
     // Backlinks - populated by backlinks-index.tsx
-    const backlinks = Writable.of<MentionablePiece[]>([]);
+    const backlinks = new Writable<MentionablePiece[]>([]);
 
     // State for inline title editing
-    const isEditingTitle = Writable.of<boolean>(false);
+    const isEditingTitle = new Writable<boolean>(false);
 
     // ===== Actions (converted from module-scope handlers) =====
 
@@ -588,8 +599,8 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
 
     // TODO(seefeld,mathpirate): We need some better way to find the "All Notes" notebook.
     const goToAllNotesAction = action(() => {
-      const pieces = allPieces.get();
-      const existing = pieces.find((piece) => {
+      const pieces = allPieces.get() ?? [];
+      const existing = pieces.find((piece: any) => {
         const name = piece?.[NAME];
         return typeof name === "string" && name.startsWith("All Notes");
       });
@@ -672,7 +683,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     );
 
     // LLM-callable: Rename the notebook
-    const setTitleAction = action(({ newTitle }: { newTitle: string }) => {
+    const setTitleAction = action((newTitle: string) => {
       title.set(newTitle);
       return newTitle;
     });
@@ -789,7 +800,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
         if (original) {
           const newNote = Note({
             title: (original.get().title ?? "Note") + " (Copy)",
-            content: (original.get().content ?? ""),
+            content: original.get().content ?? "",
             isHidden: true,
             parentNotebook: self, // Set parent for back navigation
           });
@@ -874,8 +885,8 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       };
     });
 
-    // Computed items for ct-select dropdowns (notebooks + "New Notebook...")
-    // ct-select has proper bidirectional DOM sync, unlike native <select>
+    // Computed items for cf-select dropdowns (notebooks + "New Notebook...")
+    // cf-select has proper bidirectional DOM sync, unlike native <select>
     const notebookSelectItems = computed(() => [
       ...notebooks.map((nb, idx: number) => ({
         label: nb?.[NAME] ?? "Untitled",
@@ -919,8 +930,8 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
 
     // All Notes button display - search allPieces by name (matches default-app approach)
     const allNotesButtonDisplay = computed(() => {
-      const pieces = allPieces.get();
-      const exists = pieces.some((piece) => {
+      const pieces = allPieces.get() ?? [];
+      const exists = pieces.some((piece: any) => {
         const name = piece?.[NAME];
         return typeof name === "string" && name.startsWith("All Notes");
       });
@@ -942,413 +953,402 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       isNotebook,
       isHidden,
       [UI]: (
-        <ct-screen>
-          <div
-            style={{
-              flex: 1,
-              overflow: "auto",
-              minHeight: 0,
-            }}
-          >
-            <ct-vstack gap="4" padding="6">
-              {/* Header row - parent link on left, Notebooks dropdown on right */}
-              <div
+        <cf-screen>
+          <cf-vstack gap="4" padding="6">
+            {/* Header row - parent link on left, Notebooks dropdown on right */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                width: "100%",
+              }}
+            >
+              {/* Parent link - shows parent notebook chip if parentNotebook is set */}
+              <cf-hstack
+                gap="2"
+                align="center"
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  width: "100%",
+                  display: computed(() => hasParentNotebook ? "flex" : "none"),
                 }}
               >
-                {/* Parent link - shows parent notebook chip if parentNotebook is set */}
-                <ct-hstack
-                  gap="2"
-                  align="center"
+                <span
                   style={{
-                    display: computed(() =>
-                      hasParentNotebook ? "flex" : "none"
-                    ),
+                    fontSize: "13px",
+                    color: "var(--cf-theme-color-text-secondary)",
                   }}
                 >
-                  <span
+                  In:
+                </span>
+                <cf-chip
+                  label={parentNotebookLabel}
+                  interactive
+                  oncf-click={goToParentAction}
+                />
+              </cf-hstack>
+              {/* Spacer when no parent */}
+              <div
+                style={{
+                  display: computed(() => hasParentNotebook ? "none" : "block"),
+                }}
+              />
+
+              <cf-button
+                variant="ghost"
+                onClick={goToAllNotesAction}
+                style={{
+                  padding: "8px 16px",
+                  fontSize: "16px",
+                  borderRadius: "8px",
+                  display: allNotesButtonDisplay,
+                }}
+              >
+                📁 All Notes
+              </cf-button>
+            </div>
+
+            <cf-card>
+              <cf-vstack gap="4">
+                {/* Header - also a drop zone for receiving items from "Other notebooks" */}
+                <cf-drop-zone
+                  accept="sibling"
+                  oncf-drop={handleDropOntoCurrentNotebook({
+                    notes,
+                    notebooks,
+                    selectedNoteIndices,
+                  })}
+                  style={{ width: "100%" }}
+                >
+                  <div
                     style={{
-                      fontSize: "13px",
-                      color: "var(--ct-color-text-secondary)",
+                      display: "flex",
+                      width: "100%",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "8px",
+                      borderRadius: "8px",
+                      background: "var(--cf-theme-color-background, #fff)",
                     }}
                   >
-                    In:
-                  </span>
-                  <ct-chip
-                    label={parentNotebookLabel}
-                    interactive
-                    onct-click={goToParentAction}
-                  />
-                </ct-hstack>
-                {/* Spacer when no parent */}
-                <div
-                  style={{
-                    display: computed(() =>
-                      hasParentNotebook ? "none" : "block"
-                    ),
-                  }}
-                />
-
-                <ct-button
-                  variant="ghost"
-                  onClick={goToAllNotesAction}
-                  style={{
-                    padding: "8px 16px",
-                    fontSize: "16px",
-                    borderRadius: "8px",
-                    display: allNotesButtonDisplay,
-                  }}
-                >
-                  📁 All Notes
-                </ct-button>
-              </div>
-
-              <ct-card>
-                <ct-vstack gap="4">
-                  {/* Header - also a drop zone for receiving items from "Other notebooks" */}
-                  <ct-drop-zone
-                    accept="sibling"
-                    onct-drop={handleDropOntoCurrentNotebook({
-                      notes,
-                      notebooks,
-                      selectedNoteIndices,
-                    })}
-                    style={{ width: "100%" }}
-                  >
+                    {/* Editable Title */}
+                    <div
+                      style={{
+                        display: titleDisplayStyle,
+                        alignItems: "center",
+                        gap: "8px",
+                        cursor: "pointer",
+                      }}
+                      onClick={startEditingTitleAction}
+                    >
+                      <span
+                        style={{
+                          margin: 0,
+                          fontSize: "15px",
+                          fontWeight: "600",
+                        }}
+                      >
+                        📓 {title} ({noteCount})
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        display: titleInputDisplayStyle,
+                        flex: 1,
+                        marginRight: "12px",
+                      }}
+                    >
+                      <cf-input
+                        $value={title}
+                        placeholder="Notebook name..."
+                        style={{ flex: 1 }}
+                        oncf-blur={stopEditingTitleAction}
+                        oncf-keydown={handleTitleKeydownAction}
+                      />
+                    </div>
                     <div
                       style={{
                         display: "flex",
-                        width: "100%",
                         alignItems: "center",
-                        justifyContent: "space-between",
-                        padding: "8px",
-                        borderRadius: "8px",
-                        background: "var(--ct-color-bg-primary, #fff)",
+                        gap: "8px",
                       }}
                     >
-                      {/* Editable Title */}
-                      <div
-                        style={{
-                          display: titleDisplayStyle,
-                          alignItems: "center",
-                          gap: "8px",
-                          cursor: "pointer",
-                        }}
-                        onClick={startEditingTitleAction}
+                      <cf-button
+                        size="sm"
+                        variant="ghost"
+                        title="New Note"
+                        onClick={showNewNoteModalAction}
+                        style={newButtonStyle}
                       >
-                        <span
+                        <span style={{ fontSize: "14px" }}>📝</span>
+                        <span style={{ fontSize: "13px", fontWeight: "500" }}>
+                          New
+                        </span>
+                      </cf-button>
+                      <cf-button
+                        size="sm"
+                        variant="ghost"
+                        title="New Notebook"
+                        onClick={showNewNotebookModalAction}
+                        style={newButtonStyle}
+                      >
+                        <span style={{ fontSize: "14px" }}>📓</span>
+                        <span style={{ fontSize: "13px", fontWeight: "500" }}>
+                          New
+                        </span>
+                      </cf-button>
+                    </div>
+                  </div>
+                </cf-drop-zone>
+
+                {/* Empty state - shown when notebook has no notes, opens new note modal */}
+                <div
+                  style={{
+                    display: emptyStateDisplay,
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "48px 24px",
+                    cursor: "pointer",
+                    borderRadius: "8px",
+                    border: "2px dashed var(--cf-theme-color-border, #e5e5e7)",
+                    background: "var(--cf-theme-color-surface, #f9f9f9)",
+                  }}
+                  onClick={showNewNoteModalAction}
+                >
+                  <span style={{ fontSize: "32px", marginBottom: "12px" }}>
+                    📝
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "15px",
+                      fontWeight: "500",
+                      color: "var(--cf-theme-color-text)",
+                    }}
+                  >
+                    Click to create your first note
+                  </span>
+                </div>
+
+                <cf-vstack
+                  gap="0"
+                  style={{
+                    display: notesListDisplay,
+                  }}
+                >
+                  {/* Notes List - using cf-table like default-app for consistent spacing */}
+                  <cf-table full-width hover>
+                    <tbody>
+                      {notes.map((note, index) => (
+                        <tr
                           style={{
-                            margin: 0,
-                            fontSize: "15px",
-                            fontWeight: "600",
+                            background: computed(() =>
+                              selectedNoteIndices.get().includes(index)
+                                ? "var(--cf-theme-color-surface, #f5f5f7)"
+                                : "transparent"
+                            ),
                           }}
                         >
-                          📓 {title} ({noteCount})
-                        </span>
-                      </div>
-                      <div
-                        style={{
-                          display: titleInputDisplayStyle,
-                          flex: 1,
-                          marginRight: "12px",
-                        }}
-                      >
-                        <ct-input
-                          $value={title}
-                          placeholder="Notebook name..."
-                          style={{ flex: 1 }}
-                          onct-blur={stopEditingTitleAction}
-                          onct-keydown={handleTitleKeydownAction}
-                        />
-                      </div>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                        }}
-                      >
-                        <ct-button
-                          size="sm"
-                          variant="ghost"
-                          title="New Note"
-                          onClick={showNewNoteModalAction}
-                          style={newButtonStyle}
-                        >
-                          <span style={{ fontSize: "14px" }}>📝</span>
-                          <span style={{ fontSize: "13px", fontWeight: "500" }}>
-                            New
-                          </span>
-                        </ct-button>
-                        <ct-button
-                          size="sm"
-                          variant="ghost"
-                          title="New Notebook"
-                          onClick={showNewNotebookModalAction}
-                          style={newButtonStyle}
-                        >
-                          <span style={{ fontSize: "14px" }}>📓</span>
-                          <span style={{ fontSize: "13px", fontWeight: "500" }}>
-                            New
-                          </span>
-                        </ct-button>
-                      </div>
-                    </div>
-                  </ct-drop-zone>
-
-                  {/* Empty state - shown when notebook has no notes, opens new note modal */}
-                  <div
-                    style={{
-                      display: emptyStateDisplay,
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      padding: "48px 24px",
-                      cursor: "pointer",
-                      borderRadius: "8px",
-                      border: "2px dashed var(--ct-color-border, #e5e5e7)",
-                      background: "var(--ct-color-bg-secondary, #f9f9f9)",
-                    }}
-                    onClick={showNewNoteModalAction}
-                  >
-                    <span style={{ fontSize: "32px", marginBottom: "12px" }}>
-                      📝
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "15px",
-                        fontWeight: "500",
-                        color: "var(--ct-color-text-primary)",
-                      }}
-                    >
-                      Click to create your first note
-                    </span>
-                  </div>
-
-                  <ct-vstack
-                    gap="0"
-                    style={{
-                      display: notesListDisplay,
-                    }}
-                  >
-                    {/* Notes List - using ct-table like default-app for consistent spacing */}
-                    <ct-table full-width hover>
-                      <tbody>
-                        {notes.map((note, index) => (
-                          <tr
+                          <td
                             style={{
-                              background: computed(() =>
-                                selectedNoteIndices.get().includes(index)
-                                  ? "var(--ct-color-bg-secondary, #f5f5f7)"
-                                  : "transparent"
-                              ),
+                              width: "32px",
+                              padding: "0 4px",
+                              verticalAlign: "middle",
                             }}
                           >
-                            <td
+                            <div
                               style={{
-                                width: "32px",
-                                padding: "0 4px",
-                                verticalAlign: "middle",
+                                cursor: "pointer",
+                                userSelect: "none",
                               }}
+                              onClick={toggleNoteCheckbox({
+                                index,
+                                selectedNoteIndices,
+                                lastSelectedNoteIndex,
+                              })}
                             >
-                              <div
-                                style={{
-                                  cursor: "pointer",
-                                  userSelect: "none",
-                                }}
-                                onClick={toggleNoteCheckbox({
-                                  index,
-                                  selectedNoteIndices,
-                                  lastSelectedNoteIndex,
-                                })}
-                              >
-                                <ct-checkbox
-                                  checked={computed(() =>
-                                    selectedNoteIndices.get().includes(index)
-                                  )}
-                                />
-                              </div>
-                            </td>
-                            <td style={{ verticalAlign: "middle" }}>
-                              {/* Drop zone + drag source on the item itself */}
-                              <ct-drop-zone
-                                accept="note,notebook"
-                                onct-drop={handleDropOntoNotebook({
-                                  targetNotebook: self,
-                                  currentNotes: notes,
-                                  selectedNoteIndices,
-                                  notebooks,
-                                })}
-                              >
-                                <ct-drag-source $cell={note} type="note">
-                                  <div
-                                    style={{ cursor: "pointer" }}
-                                    onClick={navigateToChild({
-                                      child: note,
-                                      self,
-                                    })}
-                                  >
-                                    <ct-cell-context $cell={note}>
-                                      <ct-chip
-                                        label={note?.[NAME] ??
-                                          note?.title ??
-                                          "Untitled"}
-                                        interactive
-                                      />
-                                    </ct-cell-context>
-                                  </div>
-                                </ct-drag-source>
-                              </ct-drop-zone>
-                            </td>
-                            <td
-                              style={{
-                                width: "40px",
-                                verticalAlign: "middle",
-                              }}
+                              <cf-checkbox
+                                checked={computed(() =>
+                                  selectedNoteIndices.get().includes(index)
+                                )}
+                              />
+                            </div>
+                          </td>
+                          <td style={{ verticalAlign: "middle" }}>
+                            {/* Drop zone + drag source on the item itself */}
+                            <cf-drop-zone
+                              accept="note,notebook"
+                              oncf-drop={handleDropOntoNotebook({
+                                targetNotebook: self,
+                                currentNotes: notes,
+                                selectedNoteIndices,
+                                notebooks,
+                              })}
                             >
-                              <ct-button
-                                size="sm"
-                                variant="ghost"
-                                onClick={removeFromNotebook({ note, notes })}
-                              >
-                                ✕
-                              </ct-button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </ct-table>
+                              <cf-drag-source $cell={note} type="note">
+                                <div
+                                  style={{ cursor: "pointer" }}
+                                  onClick={navigateToChild({
+                                    child: note,
+                                    self,
+                                  })}
+                                >
+                                  <cf-cell-context $cell={note}>
+                                    <cf-chip
+                                      label={note?.[NAME] ??
+                                        note?.title ??
+                                        "Untitled"}
+                                      interactive
+                                    />
+                                  </cf-cell-context>
+                                </div>
+                              </cf-drag-source>
+                            </cf-drop-zone>
+                          </td>
+                          <td
+                            style={{
+                              width: "40px",
+                              verticalAlign: "middle",
+                            }}
+                          >
+                            <cf-button
+                              size="sm"
+                              variant="ghost"
+                              onClick={removeFromNotebook({ note, notes })}
+                            >
+                              ✕
+                            </cf-button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </cf-table>
 
-                    {/* Select All footer - only show when more than 1 item */}
-                    <div
-                      style={{
-                        display: selectAllDisplay,
-                        alignItems: "center",
-                        padding: "4px 0",
-                        fontSize: "13px",
-                        color: "var(--ct-color-text-secondary, #6e6e73)",
-                      }}
-                    >
-                      {/* Checkbox column (32px + 4px padding) */}
-                      <div style={{ width: "32px", padding: "0 4px" }}>
-                        <ct-checkbox
-                          checked={computed(() => notes.get().length > 0 &&
-                            selectedNoteIndices.get().length ===
-                              notes.get().length
-                          )}
-                          onct-change={computed(() =>
-                            selectedNoteIndices.get().length ===
-                                notes.get().length
-                              ? deselectAllNotesAction
-                              : selectAllNotesAction
-                          )}
-                        />
-                      </div>
-                      {/* Text aligned with piece pills */}
-                      <span style={{ paddingLeft: "4px" }}>Select All</span>
-                    </div>
-                  </ct-vstack>
-
-                  {/* Action Bar - Use CSS display to keep DOM alive (preserves handler streams) */}
-                  <ct-hstack
-                    padding="3"
-                    gap="3"
+                  {/* Select All footer - only show when more than 1 item */}
+                  <div
                     style={{
-                      display: actionBarDisplay,
-                      background: "var(--ct-color-bg-secondary, #f5f5f7)",
-                      borderRadius: "8px",
+                      display: selectAllDisplay,
                       alignItems: "center",
-                      marginTop: "8px",
+                      padding: "4px 0",
+                      fontSize: "13px",
+                      color: "var(--cf-theme-color-text-secondary, #6e6e73)",
                     }}
                   >
-                    <span style={{ fontSize: "13px", fontWeight: "500" }}>
-                      {selectedCount} selected
-                    </span>
-                    <span style={{ flex: 1 }} />
-                    <ct-select
-                      $value={selectedAddNotebook}
-                      items={notebookSelectItems}
-                      placeholder="Add to notebook..."
-                      style={{ width: "160px" }}
-                      onChange={addSelectedToNotebook({
-                        notes,
-                        selectedNoteIndices,
-                        notebooks,
-                        selectedAddNotebook,
-                        showNewNotebookPrompt,
-                        pendingNotebookAction,
-                      })}
-                    />
-                    <ct-select
-                      $value={selectedMoveNotebook}
-                      items={notebookSelectItems}
-                      placeholder="Move to..."
-                      style={{ width: "140px" }}
-                      onChange={moveSelectedToNotebook({
-                        notes,
-                        selectedNoteIndices,
-                        notebooks,
-                        selectedMoveNotebook,
-                        showNewNotebookPrompt,
-                        pendingNotebookAction,
-                      })}
-                    />
-                    <ct-button
-                      size="sm"
-                      variant="ghost"
-                      onClick={doDuplicateSelectedNotes}
-                    >
-                      Duplicate
-                    </ct-button>
-                    <ct-button
-                      size="sm"
-                      variant="ghost"
-                      onClick={deleteSelectedNotes({
-                        notes,
-                        selectedNoteIndices,
-                        allPieces,
-                        notebooks,
-                      })}
-                      style={{ color: "var(--ct-color-danger, #dc3545)" }}
-                    >
-                      Delete
-                    </ct-button>
-                  </ct-hstack>
-                </ct-vstack>
-              </ct-card>
+                    {/* Checkbox column (32px + 4px padding) */}
+                    <div style={{ width: "32px", padding: "0 4px" }}>
+                      <cf-checkbox
+                        checked={computed(() =>
+                          notes.get().length > 0 &&
+                          selectedNoteIndices.get().length ===
+                            notes.get().length
+                        )}
+                        oncf-change={computed(() =>
+                          selectedNoteIndices.get().length ===
+                              notes.get().length
+                            ? deselectAllNotesAction
+                            : selectAllNotesAction
+                        )}
+                      />
+                    </div>
+                    {/* Text aligned with piece pills */}
+                    <span style={{ paddingLeft: "4px" }}>Select All</span>
+                  </div>
+                </cf-vstack>
 
-              {/* Siblings feature disabled for performance - see _notebookRelationships for re-enabling */}
-            </ct-vstack>
-          </div>
+                {/* Action Bar - Use CSS display to keep DOM alive (preserves handler streams) */}
+                <cf-hstack
+                  padding="3"
+                  gap="3"
+                  style={{
+                    display: actionBarDisplay,
+                    background: "var(--cf-theme-color-surface, #f5f5f7)",
+                    borderRadius: "8px",
+                    alignItems: "center",
+                    marginTop: "8px",
+                  }}
+                >
+                  <span style={{ fontSize: "13px", fontWeight: "500" }}>
+                    {selectedCount} selected
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  <cf-select
+                    $value={selectedAddNotebook}
+                    items={notebookSelectItems}
+                    placeholder="Add to notebook..."
+                    style={{ width: "160px" }}
+                    onChange={addSelectedToNotebook({
+                      notes,
+                      selectedNoteIndices,
+                      notebooks,
+                      selectedAddNotebook,
+                      showNewNotebookPrompt,
+                      pendingNotebookAction,
+                    })}
+                  />
+                  <cf-select
+                    $value={selectedMoveNotebook}
+                    items={notebookSelectItems}
+                    placeholder="Move to..."
+                    style={{ width: "140px" }}
+                    onChange={moveSelectedToNotebook({
+                      notes,
+                      selectedNoteIndices,
+                      notebooks,
+                      selectedMoveNotebook,
+                      showNewNotebookPrompt,
+                      pendingNotebookAction,
+                    })}
+                  />
+                  <cf-button
+                    size="sm"
+                    variant="ghost"
+                    onClick={doDuplicateSelectedNotes}
+                  >
+                    Duplicate
+                  </cf-button>
+                  <cf-button
+                    size="sm"
+                    variant="ghost"
+                    onClick={deleteSelectedNotes({
+                      notes,
+                      selectedNoteIndices,
+                      allPieces,
+                      notebooks,
+                    })}
+                    style={{ color: "var(--cf-theme-color-error, #dc3545)" }}
+                  >
+                    Delete
+                  </cf-button>
+                </cf-hstack>
+              </cf-vstack>
+            </cf-card>
+
+            {/* Siblings feature disabled for performance - see _notebookRelationships for re-enabling */}
+          </cf-vstack>
 
           {/* New Notebook Prompt Modal */}
-          <ct-modal
+          <cf-modal
             $open={showNewNotebookPrompt}
             dismissable
             size="sm"
             label="New Notebook"
           >
             <span slot="header">New Notebook</span>
-            <ct-input
+            <cf-input
               $value={newNotebookName}
               placeholder="Enter notebook name..."
             />
-            <ct-hstack
+            <cf-hstack
               slot="footer"
               gap="2"
               style={{ justifyContent: "flex-end" }}
             >
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={cancelNewNotebookPromptAction}
               >
                 Cancel
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="primary"
                 onClick={createNotebookFromPrompt({
                   newNotebookName,
@@ -1361,95 +1361,95 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                 })}
               >
                 Create
-              </ct-button>
-            </ct-hstack>
-          </ct-modal>
+              </cf-button>
+            </cf-hstack>
+          </cf-modal>
 
           {/* New Note Prompt Modal */}
-          <ct-modal
+          <cf-modal
             $open={showNewNotePrompt}
             dismissable
             size="sm"
             label="New Note"
           >
             <span slot="header">New Note</span>
-            <ct-input
+            <cf-input
               $value={newNoteTitle}
               placeholder="Enter note title..."
             />
-            <ct-hstack
+            <cf-hstack
               slot="footer"
               gap="2"
               style={{ justifyContent: "flex-end" }}
             >
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={cancelNewNotePromptAction}
               >
                 Cancel
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="ghost"
                 onClick={createAnotherNoteAction}
               >
                 Create Another
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="primary"
                 onClick={createNoteAction}
               >
                 Create
-              </ct-button>
-            </ct-hstack>
-          </ct-modal>
+              </cf-button>
+            </cf-hstack>
+          </cf-modal>
 
           {/* New Nested Notebook Prompt Modal */}
-          <ct-modal
+          <cf-modal
             $open={showNewNestedNotebookPrompt}
             dismissable
             size="sm"
             label="New Notebook"
           >
             <span slot="header">New Notebook</span>
-            <ct-input
+            <cf-input
               $value={newNestedNotebookTitle}
               placeholder="Enter notebook title..."
             />
-            <ct-hstack
+            <cf-hstack
               slot="footer"
               gap="2"
               style={{ justifyContent: "flex-end" }}
             >
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={cancelNewNestedNotebookPromptAction}
               >
                 Cancel
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="ghost"
                 onClick={createAnotherNestedNotebookAction}
               >
                 Create Another
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="primary"
                 onClick={createNestedNotebookAction}
               >
                 Create
-              </ct-button>
-            </ct-hstack>
-          </ct-modal>
+              </cf-button>
+            </cf-hstack>
+          </cf-modal>
 
           {/* Backlinks footer - show pieces that link to this notebook */}
-          <ct-hstack
+          <cf-hstack
             slot="footer"
             gap="2"
             padding="3"
             style={{
               display: backlinksDisplay,
               alignItems: "center",
-              borderTop: "1px solid var(--ct-color-border, #e5e5e7)",
+              borderTop: "1px solid var(--cf-theme-color-border, #e5e5e7)",
               flexWrap: "wrap",
             }}
           >
@@ -1457,23 +1457,23 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               style={{
                 fontSize: "12px",
                 lineHeight: "28px",
-                color: "var(--ct-color-text-secondary, #666)",
+                color: "var(--cf-theme-color-text-secondary, #666)",
               }}
             >
               Linked from:
             </span>
             {backlinks.map((piece) => (
-              <ct-button
+              <cf-button
                 variant="ghost"
                 size="sm"
                 onClick={handleBacklinkClick({ piece })}
                 style={{ fontSize: "12px" }}
               >
                 {piece?.[NAME]}
-              </ct-button>
+              </cf-button>
             ))}
-          </ct-hstack>
-        </ct-screen>
+          </cf-hstack>
+        </cf-screen>
       ),
       title,
       notes,

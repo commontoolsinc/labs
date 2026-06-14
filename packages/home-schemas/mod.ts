@@ -8,12 +8,12 @@
  * - Spaces: user's managed spaces list
  *
  * This package exists to break the circular dependency between
- * @commontools/runner and @commontools/piece. Both packages can
+ * @commonfabric/runner and @commonfabric/piece. Both packages can
  * safely import schemas from here.
  */
 
-import { JSONSchema } from "@commontools/api";
-import { Schema } from "@commontools/api/schema";
+import { JSONSchema } from "@commonfabric/api";
+import { Schema } from "@commonfabric/api/schema";
 
 export {
   type FavoriteEntry,
@@ -45,8 +45,13 @@ export {
 } from "./learned.ts";
 
 export {
+  type SiteTable,
+  siteTableCause,
+  siteTableSchema,
   type SpaceEntry,
   spaceEntrySchema,
+  type SpaceHostEntry,
+  spaceHostEntrySchema,
   type SpacesList,
   spacesListSchema,
 } from "./spaces.ts";

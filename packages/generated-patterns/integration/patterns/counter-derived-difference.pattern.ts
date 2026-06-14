@@ -1,15 +1,13 @@
-/// <cts-enable />
 import {
   type Cell,
   cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
   str,
-  toSchema,
-} from "commontools";
+  type Writable,
+} from "commonfabric";
 
 interface DerivedDifferenceArgs {
   primary: Default<number, 0>;
@@ -95,36 +93,38 @@ const recordDifference = (
   state.history.push(difference);
 };
 
-const makeAdjustHandler = (via: DifferenceSource) =>
-  handler(
-    (
-      event: AdjustmentEvent | number | undefined,
-      context: {
-        target: Cell<number>;
-        step: Cell<number>;
-        primary: Cell<number>;
-        secondary: Cell<number>;
-        sequence: Cell<number>;
-        log: Cell<DifferenceAudit[]>;
-        history: Cell<number[]>;
+interface AdjustHandlerContext {
+  via: DifferenceSource;
+  target: Cell<number>;
+  step: Cell<number>;
+  primary: Cell<number>;
+  secondary: Cell<number>;
+  sequence: Cell<number>;
+  log: Cell<DifferenceAudit[]>;
+  history: Cell<number[]>;
+}
+
+const adjustHandler = handler(
+  (
+    event: AdjustmentEvent | number | undefined,
+    context: AdjustHandlerContext,
+  ) => {
+    const step = sanitizeStep(context.step.get(), 1);
+    const delta = resolveDelta(event, step);
+    const current = sanitizeInteger(context.target.get(), 0);
+    context.target.set(current + delta);
+    recordDifference(
+      {
+        sequence: context.sequence,
+        log: context.log,
+        history: context.history,
+        primary: context.primary,
+        secondary: context.secondary,
       },
-    ) => {
-      const step = sanitizeStep(context.step.get(), 1);
-      const delta = resolveDelta(event, step);
-      const current = sanitizeInteger(context.target.get(), 0);
-      context.target.set(current + delta);
-      recordDifference(
-        {
-          sequence: context.sequence,
-          log: context.log,
-          history: context.history,
-          primary: context.primary,
-          secondary: context.secondary,
-        },
-        via,
-      );
-    },
-  );
+      context.via,
+    );
+  },
+);
 
 const setStep = handler(
   (
@@ -148,19 +148,17 @@ const liftSanitizeInteger = lift((value: number | undefined) =>
 const liftSanitizeStep = lift((value: number | undefined) =>
   sanitizeStep(value, 1)
 );
-const liftDifferenceSummary = lift(
-  toSchema<{ primary: Cell<number>; secondary: Cell<number> }>(),
-  toSchema<{ primary: number; secondary: number; difference: number }>(),
-  ({ primary, secondary }) => {
-    const primaryValue = sanitizeInteger(primary.get(), 0);
-    const secondaryValue = sanitizeInteger(secondary.get(), 0);
-    return {
-      primary: primaryValue,
-      secondary: secondaryValue,
-      difference: primaryValue - secondaryValue,
-    };
-  },
-);
+const liftDifferenceSummary = lift<
+  { primary: Writable<number>; secondary: Writable<number> }
+>(({ primary, secondary }) => {
+  const primaryValue = sanitizeInteger(primary.get(), 0);
+  const secondaryValue = sanitizeInteger(secondary.get(), 0);
+  return {
+    primary: primaryValue,
+    secondary: secondaryValue,
+    difference: primaryValue - secondaryValue,
+  };
+});
 
 export const counterWithDerivedDifference = pattern<DerivedDifferenceArgs>(
   ({ primary, secondary, primaryStep, secondaryStep }) => {
@@ -179,10 +177,7 @@ export const counterWithDerivedDifference = pattern<DerivedDifferenceArgs>(
       secondary: secondaryValue,
     });
 
-    const differenceValue = derive(
-      differenceSummary,
-      (snapshot) => snapshot.difference,
-    );
+    const differenceValue = differenceSummary.difference;
     const summaryLabel =
       str`Difference ${differenceValue} (primary ${primaryValue}, secondary ${secondaryValue})`;
 
@@ -198,7 +193,8 @@ export const counterWithDerivedDifference = pattern<DerivedDifferenceArgs>(
       auditLog,
       controls: {
         primary: {
-          adjust: makeAdjustHandler("primary")({
+          adjust: adjustHandler({
+            via: "primary",
             target: primary,
             step: primaryStep,
             primary,
@@ -210,7 +206,8 @@ export const counterWithDerivedDifference = pattern<DerivedDifferenceArgs>(
           setStep: setStep({ step: primaryStep }),
         },
         secondary: {
-          adjust: makeAdjustHandler("secondary")({
+          adjust: adjustHandler({
+            via: "secondary",
             target: secondary,
             step: secondaryStep,
             primary,

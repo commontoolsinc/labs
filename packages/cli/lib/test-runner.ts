@@ -25,36 +25,155 @@
  * use the --root option to specify a common ancestor directory.
  */
 
-import { Identity } from "@commontools/identity";
-import { Engine, Runtime } from "@commontools/runner";
+import { Identity } from "@commonfabric/identity";
+import { ConsoleMethod, Runtime } from "@commonfabric/runner";
 import type {
   Cell,
+  ConsoleHandler,
   ErrorWithContext,
   Pattern,
   SettleStats,
   Stream,
-} from "@commontools/runner";
-import type { OpaqueRef } from "@commontools/api";
-import { FileSystemProgramResolver } from "@commontools/js-compiler";
+} from "@commonfabric/runner";
+import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type { OpaqueRef } from "@commonfabric/api";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { basename } from "@std/path";
-import { timeout } from "@commontools/utils/sleep";
+import { timeout } from "@commonfabric/utils/sleep";
 import { experimentalOptionsFromEnv } from "./utils.ts";
 import {
+  appendLoggerDeltaMessages,
+  snapshotLoggerErrorWarnCounts,
+} from "./console-capture.ts";
+import {
+  buildActionEvent,
+  type TrustedUiDescriptor,
+} from "./trusted-test-event.ts";
+import {
+  multiUserDescriptorMeta,
+  runMultiUserTestPattern,
+} from "./multi-user-test-runner.ts";
+import {
   type CDFPoint,
+  getLogger,
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
   resetAllCountBaselines,
+  resetAllLoggerCounts,
   resetAllTimingBaselines,
-} from "@commontools/utils/logger";
+  resetAllTimingStats,
+} from "@commonfabric/utils/logger";
+
+const phaseLogger = getLogger("test-runner-phase", {
+  enabled: false,
+  level: "debug",
+  logCountEvery: 0,
+});
+
+type TimeStampConsole = Console & {
+  timeStamp?: (label?: string) => void;
+};
+
+let phaseMarkSequence = 0;
+
+function markPhaseBoundary(label: string, boundary: "start" | "end"): string {
+  const markName = `${label}:${boundary}#${++phaseMarkSequence}`;
+  performance.mark(markName);
+  (console as TimeStampConsole).timeStamp?.(`${label}:${boundary}`);
+  return markName;
+}
+async function withPhase<T>(
+  keys: readonly string[],
+  fn: () => Promise<T> | T,
+): Promise<T> {
+  const label = `cf-test/${keys.join("/")}`;
+  const startMark = markPhaseBoundary(label, "start");
+  phaseLogger.timeStart(...keys);
+  try {
+    return await fn();
+  } finally {
+    const endMark = markPhaseBoundary(label, "end");
+    phaseLogger.timeEnd(...keys);
+    performance.measure(`${label}#${phaseMarkSequence}`, startMark, endMark);
+  }
+}
 
 /**
  * A test step is an object with either an 'assertion' or 'action' property.
  * This discriminated union avoids TypeScript trying to unify incompatible Cell/Stream types.
  * Add `skip: true` to temporarily disable a step (like it.skip in other frameworks).
+ *
+ * Action steps may carry an `event` payload (sent instead of `undefined`) and
+ * a `trustedUi` descriptor. With `trustedUi`, the runner sends the event with
+ * renderer-trusted DOM provenance for that surface/action — the headless
+ * equivalent of the user clicking the trusted surface — which CFC
+ * `TrustedActionWrite` policies require under enforcement.
  */
 export type TestStep =
   | { assertion: OpaqueRef<boolean>; skip?: boolean }
-  | { action: Stream<void>; skip?: boolean };
+  | {
+    action: Stream<unknown>;
+    event?: unknown;
+    trustedUi?: TrustedUiDescriptor;
+    skip?: boolean;
+  };
+
+type HarnessTestStepMeta = {
+  action?: unknown;
+  assertion?: unknown;
+  event?: unknown;
+  trustedUi?: unknown;
+  skip?: boolean;
+};
+
+type HarnessTestStepCell = Cell<unknown>;
+
+const testStepPeekSchema = internSchema(
+  {
+    type: "object",
+    properties: {
+      action: { type: "unknown" },
+      assertion: { type: "unknown" },
+      event: { type: "unknown" },
+      trustedUi: {
+        type: "object",
+        properties: {
+          surface: { type: "string" },
+          action: { type: "string" },
+        },
+      },
+      skip: { type: "boolean" },
+    },
+  },
+);
+
+const testStepEntrySchema = internSchema(
+  {
+    type: "object",
+    asCell: ["cell"],
+  },
+);
+
+const testStepListSchema = internSchema(
+  {
+    type: "array",
+    items: testStepEntrySchema,
+    default: [],
+  },
+);
+
+function actionStreamForStep(stepCell: HarnessTestStepCell): Stream<unknown> {
+  const actionCell = stepCell.key("action") as unknown;
+  if (
+    typeof actionCell !== "object" || actionCell === null ||
+    typeof (actionCell as { send?: unknown }).send !== "function"
+  ) {
+    throw new Error("Test step action is not a stream");
+  }
+  return actionCell as Stream<unknown>;
+}
 
 export interface TestResult {
   name: string;
@@ -85,8 +204,24 @@ export interface TestRunResult {
   allowRuntimeErrors?: boolean;
   /** Non-idempotent computation names detected by the idempotency check */
   nonIdempotent: string[];
-  /** If true, non-idempotent computations are expected and should not fail the test */
+  /** If true, non-idempotent computations are expected: detected violations
+   * don't fail the test, and detecting NONE fails it (the flag asserts the
+   * detector fires; it is not a mere tolerance). */
   expectNonIdempotent?: boolean;
+  /**
+   * console.error() calls captured via the harness console event during the
+   * run phase, plus logger-level error activity detected via count deltas.
+   */
+  consoleErrors: string[];
+  /** If true, console errors are expected and should not fail the test. */
+  allowConsoleErrors?: boolean;
+  /**
+   * console.warn() calls captured via the harness console event during the
+   * run phase, plus logger-level warn activity detected via count deltas.
+   */
+  consoleWarnings: string[];
+  /** If true, console warnings are expected and should not fail the test. */
+  allowConsoleWarnings?: boolean;
 }
 
 export interface TestRunnerOptions {
@@ -96,6 +231,16 @@ export interface TestRunnerOptions {
   root?: string;
   /** Print logger stats for steps slower than this (ms). 0 = every step. Default 5000. Only applies when verbose is true. */
   statsThreshold?: number;
+  /** Timing categories to always print in verbose stats output. Matched by exact name or prefix. */
+  statsInclude?: string[];
+  /** Number of per-step scheduler action deltas to print. Default 10. */
+  statsActionLimit?: number;
+  /** Override CFC enforcement mode for the test runtime. */
+  cfcEnforcementMode?: CfcEnforcementMode;
+  /** Print storage-related logger timings and counts after each test file. */
+  storageStats?: boolean;
+  /** Limit for storage timing/count tables when storageStats is enabled. */
+  storageStatsLimit?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +248,7 @@ export interface TestRunnerOptions {
 // ---------------------------------------------------------------------------
 
 type GlobalWithLoggers = {
-  commontools?: {
+  commonfabric?: {
     logger?: Record<
       string,
       {
@@ -121,6 +266,16 @@ type GlobalWithLoggers = {
           error: number;
           total: number;
         };
+        countsByKey?: Record<
+          string,
+          {
+            debug: number;
+            info: number;
+            warn: number;
+            error: number;
+            total: number;
+          }
+        >;
       }
     >;
   };
@@ -170,8 +325,8 @@ function getGlobalLogCounts(): {
 } {
   const g = globalThis as unknown as GlobalWithLoggers;
   const r = { debug: 0, info: 0, warn: 0, error: 0, total: 0 };
-  if (g.commontools?.logger) {
-    for (const logger of Object.values(g.commontools.logger)) {
+  if (g.commonfabric?.logger) {
+    for (const logger of Object.values(g.commonfabric.logger)) {
       const c = logger.counts;
       r.debug += c.debug;
       r.info += c.info;
@@ -192,8 +347,8 @@ function getGlobalLogCountDeltas(): {
 } {
   const g = globalThis as unknown as GlobalWithLoggers;
   const r = { debug: 0, info: 0, warn: 0, error: 0, total: 0 };
-  if (g.commontools?.logger) {
-    for (const logger of Object.values(g.commontools.logger)) {
+  if (g.commonfabric?.logger) {
+    for (const logger of Object.values(g.commonfabric.logger)) {
       const d = logger.getCountDeltas();
       r.debug += d.debug;
       r.info += d.info;
@@ -212,10 +367,17 @@ function cdfPercentile(cdf: CDFPoint[], p: number): number {
   return cdf[cdf.length - 1]?.x ?? 0;
 }
 
+function matchesTimingPrefix(name: string, prefixes: string[]): boolean {
+  return prefixes.some((prefix) =>
+    name === prefix || name.startsWith(`${prefix}/`)
+  );
+}
+
 function printLoggerStats(
   elapsedMs: number,
   useDelta: boolean,
   label?: string,
+  statsInclude: string[] = [],
 ): void {
   const counts = useDelta ? getGlobalLogCountDeltas() : getGlobalLogCounts();
   const dp = useDelta ? "Δ" : "";
@@ -230,6 +392,8 @@ function printLoggerStats(
   const entries: {
     name: string;
     n: number;
+    total: number;
+    avg: number;
     p50: number;
     p95: number;
     max: number;
@@ -238,22 +402,26 @@ function printLoggerStats(
   for (const [loggerName, timings] of Object.entries(breakdown)) {
     for (const [key, timing] of Object.entries(timings)) {
       if (useDelta) {
-        if (!timing.cdfSinceBaseline || timing.cdfSinceBaseline.length === 0) {
+        if (timing.countSinceBaseline === 0) {
           continue;
         }
-        const cdf = timing.cdfSinceBaseline;
+        const cdf = timing.cdfSinceBaseline ?? [];
         entries.push({
           name: `${loggerName}/${key}`,
-          n: cdf.length,
-          p50: cdfPercentile(cdf, 0.5),
-          p95: cdfPercentile(cdf, 0.95),
-          max: cdf[cdf.length - 1].x,
+          n: timing.countSinceBaseline,
+          total: timing.totalTimeSinceBaseline,
+          avg: timing.averageSinceBaseline,
+          p50: cdf.length > 0 ? cdfPercentile(cdf, 0.5) : 0,
+          p95: cdf.length > 0 ? cdfPercentile(cdf, 0.95) : 0,
+          max: cdf.length > 0 ? cdf[cdf.length - 1].x : 0,
         });
       } else {
         if (timing.count === 0) continue;
         entries.push({
           name: `${loggerName}/${key}`,
           n: timing.count,
+          total: timing.totalTime,
+          avg: timing.average,
           p50: timing.p50,
           p95: timing.p95,
           max: timing.max,
@@ -263,18 +431,42 @@ function printLoggerStats(
   }
 
   if (entries.length > 0) {
-    entries.sort((a, b) => b.p95 - a.p95);
-    console.log(`           Timings (top 10 by p95):`);
-    for (const entry of entries.slice(0, 10)) {
+    entries.sort((a, b) => b.total - a.total);
+    const topEntries = entries.slice(0, 10);
+    const topNames = new Set(topEntries.map((entry) => entry.name));
+    const includedEntries = statsInclude.length > 0
+      ? entries.filter((entry) =>
+        !topNames.has(entry.name) &&
+        matchesTimingPrefix(entry.name, statsInclude)
+      )
+      : [];
+
+    console.log(`           Timings (top 10 by total time):`);
+    for (const entry of topEntries) {
       const name = entry.name.padEnd(35);
       const np = useDelta ? "Δn" : " n";
       console.log(
-        `             ${name} ${np}=${String(entry.n).padStart(5)} p50=${
-          fmtMs(entry.p50).padStart(7)
-        } p95=${fmtMs(entry.p95).padStart(7)} max=${
-          fmtMs(entry.max).padStart(7)
+        `             ${name} ${np}=${String(entry.n).padStart(5)} total=${
+          fmtMs(entry.total).padStart(7)
+        } avg=${fmtMs(entry.avg).padStart(7)} p95=${
+          fmtMs(entry.p95).padStart(7)
         }`,
       );
+    }
+
+    if (includedEntries.length > 0) {
+      console.log(`           Included Timings:`);
+      for (const entry of includedEntries) {
+        const name = entry.name.padEnd(35);
+        const np = useDelta ? "Δn" : " n";
+        console.log(
+          `             ${name} ${np}=${String(entry.n).padStart(5)} total=${
+            fmtMs(entry.total).padStart(7)
+          } avg=${fmtMs(entry.avg).padStart(7)} p95=${
+            fmtMs(entry.p95).padStart(7)
+          }`,
+        );
+      }
     }
   }
 
@@ -290,8 +482,8 @@ function printLoggerStats(
   const countEntries: CountEntry[] = [];
   if (useDelta) {
     const g = globalThis as unknown as GlobalWithLoggers;
-    if (g.commontools?.logger) {
-      for (const [name, logger] of Object.entries(g.commontools.logger)) {
+    if (g.commonfabric?.logger) {
+      for (const [name, logger] of Object.entries(g.commonfabric.logger)) {
         const c = logger.getCountDeltas();
         if (c.total > 0) {
           countEntries.push({
@@ -352,6 +544,156 @@ function printLoggerStats(
       const levels = parts.length > 0 ? ` (${parts.join(" ")})` : "";
       console.log(
         `             ${name} ${np}n=${
+          String(entry.total).padStart(7)
+        }${levels}`,
+      );
+    }
+  }
+}
+
+function isStorageLoggerName(name: string): boolean {
+  return name === "traverse" ||
+    name === "memory-provider" ||
+    name === "memory-v2-query" ||
+    name === "memory-v2-server" ||
+    name.startsWith("storage") ||
+    name === "extended-storage-transaction";
+}
+
+function printStorageStats(elapsedMs: number, limit = 16): void {
+  type StorageCountEntry = {
+    name: string;
+    d: number;
+    i: number;
+    w: number;
+    e: number;
+    total: number;
+  };
+
+  type StorageCountKeyEntry = {
+    logger: string;
+    key: string;
+    d: number;
+    i: number;
+    w: number;
+    e: number;
+    total: number;
+  };
+
+  console.log(`  🗄 ${fmtMs(elapsedMs)} | Storage totals:`);
+
+  const timingBreakdown = getTimingStatsBreakdown();
+  const timingEntries: {
+    name: string;
+    n: number;
+    p50: number;
+    p95: number;
+    max: number;
+  }[] = [];
+
+  for (const [loggerName, timings] of Object.entries(timingBreakdown)) {
+    if (!isStorageLoggerName(loggerName)) continue;
+    for (const [key, timing] of Object.entries(timings)) {
+      if (timing.count === 0) continue;
+      timingEntries.push({
+        name: `${loggerName}/${key}`,
+        n: timing.count,
+        p50: timing.p50,
+        p95: timing.p95,
+        max: timing.max,
+      });
+    }
+  }
+
+  if (timingEntries.length > 0) {
+    timingEntries.sort((a, b) => b.p95 - a.p95);
+    console.log(
+      `           Timings (top ${
+        Math.min(limit, timingEntries.length)
+      } by p95):`,
+    );
+    for (const entry of timingEntries.slice(0, limit)) {
+      const name = entry.name.padEnd(35);
+      console.log(
+        `             ${name}  n=${String(entry.n).padStart(5)} p50=${
+          fmtMs(entry.p50).padStart(7)
+        } p95=${fmtMs(entry.p95).padStart(7)} max=${
+          fmtMs(entry.max).padStart(7)
+        }`,
+      );
+    }
+  }
+
+  const g = globalThis as unknown as GlobalWithLoggers;
+  const countEntries: StorageCountEntry[] = [];
+  if (g.commonfabric?.logger) {
+    for (const [name, logger] of Object.entries(g.commonfabric.logger)) {
+      if (!isStorageLoggerName(name)) continue;
+      const c = logger.counts;
+      if (c.total > 0) {
+        countEntries.push({
+          name,
+          d: c.debug,
+          i: c.info,
+          w: c.warn,
+          e: c.error,
+          total: c.total,
+        });
+      }
+    }
+  }
+
+  if (countEntries.length > 0) {
+    countEntries.sort((a, b) => b.total - a.total);
+    console.log(`           Counts (all storage loggers):`);
+    for (const entry of countEntries) {
+      const parts: string[] = [];
+      if (entry.d > 0) parts.push(`d:${entry.d}`);
+      if (entry.i > 0) parts.push(`i:${entry.i}`);
+      if (entry.w > 0) parts.push(`w:${entry.w}`);
+      if (entry.e > 0) parts.push(`e:${entry.e}`);
+      const levels = parts.length > 0 ? ` (${parts.join(" ")})` : "";
+      console.log(
+        `             ${entry.name.padEnd(35)} n=${
+          String(entry.total).padStart(7)
+        }${levels}`,
+      );
+    }
+  }
+
+  const keyEntries: StorageCountKeyEntry[] = [];
+  if (g.commonfabric?.logger) {
+    for (const [loggerName, logger] of Object.entries(g.commonfabric.logger)) {
+      if (!isStorageLoggerName(loggerName) || !logger.countsByKey) continue;
+      for (const [key, counts] of Object.entries(logger.countsByKey)) {
+        if (counts.total === 0) continue;
+        keyEntries.push({
+          logger: loggerName,
+          key,
+          d: counts.debug,
+          i: counts.info,
+          w: counts.warn,
+          e: counts.error,
+          total: counts.total,
+        });
+      }
+    }
+  }
+
+  if (keyEntries.length > 0) {
+    keyEntries.sort((a, b) => b.total - a.total);
+    console.log(
+      `           Count keys (top ${Math.min(limit, keyEntries.length)}):`,
+    );
+    for (const entry of keyEntries.slice(0, limit)) {
+      const parts: string[] = [];
+      if (entry.d > 0) parts.push(`d:${entry.d}`);
+      if (entry.i > 0) parts.push(`i:${entry.i}`);
+      if (entry.w > 0) parts.push(`w:${entry.w}`);
+      if (entry.e > 0) parts.push(`e:${entry.e}`);
+      const levels = parts.length > 0 ? ` (${parts.join(" ")})` : "";
+      console.log(
+        `             ${`${entry.logger}/${entry.key}`.padEnd(55)} n=${
           String(entry.total).padStart(7)
         }${levels}`,
       );
@@ -500,61 +842,136 @@ export async function runTestPattern(
 ): Promise<TestRunResult> {
   const TIMEOUT = options.timeout ?? 60000;
   const startTime = performance.now();
+  performance.clearMarks();
+  performance.clearMeasures();
+  resetAllLoggerCounts();
+  resetAllTimingStats();
 
   // Collect runtime errors via the scheduler's error handler
   const runtimeErrors: ErrorWithContext[] = [];
 
+  // Collect pattern-code console.error / console.warn calls (channel 1: harness
+  // console event) and logger-level error/warn activity (channel 2: logger count
+  // deltas).  Both are populated during the run phase only (after compile).
+  const consoleErrors: string[] = [];
+  const consoleWarnings: string[] = [];
+  // Both channels cover the RUN phase only: the channel-1 handler is
+  // registered at runtime setup (the scheduler accepts one handler), but it
+  // stays inert until this flips at the same post-compile point where the
+  // channel-2 snapshot is taken — compile/module-evaluation output is
+  // infrastructure noise, not the test's behavior.
+  let consoleCaptureActive = false;
+
   // 1. Create emulated runtime (same as piece step)
-  const identity = await Identity.fromPassphrase("test-runner");
-  const space = identity.did();
-  const { StorageManager } = await import(
-    "@commontools/runner/storage/cache.deno"
+  const identity = await withPhase(
+    ["runTestPattern", "identity"],
+    () => Identity.fromPassphrase("test-runner"),
   );
-  const storageManager = StorageManager.emulate({ as: identity });
+  const space = identity.did();
+  const { StorageManager } = await withPhase([
+    "runTestPattern",
+    "storageImport",
+  ], () => import("@commonfabric/runner/storage/cache.deno"));
+  const storageManager = await withPhase(
+    ["runTestPattern", "storageManager"],
+    () =>
+      StorageManager.emulate({
+        as: identity,
+      }),
+  );
 
   // Track navigation events for assertions and verbose output
   const navigations: NavigationEvent[] = [];
   let currentActionIndex = -1;
 
-  const runtime = new Runtime({
-    storageManager,
-    experimental: experimentalOptionsFromEnv(),
-    apiUrl: new URL(import.meta.url),
-    errorHandlers: [(error: ErrorWithContext) => runtimeErrors.push(error)],
-    navigateCallback: (target) => {
-      const name = (target.key("$NAME") as Cell<string | undefined>).get();
-      navigations.push({
-        name,
-        afterActionIndex: currentActionIndex,
-      });
-      if (options.verbose) {
-        const label = typeof name === "string" ? name : "(unnamed)";
-        console.log(`    → navigateTo: ${label}`);
-      }
-    },
-  });
+  const runtime = await withPhase(
+    ["runTestPattern", "runtime"],
+    () =>
+      new Runtime({
+        storageManager,
+        // Match the production runtime default: enforce explicitly declared
+        // `ifc` policies so pattern tests act as a regression net for CFC.
+        // Patterns without CFC annotations are unaffected; tests that need a
+        // laxer mode can pass `cfcEnforcementMode` explicitly.
+        cfcEnforcementMode: options.cfcEnforcementMode ?? "enforce-explicit",
+        experimental: experimentalOptionsFromEnv(),
+        apiUrl: new URL(import.meta.url),
+        errorHandlers: [(error: ErrorWithContext) => runtimeErrors.push(error)],
+        navigateCallback: (target) => {
+          const name = (target.key("$NAME") as Cell<string | undefined>).get();
+          navigations.push({
+            name,
+            afterActionIndex: currentActionIndex,
+          });
+          if (options.verbose) {
+            const label = typeof name === "string" ? name : "(unnamed)";
+            console.log(`    → navigateTo: ${label}`);
+          }
+        },
+      }),
+  );
   runtime.enableIdempotencyCheck();
+  // Channel 1: capture pattern-code console.error / console.warn calls that
+  // flow through the scheduler's harness console event.  The handler must
+  // return args unchanged so the call still appears in the host console.
+  runtime.scheduler.onConsole(
+    (({ method, args }) => {
+      if (!consoleCaptureActive) {
+        return args;
+      }
+      if (method === ConsoleMethod.Error) {
+        const text = args.map((a) => String(a)).join(" ");
+        consoleErrors.push(`[console.error] ${text}`);
+      } else if (method === ConsoleMethod.Warn) {
+        const text = args.map((a) => String(a)).join(" ");
+        consoleWarnings.push(`[console.warn] ${text}`);
+      }
+      return args;
+    }) satisfies ConsoleHandler,
+  );
   if (options.verbose) {
     runtime.scheduler.enableSettleStats();
   }
-  const engine = new Engine(runtime);
-
-  // Track sink subscription for cleanup
-  let sinkCancel: (() => void) | undefined;
+  // Compile/evaluate through the runtime's OWN harness, not a second Engine.
+  // Verified-load registration, source maps, and module hashes all live on the
+  // engine that evaluates the bundle; the runner and the builder's source-
+  // location annotation consult `runtime.harness`. A separate Engine splits
+  // that state, so `fn.src` stays a raw bundle coordinate and CFC verified-
+  // binding identities (writeAuthorizedBy) fail under enforcement.
+  const engine = await withPhase(
+    ["runTestPattern", "engine"],
+    () => runtime.harness,
+  );
 
   try {
     // 2. Compile the test pattern
-    const program = await engine.resolve(
-      new FileSystemProgramResolver(testPath, options.root),
+    const program = await withPhase(
+      ["runTestPattern", "resolve"],
+      () =>
+        engine.resolve(
+          new FileSystemProgramResolver(testPath, options.root),
+        ),
     );
-    const { main } = await engine.process(program, {
-      noCheck: false,
-      noRun: false,
-    });
+    const { main } = await withPhase(
+      ["runTestPattern", "compile"],
+      () => engine.compileAndEvaluateModules(program),
+    );
 
     if (!main?.default) {
       throw new Error(
         `Test pattern must export a pattern function as default`,
+      );
+    }
+
+    // Multi-user tests export a descriptor ({ setup?, participants }) as the
+    // default export. They run in worker-isolated runtimes against a shared
+    // storage server — hand off to the multi-user orchestrator (this local
+    // runtime is only used for detection; the try/finally below disposes it).
+    const multiUserMeta = multiUserDescriptorMeta(main.default);
+    if (multiUserMeta) {
+      return await withPhase(
+        ["runTestPattern", "multiUser"],
+        () => runMultiUserTestPattern(testPath, multiUserMeta, options),
       );
     }
 
@@ -570,7 +987,7 @@ export async function runTestPattern(
     // In production, default-app.tsx provides this. The test harness must
     // create a minimal equivalent so patterns that use wish("#default") to
     // access allPieces, recentPieces, etc. work correctly.
-    {
+    await withPhase(["runTestPattern", "defaultPatternSetup"], async () => {
       const setupTx = runtime.edit();
       const spaceCell = runtime.getCell(space, space, undefined, setupTx);
       const defaultPatternCell = runtime.getCell(
@@ -585,64 +1002,166 @@ export async function runTestPattern(
         mentionable: [],
       });
       (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
+      runtime.prepareTxForCommit?.(setupTx);
       await setupTx.commit();
       await runtime.idle();
-    }
+    });
+
+    // Channel 2: snapshot logger error/warn counts AFTER compile but BEFORE the
+    // run/assert phase.  This excludes compile-cache and infrastructure noise
+    // (e.g. cache-miss warnings emitted during engine.compileAndEvaluateModules)
+    // while capturing everything the pattern's own handlers log at error/warn
+    // level through the runtime logger.
+    const loggerCountsBeforeRun = snapshotLoggerErrorWarnCounts();
+    consoleCaptureActive = true;
 
     // 4. Instantiate the test pattern using runtime.run() for proper space context
-    const tx = runtime.edit();
+    const patternResult = await withPhase(
+      ["runTestPattern", "patternRun"],
+      async () => {
+        const tx = runtime.edit();
 
-    // Create a result cell for the pattern
-    const resultCell = runtime.getCell<Record<string, unknown>>(
-      space,
-      `test-pattern-result-${Date.now()}`,
-      undefined,
-      tx,
+        // Create a result cell for the pattern
+        const resultCell = runtime.getCell<Record<string, unknown>>(
+          space,
+          `test-pattern-result-${Date.now()}`,
+          undefined,
+          tx,
+        );
+
+        // Run the pattern with proper space context
+        const value = runtime.run(tx, testPatternFactory, {}, resultCell);
+
+        // Commit the transaction
+        runtime.prepareTxForCommit?.(tx);
+        await tx.commit();
+        return value;
+      },
     );
 
-    // Run the pattern with proper space context
-    const patternResult = runtime.run(tx, testPatternFactory, {}, resultCell);
-
-    // Commit the transaction
-    await tx.commit();
-
-    // Wait for initial setup to complete
-    await runtime.idle();
-    // Also wait for all in-flight storage subscriptions to settle.
-    // replica.poll() fires without await during mount(), so subscription
-    // updates can arrive after idle() resolves, scheduling more work.
-    await storageManager.synced();
-    await runtime.idle();
-
-    // Keep the pattern reactive - store cancel function for cleanup
-    sinkCancel = patternResult.sink(() => {});
+    await withPhase(["runTestPattern", "initialSettle"], async () => {
+      // Wait for initial setup to complete
+      await runtime.idle();
+      // Also wait for all in-flight storage subscriptions to settle.
+      // replica.poll() fires without await during mount(), so subscription
+      // updates can arrive after idle() resolves, scheduling more work.
+      await storageManager.synced();
+      await runtime.idle();
+    });
 
     // 4. Get the tests array from pattern output
-    const testsCell = patternResult.key("tests") as Cell<unknown>;
-    const testsValue = testsCell.get();
+    const testsCell = await withPhase(
+      ["runTestPattern", "testsCell"],
+      () => patternResult.key("tests") as Cell<unknown>,
+    );
+    const testSteps = await withPhase(
+      ["runTestPattern", "testsValue"],
+      () => testsCell.asSchema(testStepListSchema).get(),
+    );
 
     // Validate it's an array
-    if (!Array.isArray(testsValue)) {
+    if (!Array.isArray(testSteps)) {
       throw new Error(
         "Test pattern must return { tests: TestStep[] }. Got: " +
-          JSON.stringify(typeof testsValue),
+          toCompactDebugString(typeof testSteps),
       );
     }
 
-    // Check for allowRuntimeErrors and expectNonIdempotent flags
-    const allowRuntimeErrors =
-      (patternResult.key("allowRuntimeErrors") as Cell<unknown>).get() === true;
-    const expectNonIdempotent =
-      (patternResult.key("expectNonIdempotent") as Cell<unknown>).get() ===
-        true;
+    // Check for allowRuntimeErrors, expectNonIdempotent, and console opt-out flags
+    const allowRuntimeErrors = await withPhase(
+      ["runTestPattern", "allowRuntimeErrors"],
+      async () =>
+        await (patternResult.key("allowRuntimeErrors") as Cell<unknown>)
+          .pull() === true,
+    );
+    const expectNonIdempotent = await withPhase(
+      ["runTestPattern", "expectNonIdempotent"],
+      async () =>
+        await (patternResult.key("expectNonIdempotent") as Cell<unknown>)
+          .pull() === true,
+    );
+    const allowConsoleErrors = await withPhase(
+      ["runTestPattern", "allowConsoleErrors"],
+      async () =>
+        await (patternResult.key("allowConsoleErrors") as Cell<unknown>)
+          .pull() === true,
+    );
+    const allowConsoleWarnings = await withPhase(
+      ["runTestPattern", "allowConsoleWarnings"],
+      async () =>
+        await (patternResult.key("allowConsoleWarnings") as Cell<unknown>)
+          .pull() === true,
+    );
 
     if (options.verbose) {
-      console.log(`  Found ${testsValue.length} test steps`);
-      printLoggerStats(performance.now() - startTime, false, "Setup");
+      console.log(`  Found ${testSteps.length} test steps`);
+      printLoggerStats(
+        performance.now() - startTime,
+        false,
+        "Setup",
+        options.statsInclude,
+      );
       printSettleStats(runtime.scheduler.getSettleStats());
       resetAllCountBaselines();
       resetAllTimingBaselines();
     }
+
+    const settleRuntime = async (
+      stepIndex: number,
+      stepLabel: string,
+      maxSettle = 20,
+    ): Promise<void> => {
+      await withPhase(
+        ["runTestPattern", "step", stepLabel, "settle"],
+        () =>
+          Promise.race([
+            (async () => {
+              for (let settle = 0; settle < maxSettle; settle++) {
+                const iterStart = performance.now();
+                await withPhase(
+                  [
+                    "runTestPattern",
+                    "step",
+                    stepLabel,
+                    "settle",
+                    `iter-${settle}`,
+                    "idle",
+                  ],
+                  () => runtime.idle(),
+                );
+                await withPhase(
+                  [
+                    "runTestPattern",
+                    "step",
+                    stepLabel,
+                    "settle",
+                    `iter-${settle}`,
+                    "synced",
+                  ],
+                  () => storageManager.synced(),
+                );
+                const totalMs = performance.now() - iterStart;
+                if (options.verbose && totalMs > 1) {
+                  console.log(
+                    `      settle[${settle}]: ${fmtMs(totalMs)}`,
+                  );
+                }
+                // If both resolved nearly instantly, the system is settled.
+                // synced() has ~1ms of overhead even when idle, so use 2ms.
+                if (settle > 0 && totalMs < 2) break;
+              }
+              await withPhase(
+                ["runTestPattern", "step", stepLabel, "settle", "finalIdle"],
+                () => runtime.idle(),
+              );
+            })(),
+            timeout(
+              TIMEOUT,
+              `Action at index ${stepIndex} timed out after ${TIMEOUT}ms`,
+            ),
+          ]),
+      );
+    };
 
     // 5. Process tests sequentially
     const results: TestResult[] = [];
@@ -650,26 +1169,24 @@ export async function runTestPattern(
     let assertionCount = 0;
     let actionCount = 0;
 
-    for (let i = 0; i < testsValue.length; i++) {
+    for (let i = 0; i < testSteps.length; i++) {
       if (options.verbose) {
         resetAllCountBaselines();
         resetAllTimingBaselines();
       }
       const itemStart = performance.now();
-      const stepValue = testsValue[i] as {
-        action?: unknown;
-        assertion?: unknown;
-        skip?: boolean;
-      };
+      const stepCell = testSteps[i] as HarnessTestStepCell;
+      const stepValue = stepCell.asSchema(testStepPeekSchema)
+        .get() as HarnessTestStepMeta;
 
       // Check if this step has 'action' or 'assertion' key
-      const isAction = "action" in stepValue;
-      const isAssertion = "assertion" in stepValue;
+      const isAction = Object.hasOwn(stepValue, "action");
+      const isAssertion = Object.hasOwn(stepValue, "assertion");
 
       if (!isAction && !isAssertion) {
         throw new Error(
           `Test step at index ${i} must have either 'action' or 'assertion' key. Got: ${
-            JSON.stringify(Object.keys(stepValue))
+            toCompactDebugString(Object.keys(stepValue))
           }`,
         );
       }
@@ -728,12 +1245,18 @@ export async function runTestPattern(
         }
 
         // Get the action stream via .key()
-        const actionStream = testsCell.key(i).key(
-          "action",
-        ) as unknown as Stream<unknown>;
+        const actionStream = await withPhase(
+          ["runTestPattern", "step", actionName, "stream"],
+          () => actionStreamForStep(stepCell),
+        );
 
-        // Send undefined for void streams
-        actionStream.send(undefined);
+        // Send the step's event (undefined for plain void actions), wrapped
+        // with renderer-trusted provenance when the step declares `trustedUi`.
+        await withPhase(["runTestPattern", "step", actionName, "send"], () => {
+          actionStream.send(
+            buildActionEvent(stepValue.event, stepValue.trustedUi),
+          );
+        });
 
         // Wait for idle, then settle commits and re-idle.
         // Optimistic commits can fail (CAS conflicts), causing rollbacks
@@ -741,30 +1264,7 @@ export async function runTestPattern(
         // resolve quickly (< 1ms), indicating quiescence. Max iterations
         // as a safety net against infinite loops.
         try {
-          const MAX_SETTLE = 20;
-          await Promise.race([
-            (async () => {
-              for (let settle = 0; settle < MAX_SETTLE; settle++) {
-                const iterStart = performance.now();
-                await runtime.idle();
-                await storageManager.synced();
-                const totalMs = performance.now() - iterStart;
-                if (options.verbose && totalMs > 1) {
-                  console.log(
-                    `      settle[${settle}]: ${fmtMs(totalMs)}`,
-                  );
-                }
-                // If both resolved nearly instantly, the system is settled.
-                // synced() has ~1ms of overhead even when idle, so use 2ms.
-                if (settle > 0 && totalMs < 2) break;
-              }
-              await runtime.idle();
-            })(),
-            timeout(
-              TIMEOUT,
-              `Action at index ${i} timed out after ${TIMEOUT}ms`,
-            ),
-          ]);
+          await settleRuntime(i, actionName, 20);
         } catch (err) {
           results.push({
             name: actionName,
@@ -800,6 +1300,7 @@ export async function runTestPattern(
           if (deltas.length > 0) {
             deltas.sort((a, b) => b.delta - a.delta);
             const totalDelta = deltas.reduce((s, d) => s + d.delta, 0);
+            const actionLimit = options.statsActionLimit ?? 10;
             console.log(
               `    ⟳ ${totalDelta} scheduler runs across ${deltas.length} actions:`,
             );
@@ -855,7 +1356,7 @@ export async function runTestPattern(
               }
             }
 
-            for (const d of deltas.slice(0, 10)) {
+            for (const d of deltas.slice(0, actionLimit)) {
               const label = d.preview
                 ? d.preview.split("\n")[0].trim().slice(0, 50)
                 : d.id;
@@ -897,11 +1398,14 @@ export async function runTestPattern(
                 console.log(`      ${String(count).padStart(4)}× ${entity}`);
               }
             }
-            if (deltas.length > 10) {
-              const rest = deltas.slice(10).reduce((s, d) => s + d.delta, 0);
+            if (deltas.length > actionLimit) {
+              const rest = deltas.slice(actionLimit).reduce(
+                (s, d) => s + d.delta,
+                0,
+              );
               console.log(
                 `      ${String(rest).padStart(4)}× (${
-                  deltas.length - 10
+                  deltas.length - actionLimit
                 } more actions)`,
               );
             }
@@ -915,19 +1419,55 @@ export async function runTestPattern(
         let passed = false;
         let error: string | undefined;
 
-        try {
+        const evaluateAssertion = async (): Promise<
+          { passed: boolean; error?: string }
+        > => {
           // Get the assertion cell via .key()
-          const assertCell = testsCell.key(i).key("assertion") as Cell<unknown>;
-          const value = assertCell.get();
-          passed = value === true;
-          if (!passed) {
-            error = `Expected true, got ${JSON.stringify(value)}`;
+          try {
+            const assertCell = stepCell.key("assertion") as Cell<unknown>;
+            const value = await assertCell.pull();
+            if (value === true) {
+              return { passed: true };
+            }
+            return {
+              passed: false,
+              error: `Expected true, got ${toCompactDebugString(value)}`,
+            };
+          } catch (err) {
+            return {
+              passed: false,
+              error: `Error reading assertion: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            };
           }
-        } catch (err) {
-          passed = false;
-          error = `Error reading assertion: ${
-            err instanceof Error ? err.message : String(err)
-          }`;
+        };
+
+        ({ passed, error } = await withPhase(
+          ["runTestPattern", "step", assertionName, "evaluate"],
+          () => evaluateAssertion(),
+        ));
+
+        if (!passed && lastActionIndex !== null) {
+          try {
+            for (let retry = 0; retry < 3 && !passed; retry++) {
+              await new Promise((resolve) => setTimeout(resolve, 0));
+              await settleRuntime(i, assertionName, 6);
+              ({ passed, error } = await withPhase(
+                [
+                  "runTestPattern",
+                  "step",
+                  assertionName,
+                  `retry-${retry + 1}`,
+                  "evaluate",
+                ],
+                () => evaluateAssertion(),
+              ));
+            }
+          } catch (err) {
+            passed = false;
+            error = err instanceof Error ? err.message : String(err);
+          }
         }
 
         results.push({
@@ -961,6 +1501,7 @@ export async function runTestPattern(
             performance.now() - startTime,
             true,
             `${stepLabel} took ${fmtMs(stepDuration)}`,
+            options.statsInclude,
           );
           printSettleStats(runtime.scheduler.getSettleStats());
         }
@@ -971,10 +1512,29 @@ export async function runTestPattern(
     if (options.verbose) {
       printActionStatsTable(runtime);
     }
+    if (options.storageStats) {
+      printStorageStats(
+        performance.now() - startTime,
+        options.storageStatsLimit ?? 16,
+      );
+    }
 
     // Collect idempotency violations detected during normal execution
     const nonIdempotent = runtime.getIdempotencyViolations()
-      .map((r) => r.actionInfo?.patternName ?? r.actionId);
+      .map((r) => {
+        const id = r.actionInfo?.patternName ?? r.actionId;
+        return r.differingWriteKeys.length
+          ? `${id} (differing writes: ${r.differingWriteKeys.join(", ")})`
+          : id;
+      });
+
+    // Channel 2: compute logger error/warn deltas since the run-phase snapshot
+    // and append any new activity to the console capture lists.
+    appendLoggerDeltaMessages(
+      loggerCountsBeforeRun,
+      consoleErrors,
+      consoleWarnings,
+    );
 
     const errorMessages = runtimeErrors.map((e) => String(e));
     return {
@@ -986,6 +1546,10 @@ export async function runTestPattern(
       allowRuntimeErrors,
       nonIdempotent,
       expectNonIdempotent,
+      consoleErrors,
+      allowConsoleErrors,
+      consoleWarnings,
+      allowConsoleWarnings,
     };
   } catch (err) {
     let errorMessage = err instanceof Error ? err.message : String(err);
@@ -1009,12 +1573,18 @@ export async function runTestPattern(
       runtimeErrors: errorMessages,
       nonIdempotent: [],
       error: errorMessage,
+      consoleErrors,
+      consoleWarnings,
     };
   } finally {
     // 6. Cleanup
-    sinkCancel?.();
-    engine.dispose();
-    await storageManager.close();
+    await withPhase(["runTestPattern", "cleanup", "engineDispose"], () => {
+      engine.dispose();
+    });
+    await withPhase(
+      ["runTestPattern", "cleanup", "storageClose"],
+      () => storageManager.close(),
+    );
   }
 }
 
@@ -1090,6 +1660,13 @@ export async function runTests(
             console.log(`    ${name}`);
           }
         }
+      } else if (result.expectNonIdempotent) {
+        // The flag asserts the detector fires — passing silently here would
+        // let detection regressions defang the non-idempotent fixtures.
+        totalFailed++;
+        console.log(
+          "  ✗ expected non-idempotent computation(s), none detected",
+        );
       }
 
       // Report runtime errors
@@ -1109,6 +1686,46 @@ export async function runTests(
             const truncated = firstLine.length > 120
               ? firstLine.slice(0, 120) + "..."
               : firstLine;
+            console.log(`    ${truncated}`);
+          }
+        }
+      }
+
+      // Report console errors (channel 1: console.error; channel 2: logger errors)
+      if (result.consoleErrors && result.consoleErrors.length > 0) {
+        if (result.allowConsoleErrors) {
+          console.log(
+            `  ⊘ ${result.consoleErrors.length} console error(s) (allowed)`,
+          );
+        } else {
+          totalFailed++;
+          console.log(
+            `  ✗ ${result.consoleErrors.length} console error(s) during test:`,
+          );
+          for (const msg of result.consoleErrors) {
+            const truncated = msg.length > 120
+              ? msg.slice(0, 120) + "..."
+              : msg;
+            console.log(`    ${truncated}`);
+          }
+        }
+      }
+
+      // Report console warnings (channel 1: console.warn; channel 2: logger warns)
+      if (result.consoleWarnings && result.consoleWarnings.length > 0) {
+        if (result.allowConsoleWarnings) {
+          console.log(
+            `  ⊘ ${result.consoleWarnings.length} console warning(s) (allowed)`,
+          );
+        } else {
+          totalFailed++;
+          console.log(
+            `  ✗ ${result.consoleWarnings.length} console warning(s) during test:`,
+          );
+          for (const msg of result.consoleWarnings) {
+            const truncated = msg.length > 120
+              ? msg.slice(0, 120) + "..."
+              : msg;
             console.log(`    ${truncated}`);
           }
         }

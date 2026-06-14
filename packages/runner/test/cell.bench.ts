@@ -1,5 +1,5 @@
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
@@ -9,7 +9,9 @@ const space = signer.did();
 
 // Setup helper to create runtime and transaction
 function setup() {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
@@ -21,12 +23,11 @@ function setup() {
 // Cleanup helper
 async function cleanup(
   runtime: Runtime,
-  storageManager: ReturnType<typeof StorageManager.emulate>,
+  _storageManager: ReturnType<typeof StorageManager.emulate>,
   tx?: IExtendedStorageTransaction,
 ) {
   await tx?.commit();
   await runtime.dispose();
-  await storageManager.close();
 }
 
 // Benchmark: Cell creation
@@ -556,7 +557,7 @@ Deno.bench("Cell asSchema - schema transformation (100x)", async () => {
     type: "object",
     properties: {
       id: { type: "number" },
-      metadata: { type: "object", asCell: true },
+      metadata: { type: "object", asCell: ["cell"] },
     },
     required: ["id", "metadata"],
   } as const satisfies JSONSchema;
@@ -668,7 +669,7 @@ Deno.bench("Cell get - complex object with asCell schema (100x)", async () => {
           value: { type: "number" },
         },
         required: ["value"],
-        asCell: true, // This creates a cell reference
+        asCell: ["cell"], // This creates a cell reference
       },
     },
     required: ["name", "age", "nested"],
@@ -688,7 +689,7 @@ Deno.bench("Cell get - complex object with asCell schema (100x)", async () => {
     const value = cell.get();
     value.name;
     value.age;
-    value.nested.get(); // nested is a Cell due to asCell: true
+    value.nested.get(); // nested is a Cell due to asCell: ["cell"]
   }
 
   await cleanup(runtime, storageManager, tx);
@@ -801,7 +802,7 @@ Deno.bench("Cell array - map operation with schema (100x)", async () => {
 });
 
 // Benchmark: Link operations
-Deno.bench("Cell getAsLink - link generation schemaless (100x)", async () => {
+Deno.bench("Cell getAsLink - link generation schemaless (100x)", async (b) => {
   const { runtime, storageManager, tx } = setup();
 
   const cell = runtime.getCell<{ value: number }>(
@@ -814,14 +815,16 @@ Deno.bench("Cell getAsLink - link generation schemaless (100x)", async () => {
   await tx.commit();
 
   // Measure link generation
+  b.start();
   for (let i = 0; i < 100; i++) {
     cell.getAsLink();
   }
+  b.end();
 
   await cleanup(runtime, storageManager, tx);
 });
 
-Deno.bench("Cell getAsLink - with options (100x)", async () => {
+Deno.bench("Cell getAsLink - with options (100x)", async (b) => {
   const { runtime, storageManager, tx } = setup();
 
   const cell1 = runtime.getCell<{ value: number }>(
@@ -842,9 +845,11 @@ Deno.bench("Cell getAsLink - with options (100x)", async () => {
   await tx.commit();
 
   // Measure link generation with options
+  b.start();
   for (let i = 0; i < 100; i++) {
     cell1.getAsLink({ base: cell2, includeSchema: true });
   }
+  b.end();
 
   await cleanup(runtime, storageManager, tx);
 });
@@ -940,7 +945,7 @@ Deno.bench("Cell complex - schema with asCell references (100x)", async () => {
       id: { type: "number" },
       metadata: {
         type: "object",
-        asCell: true,
+        asCell: ["cell"],
       },
       tags: {
         type: "array",
@@ -952,7 +957,7 @@ Deno.bench("Cell complex - schema with asCell references (100x)", async () => {
           theme: { type: "string" },
           notifications: { type: "boolean" },
         },
-        asCell: true,
+        asCell: ["cell"],
       },
     },
     required: ["id", "metadata", "tags", "settings"],
@@ -1338,7 +1343,9 @@ const notebookSchema: JSONSchema = {
 };
 
 async function benchmarkNotebookReads(noteCount: number, readCount: number) {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,

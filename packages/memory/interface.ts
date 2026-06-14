@@ -1,113 +1,16 @@
-import type { ContentId, DefinedReferent } from "./reference.ts";
-import type { JSONSchema, JSONValue } from "@commontools/api";
-import type { StorableInstance } from "./storable-protocol.ts";
-import type {
-  StorableEpochDays,
-  StorableEpochNsec,
-} from "./storable-native-instances.ts";
+import type { FabricValue, JSONValue } from "@commonfabric/api";
+import type { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 
-export type SchemaPathSelector = {
-  path: readonly string[];
-  schema?: JSONSchema;
-};
+import type { SchemaPathSelector } from "@commonfabric/api";
+export type { SchemaPathSelector };
+
+// Backward-compat aliases for branches that still import the older storage
+// naming from the memory package surface.
+export type StorableDatum = FabricValue;
+export type StorableValue = FabricValue;
+export type { FabricValue };
 
 export type { JSONValue };
-
-/**
- * A value that can be stored in the storage layer. This is similar to
- * `JSONValue` but is specifically intended for use at storage boundaries
- * (values going into or coming out of the database).
- *
- * Note: Once the `richStorableValues` experiment graduates and the rich path
- * becomes the default, `StorableValue = StorableDatum | undefined` will be a
- * redundant union (since `StorableDatum` includes `undefined`). The alias is
- * retained for compatibility and readability at call sites.
- */
-export type StorableValue = StorableDatum | undefined;
-
-/**
- * The full set of values that the storage layer can represent. This is the
- * strongly-typed "middle layer" of the three-layer architecture:
- *
- *   JavaScript "wild west" (unknown) <-> StorableValue <-> Serialized (Uint8Array)
- *
- * Most native JS object types (`Error`, `Map`, `Set`, `Uint8Array`) enter the
- * storable layer via wrapper classes that implement `StorableInstance`. However,
- * temporal types (`StorableEpochNsec`, `StorableEpochDays`) and `bigint` are
- * direct members of `StorableDatum` without implementing `StorableInstance`.
- * Native `Date` is converted to `StorableEpochNsec` during conversion.
- *
- * `undefined` is preserved when the `richStorableValues` flag is ON. When the
- * flag is OFF, `undefined` in arrays is converted to `null` and `undefined`
- * object properties are omitted -- matching legacy behavior.
- */
-export type StorableDatum =
-  // -- Primitives --
-  | null
-  | boolean
-  | number
-  | string
-  | bigint
-  // -- Temporal primitives --
-  | StorableEpochNsec
-  | StorableEpochDays
-  // -- Containers --
-  | StorableArray
-  | StorableObject
-  // -- Protocol types (Cell, Stream, UnknownStorable, ProblematicStorable,
-  //    and native wrappers like StorableError at runtime) --
-  | StorableInstance
-  // -- Extended primitives (experimental: richStorableValues) --
-  | undefined;
-
-/** An array of storable data. */
-export interface StorableArray extends ArrayLike<StorableDatum> {}
-
-/** An object/record of storable data. */
-export interface StorableObject extends Record<string, StorableDatum> {}
-
-/**
- * A value with storable structure at the top level, but potentially unconverted
- * nested values. This is the result of shallow conversion via `shallowStorableFromNativeValue()`
- * - arrays and objects have the right shape but their contents may still contain
- * values requiring further conversion (e.g., Error instances in a `cause` chain).
- */
-export type StorableValueLayer =
-  | StorableValue
-  | unknown[]
-  | Record<string, unknown>;
-
-/**
- * Union of raw native JS **object** types that the storable type system can
- * convert into `StorableInstance` wrappers. These are the inputs to the
- * "sausage grinder" -- `shallowStorableFromNativeValue()` accepts
- * `StorableValue | StorableNativeObject`, meaning callers can pass in either
- * already-storable data or raw native JS objects. The conversion produces
- * `StorableInstance` wrappers (StorableError, StorableMap, etc.) that live
- * inside `StorableValue` via the `StorableInstance` arm of `StorableDatum`.
- *
- * `Blob` is included because `StorableUint8Array.toNativeValue(true)` returns
- * a `Blob` (immutable by nature) instead of a `Uint8Array`. The synchronous
- * serialization path throws on `Blob` since its data access methods are async.
- *
- * The `{ toJSON(): unknown }` arm covers objects (and functions) that are
- * convertible to storable form via their `toJSON()` method. This is a legacy
- * conversion path but is included here so the `canBeStored()` type predicate
- * (`value is StorableValue | StorableNativeObject`) remains sound.
- *
- * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
- * and belongs directly in `StorableDatum` without wrapping.
- */
-export type StorableNativeObject =
-  | Error
-  | Map<unknown, unknown>
-  | Set<unknown>
-  | Date
-  | RegExp
-  | Uint8Array
-  | Blob
-  | { toJSON(): unknown };
-
 export interface Clock {
   now(): UTCUnixTimestampInSeconds;
 }
@@ -128,8 +31,8 @@ export interface Principal<ID extends DID = DID> {
  * Principal capable of issuing an {@link Authorization}.
  */
 export interface Authority extends Principal {
-  authorize<T extends DefinedReferent>(
-    access: Iterable<ContentId<T> | T>,
+  authorize<T extends FabricValue>(
+    access: Iterable<FabricHash | T>,
   ): AwaitResult<Authorization<T>, AuthorizationError>;
 }
 
@@ -166,15 +69,15 @@ export type UCAN<Command extends Invocation> = {
 /**
  * Proof of authorization for a given access.
  */
-export interface Proof<Access extends DefinedReferent = DefinedReferent> {
-  [link: AsString<ContentId<Access>>]: Unit;
+export interface Proof<Access extends FabricValue = FabricValue> {
+  [link: AsString<FabricHash>]: Unit;
 }
 
 /**
  * Represents a verifiable authorization issued by specific {@link Authority}.
  * It is slightly more abstract notion than signed payload.
  */
-export type Authorization<T extends DefinedReferent = DefinedReferent> = {
+export type Authorization<T extends FabricValue = FabricValue> = {
   signature: Signature<Proof<T>>;
   access: Proof<T>;
 };
@@ -475,7 +378,7 @@ export type Task<Return, Command = never> = Iterable<Command, Return>;
 
 export type Job<
   Command extends NonNullable<unknown> = NonNullable<unknown>,
-  Return extends DefinedReferent = DefinedReferent,
+  Return extends FabricValue = FabricValue,
   Effect = unknown,
 > = {
   invoke: Command;
@@ -501,32 +404,32 @@ export type SessionTask<Space extends MemorySpace> =
 
 export type Receipt<
   Command extends NonNullable<unknown>,
-  Result extends DefinedReferent,
+  Result extends FabricValue,
   Effect,
 > =
   | {
     the: "task/return";
-    of: InvocationURL<ContentId<Command>>;
+    of: InvocationURL<FabricHash>;
     is: Awaited<Result>;
   }
   | (Effect extends never ? never
     : {
       the: "task/effect";
-      of: InvocationURL<ContentId<Command>>;
+      of: InvocationURL<FabricHash>;
       is: Effect;
     });
 
 export type Effect<Of extends NonNullable<unknown>, Command> = {
-  of: ContentId<Of>;
+  of: FabricHash;
   run: Command;
   is?: undefined;
 };
 
 export type Return<
   Of extends NonNullable<unknown>,
-  Result extends DefinedReferent,
+  Result extends FabricValue,
 > = {
-  of: ContentId<Of>;
+  of: FabricHash;
   is: Result;
   run?: undefined;
 };
@@ -663,7 +566,7 @@ export interface Unclaimed<T extends string = MIME, Of extends string = URI> {
 
 /**
  * `Assertion` is just like a {@link Statement} except the value MUST be inline
- * {@link StorableDatum} as opposed to reference to one. {@link Assertion}s are
+ * {@link FabricValue} as opposed to reference to one. {@link Assertion}s are
  * used to assert facts, while {@link Statement}s are used to retract them. This
  * allows retracting over the wire without having to send JSON values back and
  * forth.
@@ -671,15 +574,12 @@ export interface Unclaimed<T extends string = MIME, Of extends string = URI> {
 export interface Assertion<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends StorableDatum = StorableDatum,
+  Is extends FabricValue = FabricValue,
 > {
   the: T;
   of: Of;
   is: Is;
-  cause:
-    | ContentId<Assertion<T, Of, Is>>
-    | ContentId<Retraction<T, Of, Is>>
-    | ContentId<Unclaimed<T, Of>>;
+  cause: FabricHash;
 }
 
 /**
@@ -689,22 +589,22 @@ export interface Assertion<
 export interface Retraction<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends StorableDatum = StorableDatum,
+  Is extends FabricValue = FabricValue,
 > {
   the: T;
   of: Of;
   is?: undefined;
-  cause: ContentId<Assertion<T, Of, Is>>;
+  cause: FabricHash;
 }
 
 export interface Invariant<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends StorableDatum = StorableDatum,
+  Is extends FabricValue = FabricValue,
 > {
   the: T;
   of: Of;
-  fact: ContentId<Fact<T, Of, Is>>;
+  fact: FabricHash;
 
   is?: undefined;
   cause?: undefined;
@@ -718,13 +618,13 @@ export interface Invariant<
 export type Fact<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends StorableDatum = StorableDatum,
+  Is extends FabricValue = FabricValue,
 > = Assertion<T, Of, Is> | Retraction<T, Of, Is>;
 
 export type Statement<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends StorableDatum = StorableDatum,
+  Is extends FabricValue = FabricValue,
 > = Assertion<T, Of, Is> | Retraction<T, Of, Is> | Invariant<T, Of, Is>;
 
 export type State = Fact | Unclaimed;
@@ -781,10 +681,10 @@ export type CommitFact<Subject extends MemorySpace = MemorySpace> = Assertion<
 export type ClaimFact = true;
 
 // ⚠️ Note we use `void` as opposed to `undefined` because the latter makes it
-// incompatible with the `Is` type parameter (which defaults to `StorableDatum`
+// incompatible with the `Is` type parameter (which defaults to `FabricValue`
 // and previously defaulted to `JSONValue`).
 export type RetractFact = { is?: void };
-export type AssertFact<Is extends StorableDatum = StorableDatum> = { is: Is };
+export type AssertFact<Is extends FabricValue = FabricValue> = { is: Is };
 // This is the structure of a bunch of our objects
 export type OfTheCause<T> = {
   [of in URI]: {
@@ -797,7 +697,7 @@ export type OfTheCause<T> = {
 export type Changes<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends StorableDatum = StorableDatum,
+  Is extends FabricValue = FabricValue,
 > = {
   [of in Of]: {
     [the in T]: {
@@ -809,7 +709,7 @@ export type Changes<
 export type FactSelection<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends StorableDatum = StorableDatum,
+  Is extends FabricValue = FabricValue,
 > = {
   [of in Of]: {
     [the in T]: {
@@ -850,10 +750,8 @@ export type ACL = {
 export type URI = `${string}:${string}`;
 // Mime type or Media Type -- often called 'the'
 export type MIME = `${string}/${string}`;
-// TODO(danfuzz): Clean up after canonical hashing flag graduates. The `fid1:`
-// branch was added for StorableContentId; once the experiment is permanent,
-// the `b`-prefixed format can be removed.
-export type CauseString = `b${string}` | `fid1:${string}`;
+// Fact cause. Matches the content hash string format defined by `data-model`.
+export type CauseString = `fid1:${string}`;
 
 export type Transaction<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/transact",
@@ -885,7 +783,7 @@ export type Subscribe<Space extends MemorySpace = MemorySpace> = Invocation<
 export type Unsubscribe<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/query/unsubscribe",
   Space,
-  { source: InvocationURL<ContentId<Subscribe<Space>>> }
+  { source: InvocationURL<FabricHash> }
 >;
 
 export type SchemaQueryArgs = {
@@ -1034,7 +932,7 @@ export type Conflict = {
   /**
    * Expected state in the replica.
    */
-  expected: ContentId<Fact> | null;
+  expected: FabricHash | null;
 
   /**
    * Actual memory state in the replica repository.

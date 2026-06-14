@@ -1,0 +1,29 @@
+{
+  "description": "Simple two-turn conversation without tools",
+  "responses": [
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "messagesContain": ["Hello"],
+        "messageCount": 1
+      },
+      "response": {
+        "role": "assistant",
+        "content": "Hi there!",
+        "id": "turn-1"
+      }
+    },
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "messagesContain": ["Hello", "How are you?"],
+        "messageCount": 3
+      },
+      "response": {
+        "role": "assistant",
+        "content": "I'm doing well, thanks!",
+        "id": "turn-2"
+      }
+    }
+  ]
+}

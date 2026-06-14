@@ -1,5 +1,5 @@
-import { Cancel } from "@commontools/runtime-client";
-import { CellHandle } from "@commontools/runtime-client";
+import { Cancel } from "@commonfabric/runtime-client";
+import { CellHandle } from "@commonfabric/runtime-client";
 import { assert } from "@std/assert";
 
 export class CellUpdateEvent<T> extends CustomEvent<T> {

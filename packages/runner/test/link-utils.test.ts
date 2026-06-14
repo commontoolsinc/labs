@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   areLinksSame,
+  areNormalizedLinksSame,
+  areNormalizedLinksSameIgnoringScope,
   createDataCellURI,
   createLLMFriendlyLink,
   createSigilLinkFromParsedLink,
@@ -18,12 +20,13 @@ import {
   sanitizeSchemaForLinks,
 } from "../src/link-utils.ts";
 import { getJSONFromDataURI } from "../src/uri-utils.ts";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { createCell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -43,9 +46,9 @@ describe("link-utils", () => {
   });
 
   afterEach(async () => {
+    tx.abort();
     await runtime?.dispose();
     await storageManager?.close();
-    await tx.commit();
   });
 
   describe("isSigilValue", () => {
@@ -208,6 +211,24 @@ describe("link-utils", () => {
   });
 
   describe("parseLink", () => {
+    it("runtime getCellFromEntityId should accept an explicit scope", () => {
+      const cell = runtime.getCellFromEntityId(
+        space,
+        { "/": "scoped-entity" },
+        [],
+        undefined,
+        undefined,
+        "user",
+      );
+
+      expect(cell.getAsNormalizedFullLink()).toMatchObject({
+        id: "of:scoped-entity",
+        path: [],
+        space,
+        scope: "user",
+      });
+    });
+
     it("should parse cells to normalized links", () => {
       const cell = runtime.getCell(space, "test", undefined, tx);
       cell.set({ value: 42 });
@@ -217,7 +238,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: [],
         space: space,
-        type: "application/json",
+        scope: "space",
         schema: undefined,
       });
     });
@@ -232,7 +253,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: ["nested"],
         space: space,
-        type: "application/json",
+        scope: "space",
         schema: undefined,
       });
     });
@@ -245,7 +266,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: [],
         space: space,
-        type: "application/json",
+        scope: "space",
         schema: undefined,
       });
     });
@@ -267,7 +288,6 @@ describe("link-utils", () => {
         id: "of:test",
         path: ["nested", "value"],
         space: space,
-        type: "application/json",
         schema: { type: "number" },
       });
     });
@@ -290,7 +310,6 @@ describe("link-utils", () => {
         id: "of:test",
         path: ["nested", "value"],
         space: space,
-        type: "application/json",
         schema: { type: "number" },
       });
     });
@@ -302,7 +321,6 @@ describe("link-utils", () => {
             id: "of:test",
             path: ["nested", "value"],
             space: space,
-            type: "application/json",
             schema: { type: "number" },
             overwrite: "redirect",
           },
@@ -314,7 +332,6 @@ describe("link-utils", () => {
         id: "of:test",
         path: ["nested", "value"],
         space: space,
-        type: "application/json",
         schema: { type: "number" },
         overwrite: "redirect",
       });
@@ -336,7 +353,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: ["nested", "value"],
         space: space,
-        type: "application/json",
+        scope: "space",
         schema: undefined,
       });
     });
@@ -353,7 +370,6 @@ describe("link-utils", () => {
 
       expect(result).toEqual({
         path: ["nested", "value"],
-        type: "application/json",
       });
 
       // Don't allow `id: undefined`, etc.
@@ -371,7 +387,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: [],
         space: space,
-        type: "application/json",
+        scope: "space",
         schema: undefined,
       });
     });
@@ -391,7 +407,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: ["nested", "value"],
         space: space,
-        type: "application/json",
+        scope: "space",
         schema: { type: "number" },
         overwrite: "redirect",
       });
@@ -409,8 +425,8 @@ describe("link-utils", () => {
       expect(result).toEqual({
         id: expect.stringContaining("of:"),
         path: ["nested", "value"],
-        type: "application/json",
         space: space,
+        scope: "space",
         schema: undefined,
         overwrite: "redirect",
       });
@@ -436,6 +452,16 @@ describe("link-utils", () => {
         "Cannot parse value as link",
       );
       expect(() => parseLinkOrThrow(123)).toThrow("Cannot parse value as link");
+    });
+
+    it("should not crash on BigInt values when formatting the error", () => {
+      // Regression: a previous version embedded `JSON.stringify(value)` in the
+      // error message, which throws on BigInt and masks the original "not a
+      // link" failure. Using `toCompactDebugString` instead handles BigInt
+      // safely.
+      expect(() => parseLinkOrThrow(123n as unknown as never)).toThrow(
+        "Cannot parse value as link",
+      );
     });
   });
 
@@ -472,7 +498,7 @@ describe("link-utils", () => {
 
     it("should handle null/undefined values", () => {
       expect(areLinksSame(null, null)).toBe(true);
-      expect(areLinksSame(undefined, undefined)).toBe(true);
+      expect(areLinksSame(undefined, undefined)).toBe(false);
       expect(areLinksSame(null, undefined)).toBe(false);
 
       const cell = runtime.getCell(space, "test");
@@ -504,6 +530,67 @@ describe("link-utils", () => {
           },
         },
       });
+    });
+
+    it("serializes scoped links and parses inherited link scope from the base", () => {
+      const normalizedLink: NormalizedLink = {
+        id: "of:test",
+        path: ["nested"],
+        space,
+        scope: "session",
+      };
+
+      const result = createSigilLinkFromParsedLink(normalizedLink);
+      expect(result["/"][LINK_V1_TAG].scope).toBe("session");
+
+      expect(parseLink(result, {
+        id: "of:base",
+        path: [],
+        space,
+        scope: "user",
+      })).toEqual({
+        id: "of:test",
+        path: ["nested"],
+        space,
+        scope: "session",
+      });
+
+      expect(parseLink({
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "of:relative",
+            path: [],
+          },
+        },
+      }, {
+        id: "of:base",
+        path: [],
+        space,
+        scope: "user",
+      })).toEqual({
+        id: "of:relative",
+        path: [],
+        space,
+        scope: "user",
+      });
+    });
+
+    it("includes scope in normal equality but exposes scope-insensitive equality for cause generation", () => {
+      const userLink: NormalizedLink = {
+        id: "of:test",
+        path: ["value"],
+        space,
+        scope: "user",
+      };
+      const sessionLink: NormalizedLink = {
+        ...userLink,
+        scope: "session",
+      };
+
+      expect(areNormalizedLinksSame(userLink, sessionLink)).toBe(false);
+      expect(areNormalizedLinksSameIgnoringScope(userLink, sessionLink)).toBe(
+        true,
+      );
     });
 
     it("should omit space when same as base", () => {
@@ -547,14 +634,80 @@ describe("link-utils", () => {
 
       expect(result["/"][LINK_V1_TAG].overwrite).toBe("redirect");
     });
+
+    it("should preserve stream cell schemas by default when including schema", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          setTitle: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+            },
+            required: ["title"],
+            asCell: ["stream"],
+          },
+        },
+        required: ["title", "setTitle"],
+      } as const satisfies JSONSchema;
+
+      const result = createSigilLinkFromParsedLink({
+        id: "of:stream-schema",
+        path: [],
+        space,
+        schema,
+      }, { includeSchema: true });
+
+      expect(result["/"][LINK_V1_TAG].schema).toEqual(schema);
+    });
+
+    it("should strip stream cell schemas from links when requested", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          setTitle: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+            },
+            required: ["title"],
+            asCell: ["stream"],
+          },
+        },
+        required: ["title", "setTitle"],
+      } as const satisfies JSONSchema;
+
+      const result = createSigilLinkFromParsedLink({
+        id: "of:stream-schema",
+        path: [],
+        space,
+        schema,
+      }, { includeSchema: true, keepStreams: false });
+
+      expect(result["/"][LINK_V1_TAG].schema).toEqual({
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          setTitle: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+            },
+            required: ["title"],
+          },
+        },
+        required: ["title"],
+      });
+    });
   });
 
   describe("stripAsCellAndStreamFromSchema", () => {
-    it("should remove asCell and asStream from simple schema", () => {
+    it("should remove asCell from simple schema", () => {
       const schema = {
         type: "object",
-        asCell: true,
-        asStream: false,
+        asCell: ["cell"],
         properties: {
           name: { type: "string" },
         },
@@ -570,18 +723,18 @@ describe("link-utils", () => {
       });
     });
 
-    it("should remove asCell and asStream from nested properties", () => {
+    it("should remove asCell from nested properties", () => {
       const schema = {
         type: "object",
         properties: {
           user: {
             type: "object",
-            asCell: true,
+            asCell: ["cell"],
             properties: {
               name: { type: "string" },
               settings: {
                 type: "object",
-                asStream: true,
+                asCell: ["stream"],
                 properties: {
                   theme: { type: "string" },
                 },
@@ -610,6 +763,99 @@ describe("link-utils", () => {
           },
         },
       });
+    });
+
+    it("does not promote stripped asCell entry scope to schema scope", () => {
+      // The scope of an asCell value belongs to the link to its target (the
+      // link carries its own scope) and acts as a follow cap. It must NOT be
+      // promoted onto the stripped schema's top-level `scope`: doing so makes it
+      // look like an authored container scope, which then gets stamped onto the
+      // container link on reads and addresses the wrong scoped instance (CT-1623).
+      const schema = {
+        type: "object",
+        properties: {
+          rack: {
+            type: "array",
+            items: { type: "string" },
+            asCell: [{ kind: "cell", scope: "user" }],
+          },
+          message: {
+            type: "string",
+            asCell: [{ kind: "cell", scope: "session" }],
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect(result).toEqual({
+        type: "object",
+        properties: {
+          rack: {
+            type: "array",
+            items: { type: "string" },
+          },
+          message: {
+            type: "string",
+          },
+        },
+      });
+    });
+
+    it("should remove required entries for stripped stream properties", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          setTitle: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+            },
+            required: ["title"],
+            asCell: ["stream"],
+          },
+        },
+        required: ["title", "setTitle"],
+      } as const satisfies JSONSchema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect(result).toEqual({
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          setTitle: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+            },
+            required: ["title"],
+          },
+        },
+        required: ["title"],
+      });
+    });
+
+    it("should keep required entries for preserved stream properties", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          setTitle: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+            },
+            required: ["title"],
+            asCell: ["stream"],
+          },
+        },
+        required: ["setTitle"],
+      } as const satisfies JSONSchema;
+
+      const result = sanitizeSchemaForLinks(schema, { keepStreams: true });
+
+      expect(result).toEqual(schema);
     });
 
     it("should handle arrays of schemas", () => {
@@ -620,7 +866,7 @@ describe("link-utils", () => {
             type: "array",
             items: {
               type: "string",
-              asCell: true,
+              asCell: ["cell"],
             },
           },
         },
@@ -645,8 +891,8 @@ describe("link-utils", () => {
       const schema = {
         type: "object",
         anyOf: [
-          { type: "string", asCell: true },
-          { type: "number", asStream: true },
+          { type: "string", asCell: ["cell"] },
+          { type: "number", asCell: ["stream"] },
         ],
       } as const satisfies JSONSchema;
 
@@ -666,7 +912,7 @@ describe("link-utils", () => {
         type: "object",
         additionalProperties: {
           type: "string",
-          asCell: true,
+          asCell: ["cell"],
         },
       } as const satisfies JSONSchema;
 
@@ -683,28 +929,28 @@ describe("link-utils", () => {
     it("should not mutate the original schema", () => {
       const originalSchema = {
         type: "object",
-        asCell: true,
+        asCell: ["cell"],
         properties: {
-          name: { type: "string", asStream: true },
+          name: { type: "string", asCell: ["stream"] },
         },
       } as const satisfies JSONSchema;
 
       const result = sanitizeSchemaForLinks(originalSchema);
 
       // Original should be unchanged
-      expect(originalSchema.asCell).toBe(true);
-      expect(originalSchema.properties.name.asStream).toBe(true);
+      expect(originalSchema.asCell).toEqual(["cell"]);
+      expect(originalSchema.properties.name.asCell).toEqual(["stream"]);
 
       // Result should have flags removed
-      expect((result as any).asCell).toBeUndefined();
-      expect((result as any).properties.name.asStream).toBeUndefined();
+      expect(result).not.toHaveProperty("asCell");
+      expect((result as any).properties.name).not.toHaveProperty("asCell");
     });
 
     it("should handle circular schema references without stack overflow", () => {
       // Create a circular schema like Record pattern has
       const schema: any = {
         type: "object",
-        asCell: true,
+        asCell: ["cell"],
         properties: {
           name: { type: "string" },
           subPieces: {
@@ -725,7 +971,7 @@ describe("link-utils", () => {
       const result = sanitizeSchemaForLinks(schema);
 
       // Should have removed asCell from top level
-      expect((result as any).asCell).toBeUndefined();
+      expect(result).not.toHaveProperty("asCell");
       // Should have processed nested properties
       expect((result as any).properties.name.type).toBe("string");
       // CT-1142: Result should be JSON-serializable without exponential growth
@@ -740,16 +986,23 @@ describe("link-utils", () => {
     it("should handle direct self-reference cycle with $ref", () => {
       const schema: any = {
         type: "object",
-        asCell: true,
-        asStream: true,
+        asCell: ["cell"],
       };
       schema.self = schema;
-
       const result = sanitizeSchemaForLinks(schema);
 
-      // Top level flags should be removed
-      expect((result as any).asCell).toBeUndefined();
-      expect((result as any).asStream).toBeUndefined();
+      // Top level asCell ["cell"] flags should be removed
+      expect(result).not.toHaveProperty("asCell");
+      const schema2: any = {
+        type: "object",
+        asCell: ["stream"],
+      };
+      schema.self = schema;
+      const result2 = sanitizeSchemaForLinks(schema2);
+
+      // Top level asCell ["stream"] flags should be removed
+      expect(result2).not.toHaveProperty("asCell");
+
       // Cycle reference should be replaced with $ref
       expect((result as any).self.$ref).toBeDefined();
       expect((result as any).self.$ref).toMatch(/^#\/\$defs\//);
@@ -760,9 +1013,9 @@ describe("link-utils", () => {
     });
 
     it("should handle three-way cycle (A → B → C → A) with $ref", () => {
-      const a: any = { type: "a", asCell: true, next: null };
-      const b: any = { type: "b", asStream: true, next: null };
-      const c: any = { type: "c", asCell: true, next: null };
+      const a: any = { type: "a", asCell: ["cell"], next: null };
+      const b: any = { type: "b", asCell: ["stream"], next: null };
+      const c: any = { type: "c", asCell: ["cell"], next: null };
       a.next = b;
       b.next = c;
       c.next = a;
@@ -770,9 +1023,9 @@ describe("link-utils", () => {
       const result = sanitizeSchemaForLinks(a);
 
       // All flags should be removed in the processed chain
-      expect((result as any).asCell).toBeUndefined();
-      expect((result as any).next.asStream).toBeUndefined();
-      expect((result as any).next.next.asCell).toBeUndefined();
+      expect(result).not.toHaveProperty("asCell");
+      expect((result as any).next).not.toHaveProperty("asStream");
+      expect((result as any).next.next).not.toHaveProperty("asCell");
       // The cycle back should be a $ref
       expect((result as any).next.next.next.$ref).toBeDefined();
       expect((result as any).next.next.next.$ref).toMatch(/^#\/\$defs\//);
@@ -783,14 +1036,14 @@ describe("link-utils", () => {
     it("should handle cycle through array items with $ref", () => {
       const schema: any = {
         type: "array",
-        asCell: true,
+        asCell: ["cell"],
         items: null,
       };
       schema.items = schema;
 
       const result = sanitizeSchemaForLinks(schema);
 
-      expect((result as any).asCell).toBeUndefined();
+      expect(result).not.toHaveProperty("asCell");
       // Cycle reference should be a $ref
       expect((result as any).items.$ref).toBeDefined();
       expect((result as any).items.$ref).toMatch(/^#\/\$defs\//);
@@ -801,14 +1054,14 @@ describe("link-utils", () => {
     it("should handle cycle through anyOf with $ref", () => {
       const schema: any = {
         type: "object",
-        asCell: true,
+        asCell: ["cell"],
         anyOf: [{ type: "string" }, null],
       };
       schema.anyOf[1] = schema;
 
       const result = sanitizeSchemaForLinks(schema);
 
-      expect((result as any).asCell).toBeUndefined();
+      expect(result).not.toHaveProperty("asCell");
       expect((result as any).anyOf[0].type).toBe("string");
       // Cycle reference should be a $ref
       expect((result as any).anyOf[1].$ref).toBeDefined();
@@ -818,36 +1071,36 @@ describe("link-utils", () => {
     });
 
     it("should handle multiple independent cycles", () => {
-      const cycle1: any = { type: "cycle1", asCell: true };
+      const cycle1: any = { type: "cycle1", asCell: ["cell"] };
       cycle1.self = cycle1;
-      const cycle2: any = { type: "cycle2", asStream: true };
+      const cycle2: any = { type: "cycle2", asCell: ["stream"] };
       cycle2.self = cycle2;
       const schema: any = { a: cycle1, b: cycle2 };
 
       const result = sanitizeSchemaForLinks(schema);
 
-      expect((result as any).a.asCell).toBeUndefined();
-      expect((result as any).b.asStream).toBeUndefined();
+      expect((result as any).a).not.toHaveProperty("asCell");
+      expect((result as any).b).not.toHaveProperty("asCell");
     });
 
     it("should handle keepStreams option with circular schemas", () => {
       const schema: any = {
         type: "object",
-        asCell: true,
-        asStream: true,
+        asCell: ["stream"],
       };
       schema.self = schema;
 
       const result = sanitizeSchemaForLinks(schema, { keepStreams: true });
 
-      expect((result as any).asCell).toBeUndefined();
-      // asStream should be kept
-      expect((result as any).asStream).toBe(true);
+      // Expect the new version of asStream (where it's an entry in asCell)
+      expect((result as any).asCell).toEqual(["stream"]);
+      // asStream should be gone
+      expect(result).not.toHaveProperty("asStream");
     });
 
     it("should handle shared references (diamond pattern) correctly", () => {
       // Test that same object referenced from multiple places is handled
-      const shared: any = { type: "shared", asCell: true };
+      const shared: any = { type: "shared", asCell: ["cell"] };
       const schema: any = {
         left: { path: shared },
         right: { path: shared },
@@ -856,26 +1109,25 @@ describe("link-utils", () => {
       const result = sanitizeSchemaForLinks(schema);
 
       // First encounter should strip asCell
-      expect((result as any).left.path.asCell).toBeUndefined();
+      expect((result as any).left.path).not.toHaveProperty("asCell");
       // Second encounter returns the same processed result (consistent!)
       expect((result as any).right.path).toBe((result as any).left.path);
-      expect((result as any).right.path.asCell).toBeUndefined();
+      expect((result as any).right.path).not.toHaveProperty("asCell");
     });
 
     it("should process schemas inside existing $defs", () => {
-      // Bug fix test: schemas inside $defs should have asCell/asStream stripped
+      // Bug fix test: schemas inside $defs should have asCell stripped
       const schema: any = {
         type: "object",
         $defs: {
           MyType: {
             type: "string",
-            asCell: true,
-            asStream: true,
+            asCell: ["cell"],
           },
           NestedType: {
             type: "object",
             properties: {
-              nested: { asCell: true },
+              nested: { asCell: ["cell"] },
             },
           },
         },
@@ -885,13 +1137,12 @@ describe("link-utils", () => {
       const result = sanitizeSchemaForLinks(schema);
 
       // $defs schemas should have asCell/asStream stripped
-      expect((result as any).$defs.MyType.asCell).toBeUndefined();
-      expect((result as any).$defs.MyType.asStream).toBeUndefined();
+      expect((result as any).$defs.MyType).not.toHaveProperty("asCell");
       expect((result as any).$defs.MyType.type).toBe("string");
       // Nested properties too
       expect(
-        (result as any).$defs.NestedType.properties.nested.asCell,
-      ).toBeUndefined();
+        (result as any).$defs.NestedType.properties.nested,
+      ).not.toHaveProperty("asCell");
       // $ref should be preserved
       expect((result as any).$ref).toBe("#/$defs/MyType");
     });
@@ -929,14 +1180,14 @@ describe("link-utils", () => {
     it("should handle cycles through oneOf", () => {
       const schema: any = {
         type: "object",
-        asCell: true,
+        asCell: ["cell"],
         oneOf: [{ type: "null" }, null],
       };
       schema.oneOf[1] = schema;
 
       const result = sanitizeSchemaForLinks(schema);
 
-      expect((result as any).asCell).toBeUndefined();
+      expect(result).not.toHaveProperty("asCell");
       expect((result as any).oneOf[0].type).toBe("null");
       expect((result as any).oneOf[1].$ref).toBeDefined();
       expect(() => JSON.stringify(result)).not.toThrow();
@@ -945,21 +1196,21 @@ describe("link-utils", () => {
     it("should handle cycles through allOf", () => {
       const schema: any = {
         type: "object",
-        asStream: true,
+        asCell: ["stream"],
         allOf: [{ type: "object" }, null],
       };
       schema.allOf[1] = { properties: { nested: schema } };
 
       const result = sanitizeSchemaForLinks(schema);
 
-      expect((result as any).asStream).toBeUndefined();
+      expect(result).not.toHaveProperty("asCell");
       expect((result as any).allOf[1].properties.nested.$ref).toBeDefined();
       expect(() => JSON.stringify(result)).not.toThrow();
     });
 
     it("should handle $defs with internal cycles", () => {
       // A definition that references itself
-      const myDef: any = { type: "object", asCell: true };
+      const myDef: any = { type: "object", asCell: ["cell"] };
       myDef.properties = { child: myDef };
 
       const schema: any = {
@@ -973,7 +1224,7 @@ describe("link-utils", () => {
       const result = sanitizeSchemaForLinks(schema);
 
       // asCell should be stripped
-      expect((result as any).$defs.MyRecursiveDef.asCell).toBeUndefined();
+      expect((result as any).$defs.MyRecursiveDef).not.toHaveProperty("asCell");
       // The internal cycle should be converted to $ref
       expect(
         (result as any).$defs.MyRecursiveDef.properties.child.$ref,
@@ -984,16 +1235,16 @@ describe("link-utils", () => {
     it("should handle keepAsOpaque option", () => {
       const schema: any = {
         type: "object",
-        asOpaque: true,
+        asCell: ["opaque"],
       };
 
-      // By default, asOpaque should be removed
+      // By default, asCell should be removed
       const resultDefault = sanitizeSchemaForLinks(schema);
-      expect((resultDefault as any).asOpaque).toBeUndefined();
+      expect(resultDefault).not.toHaveProperty("asCell");
 
-      // With keepAsOpaque: true, it should be preserved
-      const resultKept = sanitizeSchemaForLinks(schema, { keepAsOpaque: true });
-      expect((resultKept as any).asOpaque).toBe(true);
+      // With keepAsCell: true, it should be preserved
+      const resultKept = sanitizeSchemaForLinks(schema, { keepAsCell: true });
+      expect((resultKept as any).asCell).toEqual(["opaque"]);
     });
   });
 
@@ -1051,6 +1302,32 @@ describe("link-utils", () => {
         "value",
       ]);
       expect(parsed.value.link["/"][LINK_V1_TAG].id).toBe(baseId);
+    });
+
+    it("should rewrite relative links with base scope", () => {
+      const baseCell = runtime.getCell(space, "scoped base", undefined, tx);
+      const scopedBaseCell = createCell(runtime, {
+        ...baseCell.getAsNormalizedFullLink(),
+        scope: "session",
+      }, tx);
+      const baseId = scopedBaseCell.getAsNormalizedFullLink().id;
+
+      const relativeLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            path: ["nested", "value"],
+          },
+        },
+      };
+
+      const dataURI = createDataCellURI(
+        { link: relativeLink },
+        scopedBaseCell,
+      );
+      const parsed = getJSONFromDataURI(dataURI);
+
+      expect(parsed.value.link["/"][LINK_V1_TAG].id).toBe(baseId);
+      expect(parsed.value.link["/"][LINK_V1_TAG].scope).toBe("session");
     });
 
     it("should rewrite nested relative links with base id", () => {
@@ -1192,8 +1469,43 @@ describe("link-utils", () => {
         id: longId,
         path: ["path", "to", "cell"],
         space: space,
-        type: "application/json",
       });
+    });
+
+    it("should parse scope suffixes on the handle segment", () => {
+      const link = `/${longId}@user/path/to/cell`;
+      const result = parseLLMFriendlyLink(link, space);
+
+      expect(result).toEqual({
+        id: longId,
+        path: ["path", "to", "cell"],
+        space: space,
+        scope: "user",
+      });
+    });
+
+    it("should parse scope suffixes on cross-space handles", () => {
+      const otherSpace = "did:key:z6MkrX123abc";
+      const link = `/@${otherSpace}/${longId}@session/path`;
+      const result = parseLLMFriendlyLink(link, space);
+
+      expect(result).toEqual({
+        id: longId,
+        path: ["path"],
+        space: otherSpace,
+        scope: "session",
+      });
+    });
+
+    it("should reject invalid scope suffixes on the handle segment", () => {
+      expect(() => parseLLMFriendlyLink(`/${longId}@any/path`, space)).toThrow(
+        /Invalid scope suffix/,
+      );
+      expect(() => parseLLMFriendlyLink(`/${longId}@inherit/path`, space))
+        .toThrow(/Invalid scope suffix/);
+      expect(() => parseLLMFriendlyLink(`/${longId}@/path`, space)).toThrow(
+        /Invalid scope suffix/,
+      );
     });
 
     it("should parse link without space if optional", () => {
@@ -1203,7 +1515,6 @@ describe("link-utils", () => {
       expect(result).toEqual({
         id: longId,
         path: ["path"],
-        type: "application/json",
       });
     });
 
@@ -1217,6 +1528,13 @@ describe("link-utils", () => {
       expect(() => parseLLMFriendlyLink("/path/only", space)).toThrow(
         'Target must include a piece handle, e.g. "/of:bafyabc123/path".',
       );
+    });
+
+    it("should throw a controlled error if cross-space target omits handle", () => {
+      expect(() => parseLLMFriendlyLink("/@did:key:z6MkrX123abc", space))
+        .toThrow(
+          'Target must include a piece handle, e.g. "/of:bafyabc123/path".',
+        );
     });
 
     it("should throw if handle is too short (human name)", () => {
@@ -1240,6 +1558,30 @@ describe("link-utils", () => {
       const result = createLLMFriendlyLink(link as any);
 
       expect(result).toBe(`/${longId}/path/to/cell`);
+    });
+
+    it("should create LLM friendly links with non-space scope suffixes", () => {
+      const link: NormalizedLink = {
+        id: longId,
+        path: ["path"],
+        space: space,
+        scope: "user",
+      };
+      const result = createLLMFriendlyLink(link as any);
+
+      expect(result).toBe(`/${longId}@user/path`);
+    });
+
+    it("should omit explicit space scope when creating LLM friendly links", () => {
+      const link: NormalizedLink = {
+        id: longId,
+        path: ["path"],
+        space: space,
+        scope: "space",
+      };
+      const result = createLLMFriendlyLink(link as any);
+
+      expect(result).toBe(`/${longId}/path`);
     });
 
     it("should handle empty path", () => {

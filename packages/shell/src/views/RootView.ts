@@ -7,18 +7,39 @@ import {
   Command,
   isAppViewEqual,
   isCommand,
+  navigate,
 } from "../../shared/mod.ts";
 import { BaseView, createDefaultAppState, SHELL_COMMAND } from "./BaseView.ts";
-import { KeyStore } from "@commontools/identity";
+import { KeyStore } from "@commonfabric/identity";
 import { property, state } from "lit/decorators.js";
 import { Task } from "@lit/task";
-import { type RuntimeClient } from "@commontools/runtime-client";
-import { type DID } from "@commontools/identity";
-import { RuntimeInternals } from "../lib/runtime.ts";
-import { createVDomDebugHelpers } from "@commontools/html/debug";
+import { type RuntimeClient } from "@commonfabric/runtime-client";
+import { type DID } from "@commonfabric/identity";
+import { resolveSpaceDid, RuntimeInternals } from "@commonfabric/lib-shell";
+import { shouldRecreateRuntime } from "../lib/runtime-lifecycle.ts";
+import { createVDomDebugHelpers } from "@commonfabric/html/debug";
 import { createDebugUtils } from "../lib/debug-utils.ts";
-import { runtimeContext, spaceContext } from "@commontools/ui";
+import { runtimeContext, spaceContext } from "@commonfabric/ui";
 import { provide } from "@lit/context";
+import {
+  getThemePreference,
+  type ThemePreference,
+} from "../lib/theme-preference.ts";
+import { EXPERIMENTAL } from "../lib/env.ts";
+
+type CommonfabricDebugState = Partial<ReturnType<typeof createDebugUtils>> & {
+  rt?: RuntimeClient;
+  vdom?: ReturnType<typeof createVDomDebugHelpers>;
+  detectNonIdempotent?: (durationMs?: number) => Promise<unknown>;
+};
+
+function getCommonfabricGlobal(): typeof globalThis & {
+  commonfabric?: CommonfabricDebugState;
+} {
+  return globalThis as typeof globalThis & {
+    commonfabric?: CommonfabricDebugState;
+  };
+}
 
 // The root element for the shell application.
 //
@@ -30,14 +51,8 @@ export class XRootView extends BaseView {
     :host {
       display: block;
       width: 100%;
-      height: 100vh;
-      padding: var(--padding-desktop, 15px);
-    }
-
-    @media (max-width: 767px) {
-      :host {
-        padding: var(--padding-mobile, 5px);
-      }
+      height: 100dvh;
+      overflow: hidden;
     }
 
     #body {
@@ -47,25 +62,28 @@ export class XRootView extends BaseView {
   `;
 
   @state()
-  app = createDefaultAppState();
+  accessor app = createDefaultAppState();
+
+  @state()
+  private accessor _themePreference: ThemePreference = getThemePreference();
 
   @property()
-  keyStore?: KeyStore;
+  accessor keyStore: KeyStore | undefined = undefined;
 
   @provide({ context: runtimeContext })
   @state()
-  private runtime?: RuntimeClient;
+  private accessor runtime: RuntimeClient | undefined = undefined;
 
   @provide({ context: spaceContext })
   @state()
-  private space?: DID;
+  private accessor space: DID | undefined = undefined;
 
-  // The runtime task runs when AppState changes, and determines
-  // if a new RuntimeInternals must be created, like when
-  // identity or space change. This is manually run in `updated()`
-  // because we want to compare to previous values, leaving this
-  // function responsible for cleaning up previous runtimes, and
-  // creating a new one.
+  // The runtime task runs when AppState changes, and determines if a
+  // new RuntimeInternals must be created — only when identity or host
+  // (apiUrl) change; one runtime serves every space. This is manually
+  // run in `updated()` because we want to compare to previous values,
+  // leaving this function responsible for cleaning up previous
+  // runtimes, and creating a new one.
   private _rt = new Task<[AppState | undefined], RuntimeInternals | undefined>(
     this,
     {
@@ -84,41 +102,48 @@ export class XRootView extends BaseView {
           // Clear the runtime and space when no app state
           this.runtime = undefined;
           this.space = undefined;
-          if (globalThis.commontools) {
-            globalThis.commontools.rt = undefined;
+          const global = getCommonfabricGlobal();
+          if (global.commonfabric) {
+            global.commonfabric.rt = undefined;
           }
           return undefined;
         }
 
         const rt = await RuntimeInternals.create({
           identity: app.identity,
-          view: app.view,
           apiUrl: app.apiUrl,
+          experimental: EXPERIMENTAL,
+          // lib-shell emits address-shaped targets ({spaceDid, pieceId});
+          // mapNavigationView (shared/navigate.ts) maps a DID back to the
+          // human-readable spaceName URL at the Navigation layer.
+          navigate,
         });
 
         if (signal.aborted) {
           rt.dispose().catch(console.error);
           this.runtime = undefined;
           this.space = undefined;
-          if (globalThis.commontools) {
-            globalThis.commontools.rt = undefined;
+          const global = getCommonfabricGlobal();
+          if (global.commonfabric) {
+            global.commonfabric.rt = undefined;
           }
           return;
         }
 
-        // Update the provided runtime and space values
+        // Update the provided runtime; `space` is view state, resolved
+        // from app.view in updated() independent of the runtime's life.
         this.runtime = rt.runtime();
-        this.space = rt.space() as DID;
 
         // Expose RuntimeClient for console debugging
-        // (e.g. commontools.rt.setLoggerLevel("debug"))
-        if (!globalThis.commontools) {
-          (globalThis as any).commontools = {};
-        }
-        globalThis.commontools.rt = this.runtime;
-        globalThis.commontools.vdom = createVDomDebugHelpers();
-        globalThis.commontools.detectNonIdempotent = async () => {
-          const result = await rt.runtime().detectNonIdempotent();
+        // (e.g. commonfabric.rt.setLoggerLevel("debug"))
+        const global = getCommonfabricGlobal();
+        global.commonfabric ??= {};
+        global.commonfabric.rt = this.runtime;
+        global.commonfabric.vdom = createVDomDebugHelpers();
+        global.commonfabric.detectNonIdempotent = async (
+          durationMs = 5000,
+        ) => {
+          const result = await rt.runtime().detectNonIdempotent(durationMs);
           console.table(
             result.nonIdempotent.map((r: any) => ({
               action: r.actionId,
@@ -130,14 +155,17 @@ export class XRootView extends BaseView {
         };
 
         // Debug utilities for inspecting cell values from the console
-        globalThis.commontools.space = this.space;
         const debugUtils = createDebugUtils(
           () => this.space as DID,
           () => this.runtime,
         );
-        globalThis.commontools.readCell = debugUtils.readCell;
-        globalThis.commontools.readArgumentCell = debugUtils.readArgumentCell;
-        globalThis.commontools.subscribeToCell = debugUtils.subscribeToCell;
+        global.commonfabric.readCell = debugUtils.readCell;
+        global.commonfabric.readArgumentCell = debugUtils.readArgumentCell;
+        global.commonfabric.subscribeToCell = debugUtils.subscribeToCell;
+        global.commonfabric.watchWrites = debugUtils.watchWrites;
+        global.commonfabric.getWriteStackTrace = debugUtils.getWriteStackTrace;
+        global.commonfabric.explainTriggerTrace =
+          debugUtils.explainTriggerTrace;
 
         return rt;
       },
@@ -147,10 +175,18 @@ export class XRootView extends BaseView {
   override connectedCallback(): void {
     super.connectedCallback();
     this.addEventListener(SHELL_COMMAND, this.onCommand);
+    document.addEventListener(
+      "theme-preference-changed",
+      this._onThemeChanged,
+    );
   }
 
   override disconnectedCallback(): void {
     this.removeEventListener(SHELL_COMMAND, this.onCommand);
+    document.removeEventListener(
+      "theme-preference-changed",
+      this._onThemeChanged,
+    );
     super.disconnectedCallback();
   }
 
@@ -165,27 +201,49 @@ export class XRootView extends BaseView {
     const flipState = (!previous && current) ||
       !current;
 
-    let spaceChanged = false;
-    if (previous && !isAppViewEqual(previous.view, current.view)) {
-      // Check that if the view has changed, we may still
-      // be in the same space
-      if ("spaceName" in previous.view && "spaceName" in current.view) {
-        spaceChanged = previous.view.spaceName !== current.view.spaceName;
-      } else {
-        spaceChanged = true;
-      }
-    }
-
-    // If host, view's space, or identity changes, we'll
-    // need to recreate the runtime.
     const stateChanged = !!previous &&
-      (previous.apiUrl !== current.apiUrl ||
-        previous.identity !== current.identity || spaceChanged);
+      shouldRecreateRuntime(previous, current);
 
     if (flipState || stateChanged) {
       this._rt.run([current]);
     }
+    if (
+      flipState || stateChanged ||
+      (previous && !isAppViewEqual(previous.view, current.view))
+    ) {
+      void this.#resolveViewSpace(current);
+    }
   }
+
+  // Resolve the current view to a space DID — view state, independent of
+  // the runtime's lifecycle.
+  #resolveSpaceToken = 0;
+  async #resolveViewSpace(app: AppState | undefined): Promise<void> {
+    const token = ++this.#resolveSpaceToken;
+    let space: DID | undefined;
+    const identity = app?.identity;
+    const view = app?.view;
+    if (identity && view) {
+      if ("builtin" in view) {
+        space = view.builtin === "home" ? identity.did() : undefined;
+      } else if ("spaceDid" in view) {
+        space = view.spaceDid;
+      } else if ("spaceName" in view) {
+        try {
+          space = await resolveSpaceDid(identity, view.spaceName);
+        } catch (error) {
+          console.error("[RootView] Failed to resolve space name:", error);
+          space = undefined;
+        }
+      }
+    }
+    if (token !== this.#resolveSpaceToken) return;
+    this.space = space;
+  }
+
+  private _onThemeChanged = (e: Event) => {
+    this._themePreference = (e as CustomEvent).detail;
+  };
 
   onCommand = (e: Event) => {
     const { detail: command } = e as CustomEvent;
@@ -221,16 +279,19 @@ export class XRootView extends BaseView {
   }
 
   getRuntimeSpaceDID(): DID | undefined {
-    return this._rt.value?.space();
+    return this.space;
   }
 
   override render() {
     return html`
-      <x-app-view
-        .app="${this.app}"
-        .keyStore="${this.keyStore}"
-        .rt="${this._rt.value}"
-      ></x-app-view>
+      <cf-theme .theme="${{ colorScheme: this._themePreference }}">
+        <x-app-view
+          .app="${this.app}"
+          .keyStore="${this.keyStore}"
+          .rt="${this._rt.value}"
+          .space="${this.space}"
+        ></x-app-view>
+      </cf-theme>
     `;
   }
 }

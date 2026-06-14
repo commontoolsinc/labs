@@ -3,24 +3,38 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import "@commontools/utils/equal-ignoring-symbols";
+import "@commonfabric/utils/equal-ignoring-symbols";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import type { StorableValue } from "@commontools/memory/interface";
-import { isCell } from "../src/cell.ts";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { FabricValue } from "@commonfabric/memory/interface";
+import { isCell, recursivelyAddIDIfNeeded } from "../src/cell.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";
-import { ID, JSONSchema, type Pattern } from "../src/builder/types.ts";
-import { isPrimitiveCellLink } from "../src/link-utils.ts";
+import {
+  type Frame,
+  ID,
+  JSONSchema,
+  type Pattern,
+} from "../src/builder/types.ts";
+import {
+  getMetaLink,
+  isPrimitiveCellLink,
+  parseLink,
+} from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  type IExtendedStorageTransaction,
+  type IMemorySpaceAddress,
+} from "../src/storage/interface.ts";
+import { setResultCell } from "../src/result-utils.ts";
+import { trustPattern } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-const richSigner = await Identity.fromPassphrase("test rich raw");
-const richSpace = richSigner.did();
+const rawSigner = await Identity.fromPassphrase("test raw");
+const rawSpace = rawSigner.did();
 
 describe("Cell", () => {
   let runtime: Runtime;
@@ -66,44 +80,115 @@ describe("Cell", () => {
     expect(c.get()).toBe(20);
   });
 
-  it("should convert Error instances to @Error wrapper on set", () => {
-    const c = runtime.getCell<unknown>(
+  it("should wrap Error instances in FabricError on set", async () => {
+    const sm = StorageManager.emulate({ as: signer });
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+    });
+    const localTx = rt.edit();
+    const c = rt.getCell<unknown>(
       space,
-      "should convert Error instances to @Error wrapper on set",
+      "should wrap Error instances in FabricError on set",
       undefined,
-      tx,
+      localTx,
     );
     const error = new TypeError("something went wrong");
     c.set(error);
 
-    // Error should be converted to @Error wrapper during set
-    const result = c.get() as { "@Error": Record<string, unknown> } | undefined;
-    expect(result).toHaveProperty("@Error");
-    expect(result!["@Error"].name).toBe("TypeError");
-    expect(result!["@Error"].message).toBe("something went wrong");
-    expect(typeof result!["@Error"].stack).toBe("string");
+    // Error is stored as a `FabricError`-shaped value. `c.get()` returns a
+    // proxy view of the stored wrapper — its observable fields (`type`,
+    // `name`, `message`, `stack`, etc.) are exposed directly on the
+    // projection.
+    const result = c.get() as {
+      message: string;
+      stack: string;
+    };
+    expect(result.message).toBe("something went wrong");
+    expect(typeof result.stack).toBe("string");
+    await localTx.commit();
+    await rt.dispose();
+    await sm.close();
   });
 
-  it("should preserve Error cause property on set", () => {
-    const c = runtime.getCell<unknown>(
+  it("should preserve Error cause property on set", async () => {
+    const sm = StorageManager.emulate({ as: signer });
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+    });
+    const localTx = rt.edit();
+    const c = rt.getCell<unknown>(
       space,
       "should preserve Error cause property on set",
       undefined,
-      tx,
+      localTx,
     );
     const cause = new Error("root cause");
     const error = new Error("wrapper error", { cause });
     c.set(error);
 
-    // Error cause should be recursively converted to @Error wrapper
-    const result = c.get() as { "@Error": Record<string, unknown> } | undefined;
-    expect(result).toHaveProperty("@Error");
-    expect(result!["@Error"].message).toBe("wrapper error");
-    const causeWrapper = result!["@Error"].cause as {
-      "@Error": Record<string, unknown>;
+    // Outer error is a `FabricError`-shaped value; its cause is also
+    // `FabricError`-shaped (recursively wrapped at conversion time). The
+    // proxy view exposes the wrapper's observable fields directly.
+    const result = c.get() as {
+      message: string;
+      cause: { message: string; stack: string };
     };
-    expect(causeWrapper).toHaveProperty("@Error");
-    expect(causeWrapper["@Error"].message).toBe("root cause");
+    expect(result.message).toBe("wrapper error");
+    expect(result.cause.message).toBe("root cause");
+    expect(typeof result.cause.stack).toBe("string");
+    await localTx.commit();
+    await rt.dispose();
+    await sm.close();
+  });
+
+  it("Error set through a nested write-redirect lands on the target", async () => {
+    const sm = StorageManager.emulate({ as: signer });
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+    });
+    const localTx = rt.edit();
+
+    const target = rt.getCell<unknown>(
+      space,
+      "nested redirect target",
+      undefined,
+      localTx,
+    );
+    target.set("initial");
+
+    // `parent.slot` holds a write-redirect that aliases writes to `target`.
+    // `Cell.set` pre-resolves its top-level link, so to exercise
+    // `normalizeAndDiff`'s redirect-resolution branch we need the redirect
+    // at a nested key — that's the path it actually fires on, during the
+    // per-key recursion in the `isRecord(newValue)` branch.
+    const parent = rt.getCell<{ slot: unknown }>(
+      space,
+      "nested redirect parent",
+      undefined,
+      localTx,
+    );
+    parent.setRawUntyped({
+      slot: target.getAsWriteRedirectLink(),
+    } as unknown as FabricValue);
+
+    // Writing a `FabricInstance` (here, a native `Error` that gets wrapped
+    // into `FabricError`) through the redirect must land at the target,
+    // not clobber the redirect link at `parent.slot`. Target started as
+    // `"initial"`; under the bug, target stays as `"initial"` because the
+    // FabricError clobbered the redirect at `parent.slot`.
+    parent.set({ slot: new TypeError("through nested redirect") });
+
+    const targetResult = target.get() as {
+      message: string;
+    };
+    expect(targetResult.message).toBe("through nested redirect");
+
+    await localTx.commit();
+    await rt.dispose();
+    await sm.close();
   });
 
   it("should call toJSON() on plain objects during set", () => {
@@ -146,12 +231,18 @@ describe("Cell", () => {
     expect(result?.arr.length).toBe(3);
   });
 
-  it("should preserve shared sparse arrays and preserve sharing", () => {
-    const c = runtime.getCell<unknown>(
+  it("should preserve shared sparse arrays with structural equality", async () => {
+    const sm = StorageManager.emulate({ as: signer });
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+    });
+    const localTx = rt.edit();
+    const c = rt.getCell<unknown>(
       space,
-      "should preserve shared sparse arrays and preserve sharing",
+      "sparse sharing",
       undefined,
-      tx,
+      localTx,
     );
     const sparse: unknown[] = [];
     sparse[0] = 1;
@@ -166,8 +257,89 @@ describe("Cell", () => {
     expect(2 in (result?.[0] ?? [])).toBe(false);
     expect(result?.[0][3]).toBe(2);
     expect(result?.[0].length).toBe(4);
-    // Both should reference the same array (sharing preserved)
-    expect(result?.[0]).toBe(result?.[1]);
+    // Both should be structurally equal
+    expect(result?.[0]).toEqual(result?.[1]);
+    await localTx.commit();
+    await rt.dispose();
+    await sm.close();
+  });
+
+  it("returns a deep-frozen structural copy when recursivelyAddIDIfNeeded has nothing to do (unfrozen input)", () => {
+    const frame: Frame = {
+      generatedIdCounter: 0,
+      opaqueRefs: new Set(),
+    };
+    const interests = ["coding", "reading"];
+    const value = {
+      firstName: "Ada",
+      lastName: "Lovelace",
+      interests,
+      stable: { nested: true },
+    };
+
+    const result = recursivelyAddIDIfNeeded(value, frame);
+
+    // The "preserve identity when nothing to do" optimization doesn't
+    // apply for unfrozen inputs; the function returns a structurally
+    // equivalent, deep-frozen tree (top-level included).
+    expect(result).not.toBe(value);
+    expect(result).toEqual(value);
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.interests)).toBe(true);
+    expect(Object.isFrozen(result.stable)).toBe(true);
+  });
+
+  it("preserves identity when input is already deep-frozen", () => {
+    const frame: Frame = {
+      generatedIdCounter: 0,
+      opaqueRefs: new Set(),
+    };
+    // Deep-freeze before passing in. An already-frozen
+    // plain Object/Array is a valid `FabricValue` and shallow fabric
+    // conversion returns it as-is, so reference identity survives all
+    // the way out.
+    const interests = Object.freeze(["coding", "reading"]);
+    const stable = Object.freeze({ nested: true });
+    const value = Object.freeze({
+      firstName: "Ada",
+      lastName: "Lovelace",
+      interests,
+      stable,
+    });
+
+    const result = recursivelyAddIDIfNeeded(value, frame);
+
+    expect(result).toBe(value);
+    expect(result.interests).toBe(interests);
+    expect(result.stable).toBe(stable);
+  });
+
+  it("adds generated IDs to objects in arrays regardless of clone depth", () => {
+    const frame: Frame = {
+      generatedIdCounter: 0,
+      opaqueRefs: new Set(),
+    };
+    const stable = { nested: true };
+    const value = {
+      stable,
+      list: [{ name: "Ada" }, "plain"],
+    };
+
+    const result = recursivelyAddIDIfNeeded(value, frame) as typeof value;
+
+    // Shallow fabric conversion clones at each level, so no
+    // sub-branch is reference-preserved. The core invariants that
+    // remain: ID assignment for objects-in-arrays still fires, and
+    // primitive list elements still pass through unchanged. The
+    // returned tree is deep-frozen as a whole (top-level + sub-trees).
+    expect(result).not.toBe(value);
+    expect(result.stable).not.toBe(stable);
+    expect(result.stable).toEqual(stable);
+    expect((result.list[0] as Record<PropertyKey, unknown>)[ID]).toBe(0);
+    expect(result.list[1]).toBe("plain");
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.list)).toBe(true);
+    expect(Object.isFrozen(result.list[0])).toBe(true);
   });
 
   it("should preserve holes and add IDs to objects in sparse arrays", () => {
@@ -213,71 +385,6 @@ describe("Cell", () => {
     expect(result?.arr).toBe("custom-array-value");
   });
 
-  it("should convert -0 to 0 during set", () => {
-    const c = runtime.getCell<unknown>(
-      space,
-      "should convert -0 to 0 during set",
-      undefined,
-      tx,
-    );
-    c.set({ value: -0 });
-
-    const result = c.get() as { value: number } | undefined;
-    expect(result?.value).toBe(0);
-    // Verify it's actually 0, not -0
-    expect(Object.is(result?.value, 0)).toBe(true);
-    expect(Object.is(result?.value, -0)).toBe(false);
-  });
-
-  it("should throw when setting NaN", () => {
-    const c = runtime.getCell<unknown>(
-      space,
-      "should throw when setting NaN",
-      undefined,
-      tx,
-    );
-    expect(() => c.set({ value: NaN })).toThrow(
-      "Cannot store non-finite number",
-    );
-  });
-
-  it("should throw when setting Infinity", () => {
-    const c = runtime.getCell<unknown>(
-      space,
-      "should throw when setting Infinity",
-      undefined,
-      tx,
-    );
-    expect(() => c.set({ value: Infinity })).toThrow(
-      "Cannot store non-finite number",
-    );
-    expect(() => c.set({ value: -Infinity })).toThrow(
-      "Cannot store non-finite number",
-    );
-  });
-
-  it("should throw when setting Symbol", () => {
-    const c = runtime.getCell<unknown>(
-      space,
-      "should throw when setting Symbol",
-      undefined,
-      tx,
-    );
-    expect(() => c.set({ value: Symbol("test") })).toThrow(
-      "Cannot store symbol",
-    );
-  });
-
-  it("should throw when setting BigInt", () => {
-    const c = runtime.getCell<unknown>(
-      space,
-      "should throw when setting BigInt",
-      undefined,
-      tx,
-    );
-    expect(() => c.set({ value: BigInt(123) })).toThrow("Cannot store bigint");
-  });
-
   it("should create a proxy for the cell", () => {
     const c = runtime.getCell<{ x: number; y: number }>(
       space,
@@ -311,6 +418,49 @@ describe("Cell", () => {
     );
     cell.set({ x: 1, y: 2 });
     expect(cell.getRaw()).toEqual({ x: 1, y: 2 });
+  });
+
+  it("should let getRaw control whether the final link is followed", () => {
+    const source = runtime.getCell<{ value: number }>(
+      space,
+      "getRaw lastNode source",
+      undefined,
+      tx,
+    );
+    source.set({ value: 42 });
+
+    const regularLink = runtime.getCell<unknown>(
+      space,
+      "getRaw lastNode regular link",
+      undefined,
+      tx,
+    );
+    regularLink.setRaw(source.key("value").getAsLink());
+
+    const writeRedirectLink = runtime.getCell<unknown>(
+      space,
+      "getRaw lastNode write redirect link",
+      undefined,
+      tx,
+    );
+    writeRedirectLink.setRaw(source.key("value").getAsWriteRedirectLink());
+
+    const regularRaw = regularLink.getRaw();
+    expect(parseLink(regularRaw, regularLink)?.id).toBe(
+      source.getAsNormalizedFullLink().id,
+    );
+    expect(regularLink.getRaw({ lastNode: "value" })).toBe(42);
+    expect(
+      parseLink(
+        regularLink.getRaw({ lastNode: "writeRedirect" }),
+        regularLink,
+      )?.id,
+    ).toBe(source.getAsNormalizedFullLink().id);
+
+    expect(parseLink(writeRedirectLink.getRaw(), writeRedirectLink)?.id).toBe(
+      source.getAsNormalizedFullLink().id,
+    );
+    expect(writeRedirectLink.getRaw({ lastNode: "writeRedirect" })).toBe(42);
   });
 
   it("should set raw value using setRaw", () => {
@@ -378,41 +528,86 @@ describe("Cell", () => {
 
   it("should set and get the source cell", () => {
     // Create two cells
-    const sourceCell = runtime.getCell<{ foo: number }>(
+    const resultCell = runtime.getCell<{ foo: number }>(
       space,
-      "source cell for setSourceCell/getSourceCell test",
+      "result cell for result metadata test",
       undefined,
       tx,
     );
-    sourceCell.set({ foo: 123 });
+    resultCell.set({ foo: 123 });
 
     const targetCell = runtime.getCell<{ bar: string }>(
       space,
-      "target cell for setSourceCell/getSourceCell test",
+      "target cell for result metadata test",
       undefined,
       tx,
     );
     targetCell.set({ bar: "baz" });
 
-    // Initially, getSourceCell should return undefined
-    expect(targetCell.getSourceCell()).toBeUndefined();
+    // Initially, result metadata should be unset
+    expect(getMetaLink(targetCell, "result")).toBeUndefined();
 
-    // Set the source cell
-    targetCell.setSourceCell(sourceCell);
+    // Set the result cell
+    setResultCell(targetCell, resultCell);
 
-    // Now getSourceCell should return a Cell with the same value as sourceCell
-    const retrievedSource = targetCell.getSourceCell();
-    expect(isCell(retrievedSource)).toBe(true);
-    expect(retrievedSource?.get()).toEqual({ foo: 123 });
+    // Now getMetaLink should return a link to resultCell
+    const retrievedResultLink = getMetaLink(targetCell, "result");
+    expect(retrievedResultLink).toBeDefined();
+    const retrievedResult = runtime.getCellFromLink(
+      retrievedResultLink!,
+      undefined,
+      tx,
+    );
+    expect(isCell(retrievedResult)).toBe(true);
+    expect(retrievedResult?.get()).toEqual({ foo: 123 });
 
     // Changing the source cell's value should be reflected
-    sourceCell.set({ foo: 456 });
-    expect(retrievedSource?.get()).toEqual({ foo: 456 });
+    resultCell.set({ foo: 456 });
+    expect(retrievedResult?.get()).toEqual({ foo: 456 });
+  });
+
+  it("should sink metadata field changes", async () => {
+    const cell = runtime.getCell<{ value: number }>(
+      space,
+      "sink meta field changes",
+      undefined,
+      tx,
+    );
+    cell.set({ value: 1 });
+    cell.setMetaRaw("slug", "first");
+    await tx.commit();
+    tx = runtime.edit();
+
+    const seen: unknown[] = [];
+    const cleaned: unknown[] = [];
+    const cancel = cell.withTx(tx).sinkMeta("slug", (value) => {
+      seen.push(value);
+      return () => cleaned.push(value);
+    });
+    await runtime.idle();
+    expect(seen).toEqual(["first"]);
+
+    const metaTx = runtime.edit();
+    cell.withTx(metaTx).setMetaRaw("slug", "second");
+    await metaTx.commit();
+    await runtime.idle();
+
+    expect(seen).toEqual(["first", "second"]);
+    expect(cleaned).toEqual(["first"]);
+
+    const valueTx = runtime.edit();
+    cell.withTx(valueTx).set({ value: 2 });
+    await valueTx.commit();
+    await runtime.idle();
+
+    expect(seen).toEqual(["first", "second"]);
+    cancel();
+    expect(cleaned).toEqual(["first", "second"]);
   });
 
   it("should update pattern output when argument is changed via getArgumentCell", async () => {
     // Create a simple doubling pattern
-    const doublePattern: Pattern = {
+    const doublePattern = trustPattern(runtime, {
       argumentSchema: {
         type: "object",
         properties: { input: { type: "number" } },
@@ -422,18 +617,18 @@ describe("Cell", () => {
         type: "object",
         properties: { output: { type: "number" } },
       },
-      result: { output: { $alias: { path: ["internal", "doubled"] } } },
+      result: { output: { $alias: { partialCause: "doubled", path: [] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (args: { input: number }) => (args.input * 2),
           },
-          inputs: { input: { $alias: { path: ["argument", "input"] } } },
-          outputs: { $alias: { path: ["internal", "doubled"] } },
+          inputs: { input: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: { $alias: { partialCause: "doubled", path: [] } },
         },
       ],
-    };
+    } as Pattern);
 
     // Instantiate the pattern with initial argument
     const resultCell = runtime.getCell(space, "doubling pattern instance");
@@ -466,6 +661,75 @@ describe("Cell", () => {
     // Verify final output
     const final = await resultCell.pull();
     expect(final).toEqual({ output: 200 });
+  });
+
+  it("should resolve getArgumentCell from argument metadata after reload", async () => {
+    const argumentSchema = {
+      type: "object",
+      properties: { input: { type: "number" } },
+      required: ["input"],
+    } as const;
+    const doublePattern = trustPattern(runtime, {
+      argumentSchema,
+      resultSchema: {
+        type: "object",
+        properties: { output: { type: "number" } },
+      },
+      result: { output: { $alias: { partialCause: "doubled", path: [] } } },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (args: { input: number }) => args.input * 2,
+          },
+          inputs: { input: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: { $alias: { partialCause: "doubled", path: [] } },
+        },
+      ],
+    } as Pattern);
+    const resultCell = runtime.getCell(
+      space,
+      "getArgumentCell after reload",
+      undefined,
+      tx,
+    );
+    runtime.setup(tx, doublePattern, { input: 11 }, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const reloadedResultCell = resultCell.withTx(tx);
+    const argumentLink = getMetaLink(reloadedResultCell, "argument");
+    expect(argumentLink?.schema).toEqual(argumentSchema);
+
+    const argumentCell = reloadedResultCell.getArgumentCell<{ input: number }>(
+      argumentSchema,
+    );
+    expect(argumentCell?.get()).toEqual({ input: 11 });
+    expect(argumentCell?.getAsNormalizedFullLink().id).toBe(argumentLink?.id);
+    expect(argumentCell?.getAsNormalizedFullLink().scope).toBe(
+      argumentLink?.scope,
+    );
+  });
+});
+
+describe("Cell circular references", () => {
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
   });
 
   it("should translate circular references into links", () => {
@@ -515,7 +779,7 @@ describe("Cell", () => {
               items: {
                 type: "object",
                 properties: { parent: { $ref: "#/$defs/Root" } },
-                asCell: true,
+                asCell: ["cell"],
                 required: ["parent"],
               },
             },
@@ -606,7 +870,7 @@ describe("Cell utility functions", () => {
     expect(isCellResult({})).toBe(false);
   });
 
-  describe("getRawUntyped / setRawUntyped / getRawUntypedMutable", () => {
+  describe("getRawUntyped / setRawUntyped", () => {
     it("getRawUntyped returns the same value as getRaw for typed data", () => {
       const cell = runtime.getCell<{ a: number }>(
         space,
@@ -638,7 +902,7 @@ describe("Cell utility functions", () => {
       // Write a sigil link via setRawUntyped — this would not type-check
       // with setRaw because a link object is not assignable to string.
       const link = target.getAsWriteRedirectLink();
-      cell.setRawUntyped(link as StorableValue);
+      cell.setRawUntyped(link as FabricValue);
 
       // The raw untyped read should return the link structure.
       const raw = cell.getRawUntyped();
@@ -658,44 +922,110 @@ describe("Cell utility functions", () => {
       expect(cell.getRawUntyped()).toBeUndefined();
     });
 
-    it("getRawUntypedMutable returns undefined for an empty cell", () => {
+    it("getRawUntyped({ frozen: false }) returns undefined for an empty cell", () => {
       const cell = runtime.getCell<{ x: number }>(
         space,
-        "getRawUntypedMutable empty",
+        "getRawUntyped frozen false empty",
         undefined,
         tx,
       );
-      expect(cell.getRawUntypedMutable()).toBeUndefined();
+      expect(cell.getRawUntyped({ frozen: false })).toBeUndefined();
     });
 
-    it("getRawUntypedMutable returns a value equal to getRaw", () => {
+    it("getRawUntyped({ frozen: false }) returns a value equal to getRaw", () => {
       const cell = runtime.getCell<{ x: number; y: number }>(
         space,
-        "getRawUntypedMutable basic",
+        "getRawUntyped frozen false basic",
         undefined,
         tx,
       );
       cell.set({ x: 10, y: 20 });
-      expect(cell.getRawUntypedMutable()).toEqual(cell.getRaw());
+      expect(cell.getRawUntyped({ frozen: false })).toEqual(cell.getRaw());
+    });
+
+    it("getRawUntyped({ frozen: false }) _does_ clone", () => {
+      const cell = runtime.getCell<{ items: number[] }>(
+        space,
+        "getRawUntyped frozen false clone off",
+        undefined,
+        tx,
+      );
+      const orig = { items: [1, 2] };
+      cell.set(orig);
+      const result = cell.getRawUntyped({ frozen: false });
+      expect(result).toEqual(orig);
+      expect(result).not.toBe(orig);
+      expect(Object.isFrozen(result)).toBe(false);
+    });
+
+    it("setRawUntyped accepts an array", () => {
+      const cell = runtime.getCell<number[]>(
+        space,
+        "setRawUntyped array",
+        undefined,
+        tx,
+      );
+      cell.setRawUntyped([1, 2, 3] as FabricValue);
+      expect(cell.getRawUntyped()).toEqual([1, 2, 3]);
+    });
+
+    it("setRawUntyped accepts a nested object", () => {
+      const cell = runtime.getCell<{ a: { b: { c: number } } }>(
+        space,
+        "setRawUntyped nested",
+        undefined,
+        tx,
+      );
+      cell.setRawUntyped({ a: { b: { c: 42 } } } as FabricValue);
+      const raw = cell.getRawUntyped() as { a: { b: { c: number } } };
+      expect(raw.a.b.c).toBe(42);
+    });
+
+    it("setRawUntyped accepts null", () => {
+      const cell = runtime.getCell<number | null>(
+        space,
+        "setRawUntyped null",
+        undefined,
+        tx,
+      );
+      cell.set(10);
+      cell.setRawUntyped(null as FabricValue);
+      expect(cell.getRawUntyped()).toBe(null);
+    });
+
+    it("setRawUntyped accepts an empty array", () => {
+      const cell = runtime.getCell<unknown[]>(
+        space,
+        "setRawUntyped empty array",
+        undefined,
+        tx,
+      );
+      cell.setRawUntyped([] as FabricValue);
+      expect(cell.getRawUntyped()).toEqual([]);
+    });
+
+    it("setRawUntyped throws without a transaction", () => {
+      const cell = runtime.getCell<number>(
+        space,
+        "setRawUntyped no tx",
+      );
+      expect(() => cell.setRawUntyped(42 as FabricValue)).toThrow(
+        "Transaction required",
+      );
     });
   });
 });
 
-// Separate top-level describe with richStorableValues enabled for frozen-ness.
-describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
+describe("Cell raw methods: frozen-or-not", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: richSigner });
+    storageManager = StorageManager.emulate({ as: rawSigner });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: {
-        richStorableValues: true,
-        canonicalHashing: true,
-      },
     });
     tx = runtime.edit();
   });
@@ -708,7 +1038,7 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
 
   it("getRaw returns a frozen object", () => {
     const cell = runtime.getCell<{ a: number; b: number[] }>(
-      richSpace,
+      rawSpace,
       "getRaw frozen",
       undefined,
       tx,
@@ -722,7 +1052,7 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
 
   it("getRawUntyped returns a frozen object", () => {
     const cell = runtime.getCell<{ x: number[] }>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen",
       undefined,
       tx,
@@ -734,16 +1064,18 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
     expect(Object.isFrozen((raw as { x: readonly number[] }).x)).toBe(true);
   });
 
-  it("getRawUntypedMutable returns a mutable deep copy", () => {
+  it("getRawUntyped({ frozen: false }) returns a mutable deep copy", () => {
     const cell = runtime.getCell<{ items: number[] }>(
-      richSpace,
-      "getRawUntypedMutable mutable",
+      rawSpace,
+      "getRawUntyped frozen false mutable",
       undefined,
       tx,
     );
     cell.set({ items: [10, 20] });
 
-    const mutable = cell.getRawUntypedMutable() as { items: number[] };
+    const mutable = cell.getRawUntyped({ frozen: false }) as {
+      items: number[];
+    };
     expect(mutable).toBeDefined();
     expect(Object.isFrozen(mutable)).toBe(false);
     expect(Object.isFrozen(mutable.items)).toBe(false);
@@ -758,7 +1090,7 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
 
   it("getRaw and getRawUntyped agree, both frozen", () => {
     const cell = runtime.getCell<{ v: string }>(
-      richSpace,
+      rawSpace,
       "raw agreement frozen",
       undefined,
       tx,
@@ -770,4 +1102,407 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
     expect(Object.isFrozen(typed)).toBe(true);
     expect(Object.isFrozen(untyped)).toBe(true);
   });
+
+  it("setRawUntyped stores arrays correctly", () => {
+    const cell = runtime.getCell<number[]>(
+      rawSpace,
+      "setRawUntyped array",
+      undefined,
+      tx,
+    );
+    cell.setRawUntyped([10, 20, 30] as FabricValue);
+    const raw = cell.getRawUntyped();
+    expect(raw).toEqual([10, 20, 30]);
+    expect(Object.isFrozen(raw)).toBe(true);
+  });
+
+  it("setRawUntyped stores nested objects correctly", () => {
+    const cell = runtime.getCell<{ a: { b: number[] } }>(
+      rawSpace,
+      "setRawUntyped nested",
+      undefined,
+      tx,
+    );
+    cell.setRawUntyped({ a: { b: [1, 2] } } as FabricValue);
+    const raw = cell.getRawUntyped() as { a: { b: readonly number[] } };
+    expect(raw.a.b).toEqual([1, 2]);
+    expect(Object.isFrozen(raw)).toBe(true);
+    expect(Object.isFrozen(raw.a)).toBe(true);
+    expect(Object.isFrozen(raw.a.b)).toBe(true);
+  });
+
+  it("setRawUntyped stores null", () => {
+    const cell = runtime.getCell<number | null>(
+      rawSpace,
+      "setRawUntyped null",
+      undefined,
+      tx,
+    );
+    cell.set(5);
+    cell.setRawUntyped(null as FabricValue);
+    expect(cell.getRawUntyped()).toBe(null);
+  });
+
+  it("getRawUntyped({ frozen: false }) returns mutable array copy", () => {
+    const cell = runtime.getCell<number[]>(
+      rawSpace,
+      "getRawUntyped frozen false array",
+      undefined,
+      tx,
+    );
+    cell.set([10, 20, 30]);
+    const mutable = cell.getRawUntyped({ frozen: false }) as number[];
+    expect(Object.isFrozen(mutable)).toBe(false);
+    mutable.push(40);
+    expect(cell.getRaw() as readonly number[]).toEqual([10, 20, 30]);
+  });
+
+  it("getRawUntyped({ frozen: false }) returns mutable deeply nested copy", () => {
+    const cell = runtime.getCell<{ a: { b: { c: number[] } } }>(
+      rawSpace,
+      "getRawUntyped frozen false deep nested",
+      undefined,
+      tx,
+    );
+    cell.set({ a: { b: { c: [1, 2] } } });
+    const mutable = cell.getRawUntyped({ frozen: false }) as {
+      a: { b: { c: number[] } };
+    };
+    expect(Object.isFrozen(mutable)).toBe(false);
+    expect(Object.isFrozen(mutable.a)).toBe(false);
+    expect(Object.isFrozen(mutable.a.b)).toBe(false);
+    expect(Object.isFrozen(mutable.a.b.c)).toBe(false);
+    mutable.a.b.c.push(3);
+    const raw = cell.getRaw() as { a: { b: { c: readonly number[] } } };
+    expect(raw.a.b.c).toEqual([1, 2]);
+  });
+
+  it("getRawUntyped({ frozen: false }) with empty array", () => {
+    const cell = runtime.getCell<unknown[]>(
+      rawSpace,
+      "getRawUntyped frozen false empty array",
+      undefined,
+      tx,
+    );
+    cell.set([]);
+    const mutable = cell.getRawUntyped({ frozen: false }) as unknown[];
+    expect(mutable).toEqual([]);
+    expect(Object.isFrozen(mutable)).toBe(false);
+  });
+
+  it("getRawUntyped({ frozen: false }) successive calls return independent copies", () => {
+    const cell = runtime.getCell<{ val: number }>(
+      rawSpace,
+      "getRawUntyped frozen false independence",
+      undefined,
+      tx,
+    );
+    cell.set({ val: 1 });
+    const copy1 = cell.getRawUntyped({ frozen: false }) as { val: number };
+    const copy2 = cell.getRawUntyped({ frozen: false }) as { val: number };
+    copy1.val = 99;
+    expect(copy2.val).toBe(1);
+  });
+
+  it("getRawUntyped({ frozen: true }) returns frozen (same as default)", () => {
+    const cell = runtime.getCell<{ x: number }>(
+      rawSpace,
+      "getRawUntyped frozen true",
+      undefined,
+      tx,
+    );
+    cell.set({ x: 42 });
+    const frozen = cell.getRawUntyped({ frozen: true });
+    expect(Object.isFrozen(frozen)).toBe(true);
+    expect(frozen).toEqual(cell.getRawUntyped());
+  });
+
+  it("getRawUntyped({ frozen: false }) with deeply nested structure", () => {
+    const cell = runtime.getCell<{ a: { b: { c: number[] } } }>(
+      rawSpace,
+      "getRawUntyped frozen false deep",
+      undefined,
+      tx,
+    );
+    cell.set({ a: { b: { c: [1] } } });
+    const mutable = cell.getRawUntyped({ frozen: false }) as {
+      a: { b: { c: number[] } };
+    };
+    expect(Object.isFrozen(mutable)).toBe(false);
+    expect(Object.isFrozen(mutable.a)).toBe(false);
+    expect(Object.isFrozen(mutable.a.b)).toBe(false);
+    expect(Object.isFrozen(mutable.a.b.c)).toBe(false);
+  });
+
+  it("getRawUntyped({ frozen: false }) successive calls are independent", () => {
+    const cell = runtime.getCell<{ val: number }>(
+      rawSpace,
+      "getRawUntyped frozen false independence",
+      undefined,
+      tx,
+    );
+    cell.set({ val: 1 });
+    const copy1 = cell.getRawUntyped({ frozen: false }) as { val: number };
+    const copy2 = cell.getRawUntyped({ frozen: false }) as { val: number };
+    copy1.val = 99;
+    expect(copy2.val).toBe(1);
+  });
 });
+
+// Result-meta round-trip across commit + fresh-tx reload. These tests assert
+// end-to-end correctness of the standard result meta link round-trip: the
+// round-trip preserves the result-link object, and a raw `tx.read` of
+// `path: ["result"]` returns it as an object link record (with own-property
+//  `"/"`), never as a string.
+//
+// Historical context: these tests were authored alongside the deletion of
+// two defensive `JSON.parse` blocks that previously existed in
+// `runner/src/storage/transaction.ts` (in `read()`) and `runner/src/cell.ts`
+// (in the old source metadata path). Both blocks guarded a parse with the same shape —
+// `typeof value === "string" && value.startsWith('{"/":')` — and were
+// originally added (PRs #1472, #1562) to handle string-form values
+// returned from a previous shape of the storage layer. PR #2971 in
+// March 2026 wired `valueFromJson` into the storage-boundary read path
+// (`memory/space.ts`): `valueFromJson` unconditionally decodes the `is`
+// column to an object (stripping the `fvj1:` prefix) before reaching
+// either defensive parse. From that point on, neither guard could fire
+// through the standard public API, and the defensive parses became
+// orphaned — which is what motivated their deletion.
+//
+// The tests below pin the round-trip behavior that, post-deletion, is the
+// observable contract. They serve as a passive regression net for any future
+// change that might re-introduce a non-object value at `path: ["result"]`.
+//
+// See `coordination/docs/2026-04-30-fvj1-parse-site-kickoff.md` (project
+// kickoff doc, session 2026-067) for the full liveness analysis.
+describe(`Cell result-meta round-trip`, () => {
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it(
+    "result meta link round-trips correctly across a fresh tx",
+    async () => {
+      // Set up a result/target pair via the standard meta-link API.
+      const resultCell = runtime.getCell<{ foo: number }>(
+        space,
+        "fvj1 source-cell round-trip: source",
+        undefined,
+        tx,
+      );
+      resultCell.set({ foo: 123 });
+
+      const targetCell = runtime.getCell<{ bar: string }>(
+        space,
+        "fvj1 source-cell round-trip: target",
+        undefined,
+        tx,
+      );
+      targetCell.set({ bar: "baz" });
+      setResultCell(targetCell, resultCell);
+
+      // Commit, then start a fresh tx. This forces the `path: ["result"]`
+      // read to go through the storage layer (rather than the in-tx
+      // novelty cache, which short-circuits serialization), so
+      // `valueFromJson` runs as the actual decode step.
+      await tx.commit();
+      tx = runtime.edit();
+
+      const retrievedResultLink = getMetaLink(
+        targetCell.withTx(tx),
+        "result",
+      );
+      expect(retrievedResultLink).toBeDefined();
+      const retrievedResult = runtime.getCellFromLink(retrievedResultLink!);
+      expect(isCell(retrievedResult)).toBe(true);
+      expect(retrievedResult?.withTx(tx).get()).toEqual({ foo: 123 });
+    },
+  );
+
+  it(
+    "raw read of path: ['result'] returns an object link record",
+    async () => {
+      // Set up a result/target pair and commit.
+      const resultCell = runtime.getCell<{ foo: number }>(
+        space,
+        "fvj1 source-cell raw read: source",
+        undefined,
+        tx,
+      );
+      resultCell.set({ foo: 123 });
+
+      const targetCell = runtime.getCell<{ bar: string }>(
+        space,
+        "fvj1 source-cell raw read: target",
+        undefined,
+        tx,
+      );
+      targetCell.set({ bar: "baz" });
+      setResultCell(targetCell, resultCell);
+
+      await tx.commit();
+      tx = runtime.edit();
+
+      // Raw read of `path: ["result"]` exercises the same storage-layer
+      // code path as `getMetaLink`'s underlying `readOrThrow`. The value
+      // the storage layer surfaces should be an object link record (with
+      // own-property `"/"`), never a JSON-stringified form, under both flag
+      // states.
+      const targetLink = targetCell.getAsNormalizedFullLink();
+      const resultAddress = {
+        space,
+        id: targetLink.id,
+        path: ["result"],
+      } as IMemorySpaceAddress;
+      const readResult = tx.read(resultAddress);
+      expect(readResult.ok).toBeDefined();
+
+      const value = readResult.ok!.value;
+      expect(typeof value).not.toBe("string");
+      expect(typeof value).toBe("object");
+      expect(value).not.toBeNull();
+      expect(Object.prototype.hasOwnProperty.call(value, "/")).toBe(true);
+    },
+  );
+});
+
+describe(
+  `Cell special-number storage`,
+  () => {
+    let runtime: Runtime;
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let tx: IExtendedStorageTransaction;
+
+    beforeEach(() => {
+      storageManager = StorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      tx = runtime.edit();
+    });
+
+    afterEach(async () => {
+      await tx.commit();
+      await runtime?.dispose();
+      await storageManager?.close();
+    });
+
+    it("preserves the sign of -0 on set", () => {
+      const c = runtime.getCell<unknown>(
+        space,
+        "preserve -0",
+        undefined,
+        tx,
+      );
+      c.set({ value: -0 });
+      const result = c.get() as { value: number } | undefined;
+      expect(Object.is(result?.value, -0)).toBe(true);
+      expect(Object.is(result?.value, 0)).toBe(false);
+    });
+
+    it("stores NaN", () => {
+      const c = runtime.getCell<unknown>(
+        space,
+        "store NaN",
+        undefined,
+        tx,
+      );
+      c.set({ value: NaN });
+      const result = c.get() as { value: number } | undefined;
+      expect(Number.isNaN(result?.value)).toBe(true);
+    });
+
+    it("stores +Infinity and -Infinity", () => {
+      const c = runtime.getCell<unknown>(
+        space,
+        "store infinities",
+        undefined,
+        tx,
+      );
+      c.set({ pos: Infinity, neg: -Infinity });
+      const result = c.get() as
+        | { pos: number; neg: number }
+        | undefined;
+      expect(result?.pos).toBe(Infinity);
+      expect(result?.neg).toBe(-Infinity);
+    });
+  },
+);
+
+describe(
+  "Cell symbol storage",
+  () => {
+    let runtime: Runtime;
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let tx: IExtendedStorageTransaction;
+
+    beforeEach(() => {
+      storageManager = StorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      tx = runtime.edit();
+    });
+
+    afterEach(async () => {
+      await tx.commit();
+      await runtime?.dispose();
+      await storageManager?.close();
+    });
+
+    it("round-trips an interned symbol with stable identity", () => {
+      const c = runtime.getCell<unknown>(
+        space,
+        "interned symbol round-trip",
+        undefined,
+        tx,
+      );
+      c.set({ tag: Symbol.for("status") });
+      const result = c.get() as { tag: symbol } | undefined;
+      // Same registry key in the same realm yields the same symbol
+      // instance, so the round-tripped value is `Object.is` to the
+      // constructed sentinel.
+      expect(Object.is(result?.tag, Symbol.for("status"))).toBe(true);
+    });
+
+    it("round-trips an interned symbol with an empty key", () => {
+      const c = runtime.getCell<unknown>(
+        space,
+        "interned empty-key symbol",
+        undefined,
+        tx,
+      );
+      c.set({ tag: Symbol.for("") });
+      const result = c.get() as { tag: symbol } | undefined;
+      expect(Object.is(result?.tag, Symbol.for(""))).toBe(true);
+    });
+
+    it("throws on a unique (uninterned) symbol", () => {
+      const c = runtime.getCell<unknown>(
+        space,
+        "throw on unique symbol",
+        undefined,
+        tx,
+      );
+      expect(() => c.set({ value: Symbol("nope") })).toThrow(
+        "Cannot store unique (uninterned) symbol",
+      );
+    });
+  },
+);

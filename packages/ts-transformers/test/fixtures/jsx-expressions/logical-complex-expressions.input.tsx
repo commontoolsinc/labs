@@ -1,10 +1,9 @@
-/// <cts-enable />
-import { cell, pattern, UI } from "commontools";
+import { cell, pattern, UI } from "commonfabric";
 
 // FIXTURE: logical-complex-expressions
-// Verifies: nested && and mixed || && with JSX are transformed to when() with derive() predicates
-//   a && b && <JSX>     → when(derive({a, b}, ...), <JSX>)
-//   (a || b) && <JSX>   → when(derive({a, b}, ...), <JSX>)
+// Verifies: nested && and mixed || && with JSX are transformed to when() with lift-applied predicates
+//   a && b && <JSX>     → when(lift(...)({ a, b }), <JSX>)
+//   (a || b) && <JSX>   → when(lift(...)({ a, b }), <JSX>)
 export default pattern((_state) => {
   const items = cell<string[]>([]);
   const isEnabled = cell(false);

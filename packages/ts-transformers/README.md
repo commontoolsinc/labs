@@ -1,9 +1,9 @@
-# @commontools/ts-transformers
+# @commonfabric/ts-transformers
 
-TypeScript AST transformers that bridge natural TypeScript code and the
-CommonTools runtime. Pattern authors write idiomatic TypeScript; the
-transformers rewrite it into schema-annotated form for reactivity and
-information flow control (IFC).
+TypeScript AST transformers that bridge authored TypeScript patterns and the
+Common Fabric runtime. Pattern authors write natural TypeScript; the transformer
+pipeline rewrites supported reactive constructs into explicit schema-annotated
+form for reactivity and information-flow control.
 
 ## What It Does
 
@@ -14,31 +14,53 @@ The transformers analyze TypeScript at compile time and:
    runtime-inspectable schema
 2. **Make closure captures explicit** - Hidden variable captures become explicit
    parameters with schemas
-3. **Annotate data flow boundaries** - Every `derive`, `handler`, and
+3. **Annotate data flow boundaries** - Every `lift` / `computed`, `handler`, and
    `mapWithPattern` gets input/output schemas
 
-Example transformation:
+Example transformation (illustrative; trimmed for readability — use
+`--show-transformed` below for the full output):
 
-```typescript
-// Input: Natural TypeScript
-state.items.map((item) => item.price * state.discount);
+```tsx
+// Input: Natural TypeScript inside a pattern
+items.map((item) => item.price * discount);
 
-// Output: Schema-annotated form
-state.items.mapWithPattern(
-  pattern(
-    inputSchema,
-    outputSchema,
-    ({ element: item, params: { state } }) =>
-      derive(
-        deriveInputSchema,
-        deriveOutputSchema,
-        { item, state },
-        ({ item, state }) => item.price * state.discount,
-      ),
-  ),
-  { state: { discount: state.discount } },
+// Output: the reactive collection call becomes a hoisted, schema-annotated
+// mapWithPattern over a module-scope pattern, with closure captures threaded as
+// params and reactive reads lowered to `.key(...)`:
+const __cfPattern_1 = __cfHelpers.pattern(
+  (__cf_pattern_input) => {
+    const item = __cf_pattern_input.key("element");
+    const discount = __cf_pattern_input.key("params", "discount");
+    return item.key("price") * discount;
+  },
+  /* element + params input schema */ {
+    /* … */
+  } as const satisfies __cfHelpers.JSONSchema,
+  /* result schema */ {
+    type: "number",
+  } as const satisfies __cfHelpers.JSONSchema,
 );
+// …used at the original site as:
+items.mapWithPattern(__cfPattern_1, { params: { discount } });
+// …and registered for content-addressed identity at module end:
+__cfReg({ __cfPattern_1 });
 ```
+
+Note the shape that current `main` actually emits: builder calls (`pattern` /
+`lift` / `handler`) are hoisted to module-scope consts and registered with a
+single trailing `__cfReg({ … })` (see the current-behavior spec §11);
+`computed`/`derive`-style computations lower to the lift-applied form rather
+than the retired `derive(...)` helper.
+
+## Review First
+
+For the current branch shape, start here instead of inferring architecture from
+older implementation notes:
+
+- `docs/specs/ts-transformer/ts_transformers_review_guide.md`
+- `docs/specs/ts-transformer/ts_transformers_target_pattern_language_spec.md`
+- `docs/specs/ts-transformer/ts_transformers_lowering_contract.md`
+- `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`
 
 ## Development
 
@@ -61,7 +83,7 @@ test/fixtures/closures/
 ├── map-single-capture.expected.tsx   # What the transformer produces
 ├── handler-event-param.input.tsx
 ├── handler-event-param.expected.tsx
-└── ... (96 closure fixtures)
+└── ... (many more closure fixtures)
 ```
 
 To run a specific fixture:
@@ -73,8 +95,14 @@ env FIXTURE=map-single-capture deno task test
 To see transformed output:
 
 ```bash
-deno task ct check --show-transformed test/fixtures/closures/map-single-capture.input.tsx
+deno task cf check --show-transformed [--no-run] packages/patterns/lunch-poll/main.tsx
 ```
+
+Run it from the repository root, targeting a pattern that lives in the workspace
+(the path is repo-root-relative, e.g. `packages/patterns/lunch-poll/main.tsx`):
+`deno task cf` resolves the pattern against the workspace to execute the
+transform. Add `--no-run` to emit the transformed output without running the
+pattern.
 
 ### Adding New Transformations
 
@@ -86,38 +114,60 @@ deno task ct check --show-transformed test/fixtures/closures/map-single-capture.
 
 ## Architecture
 
-### Transformation Pipeline
+### Pipeline
 
 ```
-Closure → SchemaInjection → OpaqueRefJSX → SchemaGenerator
+CastValidation
+→ EmptyArrayOfValidation
+→ OpaqueGetValidation
+→ PatternContextValidation
+→ JsxExpressionSiteRouter
+→ LiftLowering
+→ Closure
+→ PatternOwnedExpressionSiteLowering
+→ HelperOwnedExpressionSiteLowering
+→ WriteAuthorizedByValidation
+→ PatternCallbackLowering
+→ SchemaInjection
+→ BuilderCallHoisting
+→ SchemaGenerator
+→ ReactiveVariableFor
+→ ModuleScopeShadowing
+→ ModuleScopeCfData
+→ ModuleScopeFunctionHardening
 ```
 
-The closure transformer runs first on clean AST so TypeChecker node identity
-works for scope detection.
+The exact current order and behavior are documented normatively in
+`docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`.
 
-### Key Transformations
+### Representative Rewrites
 
 | Input Pattern         | Output                                    | Purpose                   |
 | --------------------- | ----------------------------------------- | ------------------------- |
 | `array.map(fn)`       | `array.mapWithPattern(pattern, captures)` | Explicit closure captures |
-| `expr1 * expr2`       | `derive(schema, schema, inputs, fn)`      | Data flow boundary        |
+| `expr1 * expr2`       | `lift(schema, schema, fn)(inputs)`        | Data flow boundary        |
 | `onClick={() => ...}` | `handler(eventSchema, stateSchema, fn)`   | Handler with dual schemas |
-| `Cell<T>`             | `{ type: "...", asCell: true }`           | Writable reactive ref     |
-| `OpaqueRef<T>`        | `{ type: "...", asOpaque: true }`         | Read-only reactive ref    |
+| `Cell<T>`             | `{ type: "...", asCell: ["cell"] }`       | Writable reactive ref     |
+| `OpaqueRef<T>`        | structural schema without `asOpaque`      | Read-only reactive ref    |
 
-## Documentation
+## Additional Documentation
 
-- `docs/closure-design.md` - Closure transformation design decisions
-- `docs/handler-closures-design.md` - Event handler transformation
-- `docs/hierarchical-params-spec.md` - Nested parameter handling
-- `ISSUES_TO_FOLLOW_UP.md` - Known issues and open questions
+- `docs/specs/ts-transformer/ts_transformers_review_guide.md` - concise review
+  entrypoint and read order
+- `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md` -
+  implemented behavior inventory
+- `docs/specs/ts-transformer/ts_transformers_design_deltas.md` - hardening
+  follow-ups and historical deltas
+- `ISSUES_TO_FOLLOW_UP.md` - narrow internal follow-up queue for remaining live
+  schema questions
 
 ## Why This Matters
 
 The schemas enable:
 
 - **Reactivity** - Runtime knows which values to track for re-computation
-- **Taint tracking** - If secret data enters a derive, the output is tainted
+- **Taint tracking** - If secret data enters a computation, the output is
+  tainted
 - **Access control** - Can this computation see this data?
 - **Audit trails** - How did this value get computed?
 

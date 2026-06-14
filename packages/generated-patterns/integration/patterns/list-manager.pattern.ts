@@ -1,13 +1,12 @@
-/// <cts-enable />
 import {
   Cell,
+  computed,
   Default,
-  derive,
   handler,
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface Item {
   label: string;
@@ -49,10 +48,7 @@ const incrementItem = handler(
 export const listManager = pattern<ListManagerArgs>(
   ({ items }) => {
     const size = liftSize(items);
-    const names = derive(
-      items,
-      (collection) => collection.map((item) => item.label),
-    );
+    const names = computed(() => items.map((item) => item.label));
 
     return {
       summary: str`Items: ${size}`,

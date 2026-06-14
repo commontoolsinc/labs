@@ -1,19 +1,18 @@
-/// <cts-enable />
 import {
   computed,
   Default,
   handler,
-  ifElse,
   NAME,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Secret<T> = T;
 
-import { createRefreshFunction } from "../../auth/auth-refresh.ts";
+import { refreshOAuthToken } from "../../auth/auth-refresh.ts";
 import {
   REFRESH_THRESHOLD_MS,
   startReactiveClock,
@@ -64,10 +63,10 @@ export function createPreviewUI(
   const name = auth?.user?.name;
   const isAuthenticated = !!email;
 
-  // Date.now() capture is intentional — createPreviewUI produces a static
+  // safeDateNow() capture is intentional — createPreviewUI produces a static
   // snapshot for picker display, not a live-updating component. The main
   // pattern UI uses a reactive clock (startReactiveClock) separately.
-  const now = Date.now();
+  const now = safeDateNow();
   const expiresAt = auth?.expiresAt || 0;
   const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
   const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
@@ -162,53 +161,57 @@ export function createPreviewUI(
  * Use direct property access: `airtableAuthPiece.auth`
  */
 export type AirtableAuth = {
-  accessToken: Default<Secret<string>, "">;
-  tokenType: Default<string, "">;
-  scope: Default<string[], []>;
-  expiresIn: Default<number, 0>;
-  expiresAt: Default<number, 0>;
-  refreshToken: Default<Secret<string>, "">;
-  user: Default<{
+  accessToken: Secret<string> | Default<"">;
+  tokenType: string | Default<"">;
+  scope: string[] | Default<[]>;
+  expiresIn: number | Default<0>;
+  expiresAt: number | Default<0>;
+  refreshToken: Secret<string> | Default<"">;
+  user: {
     email: string;
     name: string;
     picture: string;
-  }, { email: ""; name: ""; picture: "" }>;
+  } | Default<{ email: ""; name: ""; picture: "" }>;
 };
 
 // Selected scopes configuration
 export type SelectedScopes = {
-  "data.records:read": Default<boolean, true>;
-  "data.records:write": Default<boolean, false>;
-  "data.recordComments:read": Default<boolean, false>;
-  "data.recordComments:write": Default<boolean, false>;
-  "schema.bases:read": Default<boolean, true>;
-  "schema.bases:write": Default<boolean, false>;
-  "webhook:manage": Default<boolean, false>;
+  "data.records:read": boolean | Default<true>;
+  "data.records:write": boolean | Default<false>;
+  "data.recordComments:read": boolean | Default<false>;
+  "data.recordComments:write": boolean | Default<false>;
+  "schema.bases:read": boolean | Default<true>;
+  "schema.bases:write": boolean | Default<false>;
+  "webhook:manage": boolean | Default<false>;
 };
 
 interface Input {
-  selectedScopes: Default<SelectedScopes, {
-    "data.records:read": true;
-    "data.records:write": false;
-    "data.recordComments:read": false;
-    "data.recordComments:write": false;
-    "schema.bases:read": true;
-    "schema.bases:write": false;
-    "webhook:manage": false;
-  }>;
-  auth: Default<AirtableAuth, {
-    accessToken: "";
-    tokenType: "";
-    scope: [];
-    expiresIn: 0;
-    expiresAt: 0;
-    refreshToken: "";
-    user: { email: ""; name: ""; picture: "" };
-  }>;
+  selectedScopes:
+    | SelectedScopes
+    | Default<{
+      "data.records:read": true;
+      "data.records:write": false;
+      "data.recordComments:read": false;
+      "data.recordComments:write": false;
+      "schema.bases:read": true;
+      "schema.bases:write": false;
+      "webhook:manage": false;
+    }>;
+  auth:
+    | AirtableAuth
+    | Default<{
+      accessToken: "";
+      tokenType: "";
+      scope: [];
+      expiresIn: 0;
+      expiresAt: 0;
+      refreshToken: "";
+      user: { email: ""; name: ""; picture: "" };
+    }>;
 }
 
 /** Airtable OAuth authentication for Airtable APIs. #airtableAuth */
-interface Output {
+export interface Output {
   auth: AirtableAuth;
   scopes: string[];
   selectedScopes: SelectedScopes;
@@ -222,28 +225,35 @@ interface Output {
   bgUpdater: Stream<Record<string, never>>;
 }
 
-// Module-scope singleton refresh guard for Airtable OAuth.
-// This is intentional: all instances of this auth pattern share one guard,
-// preventing concurrent refresh requests. This is correct because each
-// provider (e.g. Airtable, Google) has its own module with its own guard.
-const refreshAuthToken = createRefreshFunction(
-  "/api/integrations/airtable-oauth/refresh",
-);
+async function refreshAirtableAuthToken(
+  auth: Writable<AirtableAuth>,
+  refreshInProgress: Writable<boolean>,
+): Promise<boolean> {
+  return await refreshOAuthToken(
+    auth,
+    "/api/integrations/airtable-oauth/refresh",
+    refreshInProgress,
+  );
+}
 
 // Handler for refreshing tokens from UI button
 const handleRefresh = handler<
   unknown,
   {
     auth: Writable<AirtableAuth>;
+    refreshInProgress: Writable<boolean>;
     refreshing: Writable<boolean>;
     refreshFailed: Writable<boolean>;
   }
 >(
-  async (_event, { auth, refreshing, refreshFailed }) => {
+  async (_event, { auth, refreshInProgress, refreshing, refreshFailed }) => {
     refreshing.set(true);
     refreshFailed.set(false);
     try {
-      const didRefresh = await refreshAuthToken(auth);
+      const didRefresh = await refreshAirtableAuthToken(
+        auth,
+        refreshInProgress,
+      );
       refreshing.set(false);
       if (!didRefresh) return;
       refreshFailed.set(false);
@@ -257,24 +267,30 @@ const handleRefresh = handler<
 // Handler for refreshing tokens from other pieces
 const refreshTokenHandler = handler<
   Record<string, never>,
-  { auth: Writable<AirtableAuth> }
->(async (_event, { auth }) => {
-  await refreshAuthToken(auth);
+  {
+    auth: Writable<AirtableAuth>;
+    refreshInProgress: Writable<boolean>;
+  }
+>(async (_event, { auth, refreshInProgress }) => {
+  await refreshAirtableAuthToken(auth, refreshInProgress);
 });
 
 // Background updater handler for proactive token refresh
 const bgRefreshHandler = handler<
   Record<string, never>,
-  { auth: Writable<AirtableAuth> }
+  {
+    auth: Writable<AirtableAuth>;
+    refreshInProgress: Writable<boolean>;
+  }
 >(
-  async (_event, { auth }) => {
+  async (_event, { auth, refreshInProgress }) => {
     const currentAuth = auth.get();
     if (!currentAuth?.accessToken || !currentAuth?.refreshToken) return;
 
     const expiresAt = currentAuth.expiresAt ?? 0;
     if (expiresAt <= 0) return;
 
-    const timeRemaining = expiresAt - Date.now();
+    const timeRemaining = expiresAt - safeDateNow();
     if (timeRemaining > REFRESH_THRESHOLD_MS) return;
 
     console.log(
@@ -282,7 +298,7 @@ const bgRefreshHandler = handler<
     );
 
     try {
-      await refreshAuthToken(auth);
+      await refreshAirtableAuthToken(auth, refreshInProgress);
       console.log("[airtable-auth bgUpdater] Token refreshed successfully");
     } catch (e) {
       const status = (e as { status?: number }).status;
@@ -341,7 +357,7 @@ export default pattern<Input, Output>(
       return false;
     });
 
-    const now = Writable.of(Date.now());
+    const now = new Writable(safeDateNow());
     startReactiveClock(now);
 
     const isTokenExpired = computed(() => {
@@ -355,8 +371,9 @@ export default pattern<Input, Output>(
 
     const checkboxesDisabled = computed(() => !!auth?.accessToken);
 
-    const refreshing = Writable.of(false);
-    const refreshFailed = Writable.of(false);
+    const refreshInProgress = new Writable(false);
+    const refreshing = new Writable(false);
+    const refreshFailed = new Writable(false);
 
     const scopesDisplay = computed(() => scopes.join(", "));
 
@@ -368,7 +385,7 @@ export default pattern<Input, Output>(
       const email = auth?.user?.email || "";
       const name = auth?.user?.name || "";
       const isAuthenticated = !!email;
-      const now = Date.now();
+      const now = safeDateNow();
       const expiresAt = auth?.expiresAt || 0;
       const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
       const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
@@ -453,23 +470,25 @@ export default pattern<Input, Output>(
             }}
           >
             <h3 style={{ fontSize: "16px", marginTop: "0" }}>
-              Status: {ifElse(loggedIn, "Authenticated", "Not Authenticated")}
+              Status: {loggedIn ? "Authenticated" : "Not Authenticated"}
             </h3>
 
-            {ifElse(
-              loggedIn,
-              <div>
-                <p style={{ margin: "8px 0" }}>
-                  <strong>Email:</strong> {auth.user.email}
+            {loggedIn
+              ? (
+                <div>
+                  <p style={{ margin: "8px 0" }}>
+                    <strong>Email:</strong> {auth.user.email}
+                  </p>
+                  <p style={{ margin: "8px 0" }}>
+                    <strong>Name:</strong> {auth.user.name}
+                  </p>
+                </div>
+              )
+              : (
+                <p style={{ color: "#666" }}>
+                  Select permissions below and authenticate with Airtable
                 </p>
-                <p style={{ margin: "8px 0" }}>
-                  <strong>Name:</strong> {auth.user.name}
-                </p>
-              </div>,
-              <p style={{ color: "#666" }}>
-                Select permissions below and authenticate with Airtable
-              </p>,
-            )}
+              )}
           </div>
 
           {/* Permissions checkboxes */}
@@ -484,20 +503,20 @@ export default pattern<Input, Output>(
           >
             <h4 style={{ marginTop: "0", marginBottom: "12px" }}>
               Permissions
-              {ifElse(
-                loggedIn,
-                <span
-                  style={{
-                    fontWeight: "normal",
-                    fontSize: "12px",
-                    color: "#6b7280",
-                    marginLeft: "8px",
-                  }}
-                >
-                  (locked while authenticated)
-                </span>,
-                null,
-              )}
+              {loggedIn
+                ? (
+                  <span
+                    style={{
+                      fontWeight: "normal",
+                      fontSize: "12px",
+                      color: "#6b7280",
+                      marginLeft: "8px",
+                    }}
+                  >
+                    (locked while authenticated)
+                  </span>
+                )
+                : null}
             </h4>
             <div
               style={{ display: "flex", flexDirection: "column", gap: "10px" }}
@@ -512,132 +531,137 @@ export default pattern<Input, Output>(
                     color: loggedIn ? "#9ca3af" : "inherit",
                   }}
                 >
-                  <ct-checkbox
+                  <cf-checkbox
                     $checked={selectedScopes[key as keyof SelectedScopes]}
                     disabled={checkboxesDisabled}
                   >
                     {description}
-                  </ct-checkbox>
+                  </cf-checkbox>
                 </label>
               ))}
             </div>
           </div>
 
           {/* Re-auth warning */}
-          {ifElse(
-            needsReauth,
-            <div
-              style={{
-                padding: "12px",
-                backgroundColor: "#fff3cd",
-                borderRadius: "8px",
-                border: "1px solid #ffc107",
-                fontSize: "14px",
-              }}
-            >
-              <strong>Note:</strong>{" "}
-              You've selected new permissions. Click "Authenticate with
-              Airtable" below to grant access.
-            </div>,
-            null,
-          )}
+          {needsReauth
+            ? (
+              <div
+                style={{
+                  padding: "12px",
+                  backgroundColor: "#fff3cd",
+                  borderRadius: "8px",
+                  border: "1px solid #ffc107",
+                  fontSize: "14px",
+                }}
+              >
+                <strong>Note:</strong>{" "}
+                You've selected new permissions. Click "Authenticate with
+                Airtable" below to grant access.
+              </div>
+            )
+            : null}
 
           {/* Favorite reminder */}
-          {ifElse(
-            loggedIn,
-            <div
-              style={{
-                padding: "15px",
-                backgroundColor: "#d4edda",
-                borderRadius: "8px",
-                border: "1px solid #28a745",
-                fontSize: "14px",
-              }}
-            >
-              <strong>Tip:</strong>{" "}
-              Favorite this piece to share your Airtable auth across all your
-              patterns. Any pattern using{" "}
-              <code>wish({"{"} query: "#airtableAuth" {"}"})</code>{" "}
-              will automatically find and use it.
-            </div>,
-            null,
-          )}
+          {loggedIn
+            ? (
+              <div
+                style={{
+                  padding: "15px",
+                  backgroundColor: "#d4edda",
+                  borderRadius: "8px",
+                  border: "1px solid #28a745",
+                  fontSize: "14px",
+                }}
+              >
+                <strong>Tip:</strong>{" "}
+                Favorite this piece to share your Airtable auth across all your
+                patterns. Any pattern using{" "}
+                <code>wish({"{"} query: "#airtableAuth" {"}"})</code>{" "}
+                will automatically find and use it.
+              </div>
+            )
+            : null}
 
           {/* Show selected scopes */}
-          {ifElse(
-            notLoggedInWithScopes,
-            <div style={{ fontSize: "14px", color: "#666" }}>
-              Will request: {scopesDisplay}
-            </div>,
-            null,
-          )}
+          {notLoggedInWithScopes
+            ? (
+              <div style={{ fontSize: "14px", color: "#666" }}>
+                Will request: {scopesDisplay}
+              </div>
+            )
+            : null}
 
           {/* Token expired warning */}
-          {ifElse(
-            isTokenExpired,
-            <div
-              style={{
-                padding: "16px",
-                backgroundColor: "#fee2e2",
-                borderRadius: "8px",
-                border: "1px solid #ef4444",
-                marginBottom: "15px",
-              }}
-            >
-              <h4
+          {isTokenExpired
+            ? (
+              <div
                 style={{
-                  margin: "0 0 8px 0",
-                  color: "#dc2626",
-                  fontSize: "14px",
+                  padding: "16px",
+                  backgroundColor: "#fee2e2",
+                  borderRadius: "8px",
+                  border: "1px solid #ef4444",
+                  marginBottom: "15px",
                 }}
               >
-                Session Expired
-              </h4>
-              <p
-                style={{
-                  margin: "0 0 12px 0",
-                  fontSize: "13px",
-                  color: "#4b5563",
-                }}
-              >
-                Your Airtable token has expired. Click below to refresh it.
-              </p>
-              <button
-                type="button"
-                onClick={handleRefresh({ auth, refreshing, refreshFailed })}
-                disabled={refreshing}
-                style={{
-                  padding: "10px 20px",
-                  backgroundColor: refreshing ? "#93c5fd" : "#3b82f6",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "6px",
-                  cursor: refreshing ? "not-allowed" : "pointer",
-                  fontWeight: "500",
-                  fontSize: "14px",
-                }}
-              >
-                {ifElse(refreshing, "Refreshing...", "Refresh Token")}
-              </button>
-              {ifElse(
-                refreshFailed,
-                <p
+                <h4
                   style={{
-                    margin: "8px 0 0 0",
-                    fontSize: "13px",
+                    margin: "0 0 8px 0",
                     color: "#dc2626",
-                    fontWeight: "500",
+                    fontSize: "14px",
                   }}
                 >
-                  Refresh failed — try signing in again below.
-                </p>,
-                null,
-              )}
-            </div>,
-            null,
-          )}
+                  Session Expired
+                </h4>
+                <p
+                  style={{
+                    margin: "0 0 12px 0",
+                    fontSize: "13px",
+                    color: "#4b5563",
+                  }}
+                >
+                  Your Airtable token has expired. Click below to refresh it.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleRefresh({
+                    auth,
+                    refreshInProgress,
+                    refreshing,
+                    refreshFailed,
+                  })}
+                  disabled={refreshing}
+                  style={{
+                    padding: "10px 20px",
+                    backgroundColor: refreshing ? "#93c5fd" : "#3b82f6",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "6px",
+                    cursor: refreshing ? "not-allowed" : "pointer",
+                    fontWeight: "500",
+                    fontSize: "14px",
+                  }}
+                >
+                  {refreshing ? "Refreshing..." : "Refresh Token"}
+                </button>
+                {refreshFailed
+                  ? (
+                    <p
+                      style={{
+                        margin: "8px 0 0 0",
+                        fontSize: "13px",
+                        color: "#dc2626",
+                        fontWeight: "500",
+                      }}
+                    >
+                      Refresh failed — try signing in again below.
+                    </p>
+                  )
+                  : null}
+              </div>
+            )
+            : null}
 
-          <ct-oauth
+          <cf-oauth
             $auth={auth}
             scopes={scopes}
             provider="airtable"
@@ -648,85 +672,90 @@ export default pattern<Input, Output>(
           />
 
           {/* Show granted scopes */}
-          {ifElse(
-            loggedIn,
-            <div
-              style={{
-                padding: "15px",
-                backgroundColor: "#e3f2fd",
-                borderRadius: "8px",
-                fontSize: "14px",
-              }}
-            >
-              <strong>Granted Scopes:</strong>
-              <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
-                {grantedScopesList.map((scope) => <li>{scope}</li>)}
-              </ul>
-            </div>,
-            null,
-          )}
-
-          {/* Token status when authenticated and NOT expired */}
-          {ifElse(
-            showTokenStatus,
-            <div
-              style={{
-                padding: "16px",
-                backgroundColor: "#f0f9ff",
-                borderRadius: "8px",
-                border: "1px solid #0ea5e9",
-              }}
-            >
+          {loggedIn
+            ? (
               <div
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  gap: "12px",
+                  padding: "15px",
+                  backgroundColor: "#e3f2fd",
+                  borderRadius: "8px",
+                  fontSize: "14px",
                 }}
               >
-                <div>
-                  <h4
-                    style={{
-                      margin: "0 0 4px 0",
-                      fontSize: "14px",
-                      color: "#0369a1",
-                    }}
-                  >
-                    Token Status
-                  </h4>
-                  <p
-                    style={{
-                      margin: "0",
-                      fontSize: "13px",
-                      color: "#4b5563",
-                    }}
-                  >
-                    Expires in: <strong>{tokenExpiryDisplay}</strong>
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleRefresh({ auth, refreshing, refreshFailed })}
-                  disabled={refreshing}
+                <strong>Granted Scopes:</strong>
+                <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
+                  {grantedScopesList.map((scope) => <li>{scope}</li>)}
+                </ul>
+              </div>
+            )
+            : null}
+
+          {/* Token status when authenticated and NOT expired */}
+          {showTokenStatus
+            ? (
+              <div
+                style={{
+                  padding: "16px",
+                  backgroundColor: "#f0f9ff",
+                  borderRadius: "8px",
+                  border: "1px solid #0ea5e9",
+                }}
+              >
+                <div
                   style={{
-                    padding: "8px 16px",
-                    backgroundColor: refreshing ? "#7dd3fc" : "#0ea5e9",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "6px",
-                    cursor: refreshing ? "not-allowed" : "pointer",
-                    fontWeight: "500",
-                    fontSize: "13px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "12px",
                   }}
                 >
-                  {ifElse(refreshing, "Refreshing...", "Refresh Now")}
-                </button>
+                  <div>
+                    <h4
+                      style={{
+                        margin: "0 0 4px 0",
+                        fontSize: "14px",
+                        color: "#0369a1",
+                      }}
+                    >
+                      Token Status
+                    </h4>
+                    <p
+                      style={{
+                        margin: "0",
+                        fontSize: "13px",
+                        color: "#4b5563",
+                      }}
+                    >
+                      Expires in: <strong>{tokenExpiryDisplay}</strong>
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRefresh({
+                      auth,
+                      refreshInProgress,
+                      refreshing,
+                      refreshFailed,
+                    })}
+                    disabled={refreshing}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: refreshing ? "#7dd3fc" : "#0ea5e9",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: refreshing ? "not-allowed" : "pointer",
+                      fontWeight: "500",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {refreshing ? "Refreshing..." : "Refresh Now"}
+                  </button>
+                </div>
               </div>
-            </div>,
-            null,
-          )}
+            )
+            : null}
 
           <div
             style={{
@@ -746,44 +775,46 @@ export default pattern<Input, Output>(
       auth,
       scopes,
       selectedScopes,
-      userChip: ifElse(
-        hasEmail,
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span
-            style={{
-              width: "24px",
-              height: "24px",
-              borderRadius: "50%",
-              backgroundColor: "#18BFFF",
-              display: "inline-block",
-            }}
-          />
-          <div>
-            <div style={{ fontWeight: 500, fontSize: "14px" }}>
-              {ifElse(hasUserName, auth.user.name, auth.user.email)}
+      userChip: hasEmail
+        ? (
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span
+              style={{
+                width: "24px",
+                height: "24px",
+                borderRadius: "50%",
+                backgroundColor: "#18BFFF",
+                display: "inline-block",
+              }}
+            />
+            <div>
+              <div style={{ fontWeight: 500, fontSize: "14px" }}>
+                {hasUserName ? auth.user.name : auth.user.email}
+              </div>
+              {hasUserName
+                ? (
+                  <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                    {auth.user.email}
+                  </div>
+                )
+                : null}
             </div>
-            {ifElse(
-              hasUserName,
-              <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                {auth.user.email}
-              </div>,
-              null,
-            )}
           </div>
-        </div>,
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span
-            style={{
-              width: "24px",
-              height: "24px",
-              borderRadius: "50%",
-              backgroundColor: "#e5e7eb",
-              display: "inline-block",
-            }}
-          />
-          <span style={{ color: "#6b7280" }}>Not signed in</span>
-        </div>,
-      ),
+        )
+        : (
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span
+              style={{
+                width: "24px",
+                height: "24px",
+                borderRadius: "50%",
+                backgroundColor: "#e5e7eb",
+                display: "inline-block",
+              }}
+            />
+            <span style={{ color: "#6b7280" }}>Not signed in</span>
+          </div>
+        ),
       previewUI: (
         <div
           style={{
@@ -809,19 +840,19 @@ export default pattern<Input, Output>(
                 justifyContent: "center",
               }}
             >
-              {ifElse(
-                previewState.isAuthenticated,
-                <span
-                  style={{
-                    color: "white",
-                    fontSize: "14px",
-                    fontWeight: "600",
-                  }}
-                >
-                  {previewState.initial}
-                </span>,
-                null,
-              )}
+              {previewState.isAuthenticated
+                ? (
+                  <span
+                    style={{
+                      color: "white",
+                      fontSize: "14px",
+                      fontWeight: "600",
+                    }}
+                  >
+                    {previewState.initial}
+                  </span>
+                )
+                : null}
             </div>
             <div
               style={{
@@ -838,38 +869,36 @@ export default pattern<Input, Output>(
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 500, fontSize: "14px" }}>
-              {ifElse(
-                previewState.isAuthenticated,
-                <span>{previewState.name || previewState.email}</span>,
-                <span>Sign in required</span>,
-              )}
+              {previewState.isAuthenticated
+                ? <span>{previewState.name || previewState.email}</span>
+                : <span>Sign in required</span>}
             </div>
-            {ifElse(
-              previewState.isAuthenticated && !!previewState.name &&
-                !!previewState.email,
-              <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                {previewState.email}
-              </div>,
-              null,
-            )}
-            {ifElse(
-              !!previewState.scopeSummary,
-              <div
-                style={{
-                  fontSize: "12px",
-                  color: "#6b7280",
-                  marginTop: "2px",
-                }}
-              >
-                {previewState.scopeSummary}
-              </div>,
-              null,
-            )}
+            {previewState.isAuthenticated && !!previewState.name &&
+                !!previewState.email
+              ? (
+                <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                  {previewState.email}
+                </div>
+              )
+              : null}
+            {previewState.scopeSummary
+              ? (
+                <div
+                  style={{
+                    fontSize: "12px",
+                    color: "#6b7280",
+                    marginTop: "2px",
+                  }}
+                >
+                  {previewState.scopeSummary}
+                </div>
+              )
+              : null}
           </div>
         </div>
       ),
-      refreshToken: refreshTokenHandler({ auth }),
-      bgUpdater: bgRefreshHandler({ auth }),
+      refreshToken: refreshTokenHandler({ auth, refreshInProgress }),
+      bgUpdater: bgRefreshHandler({ auth, refreshInProgress }),
     };
   },
 );

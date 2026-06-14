@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Gmail Search Registry - Community Query Database
  *
@@ -23,10 +22,12 @@ import {
   Default,
   handler,
   NAME,
+  nonPrivateRandom,
   pattern,
+  safeDateNow,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // ============================================================================
 // TYPES
@@ -59,7 +60,7 @@ export interface AgentTypeRegistry {
 
 export interface GmailSearchRegistryInput {
   // Flat array of all queries (workaround for CLI display bug CT-1104)
-  queries?: Default<SharedQuery[], []>;
+  queries?: SharedQuery[] | Default<[]>;
 }
 
 /** Community registry for shared Gmail search queries. #gmailSearchRegistry */
@@ -105,8 +106,8 @@ const submitQuery = handler<
   }
 
   // Create new query entry and push to array
-  const queryId = `query-${Date.now()}-${
-    Math.random().toString(36).slice(2, 8)
+  const queryId = `query-${safeDateNow()}-${
+    nonPrivateRandom().toString(36).slice(2, 8)
   }`;
   state.queries.push({
     id: queryId,
@@ -114,7 +115,7 @@ const submitQuery = handler<
     query: input.query,
     description: input.description || "",
     submittedBy: input.submittedBy || "",
-    submittedAt: Date.now(),
+    submittedAt: safeDateNow(),
     upvotes: 0,
     downvotes: 0,
     lastValidated: 0,
@@ -136,7 +137,7 @@ const upvoteQuery = handler<
   const updatedQuery = {
     ...allQueries[queryIdx],
     upvotes: allQueries[queryIdx].upvotes + 1,
-    lastValidated: Date.now(),
+    lastValidated: safeDateNow(),
   };
 
   state.queries.set([
@@ -250,15 +251,15 @@ const GmailSearchRegistry = pattern<
     downvoteQuery: boundDownvoteQuery,
 
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div slot="header">
           <h2 style={{ margin: "0", fontSize: "18px" }}>
             Gmail Search Registry
           </h2>
         </div>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack style="padding: 16px; gap: 16px;">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack style="padding: 16px; gap: 16px;">
             {/* Info banner */}
             <div
               style={{
@@ -487,9 +488,9 @@ const GmailSearchRegistry = pattern<
                 </li>
               </ul>
             </div>
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
   };
 });

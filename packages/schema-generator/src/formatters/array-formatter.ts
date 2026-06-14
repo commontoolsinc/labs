@@ -1,9 +1,9 @@
 import ts from "typescript";
 import type {
-  GenerationContext,
-  SchemaDefinition,
-  TypeFormatter,
-} from "../interface.ts";
+  JSONSchemaMutable,
+  JSONSchemaObjMutable,
+} from "@commonfabric/api";
+import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { getArrayElementInfo } from "../type-utils.ts";
 
@@ -14,13 +14,13 @@ export class ArrayFormatter implements TypeFormatter {
     return !!getArrayElementInfo(type, context.typeChecker, context.typeNode);
   }
 
-  formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
+  formatType(type: ts.Type, context: GenerationContext): JSONSchemaObjMutable {
     // Check for array items override (propagated from wrapper types for array-property-only access)
     // This allows patterns like `allPieces.length` to generate `items: { not: true, asCell/asOpaque: true }`
     if (context.arrayItemsOverride !== undefined) {
       return {
         type: "array",
-        items: context.arrayItemsOverride as boolean | SchemaDefinition,
+        items: context.arrayItemsOverride as JSONSchemaMutable,
       };
     }
 
@@ -52,8 +52,8 @@ export class ArrayFormatter implements TypeFormatter {
     }
 
     if ((elementFlags & ts.TypeFlags.Unknown) && !info.elementNode) {
-      // unknown[] - allow any item type (type safety at compile time)
-      return { type: "array", items: true };
+      // unknown[] - items are unknown type
+      return { type: "array", items: { type: "unknown" } };
     }
 
     if (elementFlags & ts.TypeFlags.Never) {

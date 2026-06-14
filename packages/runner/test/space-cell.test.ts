@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime, spaceCellSchema } from "../src/runtime.ts";
 import { isCell } from "../src/cell.ts";
 
@@ -45,7 +45,7 @@ describe("Runtime.getSpaceCell", () => {
 
     it("should have no defaultPattern in a fresh space", () => {
       // When the space cell itself is undefined, accessing defaultPattern
-      // via the schema (which has asCell: true) returns a Cell reference,
+      // via the schema (which has asCell: ["cell"]) returns a Cell reference,
       // but that cell's value should be undefined for a fresh space
       const spaceCell = runtime.getSpaceCell(space);
       const defaultPatternCell = spaceCell.key("defaultPattern");
@@ -112,7 +112,7 @@ describe("Runtime.getSpaceCell", () => {
   });
 
   describe("schema handling", () => {
-    it("should use spaceCellSchema by default", () => {
+    it("should expose defaultPattern in spaceCellSchema by default", () => {
       // Verify the default schema structure
       const schema = spaceCellSchema as {
         type: string;
@@ -120,7 +120,9 @@ describe("Runtime.getSpaceCell", () => {
       };
       expect(schema.type).toBe("object");
       expect(schema.properties).toHaveProperty("defaultPattern");
-      expect(schema.properties.defaultPattern).toHaveProperty("asCell", true);
+      expect(schema.properties.defaultPattern).toHaveProperty("asCell", [
+        "cell",
+      ]);
     });
 
     it("should accept custom schema when provided", () => {

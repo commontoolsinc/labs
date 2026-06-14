@@ -3,7 +3,8 @@
 # wish()
 
 `wish()` discovers and connects to other pieces at runtime. It searches
-favorites and/or mentionables by tag, and returns a reactive `WishState<T>`.
+favorites, mentionables, and profile elements by tag, and returns a reactive
+`WishState<T>`.
 
 ```tsx
 const wishResult = wish<{ content: string }>({ query: "#note" });
@@ -56,7 +57,7 @@ Decorate your schema with a jsdoc comment containing a `#tag`:
 ```tsx
 /** Represents a small #note a user took to remember some text. */
 type Output = {
-  content: Default<string, "">;
+  content: string | Default<"">;
 };
 ```
 
@@ -70,8 +71,9 @@ const wishResult = wish<{ content: string }>({ query: "#note" });
 
 The `scope` parameter controls where wish searches for matching pieces:
 
-- `"~"` - Search favorites in the [[HOME_SPACE]] (global, cross-space)
-- `"."` - Search [[mentionable]] items in the current space
+- `"~"` - Search favorites in the [home space](HOME_SPACE.md) (global, cross-space)
+- `"."` - Search [mentionable](mentionable.md) items in the current space
+- `"profile"` - Search elements in the current user's shared profile
 
 By default (no scope), wish searches **favorites only** for backward
 compatibility.
@@ -88,21 +90,68 @@ wish({ query: "#note", scope: ["."] })
 
 // Search both favorites AND mentionables (favorites first)
 wish({ query: "#note", scope: ["~", "."] })
+
+// Search the current user's shared profile elements
+wish({ query: "#portfolio", scope: ["profile"] })
 ```
 
-### Favorites vs Mentionables
+### Well-Known Profile Targets
 
-| Feature    | Favorites (`~`)           | Mentionables (`.`)              |
-|------------|---------------------------|---------------------------------|
-| Storage    | Home space (global)       | Current space                   |
-| Scope      | Cross-space               | Per-space                       |
-| Source     | User's favorites list     | Pattern's `mentionable` export  |
-| Tag source | Snapshotted when favorited| Computed from schema            |
+A user may have multiple profiles, stored on the home default pattern at
+`homeSpaceCell.defaultPattern.profiles` (a list), with `defaultProfile` and a
+recency-ordered `mru`. The well-known wishes enumerate that list and resolve,
+ordered **default first, then by MRU**:
+
+```tsx
+wish({ query: "#profile" }) // the default profile (headless); see [UI] below
+wish({ query: "#profileName" }) // default profile's initialNameApplied
+wish({ query: "#profileAvatar" }) // default profile's avatar
+wish({ query: "#profileSpace" }) // default profile's space cell
+```
+
+Headless / single-profile callers get the default profile. The optional `[UI]`
+for `wish({ query: "#profile" })`:
+
+- **0 profiles:** the trusted profile-create surface (same input as the home
+  Profile tab). Submitting a name creates the viewer's first profile and leaves
+  the current view in place; the wish reacts once the link exists.
+- **1 profile:** a link to that profile.
+- **2+ profiles:** the **profile picker** (`profile-picker.tsx`) — lists
+  profiles, selects the default, stamps MRU, and creates more inline.
+
+When rendering profile data from a shared piece, use a user-scoped result schema
+for the rendered output so each viewer sees their own home profile projection.
+
+### Favorites vs Mentionables vs Profile
+
+| Feature    | Favorites (`~`)            | Mentionables (`.`)              | Profile (`profile`)              |
+|------------|----------------------------|---------------------------------|----------------------------------|
+| Storage    | Home default pattern       | Current space                   | Profile default pattern          |
+| Scope      | Cross-space                | Per-space                       | Cross-space, per-user            |
+| Source     | User's favorites list      | Pattern's `mentionable` export  | User's profile element list      |
+| Tag source | Snapshotted when favorited | Computed from schema            | `userTags` first, then `tag`     |
+
+### Accessing the Favorites List Itself
+
+Favorites are pieces added to the user's home space; they are accessible from
+any space. You can wish for the favorites list directly (see
+`system/favorites-manager.tsx` for a full example):
+
+```tsx
+type Favorite = { cell: { [NAME]?: string }; tag: string };
+const wishResult = wish<Array<Favorite>>({ query: "#favorites" });
+```
+
+The `tag` field contains the serialized `resultSchema` of the piece pointed to
+by `cell`. It is populated automatically when a favorite is added and is used
+for tag-based searching in the wish system.
 
 ### When to Use Each Scope
 
 - **Favorites only (default)**: Globally available pieces the user has explicitly saved
 - **Mentionables only**: Space-specific features that discover pieces created within that space
+- **Profile only**: User-owned profile pieces that should follow the viewer
+  across shared spaces
 - **Both**: Find any relevant piece regardless of where it lives
 
 ## Call wish() at Pattern Level

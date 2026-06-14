@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: equals() vs Manual IDs
  *
@@ -35,7 +34,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface Item {
   title: string;
@@ -47,7 +46,7 @@ interface TestCellEqualsInput {
   selectedItem: Writable<Item | null>;
 }
 
-interface TestCellEqualsOutput extends TestCellEqualsInput {}
+export interface TestCellEqualsOutput extends TestCellEqualsInput {}
 
 // Handler to add a new item at the END of the list
 // (Adding at end keeps indices stable for existing items)
@@ -143,10 +142,10 @@ export default pattern<TestCellEqualsInput, TestCellEqualsOutput>(
 
           {/* Controls */}
           <div style={{ marginBottom: "1rem", display: "flex", gap: "0.5rem" }}>
-            <ct-button onClick={addItem({ items })}>Add Item</ct-button>
-            <ct-button onClick={removeSelected({ items, selectedItem })}>
+            <cf-button onClick={addItem({ items })}>Add Item</cf-button>
+            <cf-button onClick={removeSelected({ items, selectedItem })}>
               Remove Selected
-            </ct-button>
+            </cf-button>
           </div>
 
           {/* Selected item display */}

@@ -1,8 +1,8 @@
-import { env } from "@commontools/integration";
+import { env, waitFor } from "@commonfabric/integration";
 import { describe, it } from "@std/testing/bdd";
 import { assert } from "@std/assert";
 import { ShellIntegration } from "../../integration/shell-utils.ts";
-import { sleep } from "@commontools/utils/sleep";
+import { clickPierce, pierce } from "./shadow-dom.ts";
 
 const { FRONTEND_URL } = env;
 
@@ -28,33 +28,25 @@ describe("shell login tests", () => {
       (state.view as { spaceName: string }).spaceName === "common-knowledge",
     );
 
-    let handle = await page.waitForSelector(
-      '[test-id="register-new-key"]',
-      { strategy: "pierce" },
-    );
-    handle.click();
-    // TODO(js): If we don't sleep, we get box model errors
-    // when trying to click the handles. Not sure why we need
-    // to sleep at all, but at least not "duration" dependent
-    await sleep(1);
-    handle = await page.waitForSelector(
-      '[test-id="generate-passphrase"]',
-      { strategy: "pierce" },
-    );
-    handle.click();
-    await sleep(1);
-    handle = await page.waitForSelector(
-      '[test-id="passphrase-continue"]',
-      { strategy: "pierce" },
-    );
-    handle.click();
+    await clickPierce(page, '[test-id="register-new-key"]');
+    await pierce(page, '[test-id="use-passphrase"]');
 
-    await sleep(1);
-    handle = await page.waitForSelector("#page-title", { strategy: "pierce" });
-    const title = await handle.evaluate((el: Element) => el.textContent);
-    assert(
-      title?.trim() === spaceName,
-      `Expect "${title?.trim()}" to be "${spaceName}"`,
-    );
+    await clickPierce(page, '[test-id="use-passphrase"]');
+    await pierce(page, '[test-id="generate-passphrase"]');
+
+    await clickPierce(page, '[test-id="generate-passphrase"]');
+    await pierce(page, '[test-id="passphrase-continue"]');
+
+    await clickPierce(page, '[test-id="passphrase-continue"]');
+
+    await waitFor(async () => {
+      try {
+        const handle = await pierce(page, ".header-space", 500);
+        const title = await handle.evaluate((el: Element) => el.textContent);
+        return title?.trim() === spaceName;
+      } catch {
+        return false;
+      }
+    });
   });
 });

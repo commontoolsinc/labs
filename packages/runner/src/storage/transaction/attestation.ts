@@ -1,11 +1,10 @@
-import { deepEqual } from "@commontools/utils/deep-equal";
-import { isRecord } from "@commontools/utils/types";
-import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
-import type {
-  StorableDatum,
-  StorableObject,
-  StorableValue,
-} from "@commontools/memory/interface";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isRecord } from "@commonfabric/utils/types";
+import {
+  type FabricObject,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import type {
   IAttestation,
   IInvalidDataURIError,
@@ -20,18 +19,10 @@ import type {
   Result,
   State,
 } from "../interface.ts";
-import { unclaimed } from "@commontools/memory/fact";
-import { getLogger } from "@commontools/utils/logger";
-import { LRUCache } from "@commontools/utils/cache";
-
-/** Copies an array preserving sparse holes (unlike [...arr] which fills them with undefined). */
-const sparseArrayCopy = <T>(arr: T[]): T[] => {
-  const copy = new Array<T>(arr.length);
-  arr.forEach((v, i) => {
-    copy[i] = v;
-  });
-  return copy;
-};
+import { unclaimed } from "@commonfabric/memory/fact";
+import { getLogger } from "@commonfabric/utils/logger";
+import { LRUCache } from "@commonfabric/utils/cache";
+import { toTransactionDocumentValue } from "../v2-document.ts";
 
 const logger = getLogger("attestation", {
   enabled: false,
@@ -72,194 +63,6 @@ export const UnsupportedMediaTypeError = (
     return this;
   },
 });
-
-/**
- * Sets a value at path using structural sharing. Only clones along the path.
- * Returns original reference if nothing changed (noop propagation).
- *
- * CT-1123 Phase 2: This replaces the O(N) JSON.parse(JSON.stringify()) deep clone
- * with O(D) structural sharing where D is path depth.
- */
-const setAtPath = (
-  root: StorableValue,
-  path: readonly MemoryAddressPathComponent[],
-  value: StorableValue,
-): { ok: StorableValue } | {
-  error: { at: number; type: string; notFound?: boolean };
-} => {
-  // Base case: empty path = replace root
-  if (path.length === 0) {
-    return { ok: value };
-  }
-
-  const [key, ...rest] = path;
-
-  // Type check: can't traverse through non-objects
-  if (root === null || root === undefined || typeof root !== "object") {
-    // Distinguish between undefined (path not found) vs primitive (type mismatch)
-    if (root === undefined) {
-      // Return at: -1 to indicate the error is at the parent level (the key that
-      // led here doesn't exist). After +1 adjustments during unwinding, this
-      // produces a path that includes the missing key, matching read semantics.
-      return { error: { at: -1, type: "undefined", notFound: true } };
-    }
-    const actualType = root === null ? "null" : typeof root;
-    return { error: { at: 0, type: actualType } };
-  }
-
-  // Handle arrays
-  if (Array.isArray(root)) {
-    // Special: array.length property
-    if (key === "length" && rest.length === 0) {
-      const newLen = value as number;
-      if (root.length === newLen) return { ok: root }; // noop
-      // Use slice for truncation, negative values, and non-finite values (NaN, Infinity)
-      // slice handles these edge cases correctly and matches previous behavior
-      if (newLen < root.length || newLen < 0 || !Number.isFinite(newLen)) {
-        return { ok: root.slice(0, newLen) };
-      } else {
-        // Extension: create array with new length (sparse slots preserved)
-        const extended = sparseArrayCopy(root);
-        extended.length = newLen;
-        return { ok: extended };
-      }
-    }
-
-    // Validate array key
-    if (!isArrayIndexPropertyName(key)) {
-      return { error: { at: 0, type: "array" } };
-    }
-
-    const index = Number(key);
-
-    // Terminal case
-    if (rest.length === 0) {
-      if (root[index] === value) return { ok: root }; // noop
-      const newArray = sparseArrayCopy(root);
-      if (value === undefined) {
-        delete newArray[index]; // creates hole, not splice
-      } else {
-        newArray[index] = value;
-      }
-      return { ok: newArray };
-    }
-
-    // Recursive case
-    const nested = root[index];
-    const result = setAtPath(nested, rest, value);
-    if ("error" in result) {
-      return {
-        error: {
-          at: result.error.at + 1,
-          type: result.error.type,
-          notFound: result.error.notFound,
-        },
-      };
-    }
-    if (result.ok === nested) return { ok: root }; // noop propagation
-    const newArray = sparseArrayCopy(root);
-    newArray[index] = result.ok as StorableDatum;
-    return { ok: newArray };
-  }
-
-  // Handle objects
-  const obj = root as StorableObject;
-
-  // Terminal case
-  if (rest.length === 0) {
-    if (obj[key] === value) return { ok: root }; // noop
-    if (value === undefined) {
-      if (!(key in obj)) return { ok: root }; // delete non-existent = noop
-      const { [key]: _, ...without } = obj;
-      return { ok: without as StorableDatum };
-    }
-    return { ok: { ...obj, [key]: value } };
-  }
-
-  // Recursive case
-  const nested = obj[key];
-  const result = setAtPath(nested, rest, value);
-  if ("error" in result) {
-    return {
-      error: {
-        at: result.error.at + 1,
-        type: result.error.type,
-        notFound: result.error.notFound,
-      },
-    };
-  }
-  if (result.ok === nested) return { ok: root }; // noop propagation
-  return { ok: { ...obj, [key]: result.ok as StorableDatum } };
-};
-
-/**
- * Takes `source` attestation, `address` and `value` and produces derived
- * attestation with `value` set to a property that given `address` leads to
- * in the `source`. Fails with type mismatch error if provided `address` leads
- * to a non-object target, or NotFound error if the document doesn't exist.
- *
- * CT-1123 Phase 2: Now uses structural sharing via setAtPath() instead of
- * JSON.parse(JSON.stringify()) deep clone. Only clones objects along the
- * modified path, leaving siblings shared.
- */
-export const write = (
-  source: IAttestation,
-  address: IMemoryAddress,
-  value: StorableValue,
-): Result<
-  IAttestation,
-  IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
-> => {
-  // Calculate relative path from source
-  const relativePath = address.path.slice(source.address.path.length);
-
-  // Root write: path lengths equal (empty relative path)
-  if (relativePath.length === 0) {
-    if (source.value === value) return { ok: source }; // noop
-    return { ok: { ...source, value } };
-  }
-
-  // Can't write nested path on undefined document
-  if (source.value === undefined) {
-    return {
-      error: NotFound(source, address, source.address.path),
-    };
-  }
-
-  // Apply structural sharing via setAtPath
-  const result = setAtPath(source.value, relativePath, value);
-
-  if ("error" in result) {
-    // Map error position to full address path
-    // result.error.at is the depth where the error occurred; +1 to include the failed key
-    const errorPath = address.path.slice(
-      0,
-      source.address.path.length + result.error.at + 1,
-    );
-
-    // Distinguish between NotFound (path doesn't exist) and TypeMismatch (wrong type)
-    if (result.error.notFound) {
-      // errorPath includes the missing key, matching read error semantics
-      return {
-        error: NotFound(source, address, errorPath),
-      };
-    }
-    return {
-      error: TypeMismatchError(
-        { ...address, path: errorPath },
-        result.error.type,
-        "write",
-      ),
-    };
-  }
-
-  // Noop: setAtPath returns original reference if nothing changed
-  if (result.ok === source.value) {
-    return { ok: source };
-  }
-
-  return { ok: { ...source, value: result.ok } };
-};
 
 /**
  * Reads requested `address` from the provided `source` attestation and either
@@ -310,9 +113,11 @@ export const read = (
  * Takes a source fact {@link State} and derives an attestion describing its
  * state.
  */
-export const attest = ({ the, of, is }: Omit<State, "cause">): IAttestation => {
+export const attest = (
+  { the, of, is, scope }: Omit<State, "cause"> & Pick<IMemoryAddress, "scope">,
+): IAttestation => {
   return {
-    address: { id: of, type: the, path: [] },
+    address: { id: of, type: the, path: [], scope },
     value: is,
   };
 };
@@ -330,10 +135,17 @@ export const claim = (
   { address, value: expected }: IAttestation,
   replica: ISpaceReplica,
 ): Result<State, IStorageTransactionInconsistent> => {
+  const type = address.type ?? "application/json";
   const state = replica.get(address) ??
-    unclaimed({ of: address.id, the: address.type });
+    unclaimed({ of: address.id, the: type });
   const source = attest(state);
-  const actual = read(source, address)?.ok?.value;
+  const actual = type === "application/json" &&
+      address.path.length === 0 &&
+      typeof replica.getDocument === "function"
+    ? toTransactionDocumentValue(
+      replica.getDocument(address.id, address.scope),
+    )
+    : read(source, address)?.ok?.value;
 
   // Fast path: reference equality check avoids expensive comparison
   // when the replica state hasn't changed since the original read
@@ -380,7 +192,7 @@ export const resolve = (
   while (++at < path.length) {
     const key = path[at];
     if (isRecord(value)) {
-      value = (value as StorableObject)[key];
+      value = (value as FabricObject)[key];
     } else {
       // If the value is undefined, the path doesn't exist, but we can still
       // write onto it. Return error with last valid path component.
@@ -413,7 +225,7 @@ export const load = (
   address: Omit<IMemoryAddress, "path">,
 ): Result<IAttestation, IInvalidDataURIError | IUnsupportedMediaTypeError> => {
   // Check cache first
-  const cacheKey = `${address.id}::${address.type}`;
+  const cacheKey = address.id;
   const cached = dataURICache.get(cacheKey);
   if (cached) {
     cacheHitLogger.debug("cache-hit", "found cached result");
@@ -455,17 +267,8 @@ export const load = (
         // Decode data
         const content = isBase64 ? atob(data) : decodeURIComponent(data);
 
-        // Check if media type matches address.type
-        if (mediaType !== address.type) {
-          // Media type mismatch - return error
-          result = {
-            error: UnsupportedMediaTypeError(
-              `Media type mismatch: expected "${address.type}" but data URI contains "${mediaType}"`,
-            ),
-          };
-        } else if (mediaType === "application/json") {
-          // Handle JSON media type
-          let value: StorableDatum;
+        if (mediaType === "application/json") {
+          let value: FabricValue;
           try {
             value = JSON.parse(content);
             result = { ok: { address: { ...address, path: [] }, value } };
@@ -477,12 +280,6 @@ export const load = (
               ),
             };
           }
-        } else if (mediaType.startsWith("text/")) {
-          // Handle other media types - store as string for now since we do not
-          // support blobs yet.
-          result = {
-            ok: { address: { ...address, path: [] }, value: content },
-          };
         } else {
           result = {
             error: UnsupportedMediaTypeError(
@@ -565,8 +362,8 @@ export const TypeMismatchError = (
 
 export const StateInconsistency = (source: {
   address: IMemoryAddress;
-  expected?: StorableDatum;
-  actual?: StorableDatum;
+  expected?: FabricValue;
+  actual?: FabricValue;
   space?: MemorySpace;
 }): IStorageTransactionInconsistent => {
   const { address, space, expected, actual } = source;
@@ -576,9 +373,9 @@ export const StateInconsistency = (source: {
     }"`,
     space ? ` in space "${space}"` : "",
     ` hash changed. Previously it used to be:\n `,
-    expected === undefined ? "undefined" : JSON.stringify(expected),
+    toCompactDebugString(expected),
     "\n and currently it is:\n ",
-    actual === undefined ? "undefined" : JSON.stringify(actual),
+    toCompactDebugString(actual),
   ].join("");
 
   return {

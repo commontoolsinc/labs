@@ -1,5 +1,16 @@
-import * as __ctHelpers from "commontools";
-import { cell } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { cell } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: collections-array-of-objects
 // Verifies: schema injection generates array-of-objects schema with typed items and required keys
 //   cell([{id: 1, name: "Alice", ...}]) → cell([...], { type: "array", items: { type: "object", properties: {...}, required: [...] } })
@@ -26,10 +37,10 @@ export default function TestCollectionsArrayOfObjects() {
             },
             required: ["id", "name", "score"]
         }
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_arrayOfObjects", true);
     return _arrayOfObjects;
 }
+__cfHardenFn(TestCollectionsArrayOfObjects);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);

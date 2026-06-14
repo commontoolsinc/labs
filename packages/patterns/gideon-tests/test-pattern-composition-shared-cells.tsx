@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: Pattern Composition with Shared Cell References
  *
@@ -29,19 +28,18 @@
 import {
   computed,
   Default,
-  derive,
   handler,
   ifElse,
   NAME,
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface ShoppingItem {
   title: string;
-  done: Default<boolean, false>;
-  category: Default<string, "Uncategorized">;
+  done: boolean | Default<false>;
+  category: string | Default<"Uncategorized">;
 }
 
 // Handlers at module scope
@@ -100,7 +98,7 @@ const BasicList = pattern<BasicListInput>(({ items }) => {
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           {items.map((item) => (
             <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <ct-checkbox $checked={item.done}>
+              <cf-checkbox $checked={item.done}>
                 <span
                   style={computed(
                     () => (item.done ? { textDecoration: "line-through" } : {}),
@@ -108,15 +106,15 @@ const BasicList = pattern<BasicListInput>(({ items }) => {
                 >
                   {item.title} ({item.category})
                 </span>
-              </ct-checkbox>
-              <ct-button onClick={removeItem({ items, item })}>x</ct-button>
+              </cf-checkbox>
+              <cf-button onClick={removeItem({ items, item })}>x</cf-button>
             </div>
           ))}
         </div>
 
-        <ct-message-input
+        <cf-message-input
           placeholder="Add item (e.g., Apples:Produce)..."
-          onct-send={addItem({ items })}
+          oncf-send={addItem({ items })}
         />
       </div>
     ),
@@ -131,16 +129,13 @@ interface CategoryListInput {
 
 const CategoryList = pattern<CategoryListInput>(({ items }) => {
   // Compute unique sorted categories from items
-  const categories = derive(
-    { items },
-    ({ items: itemsArray }: { items: ShoppingItem[] }) => {
-      const cats = new Set<string>();
-      for (const item of itemsArray) {
-        cats.add(item.category || "Uncategorized");
-      }
-      return Array.from(cats).sort();
-    },
-  );
+  const categories = computed(() => {
+    const cats = new Set<string>();
+    for (const item of items.get()) {
+      cats.add(item.category || "Uncategorized");
+    }
+    return Array.from(cats).sort();
+  });
 
   return {
     [NAME]: "Shopping List by Category",
@@ -169,7 +164,7 @@ const CategoryList = pattern<CategoryListInput>(({ items }) => {
                     marginLeft: "16px",
                   }}
                 >
-                  <ct-checkbox $checked={item.done}>
+                  <cf-checkbox $checked={item.done}>
                     <span
                       style={computed(() => (item.done
                         ? { textDecoration: "line-through" }
@@ -178,8 +173,8 @@ const CategoryList = pattern<CategoryListInput>(({ items }) => {
                     >
                       {item.title}
                     </span>
-                  </ct-checkbox>
-                  <ct-button onClick={removeItem({ items, item })}>x</ct-button>
+                  </cf-checkbox>
+                  <cf-button onClick={removeItem({ items, item })}>x</cf-button>
                 </div>,
                 null,
               )
@@ -194,14 +189,13 @@ const CategoryList = pattern<CategoryListInput>(({ items }) => {
 
 // Main pattern: Compose both views with shared cell
 interface ComposedInput {
-  items: Default<
-    ShoppingItem[],
-    [
+  items:
+    | ShoppingItem[]
+    | Default<[
       { title: "Milk"; done: false; category: "Dairy" },
       { title: "Bread"; done: false; category: "Bakery" },
       { title: "Cheese"; done: true; category: "Dairy" },
-    ]
-  >;
+    ]>;
 }
 
 export default pattern<ComposedInput>(({ items }) => {

@@ -1,11 +1,10 @@
-/// <cts-enable />
 import {
   computed,
   fetchData,
   handler,
-  ifElse,
   NAME,
   navigateTo,
+  nonPrivateRandom,
   pattern,
   patternTool,
   Stream,
@@ -13,7 +12,7 @@ import {
   when,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import Chatbot from "../chatbot.tsx";
 import {
   bash,
@@ -25,7 +24,7 @@ import {
   readWebpage,
   searchWeb,
   updateProfile,
-} from "./common-tools.tsx";
+} from "./common-fabric.tsx";
 import { MentionablePiece } from "./backlinks-index.tsx";
 import {
   searchPattern as summarySearchPattern,
@@ -120,17 +119,17 @@ export default pattern<OmniboxFABInput>(
     const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
     const { entries: summaryEntries } = wish<{
       entries: SummaryIndexEntry[];
-    }>({ query: "#summaryIndex" }).result;
-    const sandboxId = Writable.of(
-      `omnibot-${Math.random().toString(36).slice(2, 10)}`,
+    }>({ query: "#summaryIndex" }).result!;
+    const sandboxId = new Writable(
+      `omnibot-${nonPrivateRandom().toString(36).slice(2, 10)}`,
     );
 
-    const profile = wish<string>({ query: "#profile" });
+    const profile = wish<string>({ query: "#learnedSummary" });
 
     const patternIndexUrl = wish<{ url: Writable<string> }>({
       query: "#pattern-index",
     });
-    const resolvedPatternUrl = Writable.of<string>("/api/patterns/index.md");
+    const resolvedPatternUrl = new Writable<string>("/api/patterns/index.md");
     computed(() => {
       const urlRef = patternIndexUrl?.result?.url;
       const urlValue = typeof urlRef?.get === "function"
@@ -204,9 +203,9 @@ Be matter-of-fact. Prefer action to explanation.`;
       tools: allTools,
     });
 
-    const fabExpanded = Writable.of(false);
-    const showHistory = Writable.of(false);
-    const peekDismissedIndex = Writable.of(-1);
+    const fabExpanded = new Writable(false);
+    const showHistory = new Writable(false);
+    const peekDismissedIndex = new Writable(-1);
 
     // Derive pin count for collapsed state dots
     const pinCount = computed(() => {
@@ -245,15 +244,15 @@ Be matter-of-fact. Prefer action to explanation.`;
       [NAME]: "OmniboxFAB",
       messages: omnibot.messages,
       [UI]: (
-        <ct-drop-zone
+        <cf-drop-zone
           accept="cell-link"
           style="position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); z-index: 997;"
-          onct-drop={handleDropToPin({
+          oncf-drop={handleDropToPin({
             pinToChat: omnibot.pinToChat,
             fabExpanded,
           })}
         >
-          <ct-fab
+          <cf-fab
             expanded={fabExpanded}
             variant="primary"
             position="bottom-center"
@@ -262,95 +261,95 @@ Be matter-of-fact. Prefer action to explanation.`;
             $messages={omnibot.messages}
             $previewMessage={latestAssistantMessage}
             placeholder="Ask about anything..."
-            onct-fab-backdrop-click={closeFab({ fabExpanded })}
-            onct-fab-escape={closeFab({ fabExpanded })}
+            oncf-fab-backdrop-click={closeFab({ fabExpanded })}
+            oncf-fab-escape={closeFab({ fabExpanded })}
             onClick={toggle({ value: fabExpanded })}
           >
-            {ifElse(
-              fabExpanded,
-              <div style="width: 100%; display: flex; flex-direction: column; max-height: 580px;">
-                {/* Chevron to expand chat history */}
-                <div style="display: flex; justify-content: center; flex-shrink: 0;">
-                  <ct-chevron-button
-                    expanded={showHistory}
-                    loading={omnibot.pending}
-                    onct-toggle={toggle({ value: showHistory })}
-                  />
-                </div>
+            {fabExpanded
+              ? (
+                <div style="width: 100%; display: flex; flex-direction: column; max-height: 580px;">
+                  {/* Chevron to expand chat history */}
+                  <div style="display: flex; justify-content: center; flex-shrink: 0;">
+                    <cf-chevron-button
+                      expanded={showHistory}
+                      loading={omnibot.pending}
+                      oncf-toggle={toggle({ value: showHistory })}
+                    />
+                  </div>
 
-                {/* Pinned items / attachments - always visible */}
-                <div style="padding: 4px 8px; flex-shrink: 0;">
-                  {omnibot.ui.attachmentsAndTools}
-                </div>
+                  {/* Pinned items / attachments - always visible */}
+                  <div style="padding: 4px 8px; flex-shrink: 0;">
+                    {omnibot.ui.attachmentsAndTools}
+                  </div>
 
-                {/* Expandable chat history */}
-                <div
-                  style={computed(() => {
-                    const show = showHistory.get();
-                    return `flex: ${
-                      show ? "1" : "0"
-                    }; min-height: 0; display: flex; flex-direction: column; opacity: ${
-                      show ? "1" : "0"
-                    }; max-height: ${
-                      show ? "480px" : "0"
-                    }; overflow: hidden; transition: opacity 200ms ease, max-height 300ms ease; pointer-events: ${
-                      show ? "auto" : "none"
-                    };`;
-                  })}
-                >
-                  <div style="flex: 1; overflow-y: auto; min-height: 0;">
-                    <ct-cell-context $cell={omnibot}>
-                      {omnibot.ui.chatLog}
-                    </ct-cell-context>
+                  {/* Expandable chat history */}
+                  <div
+                    style={computed(() => {
+                      const show = showHistory.get();
+                      return `flex: ${
+                        show ? "1" : "0"
+                      }; min-height: 0; display: flex; flex-direction: column; opacity: ${
+                        show ? "1" : "0"
+                      }; max-height: ${
+                        show ? "480px" : "0"
+                      }; overflow: hidden; transition: opacity 200ms ease, max-height 300ms ease; pointer-events: ${
+                        show ? "auto" : "none"
+                      };`;
+                    })}
+                  >
+                    <div style="flex: 1; overflow-y: auto; min-height: 0;">
+                      <cf-cell-context $cell={omnibot}>
+                        {omnibot.ui.chatLog}
+                      </cf-cell-context>
+                    </div>
+                  </div>
+
+                  {computed(() => {
+                      const show = showHistory.get();
+                      const dismissedIdx = peekDismissedIndex.get();
+                      return !show && latestAssistantMessage &&
+                        assistantMessageCount !== dismissedIdx;
+                    })
+                    ? (
+                      <div style="margin: 4px 8px 0; padding: 0; flex-shrink: 0; position: relative;">
+                        <cf-button
+                          variant="ghost"
+                          size="icon"
+                          onClick={dismissPeek({
+                            peekDismissedIndex,
+                            assistantMessageCount,
+                          })}
+                          style="position: absolute; top: 0px; right: 0px; z-index: 1; font-size: 16px;"
+                          title="Dismiss"
+                        >
+                          ×
+                        </cf-button>
+                        <div
+                          onClick={toggle({ value: showHistory })}
+                          style="cursor: pointer;"
+                        >
+                          <cf-cell-context $cell={latestAssistantMessage}>
+                            <cf-chat-message
+                              role="assistant"
+                              compact
+                              content={latestAssistantMessage ?? ""}
+                              pending={omnibot.pending}
+                            />
+                          </cf-cell-context>
+                        </div>
+                      </div>
+                    )
+                    : null}
+
+                  {/* Prompt input */}
+                  <div style="padding: 4px 8px 8px; flex-shrink: 0;">
+                    {omnibot.ui.promptInput}
                   </div>
                 </div>
-
-                {ifElse(
-                  computed(() => {
-                    const show = showHistory.get();
-                    const dismissedIdx = peekDismissedIndex.get();
-                    return !show && latestAssistantMessage &&
-                      assistantMessageCount !== dismissedIdx;
-                  }),
-                  <div style="margin: 4px 8px 0; padding: 0; flex-shrink: 0; position: relative;">
-                    <ct-button
-                      variant="ghost"
-                      size="icon"
-                      onClick={dismissPeek({
-                        peekDismissedIndex,
-                        assistantMessageCount,
-                      })}
-                      style="position: absolute; top: 0px; right: 0px; z-index: 1; font-size: 16px;"
-                      title="Dismiss"
-                    >
-                      ×
-                    </ct-button>
-                    <div
-                      onClick={toggle({ value: showHistory })}
-                      style="cursor: pointer;"
-                    >
-                      <ct-cell-context $cell={latestAssistantMessage}>
-                        <ct-chat-message
-                          role="assistant"
-                          compact
-                          content={latestAssistantMessage}
-                          pending={omnibot.pending}
-                        />
-                      </ct-cell-context>
-                    </div>
-                  </div>,
-                  null,
-                )}
-
-                {/* Prompt input */}
-                <div style="padding: 4px 8px 8px; flex-shrink: 0;">
-                  {omnibot.ui.promptInput}
-                </div>
-              </div>,
-              null,
-            )}
-          </ct-fab>
-        </ct-drop-zone>
+              )
+              : null}
+          </cf-fab>
+        </cf-drop-zone>
       ),
       fabExpanded,
       pinToChat: handleExternalPin({

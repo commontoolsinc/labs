@@ -1,296 +1,355 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     count: number;
     price: number;
     discount: number;
     quantity: number;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        count: number;
+    };
+}, number>(({ state }) => state.count + 1, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["count"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_2 = __cfHelpers.lift<{
+    state: {
+        count: number;
+    };
+}, number>(({ state }) => state.count - 1, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["count"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_3 = __cfHelpers.lift<{
+    state: {
+        count: number;
+    };
+}, number>(({ state }) => state.count * 2, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["count"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_4 = __cfHelpers.lift<{
+    state: {
+        price: number;
+    };
+}, number>(({ state }) => state.price / 2, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_5 = __cfHelpers.lift<{
+    state: {
+        count: number;
+    };
+}, number>(({ state }) => state.count % 3, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["count"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_6 = __cfHelpers.lift<{
+    state: {
+        price: number;
+        discount: number;
+    };
+}, number>(({ state }) => state.price - (state.price * state.discount), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                },
+                discount: {
+                    type: "number"
+                }
+            },
+            required: ["price", "discount"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_7 = __cfHelpers.lift<{
+    state: {
+        price: number;
+        quantity: number;
+    };
+}, number>(({ state }) => state.price * state.quantity, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                },
+                quantity: {
+                    type: "number"
+                }
+            },
+            required: ["price", "quantity"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_8 = __cfHelpers.lift<{
+    state: {
+        price: number;
+        quantity: number;
+    };
+}, number>(({ state }) => (state.price * state.quantity) * 1.08, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                },
+                quantity: {
+                    type: "number"
+                }
+            },
+            required: ["price", "quantity"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_9 = __cfHelpers.lift<{
+    state: {
+        count: number;
+        quantity: number;
+        price: number;
+        discount: number;
+    };
+}, number>(({ state }) => (state.count + state.quantity) * state.price -
+    (state.price * state.discount), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                },
+                quantity: {
+                    type: "number"
+                },
+                price: {
+                    type: "number"
+                },
+                discount: {
+                    type: "number"
+                }
+            },
+            required: ["count", "quantity", "price", "discount"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_10 = __cfHelpers.lift<{
+    state: {
+        count: number;
+    };
+}, number>(({ state }) => state.count * state.count * state.count, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["count"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_11 = __cfHelpers.lift<{
+    state: {
+        price: number;
+    };
+}, number>(({ state }) => state.price - 10, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_12 = __cfHelpers.lift<{
+    state: {
+        price: number;
+    };
+}, number>(({ state }) => state.price + 10, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: jsx-arithmetic-operations
-// Verifies: arithmetic expressions with reactive refs in JSX are wrapped in derive()
-//   {state.count + 1}                      → derive({count}, ({state}) => state.count + 1)
-//   {state.price * state.quantity * 1.08}   → derive({price, quantity}, ...)
-//   {state.count * state.count * state.count} → derive({count}, ...)
+// Verifies: arithmetic expressions with reactive refs in JSX are wrapped in a lift-applied computation
+//   {state.count + 1}                      → lift(({state}) => state.count + 1)({ count })
+//   {state.price * state.quantity * 1.08}   → lift(...)({ price, quantity })
+//   {state.count * state.count * state.count} → lift(...)({ count })
 export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>Basic Arithmetic</h3>
-        <p>Count + 1: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["count"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Count + 1: {__cfLift_1({ state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count + 1)}</p>
-        <p>Count - 1: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["count"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+            } })}</p>
+        <p>Count - 1: {__cfLift_2({ state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count - 1)}</p>
-        <p>Count * 2: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["count"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+            } })}</p>
+        <p>Count * 2: {__cfLift_3({ state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count * 2)}</p>
-        <p>Price / 2: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        price: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["price"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+            } })}</p>
+        <p>Price / 2: {__cfLift_4({ state: {
                 price: state.key("price")
-            } }, ({ state }) => state.price / 2)}</p>
-        <p>Count % 3: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["count"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+            } })}</p>
+        <p>Count % 3: {__cfLift_5({ state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count % 3)}</p>
+            } })}</p>
 
         <h3>Complex Expressions</h3>
-        <p>Discounted Price: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        price: {
-                            type: "number",
-                            asOpaque: true
-                        },
-                        discount: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["price", "discount"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Discounted Price: {__cfLift_6({ state: {
                 price: state.key("price"),
                 discount: state.key("discount")
-            } }, ({ state }) => state.price - (state.price * state.discount))}</p>
-        <p>Total: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        price: {
-                            type: "number",
-                            asOpaque: true
-                        },
-                        quantity: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["price", "quantity"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+            } })}</p>
+        <p>Total: {__cfLift_7({ state: {
                 price: state.key("price"),
                 quantity: state.key("quantity")
-            } }, ({ state }) => state.price * state.quantity)}</p>
-        <p>With Tax (8%): {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        price: {
-                            type: "number",
-                            asOpaque: true
-                        },
-                        quantity: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["price", "quantity"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+            } })}</p>
+        <p>With Tax (8%): {__cfLift_8({ state: {
                 price: state.key("price"),
                 quantity: state.key("quantity")
-            } }, ({ state }) => (state.price * state.quantity) * 1.08)}</p>
+            } })}</p>
         <p>
-          Complex: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number",
-                            asOpaque: true
-                        },
-                        quantity: {
-                            type: "number",
-                            asOpaque: true
-                        },
-                        price: {
-                            type: "number",
-                            asOpaque: true
-                        },
-                        discount: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["count", "quantity", "price", "discount"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          Complex: {__cfLift_9({ state: {
                 count: state.key("count"),
                 quantity: state.key("quantity"),
                 price: state.key("price"),
                 discount: state.key("discount")
-            } }, ({ state }) => (state.count + state.quantity) * state.price -
-            (state.price * state.discount))}
+            } })}
         </p>
 
         <h3>Multiple Same Ref</h3>
-        <p>Count³: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["count"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Count³: {__cfLift_10({ state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count * state.count * state.count)}</p>
-        <p>Price Range: ${__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        price: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["price"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+            } })}</p>
+        <p>Price Range: ${__cfLift_11({ state: {
                 price: state.key("price")
-            } }, ({ state }) => state.price - 10)} - ${__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        price: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["price"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+            } })} - ${__cfLift_12({ state: {
                 price: state.key("price")
-            } }, ({ state }) => state.price + 10)}</p>
+            } })}</p>
       </div>),
     };
 }, {
@@ -310,7 +369,7 @@ export default pattern((state) => {
         }
     },
     required: ["count", "price", "discount", "quantity"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -323,11 +382,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -340,8 +398,21 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2,
+    __cfLift_3,
+    __cfLift_4,
+    __cfLift_5,
+    __cfLift_6,
+    __cfLift_7,
+    __cfLift_8,
+    __cfLift_9,
+    __cfLift_10,
+    __cfLift_11,
+    __cfLift_12
+});

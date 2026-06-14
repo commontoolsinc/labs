@@ -1,0 +1,348 @@
+import ts from "typescript";
+
+import {
+  detectCallKind,
+  type NormalizedDataFlow,
+  setParentPointers,
+  typeToTypeNodeWithRegistry,
+} from "../../ast/mod.ts";
+import { isModuleScopedDeclaration } from "../../ast/scope-analysis.ts";
+import { TransformationContext } from "../../core/mod.ts";
+import { createLiftAppliedCall } from "../builtins/lift-applied.ts";
+
+function getCaptureRootExpression(expression: ts.Expression): ts.Expression {
+  let current = expression;
+  while (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current) ||
+    ts.isCallExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function isNestedFunctionLocalCapture(
+  expression: ts.Expression,
+  wrappedExpression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  const wrappedSourceNode = wrappedExpression.pos >= 0
+    ? wrappedExpression
+    : ts.getOriginalNode(wrappedExpression);
+  const root = getCaptureRootExpression(expression);
+  if (!ts.isIdentifier(root)) {
+    return false;
+  }
+
+  const symbol = checker.getSymbolAtLocation(root);
+  if (!symbol) {
+    return false;
+  }
+
+  const declarations = symbol.getDeclarations() ?? [];
+  return declarations.some((declaration) => {
+    if (
+      declaration.pos < wrappedSourceNode.pos ||
+      declaration.end > wrappedSourceNode.end
+    ) {
+      return false;
+    }
+
+    let current: ts.Node | undefined = declaration.parent;
+    while (current && current !== wrappedSourceNode) {
+      if (ts.isFunctionLike(current)) {
+        return true;
+      }
+      current = current.parent;
+    }
+
+    return false;
+  });
+}
+
+export function createReactiveWrapperForExpression(
+  expression: ts.Expression,
+  relevantDataFlows: readonly NormalizedDataFlow[],
+  context: TransformationContext,
+  options: {
+    allowDirectExpressionWrap?: boolean;
+    preferInputBoundWrapper?: boolean;
+    filterNestedFunctionLocalCaptures?: boolean;
+  } = {},
+): ts.Expression | undefined {
+  const shouldFilterNestedLocals = options.filterNestedFunctionLocalCaptures ??
+    !ts.isCallExpression(expression);
+
+  const wrapperDataFlows = shouldFilterNestedLocals
+    ? relevantDataFlows.filter((dataFlow) =>
+      !isNestedFunctionLocalCapture(
+        dataFlow.expression,
+        expression,
+        context.checker,
+      )
+    )
+    : [...relevantDataFlows];
+
+  if (wrapperDataFlows.length === 0) return undefined;
+
+  // Don't wrap expressions that are already lift-applied, computed, when, or unless calls
+  // These are already reactive and wrapping them would create unnecessary nesting
+  if (ts.isCallExpression(expression)) {
+    const callKind = detectCallKind(expression, context.checker);
+    if (
+      callKind?.kind === "lift-applied" ||
+      callKind?.kind === "when" ||
+      callKind?.kind === "unless" ||
+      (callKind?.kind === "builder" && callKind.builderName === "computed")
+    ) {
+      return undefined;
+    }
+  }
+
+  if (
+    !options.allowDirectExpressionWrap &&
+    wrapperDataFlows.length === 1
+  ) {
+    const [dataFlow] = wrapperDataFlows;
+    if (dataFlow && dataFlow.expression === expression) {
+      return undefined;
+    }
+  }
+
+  if (options.preferInputBoundWrapper) {
+    const refs = unionWithEnclosingScopeFreeIdentifiers(
+      wrapperDataFlows.map((dataFlow) => dataFlow.expression),
+      expression,
+      context.checker,
+    );
+    return createLiftAppliedCall(expression, refs, {
+      factory: context.factory,
+      tsContext: context.tsContext,
+      cfHelpers: context.cfHelpers,
+      context,
+    });
+  }
+
+  const { factory, checker, sourceFile } = context;
+
+  context.markSyntheticComputeOwnedSubtree(expression);
+
+  // Get result type for the synthetic lift-applied call we're about to emit.
+  let resultTypeNode: ts.TypeNode | undefined;
+  let resultType: ts.Type | undefined;
+
+  try {
+    resultType = checker.getTypeAtLocation(expression);
+    // Build via the canonical chokepoint so commonfabric refs normalize to
+    // `__cfHelpers.X` and the node is registered for schema generation. (The
+    // call-node registration below still keys the lift-applied CallExpression
+    // to its result Type.)
+    resultTypeNode = typeToTypeNodeWithRegistry(
+      resultType,
+      { checker, factory, sourceFile },
+      context.options.state?.typeRegistry,
+    );
+  } catch {
+    resultTypeNode = undefined;
+    resultType = undefined;
+  }
+
+  // Emit the canonical lift-applied form for a zero-input compute wrapper:
+  //   __cfHelpers.lift(() => expression)({})
+  //
+  // This matches LiftLoweringTransformer's lowering of source-level
+  // `computed(() => expr)`. Previously this site emitted bare
+  // `__cfHelpers.computed(...)` — but LiftLoweringTransformer has already run
+  // by this stage in the pipeline, so emitting computed here would leave it
+  // in lowered output, defeating Phase 1's "no computed/derive in lowered
+  // output" invariant.
+  const arrowFunction = factory.createArrowFunction(
+    undefined,
+    undefined,
+    [],
+    resultTypeNode,
+    factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+    expression,
+  );
+  context.markAsSyntheticComputeCallback(arrowFunction);
+
+  const innerLiftCall = context.cfHelpers.createHelperCall(
+    "lift",
+    expression,
+    undefined,
+    [arrowFunction],
+  );
+  const emptyInput = factory.createObjectLiteralExpression([], false);
+  const liftAppliedCall = factory.createCallExpression(
+    innerLiftCall,
+    undefined,
+    [emptyInput],
+  );
+
+  // Register types for both the TypeNode and the lift-applied CallExpression
+  if (resultTypeNode && resultType && context.options.state?.typeRegistry) {
+    context.options.state?.typeRegistry.set(resultTypeNode, resultType);
+    context.options.state?.typeRegistry.set(liftAppliedCall, resultType);
+  }
+
+  // CRITICAL: Set parent pointers and connect to parent chain
+  // This maintains the parent chain so walking up from nested callbacks works
+  setParentPointers(liftAppliedCall, expression.parent);
+
+  return liftAppliedCall;
+}
+
+/**
+ * Union the reactive dataflow refs with any free identifiers in `expression`
+ * whose declarations live in an enclosing (non-module, non-expression-local)
+ * function scope. This is what makes plain-JS captures (e.g. `const suffix =
+ * "!"` declared in the enclosing pattern/map callback) become explicit
+ * lift-applied inputs instead of flowing through lexical closure.
+ *
+ * The dataflow analyzer only surfaces reactive captures (Cell/OpaqueRef).
+ * Plain-JS values declared in enclosing scope are invisible to it, so they
+ * default to lexical closure when `createLiftAppliedCall` emits the callback.
+ * That breaks the self-contained-callback contract that SES sandboxing and
+ * module-scope hoisting rely on. Including them here gives them schema
+ * coverage and explicit transport.
+ *
+ * Identifiers that resolve to module scope (imports, top-level consts) are
+ * NOT added — module bindings are stable and hoistable. Identifiers
+ * declared *inside* a nested function within `expression` itself (e.g. the
+ * parameter of a `.filter((x) => ...)` callback nested in the expression)
+ * are NOT added — they're local, not enclosing.
+ */
+function unionWithEnclosingScopeFreeIdentifiers(
+  refs: readonly ts.Expression[],
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.Expression[] {
+  // Build a set of identifier names already represented by the dataflow refs
+  // so we don't add them again. We key by name rather than by symbol because
+  // dataflow refs are sometimes synthesized expressions whose root identifier
+  // doesn't carry a resolvable symbol on the post-transform AST. Within a
+  // single expression, TypeScript scoping makes name → binding unambiguous,
+  // so name-based dedup is safe here.
+  const alreadyCoveredNames = new Set<string>();
+  for (const ref of refs) {
+    const root = getRootIdentifier(ref);
+    if (root) alreadyCoveredNames.add(root.text);
+  }
+
+  const added: ts.Expression[] = [];
+  const addedNames = new Set<string>();
+
+  const visit = (node: ts.Node): void => {
+    // Don't descend into nested functions — their parameters and locals
+    // are not enclosing-scope captures of the expression.
+    if (node !== expression && ts.isFunctionLike(node)) {
+      return;
+    }
+
+    if (ts.isIdentifier(node) && isReferenceSite(node)) {
+      if (
+        !alreadyCoveredNames.has(node.text) && !addedNames.has(node.text)
+      ) {
+        const symbol = checker.getSymbolAtLocation(node);
+        // Only capture value-space symbols. Type-only identifiers (type
+        // aliases, interfaces — type parameters are also filtered by
+        // `isEnclosingScopeDeclaration` below) can appear at reference
+        // sites in `as`/`satisfies` casts and generic type arguments;
+        // emitting them as runtime inputs would be a type error.
+        if (
+          symbol &&
+          (symbol.flags & ts.SymbolFlags.Value) !== 0 &&
+          isEnclosingScopeDeclaration(symbol)
+        ) {
+          addedNames.add(node.text);
+          added.push(node);
+        }
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(expression);
+
+  return [...refs, ...added];
+}
+
+function getRootIdentifier(expr: ts.Expression): ts.Identifier | undefined {
+  let current: ts.Expression = expr;
+  while (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current) ||
+    ts.isCallExpression(current) ||
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isNonNullExpression(current)
+  ) {
+    if (ts.isCallExpression(current)) {
+      current = current.expression;
+    } else if (ts.isPropertyAccessExpression(current)) {
+      current = current.expression;
+    } else if (ts.isElementAccessExpression(current)) {
+      current = current.expression;
+    } else {
+      current = (current as
+        | ts.ParenthesizedExpression
+        | ts.AsExpression
+        | ts.NonNullExpression).expression;
+    }
+  }
+  return ts.isIdentifier(current) ? current : undefined;
+}
+
+function isReferenceSite(node: ts.Identifier): boolean {
+  const parent = node.parent;
+  if (!parent) return false;
+  // Property name in a property access — not a free reference.
+  if (ts.isPropertyAccessExpression(parent) && parent.name === node) {
+    return false;
+  }
+  // Property key in an object literal — not a free reference.
+  if (ts.isPropertyAssignment(parent) && parent.name === node) return false;
+  // Property name in a binding pattern (e.g. `{ propertyName: bindingName }`)
+  // — not a free reference.
+  if (ts.isBindingElement(parent) && parent.propertyName === node) return false;
+  // JSX tag names look like identifiers but resolve to components/elements.
+  if (
+    ts.isJsxOpeningElement(parent) ||
+    ts.isJsxClosingElement(parent) ||
+    ts.isJsxSelfClosingElement(parent)
+  ) return false;
+  return true;
+}
+
+function isEnclosingScopeDeclaration(symbol: ts.Symbol): boolean {
+  const declarations = symbol.getDeclarations();
+  if (!declarations || declarations.length === 0) return false;
+  // Reject if ANY declaration is module-scoped or an import — those don't
+  // need to be passed as lift-applied inputs. They're stable and hoistable.
+  for (const decl of declarations) {
+    if (
+      ts.isImportSpecifier(decl) ||
+      ts.isImportClause(decl) ||
+      ts.isNamespaceImport(decl) ||
+      isModuleScopedDeclaration(decl)
+    ) {
+      return false;
+    }
+    if (ts.isTypeParameterDeclaration(decl)) {
+      return false;
+    }
+  }
+  // Accept only if SOME declaration is inside a function-like ancestor
+  // (i.e., truly enclosing-scope, not floating somewhere weird).
+  return declarations.some((decl) => {
+    let current: ts.Node | undefined = decl.parent;
+    while (current) {
+      if (ts.isFunctionLike(current)) return true;
+      if (ts.isSourceFile(current)) return false;
+      current = current.parent;
+    }
+    return false;
+  });
+}

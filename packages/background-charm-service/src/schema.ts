@@ -1,4 +1,4 @@
-import { type JSONSchema, type Schema } from "@commontools/runner";
+import { type JSONSchema, type Schema } from "@commonfabric/runner";
 
 // This is the derived space id for toolshed-system
 export const BG_SYSTEM_SPACE_ID =

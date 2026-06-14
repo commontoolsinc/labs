@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Tags Module - Pattern for tag/label management
  *
@@ -13,7 +12,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -30,7 +29,7 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface TagsModuleInput {
   /** Tags or labels */
-  tags: Default<string[], []>;
+  tags: string[] | Default<[]>;
 }
 
 // ===== Handlers =====
@@ -62,7 +61,7 @@ const removeTag = handler<
 // ===== The Pattern =====
 export const TagsModule = pattern<TagsModuleInput, TagsModuleInput>(
   ({ tags }) => {
-    const tagInput = Writable.of<string>("");
+    const tagInput = new Writable<string>("");
     const displayText = computed(() => {
       const count = (tags || []).length || 0;
       return count > 0 ? `${count} tag${count !== 1 ? "s" : ""}` : "No tags";
@@ -71,19 +70,19 @@ export const TagsModule = pattern<TagsModuleInput, TagsModuleInput>(
     return {
       [NAME]: computed(() => `${MODULE_METADATA.icon} Tags: ${displayText}`),
       [UI]: (
-        <ct-vstack style={{ gap: "12px" }}>
+        <cf-vstack style={{ gap: "12px" }}>
           {/* Tag input */}
-          <ct-hstack style={{ gap: "8px" }}>
-            <ct-input
+          <cf-hstack style={{ gap: "8px" }}>
+            <cf-input
               $value={tagInput}
               placeholder="Add a tag..."
               style={{ flex: "1" }}
             />
-            <ct-button onClick={addTag({ tags, tagInput })}>Add</ct-button>
-          </ct-hstack>
+            <cf-button onClick={addTag({ tags, tagInput })}>Add</cf-button>
+          </cf-hstack>
 
           {/* Tag chips */}
-          <ct-hstack style={{ gap: "8px", flexWrap: "wrap" }}>
+          <cf-hstack style={{ gap: "8px", flexWrap: "wrap" }}>
             {tags.map((tag: string, index: number) => (
               <span
                 key={index}
@@ -116,8 +115,8 @@ export const TagsModule = pattern<TagsModuleInput, TagsModuleInput>(
                 </button>
               </span>
             ))}
-          </ct-hstack>
-        </ct-vstack>
+          </cf-hstack>
+        </cf-vstack>
       ),
       tags,
     };

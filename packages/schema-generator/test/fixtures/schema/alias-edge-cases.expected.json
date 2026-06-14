@@ -1,37 +1,53 @@
 {
   "properties": {
     "deepNestedStream": {
-      "asStream": true,
+      "asCell": [
+        "stream",
+        "cell"
+      ],
       "type": "number"
     },
     "deepStream": {
-      "asStream": true,
+      "asCell": [
+        "stream"
+      ],
       "type": "number"
     },
     "indirectArray": {
-      "asCell": true,
+      "asCell": [
+        "cell"
+      ],
       "items": {
         "type": "string"
       },
       "type": "array"
     },
     "numberListCell": {
-      "asCell": true,
+      "asCell": [
+        "cell"
+      ],
       "items": {
         "type": "number"
       },
       "type": "array"
     },
     "stringCellStream": {
-      "asStream": true,
+      "asCell": [
+        "stream",
+        "cell"
+      ],
       "type": "string"
     },
     "userStore": {
-      "asCell": true,
+      "asCell": [
+        "cell"
+      ],
       "type": "string"
     },
     "users": {
-      "asCell": true,
+      "asCell": [
+        "cell"
+      ],
       "items": {
         "properties": {
           "id": {
@@ -50,7 +66,9 @@
       "type": "array"
     },
     "veryDeepCell": {
-      "asCell": true,
+      "asCell": [
+        "cell"
+      ],
       "type": "string"
     }
   },

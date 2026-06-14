@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { type Cell, Default, handler, pattern, UI } from "commontools";
+import { type Cell, Default, handler, pattern, UI } from "commonfabric";
 
 interface Player {
   playerName: string;

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: GoogleAuthManager
  *
@@ -10,15 +9,15 @@
  * Note: Since this pattern depends on wish() finding auth pieces,
  * we can only test the "no auth found" scenarios without external setup.
  *
- * Run: deno task ct test packages/patterns/google/core/util/google-auth-manager.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/google/core/util/google-auth-manager.test.tsx --verbose
  */
-import { computed, pattern } from "commontools";
+import { computed, pattern } from "commonfabric";
 import {
   GoogleAuthManager,
   type GoogleAuthManagerOutput,
 } from "./google-auth-manager.tsx";
 
-interface TestOutput {
+export interface TestOutput {
   tests: unknown[];
   authDefault: GoogleAuthManagerOutput;
   authWithScopes: GoogleAuthManagerOutput;

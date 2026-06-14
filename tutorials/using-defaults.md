@@ -6,7 +6,7 @@ subject: Tutorial
 authors:
   - name: Ellyse Cedeno
     email: ellyse@common.tools
-keywords: commontools, state, Cell, Default, pattern inputs
+keywords: commonfabric, state, Cell, Default, pattern inputs
 abstract: |
   In this section, we learn how to use Default<> to automatically create and initialize
   Cells for pattern inputs. This is the recommended pattern for managing pattern state.
@@ -36,7 +36,7 @@ instead of `cell()`.
 3. **Schema generation** - Generates proper JSON schema for your pattern
 4. **Works** - also at the time of this writing, `cell()` has some bugs, this is
    a huge reason to avoid it. When you use `Default<>` in a pattern's input
-   interface, the Common Tools runtime automatically creates a Cell and
+   interface, the Common Fabric runtime automatically creates a Cell and
    initializes it with your default value.
 
 ## A Simple Counter with Default
@@ -78,8 +78,7 @@ Let's build a complete counter with an increment button:
 ```{code-block} typescript
 :label: using_defaults_counter
 :linenos: true
-:emphasize-lines: 11-13,21,26,31
-/// <cts-enable />
+:emphasize-lines: 10-12,20,25,30
 import {
   Default,
   h,
@@ -87,7 +86,7 @@ import {
   pattern,
   UI,
   type Cell,
-} from "commontools";
+} from "commonfabric";
 
 interface CounterState {
   count: Default<number, 100>;
@@ -114,18 +113,18 @@ export default pattern<CounterState>((state) => {
 });
 ```
 
-**Lines 11-13** define the input interface with `Default<number, 100>`. This
+**Lines 10-12** define the input interface with `Default<number, 100>`. This
 tells the runtime:
 
 - Create a Cell that holds a number
 - Initialize it to 100
 
-**Line 21** receives `state` which has a `count` property that's already a
+**Line 20** receives `state` which has a `count` property that's already a
 `Cell<number>`.
 
-**Line 26** passes the Cell to the handler, just like before.
+**Line 25** passes the Cell to the handler, just like before.
 
-**Line 31** exports the Cell so other patterns can use it.
+**Line 30** exports the Cell so other patterns can use it.
 
 :::{dropdown} View complete code :animate: fade-in
 
@@ -147,8 +146,7 @@ items already in it:
 ```{code-block} typescript
 :label: using_defaults_array
 :linenos: true
-:emphasize-lines: 11-13
-/// <cts-enable />
+:emphasize-lines: 10-12
 import {
   Default,
   h,
@@ -156,14 +154,14 @@ import {
   pattern,
   UI,
   type Cell,
-} from "commontools";
+} from "commonfabric";
 
 interface TodoListState {
   items: Default<string[], ["Pay bill", "Write code", "Dinner with friends"]>;
 }
 ```
 
-**Line 12** specifies
+**Line 11** specifies
 `Default<string[], ["Pay bill", "Write code", "Dinner with friends"]>`:
 
 - First parameter: The type is an array of strings
@@ -191,7 +189,7 @@ const addItem = handler<
 ```
 
 This handler receives an event with `{detail: {message: string}}` - this is the
-shape we'll need for the `<ct-message-input>` component we'll use later. The
+shape we'll need for the `<cf-message-input>` component we'll use later. The
 handler gets the message text, trims whitespace, and adds it to the array if
 it's not empty.
 
@@ -200,8 +198,7 @@ Here's the complete todo list pattern:
 ```{code-block} typescript
 :label: using_defaults_todo_complete
 :linenos: true
-:emphasize-lines: 11-13,28,33-36
-/// <cts-enable />
+:emphasize-lines: 10-12,27,32-35
 import {
   Default,
   h,
@@ -209,7 +206,7 @@ import {
   pattern,
   UI,
   type Cell,
-} from "commontools";
+} from "commonfabric";
 
 interface TodoListState {
   items: Default<string[], ["Pay bill", "Write code", "Dinner with friends"]>;
@@ -233,10 +230,10 @@ export default pattern<TodoListState>((state) => {
     [UI]: (
       <div>
         <h2>My Todos</h2>
-        <ct-message-input
+        <cf-message-input
           name="Add"
           placeholder="Add a todo..."
-          onct-send={addItem({ items: state.items })}
+          oncf-send={addItem({ items: state.items })}
         />
         <ul>
           {state.items.map((item) => (
@@ -250,16 +247,16 @@ export default pattern<TodoListState>((state) => {
 });
 ```
 
-**Lines 11-13** define the state with three todo items as the default.
+**Lines 10-12** define the state with three todo items as the default.
 
-**Line 28** receives `state` which has an `items` property that's already a
+**Line 27** receives `state` which has an `items` property that's already a
 `Cell<string[]>`.
 
-**Lines 33-36** use the `<ct-message-input>` component for input, which
-provides a text field with a submit button. The `onct-send` event fires when
+**Lines 32-35** use the `<cf-message-input>` component for input, which
+provides a text field with a submit button. The `oncf-send` event fires when
 the user submits.
 
-**Lines 39-41** use `.map()` to render each item in the list.
+**Lines 38-40** use `.map()` to render each item in the list.
 
 :::{dropdown} View complete code :animate: fade-in
 
@@ -340,7 +337,6 @@ Here's the complete game stats pattern:
 :label: using_defaults_object_complete
 :linenos: true
 :emphasize-lines: 11-24,42-53
-/// <cts-enable />
 import {
   Default,
   h,
@@ -348,7 +344,7 @@ import {
   pattern,
   UI,
   type Cell,
-} from "commontools";
+} from "commonfabric";
 
 interface Player {
   playerName: string;

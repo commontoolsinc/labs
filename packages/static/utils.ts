@@ -1,4 +1,4 @@
-import { isDeno } from "@commontools/utils/env";
+import { isDeno } from "@commonfabric/utils/env";
 import { FS_URL, InnerCache, type StaticCache } from "./cache.ts";
 
 // `TestStaticCache` uses StaticCacheFS in Deno and `${window.location.origin}/static`

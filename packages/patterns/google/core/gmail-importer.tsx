@@ -1,11 +1,7 @@
-/// <cts-enable />
 import {
   computed,
   Default,
-  derive,
-  getPatternEnvironment,
   handler,
-  ifElse,
   NAME,
   pattern,
   patternTool,
@@ -15,13 +11,12 @@ import {
   UI,
   VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Secret<T> = T;
 type Confidential<T> = T;
 
-import TurndownService from "turndown";
-import { GmailClient } from "./util/gmail-client.ts";
+import { type GmailClient, gmailClient } from "./util/gmail-client.ts";
 import {
   createGoogleAuth,
   type ScopeKey,
@@ -39,46 +34,43 @@ type SyncableWritable<T> = Writable<T> & {
 /**
  * Auth data structure for Google OAuth tokens.
  *
- * ⚠️ CRITICAL: When consuming this auth, DO NOT use derive()!
- * derive() creates read-only projections - token refresh will silently fail.
- * Use property access (piece.auth) or ifElse() instead.
- *
- * See: community-docs/superstitions/2025-12-03-derive-creates-readonly-cells-use-property-access.md
+ * ⚠️ CRITICAL: When consuming this auth, keep it a live, writable cell
+ * reference - do NOT copy it into a read-only projection. Token refresh
+ * mutates the auth cell in place, so any consumer that reads a detached
+ * snapshot will see refresh silently fail.
+ * Use direct property access (piece.auth) or select it with a ternary
+ * (which lowers to ifElse and preserves the underlying cell reference).
  */
 export type Auth = {
-  token: Default<Secret<string>, "">;
-  tokenType: Default<string, "">;
-  scope: Default<string[], []>;
-  expiresIn: Default<number, 0>;
-  expiresAt: Default<number, 0>;
-  refreshToken: Default<Secret<string>, "">;
-  user: Default<
-    {
-      email: string;
-      name: string;
-      picture: string;
-    },
-    { email: ""; name: ""; picture: "" }
-  >;
+  token: Secret<string> | Default<"">;
+  tokenType: string | Default<"">;
+  scope: string[] | Default<[]>;
+  expiresIn: number | Default<0>;
+  expiresAt: number | Default<0>;
+  refreshToken: Secret<string> | Default<"">;
+  user: {
+    email: string;
+    name: string;
+    picture: string;
+  } | Default<{ email: ""; name: ""; picture: "" }>;
 };
 
-// Initialize turndown service
-const turndown = new TurndownService({
-  headingStyle: "atx",
-  codeBlockStyle: "fenced",
-  emDelimiter: "*",
-});
-
-const _env = getPatternEnvironment();
-
-turndown.addRule("removeStyleTags", {
-  filter: ["style"],
-  replacement: function () {
-    return "";
-  },
-});
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+function htmlToMarkdown(htmlContent: string): string {
+  return htmlContent
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|section|article|li|tr|h[1-6])>/gi, "\n")
+    .replace(/<li>/gi, "- ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 /** An #email */
 export type Email = {
@@ -87,7 +79,7 @@ export type Email = {
   // Identifier for the email thread
   threadId: string;
   // Labels assigned to the email
-  labelIds: Default<string[], []>;
+  labelIds: string[] | Default<[]>;
   // Brief preview of the email content
   snippet: string;
   // Email subject line
@@ -105,26 +97,26 @@ export type Email = {
   // Email content converted to Markdown format. Often best for processing email contents.
   markdownContent: string;
   // Summary for search indexing
-  summary: Default<string, "">;
+  summary: string | Default<"">;
 };
 
 type Settings = {
   // Gmail filter query to use for fetching emails
-  gmailFilterQuery: Default<string, "in:INBOX">;
+  gmailFilterQuery: string | Default<"in:INBOX">;
   // Maximum number of emails to fetch
-  limit: Default<number, 10>;
+  limit: number | Default<10>;
   // Enable verbose console logging for debugging
-  debugMode: Default<boolean, false>;
+  debugMode: boolean | Default<false>;
   // Automatically fetch emails when auth becomes valid (opt-in)
-  autoFetchOnAuth: Default<boolean, false>;
+  autoFetchOnAuth: boolean | Default<false>;
   // Resolve inline image attachments (cid: references) to base64 data URLs
   // Enable this for emails with embedded images (e.g., USPS Informed Delivery)
   // Note: This fetches additional attachment data which may be slower
-  resolveInlineImages: Default<boolean, false>;
+  resolveInlineImages: boolean | Default<false>;
 };
 
 /** Gmail email importer for fetching and viewing emails. #gmailEmails */
-interface Output {
+export interface Output {
   [NAME]: string;
   [UI]: VNode;
   /** Array of imported emails */
@@ -165,7 +157,7 @@ const _updateLimit = handler<
   state.limit.set(parseInt(detail?.value ?? "100") || 0);
 });
 
-// GmailClient is now imported from ./util/gmail-client.ts
+// gmailClient is now imported from ./util/gmail-client.ts
 // This enables code reuse with gmail-agentic-search and ensures
 // consistent token refresh behavior across all Gmail patterns.
 
@@ -175,16 +167,14 @@ const googleUpdater = handler<
     emails: SyncableWritable<Array<Writable<Email>>>;
     auth: SyncableWritable<Auth>;
     settings: SyncableWritable<
-      Default<
-        Settings,
-        {
-          gmailFilterQuery: "in:INBOX";
-          limit: 10;
-          debugMode: false;
-          autoFetchOnAuth: false;
-          resolveInlineImages: false;
-        }
-      >
+      | Settings
+      | Default<{
+        gmailFilterQuery: "in:INBOX";
+        limit: 10;
+        debugMode: false;
+        autoFetchOnAuth: false;
+        resolveInlineImages: false;
+      }>
     >;
     historyId: SyncableWritable<string>;
     fetching?: Writable<boolean>;
@@ -635,8 +625,7 @@ async function messageToEmail(
             `[messageToEmail] Converting HTML to markdown...`,
           );
           try {
-            // Convert HTML to markdown using our custom converter
-            markdownContent = turndown.turndown(htmlContent);
+            markdownContent = htmlToMarkdown(htmlContent);
             debugLog(
               debugMode,
               `[messageToEmail] Markdown conversion successful, length: ${markdownContent.length}`,
@@ -739,7 +728,7 @@ export async function process(
     return;
   }
 
-  const client = new GmailClient(auth, { debugMode });
+  const client = gmailClient(auth, { debugMode });
   const currentHistoryId = state.historyId.get();
 
   let newHistoryId: string | null = null;
@@ -976,7 +965,6 @@ export async function process(
       );
 
       try {
-        await sleep(1000);
         const fetched = await client.fetchMessagesByIds(batchIds);
         const resolveInlineImages = state.resolveInlineImages || false;
         debugLog(
@@ -1051,7 +1039,7 @@ const EmailCard = pattern<
   { email: Email },
   { [NAME]: string; summary: string; [UI]: VNode }
 >(({ email }) => ({
-  [NAME]: computed(() => email.subject),
+  [NAME]: email.subject,
   summary: str`${email.subject} from ${email.from}: ${email.snippet}`,
   [UI]: (
     <div
@@ -1096,25 +1084,24 @@ const EmailCard = pattern<
 
 export default pattern<
   {
-    settings: Default<
-      Settings,
-      {
+    settings:
+      | Settings
+      | Default<{
         gmailFilterQuery: "in:INBOX";
         limit: 10;
         debugMode: false;
         autoFetchOnAuth: false;
         resolveInlineImages: false;
-      }
-    >;
+      }>;
     // Optional: Link auth directly from a Google Auth piece when wish() is unavailable
-    // Use: ct piece link googleAuthPiece/auth gmailImporterPiece/overrideAuth
+    // Use: cf piece link googleAuthPiece/auth gmailImporterPiece/overrideAuth
     overrideAuth?: Auth;
   },
   Output
 >(({ settings, overrideAuth }) => {
-  const emails = Writable.of<Confidential<Email[]>>([]).for("emails");
-  const historyId = Writable.of("").for("historyId");
-  const fetching = Writable.of(false).for("fetching");
+  const emails = new Writable<Confidential<Email[]>>([]).for("emails");
+  const historyId = new Writable("").for("historyId");
+  const fetching = new Writable(false).for("fetching");
 
   // Use full auth manager with required scopes
   const {
@@ -1127,20 +1114,15 @@ export default pattern<
   });
 
   // Check if overrideAuth is provided (for manual linking when wish() is unavailable)
-  const hasOverrideAuth = computed(() => !!overrideAuth?.token);
-  const overrideAuthEmail = computed(() => overrideAuth?.user?.email || "");
+  const hasOverrideAuth = !!overrideAuth?.token;
+  const overrideAuthEmail = overrideAuth?.user?.email || "";
 
-  const auth = ifElse(
-    hasOverrideAuth,
-    overrideAuth,
-    wishedAuth,
-  );
-  const isReady = ifElse(hasOverrideAuth, hasOverrideAuth, wishedIsReady);
-  const currentEmail = ifElse(
-    hasOverrideAuth,
-    overrideAuthEmail,
-    wishedCurrentEmail,
-  );
+  // IMPORTANT: select auth via a bare ternary (lowers to ifElse), NOT a plain
+  // projection that would copy the value. This keeps `auth` a live, writable
+  // cell reference so cross-piece token refresh can mutate it in place.
+  const auth = hasOverrideAuth ? overrideAuth : wishedAuth;
+  const isReady = hasOverrideAuth ? hasOverrideAuth : wishedIsReady;
+  const currentEmail = hasOverrideAuth ? overrideAuthEmail : wishedCurrentEmail;
 
   const summary = computed(() => {
     const emailList = emails.get();
@@ -1167,7 +1149,7 @@ export default pattern<
 
   // Auto-fetch when auth becomes valid (opt-in feature)
   // Track whether we've already triggered auto-fetch to prevent loops
-  const hasAutoFetched = Writable.of(false).for("auto fetched");
+  const hasAutoFetched = new Writable(false).for("auto fetched");
 
   computed(() => {
     const ready = isReady;
@@ -1203,25 +1185,25 @@ export default pattern<
   return {
     [NAME]: str`GMail Importer ${currentEmail}`,
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div slot="header">
-          <ct-heading level={3}>Gmail Importer</ct-heading>
+          <cf-heading level={3}>Gmail Importer</cf-heading>
         </div>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack padding="6" gap="4">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack padding="6" gap="4">
             {/* Auth management UI */}
             {authUI}
 
             <h3 style={{ fontSize: "18px", fontWeight: "bold" }}>
-              Imported email count: {computed(() => emails.get().length)}
+              Imported email count: {emails.get().length}
             </h3>
 
             <div style={{ fontSize: "14px", color: "#666" }}>
               historyId: {historyId || "none"}
             </div>
 
-            <ct-vstack gap="4">
+            <cf-vstack gap="4">
               <div>
                 <label
                   style={{
@@ -1232,7 +1214,7 @@ export default pattern<
                 >
                   Import Limit
                 </label>
-                <ct-input
+                <cf-input
                   type="number"
                   $value={settings.limit}
                   placeholder="count of emails to import"
@@ -1249,7 +1231,7 @@ export default pattern<
                 >
                   Gmail Filter Query
                 </label>
-                <ct-input
+                <cf-input
                   type="text"
                   $value={settings.gmailFilterQuery}
                   placeholder="in:INBOX"
@@ -1309,31 +1291,31 @@ export default pattern<
                   Debug Mode (verbose console logging)
                 </label>
               </div>
-              {ifElse(
-                isReady,
-                <ct-button
-                  type="button"
-                  onClick={googleUpdaterStream}
-                  disabled={fetching}
-                >
-                  {ifElse(
-                    fetching,
-                    <span
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                      }}
-                    >
-                      <ct-loader size="sm" show-elapsed></ct-loader>
-                      Fetching...
-                    </span>,
-                    "Fetch Emails",
-                  )}
-                </ct-button>,
-                null,
-              )}
-            </ct-vstack>
+              {isReady
+                ? (
+                  <cf-button
+                    type="button"
+                    onClick={googleUpdaterStream}
+                    disabled={fetching}
+                  >
+                    {fetching.get()
+                      ? (
+                        <span
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                          }}
+                        >
+                          <cf-loader size="sm" show-elapsed></cf-loader>
+                          Fetching...
+                        </span>
+                      )
+                      : "Fetch Emails"}
+                  </cf-button>
+                )
+                : null}
+            </cf-vstack>
 
             <div>
               <table>
@@ -1362,7 +1344,7 @@ export default pattern<
                         style={{ border: "1px solid black", padding: "10px" }}
                       >
                         &nbsp;
-                        {derive(email, (email) => email?.labelIds?.join(", "))}
+                        {email?.labelIds?.join(", ")}
                         &nbsp;
                       </td>
                       <td
@@ -1386,21 +1368,21 @@ export default pattern<
                 </tbody>
               </table>
             </div>
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
     authUI,
     emails,
     mentionable: emails.map((e) => <EmailCard email={e} />),
-    emailCount: derive(emails, (list: Email[]) => list?.length || 0),
+    emailCount: emails.get()?.length || 0,
     summary,
     bgUpdater: googleUpdaterStream,
     isReady,
     // Pattern tools for omnibot
     searchEmails: patternTool(
-      ({ query, emails }: { query: string; emails: Email[] }) => {
-        return derive({ query, emails }, ({ query, emails }) => {
+      pattern(({ query, emails }: { query: string; emails: Email[] }) => {
+        return computed(() => {
           if (!query || !emails) return [];
           const lowerQuery = query.toLowerCase();
           return emails.filter(
@@ -1410,18 +1392,18 @@ export default pattern<
               email.snippet?.toLowerCase().includes(lowerQuery),
           );
         });
-      },
+      }),
       { emails },
     ),
     getEmailCount: patternTool(
-      ({ emails }: { emails: Email[] }) => {
-        return derive(emails, (list: Email[]) => list?.length || 0);
-      },
+      pattern(({ emails }: { emails: Email[] }) => {
+        return emails?.length || 0;
+      }),
       { emails },
     ),
     getRecentEmails: patternTool(
-      ({ count, emails }: { count: number; emails: Email[] }) => {
-        return derive({ count, emails }, ({ count, emails }) => {
+      pattern(({ count, emails }: { count: number; emails: Email[] }) => {
+        return computed(() => {
           if (!emails || emails.length === 0) return "No emails";
           const recent = emails.slice(0, count || 5);
           return recent
@@ -1435,7 +1417,7 @@ export default pattern<
             )
             .join("\n\n");
         });
-      },
+      }),
       { emails },
     ),
   };

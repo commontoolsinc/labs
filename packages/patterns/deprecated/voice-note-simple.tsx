@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   computed,
   type Default,
@@ -6,9 +5,9 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
-// Type definition for transcription data (from ct-voice-input component)
+// Type definition for transcription data (from cf-voice-input component)
 interface TranscriptionChunk {
   timestamp: [number, number];
   text: string;
@@ -24,11 +23,11 @@ interface TranscriptionData {
 }
 
 type Input = {
-  title?: Writable<Default<string, "Voice Note Test">>;
+  title?: Writable<string | Default<"Voice Note Test">>;
 };
 
 type Output = {
-  transcription: Default<TranscriptionData | null, null>;
+  transcription: TranscriptionData | null | Default<null>;
 };
 
 const VoiceNoteSimple = pattern<Input, Output>(
@@ -46,23 +45,23 @@ const VoiceNoteSimple = pattern<Input, Output>(
     return {
       [NAME]: title,
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           <div slot="header">
-            <ct-input
+            <cf-input
               $value={title}
               placeholder="Voice Note Test"
             />
           </div>
 
-          <ct-vstack gap="3" style="padding: 1rem; max-width: 600px;">
-            <ct-card>
+          <cf-vstack gap="3" style="padding: 1rem; max-width: 600px;">
+            <cf-card>
               <div style={{ padding: "1rem" }}>
                 <h3 style={{ marginTop: 0 }}>Voice Input Component Test</h3>
-                <p style={{ color: "var(--ct-color-gray-600)" }}>
+                <p style={{ color: "var(--cf-color-gray-600)" }}>
                   Hold the microphone button to record. Release to transcribe.
                 </p>
 
-                <ct-voice-input
+                <cf-voice-input
                   $transcription={transcription}
                   recordingMode="hold"
                   autoTranscribe
@@ -70,10 +69,10 @@ const VoiceNoteSimple = pattern<Input, Output>(
                   showWaveform
                 />
               </div>
-            </ct-card>
+            </cf-card>
 
             {hasTranscription && (
-              <ct-card>
+              <cf-card>
                 <div style={{ padding: "1rem" }}>
                   <h3 style={{ marginTop: 0 }}>Latest Transcription</h3>
                   <p style={{ margin: "1rem 0" }}>{transcriptionText}</p>
@@ -82,7 +81,7 @@ const VoiceNoteSimple = pattern<Input, Output>(
                       display: "flex",
                       gap: "1rem",
                       fontSize: "0.875rem",
-                      color: "var(--ct-color-gray-600)",
+                      color: "var(--cf-color-gray-600)",
                     }}
                   >
                     <span>
@@ -94,10 +93,10 @@ const VoiceNoteSimple = pattern<Input, Output>(
                     </span>
                   </div>
                 </div>
-              </ct-card>
+              </cf-card>
             )}
-          </ct-vstack>
-        </ct-screen>
+          </cf-vstack>
+        </cf-screen>
       ),
       transcription,
     };

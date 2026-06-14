@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { TransformationContext } from "./mod.ts";
+import { CrossStageState } from "./cross-stage-state.ts";
 
 export type TransformMode = "transform" | "error";
 
@@ -11,10 +12,20 @@ export type TransformMode = "transform" | "error";
 export interface SchemaHint {
   /** Override for array items schema (e.g., false for items: false) */
   readonly items?: unknown;
+  readonly cfcUiContract?: {
+    readonly helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+    readonly action?: string;
+    readonly surface?: string;
+    readonly role?: string;
+    readonly kind?: string;
+    readonly trustedPattern?: string;
+    readonly requiredEventIntegrity?: readonly string[];
+  };
 }
 
 export type ReactiveCapability =
   | "opaque"
+  | "comparable"
   | "readonly"
   | "writeonly"
   | "writable";
@@ -28,9 +39,16 @@ export interface CapabilityParamSummary {
   readonly name: string;
   readonly capability: ReactiveCapability;
   readonly readPaths: readonly (readonly string[])[];
+  readonly fullShapePaths?: readonly (readonly string[])[];
   readonly writePaths: readonly (readonly string[])[];
+  readonly opaquePaths?: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
+  readonly identityOnly?: boolean;
+  readonly identityPaths?: readonly (readonly string[])[];
+  readonly identityCellPaths?: readonly (readonly string[])[];
+  readonly comparablePaths?: readonly (readonly string[])[];
+  readonly comparableCellPaths?: readonly (readonly string[])[];
   readonly defaults?: readonly CapabilityParamDefault[];
 }
 
@@ -46,19 +64,18 @@ export interface FunctionCapabilitySummary {
  * Type is used in multiple places with different access patterns.
  */
 export type SchemaHints = WeakMap<ts.Node, SchemaHint>;
-export type CapabilitySummaryRegistry = WeakMap<
-  ts.Node,
-  FunctionCapabilitySummary
->;
+export type SyntheticReactiveCollectionRegistry = WeakSet<ts.Symbol>;
 
 export interface TransformationOptions {
   readonly mode?: TransformMode;
   readonly debug?: boolean;
   readonly logger?: (message: string) => void;
-  readonly typeRegistry?: TypeRegistry;
-  readonly mapCallbackRegistry?: WeakSet<ts.Node>;
-  readonly schemaHints?: SchemaHints;
-  readonly capabilitySummaryRegistry?: CapabilitySummaryRegistry;
+  /**
+   * Single owner of the pipeline's cross-transformer communication registries
+   * (typeRegistry, schemaHints, the marker sets, etc.). Replaces the formerly
+   * separate registry fields. See `CrossStageState`.
+   */
+  readonly state?: CrossStageState;
   /**
    * Shared diagnostics collector that accumulates diagnostics across all transformers.
    * If provided, diagnostics are pushed to this array in addition to the local context.
@@ -89,10 +106,16 @@ export interface DiagnosticInput {
 /**
  * Registry for passing Type information between transformer stages.
  *
- * When schema-injection creates synthetic TypeNodes, the original Type
- * may not survive round-tripping through checker.getTypeFromTypeNode().
- * This registry allows us to pass the original Type directly to the
- * schema-transformer stage.
+ * The registry carries three related kinds of synthetic typing:
+ * - replacement expression nodes that should keep the original authored type
+ * - synthetic TypeNodes that later schema/codegen phases must resolve faithfully
+ * - synthetic call expressions (`lift-applied`, `ifElse`, etc.) whose
+ *   result types would otherwise be lost after rewriting
+ *
+ * Most TypeNodes are registered directly at creation time. For composite
+ * synthetic TypeNodes that still collapse to unresolved `any` / `unknown`
+ * through the public checker APIs, `ensureTypeNodeRegistered(...)` in
+ * `ast/type-inference.ts` reconstructs and caches a Type on demand.
  *
  * Uses WeakMap with node identity as key. Node identity is preserved when
  * transformers are applied in sequence via ts.transform().
@@ -134,6 +157,12 @@ export abstract class Transformer {
 
       return transformed;
     };
+  }
+}
+
+export abstract class HelpersOnlyTransformer extends Transformer {
+  override filter(context: TransformationContext): boolean {
+    return context.cfHelpers.sourceHasHelpers();
   }
 }
 

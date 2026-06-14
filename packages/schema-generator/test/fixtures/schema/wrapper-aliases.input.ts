@@ -1,5 +1,5 @@
 // Test wrapper type aliases - both direct and aliased wrapper types
-// Using proper interface definitions that match actual CommonTools wrappers
+// Using proper interface definitions that match actual Common Fabric wrappers
 type Default<T, V = T> = T;
 
 // Define wrapper aliases

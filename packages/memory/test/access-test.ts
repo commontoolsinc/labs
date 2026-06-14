@@ -1,28 +1,15 @@
 import { assert, assertEquals, assertMatch } from "@std/assert";
-import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
+import { describe, it } from "@std/testing/bdd";
 import { alice, bob, mallory, space } from "./principal.ts";
 import * as Access from "../access.ts";
-import { type DID } from "@commontools/identity";
-import {
-  refer,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
-} from "../reference.ts";
+import { type DID } from "@commonfabric/identity";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { Invocation } from "../interface.ts";
 
 // Some generated service key.
 const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
 
 describe("access", () => {
-  // Explicitly pin canonical hashing off so these tests exercise the legacy
-  // refer() path regardless of what the ambient default is.
-  beforeAll(() => {
-    setCanonicalHashConfig(false);
-  });
-  afterAll(() => {
-    resetCanonicalHashConfig();
-  });
-
   it("signer.did()", () => {
     assertEquals(
       alice.did(),
@@ -58,7 +45,7 @@ describe("access", () => {
       prf: [],
     };
 
-    const result = await Access.authorize([refer(invocation)], alice);
+    const result = await Access.authorize([hashOf(invocation)], alice);
     assert(result.ok, "authorization was issued");
     const authorization = result.ok;
 
@@ -89,7 +76,7 @@ describe("access", () => {
       prf: [],
     };
 
-    const result = await Access.authorize([refer(invocation)], bob);
+    const result = await Access.authorize([hashOf(invocation)], bob);
     assert(result.ok, "authorization was issued");
     const authorization = result.ok;
 
@@ -119,7 +106,7 @@ describe("access", () => {
     };
 
     const result = await Access.authorize(
-      [refer(invocation1), refer(invocation2)],
+      [hashOf(invocation1), hashOf(invocation2)],
       alice,
     );
     assert(result.ok, "batch authorization was issued");
@@ -158,7 +145,7 @@ describe("access", () => {
       prf: [],
     };
 
-    const result = await Access.authorize([refer(invocation)], bob);
+    const result = await Access.authorize([hashOf(invocation)], bob);
     assert(result.ok, "authorization was issued");
     const authorization = result.ok;
 

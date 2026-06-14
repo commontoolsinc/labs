@@ -19,7 +19,7 @@ Cells can be categorized along two dimensions:
    - Stream cells (occurrence-based)
 
 2. **Semantic role**: What purpose the cell serves
-   - Process cells (execution metadata)
+   - Result metadata cells (execution metadata)
    - Precious data cells (irreplaceable):
      - User input (created/edited by user)
      - External input (fetched from outside, world has moved on)
@@ -89,22 +89,25 @@ This is **state vs occurrence**:
 While the implementation sees only "value" and "stream," there are richer
 semantic distinctions that matter for garbage collection, recovery, and UI:
 
-#### Process Cells
+#### Result Cell Metadata
 
-Control plane metadata for piece execution:
+Control plane metadata for piece execution is stored as metadata on the result
+cell:
 
 ```
 {
-  $TYPE: string,        // pattern ID
-  resultRef: SigilLink, // link to result cell
-  argument?: any,       // input data
-  spell?: SigilLink,    // link to spell
-  internal?: any        // working state
+  pattern: SigilLink,  // link to pattern
+  argument: SigilLink, // link to input data cell
+  internal: Array<{
+    partialCause: JSONValue,
+    link: SigilLink
+  }>,                 // manifest of derived internal cells
+  schema?: JSONSchema
 }
 ```
 
-Process cells are implemented as value cells but serve a distinct purpose:
-tracking which pattern governs a piece and linking to its result. See
+The argument cell and each derived internal cell are value cells with reciprocal
+`result` metadata links back to their owning result cell. See
 [Storage Format](./2-storage-format.md) for details.
 
 #### Precious Data Cells

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Airtable Auth Manager - Unified auth management utility
  *
@@ -21,7 +20,8 @@
  * ```
  */
 
-import { createAuthManager } from "../../../auth/create-auth-manager.tsx";
+import { action, navigateTo, pattern, Writable } from "commonfabric";
+import { AuthManagerBase } from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
 import AirtableAuth from "../airtable-auth.tsx";
 
@@ -48,7 +48,7 @@ export type ScopeKey =
   | "webhook:manage";
 
 /** Human-readable scope descriptions */
-export const SCOPE_DESCRIPTIONS: Record<ScopeKey, string> = {
+const AIRTABLE_SCOPE_DESCRIPTIONS = {
   "data.records:read": "Read records",
   "data.records:write": "Write records",
   "data.recordComments:read": "Read record comments",
@@ -56,9 +56,11 @@ export const SCOPE_DESCRIPTIONS: Record<ScopeKey, string> = {
   "schema.bases:read": "Read base schemas",
   "schema.bases:write": "Write base schemas",
   "webhook:manage": "Manage webhooks",
-};
+} as const;
+export const SCOPE_DESCRIPTIONS: Record<ScopeKey, string> =
+  AIRTABLE_SCOPE_DESCRIPTIONS;
 
-/** Unified scope registry for the auth manager factory */
+/** Unified scope registry for the auth manager base */
 const SCOPES: AuthManagerDescriptor["scopes"] = Object.fromEntries(
   Object.entries(SCOPE_DESCRIPTIONS).map(([key, desc]) => [
     key,
@@ -76,9 +78,59 @@ const AirtableAuthManagerDescriptor: AuthManagerDescriptor = {
   hasAvatarSupport: false,
 };
 
-export const AirtableAuthManager = createAuthManager(
-  AirtableAuthManagerDescriptor,
-  AirtableAuth,
-);
+export const AirtableAuthManager = pattern<
+  import("../../../auth/create-auth-manager.tsx").AuthManagerInput,
+  import("../../../auth/create-auth-manager.tsx").AuthManagerOutput
+>(({ requiredScopes, accountType, debugMode }) => {
+  const createAuth = action(() => {
+    const required = Array.isArray(requiredScopes) ? requiredScopes : [];
+    const emptyAuth: Record<string, unknown> = {
+      tokenType: "",
+      scope: [],
+      expiresIn: 0,
+      expiresAt: 0,
+      refreshToken: "",
+      user: { email: "", name: "", picture: "" },
+      accessToken: "",
+    };
+
+    return navigateTo(
+      AirtableAuth(
+        {
+          selectedScopes: {
+            "data.records:read": new Writable(
+              required.includes("data.records:read"),
+            ),
+            "data.records:write": new Writable(
+              required.includes("data.records:write"),
+            ),
+            "data.recordComments:read": new Writable(
+              required.includes("data.recordComments:read"),
+            ),
+            "data.recordComments:write": new Writable(
+              required.includes("data.recordComments:write"),
+            ),
+            "schema.bases:read": new Writable(
+              required.includes("schema.bases:read"),
+            ),
+            "schema.bases:write": new Writable(
+              required.includes("schema.bases:write"),
+            ),
+            "webhook:manage": new Writable(required.includes("webhook:manage")),
+          },
+          auth: emptyAuth,
+        } as Parameters<typeof AirtableAuth>[0],
+      ),
+    );
+  });
+
+  return AuthManagerBase({
+    requiredScopes,
+    accountType,
+    debugMode,
+    descriptor: AirtableAuthManagerDescriptor,
+    createAuth,
+  });
+});
 
 export default AirtableAuthManager;

@@ -3,11 +3,13 @@
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source "$SCRIPT_DIR/common/port-utils.sh"
+read_base_ports
 
 # Default ports and offset
 PORT_OFFSET=${PORT_OFFSET:-0}
 SHELL_PORT=${SHELL_PORT:-}
 TOOLSHED_PORT=${TOOLSHED_PORT:-}
+HEALTH_CHECK_TIMEOUT=${HEALTH_CHECK_TIMEOUT:-10}
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -45,8 +47,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Apply offset to default ports if not explicitly set
-SHELL_PORT=${SHELL_PORT:-$((5173 + PORT_OFFSET))}
-TOOLSHED_PORT=${TOOLSHED_PORT:-$((8000 + PORT_OFFSET))}
+SHELL_PORT=${SHELL_PORT:-$((BASE_SHELL_PORT + PORT_OFFSET))}
+TOOLSHED_PORT=${TOOLSHED_PORT:-$((BASE_TOOLSHED_PORT + PORT_OFFSET))}
 
 ALL_OK=true
 
@@ -64,15 +66,43 @@ check_server() {
         return
     fi
 
-    local status
-    status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$url" 2>/dev/null)
+    local curl_output=""
+    local curl_exit=0
+    local status=""
+    local total_time=""
+    local metrics_file=""
+    local error_file=""
 
-    if [[ "$status" == "200" ]]; then
-        echo "  $name: ok ($url)"
+    metrics_file=$(mktemp)
+    error_file=$(mktemp)
+
+    if curl -sS -o /dev/null -w "%{http_code} %{time_total}" --max-time "$HEALTH_CHECK_TIMEOUT" "$url" >"$metrics_file" 2>"$error_file"; then
+        curl_output="$(cat "$metrics_file")"
     else
-        echo "  $name: process on port $port but HTTP status $status ($url)"
-        ALL_OK=false
+        curl_exit=$?
+        curl_output="$(cat "$error_file")"
     fi
+
+    rm -f "$metrics_file" "$error_file"
+
+    if [[ "$curl_exit" -eq 0 ]]; then
+        status="${curl_output%% *}"
+        total_time="${curl_output#* }"
+        if [[ "$status" == "200" ]]; then
+            echo "  $name: ok ($url, ${total_time}s)"
+            return
+        fi
+
+        echo "  $name: process on port $port but HTTP status $status after ${total_time}s ($url)"
+        ALL_OK=false
+        return
+    fi
+
+    echo "  $name: process on port $port but curl failed with exit $curl_exit ($url)"
+    if [[ -n "$curl_output" ]]; then
+        echo "    curl: $curl_output"
+    fi
+    ALL_OK=false
 }
 
 check_server "Toolshed" "http://localhost:$TOOLSHED_PORT/_health" "$TOOLSHED_PORT"

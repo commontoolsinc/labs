@@ -1,4 +1,4 @@
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import { type JSONSchema, type NodeRef, type Opaque } from "./types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { traverseValue } from "./traverse-utils.ts";
@@ -7,14 +7,33 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { isCell } from "../cell.ts";
+import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
+import { resolveLocationFromFunctionSource } from "./module.ts";
 
 export function connectInputAndOutputs(node: NodeRef) {
   function connect(value: any): any {
     if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
     if (isCell(value)) {
-      if (value.export().frame !== node.frame) {
+      const exported = value.export();
+      if (exported.frame !== node.frame) {
+        const implementation = isRecord(node.module)
+          ? node.module.implementation
+          : undefined;
+        const sourceLocation = typeof implementation === "function"
+          ? resolveLocationFromFunctionSource(
+            implementation as (...args: any[]) => unknown,
+            node.frame,
+          )
+          : null;
         throw new Error(
-          "Reactive reference from outer scope cannot be accessed via closure. Wrap the access in a derive that passes the variable through, or use computed() which handles this automatically.",
+          closureCaptureErrorMessage({
+            capturedCell: {
+              path: exported.path,
+              scope: exported.scope,
+              name: exported.name,
+            },
+            sourceLocation,
+          }),
         );
       }
       value.connect(node);
@@ -25,8 +44,11 @@ export function connectInputAndOutputs(node: NodeRef) {
   node.inputs = traverseValue(node.inputs, connect);
   node.outputs = traverseValue(node.outputs, connect);
 
-  // We will also apply ifc tags from inputs to outputs
-  applyInputIfcToOutput(node.inputs, node.outputs);
+  // We will also apply ifc tags from inputs to outputs, unless the module has
+  // precise built-in flow handling for its result.
+  if (!isRecord(node.module) || node.module.propagateInputIfc !== false) {
+    applyInputIfcToOutput(node.inputs, node.outputs);
+  }
 }
 
 export function applyArgumentIfcToResult(
@@ -35,7 +57,7 @@ export function applyArgumentIfcToResult(
 ): JSONSchema | undefined {
   if (argumentSchema !== undefined) {
     const cfc = new ContextualFlowControl();
-    const joined = new Set<string>();
+    const joined = new Set<unknown>();
     ContextualFlowControl.joinSchema(joined, argumentSchema);
     return (joined.size !== 0)
       ? cfc.schemaWithLub(resultSchema ?? true, cfc.lub(joined))
@@ -49,7 +71,7 @@ export function applyInputIfcToOutput<T, R>(
   inputs: Opaque<T>,
   outputs: Opaque<R>,
 ) {
-  const collectedClassifications = new Set<string>();
+  const collectedClassifications = new Set<unknown>();
   const cfc = new ContextualFlowControl();
   traverseValue(inputs, (item: unknown) => {
     if (isCell(item)) {
@@ -64,24 +86,24 @@ export function applyInputIfcToOutput<T, R>(
   }
 }
 
-// Attach ifc classification to OpaqueRef objects reachable
+// Attach ifc confidentiality to OpaqueRef objects reachable
 // from the outputs without descending into OpaqueRef objects
 // TODO(@ubik2) Investigate: can we have cycles here?
-function attachCfcToOutputs<T, R>(
-  outputs: Opaque<R>,
+function attachCfcToOutputs(
+  outputs: unknown,
   cfc: ContextualFlowControl,
-  lubClassification: string,
+  lubConfidentiality: readonly unknown[],
 ) {
   if (isCell(outputs)) {
     const exported = outputs.export();
     const outputSchema = exported.schema ?? true;
     // we may have fields in the output schema, so incorporate those
-    const joined = new Set<string>([lubClassification]);
+    const joined = new Set<unknown>(lubConfidentiality);
     ContextualFlowControl.joinSchema(joined, outputSchema);
-    const ifc = (isObject(outputSchema) && outputSchema.ifc !== undefined)
+    const ifc = (isRecord(outputSchema) && outputSchema.ifc !== undefined)
       ? { ...outputSchema.ifc }
       : {};
-    ifc.classification = [cfc.lub(joined)];
+    ifc.confidentiality = cfc.lub(joined);
     const outpuSchemaObj = (outputSchema === true || outputSchema === undefined)
       ? {}
       : outputSchema === false
@@ -101,7 +123,7 @@ function attachCfcToOutputs<T, R>(
   } else if (isRecord(outputs)) {
     // Descend into objects and arrays
     for (const [_, value] of Object.entries(outputs)) {
-      attachCfcToOutputs(value, cfc, lubClassification);
+      attachCfcToOutputs(value, cfc, lubConfidentiality);
     }
   }
 }

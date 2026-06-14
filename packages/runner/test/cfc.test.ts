@@ -1,8 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { ContextualFlowControl } from "../src/cfc.ts";
+import { cfcAtom, ContextualFlowControl } from "../src/cfc.ts";
+import { schemaHasIfc } from "../src/schema.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import type { JSONSchemaObj } from "@commontools/api";
+import type { JSONSchemaObj } from "@commonfabric/api";
 
 describe("ContextualFlowControl.schemaAtPath array index validation", () => {
   it("rejects leading-zero array index like '01'", () => {
@@ -22,11 +23,181 @@ describe("ContextualFlowControl.schemaAtPath array index validation", () => {
     expect(result1).toEqual({ type: "string" });
   });
 
+  it("does not collide cached paths whose segments contain NUL bytes", () => {
+    const cfc = new ContextualFlowControl();
+
+    // Deep-frozen so the schemaAtPath memo engages; "a\0b" as a single
+    // property name must not share a cache entry with the nested path
+    // ["a", "b"].
+    const schema: JSONSchema = Object.freeze({
+      type: "object",
+      properties: Object.freeze({
+        "a\0b": Object.freeze({ type: "number" }),
+        a: Object.freeze({
+          type: "object",
+          properties: Object.freeze({
+            b: Object.freeze({ type: "string" }),
+          }),
+        }),
+      }),
+    }) as JSONSchema;
+
+    const flat = cfc.schemaAtPath(schema, ["a\0b"]);
+    const nested = cfc.schemaAtPath(schema, ["a", "b"]);
+
+    expect(flat).toEqual({ type: "number" });
+    expect(nested).toEqual({ type: "string" });
+  });
+
   it("considers a schema with only $defs true'", () => {
     const schema: JSONSchema = {
       $defs: { Test: { type: "array", items: { type: "string" } } },
     };
     expect(ContextualFlowControl.isTrueSchema(schema)).toBe(true);
+  });
+
+  it("considers a schema with only scope metadata true", () => {
+    expect(ContextualFlowControl.isTrueSchema({ scope: "any" })).toBe(true);
+  });
+
+  it("carries nested property $defs while traversing through array item refs", () => {
+    const cfc = new ContextualFlowControl();
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        argument: {
+          type: "object",
+          $defs: {
+            Item: {
+              type: "object",
+              properties: {
+                values: {
+                  type: "array",
+                  items: { type: "number" },
+                },
+              },
+            },
+          },
+          properties: {
+            items: {
+              type: "array",
+              items: { $ref: "#/$defs/Item" },
+            },
+          },
+        },
+      },
+    };
+
+    expect(cfc.schemaAtPath(schema, ["argument", "items", "0", "values"]))
+      .toEqual({
+        type: "array",
+        items: { type: "number" },
+        $defs: {
+          Item: {
+            type: "object",
+            properties: {
+              values: {
+                type: "array",
+                items: { type: "number" },
+              },
+            },
+          },
+        },
+      });
+  });
+});
+
+describe("ContextualFlowControl atom joins", () => {
+  it("preserves arbitrary confidentiality atoms instead of collapsing through fixed lattice levels", () => {
+    const cfc = new ContextualFlowControl();
+    const caveatAtom = cfcAtom.caveat("prompt-influence", "of:prompt-source");
+    const provenanceAtom = cfcAtom.resource(
+      "SourceProvenance",
+      "did:example:source",
+    );
+    const schema: JSONSchema = {
+      type: "object",
+      ifc: { confidentiality: [caveatAtom] },
+      properties: {
+        body: {
+          type: "string",
+          ifc: { confidentiality: [provenanceAtom] },
+        },
+      },
+    };
+
+    const joined = new Set<unknown>();
+    ContextualFlowControl.joinSchema(joined, schema);
+
+    expect(cfc.lub(joined)).toEqual([caveatAtom, provenanceAtom]);
+    expect(cfc.schemaAtPath(schema, ["body"])).toMatchObject({
+      type: "string",
+      ifc: {
+        confidentiality: [caveatAtom, provenanceAtom],
+      },
+    });
+  });
+});
+
+describe("schemaHasIfc", () => {
+  it("resolves nested $defs while scanning child schemas", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        nested: {
+          $ref: "#/$defs/Nested",
+          $defs: {
+            Nested: {
+              type: "object",
+              properties: {
+                value: {
+                  $ref: "#/$defs/SecretValue",
+                },
+              },
+            },
+            SecretValue: {
+              type: "string",
+              ifc: {
+                confidentiality: [cfcAtom.resource("NestedSecret")],
+              },
+            },
+          },
+        },
+      },
+    };
+
+    expect(schemaHasIfc(schema)).toBe(true);
+  });
+});
+
+describe("ContextualFlowControl.isFalseSchema", () => {
+  it("treats false as a false schema", () => {
+    expect(ContextualFlowControl.isFalseSchema(false)).toBe(true);
+  });
+
+  it("does not treat true as a false schema", () => {
+    expect(ContextualFlowControl.isFalseSchema(true)).toBe(false);
+  });
+
+  it("does not treat a normal object schema as false", () => {
+    expect(ContextualFlowControl.isFalseSchema({ type: "string" })).toBe(false);
+  });
+
+  it("treats {not: true} as a false schema (negation of true matches nothing)", () => {
+    expect(ContextualFlowControl.isFalseSchema({ not: true })).toBe(true);
+  });
+
+  it("treats {not: {}} as a false schema ({} is a true schema, so its negation is false)", () => {
+    expect(ContextualFlowControl.isFalseSchema({ not: {} })).toBe(true);
+  });
+
+  it("does not treat {not: false} as a false schema (negation of false matches everything)", () => {
+    expect(ContextualFlowControl.isFalseSchema({ not: false })).toBe(false);
+  });
+
+  it("does not treat {not: {type: 'string'}} as a false schema", () => {
+    expect(ContextualFlowControl.isFalseSchema({ not: { type: "string" } }))
+      .toBe(false);
   });
 });
 
@@ -61,6 +232,31 @@ describe("ContextualFlowControl.resolveSchemaRefsOrThrow", () => {
     const schema: JSONSchemaObj = {
       $defs: {},
       $ref: "#/$defs/Missing",
+    };
+    expect(() => ContextualFlowControl.resolveSchemaRefsOrThrow(schema))
+      .toThrow(/Failed to resolve \$ref/);
+  });
+
+  it("rejects local $refs outside root $defs", () => {
+    const schema: JSONSchemaObj = {
+      properties: {
+        name: { type: "string" },
+      },
+      $ref: "#/properties/name",
+    };
+    expect(() => ContextualFlowControl.resolveSchemaRefsOrThrow(schema))
+      .toThrow(/Failed to resolve \$ref/);
+  });
+
+  it("rejects local $refs into nested paths under root $defs", () => {
+    const schema: JSONSchemaObj = {
+      $defs: {
+        Foo: {
+          type: "object",
+          properties: { name: { type: "string" } },
+        },
+      },
+      $ref: "#/$defs/Foo/properties/name",
     };
     expect(() => ContextualFlowControl.resolveSchemaRefsOrThrow(schema))
       .toThrow(/Failed to resolve \$ref/);

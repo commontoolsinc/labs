@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { Cell, pattern, UI } from "commontools";
+import { Cell, pattern, UI } from "commonfabric";
 
 interface State {
   counter: Cell<number>;
@@ -7,7 +6,7 @@ interface State {
 
 // FIXTURE: handler-no-captures
 // Verifies: inline handler with no captured outer variables still gets wrapped with empty captures
-//   onClick={() => console.log("hi")) → handler(false, { properties: {} }, (_, __ct_handler_params) => ...)({})
+//   onClick={() => console.log("hi")) → handler(false, { properties: {} }, (_, __cf_handler_params) => ...)({})
 // Context: No closed-over state; capture object is empty
 export default pattern<State>((_state) => {
   return {

@@ -1,7 +1,7 @@
 // Tests Default<T | undefined, V> with Option B semantics
 // Properties with T | undefined should NOT be in required array
 
-import { Default } from "commontools";
+import { Default } from "commonfabric";
 
 interface SchemaRoot {
   // Property with undefined union - should be optional

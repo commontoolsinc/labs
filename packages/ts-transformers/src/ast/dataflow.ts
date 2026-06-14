@@ -7,13 +7,19 @@ import {
   setParentPointers,
 } from "./utils.ts";
 import { isFunctionLikeExpression } from "./function-predicates.ts";
-import { symbolDeclaresCommonToolsDefault } from "../core/mod.ts";
-import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
-import { detectCallKind } from "./call-kind.ts";
+import { symbolDeclaresCommonFabricDefault } from "../core/common-fabric-symbols.ts";
+import { isBrandedCellType } from "../transformers/opaque-ref/opaque-ref.ts";
+import { isSafeIdentifierText } from "../utils/identifiers.ts";
+import {
+  detectCallKind,
+  isReactiveValueExpression,
+  isReactiveValueSymbol,
+} from "./call-kind.ts";
+import { classifyOpaquePathTerminalCall } from "../transformers/opaque-roots.ts";
 
 export interface DataFlowScopeParameter {
   readonly name: string;
-  readonly symbol: ts.Symbol;
+  readonly symbol?: ts.Symbol;
   readonly declaration?: ts.ParameterDeclaration;
 }
 
@@ -91,10 +97,78 @@ const mergeAnalyses = (...analyses: InternalAnalysis[]): InternalAnalysis => {
   };
 };
 
+function unwrapStructuralDataFlowExpression(
+  expression: ts.Expression,
+): ts.Expression {
+  let current = expression;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isSatisfiesExpression(current) ||
+    ts.isNonNullExpression(current) ||
+    ts.isPartiallyEmittedExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function isStructuralOpaqueKeyDataFlow(
+  expression: ts.Expression,
+): boolean {
+  const target = unwrapStructuralDataFlowExpression(expression);
+  return ts.isCallExpression(target) &&
+    classifyOpaquePathTerminalCall(target) === "key";
+}
+
+export interface DataFlowAnalyzerHooks {
+  /**
+   * Returns true if the given identifier is a reference to the per-element
+   * parameter of an array-method pattern callback synthesized by
+   * ClosureTransformer. Such bindings are typed as the plain user element
+   * type for downstream consumers, so the analyzer needs an out-of-band
+   * signal to recognize reads through them as reactive.
+   *
+   * The hook is given the identifier node (not its symbol) because symbol
+   * identity can drift between pipeline stages when transformers create
+   * new ASTs; node identity (with parent links) is durable.
+   */
+  readonly isArrayMethodElementBindingReference?: (
+    identifier: ts.Identifier,
+  ) => boolean;
+}
+
 export function createDataFlowAnalyzer(
   checker: ts.TypeChecker,
+  hooks: DataFlowAnalyzerHooks = {},
 ): (expression: ts.Expression) => DataFlowAnalysis {
+  // Per-expression memoization for `analyze()`. Lives inside this closure;
+  // invalidated as a unit when `TransformationContext.invalidateReactiveAnalysisCaches`
+  // drops the analyzer instance (see core/mod.ts cache-invalidation contract).
   const analysisCache = new WeakMap<ts.Expression, DataFlowAnalysis>();
+  const resolvingConstAliases = new Set<ts.Symbol>();
+  const isArrayMethodElementBindingReference =
+    hooks.isArrayMethodElementBindingReference ?? (() => false);
+
+  /**
+   * Walk a property-access chain to its leftmost Identifier and ask the hook
+   * whether it refers to an array-method element binding. Unwraps non-semantic
+   * wrappers (parens, `as`, type assertions, `satisfies`, `!`, partially-
+   * emitted) at every step so wrapped reads like `(elem).foo` or `elem!.foo`
+   * are still recognized. Returns false for computed access or non-identifier
+   * roots (call expressions, etc.).
+   */
+  const leftmostIdentifierIsArrayMethodElementBinding = (
+    expression: ts.Expression,
+  ): boolean => {
+    let current: ts.Expression = unwrapStructuralDataFlowExpression(expression);
+    while (ts.isPropertyAccessExpression(current)) {
+      current = unwrapStructuralDataFlowExpression(current.expression);
+    }
+    return ts.isIdentifier(current) &&
+      isArrayMethodElementBindingReference(current);
+  };
 
   // === Synthetic node helpers ===
   // These enable unified handling of both synthetic (transformer-created) and
@@ -102,6 +176,10 @@ export function createDataFlowAnalyzer(
   // the TypeChecker can't resolve symbols or types.
 
   const isSynthetic = (node: ts.Node): boolean => !node.getSourceFile();
+
+  type StaticBindingAccessSegment =
+    | { readonly kind: "property"; readonly text: string }
+    | { readonly kind: "index"; readonly text: string };
 
   const tryGetSymbol = (node: ts.Node): ts.Symbol | undefined => {
     try {
@@ -119,29 +197,306 @@ export function createDataFlowAnalyzer(
     }
   };
 
+  const isConstVariableDeclaration = (
+    declaration: ts.VariableDeclaration,
+  ): boolean => {
+    const declarationList = declaration.parent;
+    return !!(
+      declarationList &&
+      ts.isVariableDeclarationList(declarationList) &&
+      (declarationList.flags & ts.NodeFlags.Const) !== 0
+    );
+  };
+
+  const getEnclosingConstVariableDeclaration = (
+    node: ts.Node | undefined,
+  ): ts.VariableDeclaration | undefined => {
+    let current = node;
+    while (current) {
+      if (ts.isVariableDeclaration(current)) {
+        return isConstVariableDeclaration(current) ? current : undefined;
+      }
+      current = current.parent;
+    }
+    return undefined;
+  };
+
+  const getObjectBindingAccessSegment = (
+    element: ts.BindingElement,
+  ): StaticBindingAccessSegment | undefined => {
+    if (!element.propertyName) {
+      if (ts.isIdentifier(element.name)) {
+        return { kind: "property", text: element.name.text };
+      }
+      return undefined;
+    }
+
+    if (ts.isIdentifier(element.propertyName)) {
+      return { kind: "property", text: element.propertyName.text };
+    }
+
+    const propertyNameText = getStaticPropertyNameText(element.propertyName);
+    if (propertyNameText !== undefined) {
+      return { kind: "property", text: propertyNameText };
+    }
+
+    return undefined;
+  };
+
+  const getStaticPropertyNameText = (
+    name: ts.PropertyName,
+  ): string | undefined => {
+    if (ts.isIdentifier(name)) {
+      return name.text;
+    }
+
+    if (
+      ts.isStringLiteral(name) ||
+      ts.isNumericLiteral(name) ||
+      ts.isNoSubstitutionTemplateLiteral(name)
+    ) {
+      return name.text;
+    }
+
+    return undefined;
+  };
+
+  const getBindingElementStaticAccessPath = (
+    element: ts.BindingElement,
+  ): readonly StaticBindingAccessSegment[] | undefined => {
+    const path: StaticBindingAccessSegment[] = [];
+    let current: ts.BindingElement | undefined = element;
+
+    while (current) {
+      if (current.dotDotDotToken || current.initializer) {
+        return undefined;
+      }
+
+      const parentPattern: ts.Node = current.parent;
+      if (ts.isObjectBindingPattern(parentPattern)) {
+        const segment = getObjectBindingAccessSegment(current);
+        if (!segment) {
+          return undefined;
+        }
+        path.unshift(segment);
+      } else if (ts.isArrayBindingPattern(parentPattern)) {
+        const index = parentPattern.elements.indexOf(current);
+        if (index < 0) {
+          return undefined;
+        }
+        path.unshift({ kind: "index", text: String(index) });
+      } else {
+        return undefined;
+      }
+
+      const owner: ts.Node = parentPattern.parent;
+      if (ts.isVariableDeclaration(owner)) {
+        return path;
+      }
+      if (ts.isBindingElement(owner)) {
+        current = owner;
+        continue;
+      }
+      return undefined;
+    }
+
+    return undefined;
+  };
+
+  const createStaticBindingAccessExpression = (
+    root: ts.Expression,
+    path: readonly StaticBindingAccessSegment[],
+  ): ts.Expression => {
+    let current = unwrapStructuralDataFlowExpression(root);
+
+    for (const segment of path) {
+      if (segment.kind === "index") {
+        current = ts.factory.createElementAccessExpression(
+          current,
+          ts.factory.createNumericLiteral(segment.text),
+        );
+        continue;
+      }
+
+      current = isSafeIdentifierText(segment.text)
+        ? ts.factory.createPropertyAccessExpression(
+          current,
+          ts.factory.createIdentifier(segment.text),
+        )
+        : /^\d+$/.test(segment.text)
+        ? ts.factory.createElementAccessExpression(
+          current,
+          ts.factory.createNumericLiteral(segment.text),
+        )
+        : ts.factory.createElementAccessExpression(
+          current,
+          ts.factory.createStringLiteral(segment.text),
+        );
+    }
+
+    return current;
+  };
+
+  const getStableConstAliasInitializer = (
+    symbol: ts.Symbol | undefined,
+  ): ts.Expression | undefined => {
+    if (!symbol || resolvingConstAliases.has(symbol)) {
+      return undefined;
+    }
+
+    const declaration = symbol.valueDeclaration;
+    if (!declaration) {
+      return undefined;
+    }
+
+    if (
+      ts.isVariableDeclaration(declaration) &&
+      ts.isIdentifier(declaration.name) &&
+      declaration.initializer &&
+      isConstVariableDeclaration(declaration)
+    ) {
+      return declaration.initializer;
+    }
+
+    if (
+      ts.isBindingElement(declaration) &&
+      ts.isIdentifier(declaration.name)
+    ) {
+      const variableDeclaration = getEnclosingConstVariableDeclaration(
+        declaration,
+      );
+      if (!variableDeclaration?.initializer) {
+        return undefined;
+      }
+
+      const path = getBindingElementStaticAccessPath(declaration);
+      if (!path) {
+        return undefined;
+      }
+
+      return createStaticBindingAccessExpression(
+        variableDeclaration.initializer,
+        path,
+      );
+    }
+
+    return undefined;
+  };
+
+  const getStableConstAggregateInitializer = (
+    symbol: ts.Symbol | undefined,
+  ): ts.ObjectLiteralExpression | ts.ArrayLiteralExpression | undefined => {
+    const initializer = getStableConstAliasInitializer(symbol);
+    if (!initializer) {
+      return undefined;
+    }
+
+    const target = unwrapStructuralDataFlowExpression(initializer);
+    if (
+      ts.isObjectLiteralExpression(target) ||
+      ts.isArrayLiteralExpression(target)
+    ) {
+      return target;
+    }
+
+    return undefined;
+  };
+
+  const getStaticObjectLiteralPropertyInitializer = (
+    objectLiteral: ts.ObjectLiteralExpression,
+    propertyName: string,
+  ): ts.Expression | undefined => {
+    for (let index = objectLiteral.properties.length - 1; index >= 0; index--) {
+      const property = objectLiteral.properties[index];
+
+      if (
+        ts.isSpreadAssignment(property) ||
+        (ts.isPropertyAssignment(property) &&
+          ts.isComputedPropertyName(property.name)) ||
+        (ts.isMethodDeclaration(property) &&
+          ts.isComputedPropertyName(property.name)) ||
+        (ts.isGetAccessorDeclaration(property) &&
+          ts.isComputedPropertyName(property.name)) ||
+        (ts.isSetAccessorDeclaration(property) &&
+          ts.isComputedPropertyName(property.name))
+      ) {
+        return undefined;
+      }
+
+      if (ts.isPropertyAssignment(property)) {
+        const staticName = getStaticPropertyNameText(property.name);
+        if (staticName === propertyName) {
+          return property.initializer;
+        }
+        continue;
+      }
+
+      if (ts.isShorthandPropertyAssignment(property)) {
+        if (property.name.text === propertyName) {
+          return property.name;
+        }
+        continue;
+      }
+
+      if (
+        ts.isMethodDeclaration(property) ||
+        ts.isGetAccessorDeclaration(property) ||
+        ts.isSetAccessorDeclaration(property)
+      ) {
+        const staticName = getStaticPropertyNameText(property.name);
+        if (staticName === propertyName) {
+          return undefined;
+        }
+      }
+    }
+
+    return undefined;
+  };
+
+  const shouldPreserveConstAliasIdentity = (
+    initializer: ts.Expression,
+  ): boolean => {
+    const target = unwrapStructuralDataFlowExpression(initializer);
+
+    return !(
+      ts.isObjectLiteralExpression(target) ||
+      isFunctionLikeExpression(target)
+    );
+  };
+
   // Convert symbols to enriched parameters with name and declaration info
   const toScopeParameters = (
-    symbols: ts.Symbol[],
+    parameters: readonly ts.ParameterDeclaration[],
   ): DataFlowScopeParameter[] =>
-    symbols.map((symbol) => {
-      const declarations = symbol.getDeclarations();
-      const parameterDecl = declarations?.find((
-        decl,
-      ): decl is ts.ParameterDeclaration => ts.isParameter(decl));
-      return parameterDecl
-        ? { name: symbol.getName(), symbol, declaration: parameterDecl }
-        : { name: symbol.getName(), symbol };
+    parameters.flatMap((parameter) => {
+      const symbol = tryGetSymbol(parameter.name);
+      if (symbol) {
+        return [{
+          name: symbol.getName(),
+          symbol,
+          declaration: parameter,
+        }];
+      }
+
+      if (ts.isIdentifier(parameter.name)) {
+        return [{
+          name: parameter.name.text,
+          declaration: parameter,
+        }];
+      }
+
+      return [];
     });
 
   const createScope = (
     context: AnalyzerContext,
     parent: DataFlowScope | null,
-    parameterSymbols: ts.Symbol[],
+    parameters: readonly ts.ParameterDeclaration[],
   ): DataFlowScope => {
     const scope: DataFlowScope = {
       id: context.nextScopeId++,
       parentId: parent ? parent.id : null,
-      parameters: toScopeParameters(parameterSymbols),
+      parameters: toScopeParameters(parameters),
     };
     context.scopes.set(scope.id, scope);
     return scope;
@@ -156,7 +511,9 @@ export function createDataFlowAnalyzer(
     let current: DataFlowScope | undefined = scope;
     while (current) {
       for (const param of current.parameters) {
-        result.add(param.symbol);
+        if (param.symbol) {
+          result.add(param.symbol);
+        }
       }
       current = current.parentId !== null
         ? scopes.get(current.parentId)
@@ -176,12 +533,14 @@ export function createDataFlowAnalyzer(
   // Determine how CallExpressions should be handled based on their call kind.
   // Returns the appropriate InternalAnalysis with correct requiresRewrite logic.
   const handleCallExpression = (
+    expression: ts.CallExpression,
     merged: InternalAnalysis,
     callKind: ReturnType<typeof detectCallKind>,
+    isArrayMethodFamily: boolean,
     callee: InternalAnalysis,
     rewriteHint: RewriteHint,
   ): InternalAnalysis => {
-    // Builder calls (like pattern) don't need derive wrapping
+    // Builder calls (like pattern) don't need lift-applied wrapping
     if (callKind?.kind === "builder") {
       return {
         ...merged,
@@ -192,10 +551,22 @@ export function createDataFlowAnalyzer(
 
     // Array-map calls preserve requiresRewrite from the callee
     // to handle cases like state.items.filter(...).map(...)
-    if (callKind?.kind === "array-method") {
+    if (isArrayMethodFamily) {
       return {
         ...merged,
         requiresRewrite: callee.requiresRewrite,
+        rewriteHint,
+      };
+    }
+
+    if (
+      classifyOpaquePathTerminalCall(expression) !== "get" &&
+      merged.dataFlows.length > 0 &&
+      merged.dataFlows.every(isStructuralOpaqueKeyDataFlow)
+    ) {
+      return {
+        ...merged,
+        requiresRewrite: false,
         rewriteHint,
       };
     }
@@ -217,6 +588,51 @@ export function createDataFlowAnalyzer(
       ts.isExpression(argumentExpression) &&
       (ts.isLiteralExpression(argumentExpression) ||
         ts.isNoSubstitutionTemplateLiteral(argumentExpression));
+  };
+
+  const isStructuralOpaqueTargetExpression = (
+    expression: ts.Expression,
+    seenSymbols = new Set<ts.Symbol>(),
+  ): boolean => {
+    const target = unwrapStructuralDataFlowExpression(expression);
+
+    if (ts.isCallExpression(target)) {
+      return classifyOpaquePathTerminalCall(target) === "key";
+    }
+
+    if (ts.isPropertyAccessExpression(target)) {
+      return isStructuralOpaqueTargetExpression(target.expression, seenSymbols);
+    }
+
+    if (ts.isElementAccessExpression(target)) {
+      return isStaticElementAccess(target) &&
+        isStructuralOpaqueTargetExpression(target.expression, seenSymbols);
+    }
+
+    if (!ts.isIdentifier(target)) {
+      return false;
+    }
+
+    const symbol = tryGetSymbol(target);
+    if (
+      symbol &&
+      (isReactiveValueSymbol(symbol, checker) ||
+        symbolDeclaresCommonFabricDefault(symbol, checker))
+    ) {
+      return true;
+    }
+
+    if (!symbol || seenSymbols.has(symbol)) {
+      return false;
+    }
+
+    seenSymbols.add(symbol);
+    const initializer = getStableConstAliasInitializer(symbol);
+    if (!initializer) {
+      return false;
+    }
+
+    return isStructuralOpaqueTargetExpression(initializer, seenSymbols);
   };
 
   const analyzeExpression = (
@@ -281,49 +697,12 @@ export function createDataFlowAnalyzer(
       }
     };
 
-    const getOpaqueParameterCallKind = (
-      symbol: ts.Symbol | undefined,
-    ): "builder" | "array-method" | undefined => {
-      if (!symbol) return undefined;
-      const declarations = symbol.getDeclarations();
-      if (!declarations) return undefined;
-      for (const declaration of declarations) {
-        if (!ts.isParameter(declaration)) continue;
-        let functionNode: ts.Node | undefined = declaration.parent;
-        while (functionNode && !ts.isFunctionLike(functionNode)) {
-          functionNode = functionNode.parent;
-        }
-        if (!functionNode) continue;
-        let candidate: ts.Node | undefined = functionNode.parent;
-        while (candidate && !ts.isCallExpression(candidate)) {
-          candidate = candidate.parent;
-        }
-        if (!candidate) continue;
-        const callExpression = candidate as ts.CallExpression;
-        const callKind = detectCallKind(callExpression, checker);
-        if (callKind?.kind === "builder" || callKind?.kind === "array-method") {
-          return callKind.kind;
-        }
-      }
-      return undefined;
-    };
-
-    const isRootOpaqueParameter = (symbol: ts.Symbol | undefined): boolean =>
-      getOpaqueParameterCallKind(symbol) !== undefined;
-
-    const isImplicitOpaqueRefExpression = (
-      expr: ts.Expression,
-    ): boolean => {
-      const root = findRootIdentifier(expr);
-      if (!root) return false;
-      const symbol = tryGetSymbol(root);
-      return isRootOpaqueParameter(symbol);
-    };
-
     const isSymbolIgnored = (symbol: ts.Symbol | undefined): boolean => {
       if (!symbol) return false;
       const aggregated = getAggregatedSymbols(scope, context.scopes);
-      if (aggregated.has(symbol) && isRootOpaqueParameter(symbol)) {
+      if (
+        aggregated.has(symbol) && isReactiveValueSymbol(symbol, checker)
+      ) {
         return false;
       }
       return aggregated.has(symbol);
@@ -350,7 +729,7 @@ export function createDataFlowAnalyzer(
 
     if (ts.isIdentifier(expression)) {
       // Skip property names in property access expressions - they're not data flows.
-      // For example, `toSchema` in `__ctHelpers.toSchema` is just a property name.
+      // For example, `toSchema` in `__cfHelpers.toSchema` is just a property name.
       if (
         expression.parent &&
         ts.isPropertyAccessExpression(expression.parent) &&
@@ -364,6 +743,13 @@ export function createDataFlowAnalyzer(
       // Can't resolve symbol - if synthetic, treat as opaque parameter
       // This handles cases like `discount` where the whole identifier is synthetic
       if (!symbol && isSynthetic(expression)) {
+        const hasSyntheticLocalParameter = scope.parameters.some((parameter) =>
+          !parameter.symbol && parameter.name === expression.text
+        );
+        if (hasSyntheticLocalParameter) {
+          return emptyAnalysis();
+        }
+
         recordDataFlow(expression, scope, null, true); // Explicit: synthetic opaque parameter
         return {
           containsOpaqueRef: true,
@@ -377,7 +763,10 @@ export function createDataFlowAnalyzer(
       }
 
       const type = tryGetType(expression);
-      if (type && isOpaqueRefType(type, checker)) {
+      if (
+        (type && isBrandedCellType(type, checker)) ||
+        isReactiveValueExpression(expression, checker)
+      ) {
         recordDataFlow(expression, scope, null, true); // Explicit: direct OpaqueRef
         return {
           containsOpaqueRef: true,
@@ -385,32 +774,105 @@ export function createDataFlowAnalyzer(
           dataFlows: [expression],
         };
       }
-      if (symbolDeclaresCommonToolsDefault(symbol, checker)) {
-        recordDataFlow(expression, scope, null, true); // Explicit: CommonTools default
+      if (isArrayMethodElementBindingReference(expression)) {
+        // The synthesized `element` binding of an array-method pattern
+        // callback is implicitly opaque, even though its TS type is the plain
+        // user element type. Treat it the same as a direct OpaqueRef so
+        // `element.foo`-style reads are recorded as reactive dependencies and
+        // can drive fine-grained subscriptions in downstream lowering.
+        recordDataFlow(expression, scope, null, true);
         return {
           containsOpaqueRef: true,
           requiresRewrite: false,
           dataFlows: [expression],
         };
       }
+      if (symbolDeclaresCommonFabricDefault(symbol, checker)) {
+        recordDataFlow(expression, scope, null, true); // Explicit: Common Fabric default
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: false,
+          dataFlows: [expression],
+        };
+      }
+
+      const stableConstInitializer = getStableConstAliasInitializer(symbol);
+      if (symbol && stableConstInitializer) {
+        resolvingConstAliases.add(symbol);
+        try {
+          const initializerAnalysis = analyzeExpression(
+            stableConstInitializer,
+            scope,
+            context,
+          );
+          if (
+            initializerAnalysis.containsOpaqueRef ||
+            initializerAnalysis.requiresRewrite ||
+            initializerAnalysis.dataFlows.length > 0
+          ) {
+            if (!shouldPreserveConstAliasIdentity(stableConstInitializer)) {
+              return emptyAnalysis();
+            }
+            recordDataFlow(expression, scope, null, true);
+            return {
+              containsOpaqueRef: initializerAnalysis.containsOpaqueRef ||
+                initializerAnalysis.requiresRewrite ||
+                initializerAnalysis.dataFlows.length > 0,
+              requiresRewrite: initializerAnalysis.requiresRewrite,
+              dataFlows: [expression],
+            };
+          }
+        } finally {
+          resolvingConstAliases.delete(symbol);
+        }
+      }
+
       // Check if this identifier is a parameter to a builder or array-map call (like pattern)
       // These parameters become implicitly opaque even though their type isn't OpaqueRef
-      if (isRootOpaqueParameter(symbol)) {
-        recordDataFlow(expression, scope, null, true); // Explicit: opaque parameter
-        return {
-          containsOpaqueRef: true,
-          requiresRewrite: false,
-          dataFlows: [expression],
-        };
-      }
       return emptyAnalysis();
     }
 
     if (ts.isPropertyAccessExpression(expression)) {
       const target = analyzeExpression(expression.expression, scope, context);
+      if (ts.isIdentifier(expression.expression)) {
+        const targetSymbol = tryGetSymbol(expression.expression);
+        const aggregateInitializer = getStableConstAggregateInitializer(
+          targetSymbol,
+        );
+        if (
+          aggregateInitializer &&
+          ts.isObjectLiteralExpression(aggregateInitializer)
+        ) {
+          const propertyInitializer = getStaticObjectLiteralPropertyInitializer(
+            aggregateInitializer,
+            expression.name.text,
+          );
+          if (propertyInitializer) {
+            const propertyAnalysis = analyzeExpression(
+              propertyInitializer,
+              scope,
+              context,
+            );
+            if (
+              propertyAnalysis.containsOpaqueRef ||
+              propertyAnalysis.requiresRewrite ||
+              propertyAnalysis.dataFlows.length > 0
+            ) {
+              const parentId =
+                context.expressionToNodeId.get(expression.expression) ?? null;
+              recordDataFlow(expression, scope, parentId, true);
+              return {
+                containsOpaqueRef: true,
+                requiresRewrite: false,
+                dataFlows: [expression],
+              };
+            }
+          }
+        }
+      }
       const propertyType = tryGetType(expression);
 
-      if (propertyType && isOpaqueRefType(propertyType, checker)) {
+      if (propertyType && isBrandedCellType(propertyType, checker)) {
         if (originatesFromIgnored(expression.expression)) {
           return emptyAnalysis();
         }
@@ -434,21 +896,45 @@ export function createDataFlowAnalyzer(
           };
         }
       }
-      const propertySymbol = getMemberSymbol(expression, checker);
-      if (symbolDeclaresCommonToolsDefault(propertySymbol, checker)) {
+      // For array-method element bindings, the property access result type is
+      // the plain field type (e.g. `string`), not OpaqueRef. But the read is
+      // still a reactive fine-grained dependency: the runtime can subscribe to
+      // `element.key("foo")` specifically. Record the property access (not
+      // just the root identifier) as the dataflow so downstream lift-applied
+      // input builders can emit the partial-key shape:
+      //   { element: { foo: element.key("foo") } }
+      // instead of the broader { element: element } whole-binding capture.
+      if (
+        target.containsOpaqueRef &&
+        leftmostIdentifierIsArrayMethodElementBinding(expression)
+      ) {
         if (originatesFromIgnored(expression.expression)) {
           return emptyAnalysis();
         }
         const parentId =
           context.expressionToNodeId.get(expression.expression) ?? null;
-        recordDataFlow(expression, scope, parentId, true); // Explicit: CommonTools property
+        recordDataFlow(expression, scope, parentId, true);
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: target.requiresRewrite,
+          dataFlows: [expression],
+        };
+      }
+      const propertySymbol = getMemberSymbol(expression, checker);
+      if (symbolDeclaresCommonFabricDefault(propertySymbol, checker)) {
+        if (originatesFromIgnored(expression.expression)) {
+          return emptyAnalysis();
+        }
+        const parentId =
+          context.expressionToNodeId.get(expression.expression) ?? null;
+        recordDataFlow(expression, scope, parentId, true); // Explicit: Common Fabric property
         return {
           containsOpaqueRef: true,
           requiresRewrite: true,
           dataFlows: [expression],
         };
       }
-      if (isImplicitOpaqueRefExpression(expression)) {
+      if (isReactiveValueExpression(expression, checker)) {
         if (originatesFromIgnored(expression.expression)) {
           return emptyAnalysis();
         }
@@ -461,16 +947,15 @@ export function createDataFlowAnalyzer(
 
         // If the target is a complex expression requiring rewrite (ElementAccess or Call),
         // propagate its dataFlows. Otherwise add this property access as a dataFlow.
-        if (
-          isPropertyOnCall ||
-          (target.requiresRewrite && target.dataFlows.length > 0)
-        ) {
+        if (isPropertyOnCall || target.requiresRewrite) {
           // This is a computed expression - use the dependencies from the target
           recordDataFlow(expression, scope, parentId, false);
           return {
             containsOpaqueRef: true,
             requiresRewrite: true,
-            dataFlows: target.dataFlows,
+            dataFlows: target.dataFlows.length > 0
+              ? target.dataFlows
+              : [expression],
           };
         }
 
@@ -479,7 +964,21 @@ export function createDataFlowAnalyzer(
         recordDataFlow(expression, scope, parentId, true);
         return {
           containsOpaqueRef: true,
-          requiresRewrite: true,
+          requiresRewrite: false,
+          dataFlows: [expression],
+        };
+      }
+
+      if (isStructuralOpaqueTargetExpression(expression.expression)) {
+        if (originatesFromIgnored(expression.expression)) {
+          return emptyAnalysis();
+        }
+        const parentId =
+          context.expressionToNodeId.get(expression.expression) ?? null;
+        recordDataFlow(expression, scope, parentId, true);
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: false,
           dataFlows: [expression],
         };
       }
@@ -490,9 +989,8 @@ export function createDataFlowAnalyzer(
         if (root && ts.isIdentifier(root)) {
           const rootSymbol = tryGetSymbol(root);
           if (rootSymbol) {
-            // Root symbol found - check if it's from builder/array-map
-            const callKind = getOpaqueParameterCallKind(rootSymbol);
-            if (callKind) {
+            // Root symbol found - check if it's structurally reactive.
+            if (isReactiveValueSymbol(rootSymbol, checker)) {
               // This is element.price or similar - treat as opaque property access
               const parentId =
                 context.expressionToNodeId.get(expression.expression) ?? null;
@@ -505,8 +1003,8 @@ export function createDataFlowAnalyzer(
             }
           } else {
             // Root symbol undefined - fully synthetic parameter (like `element`)
-            // Skip __ctHelpers.* property accesses - these are helper functions
-            if (root.text === "__ctHelpers") {
+            // Skip __cfHelpers.* property accesses - these are helper functions
+            if (root.text === "__cfHelpers") {
               return {
                 containsOpaqueRef: target.containsOpaqueRef,
                 requiresRewrite: target.requiresRewrite ||
@@ -559,7 +1057,7 @@ export function createDataFlowAnalyzer(
       }
 
       if (
-        isImplicitOpaqueRefExpression(expression.expression) &&
+        isReactiveValueExpression(expression.expression, checker) &&
         target.dataFlows.length === 0
       ) {
         if (originatesFromIgnored(expression.expression)) {
@@ -657,18 +1155,28 @@ export function createDataFlowAnalyzer(
     }
 
     if (ts.isCallExpression(expression)) {
+      if (classifyOpaquePathTerminalCall(expression) === "key") {
+        const callee = expression.expression;
+        const parentId = (
+            ts.isPropertyAccessExpression(callee) ||
+            ts.isElementAccessExpression(callee)
+          )
+          ? context.expressionToNodeId.get(callee.expression) ?? null
+          : null;
+        recordDataFlow(expression, scope, parentId, true);
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: false,
+          dataFlows: [expression],
+          rewriteHint: undefined,
+        };
+      }
+
       const callee = analyzeExpression(expression.expression, scope, context);
       const analyses: InternalAnalysis[] = [callee];
       for (const arg of expression.arguments) {
         if (isFunctionLikeExpression(arg)) {
-          const parameterSymbols: ts.Symbol[] = [];
-          for (const parameter of arg.parameters) {
-            const symbol = tryGetSymbol(parameter.name);
-            if (symbol) {
-              parameterSymbols.push(symbol);
-            }
-          }
-          const childScope = createScope(context, scope, parameterSymbols);
+          const childScope = createScope(context, scope, arg.parameters);
           if (ts.isBlock(arg.body)) {
             const blockAnalyses: InternalAnalysis[] = [];
             for (const statement of arg.body.statements) {
@@ -687,8 +1195,9 @@ export function createDataFlowAnalyzer(
         }
       }
 
-      const combined = mergeAnalyses(...analyses);
       const callKind = detectCallKind(expression, checker);
+      const isArrayMethodFamily = callKind?.kind === "array-method";
+      const combined = mergeAnalyses(...analyses);
       const rewriteHint: RewriteHint | undefined = (() => {
         if (callKind?.kind === "ifElse" && expression.arguments.length > 0) {
           const predicate = expression.arguments[0];
@@ -699,22 +1208,24 @@ export function createDataFlowAnalyzer(
         if (callKind?.kind === "builder") {
           return { kind: "skip-call-rewrite", reason: "builder" };
         }
-        if (callKind?.kind === "array-method") {
+        if (isArrayMethodFamily) {
           return { kind: "skip-call-rewrite", reason: "array-method" };
         }
         return undefined;
       })();
 
-      return handleCallExpression(combined, callKind, callee, rewriteHint);
+      return handleCallExpression(
+        expression,
+        combined,
+        callKind,
+        isArrayMethodFamily,
+        callee,
+        rewriteHint,
+      );
     }
 
     if (isFunctionLikeExpression(expression)) {
-      const parameterSymbols: ts.Symbol[] = [];
-      for (const parameter of expression.parameters) {
-        const symbol = tryGetSymbol(parameter.name);
-        if (symbol) parameterSymbols.push(symbol);
-      }
-      const childScope = createScope(context, scope, parameterSymbols);
+      const childScope = createScope(context, scope, expression.parameters);
       if (ts.isBlock(expression.body)) {
         const analyses: InternalAnalysis[] = [];
         for (const statement of expression.body.statements) {

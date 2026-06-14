@@ -5,7 +5,7 @@
 - The `dx1/unify-types` branch introduces a unified cell/stream type system
   built on the new `CELL_BRAND` symbol and capability interfaces (`IReadable`,
   `IWritable`, `IKeyable`, etc.).
-- API exports and `commontools.d.ts` now define `HandlerFunction` in terms of
+- API exports and `commonfabric.d.ts` now define `HandlerFunction` in terms of
   `HandlerState<T>` and `StripCell<T>`, and the runner augments these interfaces
   with runtime-specific behaviour.
 - Schema generator and opaque-ref transformers detect cell kinds via

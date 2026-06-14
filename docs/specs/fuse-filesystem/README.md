@@ -1,8 +1,8 @@
-# FUSE Filesystem for Common Tools Spaces
+# FUSE Filesystem for Common Fabric Spaces
 
 **Status:** Draft
 
-A FUSE filesystem that exposes Common Tools spaces and cells as a standard
+A FUSE filesystem that exposes Common Fabric spaces and cells as a standard
 filesystem. Read and write operations on files map to cell reads and writes.
 Directory listings reflect space contents and JSON structure traversal.
 
@@ -15,3 +15,6 @@ Directory listings reflect space contents and JSON structure traversal.
 - [5. Architecture](./5-architecture.md)
 - [6. Reactivity and Caching](./6-reactivity.md)
 - [7. Open Questions](./7-open-questions.md)
+- [8. Filesystem Projections (`[FS]`)](./8-fs-projections.md)
+- [9. CFC Annotations](./9-cfc-annotations.md)
+- [10. CFC Filesystem API Semantics](./10-cfc-filesystem-api-semantics.md)

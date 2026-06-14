@@ -1,0 +1,102 @@
+import { afterEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Runtime } from "../src/runtime.ts";
+import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
+import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
+import type { Module, Pattern } from "../src/builder/types.ts";
+import type { HarnessedFunction } from "../src/harness/types.ts";
+
+/**
+ * Regression for the re-export provenance hazard (Codex review of PR C, fixed
+ * with the source-identity guard in `Engine.recordModuleProvenance`):
+ *
+ * A re-exporting module (`export { setName } from "./handlers"`) surfaces the
+ * defining module's function under the RE-EXPORTER's identity. Provenance is
+ * first-write-wins and CFC fails closed on an identity/`fn.src` mismatch, so
+ * letting the re-exporter (potentially visited first) stamp its own identity
+ * would make a genuinely-verified handler resolve as `unsupported`. The guard
+ * records provenance only when the function's canonical `fn.src` names the
+ * recording module, so only the defining module's registration sticks.
+ */
+
+const signer = await Identity.fromPassphrase("reexport-provenance");
+
+const PROGRAM = {
+  main: "/main.tsx",
+  files: [
+    {
+      name: "/handlers.tsx",
+      contents: `/// <cts-enable />
+import { handler, Writable } from "commonfabric";
+export const setName = handler<{ name?: string }, { name: Writable<string> }>(
+  (event, state) => { state.name.set(event.name ?? ""); },
+);
+`,
+    },
+    {
+      // The entry re-exports the handler AND uses it, so the entry module is
+      // evaluated/indexed and surfaces `setName` under its own identity.
+      name: "/main.tsx",
+      contents: `/// <cts-enable />
+import { pattern, Writable } from "commonfabric";
+import { setName } from "./handlers.tsx";
+export { setName } from "./handlers.tsx";
+export default pattern(() => {
+  const name = new Writable<string>("").for("name");
+  return { name, setName: setName({ name }) };
+});
+`,
+    },
+  ],
+};
+
+describe("re-export provenance", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
+  let runtime: Runtime | undefined;
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+    runtime = undefined;
+    storageManager = undefined;
+  });
+
+  it("a re-exported handler still resolves as verified (defining identity wins)", async () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "observe",
+    });
+
+    const pattern = await runtime.patternManager.compilePattern(
+      PROGRAM,
+    ) as Pattern;
+    await runtime.idle();
+
+    const node = pattern.nodes.find((n) =>
+      (n.module as Module).type === "javascript" &&
+      (n.module as Module).wrapper === "handler"
+    );
+    expect(node).toBeDefined();
+    const module = node!.module as Module;
+    const fn = module.implementation as HarnessedFunction;
+
+    // Provenance identity matches the function's own canonical source — the
+    // DEFINING module (handlers.tsx), never the re-exporting entry.
+    const provenance = getVerifiedProvenance(fn);
+    expect(provenance).toBeDefined();
+    expect((fn as { src?: string }).src ?? "").toContain(
+      `cf:module/${provenance!.identity}`,
+    );
+
+    // CFC resolves it as verified — NOT unsupported (the bug would have made a
+    // re-exporter's identity stamp it, failing the fn.src consistency check).
+    const identity = resolvePolicyFacingImplementationIdentity(module, {
+      implementation: fn,
+    });
+    expect(identity?.kind).toBe("verified");
+  });
+});

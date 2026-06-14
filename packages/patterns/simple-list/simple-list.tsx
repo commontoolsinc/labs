@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Simple List Module - A checklist with indent support
  *
@@ -15,7 +14,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import type { ModuleMetadata } from "../container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -47,15 +46,15 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface SimpleListItem {
   text: string;
-  indented: Default<boolean, false>;
-  done: Default<boolean, false>;
+  indented: boolean | Default<false>;
+  done: boolean | Default<false>;
 }
 
 export interface SimpleListInput {
-  items?: Writable<Default<SimpleListItem[], []>>;
+  items?: Writable<SimpleListItem[] | Default<[]>>;
 }
 
-interface SimpleListOutput {
+export interface SimpleListOutput {
   [NAME]: string;
   [UI]: VNode;
   items: SimpleListItem[];
@@ -127,11 +126,11 @@ export const SimpleListModule = pattern<
   return {
     [NAME]: computed(() => `${MODULE_METADATA.icon} List: ${displayText}`),
     [UI]: (
-      <ct-vstack gap="2">
+      <cf-vstack gap="2">
         {/* List items */}
-        <ct-vstack gap="0">
+        <cf-vstack gap="0">
           {items.map((item, index: number) => (
-            <ct-hstack
+            <cf-hstack
               gap="2"
               style={{
                 alignItems: "center",
@@ -141,10 +140,10 @@ export const SimpleListModule = pattern<
               }}
             >
               {/* Checkbox */}
-              <ct-checkbox $checked={item.done} style={{ flexShrink: "0" }} />
+              <cf-checkbox $checked={item.done} style={{ flexShrink: "0" }} />
 
               {/* Editable text with Cmd+[ / Cmd+] for indent */}
-              <ct-input
+              <cf-input
                 $value={item.text}
                 placeholder="..."
                 style={{
@@ -157,7 +156,7 @@ export const SimpleListModule = pattern<
                   opacity: item.done ? "0.5" : "1",
                   color: "inherit",
                 }}
-                onct-keydown={(e: {
+                oncf-keydown={(e: {
                   detail?: {
                     key: string;
                     metaKey?: boolean;
@@ -214,25 +213,25 @@ export const SimpleListModule = pattern<
               >
                 x
               </button>
-            </ct-hstack>
+            </cf-hstack>
           ))}
-        </ct-vstack>
+        </cf-vstack>
 
         {/* Add item input - at bottom for natural list growth */}
-        <ct-message-input
+        <cf-message-input
           placeholder="Add item..."
           button-text="+"
           style={{
             fontSize: "14px",
           }}
-          onct-send={(e: { detail?: { message?: string } }) => {
+          oncf-send={(e: { detail?: { message?: string } }) => {
             const text = e.detail?.message;
             if (text) {
               addItem.send({ text });
             }
           }}
         />
-      </ct-vstack>
+      </cf-vstack>
     ),
     items,
     summary,

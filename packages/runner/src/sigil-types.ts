@@ -1,8 +1,8 @@
-import type { JSONSchema } from "@commontools/api";
-import type { MemorySpace } from "@commontools/memory/interface";
-import type { URI } from "@commontools/memory/interface";
+import type { JSONSchema, JSONValue, LinkScope } from "@commonfabric/api";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { URI } from "@commonfabric/memory/interface";
 
-export type { URI } from "@commontools/memory/interface";
+export type { URI } from "@commonfabric/memory/interface";
 
 /**
  * Generic sigil value type for future extensions
@@ -22,6 +22,7 @@ export type LinkV1Inner = {
   id?: URI;
   path?: readonly string[];
   space?: MemorySpace;
+  scope?: LinkScope;
   schema?: JSONSchema;
   overwrite?: "redirect" | "this"; // default is "this"
 };
@@ -51,14 +52,43 @@ export type SigilWriteRedirectLink = SigilValue<WriteRedirectV1>;
 /**
  * Legacy alias.
  *
- * @deprecated Switch to sigil write redirect links instead.
- *
- * A legacy alias is a cell and a path within that cell.
+ * These are used in intermediate bindings at runtime.
+ * They are persisted in saved patterns, like the map op.
  */
+type LegacyAliasBase = {
+  path: readonly string[];
+  scope?: LinkScope;
+  schema?: JSONSchema;
+};
+
+type LegacyAliasNamedCell = LegacyAliasBase & {
+  cell?: "result" | "argument";
+  partialCause?: never;
+  defer?: number;
+};
+
+type LegacyAliasAbsoluteCell = LegacyAliasBase & {
+  cell: { "/": string };
+  partialCause?: never;
+  defer?: never;
+};
+
+/**
+ * These are partial bindings that may not be applicable to the current
+ * pattern. We track the defer count, and each time we unwrap bindings,
+ * we decrement that. Once it's 0, we know that it's associated with the
+ * current pattern, and we can generate real cells based ont the combination
+ * of the pattern's result (parent) and the partialCause.
+ */
+type LegacyAliasPartialCause = LegacyAliasBase & {
+  cell?: never;
+  partialCause: JSONValue;
+  defer?: number;
+};
+
 export type LegacyAlias = {
-  $alias: {
-    cell?: number | { "/": string };
-    path: readonly PropertyKey[];
-    schema?: JSONSchema;
-  };
+  $alias:
+    | LegacyAliasNamedCell
+    | LegacyAliasAbsoluteCell
+    | LegacyAliasPartialCause;
 };

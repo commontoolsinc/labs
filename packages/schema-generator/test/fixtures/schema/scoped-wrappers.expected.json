@@ -1,0 +1,46 @@
+{
+  "properties": {
+    "anyValue": {
+      "scope": "any",
+      "type": "string"
+    },
+    "cellOfSession": {
+      "asCell": [
+        "cell"
+      ],
+      "scope": "session",
+      "type": "string"
+    },
+    "userCell": {
+      "asCell": [
+        {
+          "kind": "cell",
+          "scope": "user"
+        }
+      ],
+      "type": "string"
+    },
+    "userCellOfSession": {
+      "asCell": [
+        {
+          "kind": "cell",
+          "scope": "user"
+        }
+      ],
+      "scope": "session",
+      "type": "string"
+    },
+    "userName": {
+      "scope": "user",
+      "type": "string"
+    }
+  },
+  "required": [
+    "anyValue",
+    "cellOfSession",
+    "userCell",
+    "userCellOfSession",
+    "userName"
+  ],
+  "type": "object"
+}

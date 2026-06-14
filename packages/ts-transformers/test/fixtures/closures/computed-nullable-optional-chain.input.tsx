@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { computed, pattern, UI, NAME } from "commontools";
+import { computed, pattern, UI, NAME } from "commonfabric";
 
 // Represents a question that may or may not exist
 type Question = {
@@ -10,8 +9,8 @@ type Question = {
 
 // FIXTURE: computed-nullable-optional-chain
 // Verifies: computed() capturing a nullable computed result preserves anyOf [type, null] in schema
-//   computed(() => topQuestion?.question || "") → derive(..., { topQuestion }, ({ topQuestion }) => topQuestion?.question || "")
-//   computed(() => topQuestion === null ? "" : topQuestion.question) → derive(..., { topQuestion }, ({ topQuestion }) => ...)
+//   computed(() => topQuestion?.question || "") → lift(({ topQuestion }) => topQuestion?.question || "")({ topQuestion })
+//   computed(() => topQuestion === null ? "" : topQuestion.question) → lift(({ topQuestion }) => ...)({ topQuestion })
 // Context: Tests both optional chaining (?.) and explicit null-check patterns on
 //   a nullable OpaqueRef. The capture schema correctly uses anyOf [Question, null]
 //   with asOpaque: true for the topQuestion capture.

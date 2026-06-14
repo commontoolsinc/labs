@@ -1,4 +1,4 @@
-# @commontools/felt
+# @commonfabric/felt
 
 **F**ront**e**nd **L**ightweight **T**ooling
 

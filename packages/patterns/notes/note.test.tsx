@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: Note
  *
@@ -9,9 +8,9 @@
  * - Menu toggle behavior
  * - Title editing behavior
  *
- * Run: deno task ct test packages/patterns/notes/note.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/notes/note.test.tsx --verbose
  */
-import { action, computed, NAME, pattern } from "commontools";
+import { action, computed, NAME, pattern } from "commonfabric";
 import Note from "./note.tsx";
 import Notebook from "./notebook.tsx";
 

@@ -1,11 +1,11 @@
-import { env } from "@commontools/integration";
-import { sleep } from "@commontools/utils/sleep";
-import { PiecesController } from "@commontools/piece/ops";
-import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { env } from "@commonfabric/integration";
+import { sleep } from "@commonfabric/utils/sleep";
+import { PiecesController } from "@commonfabric/piece/ops";
+import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
-import { Identity } from "@commontools/identity";
+import { Identity } from "@commonfabric/identity";
 import { TEST_LLM } from "./flags.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
@@ -76,7 +76,7 @@ describe("LLM pattern test", () => {
       assertEquals(titleText?.trim(), "LLM Test");
 
       // Check for the message input
-      const messageInput = await page.waitForSelector("ct-message-input", {
+      const messageInput = await page.waitForSelector("cf-message-input", {
         strategy: "pierce",
       });
       assert(messageInput, "Should find message input element");
@@ -90,7 +90,7 @@ describe("LLM pattern test", () => {
       const page = shell.page();
 
       // Find the message input component
-      const messageInput = await page.waitForSelector("ct-message-input", {
+      const messageInput = await page.waitForSelector("cf-message-input", {
         strategy: "pierce",
       });
       assert(messageInput, "Should find message input");
@@ -106,7 +106,7 @@ describe("LLM pattern test", () => {
       await inputElement.type(testQuestion);
 
       // Find and click the send button
-      const sendButton = await page.waitForSelector("[data-ct-button]", {
+      const sendButton = await page.waitForSelector("[data-cf-button]", {
         strategy: "pierce",
       });
       assert(sendButton, "Should find send button");
@@ -176,7 +176,7 @@ describe("LLM pattern test", () => {
       const secondQuestion = "What is the capital of France?";
       await inputElement.type(secondQuestion);
 
-      const sendButton = await page.waitForSelector("[data-ct-button]", {
+      const sendButton = await page.waitForSelector("[data-cf-button]", {
         strategy: "pierce",
       });
       await sendButton.click();

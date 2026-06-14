@@ -24,7 +24,9 @@
   "properties": {
     "aliasedCell": {
       "$ref": "#/$defs/AnonymousType_1",
-      "asCell": true
+      "asCell": [
+        "cell"
+      ]
     },
     "aliasedDefault": {
       "$ref": "#/$defs/AnonymousType_1",
@@ -32,11 +34,15 @@
     },
     "aliasedStream": {
       "$ref": "#/$defs/AnonymousType_1",
-      "asStream": true
+      "asCell": [
+        "stream"
+      ]
     },
     "directCell": {
       "$ref": "#/$defs/AnonymousType_1",
-      "asCell": true
+      "asCell": [
+        "cell"
+      ]
     },
     "directDefault": {
       "$ref": "#/$defs/AnonymousType_1",
@@ -44,7 +50,9 @@
     },
     "directStream": {
       "$ref": "#/$defs/AnonymousType_1",
-      "asStream": true
+      "asCell": [
+        "stream"
+      ]
     }
   },
   "required": [

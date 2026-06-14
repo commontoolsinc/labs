@@ -1,10 +1,9 @@
-/// <cts-enable />
 /**
  * action() results used as event handlers in JSX. action() is an
  * opaque origin but handler results are typically used directly
  * (no property access), so opaque classification doesn't affect them.
  */
-import { action, pattern, UI, Writable } from "commontools";
+import { action, pattern, UI, Writable } from "commonfabric";
 
 interface State {
   label: string;
@@ -15,7 +14,7 @@ interface State {
 //   action(() => count.set(...)) → handler(false, { count: { asCell } }, (_, { count }) => ...)({ count })
 // Context: action() is an opaque origin, but handler results are used directly (no property access)
 export default pattern<State>(({ label }) => {
-  const count = Writable.of(0);
+  const count = new Writable(0);
 
   const increment = action(() => {
     count.set(count.get() + 1);
@@ -29,8 +28,8 @@ export default pattern<State>(({ label }) => {
     [UI]: (
       <div>
         <span>{label}: {count}</span>
-        <ct-button onClick={increment}>+</ct-button>
-        <ct-button onClick={decrement}>-</ct-button>
+        <cf-button onClick={increment}>+</cf-button>
+        <cf-button onClick={decrement}>-</cf-button>
       </div>
     ),
     count,

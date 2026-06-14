@@ -1,24 +1,23 @@
-/// <cts-enable />
-import { cell, ComparableCell, ReadonlyCell, WriteonlyCell } from "commontools";
+import { cell, ComparableCell, ReadonlyCell, WriteonlyCell } from "commonfabric";
 
 // FIXTURE: cell-like-classes
-// Verifies: schema injection works for cell(), ComparableCell.of(), ReadonlyCell.of(), and WriteonlyCell.of()
+// Verifies: schema injection works for cell(), new ComparableCell(), new ReadonlyCell(), and new WriteonlyCell()
 //   cell(100) → cell(100, { type: "number" })
-//   ComparableCell.of(200) → ComparableCell.of(200, { type: "number" })
-//   ReadonlyCell.of(300) → ReadonlyCell.of(300, { type: "number" })
-//   WriteonlyCell.of(400) → WriteonlyCell.of(400, { type: "number" })
+//   new ComparableCell(200) → new ComparableCell(200, { type: "number" })
+//   new ReadonlyCell(300) → new ReadonlyCell(300, { type: "number" })
+//   new WriteonlyCell(400) → new WriteonlyCell(400, { type: "number" })
 export default function TestCellLikeClasses() {
   // Standalone cell() function
   const _standalone = cell(100);
 
-  // ComparableCell.of()
-  const _comparable = ComparableCell.of(200);
+  // new ComparableCell()
+  const _comparable = new ComparableCell(200);
 
-  // ReadonlyCell.of()
-  const _readonly = ReadonlyCell.of(300);
+  // new ReadonlyCell()
+  const _readonly = new ReadonlyCell(300);
 
-  // WriteonlyCell.of()
-  const _writeonly = WriteonlyCell.of(400);
+  // new WriteonlyCell()
+  const _writeonly = new WriteonlyCell(400);
 
   return {
     standalone: _standalone,

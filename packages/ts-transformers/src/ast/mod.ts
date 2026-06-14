@@ -1,4 +1,39 @@
-export { type CallKind, detectCallKind } from "./call-kind.ts";
+export {
+  type ArrayCallbackContainerCallKind,
+  type ArrayMethodAccessKind,
+  type ArrayMethodCallSiteInfo,
+  type ArrayMethodFamilyName,
+  type ArrayMethodOwnership,
+  type ArrayMethodResultSinkCallInfo,
+  type ArrayMethodResultSinkReceiverChainCallInfo,
+  type CallKind,
+  classifyArrayCallbackContainerCall,
+  classifyArrayMethodAccess,
+  classifyArrayMethodCall,
+  classifyArrayMethodCallSite,
+  classifyArrayMethodResultSinkCall,
+  classifyArrayMethodResultSinkReceiverChainCall,
+  classifyWildcardTraversalCall,
+  detectCallKind,
+  detectDirectBuilderCall,
+  detectNewExpressionKind,
+  FUNCTION_HARDENING_HELPER_PREFIX,
+  getCapabilitySummaryCallbackArgument,
+  getLiftAppliedInnerCall,
+  getLiftAppliedInputAndCallback,
+  getLoweredArrayMethodName,
+  getPatternBuilderCallbackArgument,
+  hasReactiveCollectionProvenance,
+  isConsumedByTerminalChainCall,
+  isPatternBuilderCall,
+  isReactiveOriginCall,
+  isReactiveOriginExpression,
+  isReactiveOriginTaggedTemplate,
+  isReactiveValueExpression,
+  isReactiveValueSymbol,
+  isSimpleReactiveAccessExpression,
+  isWildcardTraversalCall,
+} from "./call-kind.ts";
 export * from "./dataflow.ts";
 export {
   classifyReactiveContext,
@@ -21,12 +56,16 @@ export {
   isEventHandlerType,
   isSafeEventHandlerCall,
 } from "./event-handlers.ts";
-export { isFunctionLikeExpression } from "./function-predicates.ts";
+export {
+  getEnclosingFunctionLikeDeclaration,
+  isFunctionLikeExpression,
+} from "./function-predicates.ts";
 export {
   getExpressionText,
   getMemberSymbol,
   getMethodCallTarget,
   getTypeAtLocationWithFallback,
+  getVariableInitializer,
   isFunctionParameter,
   isMethodCall,
   isOptionalMemberSymbol,
@@ -34,6 +73,7 @@ export {
   visitEachChildWithJsx,
 } from "./utils.ts";
 export {
+  ensureTypeNodeRegistered,
   getTypeFromTypeNodeWithFallback,
   getTypeReferenceArgument,
   hasArrayTypeArgument,
@@ -42,11 +82,18 @@ export {
   inferReturnType,
   inferWidenedTypeFromExpression,
   isAnyOrUnknownType,
-  isDeriveCall,
-  isReactiveArrayMethodCall,
+  isAnyType,
+  isCellLikeType,
+  isUnknownType,
+  isUnresolvedSchemaType,
   registerSyntheticCallType,
   typeToSchemaTypeNode,
   typeToTypeNode,
+  unwrapCellLikeType,
   unwrapOpaqueLikeType,
   widenLiteralType,
 } from "./type-inference.ts";
+export {
+  qualifyCommonFabricTypeRefs,
+  typeToTypeNodeWithRegistry,
+} from "./type-building.ts";

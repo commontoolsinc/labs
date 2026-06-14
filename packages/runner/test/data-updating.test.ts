@@ -19,8 +19,8 @@ import {
   parseLink,
 } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -195,6 +195,25 @@ describe("data-updating", () => {
       expect(testCell.get().a).toHaveLength(3);
       expect(testCell.getAsQueryResult().a).toEqual([1, 2, 3]);
     });
+
+    it("should overwrite an array with an object", () => {
+      const testCell = runtime.getCell<{ a: any }>(
+        space,
+        "should overwrite an array with an object 1",
+        undefined,
+        tx,
+      );
+      testCell.set({ a: [{ type: "x" }] });
+      const success = diffAndUpdate(
+        runtime,
+        tx,
+        testCell.key("a").getAsNormalizedFullLink(),
+        { type: "cf-text" },
+      );
+      expect(success).toBeTruthy();
+      expect(testCell.get()).toHaveProperty("a");
+      expect(testCell.getAsQueryResult().a).toEqual({ type: "cf-text" });
+    });
   });
 
   describe("normalizeAndDiff", () => {
@@ -363,6 +382,27 @@ describe("data-updating", () => {
         ),
       ).toBe(true);
       expect(changes[0].value).toBe(5);
+    });
+
+    it("should no-op when writing the same write redirect alias twice", () => {
+      const testCell = runtime.getCell<{
+        alias: any;
+      }>(
+        space,
+        "normalizeAndDiff test duplicate same alias",
+        undefined,
+        tx,
+      );
+
+      const aliasLink = { $alias: { path: ["some_value"] } };
+      testCell.set({ alias: aliasLink });
+
+      const current = testCell.getAsNormalizedFullLink();
+      const changes = normalizeAndDiff(runtime, tx, current, {
+        alias: aliasLink,
+      });
+
+      expect(changes.length).toBe(0);
     });
 
     it("should follow aliases", () => {
@@ -1325,7 +1365,7 @@ describe("compactChangeSet", () => {
     location: {
       id: docId,
       space: docSpace,
-      type: "application/json",
+      scope: "space",
       path,
     },
     value: value as any,
@@ -1578,6 +1618,96 @@ describe("compactChangeSet", () => {
       // Child at index "0" should be subsumed because it exists in parent
       expect(result).toHaveLength(1);
       expect(result[0].location.path).toEqual(["items"]);
+    });
+  });
+
+  describe("batched applyChangeSet", () => {
+    const makeBatchChange = (
+      path: string[],
+      value: unknown,
+    ): ChangeSet[0] => ({
+      location: {
+        id: "test:batched-doc",
+        space: "did:test:space",
+        scope: "space",
+        path,
+      },
+      value: value as any,
+    });
+
+    it("prefers the transaction batch hook when applying a change set", () => {
+      const batches: Array<
+        Array<{ address: ChangeSet[0]["location"]; value: unknown }>
+      > = [];
+      const txWithBatch = {
+        writeValueOrThrow() {
+          throw new Error("applyChangeSet should use writeValuesOrThrow");
+        },
+        writeValuesOrThrow(
+          writes: Iterable<{
+            address: ChangeSet[0]["location"];
+            value: unknown;
+          }>,
+        ) {
+          batches.push([...writes]);
+        },
+      } as unknown as IExtendedStorageTransaction;
+
+      applyChangeSet(txWithBatch, [
+        makeBatchChange(["profile", "name"], "Ada"),
+        makeBatchChange(["profile", "age"], 42),
+      ]);
+
+      expect(batches).toEqual([[
+        {
+          address: {
+            id: "test:batched-doc",
+            space: "did:test:space",
+            scope: "space",
+            path: ["profile", "name"],
+          },
+          value: "Ada",
+        },
+        {
+          address: {
+            id: "test:batched-doc",
+            space: "did:test:space",
+            scope: "space",
+            path: ["profile", "age"],
+          },
+          value: 42,
+        },
+      ]]);
+    });
+
+    it("lets the v2 transaction batch hook materialize missing parents", async () => {
+      const localStorageManager = StorageManager.emulate({ as: signer });
+      const localRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: localStorageManager,
+      });
+      const localTx = localRuntime.edit();
+
+      try {
+        const testCell = localRuntime.getCell<{ profile?: { name?: string } }>(
+          space,
+          "batched applyChangeSet materializes parents",
+          undefined,
+          localTx,
+        );
+
+        localTx.writeValuesOrThrow?.([{
+          address: testCell.key("profile").key("name")
+            .getAsNormalizedFullLink(),
+          value: "Ada",
+        }]);
+
+        expect(testCell.get()).toEqual({ profile: { name: "Ada" } });
+      } finally {
+        await localTx.commit();
+        await localRuntime.dispose();
+        await localStorageManager.close();
+      }
     });
   });
 });

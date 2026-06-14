@@ -47,7 +47,7 @@ library → external → internal):
 // Current (internal packages mixed without grouping)
 import { JSONSchema7 } from "json-schema";
 import { isOpaqueRef, OpaqueRef } from "./spell.js";
-import { diffAndUpdate, maybeGetCellLink } from "@commontools/runner";
+import { diffAndUpdate, maybeGetCellLink } from "@commonfabric/runner";
 
 // Should be:
 // Standard library
@@ -57,7 +57,7 @@ import { diffAndUpdate, maybeGetCellLink } from "@commontools/runner";
 import { JSONSchema7 } from "json-schema";
 
 // Internal
-import { diffAndUpdate, maybeGetCellLink } from "@commontools/runner";
+import { diffAndUpdate, maybeGetCellLink } from "@commonfabric/runner";
 import { isOpaqueRef, OpaqueRef } from "./spell.js";
 ```
 

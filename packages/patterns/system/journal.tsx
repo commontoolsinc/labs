@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Journal viewer pattern.
  * Displays a rolling narrative stream of journal entries.
@@ -10,10 +9,11 @@ import {
   handler,
   NAME,
   pattern,
+  toIndentedDebugString,
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Raw journal entry as stored - subject is a cell link, not a Cell
 type JournalEntry = {
@@ -87,7 +87,7 @@ export default pattern<Record<string, never>>((_) => {
   // Debug: stringify raw result for the debug panel
   const debugRaw = computed(() => {
     const raw = journalResult.result;
-    return JSON.stringify(raw, null, 2);
+    return toIndentedDebugString(raw);
   });
 
   // Most recent entries first
@@ -112,12 +112,12 @@ export default pattern<Record<string, never>>((_) => {
         >
           <h2 style={{ margin: "0" }}>Activity Journal</h2>
           {entryCount > 0 && (
-            <ct-button
-              onClick={clearJournal({ journal: journalResult.result })}
+            <cf-button
+              onClick={clearJournal({ journal: journalResult.result! })}
               variant="secondary"
             >
               Clear Journal
-            </ct-button>
+            </cf-button>
           )}
         </div>
 
@@ -218,7 +218,7 @@ export default pattern<Record<string, never>>((_) => {
                   }}
                 >
                   {entry.snapshot.name}:{" "}
-                  {entry.subject && <ct-cell-link $cell={entry.subject} />}
+                  {entry.subject && <cf-cell-link $cell={entry.subject} />}
                 </div>
               )}
 

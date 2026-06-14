@@ -2,33 +2,40 @@ import { Table } from "@cliffy/table";
 import { Command, ValidationError } from "@cliffy/command";
 import {
   applyPieceInput,
-  callPieceHandler,
+  executePieceCallable,
   formatViewTree,
   generateSpaceMap,
   getCellValue,
   getPieceView,
   inspectPiece,
   linkPieces,
+  linkSqliteDiskSource,
+  LinkValidationError,
   listPieces,
-  loadManager,
   MapFormat,
   newPiece,
   PieceConfig,
+  recreateSpaceRootPattern,
   removePiece,
   resetHomePattern,
   savePiecePattern,
   setCellValue,
   setHomePattern,
   setPiecePattern,
+  setPieceSlug,
   SpaceConfig,
+  stepPiece,
 } from "../lib/piece.ts";
-import { PiecesController } from "@commontools/piece/ops";
 import { renderPiece } from "../lib/piece-render.ts";
+import { parseSqliteSource } from "../lib/sqlite-source.ts";
 import { render, safeStringify } from "../lib/render.ts";
-import { decode } from "@commontools/utils/encoding";
+import { decode } from "@commonfabric/utils/encoding";
+import { cliText } from "../lib/cli-name.ts";
 import { absPath } from "../lib/utils.ts";
-import { parsePath } from "@commontools/piece/ops";
-import { UI } from "@commontools/runner";
+import type { CellScope } from "@commonfabric/api";
+import { parseCellPath } from "@commonfabric/runner";
+import { UI } from "@commonfabric/runner";
+import ports from "@commonfabric/ports" with { type: "json" };
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;
@@ -44,6 +51,62 @@ function hint(message: string, showQuietTip = true) {
   }
 }
 
+function summarizeForDisplay(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value !== "object") return value;
+  if (Array.isArray(value)) return `[Array(${value.length})]`;
+  const obj = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (k.startsWith("$")) continue;
+    if (v === null || v === undefined) out[k] = v;
+    else if (typeof v !== "object") out[k] = v;
+    else if (Array.isArray(v)) out[k] = `[Array(${v.length})]`;
+    else out[k] = "[Object]";
+  }
+  return out;
+}
+
+function pieceCallRawArgs(tail: string[], literalArgs: string[]): string[] {
+  if (literalArgs.length > 0) {
+    return literalArgs;
+  }
+
+  if (tail.length === 0) {
+    return [];
+  }
+
+  if (tail[0] === "--help") {
+    if (tail.length === 1) {
+      return tail;
+    }
+    if (tail.length === 2 && tail[1] === "--json") {
+      return tail;
+    }
+    throw new ValidationError(
+      'Use "-- --help <value>" to set an input field named "help".',
+    );
+  }
+
+  if (tail[0] === "--json") {
+    if (tail.length === 1) {
+      // --json alone is a no-op: cf piece call always outputs JSON.
+      // Return machine-readable schema (same as --help --json) to exit cleanly.
+      return ["--help", "--json"];
+    }
+    // --json followed by other args: existing behavior (forward as-is).
+    return ["--json"];
+  }
+
+  if (tail.length > 1) {
+    throw new ValidationError(
+      'Use a single inline JSON argument or "--" before schema-derived flags.',
+    );
+  }
+
+  return ["--json", tail[0]];
+}
+
 // Override usage, since we do not "require" args that can be reflected by env vars.
 const spaceUsage =
   `--identity <identity> --url <url> --api-url <api-url> --space <space>`;
@@ -51,7 +114,7 @@ const pieceUsage = `${spaceUsage} --piece <piece>`;
 
 // Render out args for the examples for both `--url`,
 // and for the individual components (`--api-url`, `--piece`, `--space`)
-const RAW_EX_URL = "https://ct.dev/personal-notes/baed..43mi";
+const RAW_EX_URL = "https://cf.dev/personal-notes/baed..43mi";
 const RAW_EX_COMP = parseUrl(RAW_EX_URL);
 const EX_ID = `--identity ./my.key`;
 const EX_URL = `--url ${RAW_EX_URL}`;
@@ -60,36 +123,36 @@ const EX_COMP_PIECE = `${EX_COMP} --piece ${RAW_EX_COMP.piece!}`;
 
 // Enhanced description with workflow tips
 function pieceEnvStatus(): string {
-  const identity = Deno.env.get("CT_IDENTITY");
-  const apiUrl = Deno.env.get("CT_API_URL");
+  const identity = Deno.env.get("CF_IDENTITY");
+  const apiUrl = Deno.env.get("CF_API_URL");
   if (!identity && !apiUrl) return "";
   const lines: string[] = ["", "ENVIRONMENT:"];
   if (identity) {
     lines.push(
-      `  CT_IDENTITY = ${identity} (set, no need to pass --identity)`,
+      `  CF_IDENTITY = ${identity} (set, no need to pass --identity)`,
     );
   }
   if (apiUrl) {
     lines.push(
-      `  CT_API_URL  = ${apiUrl} (set, no need to pass --api-url)`,
+      `  CF_API_URL  = ${apiUrl} (set, no need to pass --api-url)`,
     );
   }
   return lines.join("\n");
 }
 
-const pieceDescription = `Interact with pieces running on a server.
+const pieceDescription = cliText(`Interact with pieces running on a server.
 
 COMMON WORKFLOWS:
-  Deploy:    ct piece new ./pattern.tsx -i ./claude.key -a http://localhost:8000 -s my-space
-  Update:    ct piece setsrc --piece <ID> ./pattern.tsx -i ./claude.key -a http://localhost:8000 -s my-space
-  Test:      ct piece call --piece <ID> handlerName -i ./claude.key -a http://localhost:8000 -s my-space
-  Inspect:   ct piece inspect --piece <ID> -i ./claude.key -a http://localhost:8000 -s my-space
+  Deploy:    cf piece new ./pattern.tsx -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
+  Update:    cf piece setsrc --piece <ID> ./pattern.tsx -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
+  Test:      cf piece call --piece <ID> callableName -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
+  Inspect:   cf piece inspect --piece <ID> -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
 ${pieceEnvStatus()}
 TIPS:
   • Use 'setsrc' for iteration, not repeated 'new' (avoids clutter)
   • After 'set', run 'step' to trigger computed value updates
   • Path format: forward slashes only (items/0/name, not items[0].name)
-  • JSON values: strings need quotes: echo '"hello"' | ct piece set ...`;
+  • JSON values: strings need quotes: echo '"hello"' | cf piece set ...`);
 
 export const piece = new Command()
   .name("piece")
@@ -100,12 +163,12 @@ export const piece = new Command()
     "-u,--url <url:string>",
     "URL representing a host, space, and piece.",
   )
-  .globalEnv("CT_API_URL=<url:string>", "URL of the fabric instance.", {
-    prefix: "CT_",
+  .globalEnv("CF_API_URL=<url:string>", "URL of the fabric instance.", {
+    prefix: "CF_",
   })
   .globalOption("-a,--api-url <url:string>", "URL of the fabric instance.")
-  .globalEnv("CT_IDENTITY=<path:string>", "Path to an identity keyfile.", {
-    prefix: "CT_",
+  .globalEnv("CF_IDENTITY=<path:string>", "Path to an identity keyfile.", {
+    prefix: "CF_",
   })
   .globalOption("-i,--identity <path:string>", "Path to an identity keyfile.")
   .globalOption("-s,--space <space:string>", "The space name or DID")
@@ -113,15 +176,27 @@ export const piece = new Command()
   .command("ls", "List pieces in space.")
   .usage(spaceUsage)
   .example(
-    `ct piece ls ${EX_ID} ${EX_COMP}`,
+    cliText(`cf piece ls ${EX_ID} ${EX_COMP}`),
     `Display a list of all pieces in "${RAW_EX_COMP.space}".`,
   )
   .example(
-    `ct piece ls ${EX_ID} ${EX_URL}`,
+    cliText(`cf piece ls ${EX_ID} ${EX_URL}`),
     `Display a list of all pieces in "${RAW_EX_COMP.space}".`,
   )
+  .option("--json", "Output machine-readable JSON.")
   .action(async (options) => {
     const pieces = await listPieces(parseSpaceOptions(options));
+    if (options.json) {
+      render(
+        pieces.map((p) => ({
+          id: p.id,
+          name: p.name ?? null,
+          patternName: p.patternName ?? null,
+        })),
+        { json: true },
+      );
+      return;
+    }
     const piecesData = [
       ["ID", "NAME", "PATTERN"],
       ...(pieces.map(
@@ -144,15 +219,17 @@ export const piece = new Command()
   .command("new", "Create a new piece with a pattern.")
   .usage(spaceUsage)
   .example(
-    `ct piece new ${EX_ID} ${EX_COMP} ./main.tsx`,
+    cliText(`cf piece new ${EX_ID} ${EX_COMP} ./main.tsx`),
     `Create a new piece, using ./main.tsx as source.`,
   )
   .example(
-    `ct piece new ${EX_ID} ${EX_URL} ./main.tsx`,
+    cliText(`cf piece new ${EX_ID} ${EX_URL} ./main.tsx`),
     `Create a new piece, using ./main.tsx as source.`,
   )
   .example(
-    `ct piece new ${EX_ID} ${EX_COMP} --root ./patterns ./patterns/wip/main.tsx`,
+    cliText(
+      `cf piece new ${EX_ID} ${EX_COMP} --root ./patterns ./patterns/wip/main.tsx`,
+    ),
     `Create a piece that can import from parent directories within ./patterns.`,
   )
   .arguments("<main:string>")
@@ -165,6 +242,7 @@ export const piece = new Command()
     "--root <path:string>",
     "Root directory for resolving imports. Allows imports from parent directories within this root.",
   )
+  .option("--slug <slug:string>", "Slug URL/address for this piece.")
   .action(async (options, main) => {
     setQuietMode(!!options.quiet);
     const spaceConfig = parseSpaceOptions(options);
@@ -175,43 +253,77 @@ export const piece = new Command()
         mainExport: options.mainExport,
         rootPath: options.root ? absPath(options.root) : undefined,
       },
-      { start: options.start },
+      { start: options.start, slug: options.slug },
     );
     render(pieceId);
-    hint(`NEXT STEPS:
-  → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${pieceId}
-  → Update code:     ct piece setsrc --piece ${pieceId} ${main} ...
-  → Test a handler:  ct piece call --piece ${pieceId} <handlerName> ...
-  → Inspect state:   ct piece inspect --piece ${pieceId} ...`);
+    const browserPieceRef = options.slug ?? pieceId;
+    hint(cliText(`NEXT STEPS:
+  → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${browserPieceRef}
+  → Update code:     cf piece setsrc --piece ${pieceId} ${main} ...
+  → Test a callable: cf piece call --piece ${pieceId} <callableName> ...
+  → Inspect state:   cf piece inspect --piece ${pieceId} ...`));
+  })
+  /* piece set-slug */
+  .command(
+    "set-slug",
+    "Set a slug redirect to a piece or cell link.",
+  )
+  .usage(spaceUsage)
+  .example(
+    cliText(`cf piece set-slug ${EX_ID} ${EX_COMP} project-notes bafypiece1`),
+    `Set slug "project-notes" to piece "bafypiece1".`,
+  )
+  .example(
+    cliText(
+      `cf piece set-slug ${EX_ID} ${EX_COMP} latest-note old-slug --resolve-before-linking`,
+    ),
+    `Set slug "latest-note" to the cell currently resolved by "old-slug".`,
+  )
+  .arguments("<slug:string> <source:string>")
+  .option(
+    "--resolve-before-linking",
+    "Resolve the source cell before writing it as the slug redirect target.",
+  )
+  .action(async (options, slug, sourceRef) => {
+    setQuietMode(!!options.quiet);
+    const spaceConfig = parseSpaceOptions(options);
+    const source = parseLink(sourceRef);
+    await setPieceSlug(
+      spaceConfig,
+      slug,
+      source.pieceId,
+      source.path || [],
+      {
+        sourceScope: source.scope,
+        resolveBeforeLinking: !!(options as any).resolveBeforeLinking,
+      },
+    );
+    render(`Set slug ${slug} to ${sourceRef}`);
+    hint(cliText(`NEXT STEPS:
+  → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${slug}`));
   })
   /* piece step */
   .command("step", "Run a single scheduling step: start → idle → synced → stop")
   .usage(pieceUsage)
   .example(
-    `ct piece step ${EX_ID} ${EX_COMP_PIECE}`,
+    cliText(`cf piece step ${EX_ID} ${EX_COMP_PIECE}`),
     `Start, wait for idle+synced, then stop piece "${RAW_EX_COMP.piece!}".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .action(async (options) => {
     const pieceConfig = parsePieceOptions(options);
-    const manager = await loadManager(pieceConfig);
-    const pieces = new PiecesController(manager);
-    // Start in this transient runtime, wait, then stop and exit
-    const piece = await pieces.get(pieceConfig.piece, true);
-    await piece.getCell().pull();
-    await manager.synced();
-    await pieces.stop(pieceConfig.piece);
+    await stepPiece(pieceConfig);
     render(`Stepped piece ${pieceConfig.piece}`);
   })
   /* piece apply */
   .command("apply", "Pass in new inputs to the target piece")
   .usage(pieceUsage)
   .example(
-    `echo '{"foo":5}' | ct piece apply ${EX_ID} ${EX_COMP_PIECE}`,
+    cliText(`echo '{"foo":5}' | cf piece apply ${EX_ID} ${EX_COMP_PIECE}`),
     `Applies the input '{"foo":5}' to piece "${RAW_EX_COMP.piece!}".`,
   )
   .example(
-    `echo '{"foo":5}' | ct piece apply ${EX_ID} ${EX_URL}`,
+    cliText(`echo '{"foo":5}' | cf piece apply ${EX_ID} ${EX_URL}`),
     `Applies the input '{"foo":5}' to piece "${RAW_EX_COMP.piece!}".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
@@ -222,11 +334,11 @@ export const piece = new Command()
   .command("getsrc", "Retrieve the pattern source for the given piece.")
   .usage(pieceUsage)
   .example(
-    `ct piece getsrc ${EX_ID} ${EX_COMP_PIECE} ./out`,
+    cliText(`cf piece getsrc ${EX_ID} ${EX_COMP_PIECE} ./out`),
     `Retrieve the source for "${RAW_EX_COMP.piece!}" and place in ./out`,
   )
   .example(
-    `ct piece getsrc ${EX_ID} ${EX_URL} ./out`,
+    cliText(`cf piece getsrc ${EX_ID} ${EX_URL} ./out`),
     `Retrieve the source for "${RAW_EX_COMP.piece!}" and place in ./out`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
@@ -238,11 +350,11 @@ export const piece = new Command()
   .command("setsrc", "Update the pattern source for the given piece.")
   .usage(pieceUsage)
   .example(
-    `ct piece setsrc ${EX_ID} ${EX_COMP_PIECE} ./main.tsx`,
+    cliText(`cf piece setsrc ${EX_ID} ${EX_COMP_PIECE} ./main.tsx`),
     `Update the source for "${RAW_EX_COMP.piece!}" with ./main.tsx`,
   )
   .example(
-    `ct piece setsrc ${EX_ID} ${EX_URL} ./main.tsx`,
+    cliText(`cf piece setsrc ${EX_ID} ${EX_URL} ./main.tsx`),
     `Update the source for "${RAW_EX_COMP.piece!}" with ./main.tsx`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
@@ -264,32 +376,44 @@ export const piece = new Command()
       rootPath: options.root ? absPath(options.root) : undefined,
     });
     render(`Updated source for piece ${pieceConfig.piece}`);
-    hint(`NEXT STEPS:
+    hint(cliText(`NEXT STEPS:
   → Test in browser: ${pieceConfig.apiUrl}/${pieceConfig.space}/${pieceConfig.piece}
-  → Test a handler:  ct piece call --piece ${pieceConfig.piece} <handlerName> ...
-  → Check state:     ct piece inspect --piece ${pieceConfig.piece} ...`);
+  → Test a callable: cf piece call --piece ${pieceConfig.piece} <callableName> ...
+  → Check state:     cf piece inspect --piece ${pieceConfig.piece} ...`));
   })
   /* piece inspect */
   .command("inspect", "Inspect detailed information about a piece")
   .usage(pieceUsage)
   .example(
-    `ct piece inspect ${EX_ID} ${EX_COMP_PIECE}`,
+    cliText(`cf piece inspect ${EX_ID} ${EX_COMP_PIECE}`),
     `Inspect detailed information about piece "${RAW_EX_COMP.piece!}".`,
   )
   .example(
-    `ct piece inspect ${EX_ID} ${EX_URL}`,
+    cliText(`cf piece inspect ${EX_ID} ${EX_URL}`),
     `Inspect detailed information about piece "${RAW_EX_COMP.piece!}".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option("--json", "Output raw JSON data")
+  .option(
+    "--summary",
+    "Show a compact summary: scalars only, arrays/objects replaced with type descriptors, $-prefixed internal keys omitted",
+  )
   .action(async (options) => {
     const pieceConfig = parsePieceOptions(options);
 
     const pieceData = await inspectPiece(pieceConfig);
 
+    const displayData = options.summary
+      ? {
+        ...pieceData,
+        source: summarizeForDisplay(pieceData.source),
+        result: summarizeForDisplay(pieceData.result),
+      }
+      : pieceData;
+
     if (options.json) {
       // In JSON mode, use render with JSON output
-      render(pieceData, { json: true });
+      render(displayData, { json: true });
       return;
     }
 
@@ -301,20 +425,28 @@ Pattern: ${pieceData.patternName || "<no pattern name>"}
 
 --- Source (Inputs) ---`;
 
-    if (pieceData.source) {
-      output += `\n${safeStringify(pieceData.source)}`;
+    if (displayData.source) {
+      output += `\n${safeStringify(displayData.source)}`;
     } else {
       output += "\n<no source data>";
     }
 
     output += "\n\n--- Result ---";
-    if (pieceData.result) {
-      // Filter out large UI objects that clutter the output
-      const filteredResult = { ...pieceData.result };
-      if (UI in filteredResult && typeof filteredResult[UI] === "object") {
-        filteredResult[UI] = "<large UI object - use --json to see full UI>";
+    if (displayData.result !== null && displayData.result !== undefined) {
+      const isPlainObject = typeof displayData.result === "object" &&
+        !Array.isArray(displayData.result);
+      if (!options.summary && isPlainObject) {
+        // Filter out large UI objects that clutter the non-summary output
+        const filteredResult = {
+          ...(displayData.result as Record<string | symbol, unknown>),
+        };
+        if (UI in filteredResult && typeof filteredResult[UI] === "object") {
+          filteredResult[UI] = "<large UI object - use --json to see full UI>";
+        }
+        output += `\n${safeStringify(filteredResult)}`;
+      } else {
+        output += `\n${safeStringify(displayData.result)}`;
       }
-      output += `\n${safeStringify(filteredResult)}`;
     } else {
       output += "\n<no result data>";
     }
@@ -343,11 +475,11 @@ Pattern: ${pieceData.patternName || "<no pattern name>"}
   .command("view", "Display the rendered view for a piece")
   .usage(pieceUsage)
   .example(
-    `ct piece view ${EX_ID} ${EX_COMP_PIECE}`,
+    cliText(`cf piece view ${EX_ID} ${EX_COMP_PIECE}`),
     `Display the view for piece "${RAW_EX_COMP.piece!}".`,
   )
   .example(
-    `ct piece view ${EX_ID} ${EX_URL}`,
+    cliText(`cf piece view ${EX_ID} ${EX_URL}`),
     `Display the view for piece "${RAW_EX_COMP.piece!}".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
@@ -370,15 +502,15 @@ Pattern: ${pieceData.patternName || "<no pattern name>"}
   .command("render", "Render a piece's UI to HTML")
   .usage(pieceUsage)
   .example(
-    `ct piece render ${EX_ID} ${EX_COMP_PIECE}`,
+    cliText(`cf piece render ${EX_ID} ${EX_COMP_PIECE}`),
     `Render the UI for piece "${RAW_EX_COMP.piece!}" to HTML.`,
   )
   .example(
-    `ct piece render ${EX_ID} ${EX_URL}`,
+    cliText(`cf piece render ${EX_ID} ${EX_URL}`),
     `Render the UI for piece "${RAW_EX_COMP.piece!}" to HTML.`,
   )
   .example(
-    `ct piece render ${EX_ID} ${EX_COMP_PIECE} --watch`,
+    cliText(`cf piece render ${EX_ID} ${EX_COMP_PIECE} --watch`),
     `Watch and re-render piece "${RAW_EX_COMP.piece!}" when UI changes.`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
@@ -451,22 +583,69 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
   )
   .usage(spaceUsage)
   .example(
-    `ct piece link ${EX_ID} ${EX_COMP} bafypiece1/outputEmails bafypiece2/emails`,
+    cliText(
+      `cf piece link ${EX_ID} ${EX_COMP} bafypiece1/outputEmails bafypiece2/emails`,
+    ),
     `Link outputEmails field from piece "bafypiece1" to emails field in piece "bafypiece2".`,
   )
   .example(
-    `ct piece link ${EX_ID} ${EX_COMP} bafypiece1/data/users/0/email bafypiece2/config/primaryEmail`,
+    cliText(
+      `cf piece link ${EX_ID} ${EX_COMP} bafypiece1/data/users/0/email bafypiece2/config/primaryEmail`,
+    ),
     `Link deep nested field including array access.`,
   )
   .example(
-    `ct piece link ${EX_ID} ${EX_COMP} baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye bafypiece1/allPieces`,
+    cliText(
+      `cf piece link ${EX_ID} ${EX_COMP} bafypiece1@user/profile bafypiece2@session/currentProfile`,
+    ),
+    `Link scoped cell instances using @user or @session on the piece ID.`,
+  )
+  .example(
+    cliText(
+      `cf piece link ${EX_ID} ${EX_COMP} baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye bafypiece1/allPieces`,
+    ),
     `Link well-known "allPieces" list to a piece field.`,
+  )
+  .example(
+    cliText(
+      `cf piece link ${EX_ID} ${EX_COMP} sqlite:/data/reference.db bafypiece1/refDb`,
+    ),
+    `Inject a read-only on-disk SQLite file as a piece's SqliteDb input (Phase 7).`,
   )
   .arguments("<source:string> <target:string>")
   .option("--no-start", "Only link without starting the pieces")
+  .option(
+    "--allow-non-existing",
+    "Allow linking to/from pieces or paths that don't exist yet",
+  )
   .action(async (options, sourceRef, targetRef) => {
     setQuietMode(!!options.quiet);
     const spaceConfig = parseSpaceOptions(options);
+
+    // Phase 7: `cf piece link sqlite:<absPath> <piece>/<field>` injects a
+    // read-only on-disk SQLite source into the target field (v1). Detect this
+    // BEFORE parseLink (the sqlite: scheme is not a piece ref).
+    const sqliteSource = parseSqliteSource(sourceRef);
+    if (sqliteSource) {
+      const target = parseLink(targetRef);
+      if (!target.path) {
+        throw new ValidationError(
+          `Target reference must include a path. Expected: pieceId/path/to/field`,
+          { exitCode: 1 },
+        );
+      }
+      await linkSqliteDiskSource(
+        spaceConfig,
+        sqliteSource.path,
+        target.pieceId,
+        target.path,
+        { start: options.start, targetScope: target.scope },
+      );
+      render(`Linked ${sourceRef} to ${targetRef} (read-only on-disk source)`);
+      hint(cliText(`NEXT STEPS:
+  → Inspect target piece:  cf piece inspect --piece ${target.pieceId} ...`));
+      return;
+    }
 
     // Parse source and target references - handle both pieceId/path and well-known IDs
     const source = parseLink(sourceRef, { allowWellKnown: true });
@@ -484,65 +663,101 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
       );
     }
 
-    await linkPieces(
-      spaceConfig,
-      source.pieceId,
-      source.path || [], // Empty path for well-known IDs
-      target.pieceId,
-      target.path,
-      { start: options.start },
-    );
+    try {
+      await linkPieces(
+        spaceConfig,
+        source.pieceId,
+        source.path || [], // Empty path for well-known IDs
+        target.pieceId,
+        target.path,
+        {
+          start: options.start,
+          allowNonExisting: !!(options as any).allowNonExisting,
+          sourceScope: source.scope,
+          targetScope: target.scope,
+        },
+      );
+    } catch (error) {
+      if (error instanceof LinkValidationError) {
+        throw new ValidationError(error.message, { exitCode: 1 });
+      }
+      throw error;
+    }
 
     render(`Linked ${sourceRef} to ${targetRef}`);
-    hint(`NEXT STEPS:
-  → Visualize connections: ct piece map -i ... -a ... -s ...
-  → Inspect target piece:  ct piece inspect --piece ${target.pieceId} ...`);
+    hint(cliText(`NEXT STEPS:
+  → Visualize connections: cf piece map -i ... -a ... -s ...
+  → Inspect target piece:  cf piece inspect --piece ${target.pieceId} ...`));
   })
   /* piece get */
   .command(
     "get",
-    `Get a value from a piece at a specific path.
+    `Get a value from a piece at a specific path. Omit path to return the full result.
 
 PATH FORMAT: Use forward slashes and numeric indices for arrays.
   ✓ items/0/name    ✓ config/db/host    ✗ items[0].name`,
   )
   .usage(pieceUsage)
   .example(
-    `ct piece get ${EX_ID} ${EX_COMP_PIECE} name`,
+    cliText(`cf piece get ${EX_ID} ${EX_COMP_PIECE} name`),
     `Get the "name" field from piece result "${RAW_EX_COMP.piece!}".`,
   )
   .example(
-    `ct piece get ${EX_ID} ${EX_COMP_PIECE} data/users/0/email --input`,
+    cliText(
+      `cf piece get ${EX_ID} ${EX_COMP_PIECE} data/users/0/email --input`,
+    ),
     `Get a nested field value from piece input "${RAW_EX_COMP.piece!}".`,
+  )
+  .example(
+    cliText(
+      `cf piece get ${EX_ID} ${EX_COMP} --piece ${RAW_EX_COMP
+        .piece!}@session draft`,
+    ),
+    `Get a value from a session-scoped piece instance.`,
+  )
+  .example(
+    cliText(`cf piece get ${EX_ID} ${EX_COMP_PIECE}`),
+    `Get the full result of piece "${RAW_EX_COMP.piece!}".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option("--input", "Read from the piece's input cell instead of result cell")
-  .arguments("<path:string>")
+  .arguments("[path:string]")
   .action(async (options, pathString) => {
     const pieceConfig = parsePieceOptions(options);
-    const pathSegments = parsePath(pathString);
-    const value = await getCellValue(pieceConfig, pathSegments, {
-      input: options.input,
-    });
-    render(value, { json: true });
+    const pathSegments = pathString ? parseCellPath(pathString) : [];
+    try {
+      const value = await getCellValue(pieceConfig, pathSegments, {
+        input: options.input,
+      });
+      render(value, { json: true });
+    } catch (error) {
+      if (
+        error instanceof Error && error.message.startsWith("Cannot access path")
+      ) {
+        throw new ValidationError(error.message, { exitCode: 1 });
+      }
+      throw error;
+    }
   })
   /* piece set */
   .command(
     "set",
-    `Set a value in a piece at a specific path. Reads JSON from stdin.
+    cliText(`Set a value in a piece at a specific path. Reads JSON from stdin.
 
 PATH FORMAT: Use forward slashes and numeric indices for arrays.
   ✓ items/0/name    ✓ config/db/host    ✗ items[0].name
 
-JSON VALUES: Strings need quotes: echo '"hello"' | ct piece set ...`,
+JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
   )
   .usage(pieceUsage)
   .example(
-    `echo '"New Name"' | ct piece set ${EX_ID} ${EX_COMP_PIECE} name`,
+    cliText(`echo '"New Name"' | cf piece set ${EX_ID} ${EX_COMP_PIECE} name`),
     `Set the "name" field in piece result "${RAW_EX_COMP.piece!}".`,
   )
   .example(
-    `echo '{"foo": "bar"}' | ct piece set ${EX_ID} ${EX_COMP_PIECE} config --input`,
+    cliText(
+      `echo '{"foo": "bar"}' | cf piece set ${EX_ID} ${EX_COMP_PIECE} config --input`,
+    ),
     `Set a nested object value in piece input "${RAW_EX_COMP.piece!}".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
@@ -551,25 +766,27 @@ JSON VALUES: Strings need quotes: echo '"hello"' | ct piece set ...`,
   .action(async (options, pathString) => {
     setQuietMode(!!options.quiet);
     const pieceConfig = parsePieceOptions(options);
-    const pathSegments = parsePath(pathString);
+    const pathSegments = parseCellPath(pathString);
     const value = await drainStdin();
     await setCellValue(pieceConfig, pathSegments, value, {
       input: options.input,
     });
     render(`Set value at path: ${pathString}`);
     hint(
-      `TIP: Computed values may be stale. Run 'ct piece step --piece ${pieceConfig.piece} ...' to trigger recomputation.`,
+      cliText(
+        `TIP: Computed values may be stale. Run 'cf piece step --piece ${pieceConfig.piece} ...' to trigger recomputation.`,
+      ),
     );
   })
   /* piece map */
   .command("map", "Display a visual map of all pieces and their connections")
   .usage(spaceUsage)
   .example(
-    `ct piece map ${EX_ID} ${EX_COMP}`,
+    cliText(`cf piece map ${EX_ID} ${EX_COMP}`),
     `Display a map of all pieces and connections in "${RAW_EX_COMP.space}".`,
   )
   .example(
-    `ct piece map ${EX_ID} ${EX_COMP} --format dot`,
+    cliText(`cf piece map ${EX_ID} ${EX_COMP} --format dot`),
     `Output Graphviz DOT format for the space.`,
   )
   .option(
@@ -585,39 +802,68 @@ JSON VALUES: Strings need quotes: echo '"hello"' | ct piece set ...`,
     render(map);
   })
   /* piece call */
-  .command("call", "Call a handler within a piece")
+  .command("call", "Invoke a callable within a piece")
   .usage(pieceUsage)
   .example(
-    `ct piece call ${EX_ID} ${EX_COMP_PIECE} increment`,
+    cliText(`cf piece call ${EX_ID} ${EX_COMP_PIECE} increment`),
     `Call the "increment" handler on piece "${RAW_EX_COMP.piece!}".`,
   )
   .example(
-    `ct piece call ${EX_ID} ${EX_COMP_PIECE} setName '{"value":"My Name"}'`,
-    `Call the "setName" handler with arguments on piece "${RAW_EX_COMP
+    cliText(
+      `cf piece call ${EX_ID} ${EX_COMP_PIECE} setName '{"value":"My Name"}'`,
+    ),
+    `Call the "setName" handler with JSON arguments on piece "${RAW_EX_COMP
       .piece!}".`,
   )
+  .example(
+    cliText(`cf piece call ${EX_ID} ${EX_COMP_PIECE} search -- --query milk`),
+    `Run the "search" tool using schema-derived flags after "--".`,
+  )
   .option("-c,--piece <piece:string>", "The target piece ID.")
-  .arguments("<handler:string> [args:string]")
-  .action(async (options, handlerName, argsJson) => {
-    setQuietMode(!!options.quiet);
-    const pieceConfig = parsePieceOptions(options);
-    const args = argsJson ? JSON.parse(argsJson) : await drainStdin();
-    await callPieceHandler(pieceConfig, handlerName, args);
-    render(`Called handler "${handlerName}" on piece ${pieceConfig.piece}`);
-    hint(`NEXT STEPS:
-  → Verify state:  ct piece get --piece ${pieceConfig.piece} <path> ...
-  → Full inspect:  ct piece inspect --piece ${pieceConfig.piece} ...`);
+  .option(
+    "--json",
+    "Input/output format (JSON is the only supported format; this flag is a no-op)",
+  )
+  .stopEarly()
+  .arguments("<callable:string> [tail...:string]")
+  .action(async function (options, callableName, ...tail) {
+    try {
+      setQuietMode(!!options.quiet);
+      const pieceConfig = parsePieceOptions(options);
+      const rawArgs = pieceCallRawArgs(tail, this.getLiteralArgs());
+      const result = await executePieceCallable(
+        pieceConfig,
+        callableName,
+        rawArgs,
+      );
+      if (result.helpText) {
+        render(result.helpText);
+        return;
+      }
+      if (result.outputText) {
+        render(result.outputText);
+        return;
+      }
+      render(`Called handler "${callableName}" on piece ${pieceConfig.piece}`);
+      hint(cliText(`NEXT STEPS:
+  → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
+  → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(message);
+      Deno.exit(1);
+    }
   })
   /* piece rm */
   .command("rm", "Remove a piece")
   .alias("remove")
   .usage(pieceUsage)
   .example(
-    `ct piece rm ${EX_ID} ${EX_COMP_PIECE}`,
+    cliText(`cf piece rm ${EX_ID} ${EX_COMP_PIECE}`),
     `Remove piece "${RAW_EX_COMP.piece!}".`,
   )
   .example(
-    `ct piece rm ${EX_ID} ${EX_URL}`,
+    cliText(`cf piece rm ${EX_ID} ${EX_URL}`),
     `Remove piece "${RAW_EX_COMP.piece!}".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
@@ -626,18 +872,45 @@ JSON VALUES: Strings need quotes: echo '"hello"' | ct piece set ...`,
     await removePiece(pieceConfig);
     render(`Removed piece ${pieceConfig.piece}`);
   })
+  /* piece recreate-root */
+  .command(
+    "recreate-root",
+    "Recreate the root pattern for the explicitly targeted space.",
+  )
+  .usage(spaceUsage)
+  .example(
+    cliText(`cf piece recreate-root ${EX_ID} ${EX_COMP}`),
+    `Recreate the root pattern for "${RAW_EX_COMP.space}".`,
+  )
+  .example(
+    cliText(`cf piece recreate-root ${EX_ID} ${EX_URL}`),
+    `Recreate the root pattern for "${RAW_EX_COMP.space}".`,
+  )
+  .action(async (options) => {
+    setQuietMode(!!options.quiet);
+    const spaceConfig = parseSpaceOptions(options);
+    const pieceId = await recreateSpaceRootPattern(spaceConfig);
+    render(pieceId);
+    hint(cliText(`NEXT STEPS:
+  → Open space in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${pieceId}
+  → Inspect state:         cf piece inspect --piece ${pieceId} ...`));
+  })
   /* piece set-home */
   .command(
     "set-home",
-    "Deploy a custom home pattern or reset to system default.",
+    "Deploy a custom home-space pattern or reset the identity's home space to system default.",
   )
   .example(
-    `ct piece set-home ${EX_ID} -a http://localhost:8000 ./my-home.tsx`,
-    `Deploy a custom home pattern.`,
+    cliText(
+      `cf piece set-home ${EX_ID} -a http://localhost:${ports.toolshed} ./my-home.tsx`,
+    ),
+    `Deploy a custom pattern to the identity's home space.`,
   )
   .example(
-    `ct piece set-home ${EX_ID} -a http://localhost:8000 --reset`,
-    `Reset to the system default home pattern.`,
+    cliText(
+      `cf piece set-home ${EX_ID} -a http://localhost:${ports.toolshed} --reset`,
+    ),
+    `Reset the identity's home space to the system default pattern.`,
   )
   .option("--reset", "Reset to the system default home pattern")
   .option(
@@ -679,9 +952,9 @@ JSON VALUES: Strings need quotes: echo '"hello"' | ct piece set ...`,
       render("Deployed custom home pattern.");
     }
 
-    hint(`NEXT STEPS:
+    hint(cliText(`NEXT STEPS:
   → Open home in browser: ${baseConfig.apiUrl}
-  → Reset to default:     ct piece set-home --reset ...`);
+  → Reset to default:     cf piece set-home --reset ...`));
   });
 
 interface PieceCLIOptions {
@@ -692,19 +965,40 @@ interface PieceCLIOptions {
   url?: string;
 }
 
+const CELL_SCOPE_VALUES = new Set(["space", "user", "session"]);
+
+function parseScopedIdSegment(id: string): {
+  id: string;
+  scope?: CellScope;
+} {
+  const scopeSeparator = id.lastIndexOf("@");
+  if (scopeSeparator === -1) return { id };
+
+  const scope = id.slice(scopeSeparator + 1);
+  const scopedId = id.slice(0, scopeSeparator);
+  if (!scopedId || !CELL_SCOPE_VALUES.has(scope)) {
+    throw new ValidationError(
+      `Invalid scope suffix "@${scope}". Expected @space, @user, or @session.`,
+      { exitCode: 1 },
+    );
+  }
+
+  return { id: scopedId, scope: scope as CellScope };
+}
+
 function parseSetHomeOptions(
   input: PieceCLIOptions,
 ): Omit<SpaceConfig, "space"> {
   if (!input.identity) {
     throw new ValidationError(
-      `Missing required option: "--identity", or "CT_IDENTITY".`,
+      `Missing required option: "--identity", or "CF_IDENTITY".`,
       { exitCode: 1 },
     );
   }
   const apiUrl = input.apiUrl;
   if (!apiUrl) {
     throw new ValidationError(
-      `Missing required option: "--api-url", or "CT_API_URL".`,
+      `Missing required option: "--api-url", or "CF_API_URL".`,
       { exitCode: 1 },
     );
   }
@@ -738,7 +1032,7 @@ export function parseSpaceOptions(
 
   if (!input.identity) {
     throw new ValidationError(
-      `Missing required option: "--identity", or "CT_IDENTITY".`,
+      `Missing required option: "--identity", or "CF_IDENTITY".`,
       { exitCode: 1 },
     );
   }
@@ -748,16 +1042,17 @@ export function parseSpaceOptions(
   };
 
   if (input.url) {
-    const { apiUrl, space, piece } = parseUrl(input.url);
+    const { apiUrl, space, piece, pieceScope } = parseUrl(input.url);
     output.apiUrl = apiUrl;
     output.space = space;
     output.piece = piece;
+    if (pieceScope) output.pieceScope = pieceScope;
     return output as PieceConfig;
   }
 
   if (!input.apiUrl) {
     throw new ValidationError(
-      `Missing required option: "--api-url", or "CT_API_URL".`,
+      `Missing required option: "--api-url", or "CF_API_URL".`,
       { exitCode: 1 },
     );
   }
@@ -771,7 +1066,9 @@ export function parseSpaceOptions(
   if (input.piece) {
     // Do not validate here -- piece is only
     // required via `parsePieceOptions`
-    output.piece = input.piece;
+    const parsedPiece = parseScopedIdSegment(input.piece);
+    output.piece = parsedPiece.id;
+    if (parsedPiece.scope) output.pieceScope = parsedPiece.scope;
   }
 
   output.apiUrl = input.apiUrl;
@@ -779,7 +1076,7 @@ export function parseSpaceOptions(
 
   if (!input.identity) {
     throw new ValidationError(
-      `Missing required option: "--identity", or "CT_IDENTITY".`,
+      `Missing required option: "--identity", or "CF_IDENTITY".`,
       { exitCode: 1 },
     );
   }
@@ -789,7 +1086,7 @@ export function parseSpaceOptions(
 export function parseLink(
   ref: string,
   _options?: { allowWellKnown?: boolean },
-): { pieceId: string; path?: (string | number)[] } {
+): { pieceId: string; scope?: CellScope; path?: (string | number)[] } {
   const parts = ref.split("/");
   if (parts.length < 1) {
     throw new ValidationError(
@@ -798,21 +1095,26 @@ export function parseLink(
     );
   }
 
-  const pieceId = parts[0];
+  const parsedPiece = parseScopedIdSegment(parts[0]);
+  const pieceId = parsedPiece.id;
 
   if (parts.length === 1) {
     // If this is a well-known ID (no path) and allowWellKnown is not explicitly true,
     // we might want to handle it differently in the future
-    return { pieceId };
+    return { pieceId, ...(parsedPiece.scope && { scope: parsedPiece.scope }) };
   }
 
-  const path = parsePath(parts.slice(1).join("/"));
-  return { pieceId, path };
+  const path = parseCellPath(parts.slice(1).join("/"));
+  return {
+    pieceId,
+    ...(parsedPiece.scope && { scope: parsedPiece.scope }),
+    path,
+  };
 }
 
 function parseUrl(
   input: string,
-): { apiUrl: string; space: string; piece?: string } {
+): { apiUrl: string; space: string; piece?: string; pieceScope?: CellScope } {
   let url;
   try {
     url = new URL(input);
@@ -830,7 +1132,14 @@ function parseUrl(
       { exitCode: 1 },
     );
   }
-  return { apiUrl, space, piece };
+  if (!piece) return { apiUrl, space };
+  const parsedPiece = parseScopedIdSegment(piece);
+  return {
+    apiUrl,
+    space,
+    piece: parsedPiece.id,
+    ...(parsedPiece.scope && { pieceScope: parsedPiece.scope }),
+  };
 }
 
 // We use stdin for piece input which must be an `Object`

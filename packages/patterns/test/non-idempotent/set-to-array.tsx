@@ -1,8 +1,14 @@
-/// <cts-enable />
 // WARNING: This pattern is INTENTIONALLY non-idempotent.
 // It exists to test detectNonIdempotent() diagnosis tooling.
 // Do NOT use as a reference for correct pattern development.
-import { computed, Default, pattern, UI, Writable } from "commontools";
+import {
+  computed,
+  Default,
+  nonPrivateRandom,
+  pattern,
+  UI,
+  Writable,
+} from "commonfabric";
 
 interface Item {
   title: string;
@@ -21,13 +27,13 @@ const preset: Item[] = [
 ];
 
 export default pattern<{
-  items: Writable<Default<Item[], typeof preset>>;
+  items: Writable<Item[] | Default<typeof preset>>;
 }>(({ items }) => {
   // Anti-pattern: Random sort before Set insertion changes iteration order
-  const uniqueTags = Writable.of<string[]>([]);
+  const uniqueTags = new Writable<string[]>([]);
   computed(() => {
     const tags = items.get().map((i) => i.tag);
-    const shuffled = tags.sort(() => Math.random() - 0.5);
+    const shuffled = tags.sort(() => nonPrivateRandom() - 0.5);
     const set = new Set(shuffled);
     uniqueTags.set([...set]);
   });

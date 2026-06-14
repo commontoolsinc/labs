@@ -1,5 +1,6 @@
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import { isOpaqueRef, isPattern, type Opaque } from "./types.ts";
+import { noteDerivedCopy } from "./pattern-metadata.ts";
 import { isCell } from "../cell.ts";
 import { isCellResultForDereferencing } from "../query-result-proxy.ts";
 
@@ -34,11 +35,19 @@ export function traverseValue(
     if (Array.isArray(value)) {
       return (value as Array<any>).map((v) => traverseValue(v, fn, seen));
     } else {
-      return Object.fromEntries(
+      const copy = Object.fromEntries(
         Object.entries(value).map((
           [key, v],
         ) => [key, traverseValue(v, fn, seen)]),
       );
+      // A pattern copied here must keep its link back to the original
+      // (branded, content-addressed) factory — otherwise
+      // `resolveOriginal`/`getArtifactEntryRef` would be severed, which is how
+      // a pattern passed as an `op` is later identified by
+      // `{ identity, symbol }`. Mirrors the registration in
+      // `toJSONWithLegacyAliases`.
+      if (isPattern(value)) noteDerivedCopy(copy, value);
+      return copy;
     }
   } else {
     return value;

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Record Pattern v2 - True Sub-Piece Architecture
  *
@@ -20,12 +19,13 @@ import {
   lift,
   NAME,
   pattern,
+  safeDateNow,
   SELF,
   str,
-  toSchema,
+  toCompactDebugString,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import {
   createSubPiece,
   getAddableTypes,
@@ -82,15 +82,15 @@ function getNextUnusedLabel(
 // ===== Types =====
 
 interface RecordInput {
-  title?: Default<string, "">;
-  subPieces?: Default<SubPieceEntry[], []>;
-  trashedSubPieces?: Default<TrashedSubPieceEntry[], []>;
+  title?: string | Default<"">;
+  subPieces?: SubPieceEntry[] | Default<[]>;
+  trashedSubPieces?: TrashedSubPieceEntry[] | Default<[]>;
 }
 
-interface RecordOutput {
-  title?: Default<string, "">;
-  subPieces?: Default<SubPieceEntry[], []>;
-  trashedSubPieces?: Default<TrashedSubPieceEntry[], []>;
+export interface RecordOutput {
+  title?: string | Default<"">;
+  subPieces?: SubPieceEntry[] | Default<[]>;
+  trashedSubPieces?: TrashedSubPieceEntry[] | Default<[]>;
   /** Self-reference for sub-pieces to access their parent Record */
   parentRecord?: RecordOutput | null;
 }
@@ -105,92 +105,81 @@ interface RecordOutput {
 // so it can modify the parent's subPieces list when a template is selected.
 
 // Inner lift: stores the initial pieces (receives pieces as input)
-const storeInitialPieces = lift(
-  toSchema<{
-    notesPiece: unknown;
-    notesSchema: unknown;
-    typePickerPiece: unknown;
-    typePickerSchema: unknown;
-    subPieces: Writable<SubPieceEntry[]>;
-    isInitialized: Writable<boolean>;
-  }>(),
-  undefined,
-  ({
-    notesPiece,
-    notesSchema,
-    typePickerPiece,
-    typePickerSchema,
-    subPieces,
-    isInitialized,
-  }) => {
-    if (!isInitialized.get()) {
-      subPieces.set([
-        { type: "notes", pinned: true, piece: notesPiece, schema: notesSchema },
-        {
-          type: "type-picker",
-          pinned: false,
-          piece: typePickerPiece,
-          schema: typePickerSchema,
-        },
-      ]);
-      isInitialized.set(true);
-      return notesPiece; // Return notes piece as primary reference
-    }
-  },
-);
+const storeInitialPieces = lift<{
+  notesPiece: any;
+  notesSchema: any;
+  typePickerPiece: any;
+  typePickerSchema: any;
+  subPieces: Writable<SubPieceEntry[]>;
+  isInitialized: Writable<boolean>;
+}>(({
+  notesPiece,
+  notesSchema,
+  typePickerPiece,
+  typePickerSchema,
+  subPieces,
+  isInitialized,
+}) => {
+  if (!isInitialized.get()) {
+    subPieces.set([
+      { type: "notes", pinned: true, piece: notesPiece, schema: notesSchema },
+      {
+        type: "type-picker",
+        pinned: false,
+        piece: typePickerPiece,
+        schema: typePickerSchema,
+      },
+    ]);
+    isInitialized.set(true);
+    return notesPiece; // Return notes piece as primary reference
+  }
+});
 
 // Outer lift: checks if empty, creates pieces, calls inner lift
 // TypePicker uses ContainerCoordinationContext protocol for parent access
 // Note: We receive recordPatternJson as input to avoid capturing Record before it's defined
-const initializeRecord = lift(
-  toSchema<{
-    currentPieces: SubPieceEntry[]; // Unwrapped value, not Cell
-    subPieces: Writable<SubPieceEntry[]>;
-    trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
-    isInitialized: Writable<boolean>;
-    recordPatternJson: string; // Computed that returns Record JSON string
-  }>(),
-  undefined,
-  (
-    {
-      currentPieces,
+const initializeRecord = lift<{
+  currentPieces: SubPieceEntry[]; // Unwrapped value, not Cell
+  subPieces: Writable<SubPieceEntry[]>;
+  trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
+  isInitialized: Writable<boolean>;
+  recordPatternJson: string; // Computed that returns Record JSON string
+}>(({
+  currentPieces,
+  subPieces,
+  trashedSubPieces,
+  isInitialized,
+  recordPatternJson,
+}) => {
+  if ((currentPieces || []).length === 0) {
+    // Create Note as default module (rendered via cf-render variant="embedded")
+    // Pass recordPatternJson so [[wiki-links]] create Record pieces instead of Note pieces
+    const notesPiece = Note({ linkPattern: recordPatternJson });
+
+    // Capture schema for dynamic discovery
+    const notesSchema = getResultSchema(notesPiece);
+
+    // TypePicker receives Cells as top-level props (CTS handles serialization correctly)
+    // NOTE: Cells must be top-level, not nested in a context object!
+    // deno-lint-ignore no-explicit-any
+    const typePickerPiece = TypePickerModule({
+      entries: subPieces,
+      trashedEntries: trashedSubPieces,
+    } as any);
+
+    // Capture schema for dynamic discovery
+    const typePickerSchema = getResultSchema(typePickerPiece);
+
+    return storeInitialPieces({
+      notesPiece,
+      notesSchema,
+      typePickerPiece,
+      typePickerSchema,
       subPieces,
-      trashedSubPieces,
       isInitialized,
-      recordPatternJson,
-    },
-  ) => {
-    if ((currentPieces || []).length === 0) {
-      // Create Note as default module (rendered via ct-render variant="embedded")
-      // Pass recordPatternJson so [[wiki-links]] create Record pieces instead of Note pieces
-      const notesPiece = Note({ linkPattern: recordPatternJson });
-
-      // Capture schema for dynamic discovery
-      const notesSchema = getResultSchema(notesPiece);
-
-      // TypePicker receives Cells as top-level props (CTS handles serialization correctly)
-      // NOTE: Cells must be top-level, not nested in a context object!
-      // deno-lint-ignore no-explicit-any
-      const typePickerPiece = TypePickerModule({
-        entries: subPieces,
-        trashedEntries: trashedSubPieces,
-        linkPatternJson: recordPatternJson,
-      } as any);
-
-      // Capture schema for dynamic discovery
-      const typePickerSchema = getResultSchema(typePickerPiece);
-
-      return storeInitialPieces({
-        notesPiece,
-        notesSchema,
-        typePickerPiece,
-        typePickerSchema,
-        subPieces,
-        isInitialized,
-      });
-    }
-  },
-);
+    });
+  }
+});
 
 // Helper to check if a module has settings UI
 const moduleHasSettings = lift(
@@ -287,7 +276,7 @@ const addSubPiece = handler<
   const nextLabel = getNextUnusedLabel(type, current);
   const initialValues = nextLabel ? { label: nextLabel } : undefined;
 
-  // Special case: create Note (rendered via ct-render variant="embedded")
+  // Special case: create Note (rendered via cf-render variant="embedded")
   // Pass recordPatternJson so [[wiki-links]] create Record pieces instead of Note pieces
   // Special case: create ExtractorModule as controller with parent Cells and title
   const piece = type === "notes"
@@ -338,7 +327,7 @@ const trashSubPiece = handler<
   if (!entry) return;
 
   // Move to trash with timestamp
-  trash.push({ ...entry, trashedAt: new Date().toISOString() });
+  trash.push({ ...entry, trashedAt: new Date(safeDateNow()).toISOString() });
 
   // Remove from active using splice
   const updated = [...current];
@@ -698,7 +687,7 @@ const handleUpdateModule = handler<
       if (result) {
         result.set({
           success: true,
-          message: `Updated ${field} to ${JSON.stringify(value)}`,
+          message: `Updated ${field} to ${toCompactDebugString(value)}`,
         });
       }
     } else if (fieldCell && typeof fieldCell.key === "function") {
@@ -752,7 +741,7 @@ const handleRemoveModule = handler<
   const def = getDefinition(entry.type);
 
   // Move to trash with timestamp
-  trash.push({ ...entry, trashedAt: new Date().toISOString() });
+  trash.push({ ...entry, trashedAt: new Date(safeDateNow()).toISOString() });
 
   // Remove from active
   const updated = [...current];
@@ -845,28 +834,28 @@ function getDisplayInfo(
 const Record = pattern<RecordInput, RecordOutput>(
   ({ title, subPieces, trashedSubPieces, [SELF]: self }) => {
     // Local state
-    const selectedAddType = Writable.of<string>("");
-    const trashExpanded = Writable.of(false);
+    const selectedAddType = new Writable<string>("");
+    const trashExpanded = new Writable(false);
 
     // Note editor modal state
-    // NOTE: In the future, this should use a <ct-modal> component instead of inline implementation.
-    // A ct-modal component would follow the ct-fab pattern:
-    //   <ct-modal $open={isOpen} onct-modal-close={handleClose}>
+    // NOTE: In the future, this should use a <cf-modal> component instead of inline implementation.
+    // A cf-modal component would follow the cf-fab pattern:
+    //   <cf-modal $open={isOpen} oncf-modal-close={handleClose}>
     //     <content />
-    //   </ct-modal>
+    //   </cf-modal>
     // With features: backdrop blur, escape key, focus trap, centered positioning, animations
-    // IMPORTANT: Don't use Writable.of(null) - it creates a cell pointing to null, not primitive null.
-    // Use Writable.of() without argument so .get() returns undefined (falsy) initially.
+    // IMPORTANT: Don't use new Writable(null) - it creates a cell pointing to null, not primitive null.
+    // Use new Writable() without argument so .get() returns undefined (falsy) initially.
     // We store the INDEX instead of the entry to decouple modal state from array updates.
-    const editingNoteIndex = Writable.of<number | undefined>();
-    const editingNoteText = Writable.of<string>();
+    const editingNoteIndex = new Writable<number | undefined>();
+    const editingNoteText = new Writable<string>();
 
     // Expanded (maximized) module state - ephemeral, not persisted
     // Simple index-based tracking - just stores which index is expanded
-    const expandedIndex = Writable.of<number | undefined>();
+    const expandedIndex = new Writable<number | undefined>();
 
     // Settings modal state - tracks which module's settings are being edited
-    const settingsModuleIndex = Writable.of<number | undefined>();
+    const settingsModuleIndex = new Writable<number | undefined>();
 
     // Create Record pattern JSON for wiki-links in Notes
     // Using computed() defers evaluation until render time, avoiding circular dependency
@@ -874,7 +863,7 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // ===== Auto-initialize Notes + TypePicker =====
     // Capture return value to force lift execution (fixes wiki-link creation)
-    const isInitialized = Writable.of(false);
+    const isInitialized = new Writable(false);
     const _initialized = initializeRecord({
       currentPieces: subPieces,
       subPieces,
@@ -907,8 +896,6 @@ const Record = pattern<RecordInput, RecordOutput>(
     //   computed() transforms .map() callbacks to properly unwrap reactive values
     const allEntriesWithIndex = computed(() => {
       const expandedIdx = expandedIndex.get();
-      // Note: Don't use fallback (|| []) as it breaks CTS transformer's mapWithPattern
-      // subPieces is guaranteed to be an array by the Default type
       return subPieces.map((entry, index) => {
         // Get display info using plain helper function
         // This works because CTS transforms .map() to properly unwrap reactive values
@@ -945,7 +932,6 @@ const Record = pattern<RecordInput, RecordOutput>(
     const hasTypesToAdd = getAddableTypes().length > 0;
 
     // Build dropdown items from registry, separating new types from existing ones
-    // Note: Don't use fallback (|| []) as it breaks CTS transformer's mapWithPattern
     const addSelectItems = computed(() => {
       const types = [...new Set(subPieces.map((e) => e?.type).filter(Boolean))];
       const existingTypes = new Set<string>(types);
@@ -985,7 +971,6 @@ const Record = pattern<RecordInput, RecordOutput>(
     });
 
     // Check for manual icon override from record-icon module
-    // Note: Don't use fallback (|| []) as it breaks CTS transformer's method replacement
     const manualIcon = computed(() => {
       const iconModule = subPieces.find((e) => e?.type === "record-icon");
       if (!iconModule) return null;
@@ -1005,7 +990,6 @@ const Record = pattern<RecordInput, RecordOutput>(
     });
 
     // Extract nicknames from nickname modules for display in NAME
-    // Note: Don't use fallback (|| []) as it breaks CTS transformer's method replacement
     const nicknamesList = computed(() => {
       const nicknameModules = subPieces.filter((e) => e?.type === "nickname");
       const nicknames: string[] = [];
@@ -1035,7 +1019,6 @@ const Record = pattern<RecordInput, RecordOutput>(
     // ===== Trash Section Computed Values =====
 
     // Pre-compute trashed entries with displayInfo using getDisplayInfo helper
-    // Note: Don't use fallback (|| []) as it breaks CTS transformer's mapWithPattern
     const trashedEntriesWithDisplay = computed(() => {
       return trashedSubPieces.map((entry, trashIndex) => {
         // Get display info using plain helper function
@@ -1084,9 +1067,9 @@ const Record = pattern<RecordInput, RecordOutput>(
     return {
       [NAME]: str`${recordIcon} ${displayNameWithAlias}`,
       [UI]: (
-        <ct-vstack style={{ height: "100%", gap: "0" }}>
+        <cf-vstack style={{ height: "100%", gap: "0" }}>
           {/* Header toolbar */}
-          <ct-hstack
+          <cf-hstack
             style={{
               padding: "8px 12px",
               gap: "8px",
@@ -1094,17 +1077,17 @@ const Record = pattern<RecordInput, RecordOutput>(
               alignItems: "center",
             }}
           >
-            <ct-input
+            <cf-input
               $value={title}
               placeholder="Record title..."
               style={{ flex: "1", fontWeight: "600", fontSize: "16px" }}
             />
             {hasTypesToAdd && (
-              <ct-select
+              <cf-select
                 $value={selectedAddType}
                 placeholder="+ Add"
                 items={addSelectItems}
-                onct-change={addSubPiece({
+                oncf-change={addSubPiece({
                   subPieces,
                   trashedSubPieces,
                   title,
@@ -1114,7 +1097,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                 style={{ width: "130px" }}
               />
             )}
-          </ct-hstack>
+          </cf-hstack>
 
           {/* Main content area */}
           <div
@@ -1407,9 +1390,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                             >
                               {computed(() => {
                                 const piece = entry.piece as any;
-                                // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
+                                // Use embeddedUI if available, otherwise fall back to cf-render for default [UI]
                                 return piece?.embeddedUI ??
-                                  <ct-render $cell={entry.piece} />;
+                                  <cf-render $cell={entry.piece} />;
                               })}
                             </div>,
                             null,
@@ -1701,9 +1684,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                               >
                                 {computed(() => {
                                   const piece = entry.piece as any;
-                                  // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
+                                  // Use embeddedUI if available, otherwise fall back to cf-render for default [UI]
                                   return piece?.embeddedUI ??
-                                    <ct-render $cell={entry.piece} />;
+                                    <cf-render $cell={entry.piece} />;
                                 })}
                               </div>,
                               null,
@@ -1988,9 +1971,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                           >
                             {computed(() => {
                               const piece = entry.piece as any;
-                              // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
+                              // Use embeddedUI if available, otherwise fall back to cf-render for default [UI]
                               return piece?.embeddedUI ??
-                                <ct-render $cell={entry.piece} />;
+                                <cf-render $cell={entry.piece} />;
                             })}
                           </div>,
                           null,
@@ -2146,49 +2129,49 @@ const Record = pattern<RecordInput, RecordOutput>(
           </div>
 
           {/* Note Editor Modal */}
-          <ct-modal
+          <cf-modal
             $open={computed(() => editingNoteIndex.get() !== undefined)}
             dismissable
             size="md"
-            onct-modal-close={closeNoteEditor({
+            oncf-modal-close={closeNoteEditor({
               editingNoteIndex,
               editingNoteText,
             })}
           >
             <span slot="header">Module Note</span>
-            <ct-textarea
+            <cf-textarea
               $value={editingNoteText}
               placeholder="Add notes about this module... (visible to LLM reads)"
               rows={6}
               style={{ width: "100%", resize: "vertical" }}
             />
             {/* Keyboard shortcut for save (Cmd/Ctrl+Enter) */}
-            <ct-keybind
+            <cf-keybind
               code="Enter"
               meta
               ignore-editable={false}
-              onct-keybind={saveNote({
+              oncf-keybind={saveNote({
                 subPieces,
                 editingNoteIndex,
                 editingNoteText,
               })}
             />
-            <ct-keybind
+            <cf-keybind
               code="Enter"
               ctrl
               ignore-editable={false}
-              onct-keybind={saveNote({
+              oncf-keybind={saveNote({
                 subPieces,
                 editingNoteIndex,
                 editingNoteText,
               })}
             />
-            <ct-hstack
+            <cf-hstack
               slot="footer"
               gap="3"
               style={{ justifyContent: "flex-end" }}
             >
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={closeNoteEditor({
                   editingNoteIndex,
@@ -2196,8 +2179,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                 })}
               >
                 Cancel
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="primary"
                 onClick={saveNote({
                   subPieces,
@@ -2206,35 +2189,35 @@ const Record = pattern<RecordInput, RecordOutput>(
                 })}
               >
                 Save Note
-              </ct-button>
-            </ct-hstack>
-          </ct-modal>
+              </cf-button>
+            </cf-hstack>
+          </cf-modal>
 
           {/* Settings Modal */}
-          <ct-modal
+          <cf-modal
             $open={computed(() => settingsModuleIndex.get() !== undefined)}
             dismissable
             size="md"
-            onct-modal-close={closeSettings({ settingsModuleIndex })}
+            oncf-modal-close={closeSettings({ settingsModuleIndex })}
           >
             <span slot="header">
               {settingsModuleDisplay.icon} {settingsModuleDisplay.label}{" "}
               Settings
             </span>
             {currentSettingsUI}
-            <ct-hstack
+            <cf-hstack
               slot="footer"
               gap="3"
               style={{ justifyContent: "flex-end" }}
             >
-              <ct-button
+              <cf-button
                 variant="primary"
                 onClick={closeSettings({ settingsModuleIndex })}
               >
                 Done
-              </ct-button>
-            </ct-hstack>
-          </ct-modal>
+              </cf-button>
+            </cf-hstack>
+          </cf-modal>
 
           {/* Expanded (Maximize) Module Overlay - backdrop + escape handler */}
           {ifElse(
@@ -2252,15 +2235,15 @@ const Record = pattern<RecordInput, RecordOutput>(
                 }}
               />
               {/* Escape key handler */}
-              <ct-keybind
+              <cf-keybind
                 code="Escape"
                 ignore-editable={false}
-                onct-keybind={closeExpanded({ expandedIndex })}
+                oncf-keybind={closeExpanded({ expandedIndex })}
               />
             </div>,
             null,
           )}
-        </ct-vstack>
+        </cf-vstack>
       ),
       title,
       subPieces,

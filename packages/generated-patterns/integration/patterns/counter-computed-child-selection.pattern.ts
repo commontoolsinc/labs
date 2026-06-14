@@ -1,13 +1,4 @@
-/// <cts-enable />
-import {
-  Cell,
-  computed,
-  Default,
-  derive,
-  handler,
-  pattern,
-  str,
-} from "commontools";
+import { Cell, computed, Default, handler, pattern, str } from "commonfabric";
 
 const defaultCounterSeed = [2, 5, 3];
 
@@ -91,7 +82,8 @@ export const counterComputedChildSelection = pattern<
     const normalizedCounts = computed(() => sanitizeCounts(counts));
     const children = computed(() => buildChildViews(normalizedCounts));
 
-    const selection = derive(children, (list) => {
+    const selection = computed(() => {
+      const list = children;
       if (!Array.isArray(list) || list.length === 0) {
         return fallbackSelection;
       }
@@ -107,10 +99,10 @@ export const counterComputedChildSelection = pattern<
       return best ?? fallbackSelection;
     });
 
-    const selectedIndex = derive(selection, (entry) => entry.index);
-    const selectedName = derive(selection, (entry) => entry.name);
-    const selectedValue = derive(selection, (entry) => entry.value);
-    const selectedLabel = derive(selection, (entry) => entry.label);
+    const selectedIndex = selection.index;
+    const selectedName = selection.name;
+    const selectedValue = selection.value;
+    const selectedLabel = selection.label;
 
     const summary = str`Displaying ${selectedName} (${selectedValue})`;
 

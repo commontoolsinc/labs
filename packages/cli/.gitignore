@@ -1,2 +1,5 @@
 !lib/
 !lib/**
+
+# Claude Code blackboard
+.claude/blackboard.db

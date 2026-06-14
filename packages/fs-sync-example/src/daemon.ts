@@ -5,15 +5,15 @@
  * - CAS retry loop with editWatermark
  * - editIdMap surviving retries
  * - Single-transaction commit (apply edits + update state + clear queue)
- * - Cell.of() for stable identity
+ * - Cell.for() for stable identity
  * - Write redirect links for in-flight creates
  * - Lockfile for process safety
  * - System vs conflict error handling
  */
 
-import { Runtime } from "@commontools/runner";
-import { popFrame, pushFrameFromCause } from "@commontools/runner";
-import type { Cell, MemorySpace } from "@commontools/runner";
+import { Runtime } from "@commonfabric/runner";
+import { popFrame, pushFrameFromCause } from "@commonfabric/runner";
+import type { Cell, MemorySpace } from "@commonfabric/runner";
 import { debounce } from "@std/async";
 
 import type { Edit, FailedEdit, State, Todo } from "./types.ts";
@@ -150,21 +150,21 @@ function applyEdit(
 }
 
 // ---------------------------------------------------------------------------
-// Build cell state from filesystem using Cell.of() for stable identity
+// Build cell state from filesystem using Cell.for() for stable identity
 // ---------------------------------------------------------------------------
 
 function buildStateFromFs(
   filePath: string,
-  CellOf: (value: unknown) => Cell<any>,
+  CellFor: (cause: unknown) => Cell<any>,
 ): State {
   const text = Deno.readTextFileSync(filePath);
   const parsed = parseMarkdown(text);
 
   return {
-    // Cell.of() ensures stable cell identity derived from the canonical ID.
+    // Cell.for() ensures stable cell identity derived from the canonical ID.
     // Links to this todo survive across syncs.
     todos: parsed.todos.map((todo) =>
-      CellOf(todo.id).set({
+      CellFor(todo.id).set({
         id: todo.id,
         description: todo.description,
         done: todo.done,
@@ -192,7 +192,7 @@ export function runSyncLoop(
   appliedEditsCell: Cell<Edit[]>,
   failedEditsCell: Cell<FailedEdit[]>,
   todoFilePath: string,
-  CellConstructor: { of: (value: unknown) => Cell<any> },
+  CellConstructor: { for: (cause: unknown) => Cell<any> },
   tempRefs?: TempRefMap,
 ) {
   const lockPath = todoFilePath + ".lock";
@@ -326,20 +326,20 @@ export function runSyncLoop(
         editWatermark = edits.length;
 
         // 2. Read full filesystem state, build cell structure.
-        //    Cell.of() is used inside buildStateFromFs for each todo.
-        const fsState = buildStateFromFs(todoFilePath, CellConstructor.of);
+        //    Cell.for() is used inside buildStateFromFs for each todo.
+        const fsState = buildStateFromFs(todoFilePath, CellConstructor.for);
         txTodos.set(fsState.todos);
 
         // 3. Write redirect links for newly created items.
         //    tempRefs maps edit indices to the temp cells allocated by the
         //    pattern's optimistic create. Once we know the canonical ID,
-        //    we redirect the temp cell to the canonical Cell.of() cell.
+        //    we redirect the temp cell to the canonical Cell.for() cell.
         if (tempRefs) {
           for (const [editIdx, tempCell] of tempRefs) {
             const edit = edits[editIdx];
             const canonicalId = edit && editIdMap.get(edit);
             if (canonicalId) {
-              const canonicalCell = CellConstructor.of(canonicalId);
+              const canonicalCell = CellConstructor.for(canonicalId);
               const resolved = tempCell.resolveAsCell();
               resolved.setRawUntyped(
                 canonicalCell.getAsWriteRedirectLink({ base: resolved }),

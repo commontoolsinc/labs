@@ -1,78 +1,89 @@
-import * as __ctHelpers from "commontools";
-import { pattern, Writable, UI } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { pattern, Writable, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     items: Array<{
         name: string;
     }>;
 }
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const selected = __cf_pattern_input.key("params", "selected");
+    return (<span>{item.key("name")} {selected}</span>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        },
+        params: {
+            type: "object",
+            properties: {
+                selected: {
+                    anyOf: [{
+                            type: "string"
+                        }, {
+                            type: "null"
+                        }],
+                    asCell: ["readonly"]
+                }
+            },
+            required: ["selected"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-capture-writable-of
-// Verifies: Writable.of() variable closed over in .map() is captured with asCell annotation
+// Verifies: new Writable() variable closed over in .map() is captured with asCell annotation
 //   .map(fn) → .mapWithPattern(pattern(...), { selected: selected })
-//   Writable.of<string | null>(null) → params.selected with { anyOf: [string, null], asCell: true }
+//   new Writable<string | null>(null) → params.selected with { anyOf: [string, null], asCell: true }
 export default pattern((state) => {
-    const selected = Writable.of<string | null>(null, {
+    const selected = new Writable<string | null>(null, {
         anyOf: [{
                 type: "string"
             }, {
                 type: "null"
             }]
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("selected", true);
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element");
-                const selected = __ct_pattern_input.key("params", "selected");
-                return (<span>{item.key("name")} {selected}</span>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["name"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            selected: {
-                                anyOf: [{
-                                        type: "string"
-                                    }, {
-                                        type: "null"
-                                    }],
-                                asCell: true
-                            }
-                        },
-                        required: ["selected"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {
+        {state.key("items").mapWithPattern(__cfPattern_1, {
                 selected: selected
             })}
       </div>),
@@ -94,7 +105,7 @@ export default pattern((state) => {
         }
     },
     required: ["items"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -107,11 +118,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -124,8 +134,10 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfPattern_1
+});

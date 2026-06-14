@@ -1,6 +1,7 @@
 import { parse } from "./commands/mod.ts";
-import { CompilerError, TransformerError } from "@commontools/js-compiler";
-import { type LogLevel, setGlobalLogFloor } from "@commontools/utils/logger";
+import { CompilerError, TransformerError } from "@commonfabric/js-compiler";
+import { type LogLevel, setGlobalLogFloor } from "@commonfabric/utils/logger";
+import { cliName } from "./lib/cli-name.ts";
 
 const VALID_LOG_LEVELS = new Set([
   "debug",
@@ -36,18 +37,24 @@ function extractLogLevel(
 export async function main(args: string[]) {
   // Extract --log-level before Cliffy parses
   const { level, args: cleanArgs } = extractLogLevel(args);
+  Deno.env.set("CF_CLI_NAME", cliName());
+  const profileDoneMarker = Deno.env.get("CF_PROFILE_DONE_MARKER");
 
   if (level) {
     setGlobalLogFloor(level as LogLevel);
-    Deno.env.set("CT_LOG_LEVEL", level); // workers inherit
-  } else if (!Deno.env.get("CT_LOG_LEVEL")) {
+    Deno.env.set("CF_LOG_LEVEL", level); // workers inherit
+  } else if (!Deno.env.get("CF_LOG_LEVEL")) {
     setGlobalLogFloor("error" as LogLevel); // default: only errors
-    Deno.env.set("CT_LOG_LEVEL", "error");
+    Deno.env.set("CF_LOG_LEVEL", "error");
   }
-  // If CT_LOG_LEVEL env var already set, floor was initialized at module load time
+  // If CF_LOG_LEVEL env var already set, floor was initialized at module load time
 
   try {
     await parse(cleanArgs);
+    if (profileDoneMarker) {
+      console.log(profileDoneMarker);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     Deno.exit(0);
   } catch (e) {
     // TransformerError and CompilerError have nicely formatted messages
@@ -55,11 +62,13 @@ export async function main(args: string[]) {
     if (e instanceof TransformerError || e instanceof CompilerError) {
       console.error(e.message);
     } else if (e instanceof Error) {
-      // For other errors, print stack trace (which includes the message)
-      // or just the message if no stack is available
-      console.error(e.stack ?? e.message);
+      console.error(e.stack || e.message);
     } else {
       console.error(e);
+    }
+    if (profileDoneMarker) {
+      console.log(profileDoneMarker);
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
     Deno.exit(1);
   }

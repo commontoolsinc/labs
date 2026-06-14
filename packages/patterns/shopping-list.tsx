@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Shopping List Pattern
  *
@@ -11,28 +10,26 @@
 import {
   computed,
   Default,
-  derive,
   equals,
   generateObject,
   handler,
-  ifElse,
   NAME,
   navigateTo,
-  OpaqueRef,
   pattern,
   patternTool,
+  Reactive,
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import StoreMapper from "./store-mapper.tsx";
 
 // Item with optional aisle override for manual corrections
 interface ShoppingItem {
   title: string;
-  done: Default<boolean, false>;
-  aisleSeed: Default<number, 0>;
-  aisleOverride: Default<string, "">; // User's manual aisle selection
+  done: boolean | Default<false>;
+  aisleSeed: number | Default<0>;
+  aisleOverride: string | Default<"">; // User's manual aisle selection
 }
 
 // AI categorization result
@@ -41,12 +38,12 @@ interface AisleResult {
 }
 
 interface Input {
-  items: Writable<Default<ShoppingItem[], []>>;
-  storeLayout: Writable<Default<string, "">>; // Markdown store layout from Store Mapper
+  items: Writable<ShoppingItem[] | Default<[]>>;
+  storeLayout: Writable<string | Default<"">>; // Markdown store layout from Store Mapper
 }
 
 /** Shopping list with AI-powered aisle sorting. #shoppingList */
-interface Output {
+export interface Output {
   items: ShoppingItem[];
   summary: string;
   totalCount: number;
@@ -54,9 +51,9 @@ interface Output {
   remainingCount: number;
   storeLayout: string;
   // Omnibot handlers
-  addItem: OpaqueRef<Stream<{ detail: { message: string } }>>;
-  addItemForOmnibot: OpaqueRef<Stream<{ itemText: string }>>;
-  addItems: OpaqueRef<Stream<{ itemNames: string[] }>>;
+  addItem: Reactive<Stream<{ detail: { message: string } }>>;
+  addItemForOmnibot: Reactive<Stream<{ itemText: string }>>;
+  addItems: Reactive<Stream<{ itemNames: string[] }>>;
 }
 
 // Demo store layout from Andronico's on Shattuck (community-patterns)
@@ -233,10 +230,8 @@ const searchItemsPattern = pattern<
   { items: ShoppingItem[]; query: string },
   ShoppingItem[]
 >(({ items, query }) => {
-  return computed(() =>
-    items.filter((item: ShoppingItem) =>
-      item.title.toLowerCase().includes(query.toLowerCase())
-    )
+  return items.filter((item: ShoppingItem) =>
+    item.title.toLowerCase().includes(query.toLowerCase())
   );
 });
 
@@ -256,7 +251,8 @@ const openStoreMapper = handler<unknown, Record<string, never>>(
 );
 
 // Handler for removing an item
-const removeItem = handler<
+// Exported for tests.
+export const removeItem = handler<
   unknown,
   { items: Writable<ShoppingItem[]>; item: ShoppingItem }
 >((_event, { items, item }) => {
@@ -294,7 +290,11 @@ const closeCorrection = handler<
 });
 
 // Handler for selecting an aisle correction
-const selectAisle = handler<
+// Exported for tests. Writes through the element's cell (`.key(idx)`) —
+// rebuilding the array with a fresh object literal for the corrected item
+// would re-mint its entity identity and orphan previously-held references
+// (see packages/patterns/primitives/editable-list.tsx).
+export const selectAisle = handler<
   unknown,
   {
     items: Writable<ShoppingItem[]>;
@@ -307,15 +307,8 @@ const selectAisle = handler<
     const itemsList = items.get();
     const item = itemsList[idx];
     if (item) {
-      const updated = itemsList.map((i, index) =>
-        index === idx
-          ? {
-            ...i,
-            aisleOverride: selectedAisle, // Store user's selection
-          }
-          : i
-      );
-      items.set(updated);
+      // Store user's selection
+      items.key(idx).key("aisleOverride").set(selectedAisle);
     }
   }
   correctionIndex.set(-1);
@@ -337,57 +330,42 @@ function extractLocations(layout: string): string[] {
 
 export default pattern<Input, Output>(({ items, storeLayout }) => {
   // UI state for view mode
-  const viewMode = Writable.of<"quick" | "sorted">("quick");
+  const viewMode = new Writable<"quick" | "sorted">("quick");
   // Store both index and title when opening correction panel
-  const correctionIndex = Writable.of<number>(-1);
-  const correctionTitle = Writable.of<string>("");
+  const correctionIndex = new Writable<number>(-1);
+  const correctionTitle = new Writable<string>("");
 
   // Create search tool for omnibot
   const searchItems = patternTool(searchItemsPattern, { items });
 
-  // Computed for whether correction panel is open
-  const isCorrecting = computed(() => correctionIndex.get() >= 0);
+  // Whether correction panel is open
+  const isCorrecting = correctionIndex.get() >= 0;
 
-  // Computed statistics
-  const totalCount = computed(() => items.get().length);
-  const doneCount = computed(() => items.get().filter((i) => i.done).length);
-  const remainingCount = derive(
-    [totalCount, doneCount],
-    ([total, done]) => total - done,
-  );
+  // Statistics
+  const totalCount = items.get().length;
+  const doneCount = items.get().filter((i) => i.done).length;
+  const remainingCount = totalCount - doneCount;
   // Combined stats string to avoid adjacent reactive text node rendering issues
-  const statsText = derive(
-    [remainingCount, doneCount],
-    ([remaining, done]) => {
-      const itemWord = remaining === 1 ? "item" : "items";
-      return `${remaining} ${itemWord} to get • ${done} checked off`;
-    },
-  );
+  const statsText = `${remainingCount} ${
+    remainingCount === 1 ? "item" : "items"
+  } to get • ${doneCount} checked off`;
 
   // Check if a real store layout is connected (not using demo fallback)
-  const hasConnectedStore = computed(() => storeLayout.get().trim().length > 0);
+  const hasConnectedStore = storeLayout.get().trim().length > 0;
 
   // Effective layout: use connected store or demo fallback
-  const effectiveLayout = derive(
-    storeLayout,
-    (layout: string) => layout.trim().length > 0 ? layout : DEMO_STORE_LAYOUT,
-  );
+  const effectiveLayout = hasConnectedStore
+    ? storeLayout.get()
+    : DEMO_STORE_LAYOUT;
 
   // Valid locations derived from effective layout
-  const validLocations = derive(
-    effectiveLayout,
-    (layout: string) => extractLocations(layout),
-  );
+  const validLocations = extractLocations(effectiveLayout);
 
   // AI categorization for each item (uses effectiveLayout which always has a value)
   const itemsWithAisles = items.map((item) => {
     // Build prompt using effective layout + item
-    const categorizePrompt = derive(
-      [effectiveLayout, item.title, item.aisleSeed],
-      ([layout, title, seed]: [string, string, number]) => {
-        return `Store layout:\n${layout}\n\nItem: ${title}\n\nSeed: ${seed}\n\nWhich aisle or department is this item most likely to be in? Respond with the exact location name.`;
-      },
-    );
+    const categorizePrompt =
+      `Store layout:\n${effectiveLayout}\n\nItem: ${item.title}\n\nSeed: ${item.aisleSeed}\n\nWhich aisle or department is this item most likely to be in? Respond with the exact location name.`;
 
     // Generate location using AI (only if layout exists)
     const aisleResult = generateObject<AisleResult>({
@@ -406,306 +384,286 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
   return {
     [NAME]: "Shopping List",
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         {/* Header */}
-        <ct-vstack slot="header" gap="2">
-          <ct-hstack justify="between" align="center">
-            <ct-heading level={4}>🛒 Shopping List</ct-heading>
-          </ct-hstack>
-          <ct-hstack gap="2" align="center">
+        <cf-vstack slot="header" gap="2">
+          <cf-hstack justify="between" align="center">
+            <cf-heading level={4}>🛒 Shopping List</cf-heading>
+          </cf-hstack>
+          <cf-hstack gap="2" align="center">
             <span
               style={{
                 fontSize: "13px",
-                color: "var(--ct-color-gray-500)",
+                color: "var(--cf-colors-gray-500)",
                 flex: 1,
               }}
             >
               {statsText}
             </span>
-            <ct-button
-              variant={ifElse(
-                computed(() => viewMode.get() === "quick"),
-                "primary",
-                "secondary",
-              )}
+            <cf-button
+              variant={viewMode.get() === "quick" ? "primary" : "secondary"}
               size="sm"
               onClick={() => viewMode.set("quick")}
             >
               Quick
-            </ct-button>
-            <ct-button
-              variant={ifElse(
-                computed(() => viewMode.get() === "sorted"),
-                "primary",
-                "secondary",
-              )}
+            </cf-button>
+            <cf-button
+              variant={viewMode.get() === "sorted" ? "primary" : "secondary"}
               size="sm"
               onClick={() => viewMode.set("sorted")}
             >
               📍 Sorted
-            </ct-button>
-            <ct-button
+            </cf-button>
+            <cf-button
               variant="secondary"
               size="sm"
               onClick={openStoreMapper({})}
             >
               🗺️ Store
-            </ct-button>
-          </ct-hstack>
-        </ct-vstack>
+            </cf-button>
+          </cf-hstack>
+        </cf-vstack>
 
         {/* Main scrollable content */}
-        <ct-vscroll flex showScrollbar fadeEdges>
-          <ct-vstack gap="2" style="padding: 1rem; max-width: 800px;">
+        <cf-vscroll flex showScrollbar fadeEdges>
+          <cf-vstack gap="2" style="padding: 1rem; max-width: 800px;">
             {/* Input field at top - with right padding to avoid FAB */}
             <div style={{ paddingRight: "60px" }}>
-              <ct-message-input
+              <cf-message-input
                 placeholder="Type to add item, or ask omnibot..."
                 appearance="rounded"
-                onct-send={addItem({ items })}
+                oncf-send={addItem({ items })}
               />
             </div>
 
             {/* QUICK LIST VIEW */}
-            {ifElse(
-              computed(() => viewMode.get() === "quick"),
-              <ct-vstack gap="2">
-                {/* Empty state */}
-                {ifElse(
-                  computed(() => items.get().length === 0),
-                  <div
-                    style={{
-                      textAlign: "center",
-                      color: "var(--ct-color-gray-500)",
-                      padding: "2rem",
-                    }}
-                  >
-                    Your shopping list is empty. Type above to add items!
-                  </div>,
-                  null,
-                )}
-
-                {/* Item list */}
-                {items.map((item) => (
-                  <ct-card>
-                    <ct-hstack gap="2" align="center">
-                      <ct-checkbox $checked={item.done} />
-                      <ct-input
-                        $value={item.title}
-                        placeholder="Enter item..."
-                        style={{
-                          flex: 1,
-                          border: "none",
-                          background: "transparent",
-                          textDecoration: ifElse(
-                            item.done,
-                            "line-through",
-                            "none",
-                          ),
-                          opacity: ifElse(item.done, 0.6, 1),
-                        }}
-                      />
-                      <ct-button
-                        variant="ghost"
-                        onClick={removeItem({ items, item })}
-                      >
-                        ×
-                      </ct-button>
-                    </ct-hstack>
-                  </ct-card>
-                ))}
-
-                {/* Demo layout notice */}
-                {ifElse(
-                  derive(hasConnectedStore, (connected: boolean) => !connected),
-                  <div
-                    style={{
-                      textAlign: "center",
-                      color: "#f59e0b",
-                      background: "#fef3c7",
-                      padding: "0.75rem",
-                      fontSize: "13px",
-                      borderRadius: "6px",
-                      border: "1px solid #fcd34d",
-                    }}
-                  >
-                    ⚠️ Using demo store layout (Andronico's). Connect a Store
-                    Mapper for your actual store.
-                  </div>,
-                  null,
-                )}
-              </ct-vstack>,
-              null,
-            )}
-
-            {/* SORTED VIEW - Shows items with their AI-assigned aisles */}
-            {ifElse(
-              computed(() => viewMode.get() === "sorted"),
-              <ct-vstack gap="2">
-                {/* Items with aisles */}
-                {itemsWithAisles.map((itemWithAisle) => (
-                  <ct-card>
-                    <ct-hstack gap="2" align="center">
-                      <ct-checkbox $checked={itemWithAisle.item.done} />
+            {viewMode.get() === "quick"
+              ? (
+                <cf-vstack gap="2">
+                  {/* Empty state */}
+                  {items.get().length === 0
+                    ? (
                       <div
                         style={{
-                          flex: 1,
-                          color: "#111827",
-                          textDecoration: ifElse(
-                            itemWithAisle.item.done,
-                            "line-through",
-                            "none",
-                          ),
-                          opacity: ifElse(itemWithAisle.item.done, 0.6, 1),
+                          textAlign: "center",
+                          color: "var(--cf-colors-gray-500)",
+                          padding: "2rem",
                         }}
                       >
-                        {itemWithAisle.item.title}
+                        Your shopping list is empty. Type above to add items!
                       </div>
-                      {/* Show aisle - prefer user override, then AI result */}
-                      {ifElse(
-                        derive(
-                          itemWithAisle.item.aisleOverride,
-                          (override: string) => !!override,
-                        ),
-                        <span
+                    )
+                    : null}
+
+                  {/* Item list */}
+                  {items.map((item) => (
+                    <cf-card>
+                      <cf-hstack gap="2" align="center">
+                        <cf-checkbox $checked={item.done} />
+                        <cf-input
+                          $value={item.title}
+                          placeholder="Enter item..."
                           style={{
-                            fontSize: "12px",
-                            padding: "4px 8px",
-                            borderRadius: "4px",
-                            background: "var(--ct-color-green-100)",
-                            color: "var(--ct-color-green-700)",
+                            flex: 1,
+                            border: "none",
+                            background: "transparent",
+                            textDecoration: item.done ? "line-through" : "none",
+                            opacity: item.done ? 0.6 : 1,
+                          }}
+                        />
+                        <cf-button
+                          variant="ghost"
+                          onClick={removeItem({ items, item })}
+                        >
+                          ×
+                        </cf-button>
+                      </cf-hstack>
+                    </cf-card>
+                  ))}
+
+                  {/* Demo layout notice */}
+                  {!hasConnectedStore
+                    ? (
+                      <div
+                        style={{
+                          textAlign: "center",
+                          color: "#f59e0b",
+                          background: "#fef3c7",
+                          padding: "0.75rem",
+                          fontSize: "13px",
+                          borderRadius: "6px",
+                          border: "1px solid #fcd34d",
+                        }}
+                      >
+                        ⚠️ Using demo store layout (Andronico's). Connect a
+                        Store Mapper for your actual store.
+                      </div>
+                    )
+                    : null}
+                </cf-vstack>
+              )
+              : null}
+
+            {/* SORTED VIEW - Shows items with their AI-assigned aisles */}
+            {viewMode.get() === "sorted"
+              ? (
+                <cf-vstack gap="2">
+                  {/* Items with aisles */}
+                  {itemsWithAisles.map((itemWithAisle) => (
+                    <cf-card>
+                      <cf-hstack gap="2" align="center">
+                        <cf-checkbox $checked={itemWithAisle.item.done} />
+                        <div
+                          style={{
+                            flex: 1,
+                            color: "#111827",
+                            textDecoration: itemWithAisle.item.done
+                              ? "line-through"
+                              : "none",
+                            opacity: itemWithAisle.item.done ? 0.6 : 1,
                           }}
                         >
-                          {itemWithAisle.item.aisleOverride}
-                        </span>,
-                        ifElse(
-                          itemWithAisle.aisle.pending,
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              color: "#667eea",
-                            }}
-                          >
-                            🔄 sorting...
-                          </span>,
-                          <span
-                            style={{
-                              fontSize: "12px",
-                              padding: "4px 8px",
-                              borderRadius: "4px",
-                              background: "var(--ct-color-blue-100)",
-                              color: "var(--ct-color-blue-700)",
-                            }}
-                          >
-                            {derive(
-                              itemWithAisle.aisle.result,
-                              (r: AisleResult | undefined) =>
-                                r?.location || "Other",
-                            )}
-                          </span>,
-                        ),
-                      )}
-                      {/* Correction button */}
-                      <ct-button
-                        variant="ghost"
-                        onClick={openCorrection({
-                          items,
-                          item: itemWithAisle.item,
-                          correctionIndex,
-                          correctionTitle,
-                        })}
-                        style="font-size: 12px; padding: 4px;"
-                      >
-                        ✏️
-                      </ct-button>
-                    </ct-hstack>
-                  </ct-card>
-                ))}
+                          {itemWithAisle.item.title}
+                        </div>
+                        {/* Show aisle - prefer user override, then AI result */}
+                        {itemWithAisle.item.aisleOverride
+                          ? (
+                            <span
+                              style={{
+                                fontSize: "12px",
+                                padding: "4px 8px",
+                                borderRadius: "4px",
+                                background: "var(--cf-colors-green-100)",
+                                color: "var(--cf-colors-green-600)",
+                              }}
+                            >
+                              {itemWithAisle.item.aisleOverride}
+                            </span>
+                          )
+                          : itemWithAisle.aisle.pending
+                          ? (
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                color: "#667eea",
+                              }}
+                            >
+                              🔄 sorting...
+                            </span>
+                          )
+                          : (
+                            <span
+                              style={{
+                                fontSize: "12px",
+                                padding: "4px 8px",
+                                borderRadius: "4px",
+                                background: "var(--cf-colors-blue-100)",
+                                color: "var(--cf-colors-blue-600)",
+                              }}
+                            >
+                              {itemWithAisle.aisle.result?.location || "Other"}
+                            </span>
+                          )}
+                        {/* Correction button */}
+                        <cf-button
+                          variant="ghost"
+                          onClick={openCorrection({
+                            items,
+                            item: itemWithAisle.item,
+                            correctionIndex,
+                            correctionTitle,
+                          })}
+                          style="font-size: 12px; padding: 4px;"
+                        >
+                          ✏️
+                        </cf-button>
+                      </cf-hstack>
+                    </cf-card>
+                  ))}
 
-                {/* Demo layout notice */}
-                {ifElse(
-                  derive(hasConnectedStore, (connected: boolean) => !connected),
-                  <div
-                    style={{
-                      textAlign: "center",
-                      color: "#f59e0b",
-                      background: "#fef3c7",
-                      padding: "0.75rem",
-                      fontSize: "13px",
-                      borderRadius: "6px",
-                      border: "1px solid #fcd34d",
-                    }}
-                  >
-                    ⚠️ Using demo store layout (Andronico's). Connect a Store
-                    Mapper for your actual store.
-                  </div>,
-                  null,
-                )}
-              </ct-vstack>,
-              null,
-            )}
-          </ct-vstack>
-        </ct-vscroll>
+                  {/* Demo layout notice */}
+                  {!hasConnectedStore
+                    ? (
+                      <div
+                        style={{
+                          textAlign: "center",
+                          color: "#f59e0b",
+                          background: "#fef3c7",
+                          padding: "0.75rem",
+                          fontSize: "13px",
+                          borderRadius: "6px",
+                          border: "1px solid #fcd34d",
+                        }}
+                      >
+                        ⚠️ Using demo store layout (Andronico's). Connect a
+                        Store Mapper for your actual store.
+                      </div>
+                    )
+                    : null}
+                </cf-vstack>
+              )
+              : null}
+          </cf-vstack>
+        </cf-vscroll>
 
         {/* Correction panel (shown when correcting an item) */}
-        {ifElse(
-          isCorrecting,
-          <div
-            style={{
-              position: "fixed",
-              bottom: 0,
-              left: 0,
-              right: 0,
-              background: "white",
-              borderTop: "3px solid #f59e0b",
-              boxShadow: "0 -4px 12px rgba(0,0,0,0.15)",
-              padding: "1rem",
-              maxHeight: "50vh",
-              overflow: "auto",
-              zIndex: 1000,
-            }}
-          >
-            <ct-vstack gap="2">
-              <ct-hstack justify="between" align="center">
-                <span style={{ fontWeight: 500 }}>
-                  Where is "{correctionTitle}" actually located?
-                </span>
-                <ct-button
-                  variant="ghost"
-                  onClick={closeCorrection({ correctionIndex })}
+        {isCorrecting
+          ? (
+            <div
+              style={{
+                position: "fixed",
+                bottom: 0,
+                left: 0,
+                right: 0,
+                background: "white",
+                borderTop: "3px solid #f59e0b",
+                boxShadow: "0 -4px 12px rgba(0,0,0,0.15)",
+                padding: "1rem",
+                maxHeight: "50vh",
+                overflow: "auto",
+                zIndex: 1000,
+              }}
+            >
+              <cf-vstack gap="2">
+                <cf-hstack justify="between" align="center">
+                  <span style={{ fontWeight: 500 }}>
+                    Where is "{correctionTitle}" actually located?
+                  </span>
+                  <cf-button
+                    variant="ghost"
+                    onClick={closeCorrection({ correctionIndex })}
+                  >
+                    ✕ Cancel
+                  </cf-button>
+                </cf-hstack>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(auto-fill, minmax(120px, 1fr))",
+                    gap: "0.5rem",
+                  }}
                 >
-                  ✕ Cancel
-                </ct-button>
-              </ct-hstack>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
-                  gap: "0.5rem",
-                }}
-              >
-                {validLocations.map((location) => {
-                  // Extract raw location string for handler
-                  const locationStr = derive(location, (l: string) => l);
-                  return (
-                    <ct-button
-                      variant="secondary"
-                      onClick={selectAisle({
-                        items,
-                        correctionIndex,
-                        selectedAisle: locationStr,
-                      })}
-                    >
-                      {location}
-                    </ct-button>
-                  );
-                })}
-              </div>
-            </ct-vstack>
-          </div>,
-          null,
-        )}
-      </ct-screen>
+                  {validLocations.map((location) => {
+                    return (
+                      <cf-button
+                        variant="secondary"
+                        onClick={selectAisle({
+                          items,
+                          correctionIndex,
+                          selectedAisle: location,
+                        })}
+                      >
+                        {location}
+                      </cf-button>
+                    );
+                  })}
+                </div>
+              </cf-vstack>
+            </div>
+          )
+          : null}
+      </cf-screen>
     ),
     items,
     summary: computed(() => {

@@ -1,5 +1,16 @@
-import * as __ctHelpers from "commontools";
-import { handler, Cell } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { handler, Cell } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface TimedEvent {
     timestamp: Date;
 }
@@ -15,17 +26,17 @@ const timedHandler = handler({
         }
     },
     required: ["timestamp"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         lastUpdate: {
             type: "string",
             format: "date-time",
-            asCell: true
+            asCell: ["writeonly"]
         }
     },
     required: ["lastUpdate"]
-} as const satisfies __ctHelpers.JSONSchema, (event, state) => {
+} as const satisfies __cfHelpers.JSONSchema, (event, state) => {
     state.lastUpdate.set(event.timestamp);
 });
 // FIXTURE: date-types
@@ -34,6 +45,5 @@ const timedHandler = handler({
 //   Cell<Date> → { type: "string", format: "date-time", asCell: true }
 export { timedHandler };
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);

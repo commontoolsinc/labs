@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Favorite Foods Extractor
  *
@@ -8,7 +7,7 @@
  * UPDATED: Now uses the elegant agentic-tools API (defineItemSchema + listTool)
  * which eliminates the 3x redundancy of interface + input type + schema.
  */
-import { computed, Default, NAME, pattern, UI } from "commontools";
+import { computed, Default, NAME, pattern, UI } from "commonfabric";
 import GmailAgenticSearch from "../core/experimental/gmail-agentic-search.tsx";
 import {
   defineItemSchema,
@@ -75,14 +74,14 @@ type FoodPreference = InferItem<typeof FoodSchema> & { extractedAt: number };
 // PATTERN INPUT/OUTPUT
 // ============================================================================
 interface FavoriteFoodsInput {
-  foods?: Default<FoodPreference[], []>;
-  lastScanAt?: Default<number, 0>;
-  isScanning?: Default<boolean, false>;
-  maxSearches?: Default<number, 5>;
+  foods?: FoodPreference[] | Default<[]>;
+  lastScanAt?: number | Default<0>;
+  isScanning?: boolean | Default<false>;
+  maxSearches?: number | Default<5>;
 }
 
 /** Favorite foods extractor from Gmail. #favoriteFoods */
-interface FavoriteFoodsOutput {
+export interface FavoriteFoodsOutput {
   foods: FoodPreference[];
   lastScanAt: number;
   count: number;
@@ -245,15 +244,15 @@ Report each discovery immediately. Focus on patterns - if someone orders from th
       count: totalFoods,
 
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           <div slot="header">
             <h2 style={{ margin: "0", fontSize: "18px" }}>
               My Food Preferences
             </h2>
           </div>
 
-          <ct-vscroll flex showScrollbar>
-            <ct-vstack style="padding: 16px; gap: 16px;">
+          <cf-vscroll flex showScrollbar>
+            <cf-vstack style="padding: 16px; gap: 16px;">
               {/* Embed the base searcher - provides auth + scan UI */}
               {searcher as any}
 
@@ -309,7 +308,7 @@ Report each discovery immediately. Focus on patterns - if someone orders from th
                         {categoryLabels[category] || category}{" "}
                         ({groups[category].length})
                       </summary>
-                      <ct-vstack gap={2} style="padding-left: 16px;">
+                      <cf-vstack gap={2} style="padding-left: 16px;">
                         {groups[category].map((f: FoodPreference) => (
                           <div
                             style={{
@@ -360,14 +359,14 @@ Report each discovery immediately. Focus on patterns - if someone orders from th
                             </div>
                           </div>
                         ))}
-                      </ct-vstack>
+                      </cf-vstack>
                     </details>
                   ));
                 })}
               </div>
-            </ct-vstack>
-          </ct-vscroll>
-        </ct-screen>
+            </cf-vstack>
+          </cf-vscroll>
+        </cf-screen>
       ),
     };
   },

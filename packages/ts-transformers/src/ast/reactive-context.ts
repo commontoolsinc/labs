@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { detectCallKind } from "./call-kind.ts";
+import { getCallbackBoundarySemantics } from "../policy/callback-boundary.ts";
 
 export type ReactiveContextKind = "pattern" | "compute" | "neutral";
 
@@ -7,9 +8,8 @@ export type ReactiveContextOwner =
   | "pattern"
   | "render"
   | "array-method"
-  | "jsx-callback"
   | "computed"
-  | "derive"
+  | "lift-applied"
   | "action"
   | "lift"
   | "handler"
@@ -24,6 +24,8 @@ export interface ReactiveContextInfo {
 
 export interface ReactiveContextLookup {
   isArrayMethodCallback(node: ts.Node): boolean;
+  isSyntheticComputeCallback?(node: ts.Node): boolean;
+  isSyntheticComputeOwnedNode?(node: ts.Node): boolean;
 }
 
 /**
@@ -37,11 +39,15 @@ export const RESTRICTED_CONTEXT_BUILDERS = new Set([
 
 /**
  * Builder names that establish compute context.
+ *
+ * NOTE: this set currently has no consumers in the repo (it is exported from
+ * ast/mod.ts but never read). Left in place pending a separate dead-export
+ * audit; the former `"derive"` entry was removed here as part of retiring
+ * `derive` (CT-1643) — derive is no longer a recognized builder name.
  */
 export const SAFE_WRAPPER_BUILDERS = new Set([
   "computed",
   "action",
-  "derive",
   "lift",
   "handler",
 ]);
@@ -57,6 +63,52 @@ function resolveContextAnchor(node: ts.Node): ts.Node {
     return original;
   }
   return node;
+}
+
+function getMarkedSyntheticCallbackContext(
+  node: ts.Node,
+  checker: ts.TypeChecker,
+  lookup?: ReactiveContextLookup,
+): ReactiveContextInfo | undefined {
+  let current: ts.Node | undefined = node.parent;
+  let inJsxExpression = false;
+
+  while (current) {
+    if (ts.isJsxExpression(current)) {
+      inJsxExpression = true;
+    }
+
+    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      if (lookup?.isArrayMethodCallback(current)) {
+        return { kind: "pattern", owner: "array-method", inJsxExpression };
+      }
+
+      if (lookup?.isSyntheticComputeCallback?.(current)) {
+        const callParent = current.parent;
+        if (
+          callParent &&
+          ts.isCallExpression(callParent) &&
+          callParent.arguments.includes(current)
+        ) {
+          const callKind = detectCallKind(callParent, checker);
+          if (callKind?.kind === "lift-applied") {
+            return { kind: "compute", owner: "lift-applied", inJsxExpression };
+          }
+          if (callKind?.kind === "builder") {
+            const builderContext = getBuilderContext(callKind.builderName);
+            if (builderContext) {
+              return { ...builderContext, inJsxExpression };
+            }
+          }
+        }
+        return { kind: "compute", owner: "unknown", inJsxExpression };
+      }
+    }
+
+    current = current.parent;
+  }
+
+  return undefined;
 }
 
 export function findEnclosingCallbackContext(
@@ -75,41 +127,6 @@ export function findEnclosingCallbackContext(
     current = current.parent;
   }
   return undefined;
-}
-
-function isInlineJsxEventHandler(
-  func: ts.ArrowFunction | ts.FunctionExpression,
-): boolean {
-  const parent = func.parent;
-  if (!ts.isJsxExpression(parent)) return false;
-  const jsxExprParent = parent.parent;
-  if (!ts.isJsxAttribute(jsxExprParent)) return false;
-  return jsxExprParent.name.getText().startsWith("on");
-}
-
-function isWithinJsxExpression(node: ts.Node): boolean {
-  let current: ts.Node | undefined = node.parent;
-  while (current) {
-    if (ts.isJsxExpression(current)) {
-      return true;
-    }
-    current = current.parent;
-  }
-  return false;
-}
-
-function isNamedCallbackCall(
-  call: ts.CallExpression,
-  name: string,
-): boolean {
-  const expression = call.expression;
-  if (ts.isIdentifier(expression)) {
-    return expression.text === name;
-  }
-  if (ts.isPropertyAccessExpression(expression)) {
-    return expression.name.text === name;
-  }
-  return false;
 }
 
 export function isStandaloneFunctionDefinition(
@@ -164,91 +181,102 @@ export function classifyReactiveContext(
   checker: ts.TypeChecker,
   lookup?: ReactiveContextLookup,
 ): ReactiveContextInfo {
-  const anchor = resolveContextAnchor(node);
-  let current: ts.Node | undefined = anchor.parent;
-  let inJsxExpression = false;
-
-  while (current) {
-    if (ts.isJsxExpression(current)) {
-      inJsxExpression = true;
+  const classifyFromAnchor = (anchor: ts.Node): ReactiveContextInfo => {
+    const markedSyntheticContext = getMarkedSyntheticCallbackContext(
+      anchor,
+      checker,
+      lookup,
+    );
+    if (markedSyntheticContext) {
+      return markedSyntheticContext;
     }
 
-    if (ts.isFunctionDeclaration(current)) {
-      if (isStandaloneFunctionDefinition(current)) {
-        return { kind: "compute", owner: "standalone", inJsxExpression };
-      }
-    }
+    let current: ts.Node | undefined = anchor.parent;
+    let inJsxExpression = false;
 
-    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
-      // Transformed mapWithPattern callbacks are explicitly tracked and should
-      // always be treated as pattern callbacks, regardless of symbol lookup.
-      if (lookup?.isArrayMethodCallback(current)) {
-        return { kind: "pattern", owner: "array-method", inJsxExpression };
+    while (current) {
+      if (ts.isJsxExpression(current)) {
+        inJsxExpression = true;
       }
 
-      if (isInlineJsxEventHandler(current)) {
-        return { kind: "compute", owner: "handler", inJsxExpression };
+      if (ts.isFunctionDeclaration(current)) {
+        if (isStandaloneFunctionDefinition(current)) {
+          return { kind: "compute", owner: "standalone", inJsxExpression };
+        }
       }
 
-      if (isStandaloneFunctionDefinition(current)) {
-        return { kind: "compute", owner: "standalone", inJsxExpression };
-      }
-
-      const callParent: ts.Node | undefined = current.parent;
-      if (
-        callParent &&
-        ts.isCallExpression(callParent) &&
-        callParent.arguments.includes(current)
-      ) {
-        const callKind = detectCallKind(callParent, checker);
-        if (callKind?.kind === "derive") {
-          return { kind: "compute", owner: "derive", inJsxExpression };
+      if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+        if (isStandaloneFunctionDefinition(current)) {
+          return { kind: "compute", owner: "standalone", inJsxExpression };
         }
 
-        if (callKind?.kind === "builder") {
-          const builderContext = getBuilderContext(callKind.builderName);
-          if (builderContext) {
-            return { ...builderContext, inJsxExpression };
+        const boundarySemantics = getCallbackBoundarySemantics(
+          current,
+          checker,
+          {
+            isArrayMethodCallback: (node) =>
+              lookup?.isArrayMethodCallback(node) ?? false,
+          },
+        );
+        const bodyContext = boundarySemantics.bodyContext;
+        if (bodyContext) {
+          if (bodyContext.strategy === "inherit-parent") {
+            current = current.parent;
+            continue;
           }
-          // Unknown builder callback: inherit parent context.
-        }
 
-        if (callKind?.kind === "pattern-tool") {
-          return { kind: "compute", owner: "unknown", inJsxExpression };
-        }
-
-        if (callKind?.kind === "array-method") {
-          // Non-transformed map callbacks inherit the parent context.
-          current = current.parent;
-          continue;
-        }
-
-        // Fallback for synthetic helper calls where symbol-based call-kind
-        // classification can fail transiently during transformation.
-        if (
-          isNamedCallbackCall(callParent, "pattern") ||
-          isNamedCallbackCall(callParent, "patternTool")
-        ) {
-          return { kind: "pattern", owner: "pattern", inJsxExpression };
-        }
-
-        // Unknown callbacks inside JSX expressions should run in compute context.
-        // This ensures chains like `list.map(...).filter(...)` are treated as
-        // compute callbacks rather than pattern callbacks.
-        if (inJsxExpression || isWithinJsxExpression(current)) {
-          return { kind: "compute", owner: "jsx-callback", inJsxExpression };
+          return {
+            kind: bodyContext.kind,
+            owner: bodyContext.owner,
+            inJsxExpression,
+          };
         }
       }
+
+      current = current.parent;
     }
 
-    current = current.parent;
+    return {
+      kind: "neutral",
+      owner: "unknown",
+      inJsxExpression,
+    };
+  };
+
+  const currentContext = classifyFromAnchor(node);
+  if (
+    currentContext.kind === "pattern" &&
+    currentContext.owner !== "array-method" &&
+    lookup?.isSyntheticComputeOwnedNode?.(node)
+  ) {
+    return {
+      kind: "compute",
+      owner: "unknown",
+      inJsxExpression: currentContext.inJsxExpression,
+    };
+  }
+  if (currentContext.kind !== "neutral") {
+    return currentContext;
   }
 
-  return {
-    kind: "neutral",
-    owner: "unknown",
-    inJsxExpression,
-  };
+  const anchor = resolveContextAnchor(node);
+  if (anchor !== node) {
+    const anchorContext = classifyFromAnchor(anchor);
+    if (
+      anchorContext.kind === "pattern" &&
+      anchorContext.owner !== "array-method" &&
+      lookup?.isSyntheticComputeOwnedNode?.(anchor)
+    ) {
+      return {
+        kind: "compute",
+        owner: "unknown",
+        inJsxExpression: anchorContext.inJsxExpression,
+      };
+    }
+    return anchorContext;
+  }
+
+  return currentContext;
 }
 
 export function isInsideSafeCallbackWrapper(

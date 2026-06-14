@@ -2,8 +2,11 @@ import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
+  buildCaptureTypeElements,
   buildTypeElementsFromCaptureTree,
+  createRegisteredTypeLiteral,
   expressionToTypeNode,
+  typeToTypeNodeWithRegistry,
 } from "../../ast/type-building.ts";
 import {
   inferArrayElementType,
@@ -30,7 +33,7 @@ export class SchemaFactory {
     captureTree: Map<string, CaptureTreeNode>,
   ): ts.TypeNode {
     const { checker } = this.context;
-    const typeRegistry = this.context.options.typeRegistry;
+    const typeRegistry = this.context.options.state?.typeRegistry;
 
     // 1. Determine element type
     let elemTypeNode: ts.TypeNode;
@@ -109,7 +112,10 @@ export class SchemaFactory {
       );
     }
 
-    return this.factory.createTypeLiteralNode(callbackParamProperties);
+    return createRegisteredTypeLiteral(
+      callbackParamProperties,
+      { factory: this.factory, checker, typeRegistry },
+    );
   }
 
   /**
@@ -125,7 +131,7 @@ export class SchemaFactory {
       const explicit = tryExplicitParameterType(
         stateParam,
         this.context.checker,
-        this.context.options.typeRegistry,
+        this.context.options.state?.typeRegistry,
       );
       if (explicit) return explicit.typeNode;
     }
@@ -135,7 +141,14 @@ export class SchemaFactory {
       captureTree,
       this.context,
     );
-    return this.factory.createTypeLiteralNode(paramsProperties);
+    return createRegisteredTypeLiteral(
+      paramsProperties,
+      {
+        factory: this.factory,
+        checker: this.context.checker,
+        typeRegistry: this.context.options.state?.typeRegistry,
+      },
+    );
   }
 
   /**
@@ -144,7 +157,7 @@ export class SchemaFactory {
    *
    * When hadZeroParameters is true, skip the input and only include captures.
    */
-  createDeriveInputSchema(
+  createLiftAppliedInputSchema(
     originalInputParamName: string,
     originalInput: ts.Expression,
     captureTree: Map<string, CaptureTreeNode>,
@@ -180,41 +193,22 @@ export class SchemaFactory {
     }
 
     // Add type elements for captures using the existing helper
-    const captureTypeElements = buildTypeElementsFromCaptureTree(
+    const captureTypeElements = buildCaptureTypeElements(
       captureTree,
       this.context,
+      captureNameMap,
     );
-
-    // Rename the property signatures if there are collisions
-    for (const typeElement of captureTypeElements) {
-      if (
-        ts.isPropertySignature(typeElement) && ts.isIdentifier(typeElement.name)
-      ) {
-        const originalName = typeElement.name.text;
-        const renamedName = captureNameMap.get(originalName) ?? originalName;
-
-        if (renamedName !== originalName) {
-          // Create a new property signature with the renamed identifier
-          typeElements.push(
-            factory.createPropertySignature(
-              typeElement.modifiers,
-              factory.createIdentifier(renamedName),
-              typeElement.questionToken,
-              typeElement.type,
-            ),
-          );
-        } else {
-          // No renaming needed
-          typeElements.push(typeElement);
-        }
-      } else {
-        // Not a simple property signature, keep as-is
-        typeElements.push(typeElement);
-      }
-    }
+    typeElements.push(...captureTypeElements);
 
     // Create object type literal
-    return factory.createTypeLiteralNode(typeElements);
+    return createRegisteredTypeLiteral(
+      typeElements,
+      {
+        factory,
+        checker: this.context.checker,
+        typeRegistry: this.context.options.state?.typeRegistry,
+      },
+    );
   }
 
   /**
@@ -235,7 +229,7 @@ export class SchemaFactory {
     callback: ts.ArrowFunction | ts.FunctionExpression,
   ): ts.TypeNode {
     const { factory, checker } = this.context;
-    const typeRegistry = this.context.options.typeRegistry;
+    const typeRegistry = this.context.options.state?.typeRegistry;
     const eventParam = callback.parameters[0];
 
     // If no event parameter exists, use never type (will generate false schema)
@@ -260,14 +254,13 @@ export class SchemaFactory {
     // Infer from parameter location
     const type = checker.getTypeAtLocation(eventParam);
 
-    // Try to convert Type to TypeNode
-    const typeNode = checker.typeToTypeNode(
+    // Convert via the canonical chokepoint: normalizes commonfabric refs to
+    // `__cfHelpers.X`, registers the node for schema generation, and falls back
+    // to `unknown` if conversion fails.
+    return typeToTypeNodeWithRegistry(
       type,
-      this.context.sourceFile,
-      ts.NodeBuilderFlags.NoTruncation |
-        ts.NodeBuilderFlags.UseStructuralFallback,
-    ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-
-    return registerTypeForNode(typeNode, type, typeRegistry);
+      { checker, factory, sourceFile: this.context.sourceFile },
+      typeRegistry,
+    );
   }
 }

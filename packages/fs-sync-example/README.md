@@ -1,6 +1,6 @@
 # fs-sync-example
 
-A working example of bidirectional sync between a Common Tools pattern and the
+A working example of bidirectional sync between a Common Fabric pattern and the
 filesystem. A todo list UI syncs with a markdown file (`/tmp/todos.md`) via a
 daemon process.
 
@@ -25,15 +25,15 @@ daemon process.
 
 ## Files
 
-| File                             | Purpose                                           |
-| -------------------------------- | ------------------------------------------------- |
-| `src/todo-list-pattern.tsx`      | UI pattern with handlers and optimistic updates   |
-| `src/todo-list-pattern.test.tsx` | Pattern tests (run with `deno task ct test`)      |
-| `src/daemon.ts`                  | Sync loop: CAS retries, edit watermark, Cell.of() |
-| `src/run-daemon.ts`              | CLI launcher for the daemon                       |
-| `src/types.ts`                   | Shared types (Todo, Edit, FailedEdit)             |
-| `src/markdown.ts`                | Markdown parser/serializer for the todo file      |
-| `src/markdown.test.ts`           | Tests for the markdown parser                     |
+| File                             | Purpose                                            |
+| -------------------------------- | -------------------------------------------------- |
+| `src/todo-list-pattern.tsx`      | UI pattern with handlers and optimistic updates    |
+| `src/todo-list-pattern.test.tsx` | Pattern tests (run with `deno task cf test`)       |
+| `src/daemon.ts`                  | Sync loop: CAS retries, edit watermark, Cell.for() |
+| `src/run-daemon.ts`              | CLI launcher for the daemon                        |
+| `src/types.ts`                   | Shared types (Todo, Edit, FailedEdit)              |
+| `src/markdown.ts`                | Markdown parser/serializer for the todo file       |
+| `src/markdown.test.ts`           | Tests for the markdown parser                      |
 
 ## Running
 
@@ -42,24 +42,24 @@ daemon process.
 ./scripts/restart-local-dev.sh
 
 # 2. Deploy the pattern
-deno task ct piece new src/todo-list-pattern.tsx \
-  -i ~/.ct/main.key -a http://localhost:8000 -s my-space
+deno task cf piece new src/todo-list-pattern.tsx \
+  -i ~/.cf/main.key -a http://localhost:8000 -s my-space
 
 # 3. Start the sync daemon
 deno run --allow-all src/run-daemon.ts \
   --piece <PIECE_ID> \
   --api-url http://localhost:8000 \
-  --identity ~/.ct/main.key \
+  --identity ~/.cf/main.key \
   --space my-space \
   --file /tmp/todos.md
 ```
 
 ## Testing
 
-Pattern tests use the `ct test` runner (not plain `deno test`):
+Pattern tests use the `cf test` runner (not plain `deno test`):
 
 ```bash
-deno task ct test packages/fs-sync-example/src/todo-list-pattern.test.tsx
+deno task cf test packages/fs-sync-example/src/todo-list-pattern.test.tsx
 ```
 
 Markdown parser tests run with standard deno test:
@@ -72,5 +72,5 @@ deno test packages/fs-sync-example/src/markdown.test.ts
 
 This example implements the patterns described in
 [docs/development/importers/bidirectional_sync.md](../../docs/development/importers/bidirectional_sync.md),
-covering CAS retry loops, edit watermarks, Cell.of() for stable identity, and
+covering CAS retry loops, edit watermarks, Cell.for() for stable identity, and
 error classification.

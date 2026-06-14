@@ -1,11 +1,10 @@
-/// <cts-enable />
 /**
  * Address Module - Pattern for physical address with customizable label
  *
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Stores street, city, state, and ZIP with a label (Home, Work, etc.)
  */
-import { computed, type Default, NAME, pattern, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Standard Labels =====
@@ -37,15 +36,15 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface AddressModuleInput {
   /** Label for this address (Home, Work, Billing, etc.) */
-  label: Default<string, "Home">;
+  label: string | Default<"Home">;
   /** Street address */
-  street: Default<string, "">;
+  street: string | Default<"">;
   /** City */
-  city: Default<string, "">;
+  city: string | Default<"">;
   /** State/Province */
-  state: Default<string, "">;
+  state: string | Default<"">;
   /** ZIP/Postal code */
-  zip: Default<string, "">;
+  zip: string | Default<"">;
 }
 
 // ===== The Pattern =====
@@ -65,21 +64,21 @@ export const AddressModule = pattern<AddressModuleInput, AddressModuleInput>(
         () => `${MODULE_METADATA.icon} ${label}: ${displayText}`,
       ),
       [UI]: (
-        <ct-vstack style={{ gap: "12px" }}>
-          <ct-vstack style={{ gap: "4px" }}>
+        <cf-vstack style={{ gap: "12px" }}>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Label</label>
-            <ct-autocomplete
+            <cf-autocomplete
               $value={label}
               items={labelItems}
               placeholder="Select or type label..."
               allowCustom
               style={{ width: "100%" }}
             />
-          </ct-vstack>
-          <ct-vstack style={{ gap: "4px" }}>
+          </cf-vstack>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Street</label>
-            <ct-input $value={street} placeholder="123 Main St" />
-          </ct-vstack>
+            <cf-input $value={street} placeholder="123 Main St" />
+          </cf-vstack>
           <div
             style={{
               display: "grid",
@@ -87,22 +86,22 @@ export const AddressModule = pattern<AddressModuleInput, AddressModuleInput>(
               gap: "8px",
             }}
           >
-            <ct-vstack style={{ gap: "4px" }}>
+            <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>City</label>
-              <ct-input $value={city} placeholder="City" />
-            </ct-vstack>
-            <ct-vstack style={{ gap: "4px" }}>
+              <cf-input $value={city} placeholder="City" />
+            </cf-vstack>
+            <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 State
               </label>
-              <ct-input $value={state} placeholder="CA" />
-            </ct-vstack>
-            <ct-vstack style={{ gap: "4px" }}>
+              <cf-input $value={state} placeholder="CA" />
+            </cf-vstack>
+            <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>ZIP</label>
-              <ct-input $value={zip} placeholder="12345" />
-            </ct-vstack>
+              <cf-input $value={zip} placeholder="12345" />
+            </cf-vstack>
           </div>
-        </ct-vstack>
+        </cf-vstack>
       ),
       label,
       street,

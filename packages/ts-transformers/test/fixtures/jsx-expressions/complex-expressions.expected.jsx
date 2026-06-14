@@ -1,64 +1,79 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Problem {
     price: number;
     discount: number;
     tax: number;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    price: number;
+    discount: number;
+}, number>(({ price, discount }) => price - discount, {
+    type: "object",
+    properties: {
+        price: {
+            type: "number"
+        },
+        discount: {
+            type: "number"
+        }
+    },
+    required: ["price", "discount"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_2 = __cfHelpers.lift<{
+    price: number;
+    discount: number;
+    tax: number;
+}, number>(({ price, discount, tax }) => (price - discount) * (1 + tax), {
+    type: "object",
+    properties: {
+        price: {
+            type: "number"
+        },
+        discount: {
+            type: "number"
+        },
+        tax: {
+            type: "number"
+        }
+    },
+    required: ["price", "discount", "tax"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: complex-expressions
-// Verifies: multi-variable arithmetic in JSX is wrapped in derive() with captured refs
-//   {price - discount}             → derive({price, discount}, (...) => price - discount)
-//   {(price - discount) * (1+tax)} → derive({price, discount, tax}, (...) => ...)
-export default pattern((__ct_pattern_input) => {
-    const price = __ct_pattern_input.key("price");
-    const discount = __ct_pattern_input.key("discount");
-    const tax = __ct_pattern_input.key("tax");
+// Verifies: multi-variable arithmetic in JSX is wrapped in a lift-applied computation with captured refs
+//   {price - discount}             → lift((...) => price - discount)({ price, discount })
+//   {(price - discount) * (1+tax)} → lift((...) => ...)({ price, discount, tax })
+export default pattern((__cf_pattern_input) => {
+    const price = __cf_pattern_input.key("price");
+    const discount = __cf_pattern_input.key("discount");
+    const tax = __cf_pattern_input.key("tax");
     return {
         [UI]: (<div>
           <p>Price: {price}</p>
-          <p>Discount: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                price: {
-                    type: "number",
-                    asOpaque: true
-                },
-                discount: {
-                    type: "number",
-                    asOpaque: true
-                }
-            },
-            required: ["price", "discount"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, {
+          <p>Discount: {__cfLift_1({
             price: price,
             discount: discount
-        }, ({ price, discount }) => price - discount)}</p>
-          <p>With tax: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                price: {
-                    type: "number",
-                    asOpaque: true
-                },
-                discount: {
-                    type: "number",
-                    asOpaque: true
-                },
-                tax: {
-                    type: "number",
-                    asOpaque: true
-                }
-            },
-            required: ["price", "discount", "tax"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        })}</p>
+          <p>With tax: {__cfLift_2({
             price: price,
             discount: discount,
             tax: tax
-        }, ({ price, discount, tax }) => (price - discount) * (1 + tax))}</p>
+        })}</p>
         </div>),
     };
 }, {
@@ -75,7 +90,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["price", "discount", "tax"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -88,11 +103,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -105,8 +119,11 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2
+});

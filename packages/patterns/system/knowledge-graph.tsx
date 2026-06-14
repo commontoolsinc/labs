@@ -1,11 +1,9 @@
-/// <cts-enable />
 import {
   type BuiltInLLMMessage,
   computed,
   type Default,
   equals,
   handler,
-  ifElse,
   llmDialog,
   NAME,
   pattern,
@@ -15,7 +13,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { type MentionablePiece } from "./backlinks-index.tsx";
 
 export type GraphEdge = {
@@ -175,13 +173,13 @@ const listPiecesPattern = pattern<
 // --- Main pattern ---
 
 const KnowledgeGraph = pattern<Input>(() => {
-  const mentionable = wish<Default<Writable<MentionablePiece>[], []>>({
+  const mentionable = wish<Writable<MentionablePiece>[] | Default<[]>>({
     query: "#mentionable",
   }).result;
 
   const baseEdges = computed(() => {
     const result: GraphEdge[] = [];
-    for (const piece of mentionable ?? []) {
+    for (const piece of (Array.isArray(mentionable) ? mentionable : [])) {
       if (!piece) continue;
       const pieceName = (piece.get()[NAME] ?? "").toString();
       const mentioned = piece.key("mentioned").get() ?? [];
@@ -207,10 +205,10 @@ const KnowledgeGraph = pattern<Input>(() => {
         { piece: Writable<MentionablePiece>; summary: string; name: string }
       >;
     }
-  >({ query: "#summaryIndex" }).result;
+  >({ query: "#summaryIndex" }).result!;
 
   // LLM agent state
-  const messages = Writable.of<BuiltInLLMMessage[]>([]);
+  const messages = new Writable<BuiltInLLMMessage[]>([]);
   const hasBeenBuilt = computed(() => messages.get().length > 0);
 
   const agentSystemPrompt = computed(() => {
@@ -322,95 +320,97 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
       return `Knowledge Graph (${total} links)`;
     }),
     [UI]: (
-      <ct-screen>
-        <ct-toolbar slot="header" sticky>
+      <cf-screen>
+        <cf-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Knowledge Graph</h2>
           <div slot="end">
-            {ifElse(
-              hasBeenBuilt,
-              <ct-button
-                variant="ghost"
-                onClick={triggerRebuild({ addMessage, messages })}
-              >
-                Rebuild
-              </ct-button>,
-              <ct-button
-                variant="primary"
-                onClick={triggerBuild({ addMessage })}
-              >
-                Build Graph
-              </ct-button>,
-            )}
+            {hasBeenBuilt
+              ? (
+                <cf-button
+                  variant="ghost"
+                  onClick={triggerRebuild({ addMessage, messages })}
+                >
+                  Rebuild
+                </cf-button>
+              )
+              : (
+                <cf-button
+                  variant="primary"
+                  onClick={triggerBuild({ addMessage })}
+                >
+                  Build Graph
+                </cf-button>
+              )}
           </div>
-        </ct-toolbar>
-        <ct-vstack gap="4" padding="6">
+        </cf-toolbar>
+        <cf-vstack gap="4" padding="6">
           <span
             style={{
               fontSize: "13px",
-              color: "var(--ct-color-text-secondary)",
+              color: "var(--cf-theme-color-text-secondary)",
             }}
           >
             {baseEdgeCount} base links, {agentEdgeCount} agent links,{" "}
             {compoundNodeCount} groups
           </span>
 
-          <ct-message-beads
+          <cf-message-beads
             label="graph analysis"
             $messages={messages}
             pending={pending}
           />
 
-          {ifElse(
-            computed(() => compoundNodes.length > 0),
-            <div>
-              <h3 style={{ margin: "0 0 8px", fontSize: "15px" }}>Groups</h3>
-              <ct-table full-width>
-                <tbody>
-                  {compoundNodes.map((node: any) => (
-                    <tr>
-                      <td style={{ fontWeight: "500" }}>{node[NAME]}</td>
-                      <td
-                        style={{
-                          fontSize: "13px",
-                          color: "var(--ct-color-text-secondary)",
-                        }}
-                      >
-                        {node.summary}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </ct-table>
-            </div>,
-            null,
-          )}
+          {computed(() => compoundNodes.length > 0)
+            ? (
+              <div>
+                <h3 style={{ margin: "0 0 8px", fontSize: "15px" }}>Groups</h3>
+                <cf-table full-width>
+                  <tbody>
+                    {compoundNodes.map((node: any) => (
+                      <tr>
+                        <td style={{ fontWeight: "500" }}>{node[NAME]}</td>
+                        <td
+                          style={{
+                            fontSize: "13px",
+                            color: "var(--cf-theme-color-text-secondary)",
+                          }}
+                        >
+                          {node.summary}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </cf-table>
+              </div>
+            )
+            : null}
 
           <h3 style={{ margin: "0", fontSize: "15px" }}>Links</h3>
-          <ct-table full-width>
+          <cf-table full-width>
             <tbody>
               {allEdges.map((edge) => (
                 <tr>
                   <td style={{ fontWeight: "500", whiteSpace: "nowrap" }}>
-                    <ct-cell-link $cell={edge.from} />
+                    <cf-cell-link $cell={edge.from} />
                   </td>
                   <td
                     style={{
                       fontSize: "13px",
-                      color: "var(--ct-color-text-secondary)",
+                      color: "var(--cf-theme-color-text-secondary)",
                       textAlign: "center",
                     }}
                   >
                     {edge.description}
                   </td>
                   <td style={{ fontWeight: "500", whiteSpace: "nowrap" }}>
-                    <ct-cell-link $cell={edge.to} />
+                    <cf-cell-link $cell={edge.to} />
                   </td>
                 </tr>
               ))}
             </tbody>
-          </ct-table>
-        </ct-vstack>
-      </ct-screen>
+          </cf-table>
+        </cf-vstack>
+      </cf-screen>
     ),
     edges: allEdges,
     compoundNodes,

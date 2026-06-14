@@ -20,5 +20,6 @@ Deno.test("meta routes", async (t) => {
       json.did,
       "did:key:z6Mkqqy6FetDFSzm3oegQmJEUWrqBpxAZvWrw3xZTyNqJYj9",
     );
+    assertEquals(json.gitSha, null);
   });
 });

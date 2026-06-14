@@ -25,7 +25,7 @@ This is why sub-patterns **must include `[UI]` in their Output type** - see [Pat
 ## Example
 
 ```tsx
-import { pattern, NAME, UI, VNode, Writable } from "commontools";
+import { pattern, NAME, UI, VNode, Writable } from "commonfabric";
 
 interface Item { name: Writable<string> }
 
@@ -65,7 +65,7 @@ Both patterns receive the same `items` cell - changes sync automatically.
 
 **When to use which:**
 - **Pattern Composition**: Multiple views in one UI, reusable components
-- **Linked Charms**: Independent deployments that communicate
+- **Linked Pieces**: Independent deployments that communicate
 
 ## Merging Complex Objects from Pattern Inputs
 
@@ -101,3 +101,9 @@ const omnibot = Chatbot({
 ```
 
 This pattern is useful when a sub-pattern needs to accept additional configuration (e.g. extra chatbot tools, extra fields) from its caller while also defining its own base set internally.
+
+## See Also
+
+- [View Switching](./view-switching.md) — dynamically switching between sub-patterns
+- [Navigation](./navigation.md) — `navigateTo()` for drill-down to detail views
+- [Self-Reference](../concepts/self-reference.md) — tree/parent-child structures where a pattern composes itself

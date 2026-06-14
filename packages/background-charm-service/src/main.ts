@@ -1,6 +1,6 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { BackgroundCharmService } from "./service.ts";
 import { getIdentity } from "./utils.ts";
 import { env } from "./env.ts";
@@ -29,13 +29,11 @@ const runtime = new Runtime({
   apiUrl: new URL(env.API_URL),
   storageManager: StorageManager.open({
     as: identity,
-    address: new URL("/api/storage/memory", env.API_URL),
+    memoryHost: new URL(env.API_URL),
   }),
   experimental: {
-    richStorableValues: env.EXPERIMENTAL_RICH_STORABLE_VALUES,
-    storableProtocol: env.EXPERIMENTAL_STORABLE_PROTOCOL,
-    unifiedJsonEncoding: env.EXPERIMENTAL_UNIFIED_JSON_ENCODING,
-    canonicalHashing: env.EXPERIMENTAL_CANONICAL_HASHING,
+    modernCellRep: env.EXPERIMENTAL_MODERN_CELL_REP,
+    persistentSchedulerState: env.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE,
   },
 });
 const service = new BackgroundCharmService({

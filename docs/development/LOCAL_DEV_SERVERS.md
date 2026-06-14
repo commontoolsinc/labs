@@ -4,7 +4,7 @@
 
 ## Quick Reference
 
-**Use the scripts** (see ct skill for full documentation):
+**Use the scripts** (see the cf skill for full documentation):
 
 ```bash
 ./scripts/start-local-dev.sh          # Start both servers
@@ -17,6 +17,23 @@
 ./scripts/check-local-dev.sh          # Health check both servers
 ```
 
+`start-local-dev.sh` validates required commands before launching anything and
+waits for both servers to bind their ports and return HTTP 200 before reporting
+success. Set `LOCAL_DEV_STARTUP_TIMEOUT` to adjust the readiness timeout in
+seconds.
+
+**Exit codes (`start-local-dev.sh`):**
+| Code | Meaning |
+|------|---------|
+| `0` | Both servers started and became ready. |
+| `3` | A server could not bind because its port is already in use; retry on a different port offset. |
+| other non-zero | Any other startup failure (build error, crash, readiness timeout). |
+
+Code `3` is reported only when a server's actual bind fails, not from a port
+pre-check, so it carries no check-then-bind race. The toolshed and the shell dev
+server exit with the same code, and `deno task integration` relies on it to
+retry a generated offset on a collision while aborting on any other failure.
+
 **URLs:**
 | What | URL |
 |------|-----|
@@ -27,11 +44,11 @@
 **Experimental flags:** Pass env vars to the start/restart scripts to enable
 experiments on both servers:
 ```bash
-EXPERIMENTAL_CANONICAL_HASHING=true \
-EXPERIMENTAL_RICH_STORABLE_VALUES=true \
+EXPERIMENTAL_EXAMPLE_NAME_1=true \
+EXPERIMENTAL_EXAMPLE_NAME_2=true \
 ./scripts/restart-local-dev.sh --force --dangerously-clear-all-spaces
 ```
-The same env vars must also be set when running `ct` CLI commands against the
+The same env vars must also be set when running `cf` CLI commands against the
 server. See `docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
 
 **Logs:**
@@ -42,8 +59,13 @@ server. See `docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
 the passphrase `"implicit trust"`. To create a matching key for CLI operations:
 ```bash
 deno run -A packages/cli/mod.ts id derive "implicit trust" > claude.key
-export CT_IDENTITY=./claude.key
+export CF_IDENTITY=./claude.key
 ```
+
+For workflows that touch `PerUser`, `PerSession`, favorites, or home-space
+state, use one shared identity in both browser and CLI. The browser login screen
+can import a CLI PKCS8/PEM key via `Import CLI Key`. See
+[`SHARED_IDENTITY.md`](./SHARED_IDENTITY.md).
 
 **First-time browser login:**
 
@@ -61,7 +83,7 @@ await page.goto("http://localhost:8000/<SPACE>/<PIECE_ID>");
 
 ## Architecture
 
-CommonTools requires **two servers** for local development:
+Common Fabric requires **two servers** for local development:
 
 1. **Backend (Toolshed)** - Port 8000 - API, storage, runtime, proxies shell
 2. **Frontend (Shell)** - Port 5173 - Dev server with hot reload (accessed via 8000 proxy)
@@ -112,7 +134,7 @@ anything is wrong. It supports the same `--port-offset`, `--shell-port`, and
 | Space shows errors | Only one server running | Ensure BOTH are running |
 | Port already in use | Previous server didn't stop | Use `--force` flag |
 | Stale data | Cache issues | Use `--clear-cache` flag (or `--dangerously-clear-all-spaces` for database issues) |
-| `*.ts.net` URLs hang | Not on Tailscale | Connect to CT network via Tailscale |
+| `*.ts.net` URLs hang | Not on Tailscale | Connect to the Tailscale network |
 | OAuth error: `Unexpected token '<'` | Fetching from wrong port | Use port 8000 for API calls ([see below](#oauth-returns-html-instead-of-json)) |
 | UI component changes not appearing | Shell doesn't watch packages/ui | Restart local dev server |
 
@@ -148,7 +170,7 @@ cd packages/toolshed
 SHELL_URL=http://localhost:5173 API_URL=https://toolshed.saga-castor.ts.net/ deno task dev
 ```
 
-**Environment setup:** Copy `.env.example` to `.env` in the toolshed directory. See `packages/toolshed/env.ts` for all available environment variables.
+**Environment setup:** Copy `.env.example` to `.env` in the toolshed directory. See [`CONFIGURATION.md`](./CONFIGURATION.md) for a categorized reference of all configuration (env vars, tasks, flags), or `packages/toolshed/env.ts` for the canonical Zod schema.
 
 ### Checking Logs
 
@@ -182,7 +204,7 @@ This happens when OAuth or API calls hit port 5173 (frontend) instead of port 80
 
 ### UI Component Changes Not Appearing
 
-When editing `ct-*` components in `packages/ui/`, restart the local dev server to ensure the updated code is running.
+When editing `cf-*` components in `packages/ui/`, restart the local dev server to ensure the updated code is running.
 
 ---
 
@@ -241,7 +263,7 @@ curl -X POST http://localhost:8000/api/integrations/bg \
   -d '{"pieceId":"baedrei...","space":"did:key:z6Mk...","integration":"my-integration"}'
 ```
 
-Or use the `<ct-updater>` component in your piece's UI.
+Or use the `<cf-updater>` component in your piece's UI.
 
 ### Key Details
 

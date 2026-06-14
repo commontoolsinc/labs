@@ -1,5 +1,5 @@
 /**
- * JSX automatic runtime for @commontools/html
+ * JSX automatic runtime for @commonfabric/html
  *
  * This module provides the JSX runtime implementation compatible with
  * TypeScript's "jsx": "react-jsx" configuration.
@@ -8,7 +8,7 @@
  */
 
 import { h } from "./h.ts";
-import type { JSXElement, RenderNode, VNode } from "@commontools/api";
+import type { JSXElement, RenderNode, VNode } from "@commonfabric/api";
 
 /**
  * Props type for JSX elements, including children
@@ -64,7 +64,7 @@ export const jsxs = jsx;
  * Fragment component for grouping elements without adding DOM nodes.
  *
  * Used when you write <></> or <React.Fragment> in JSX.
- * Renders as a "ct-fragment" element in the virtual DOM.
+ * Renders as a "cf-fragment" element in the virtual DOM.
  */
 export const Fragment = h.fragment;
 

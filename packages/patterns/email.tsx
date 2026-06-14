@@ -1,11 +1,10 @@
-/// <cts-enable />
 /**
  * Email Module - Pattern for a single email address with customizable label
  *
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Stores one email with a label (Personal, Work, School, etc.)
  */
-import { computed, type Default, NAME, pattern, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Standard Labels =====
@@ -34,9 +33,9 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface EmailModuleInput {
   /** Label for this email (Personal, Work, School, etc.) */
-  label: Default<string, "Personal">;
+  label: string | Default<"Personal">;
   /** Email address */
-  address: Default<string, "">;
+  address: string | Default<"">;
 }
 
 // ===== The Pattern =====
@@ -56,26 +55,24 @@ export const EmailModule = pattern<EmailModuleInput, EmailModuleInput>(
         () => `${MODULE_METADATA.icon} ${label}: ${displayText}`,
       ),
       [UI]: (
-        <ct-vstack style={{ gap: "12px" }}>
-          <ct-vstack style={{ gap: "4px" }}>
-            <label style={{ fontSize: "12px", color: "#6b7280" }}>Label</label>
-            <ct-autocomplete
+        <cf-vstack gap="3">
+          <cf-field label="Label">
+            <cf-autocomplete
               $value={label}
               items={labelItems}
               placeholder="Select or type label..."
               allowCustom
               style={{ width: "100%" }}
             />
-          </ct-vstack>
-          <ct-vstack style={{ gap: "4px" }}>
-            <label style={{ fontSize: "12px", color: "#6b7280" }}>Email</label>
-            <ct-input
+          </cf-field>
+          <cf-field label="Email">
+            <cf-input
               type="email"
               $value={address}
               placeholder="email@example.com"
             />
-          </ct-vstack>
-        </ct-vstack>
+          </cf-field>
+        </cf-vstack>
       ),
       label,
       address,

@@ -16,8 +16,8 @@ exported by the default app pattern. **Never** push to `allPieces` directly.
 The most common case — creating a piece in response to a user interaction:
 
 ```tsx
-import { action, pattern, wish, Stream, UI } from "commontools";
-import { MentionablePiece } from "@commontools/piece";
+import { action, pattern, wish, Stream, UI } from "commonfabric";
+import { MentionablePiece } from "@commonfabric/piece";
 
 // Wish for the addPiece handler at pattern body level
 const defaultApp = wish<{ addPiece: Stream<{ piece: MentionablePiece }> }>({
@@ -31,7 +31,7 @@ const createNote = action(() => {
 });
 
 return {
-  [UI]: <ct-button onClick={createNote}>New Note</ct-button>,
+  [UI]: <cf-button onClick={createNote}>New Note</cf-button>,
 };
 ```
 
@@ -40,8 +40,8 @@ return {
 When you need reusable logic that can be bound to different state:
 
 ```tsx
-import { handler, Stream } from "commontools";
-import { MentionablePiece } from "@commontools/piece";
+import { handler, Stream } from "commonfabric";
+import { MentionablePiece } from "@commonfabric/piece";
 
 // Define at module scope
 const createNoteHandler = handler<
@@ -96,71 +96,6 @@ Instead, wish only for the `addPiece` stream:
 wish<{ addPiece: Stream<{ piece: MentionablePiece }> }>({
   query: "#default",
 });
-```
-
-## Migration examples
-
-### From action with `allPieces.push()`
-
-Before:
-
-```tsx
-const { allPieces } =
-  wish<{ allPieces: Writable<MinimalPiece[]> }>({ query: "#default" }).result;
-
-const createNewNote = action(() => {
-  const note = Note({ title: "New Note", content: "", noteId: generateId() });
-  allPieces.push(note as any);
-  return navigateTo(note);
-});
-```
-
-After:
-
-```tsx
-const defaultApp = wish<{ addPiece: Stream<{ piece: MentionablePiece }> }>({
-  query: "#default",
-});
-
-const createNewNote = action(() => {
-  const note = Note({ title: "New Note", content: "", noteId: generateId() });
-  defaultApp.result.addPiece.send({ piece: note });
-  return navigateTo(note);
-});
-```
-
-### From handler with `allPieces` in state
-
-Before:
-
-```tsx
-const createNoteHandler = handler<
-  { title: string; content: string },
-  { allPieces: Writable<MentionablePiece[]> }
->(({ title, content }, { allPieces }) => {
-  const note = Note({ title, content, noteId: generateId() });
-  allPieces.push(note as any);
-  return note;
-});
-
-// Bound as:
-createNoteHandler({ allPieces });
-```
-
-After:
-
-```tsx
-const createNoteHandler = handler<
-  { title: string; content: string },
-  { addPiece: Stream<{ piece: MentionablePiece }> }
->(({ title, content }, { addPiece }) => {
-  const note = Note({ title, content, noteId: generateId() });
-  addPiece.send({ piece: note });
-  return note;
-});
-
-// Bound as:
-createNoteHandler({ addPiece: defaultApp.result.addPiece });
 ```
 
 ## How it works

@@ -9,7 +9,7 @@ export interface CheckerOptions {
   messageTransformer?: DiagnosticMessageTransformer;
 }
 
-// These symbols are exported from commontools but TypeScript's declaration
+// These symbols are exported from commonfabric but TypeScript's declaration
 // diagnostics have trouble with unique symbols in certain contexts.
 // Filter out these known false positives.
 // Note: TypeScript emits different phrasings for the same underlying issue:
@@ -19,6 +19,7 @@ const KNOWN_EXPORTED_SYMBOLS = [
   "CELL_BRAND",
   "CELL_INNER_TYPE",
   "DEFAULT_MARKER",
+  "SCOPE_BRAND",
 ];
 
 export class Checker {

@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   type Cell,
   cell,
@@ -7,7 +6,7 @@ import {
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 type Frequency = "daily" | "weekly" | "monthly";
 
@@ -16,7 +15,7 @@ interface SavedSearchInput {
   name?: string;
   query?: string;
   frequency?: string;
-  channels?: unknown;
+  channels?: string[];
 }
 
 interface SavedSearchSubscription {
@@ -39,7 +38,7 @@ interface SavedSubscriptionEvent {
   name?: string;
   query?: string;
   frequency?: string;
-  channels?: unknown;
+  channels?: string[];
 }
 
 interface TriggerSubscriptionEvent {

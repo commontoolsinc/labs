@@ -1,9 +1,7 @@
-/// <cts-enable />
 import {
   Cell,
   computed,
   Default,
-  derive,
   generateText,
   handler,
   NAME,
@@ -11,10 +9,10 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Input = {
-  title?: Default<string, "Profile-Aware Writer">;
+  title?: string | Default<"Profile-Aware Writer">;
 };
 
 const handleSend = handler<
@@ -28,12 +26,12 @@ const handleSend = handler<
 });
 
 export default pattern<Input>(({ title }) => {
-  const topic = Writable.of("");
+  const topic = new Writable("");
 
-  const profile = wish<Cell<string>>({ query: "#profile" });
+  const profile = wish<Cell<string>>({ query: "#learnedSummary" });
 
   const systemPrompt = computed(() => {
-    const profileText = profile.result.get();
+    const profileText = profile.result!.get();
     const profileSection = profileText
       ? `\n\n--- About the User ---\n${profileText}\n---\n`
       : "";
@@ -52,60 +50,54 @@ Write content personalized to the user when appropriate.`;
       <div>
         <h2>{title}</h2>
 
-        <ct-card>
+        <cf-card>
           <h4 style="margin-top: 0;">Profile Context:</h4>
-          <ct-code-editor
+          <cf-code-editor
             $value={profile.result}
             style={{ maxHeight: "256px" }}
           />
-        </ct-card>
+        </cf-card>
 
         <div>
-          <ct-message-input
+          <cf-message-input
             name="Write"
             placeholder="Enter a topic to write about..."
             appearance="rounded"
-            onct-send={handleSend({ topic })}
+            oncf-send={handleSend({ topic })}
           />
         </div>
 
-        <ct-cell-context $cell={topic}>
-          {derive(topic, (t) =>
-            t
-              ? (
-                <div style="margin-top: 16px;">
-                  <h3>Topic:</h3>
-                  <blockquote>
-                    {t}
-                  </blockquote>
-                </div>
-              )
-              : null)}
-        </ct-cell-context>
+        <cf-cell-context $cell={topic}>
+          {topic.get()
+            ? (
+              <div style="margin-top: 16px;">
+                <h3>Topic:</h3>
+                <blockquote>
+                  {topic.get()}
+                </blockquote>
+              </div>
+            )
+            : null}
+        </cf-cell-context>
 
-        <ct-cell-context $cell={result}>
-          {derive(
-            [result.pending, result.result],
-            ([pending, r]) =>
-              pending
-                ? (
-                  <div style="margin-top: 16px;">
-                    <ct-loader show-elapsed />{" "}
-                    Generating personalized content...
-                  </div>
-                )
-                : r
-                ? (
-                  <div style="margin-top: 16px;">
-                    <h3>Generated Text:</h3>
-                    <div style="white-space: pre-wrap; padding: 12px; background: #f9f9f9; border-radius: 4px; line-height: 1.6;">
-                      {r}
-                    </div>
-                  </div>
-                )
-                : null,
-          )}
-        </ct-cell-context>
+        <cf-cell-context $cell={result}>
+          {result.pending
+            ? (
+              <div style="margin-top: 16px;">
+                <cf-loader show-elapsed /> Generating personalized content...
+              </div>
+            )
+            : result.result
+            ? (
+              <div style="margin-top: 16px;">
+                <h3>Generated Text:</h3>
+                <div style="white-space: pre-wrap; padding: 12px; background: #f9f9f9; border-radius: 4px; line-height: 1.6;">
+                  {result.result}
+                </div>
+              </div>
+            )
+            : null}
+        </cf-cell-context>
       </div>
     ),
     topic,

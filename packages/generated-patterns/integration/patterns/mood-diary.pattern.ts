@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   type Cell,
   cell,
@@ -7,7 +6,7 @@ import {
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 const MOOD_SCORE_TABLE = {
   radiant: 2,
@@ -33,7 +32,7 @@ interface MoodEntrySeed {
   timestamp?: string;
   mood?: string;
   note?: string;
-  tags?: unknown;
+  tags?: string[];
 }
 
 interface MoodEntry {

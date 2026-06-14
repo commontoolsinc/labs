@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   type Cell,
   cell,
@@ -7,7 +6,7 @@ import {
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface TokenDefinition {
   background: string;

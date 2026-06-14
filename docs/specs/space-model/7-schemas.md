@@ -26,7 +26,7 @@ Standard JSON Schema properties are used:
 
 ### Special Schema Properties
 
-#### `asCell`
+#### `asCell: ["cell"]`
 
 Marks a property as a cell reference rather than inline data:
 
@@ -34,12 +34,12 @@ Marks a property as a cell reference rather than inline data:
 {
   "type": "object",
   "properties": {
-    "linkedItem": { "asCell": true, "type": "object" }
+    "linkedItem": { "asCell": ["cell"], "type": "object" }
   }
 }
 ```
 
-#### `asStream`
+#### `asCell: ["stream"]`
 
 Marks a property as a stream endpoint:
 
@@ -47,7 +47,7 @@ Marks a property as a stream endpoint:
 {
   "type": "object",
   "properties": {
-    "onClick": { "asStream": true }
+    "onClick": { "asCell": ["stream"] }
   }
 }
 ```
@@ -85,7 +85,7 @@ Schemas influence runtime behavior:
 
 Schemas can be:
 - Explicitly provided when creating cells
-- Inherited from source cells
+- Inherited from result-cell metadata links
 - Inferred from values (limited)
 
 ---

@@ -1,18 +1,16 @@
-/// <cts-enable />
 import {
   BuiltInLLMContent,
   Default,
-  derive,
   generateText,
   handler,
   NAME,
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type LLMTestInput = {
-  title: Default<string, "LLM Test">;
+  title: string | Default<"LLM Test">;
 };
 
 type LLMTestResult = {
@@ -31,7 +29,7 @@ const askQuestion = handler<
 });
 
 export default pattern<LLMTestInput>(({ title }) => {
-  const question = Writable.of("");
+  const question = new Writable("");
 
   const llmResponse = generateText({
     system:
@@ -46,50 +44,45 @@ export default pattern<LLMTestInput>(({ title }) => {
         <h2>{title}</h2>
 
         <div>
-          <ct-message-input
+          <cf-message-input
             name="Ask"
             placeholder="Ask the LLM a question..."
             appearance="rounded"
-            onct-send={askQuestion({ question })}
+            oncf-send={askQuestion({ question })}
           />
         </div>
 
-        <ct-cell-context $cell={question}>
-          {derive(question, (q) =>
-            q
-              ? (
-                <div>
-                  <h3>Your Question:</h3>
-                  <blockquote>
-                    {q}
-                  </blockquote>
-                </div>
-              )
-              : null)}
-        </ct-cell-context>
+        <cf-cell-context $cell={question}>
+          {question.get()
+            ? (
+              <div>
+                <h3>Your Question:</h3>
+                <blockquote>
+                  {question.get()}
+                </blockquote>
+              </div>
+            )
+            : null}
+        </cf-cell-context>
 
-        <ct-cell-context $cell={llmResponse}>
-          {derive(
-            [llmResponse.pending, llmResponse.result],
-            ([pending, r]) =>
-              pending
-                ? (
-                  <div>
-                    <ct-loader show-elapsed /> Thinking...
-                  </div>
-                )
-                : r
-                ? (
-                  <div>
-                    <h3>LLM Response:</h3>
-                    <pre>
-                      {r}
-                    </pre>
-                  </div>
-                )
-                : null,
-          )}
-        </ct-cell-context>
+        <cf-cell-context $cell={llmResponse}>
+          {llmResponse.pending
+            ? (
+              <div>
+                <cf-loader show-elapsed /> Thinking...
+              </div>
+            )
+            : llmResponse.result
+            ? (
+              <div>
+                <h3>LLM Response:</h3>
+                <pre>
+                  {llmResponse.result}
+                </pre>
+              </div>
+            )
+            : null}
+        </cf-cell-context>
       </div>
     ),
     question,

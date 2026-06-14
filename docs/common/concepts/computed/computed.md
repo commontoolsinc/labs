@@ -1,174 +1,95 @@
-The `computed()` function is used for derived data:
+# computed()
+
+`computed()` derives reactive data — strings, numbers, arrays, objects — from
+other reactive values. Anything referenced inside the body is automatically
+tracked as a dependency, and the result updates when its inputs change.
 
 ```tsx
-import { computed, Default, NAME, pattern, UI } from "commontools";
-
-interface Item {
-  title: string;
-  done: Default<boolean, false>;
-  category: Default<string, "Other">;
-}
-
-interface Input {
-  items: Default<Item[], []>;
-}
-
-export default pattern<Input, Input>(({ items }) => {
-  // Any values mentioned in a computed() are automatically closed-over.
-  const grouped = computed(() => {
-    const groups: Record<string, Item[]> = {};
-    for (const item of items) {
-      const cat = item.category || "Other";
-      if (!groups[cat]) groups[cat] = [];
-      groups[cat].push(item);
-    }
-    return groups;
-  });
-
-  const categories = computed(() => Object.keys(grouped).sort());
-
-  return {
-    [NAME]: "By Category",
-    [UI]: (
-      <div>
-        {categories.map((cat) => (
-          <div>
-            <h3>{cat}</h3>
-            {(grouped[cat] ?? []).map((item) => (
-              <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
-            ))}
-          </div>
-        ))}
-      </div>
-    ),
-    items,
-  };
+// ✅ computed() derives data, outside JSX
+const filteredItems = computed(() => {
+  const query = searchQuery.get().toLowerCase();
+  return items.filter((item) => item.title.toLowerCase().includes(query));
 });
+
+// ❌ computed() does NOT gate UI — use plain ternaries in JSX instead
+{showForm ? <div>Form content</div> : null}
 ```
 
----
+**Rule of thumb:** `computed()` is for deriving data. For conditional
+rendering or other simple conditional values in normal pattern code, use plain
+ternaries — see [Conditional Rendering](../../patterns/conditional.md).
 
+## When NOT to Use computed()
 
-### When to Use computed()
-
-Use `computed()` **outside of JSX** for reactive transformations.
-
-**Use `computed()` for dynamic `[NAME]` values:** When deriving `[NAME]` from input props or other reactive values, wrap it in `computed()`:
+**Never inside JSX for interpolation or property access** — reactivity is
+automatic there:
 
 ```tsx
-// WRONG - input props are reactive, can't access at init time
-export default pattern<Input>(({ deck }) => ({
-  [NAME]: `Study: ${deck.name}`,  // Error: reactive reference outside context
-  ...
-}));
+// ❌ Unnecessary
+<div>{computed(() => `Hello, ${userName}`)}</div>
+<div>{computed(() => user.name)}</div>
 
-// CORRECT - computed() creates a reactive context
-export default pattern<Input>(({ deck }) => ({
-  [NAME]: computed(() => `Study: ${deck.name}`),
-  ...
-}));
+// ✅ Just reference directly
+<div>Hello, {userName}</div>
+<div>{user.name}</div>
 ```
 
-Static strings like `[NAME]: "My Pattern"` don't need `computed()`.
-
-**Never wrap JSX in `computed()`** — the transformer automatically handles
-reactivity in JSX expressions. Ternaries in JSX children position are
-automatically converted to `ifElse()`, which correctly unwraps
-OpaqueRefs. Nested ternaries work too — a ternary inside the truthy branch of
-another ternary is also transformed. See `docs/common/patterns/conditional.md`.
-
-Inside a `computed()` body, ternaries are **not** transformed — they execute
-as plain JS where a `Writable<boolean>` object is always truthy. This is
-the most common source of "conditional section always renders" bugs.
+**Never inside JSX to gate sections.** Inside a `computed()` body, ternaries
+and logical operators are **not** transformed — they execute as plain JS where
+a `Writable<boolean>` is always truthy. This is the most common source of
+"conditional section always renders" bugs:
 
 ```tsx
-// ❌ WRONG - computed() for conditional JSX. The ternary inside the
-// computed body is plain JS, not transformed to ifElse(). `showForm`
-// is a Writable object (always truthy), so the form always renders.
+// ❌ WRONG - the ternary inside the computed body is plain JS;
+// `showForm` is a Writable object (always truthy), so the form always renders
 {computed(() => {
   if (!adminMode.get()) return null;
-  return (
-    <>
-      {showForm
-        ? <div>This ALWAYS renders — showForm is an object!</div>
-        : null}
-    </>
-  );
+  return <>{showForm ? <div>ALWAYS renders!</div> : null}</>;
 })}
 
-// ❌ ALSO WRONG - same problem, just with early-return style
-{computed(() => {
-  if (!showForm.get()) return null;
-  return <div>Form content</div>;
-})}
-// This "works" because .get() returns the actual boolean, but it's
-// still unnecessary — use a JSX ternary instead.
-
-// ✅ RIGHT - Use JSX ternaries. They nest correctly.
+// ✅ RIGHT - plain ternaries at lowered sites, including nested ones
 {adminMode
-  ? (
-    <>
-      {showForm
-        ? <div>Form content — both ternaries get ifElse() transforms</div>
-        : null}
-    </>
-  )
+  ? <>{showForm ? <div>Form content</div> : null}</>
   : null}
 ```
 
-**Rule of thumb:** `computed()` is for deriving data (strings, numbers,
-arrays, objects). For conditional rendering, use JSX ternaries.
+See [Conditional Rendering](../../patterns/conditional.md) for which sites the
+transformer lowers and the eager-branch-evaluation caveat.
 
-Example of correct usage:
+**Never nested.** The inner `computed()` returns a cell reference, not a
+value, which breaks reactivity:
 
-```tsx
-import { computed, UI, Writable } from 'commontools';
+```typescript
+// ❌ WRONG - never nest computed()
+const badValue = computed(() => 123 + computed(() => myCell.get() * 2));
 
-interface Item { title: string; }
-const searchQuery = Writable.of("");
-declare const items: Item[];
-declare const groupedItems: Record<string, Item[]>;
-
-// ✅ Use computed() outside JSX
-const filteredItems = computed(() => {
-  const query = searchQuery.get().toLowerCase();
-  return items.filter(item => item.title.toLowerCase().includes(query));
-});
-
-const itemCount = computed(() => items.length);
-
-const categories = computed(() => {
-  return Object.keys(groupedItems).sort();
-});
-
-// Then use the computed values in JSX
-const result = {
-  [UI]: (
-    <div>
-      <div>Total: {itemCount}</div>
-      {filteredItems.map(item => <div>{item.title}</div>)}
-      {categories.map(cat => <h3>{cat}</h3>)}
-    </div>
-  ),
-};
+// ✅ CORRECT - declare separately
+const doubled = computed(() => myCell.get() * 2);
+const goodValue = computed(() => 123 + doubled);
 ```
 
-### Side Effects in computed()
+## Dynamic `[NAME]`
+
+Input props are reactive and can't be read at init time. Wrap derived names in
+`computed()` (static strings don't need it):
+
+```tsx
+// ❌ Error: reactive reference outside context
+[NAME]: `Study: ${deck.name}`,
+
+// ✅ computed() creates a reactive context
+[NAME]: computed(() => `Study: ${deck.name}`),
+```
+
+## Side Effects in computed()
 
 If your `computed()` has side effects (like setting another cell), they should be idempotent. Non-idempotent side effects cause the scheduler to re-run repeatedly until it hits the 101-iteration limit.
 
 ```typescript
-import { computed, Writable } from 'commontools';
-
-interface Item {}
-declare const items: Item[];
-const logArray = Writable.of<{ timestamp: number }[]>([]);
-const cacheMap = Writable.of<Record<string, number>>({});
-
 // ❌ Non-idempotent - appends on every run
 const badComputed = computed(() => {
   const current = logArray.get();
-  logArray.set([...current, { timestamp: Date.now() }]);  // Grows forever
+  logArray.set([...current, { timestamp: safeDateNow() }]); // Grows forever
   return items.length;
 });
 
@@ -177,7 +98,7 @@ const goodComputed = computed(() => {
   const current = cacheMap.get();
   const key = `items-${items.length}`;
   if (!(key in current)) {
-    cacheMap.set({ ...current, [key]: Date.now() });
+    cacheMap.set({ ...current, [key]: safeDateNow() });
   }
   return items.length;
 });
@@ -186,3 +107,113 @@ const goodComputed = computed(() => {
 The scheduler re-runs computations when their dependencies change. If a computation modifies a cell it depends on, it triggers itself. With idempotent operations, the second run produces no change, so the system settles.
 
 Prefer using handlers for mutations instead of side effects in `computed()`.
+
+## Reusable Computations: lift()
+
+`lift()` defines a reusable reactive computation at module scope. `computed()`
+is almost always better — reach for `lift()` only when the same derivation is
+used in multiple patterns or called multiple times in one pattern:
+
+```typescript
+// Module scope - reusable across patterns
+const getByDate = lift((args: { grouped: Record<string, Item[]>; date: string }) =>
+  args.grouped[args.date]
+);
+
+// Inside pattern: bind reactive inputs
+const result = getByDate({ grouped, date });
+
+// For one-off use, prefer computed()
+const result = computed(() => grouped[date]);
+```
+
+Like `handler()`, `lift()` must be defined at module scope, never inside the
+pattern body — see [Module Scope Requirement](../handler.md#module-scope-requirement)
+for why.
+
+## Escape Hatches
+
+- **`.sample()`** reads a cell **without creating a reactive dependency** —
+  the computed won't re-run when that cell changes. Use it for config/initial
+  values, breaking intentional reactive loops, or snapshotting. Overuse leads
+  to stale data.
+  ```typescript
+  const result = computed(() => {
+    const user = userCell.get(); // dependency - re-runs on change
+    const initial = configCell.sample(); // NO dependency
+    return doSomething(user, initial);
+  });
+  ```
+- **Imperative code** (for-loops, accumulation, `let`) belongs inside
+  `computed()` bodies, not at pattern scope. The body is plain JS over
+  unwrapped values.
+
+## Direct Property Access on Computed Objects
+
+Properties of object-shaped computeds can be accessed directly, including in
+JSX:
+
+```tsx
+const data = computed(() => ({ users, posts, config }));
+
+<div>{data.users.length} users</div>
+<div>Theme: {data.config.theme}</div>
+{data.users.map((user) => <div>{user.name}</div>)}
+```
+
+## Cookbook
+
+**Group by:**
+
+```tsx
+const groupedItems = computed(() => {
+  const groups: Record<string, Item[]> = {};
+  for (const item of items) {
+    const cat = item.category || "Uncategorized";
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(item);
+  }
+  return groups;
+});
+const categories = computed(() => Object.keys(groupedItems).sort());
+
+// In JSX:
+{categories.map((cat) => (
+  <div>
+    <h3>{cat}</h3>
+    {(groupedItems[cat] ?? []).map((item) => <div>{item.title}</div>)}
+  </div>
+))}
+```
+
+**Filter / search:**
+
+```tsx
+const searchQuery = new Writable("");
+const filteredItems = computed(() =>
+  items.filter((item) =>
+    item.title.toLowerCase().includes(searchQuery.get().toLowerCase())
+  )
+);
+
+// <cf-input $value={searchQuery} placeholder="Search..." />
+// {filteredItems.map((item) => <div>{item.title}</div>)}
+```
+
+**Statistics** (object-shaped computed; format with `.toFixed()` at the use
+site):
+
+```tsx
+const stats = computed(() => ({
+  total: items.length,
+  completed: items.filter((item) => item.done).length,
+  completionRate: items.length > 0
+    ? (items.filter((item) => item.done).length / items.length) * 100
+    : 0,
+}));
+
+// <div>Progress: {stats.completionRate.toFixed(1)}%</div>
+```
+
+For the hierarchical summary string convention used by container patterns, see
+[Summary Convention](../../conventions/summary.md).

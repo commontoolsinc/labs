@@ -17,7 +17,7 @@ type ComplexSchema = {
         readonly address: { readonly $ref: "#/$defs/address" };
         readonly preferences: {
           readonly $ref: "#/$defs/preferences";
-          readonly asCell: true;
+          readonly asCell: ["cell"];
         };
       };
     };
@@ -76,7 +76,7 @@ type ComplexSchema = {
           readonly items: { readonly type: "string" };
         };
       };
-      readonly asStream: true;
+      readonly asCell: ["stream"];
     };
     readonly item: {
       readonly type: "object";

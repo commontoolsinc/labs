@@ -1,23 +1,29 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { computed, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift(() => 42, false);
 // FIXTURE: computed-no-captures
-// Verifies: computed(() => expr) with no external captures is transformed to derive() with empty captures
-//   computed(() => 42) → derive({ type: "object", properties: {} }, resultSchema, {}, () => 42)
-// Context: The capture schema has no properties and the captures object is empty {}.
-//   The callback parameter list is also empty (no destructuring needed).
+// Verifies: computed(() => expr) with no external captures is transformed to
+// lift(false, fn)() with no input object.
 export default pattern(() => {
-    const result = __ctHelpers.derive({
-        type: "object",
-        properties: {}
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, {}, () => 42);
+    const result = __cfLift_1().for("result", true);
     return result;
-}, false as const satisfies __ctHelpers.JSONSchema, {
-    type: "number",
-    asOpaque: true
-} as const satisfies __ctHelpers.JSONSchema);
+}, false as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

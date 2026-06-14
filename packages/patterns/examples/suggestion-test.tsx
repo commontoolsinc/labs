@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { Default, NAME, pattern, UI, Writable } from "commontools";
+import { Default, NAME, pattern, UI, Writable } from "commonfabric";
 import Suggestion from "../system/suggestion.tsx";
 import Summary from "../suggestable/summary.tsx";
 import Checklist from "../suggestable/checklist.tsx";
@@ -9,7 +8,7 @@ import BudgetPlanner from "../suggestable/budget-planner.tsx";
 import PeopleList from "../suggestable/people-list.tsx";
 import EventList from "../suggestable/event-list.tsx";
 
-export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
+export default pattern<{ title: string | Default<"Suggestion Tester"> }>(
   ({ title }) => {
     const suggestion = Suggestion({
       situation: "gimme counter plz",
@@ -21,7 +20,7 @@ export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
       situation: "gimme note with the attached content",
       context: {
         content: "This is the expected content",
-        value: Writable.of(0),
+        value: new Writable(0),
       },
       initialResults: [],
     });
@@ -32,14 +31,14 @@ export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
         <div>
           <h1>Suggestion Tester</h1>
           <h2>Counter</h2>
-          <ct-cell-context $cell={suggestion} label="Counter Suggestion">
+          <cf-cell-context $cell={suggestion} label="Counter Suggestion">
             {suggestion}
-          </ct-cell-context>
+          </cf-cell-context>
 
           <h2>Note</h2>
-          <ct-cell-context $cell={suggestion2} label="Note Suggestion">
+          <cf-cell-context $cell={suggestion2} label="Note Suggestion">
             {suggestion2}
-          </ct-cell-context>
+          </cf-cell-context>
           <hr />
 
           <Summary

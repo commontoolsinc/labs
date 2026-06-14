@@ -14,7 +14,7 @@ describe("Schema: Cell types", () => {
     const name = result.properties?.name as Record<string, unknown>;
     expect(name).toBeDefined();
     expect(name.type).toBe("string");
-    expect(name.asCell).toBe(true);
+    expect(name.asCell).toEqual(["cell"]);
     expect(result.required).toContain("name");
   });
 
@@ -32,7 +32,20 @@ describe("Schema: Cell types", () => {
     expect(usersItems?.type).toBe("object");
     const usersItemsProps = usersItems?.properties as any;
     expect(usersItemsProps?.id?.type).toBe("string");
-    expect(users.asCell).toBe(true);
+    expect(users.asCell).toEqual(["cell"]);
+  });
+
+  it('handles SqliteDb (kind "sqlite")', async () => {
+    const code = `
+      interface X { db: SqliteDb; }
+    `;
+    const { type, checker } = await getTypeFromCode(code, "X");
+    const gen = createSchemaTransformerV2();
+    const result = asObjectSchema(gen.generateSchema(type, checker));
+    const db = result.properties?.db as Record<string, unknown>;
+    expect(db).toBeDefined();
+    expect(db.asCell).toEqual(["sqlite"]);
+    expect(result.required).toContain("db");
   });
 
   it("handles Stream<Cell<number>>", async () => {
@@ -45,9 +58,8 @@ describe("Schema: Cell types", () => {
     const prop = result.properties?.value as Record<string, unknown>;
     expect(prop).toBeDefined();
     expect(prop.type).toBe("number");
-    expect(prop.asStream).toBe(true);
-    // No asCell marker for inner Cell when wrapped in Stream
-    expect((prop as any).asCell).toBeUndefined();
+    expect(prop.asStream).toBeUndefined();
+    expect(prop.asCell).toEqual(["stream", "cell"]);
   });
 
   it("disallows Cell<Stream<T>> and suggests boxing", async () => {

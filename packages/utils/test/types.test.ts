@@ -2,14 +2,17 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   isBoolean,
+  isFiniteNumber,
   isFunction,
   isInstance,
   isNumber,
   isObject,
+  isPlainContainer,
+  isPlainObject,
   isRecord,
   isString,
   Mutable,
-} from "@commontools/utils/types";
+} from "@commonfabric/utils/types";
 
 type ImmutableObj<T> = {
   readonly prop: T;
@@ -197,6 +200,93 @@ describe("types", () => {
     });
   });
 
+  describe("isPlainObject", () => {
+    it("returns true for object literals", () => {
+      expect(isPlainObject({})).toBe(true);
+      expect(isPlainObject({ a: 1 })).toBe(true);
+      expect(isPlainObject(new Object())).toBe(true);
+    });
+
+    it("returns true for null-prototype objects", () => {
+      expect(isPlainObject(Object.create(null))).toBe(true);
+    });
+
+    it("returns false for arrays and class instances", () => {
+      class MyClass {}
+      expect(isPlainObject([])).toBe(false);
+      expect(isPlainObject([1, 2, 3])).toBe(false);
+      expect(isPlainObject(new Date())).toBe(false);
+      expect(isPlainObject(new Map())).toBe(false);
+      expect(isPlainObject(/regex/)).toBe(false);
+      expect(isPlainObject(new MyClass())).toBe(false);
+      expect(isPlainObject(Object.create({}))).toBe(false);
+    });
+
+    it("returns false for null, primitives, and functions", () => {
+      expect(isPlainObject(null)).toBe(false);
+      expect(isPlainObject(undefined)).toBe(false);
+      expect(isPlainObject(42)).toBe(false);
+      expect(isPlainObject("string")).toBe(false);
+      expect(isPlainObject(true)).toBe(false);
+      expect(isPlainObject(Symbol("test"))).toBe(false);
+      expect(isPlainObject(() => {})).toBe(false);
+    });
+  });
+
+  describe("isPlainContainer", () => {
+    it("returns true for plain objects", () => {
+      expect(isPlainContainer({})).toBe(true);
+      expect(isPlainContainer({ a: 1 })).toBe(true);
+      expect(isPlainContainer(new Object())).toBe(true);
+    });
+
+    it("returns true for null-prototype objects", () => {
+      expect(isPlainContainer(Object.create(null))).toBe(true);
+    });
+
+    it("returns true for arrays", () => {
+      expect(isPlainContainer([])).toBe(true);
+      expect(isPlainContainer([1, 2, 3])).toBe(true);
+      // Sparse arrays.
+      // deno-lint-ignore no-sparse-arrays
+      expect(isPlainContainer([1, , 3])).toBe(true);
+      // Frozen arrays.
+      expect(isPlainContainer(Object.freeze([]))).toBe(true);
+    });
+
+    it("returns true for frozen plain objects", () => {
+      expect(isPlainContainer(Object.freeze({}))).toBe(true);
+      expect(isPlainContainer(Object.freeze({ a: 1 }))).toBe(true);
+    });
+
+    it("returns false for class instances", () => {
+      class MyClass {}
+      expect(isPlainContainer(new MyClass())).toBe(false);
+      expect(isPlainContainer(new Date())).toBe(false);
+      expect(isPlainContainer(new Map())).toBe(false);
+      expect(isPlainContainer(new Set())).toBe(false);
+      expect(isPlainContainer(new Error("x"))).toBe(false);
+      expect(isPlainContainer(/regex/)).toBe(false);
+    });
+
+    it("returns false for objects with a non-Object/non-null prototype", () => {
+      // `Object.create({})` produces an object whose prototype is another
+      // plain object, which puts it outside the "plain" definition.
+      expect(isPlainContainer(Object.create({}))).toBe(false);
+    });
+
+    it("returns false for null, primitives, and functions", () => {
+      expect(isPlainContainer(null)).toBe(false);
+      expect(isPlainContainer(undefined)).toBe(false);
+      expect(isPlainContainer(42)).toBe(false);
+      expect(isPlainContainer(42n)).toBe(false);
+      expect(isPlainContainer("string")).toBe(false);
+      expect(isPlainContainer(true)).toBe(false);
+      expect(isPlainContainer(Symbol("test"))).toBe(false);
+      expect(isPlainContainer(() => {})).toBe(false);
+    });
+  });
+
   describe("isNumber", () => {
     it("returns true for finite numbers", () => {
       expect(isNumber(0)).toBe(true);
@@ -206,12 +296,12 @@ describe("types", () => {
     });
 
     it("returns false for Infinity", () => {
-      expect(isNumber(Infinity)).toBe(false);
-      expect(isNumber(-Infinity)).toBe(false);
+      expect(isFiniteNumber(Infinity)).toBe(false);
+      expect(isFiniteNumber(-Infinity)).toBe(false);
     });
 
     it("returns false for NaN", () => {
-      expect(isNumber(NaN)).toBe(false);
+      expect(isFiniteNumber(NaN)).toBe(false);
     });
 
     it("returns false for non-numbers", () => {

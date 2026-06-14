@@ -1,6 +1,11 @@
-import { type CellHandle, UI } from "@commontools/runtime-client";
-import { render } from "@commontools/html/client";
-import "../components/ct-cell-link/ct-cell-link.ts";
+import {
+  type CellHandle,
+  isCellHandle,
+  UI,
+} from "@commonfabric/runtime-client";
+import { render } from "@commonfabric/html/client";
+import { mayContainCfcRenderBoundary } from "./cfc-render-boundary-scan.ts";
+import "../components/cf-cell-link/cf-cell-link.ts";
 
 /**
  * State information for an active drag operation.
@@ -57,7 +62,7 @@ export function endDrag(): void {
   const finalState = currentDrag;
 
   // Notify listeners that drag is ending (with isEnding flag)
-  // Drop zones use this to emit ct-drop if pointer is over them
+  // Drop zones use this to emit cf-drop if pointer is over them
   notifyListenersOfEnd(finalState);
 
   // Call cleanup function if provided
@@ -172,7 +177,7 @@ export function subscribeToDrag(listener: DragListener): () => void {
 /**
  * Create a drag preview element for a cell.
  * Uses the cell's [UI] property if available, otherwise falls back to
- * a static ct-cell-link pill.
+ * a static cf-cell-link pill.
  *
  * @param cell - The CellHandle to create a preview for
  * @returns The preview element (not yet added to DOM)
@@ -196,8 +201,18 @@ export function createDragPreview(cell: CellHandle): HTMLElement {
 
   const cellValue = cell.get();
   if (cellValue && typeof cellValue === "object" && UI in cellValue) {
+    const ui = (cellValue as Record<string, unknown>)[UI];
+    // A CellHandle [UI] renders through the worker renderer, which enforces
+    // the CFC render policy itself. A plain-VNode [UI] renders through the
+    // legacy main-thread renderer, which has no CFC awareness — so any tree
+    // that may contain a <cf-cfc-render-boundary> must not be rendered here
+    // and gets the generic pill instead.
+    if (!isCellHandle(ui) && mayContainCfcRenderBoundary(ui)) {
+      _addFallbackPreview(preview, cell);
+      return preview;
+    }
     try {
-      render(preview, (cellValue as Record<string, unknown>)[UI] as any);
+      render(preview, ui as any);
     } catch (error) {
       console.warn("[drag-state] Failed to render [UI] preview:", error);
       _addFallbackPreview(preview, cell);
@@ -210,7 +225,7 @@ export function createDragPreview(cell: CellHandle): HTMLElement {
 }
 
 function _addFallbackPreview(container: HTMLElement, cell: CellHandle) {
-  const link = document.createElement("ct-cell-link");
+  const link = document.createElement("cf-cell-link");
   link.cell = cell;
   link.isStatic = true;
   container.appendChild(link);

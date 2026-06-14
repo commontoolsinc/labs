@@ -1,15 +1,13 @@
-/// <cts-enable />
 import {
   type Cell,
   cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
   str,
-  toSchema,
-} from "commontools";
+  type Writable,
+} from "commonfabric";
 
 interface SummaryArgs {
   value: Default<number, 0>;
@@ -28,10 +26,10 @@ interface AdjustmentRecord {
 }
 
 interface SummaryInputs {
-  current: Cell<number>;
-  history: Cell<number[]>;
-  step: Cell<number>;
-  adjustments: Cell<AdjustmentRecord[]>;
+  current: Writable<number>;
+  history: Writable<number[]>;
+  step: Writable<number>;
+  adjustments: Writable<AdjustmentRecord[]>;
 }
 
 interface SummarySnapshot {
@@ -170,13 +168,11 @@ const liftSanitizeStep = lift((input: number | undefined) =>
 );
 const liftSanitizeHistory = lift(sanitizeHistory);
 const liftSanitizeAdjustments = lift(sanitizeAdjustments);
-const liftSummary = lift(
-  toSchema<SummaryInputs>(),
-  toSchema<SummarySnapshot>(),
+const liftSummary = lift<SummaryInputs>(
   ({ current, history, step, adjustments }) => {
     const currentNumber = toInteger(current.get(), 0);
-    const historyList = sanitizeHistory(history.get());
-    const adjustmentList = sanitizeAdjustments(adjustments.get());
+    const historyList = sanitizeHistory([...history.get()]);
+    const adjustmentList = sanitizeAdjustments([...adjustments.get()]);
     const lastAdjustment = adjustmentList.at(-1);
     const delta = lastAdjustment?.delta ?? 0;
     const previous = currentNumber - delta;
@@ -221,10 +217,7 @@ export const counterWithDerivedSummary = pattern<SummaryArgs>(
     const stepValue = liftSanitizeStep(step);
     const historyView = liftSanitizeHistory(history);
     const adjustmentsView = liftSanitizeAdjustments(adjustments);
-    const sequenceView = derive(
-      sequence,
-      (count) => toInteger(count.get() ?? 0, 0),
-    );
+    const sequenceView = toInteger(sequence.get() ?? 0, 0);
 
     const summary = liftSummary({
       current: currentValue,
@@ -233,10 +226,10 @@ export const counterWithDerivedSummary = pattern<SummaryArgs>(
       adjustments: adjustmentsView,
     });
 
-    const trendText = derive(summary, (snapshot) => snapshot.trend);
-    const parityText = derive(summary, (snapshot) => snapshot.parity);
+    const trendText = summary.trend;
+    const parityText = summary.parity;
     const detail = str`Step ${stepValue} trend ${trendText}`;
-    const summaryLabel = derive(summary, (snapshot) => snapshot.label);
+    const summaryLabel = summary.label;
 
     return {
       value,

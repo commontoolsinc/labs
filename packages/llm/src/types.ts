@@ -1,12 +1,15 @@
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import { LlmPrompt } from "./prompts/prompting.ts";
 import type {
   BuiltInLLMContent,
   BuiltInLLMMessage,
   JSONSchema,
-} from "@commontools/api";
+} from "@commonfabric/api";
 
-export const DEFAULT_MODEL_NAME: ModelName = "anthropic:claude-sonnet-4-5";
+// Resolved by the toolshed at startup: prefers gateway:claude-sonnet-4-6 when
+// available, falls back to anthropic:claude-sonnet-4-5 otherwise. See
+// `registerDefaultModel` in packages/toolshed/routes/ai/llm/models.ts.
+export const DEFAULT_MODEL_NAME: ModelName = "default";
 
 // NOTE(ja): This should be an array of models, the first model will be tried, if it
 // fails, the second model will be tried, etc.
@@ -16,6 +19,7 @@ export const DEFAULT_GENERATE_OBJECT_MODELS: ModelName = "openai:gpt-5-mini";
 export type LLMResponse = BuiltInLLMMessage & {
   // The trace span ID
   id: string;
+  nativeModelToolResults?: readonly LLMNativeModelToolResult[];
 };
 
 export type ModelName = string;
@@ -26,6 +30,43 @@ export type LLMContent = BuiltInLLMContent;
 export interface LLMTool {
   description: string;
   inputSchema: JSONSchema;
+}
+
+export const GOOGLE_SEARCH_NATIVE_MODEL_TOOL = "google_search" as const;
+export const LLM_NATIVE_MODEL_TOOL_IDS = [
+  GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
+] as const;
+
+export type LLMNativeModelToolId = typeof LLM_NATIVE_MODEL_TOOL_IDS[number];
+
+export interface LLMNativeModelToolResult {
+  type: "cf-harness.native-model-tool-result";
+  toolId: LLMNativeModelToolId;
+  provider?: string;
+  providerMetadata?: unknown;
+  sources?: unknown;
+}
+
+export function isLLMNativeModelToolId(
+  input: unknown,
+): input is LLMNativeModelToolId {
+  return typeof input === "string" &&
+    (LLM_NATIVE_MODEL_TOOL_IDS as readonly string[]).includes(input);
+}
+
+export function isLLMNativeModelToolResult(
+  input: unknown,
+): input is LLMNativeModelToolResult {
+  return isRecord(input) && !Array.isArray(input) &&
+    input.type === "cf-harness.native-model-tool-result" &&
+    isLLMNativeModelToolId(input.toolId) &&
+    (!("provider" in input) || typeof input.provider === "string");
+}
+
+export function isLLMNativeModelToolResults(
+  input: unknown,
+): input is LLMNativeModelToolResult[] {
+  return Array.isArray(input) && input.every(isLLMNativeModelToolResult);
 }
 
 export interface LLMToolCall {
@@ -52,6 +93,7 @@ export interface LLMRequest {
   mode?: "json";
   metadata?: LLMRequestMetadata;
   tools?: Record<string, LLMTool>;
+  nativeModelToolIds?: readonly LLMNativeModelToolId[];
 }
 
 export interface LLMGenerateObjectRequest {
@@ -163,5 +205,8 @@ export function isLLMRequest(input: unknown): input is LLMRequest {
     (!("mode" in input) || input.mode === "json") &&
     (!("metadata" in input) || isLLMRequestMetadata(input.metadata)) &&
     (!("tools" in input) || (isRecord(input.tools) &&
-      Object.values(input.tools).every((tool: unknown) => isLLMTool(tool))));
+      Object.values(input.tools).every((tool: unknown) => isLLMTool(tool)))) &&
+    (!("nativeModelToolIds" in input) ||
+      (Array.isArray(input.nativeModelToolIds) &&
+        input.nativeModelToolIds.every(isLLMNativeModelToolId)));
 }

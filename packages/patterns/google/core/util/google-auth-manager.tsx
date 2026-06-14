@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Google Auth Manager - Unified auth management utility
  *
@@ -26,7 +25,8 @@
  * For fallback, a "Refresh Session" button is shown in the expired UI.
  */
 
-import { createAuthManager } from "../../../auth/create-auth-manager.tsx";
+import { action, navigateTo, pattern, Writable } from "commonfabric";
+import { AuthManagerBase } from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
 import GoogleAuth from "../google-auth.tsx";
 
@@ -36,14 +36,14 @@ export type {
   AuthState,
   TokenExpiryWarning,
 } from "../../../auth/auth-types.ts";
-export type {
+import type {
   AuthManagerInput as GoogleAuthManagerInput,
   AuthManagerOutput as GoogleAuthManagerOutput,
 } from "../../../auth/create-auth-manager.tsx";
+export type { GoogleAuthManagerInput, GoogleAuthManagerOutput };
 export type { Auth } from "../google-auth.tsx";
 
-/** Scope mapping for Google APIs - friendly names to URLs */
-export const SCOPE_MAP = {
+const GOOGLE_SCOPE_MAP_VALUES = {
   gmail: "https://www.googleapis.com/auth/gmail.readonly",
   gmailSend: "https://www.googleapis.com/auth/gmail.send",
   gmailModify: "https://www.googleapis.com/auth/gmail.modify",
@@ -53,9 +53,14 @@ export const SCOPE_MAP = {
   docs: "https://www.googleapis.com/auth/documents.readonly",
   contacts: "https://www.googleapis.com/auth/contacts.readonly",
 } as const;
+export type ScopeKey = keyof typeof GOOGLE_SCOPE_MAP_VALUES;
+
+/** Scope mapping for Google APIs - friendly names to URLs */
+const GOOGLE_SCOPE_MAP: Record<ScopeKey, string> = GOOGLE_SCOPE_MAP_VALUES;
+export const SCOPE_MAP = GOOGLE_SCOPE_MAP;
 
 /** Human-readable scope descriptions */
-export const SCOPE_DESCRIPTIONS = {
+const GOOGLE_SCOPE_DESCRIPTIONS = {
   gmail: "Gmail (read emails)",
   gmailSend: "Gmail (send emails)",
   gmailModify: "Gmail (add/remove labels)",
@@ -65,13 +70,12 @@ export const SCOPE_DESCRIPTIONS = {
   docs: "Docs (read document content)",
   contacts: "Contacts (read contacts)",
 } as const;
-
-export type ScopeKey = keyof typeof SCOPE_MAP;
+export const SCOPE_DESCRIPTIONS = GOOGLE_SCOPE_DESCRIPTIONS;
 
 /** Account type for multi-account support */
 export type AccountType = "default" | "personal" | "work";
 
-/** Unified scope registry for the auth manager factory */
+/** Unified scope registry for the auth manager base */
 const SCOPES: AuthManagerDescriptor["scopes"] = Object.fromEntries(
   Object.entries(SCOPE_MAP).map(([key, url]) => [
     key,
@@ -93,12 +97,51 @@ const GoogleAuthManagerDescriptor: AuthManagerDescriptor = {
   hasAvatarSupport: true,
 };
 
-export const GoogleAuthManager = createAuthManager(
-  GoogleAuthManagerDescriptor,
-  GoogleAuth,
-);
+export const GoogleAuthManager = pattern<
+  GoogleAuthManagerInput,
+  GoogleAuthManagerOutput
+>(({ requiredScopes, accountType, debugMode }) => {
+  const createAuth = action(() => {
+    const required = Array.isArray(requiredScopes) ? requiredScopes : [];
+    const emptyAuth: Record<string, unknown> = {
+      tokenType: "",
+      scope: [],
+      expiresIn: 0,
+      expiresAt: 0,
+      refreshToken: "",
+      user: { email: "", name: "", picture: "" },
+      token: "",
+    };
 
-export default GoogleAuthManager;
+    return navigateTo(
+      GoogleAuth(
+        {
+          selectedScopes: {
+            gmail: new Writable(required.includes("gmail")),
+            gmailSend: new Writable(required.includes("gmailSend")),
+            gmailModify: new Writable(required.includes("gmailModify")),
+            calendar: new Writable(required.includes("calendar")),
+            calendarWrite: new Writable(required.includes("calendarWrite")),
+            drive: new Writable(required.includes("drive")),
+            docs: new Writable(required.includes("docs")),
+            contacts: new Writable(required.includes("contacts")),
+          },
+          auth: emptyAuth,
+        } as Parameters<typeof GoogleAuth>[0],
+      ),
+    );
+  });
+
+  return AuthManagerBase({
+    requiredScopes,
+    accountType,
+    debugMode,
+    descriptor: GoogleAuthManagerDescriptor,
+    createAuth,
+  });
+});
 
 // Backward-compatible export for existing code that uses createGoogleAuth()
 export const createGoogleAuth = GoogleAuthManager;
+
+export default GoogleAuthManager;

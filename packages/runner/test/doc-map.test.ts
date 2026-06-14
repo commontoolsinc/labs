@@ -1,41 +1,21 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  it,
-} from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createRef, getEntityId } from "../src/create-ref.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import {
-  refer,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
-} from "@commontools/memory/reference";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { Runtime } from "../src/runtime.ts";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("refer", () => {
-  // Explicitly pin canonical hashing off so these tests exercise the legacy
-  // refer() path regardless of what the ambient default is.
-  beforeAll(() => {
-    setCanonicalHashConfig(false);
-  });
-  afterAll(() => {
-    resetCanonicalHashConfig();
-  });
-
+describe("hashOf", () => {
   it("should create a reference that is equal to another reference with the same source", () => {
-    const ref = refer({ hello: "world" });
-    const ref2 = refer({ hello: "world" });
-    expect(ref).toEqual(ref2);
+    const ref = hashOf({ hello: "world" });
+    const ref2 = hashOf({ hello: "world" });
+    expect(ref.toJSON!()).toEqual(ref2.toJSON!());
   });
 });
 
@@ -67,7 +47,7 @@ describe("cell-map", () => {
       const cause = "custom-cause";
       const ref = createRef(source, cause);
       const ref2 = createRef(source);
-      expect(ref).not.toEqual(ref2);
+      expect(ref.toJSON!()).not.toEqual(ref2.toJSON!());
     });
   });
 

@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { pattern, UI } from "commontools";
+import { pattern, UI } from "commonfabric";
 
 interface User {
   name: string;
@@ -36,10 +35,10 @@ interface State {
 }
 
 // FIXTURE: jsx-property-access
-// Verifies: nested property access chains in JSX are converted to .key() or wrapped in derive()
-//   state.user.name                → state.key("user", "name")  (simple access, no derive)
-//   state.user.age + 1             → derive({age}, ({state}) => state.user.age + 1)
-//   state.items[state.index]       → derive({items, index}, ...)
+// Verifies: nested property access chains in JSX are converted to .key() or wrapped in a lift-applied computation
+//   state.user.name                → state.key("user", "name")  (simple access, no lift)
+//   state.user.age + 1             → lift(({state}) => state.user.age + 1)({ age })
+//   state.items[state.index]       → lift(...)({ items, index })
 // Context: Covers deep nesting, style bindings, array access, method calls on properties
 export default pattern<State>((state) => {
   return {

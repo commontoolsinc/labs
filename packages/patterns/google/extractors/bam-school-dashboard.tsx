@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * BAM School Dashboard Pattern
  *
@@ -15,7 +14,7 @@
  * Usage:
  * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct piece link google-auth/auth bam-school-dashboard/overrideAuth
+ * 3. Link: cf piece link google-auth/auth bam-school-dashboard/overrideAuth
  */
 import {
   computed,
@@ -27,8 +26,8 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
-import type { Schema } from "commontools/schema";
+} from "commonfabric";
+import type { Schema } from "commonfabric/schema";
 import GmailExtractor, { type Email } from "../core/gmail-extractor.tsx";
 import type { Auth } from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
@@ -38,10 +37,10 @@ import ProcessingStatus from "../core/processing-status.tsx";
 // =============================================================================
 
 interface SchoolSettings {
-  childName: Default<string, "Adeline Komoroske">;
-  schoolName: Default<string, "Berkeley Arts Magnet">;
-  grade: Default<string, "Kindergarten">;
-  teacher: Default<string, "Mr. Zaragoza">;
+  childName: string | Default<"Adeline Komoroske">;
+  schoolName: string | Default<"Berkeley Arts Magnet">;
+  grade: string | Default<"Kindergarten">;
+  teacher: string | Default<"Mr. Zaragoza">;
 }
 
 type EventCategory =
@@ -279,21 +278,20 @@ const restoreEvent = handler<
 // =============================================================================
 
 interface PatternInput {
-  settings?: Default<
-    SchoolSettings,
-    {
+  settings?:
+    | SchoolSettings
+    | Default<{
       childName: "Adeline Komoroske";
       schoolName: "Berkeley Arts Magnet";
       grade: "Kindergarten";
       teacher: "Mr. Zaragoza";
-    }
-  >;
-  dismissedIds?: Writable<Default<string[], []>>;
+    }>;
+  dismissedIds?: Writable<string[] | Default<[]>>;
   overrideAuth?: Auth;
 }
 
 /** BAM School Dashboard - At-a-glance view of school events and announcements. #bamSchool */
-interface PatternOutput {
+export interface PatternOutput {
   emails: Email[];
   events: SchoolEvent[];
   urgentEvents: SchoolEvent[];
@@ -330,7 +328,7 @@ export default pattern<PatternInput, PatternOutput>(
       const sourceType = computed(() => classifySource(email.from || ""));
 
       const analysis = generateObject<SchoolEventResult>({
-        prompt: computed(() => {
+        prompt: computed((): string | undefined => {
           if (!email?.markdownContent) {
             return undefined;
           }
@@ -360,7 +358,7 @@ Extract:
 6. Is Urgent: True if within 7 days, action required, or time-sensitive
 
 7. Summary: 1-2 sentences of what parents need to know`;
-        }),
+        }) as any,
         schema: SCHOOL_EVENT_SCHEMA,
         model: "anthropic:claude-haiku-4-5",
       });
@@ -567,16 +565,16 @@ Extract:
       previewUI,
 
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           <div slot="header">
-            <ct-heading level={3}>{settings.schoolName} Dashboard</ct-heading>
+            <cf-heading level={3}>{settings.schoolName} Dashboard</cf-heading>
             <div style={{ fontSize: "12px", color: "#6b7280" }}>
               {settings.childName} - {settings.grade} - {settings.teacher}
             </div>
           </div>
 
-          <ct-vscroll flex showScrollbar>
-            <ct-vstack padding="6" gap="4">
+          <cf-vscroll flex showScrollbar>
+            <cf-vstack padding="6" gap="4">
               {/* Auth UI from GmailExtractor */}
               {extractor.ui.authStatusUI}
 
@@ -600,7 +598,7 @@ Extract:
                     gap: "12px",
                   }}
                 >
-                  <ct-loader size="sm" />
+                  <cf-loader size="sm" />
                   <span>
                     Analyzing emails... {completedCount}/{emailCount} complete
                   </span>
@@ -632,7 +630,7 @@ Extract:
                   Action Required ({urgentCount})
                 </h3>
 
-                <ct-vstack gap="3">
+                <cf-vstack gap="3">
                   {urgentEvents.map((event: SchoolEvent) => (
                     <div
                       style={{
@@ -830,7 +828,7 @@ Extract:
                       </div>
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </div>
 
               {/* ============================================================ */}
@@ -860,7 +858,7 @@ Extract:
                   )})
                 </h3>
 
-                <ct-vstack gap="3">
+                <cf-vstack gap="3">
                   {teacherMessages.map((event: SchoolEvent) => (
                     <div
                       style={{
@@ -959,7 +957,7 @@ Extract:
                       </div>
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </div>
 
               {/* ============================================================ */}
@@ -988,7 +986,7 @@ Extract:
                   )
                 </h3>
 
-                <ct-vstack gap="2">
+                <cf-vstack gap="2">
                   {upcomingEvents.map((event: SchoolEvent) => (
                     <div
                       style={{
@@ -1093,7 +1091,7 @@ Extract:
                       </div>
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </div>
 
               {/* ============================================================ */}
@@ -1111,7 +1109,7 @@ Extract:
                   All Updates ({computed(() => allEvents?.length || 0)})
                 </summary>
 
-                <ct-vstack gap="2" style={{ marginTop: "12px" }}>
+                <cf-vstack gap="2" style={{ marginTop: "12px" }}>
                   {allEvents.map((event: SchoolEvent) => (
                     <div
                       style={{
@@ -1194,7 +1192,7 @@ Extract:
                       </div>
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </details>
 
               {/* ============================================================ */}
@@ -1218,7 +1216,7 @@ Extract:
                   >
                     Dismissed ({dismissedCount})
                   </summary>
-                  <ct-vstack gap="2" style={{ marginTop: "8px" }}>
+                  <cf-vstack gap="2" style={{ marginTop: "8px" }}>
                     {allEmails.map((email: Email) => (
                       <div
                         style={{
@@ -1266,7 +1264,7 @@ Extract:
                         </button>
                       </div>
                     ))}
-                  </ct-vstack>
+                  </cf-vstack>
                 </details>
               </div>
 
@@ -1307,9 +1305,9 @@ Extract:
                   </div>
                 </div>
               </details>
-            </ct-vstack>
-          </ct-vscroll>
-        </ct-screen>
+            </cf-vstack>
+          </cf-vscroll>
+        </cf-screen>
       ),
     };
   },

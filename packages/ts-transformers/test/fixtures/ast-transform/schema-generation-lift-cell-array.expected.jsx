@@ -1,5 +1,16 @@
-import * as __ctHelpers from "commontools";
-import { Cell, lift } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { Cell, lift } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface CharmEntry {
     id: string;
     name: string;
@@ -10,7 +21,10 @@ interface CharmEntry {
 // Context: Cell wrapper must produce `asCell: true` in the schema; output schema inferred from return type
 // Test that lift with single generic parameter preserves Cell wrapper
 // This was broken on main - Cell would be unwrapped to ProxyArray
-const logCharmsList = lift({
+const logCharmsList = lift(({ charmsList }) => {
+    console.log("logCharmsList: ", charmsList.get());
+    return charmsList;
+}, {
     type: "object",
     properties: {
         charmsList: {
@@ -18,7 +32,7 @@ const logCharmsList = lift({
             items: {
                 $ref: "#/$defs/CharmEntry"
             },
-            asCell: true
+            asCell: ["readonly"]
         }
     },
     required: ["charmsList"],
@@ -36,12 +50,12 @@ const logCharmsList = lift({
             required: ["id", "name"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "array",
     items: {
         $ref: "#/$defs/CharmEntry"
     },
-    asCell: true,
+    asCell: ["cell"],
     $defs: {
         CharmEntry: {
             type: "object",
@@ -56,12 +70,8 @@ const logCharmsList = lift({
             required: ["id", "name"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, ({ charmsList }) => {
-    console.log("logCharmsList: ", charmsList.get());
-    return charmsList;
-});
+} as const satisfies __cfHelpers.JSONSchema);
 export default logCharmsList;
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);

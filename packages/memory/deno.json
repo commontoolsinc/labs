@@ -1,11 +1,10 @@
 {
-  "name": "@commontools/memory",
+  "name": "@commonfabric/memory",
   "tasks": {
-    "dev": "deno run --allow-read --allow-write --allow-net --allow-ffi --allow-env deno.ts",
     "check": "deno check .",
     "just-test": {
-      "description": "Just run unit tests without type checking",
-      "command": "deno test --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check"
+      "description": "Run unit tests",
+      "command": "deno test --allow-read --allow-write --allow-net --allow-ffi --allow-env"
     },
     "test": {
       "description": "Type check & run tests",
@@ -14,13 +13,9 @@
         "just-test"
       ]
     },
-    "migrate": {
-      "description": "Performs database migration",
-      "command": "deno run -A ./migrate.ts"
-    },
     "bench": {
-      "description": "Run benchmarks for fact operations",
-      "command": "deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check test/memory_bench.ts"
+      "description": "Run memory benchmarks",
+      "command": "deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env"
     }
   },
   "test": {
@@ -31,38 +26,33 @@
   "exports": {
     ".": "./lib.ts",
     "./acl": "./acl.ts",
-    "./deno": "./deno.ts",
     "./interface": "./interface.ts",
     "./fact": "./fact.ts",
     "./changes": "./changes.ts",
     "./selection": "./selection.ts",
     "./consumer": "./consumer.ts",
-    "./provider": "./provider.ts",
+    "./reference": "./reference.ts",
+    "./v2": "./v2.ts",
+    "./v2/client": "./v2/client.ts",
+    "./v2/engine": "./v2/engine.ts",
+    "./v2/server": "./v2/server.ts",
+    "./v2/standalone": "./v2/standalone.ts",
+    "./v2/session-open-auth": "./v2/session-open-auth.ts",
+    "./v2/storage-path": "./v2/storage-path.ts",
     "./commit": "./commit.ts",
     "./codec": "./codec.ts",
-    "./reference": "./reference.ts",
-    "./storable-value-modern": "./storable-value-modern.ts",
     "./schema": "./schema.ts",
-    "./storable-value-legacy": "./storable-value-legacy.ts",
-    "./storable-value": "./storable-value.ts",
-    "./storable-value-utils": "./storable-value-utils.ts",
-    "./storable-protocol": "./storable-protocol.ts",
-    "./type-tags": "./type-tags.ts",
-    "./json-encoding": "./json-encoding.ts",
-    "./json-encoding-dispatch": "./json-encoding-dispatch.ts",
-    "./json-type-handlers": "./json-type-handlers.ts",
-    "./explicit-tag-storable": "./explicit-tag-storable.ts",
-    "./unknown-storable": "./unknown-storable.ts",
-    "./problematic-storable": "./problematic-storable.ts",
-    "./deep-freeze": "./deep-freeze.ts",
-    "./frozen-builtins": "./frozen-builtins.ts",
-    "./storable-native-instances": "./storable-native-instances.ts",
-    "./special-primitive-value": "./special-primitive-value.ts",
-    "./storable-content-id": "./storable-content-id.ts"
+    "./sqlite": "./v2/sqlite/mod.ts",
+    "./sqlite/columns": "./v2/sqlite/columns.ts",
+    "./sqlite/guard": "./v2/sqlite/guard.ts",
+    "./sqlite/schema": "./v2/sqlite/schema.ts",
+    "./sqlite/row-label": "./v2/sqlite/row-label.ts",
+    "./sqlite/exec": "./v2/sqlite/exec.ts"
   },
   "imports": {
-    "@commontools/leb128": "jsr:@commontools/leb128",
+    "@commonfabric/leb128": "jsr:@commonfabric/leb128",
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
+    "@denosaurs/plug": "jsr:@denosaurs/plug@1",
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.0"
   }
 }

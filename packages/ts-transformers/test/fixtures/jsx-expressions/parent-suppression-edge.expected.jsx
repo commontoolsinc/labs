@@ -1,5 +1,16 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     user: {
         name: string;
@@ -75,10 +86,298 @@ interface State {
         }>;
     };
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        user: {
+            name: string;
+            profile: {
+                location: string;
+                bio: string;
+            };
+        };
+    };
+}, string>(({ state }) => state.user.name + " from " + state.user.profile.location + " - " +
+    state.user.profile.bio, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        },
+                        profile: {
+                            type: "object",
+                            properties: {
+                                location: {
+                                    type: "string"
+                                },
+                                bio: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["location", "bio"]
+                        }
+                    },
+                    required: ["name", "profile"]
+                }
+            },
+            required: ["user"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_2 = __cfHelpers.lift<{
+    state: {
+        user: {
+            age: number;
+        };
+    };
+}, number>(({ state }) => state.user.age * 12, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        age: {
+                            type: "number"
+                        }
+                    },
+                    required: ["age"]
+                }
+            },
+            required: ["user"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_3 = __cfHelpers.lift<{
+    state: {
+        user: {
+            age: number;
+        };
+    };
+}, number>(({ state }) => state.user.age * 365, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        age: {
+                            type: "number"
+                        }
+                    },
+                    required: ["age"]
+                }
+            },
+            required: ["user"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_4 = __cfHelpers.lift<{
+    state: {
+        user: {
+            name: string;
+            settings: {
+                theme: string;
+            };
+        };
+    };
+}, string>(({ state }) => state.user.name + " has notifications on with " +
+    state.user.settings.theme + " theme", {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        },
+                        settings: {
+                            type: "object",
+                            properties: {
+                                theme: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["theme"]
+                        }
+                    },
+                    required: ["name", "settings"]
+                }
+            },
+            required: ["user"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_5 = __cfHelpers.lift<{
+    state: {
+        user: {
+            name: string;
+        };
+    };
+}, string>(({ state }) => state.user.name + " has notifications off", {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        }
+                    },
+                    required: ["name"]
+                }
+            },
+            required: ["user"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_6 = __cfHelpers.lift<{
+    state: {
+        config: {
+            theme: {
+                spacing: {
+                    small: number;
+                    medium: number;
+                    large: number;
+                };
+            };
+        };
+    };
+}, number>(({ state }) => state.config.theme.spacing.small +
+    state.config.theme.spacing.medium +
+    state.config.theme.spacing.large, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                config: {
+                    type: "object",
+                    properties: {
+                        theme: {
+                            type: "object",
+                            properties: {
+                                spacing: {
+                                    type: "object",
+                                    properties: {
+                                        small: {
+                                            type: "number"
+                                        },
+                                        medium: {
+                                            type: "number"
+                                        },
+                                        large: {
+                                            type: "number"
+                                        }
+                                    },
+                                    required: ["small", "medium", "large"]
+                                }
+                            },
+                            required: ["spacing"]
+                        }
+                    },
+                    required: ["theme"]
+                }
+            },
+            required: ["config"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_7 = __cfHelpers.lift<{
+    state: {
+        user: {
+            name: string;
+        };
+    };
+}, string>(({ state }) => state.user.name.toUpperCase(), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        }
+                    },
+                    required: ["name"]
+                }
+            },
+            required: ["user"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_8 = __cfHelpers.lift<{
+    state: {
+        user: {
+            email: string;
+        };
+    };
+}, string>(({ state }) => state.user.email.toLowerCase(), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        email: {
+                            type: "string"
+                        }
+                    },
+                    required: ["email"]
+                }
+            },
+            required: ["user"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: parent-suppression-edge
-// Verifies: property access suppression -- sibling properties share a captured parent in derive()
-//   {state.user.name} ... {state.user.age} → individual .key() or shared derive({user: {...}})
-//   {state.config.theme.colors.primary}    → derive with deeply nested capture
+// Verifies: property access suppression -- sibling properties share a captured parent in a lift-applied computation
+//   {state.user.name} ... {state.user.age} → individual .key() or shared lift(...)({ user: {...} })
+//   {state.config.theme.colors.primary}    → lift-applied computation with deeply nested capture
 // Context: Tests that the transformer correctly deduplicates and suppresses parent captures
 export default pattern((state) => {
     return {
@@ -93,113 +392,29 @@ export default pattern((state) => {
         {/* String concatenation with multiple property accesses */}
         <p>
           Full profile:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        user: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string",
-                                    asOpaque: true
-                                },
-                                profile: {
-                                    type: "object",
-                                    properties: {
-                                        location: {
-                                            type: "string",
-                                            asOpaque: true
-                                        },
-                                        bio: {
-                                            type: "string",
-                                            asOpaque: true
-                                        }
-                                    },
-                                    required: ["location", "bio"]
-                                }
-                            },
-                            required: ["name", "profile"]
-                        }
-                    },
-                    required: ["user"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          {__cfLift_1({ state: {
                 user: {
-                    name: state.key("user").name,
+                    name: state.key("user", "name"),
                     profile: {
-                        location: state.key("user").profile.location,
-                        bio: state.key("user").profile.bio
+                        location: state.key("user", "profile", "location"),
+                        bio: state.key("user", "profile", "bio")
                     }
                 }
-            } }, ({ state }) => state.user.name + " from " + state.user.profile.location + " - " +
-            state.user.profile.bio)}
+            } })}
         </p>
 
         {/* Arithmetic with multiple properties from same base */}
         <p>
-          Age calculation: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        user: {
-                            type: "object",
-                            properties: {
-                                age: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["age"]
-                        }
-                    },
-                    required: ["user"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          Age calculation: {__cfLift_2({ state: {
                 user: {
-                    age: state.key("user").age
+                    age: state.key("user", "age")
                 }
-            } }, ({ state }) => state.user.age * 12)} months, or{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        user: {
-                            type: "object",
-                            properties: {
-                                age: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["age"]
-                        }
-                    },
-                    required: ["user"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+            } })} months, or{" "}
+          {__cfLift_3({ state: {
                 user: {
-                    age: state.key("user").age
+                    age: state.key("user", "age")
                 }
-            } }, ({ state }) => state.user.age * 365)} days
+            } })} days
         </p>
 
         <h3>Deeply Nested Property Chains</h3>
@@ -221,16 +436,15 @@ export default pattern((state) => {
         {/* Mixed depth accesses */}
         <p>
           Config summary: Dark mode{" "}
-          {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+          {__cfHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["enabled", "disabled"]
-        } as const satisfies __ctHelpers.JSONSchema, state.key("config", "features", "darkMode"), "enabled", "disabled")} with{" "}
+        } as const satisfies __cfHelpers.JSONSchema, state.key("config", "features", "darkMode"), "enabled", "disabled")} with{" "}
           {state.key("config", "theme", "colors", "primary")} primary color
         </p>
 
@@ -273,261 +487,76 @@ export default pattern((state) => {
         <h3>Complex Expressions with Shared Bases</h3>
         {/* Conditional with multiple property accesses */}
         <p>
-          Status: {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+          Status: {__cfHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, state.key("user", "settings", "notifications"), __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        user: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string",
-                                    asOpaque: true
-                                },
-                                settings: {
-                                    type: "object",
-                                    properties: {
-                                        theme: {
-                                            type: "string",
-                                            asOpaque: true
-                                        }
-                                    },
-                                    required: ["theme"]
-                                }
-                            },
-                            required: ["name", "settings"]
-                        }
-                    },
-                    required: ["user"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, state.key("user", "settings", "notifications"), __cfLift_4({ state: {
                 user: {
-                    name: state.key("user").name,
+                    name: state.key("user", "name"),
                     settings: {
-                        theme: state.key("user").settings.theme
+                        theme: state.key("user", "settings", "theme")
                     }
                 }
-            } }, ({ state }) => state.user.name + " has notifications on with " +
-            state.user.settings.theme + " theme"), __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        user: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    },
-                    required: ["user"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+            } }), __cfLift_5({ state: {
                 user: {
-                    name: state.key("user").name
+                    name: state.key("user", "name")
                 }
-            } }, ({ state }) => state.user.name + " has notifications off"))}
+            } }))}
         </p>
 
         {/* Computed expression with shared base */}
         <p>
-          Spacing calc: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        config: {
-                            type: "object",
-                            properties: {
-                                theme: {
-                                    type: "object",
-                                    properties: {
-                                        spacing: {
-                                            type: "object",
-                                            properties: {
-                                                small: {
-                                                    type: "number",
-                                                    asOpaque: true
-                                                },
-                                                medium: {
-                                                    type: "number",
-                                                    asOpaque: true
-                                                },
-                                                large: {
-                                                    type: "number",
-                                                    asOpaque: true
-                                                }
-                                            },
-                                            required: ["small", "medium", "large"]
-                                        }
-                                    },
-                                    required: ["spacing"]
-                                }
-                            },
-                            required: ["theme"]
-                        }
-                    },
-                    required: ["config"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          Spacing calc: {__cfLift_6({ state: {
                 config: {
                     theme: {
                         spacing: {
-                            small: state.key("config").theme.spacing.small,
-                            medium: state.key("config").theme.spacing.medium,
-                            large: state.key("config").theme.spacing.large
+                            small: state.key("config", "theme", "spacing", "small"),
+                            medium: state.key("config", "theme", "spacing", "medium"),
+                            large: state.key("config", "theme", "spacing", "large")
                         }
                     }
                 }
-            } }, ({ state }) => state.config.theme.spacing.small +
-            state.config.theme.spacing.medium +
-            state.config.theme.spacing.large)} total
+            } })} total
         </p>
 
         {/* Boolean expressions with multiple properties */}
         <p>
           Features:{" "}
-          {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+          {__cfHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Full features", "Limited features"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        config: {
-                            type: "object",
-                            properties: {
-                                features: {
-                                    type: "object",
-                                    properties: {
-                                        darkMode: {
-                                            type: "boolean",
-                                            asOpaque: true
-                                        },
-                                        animations: {
-                                            type: "boolean",
-                                            asOpaque: true
-                                        }
-                                    },
-                                    required: ["darkMode", "animations"]
-                                }
-                            },
-                            required: ["features"]
-                        }
-                    },
-                    required: ["config"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                config: {
-                    features: {
-                        darkMode: state.key("config").features.darkMode,
-                        animations: state.key("config").features.animations
-                    }
-                }
-            } }, ({ state }) => state.config.features.darkMode && state.config.features.animations), "Full features", "Limited features")}
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.when({
+            type: "boolean"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __cfHelpers.JSONSchema, state.key("config", "features", "darkMode"), state.key("config", "features", "animations")), "Full features", "Limited features")}
         </p>
 
         <h3>Method Calls on Shared Bases</h3>
         {/* Multiple method calls on properties from same base */}
         <p>
-          Formatted: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        user: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    },
-                    required: ["user"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          Formatted: {__cfLift_7({ state: {
                 user: {
-                    name: state.key("user").name
+                    name: state.key("user", "name")
                 }
-            } }, ({ state }) => state.user.name.toUpperCase())} -{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        user: {
-                            type: "object",
-                            properties: {
-                                email: {
-                                    type: "string",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["email"]
-                        }
-                    },
-                    required: ["user"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+            } })} -{" "}
+          {__cfLift_8({ state: {
                 user: {
-                    email: state.key("user").email
+                    email: state.key("user", "email")
                 }
-            } }, ({ state }) => state.user.email.toLowerCase())}
+            } })}
         </p>
 
         {/* Property access and method calls mixed */}
@@ -553,22 +582,21 @@ export default pattern((state) => {
         <p>
           Nested refs: {state.key("config", "theme", "colors", "primary")} in{" "}
           {state.key("config", "theme", "fonts", "body")} with{" "}
-          {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+          {__cfHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["animations", "no animations"]
-        } as const satisfies __ctHelpers.JSONSchema, state.key("config", "features", "animations"), "animations", "no animations")}
+        } as const satisfies __cfHelpers.JSONSchema, state.key("config", "features", "animations"), "animations", "no animations")}
         </p>
 
         <h3>Extreme Parent Suppression Test</h3>
         {/* Using every level of a deep chain */}
         <p>
-          All levels: Root: {__ctHelpers.ifElse({
+          All levels: Root: {__cfHelpers.ifElse({
             type: "object",
             properties: {
                 nested: {
@@ -608,16 +636,15 @@ export default pattern((state) => {
                     required: ["structure"]
                 }
             },
-            required: ["nested"],
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+            required: ["nested"]
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["exists", "missing"]
-        } as const satisfies __ctHelpers.JSONSchema, state.key("deeply"), "exists", "missing")}, Nested:{" "}
-          {__ctHelpers.ifElse({
+        } as const satisfies __cfHelpers.JSONSchema, state.key("deeply"), "exists", "missing")}, Nested:{" "}
+          {__cfHelpers.ifElse({
             type: "object",
             properties: {
                 structure: {
@@ -651,15 +678,14 @@ export default pattern((state) => {
                     required: ["with"]
                 }
             },
-            required: ["structure"],
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+            required: ["structure"]
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["exists", "missing"]
-        } as const satisfies __ctHelpers.JSONSchema, state.key("deeply", "nested"), "exists", "missing")}, Value:{" "}
+        } as const satisfies __cfHelpers.JSONSchema, state.key("deeply", "nested"), "exists", "missing")}, Value:{" "}
           {state.key("deeply", "nested", "structure", "with", "many", "levels", "value")}
         </p>
       </div>),
@@ -903,7 +929,7 @@ export default pattern((state) => {
         }
     },
     required: ["user", "config", "data", "deeply", "arrays"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -916,11 +942,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -933,8 +958,17 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2,
+    __cfLift_3,
+    __cfLift_4,
+    __cfLift_5,
+    __cfLift_6,
+    __cfLift_7,
+    __cfLift_8
+});

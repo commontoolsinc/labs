@@ -3,10 +3,10 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import "@commontools/utils/equal-ignoring-symbols";
+import "@commonfabric/utils/equal-ignoring-symbols";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { isCell } from "../src/cell.ts";
 import { ID, JSONSchema } from "../src/builder/types.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
@@ -256,7 +256,7 @@ describe("asCell", () => {
         type: "object",
         properties: { a: { type: "number" } },
         required: ["a"],
-        asCell: true,
+        asCell: ["cell"],
       } as const satisfies JSONSchema,
       tx,
     );
@@ -364,7 +364,7 @@ describe("asCell with schema", () => {
         id: { type: "number" },
         metadata: {
           type: "object",
-          asCell: true,
+          asCell: ["cell"],
         },
       },
       required: ["id", "metadata"],
@@ -487,14 +487,14 @@ describe("asCell with schema", () => {
                 name: { type: "string" },
                 settings: {
                   type: "object",
-                  asCell: true,
+                  asCell: ["cell"],
                 },
               },
               required: ["name", "settings"],
             },
             metadata: {
               type: "object",
-              asCell: true,
+              asCell: ["cell"],
             },
           },
           required: ["profile", "metadata"],
@@ -594,7 +594,7 @@ describe("asCell with schema", () => {
             createdAt: { type: "string" },
             type: { type: "string" },
           },
-          asCell: true,
+          asCell: ["cell"],
         },
       },
       required: ["id", "metadata"],
@@ -653,7 +653,7 @@ describe("asCell with schema", () => {
           type: "object",
           additionalProperties: {
             type: "object",
-            asCell: true,
+            asCell: ["cell"],
           },
         },
       },
@@ -705,7 +705,7 @@ describe("asCell with schema", () => {
       properties: {
         context: {
           type: "object",
-          additionalProperties: { asCell: true },
+          additionalProperties: { asCell: ["cell"] },
         },
       },
       required: ["context"],
@@ -759,7 +759,7 @@ describe("asCell with schema", () => {
       properties: {
         context: {
           type: "object",
-          additionalProperties: { asCell: true },
+          additionalProperties: { asCell: ["cell"] },
         },
       },
       required: ["context"],
@@ -815,7 +815,7 @@ describe("asCell with schema", () => {
       properties: {
         context: {
           type: "object",
-          additionalProperties: { asCell: true },
+          additionalProperties: { asCell: ["cell"] },
         },
       },
       required: ["context"],
@@ -884,7 +884,7 @@ describe("asCell with schema", () => {
         properties: {
           context: {
             type: "object",
-            additionalProperties: { asCell: true },
+            additionalProperties: { asCell: ["cell"] },
           },
         },
         required: ["context"],
@@ -1033,7 +1033,7 @@ describe("asCell with schema", () => {
       },
       additionalProperties: {
         type: "object",
-        properties: { anything: { asCell: true } },
+        properties: { anything: { asCell: ["cell"] } },
       },
     } as const satisfies JSONSchema;
 

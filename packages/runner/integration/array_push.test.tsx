@@ -1,13 +1,12 @@
-/// <cts-enable />
 import {
   cell,
-  derive,
+  computed,
   handler,
   JSONSchema,
   NAME,
   pattern,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 // dummy input schema
 const InputSchema = {
@@ -23,16 +22,16 @@ const OutputSchema = {
       type: "array",
       items: { type: "number" },
       default: [],
-      asCell: true,
+      asCell: ["cell"],
     },
     my_objects_array: {
       type: "array",
       items: { type: "object", properties: { count: { type: "number" } } },
       default: [],
-      asCell: true,
+      asCell: ["cell"],
     },
-    pushNumbersHandler: { asStream: true, type: "object", properties: {} },
-    pushObjectsHandler: { asStream: true, type: "object", properties: {} },
+    pushNumbersHandler: { asCell: ["stream"], type: "object", properties: {} },
+    pushObjectsHandler: { asCell: ["stream"], type: "object", properties: {} },
   },
   required: [
     "my_numbers_array",
@@ -52,7 +51,7 @@ const pushNumbersHandler = handler(
   {
     type: "object",
     properties: {
-      array: { type: "array", items: { type: "number" }, asCell: true },
+      array: { type: "array", items: { type: "number" }, asCell: ["cell"] },
     },
     required: ["array"],
   },
@@ -76,7 +75,7 @@ const pushObjectsHandler = handler(
       array: {
         type: "array",
         items: { type: "object", properties: { count: { type: "number" } } },
-        asCell: true,
+        asCell: ["cell"],
       },
     },
     required: ["array"],
@@ -101,7 +100,7 @@ export default pattern(
         <div>
           <h3>Array Push Test</h3>
           <p>
-            Array length: {derive(my_numbers_array, (arr) => arr.get().length)}
+            Array length: {computed(() => my_numbers_array.get().length)}
           </p>
           <p>
             <ul>

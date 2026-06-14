@@ -1,11 +1,11 @@
-import { env, Page, waitFor } from "@commontools/integration";
-import { PieceController, PiecesController } from "@commontools/piece/ops";
-import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { env, Page, waitFor } from "@commonfabric/integration";
+import { PieceController, PiecesController } from "@commonfabric/piece/ops";
+import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assertEquals } from "@std/assert";
-import { Identity } from "@commontools/identity";
-import { FileSystemProgramResolver } from "@commontools/js-compiler";
+import { Identity } from "@commonfabric/identity";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -86,7 +86,7 @@ describe("nested counter integration test", () => {
 
     // Click increment button (second button - first is decrement)
     // Use retry logic to handle unstable box model during page settling
-    await clickNthButton(page, "[data-ct-button]", 1);
+    await clickNthButton(page, "[data-cf-button]", 1);
 
     // Wait for piece result update
     await waitFor(async () => {

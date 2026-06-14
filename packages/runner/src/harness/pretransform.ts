@@ -1,4 +1,5 @@
-import { transformCtDirective } from "@commontools/ts-transformers";
+import { transformCfDirective } from "@commonfabric/ts-transformers";
+import ts from "typescript";
 import { RuntimeProgram } from "./types.ts";
 
 export function pretransformProgram(
@@ -10,10 +11,9 @@ export function pretransformProgram(
   return program;
 }
 
-// For each source file in the program, replace
-// a `/// <cts-enable />` directive line with an
-// internal import statement for use by the AST transformer
-// to provide access to helpers like `derive`, etc.
+// For each source file in the program, inject the internal helper import used
+// by the AST transformer by default. Files can explicitly opt out with
+// `/// <cf-disable-transform />`.
 export function transformInjectHelperModule(
   program: RuntimeProgram,
 ): RuntimeProgram {
@@ -21,7 +21,11 @@ export function transformInjectHelperModule(
     main: program.main,
     files: program.files.map((source) => ({
       name: source.name,
-      contents: transformCtDirective(source.contents),
+      contents: source.name.endsWith(".d.ts")
+        ? source.contents
+        : normalizeMixedModuleImports(
+          transformCfDirective(source.contents, source.name),
+        ),
     })),
     mainExport: program.mainExport,
   };
@@ -55,6 +59,130 @@ export function transformProgramWithPrefix(
   };
 }
 
+// ESM variant: inject the helper import and prefix files with `id` (so source
+// locations / identity match the AMD path), but DO NOT add the synthetic
+// `/index.ts` re-export. That index exists only to defeat `outFile` prefix
+// flattening in the AMD bundler; a per-module ESM graph has no bundle, so the
+// program entry is simply the prefixed main module.
+export function pretransformProgramForModules(
+  program: RuntimeProgram,
+  id: string,
+): RuntimeProgram {
+  program = transformInjectHelperModule(program);
+  return {
+    main: prefix(program.main, id),
+    files: program.files.map((source) => ({
+      name: prefix(source.name, id),
+      contents: source.contents,
+    })),
+    ...(program.mainExport !== undefined
+      ? { mainExport: program.mainExport }
+      : {}),
+  };
+}
+
 function prefix(filename: string, id: string): string {
   return `/${id}${filename}`;
+}
+
+function normalizeMixedModuleImports(source: string): string {
+  const sourceFile = ts.createSourceFile(
+    "source.tsx",
+    source,
+    ts.ScriptTarget.ES2023,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  let changed = false;
+  const statements = sourceFile.statements.flatMap((statement) => {
+    if (
+      !ts.isImportDeclaration(statement) ||
+      !statement.importClause ||
+      !statement.importClause.namedBindings ||
+      !ts.isNamedImports(statement.importClause.namedBindings)
+    ) {
+      return [statement];
+    }
+
+    const { importClause } = statement;
+    const namedBindings = importClause.namedBindings;
+    if (!namedBindings || !ts.isNamedImports(namedBindings)) {
+      return [statement];
+    }
+
+    if (importClause.name) {
+      changed = true;
+      return [
+        ts.factory.createImportDeclaration(
+          statement.modifiers,
+          ts.factory.createImportClause(
+            importClause.isTypeOnly,
+            importClause.name,
+            undefined,
+          ),
+          statement.moduleSpecifier,
+          statement.attributes,
+        ),
+        ts.factory.createImportDeclaration(
+          statement.modifiers,
+          ts.factory.createImportClause(
+            importClause.isTypeOnly,
+            undefined,
+            namedBindings,
+          ),
+          statement.moduleSpecifier,
+          statement.attributes,
+        ),
+      ];
+    }
+
+    const defaultSpecifier = namedBindings.elements.find((
+      element,
+    ) => element.propertyName?.text === "default");
+    if (!defaultSpecifier) {
+      return [statement];
+    }
+
+    changed = true;
+    const remainingElements = namedBindings.elements.filter((
+      element,
+    ) => element !== defaultSpecifier);
+    const rewrittenStatements = [
+      ts.factory.createImportDeclaration(
+        statement.modifiers,
+        ts.factory.createImportClause(
+          importClause.isTypeOnly || defaultSpecifier.isTypeOnly,
+          defaultSpecifier.name,
+          undefined,
+        ),
+        statement.moduleSpecifier,
+        statement.attributes,
+      ),
+    ];
+
+    if (remainingElements.length > 0) {
+      rewrittenStatements.push(
+        ts.factory.createImportDeclaration(
+          statement.modifiers,
+          ts.factory.createImportClause(
+            importClause.isTypeOnly,
+            undefined,
+            ts.factory.createNamedImports(remainingElements),
+          ),
+          statement.moduleSpecifier,
+          statement.attributes,
+        ),
+      );
+    }
+
+    return rewrittenStatements;
+  });
+
+  if (!changed) {
+    return source;
+  }
+
+  return ts.createPrinter({
+    newLine: ts.NewLineKind.LineFeed,
+  }).printFile(ts.factory.updateSourceFile(sourceFile, statements));
 }

@@ -1,12 +1,8 @@
 import { assert, assertMatch } from "@std/assert";
-import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
+import { describe, it } from "@std/testing/bdd";
 import { alice, bob, space } from "./principal.ts";
 import * as Access from "../access.ts";
-import {
-  refer,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
-} from "../reference.ts";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { type ACL, type Invocation } from "../interface.ts";
 import { ANYONE_USER, checkACL } from "../acl.ts";
 
@@ -14,15 +10,6 @@ import { ANYONE_USER, checkACL } from "../acl.ts";
 const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
 
 describe("acl", () => {
-  // Explicitly pin canonical hashing off so these tests exercise the legacy
-  // refer() path regardless of what the ambient default is.
-  beforeAll(() => {
-    setCanonicalHashConfig(false);
-  });
-  afterAll(() => {
-    resetCanonicalHashConfig();
-  });
-
   it("checkACL - READ capability allows query commands", () => {
     const acl: ACL = {
       [bob.did()]: "READ",
@@ -82,7 +69,7 @@ describe("acl", () => {
       prf: [],
     };
 
-    const result = await Access.authorize([refer(invocation)], alice);
+    const result = await Access.authorize([hashOf(invocation)], alice);
     assert(result.ok, "authorization was issued");
     const authorization = result.ok;
 
@@ -101,7 +88,7 @@ describe("acl", () => {
       prf: [],
     };
 
-    const result = await Access.authorize([refer(invocation)], space);
+    const result = await Access.authorize([hashOf(invocation)], space);
     assert(result.ok, "authorization was issued");
     const authorization = result.ok;
 
@@ -119,7 +106,7 @@ describe("acl", () => {
       prf: [],
     };
 
-    const result = await Access.authorize([refer(invocation)], bob);
+    const result = await Access.authorize([hashOf(invocation)], bob);
     assert(result.ok, "authorization was issued");
     const authorization = result.ok;
 
@@ -144,7 +131,7 @@ describe("acl", () => {
       prf: [],
     };
 
-    const result = await Access.authorize([refer(invocation)], bob);
+    const result = await Access.authorize([hashOf(invocation)], bob);
     assert(result.ok, "authorization was issued");
     const authorization = result.ok;
 
@@ -170,7 +157,7 @@ describe("acl", () => {
       prf: [],
     };
 
-    const result = await Access.authorize([refer(invocation)], bob);
+    const result = await Access.authorize([hashOf(invocation)], bob);
     assert(result.ok, "authorization was issued");
     const authorization = result.ok;
 

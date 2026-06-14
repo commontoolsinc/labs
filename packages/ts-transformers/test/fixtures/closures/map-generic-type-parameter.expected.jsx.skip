@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, OpaqueRef } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern, OpaqueRef } from "commonfabric";
 interface Email {
     id: string;
     content: string;
@@ -18,7 +18,7 @@ interface State {
  */
 function processWithType<T>(emails: OpaqueRef<Email[]>, _prompt: string) {
     // T is used here but should NOT be captured - it's a type, not a value
-    return emails.mapWithPattern(__ctHelpers.pattern({
+    return emails.mapWithPattern(__cfHelpers.pattern({
         type: "object",
         properties: {
             element: {
@@ -44,7 +44,7 @@ function processWithType<T>(emails: OpaqueRef<Email[]>, _prompt: string) {
                 required: ["id", "content"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             id: {
@@ -53,7 +53,7 @@ function processWithType<T>(emails: OpaqueRef<Email[]>, _prompt: string) {
             type: {}
         },
         required: ["id", "type"]
-    } as const satisfies __ctHelpers.JSONSchema, ({ element: email, params: {} }) => {
+    } as const satisfies __cfHelpers.JSONSchema, ({ element: email, params: {} }) => {
         // The type annotation <T> should not cause T to be captured
         const result = { id: email.id, type: "processed" as T };
         return result;
@@ -88,7 +88,7 @@ export default pattern({
             required: ["id", "content"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         results: {
@@ -109,11 +109,11 @@ export default pattern({
         }
     },
     required: ["results"]
-} as const satisfies __ctHelpers.JSONSchema, (state) => {
+} as const satisfies __cfHelpers.JSONSchema, (state) => {
     const results = processWithType<string>(state.emails, state.prompt);
     return { results };
 });
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

@@ -1,5 +1,16 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern, UI } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { computed, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     text: string;
     searchTerm: string;
@@ -22,884 +33,526 @@ interface State {
     words: string[];
     separator: string;
 }
-// FIXTURE: method-chains
-// Verifies: chained method calls and array method chains in JSX are wrapped in derive()
-//   state.text.trim().toLowerCase()          → derive({text}, ...)
-//   state.items.filter(fn).map(fn)           → .filterWithPattern(...).mapWithPattern(...)
-//   state.prices.reduce(fn, 0)               → derive({prices, discount}, ...)
-// Context: Covers string chains, filter/map chains, reactive args, computed values, complex predicates
-export default pattern((state) => {
-    return {
-        [UI]: (<div>
-        <h3>Chained String Methods</h3>
-        {/* Simple chain */}
-        <p>Trimmed lower: {__ctHelpers.derive({
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        text: string;
+    };
+}, string>(({ state }) => state.text.trim().toLowerCase(), {
+    type: "object",
+    properties: {
+        state: {
             type: "object",
             properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        text: {
-                            type: "string",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["text"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                text: state.key("text")
-            } }, ({ state }) => state.text.trim().toLowerCase())}</p>
-
-        {/* Chain with reactive argument */}
-        <p>
-          Contains search:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        text: {
-                            type: "string",
-                            asOpaque: true
-                        },
-                        searchTerm: {
-                            type: "string",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["text", "searchTerm"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                text: state.key("text"),
-                searchTerm: state.key("searchTerm")
-            } }, ({ state }) => state.text.toLowerCase().includes(state.searchTerm.toLowerCase()))}
-        </p>
-
-        {/* Longer chain */}
-        <p>
-          Processed:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        text: {
-                            type: "string",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["text"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                text: state.key("text")
-            } }, ({ state }) => state.text.trim().toLowerCase().replace("old", "new").toUpperCase())}
-        </p>
-
-        <h3>Array Method Chains</h3>
-        {/* Filter then length */}
-        <p>
-          Count above threshold:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        },
-                        threshold: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items", "threshold"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.key("items"),
-                threshold: state.key("threshold")
-            } }, ({ state }) => state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-            const x = __ct_pattern_input.key("element");
-            const state = __ct_pattern_input.key("params", "state");
-            return x > state.key("threshold");
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "number"
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                threshold: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["threshold"]
-                        }
-                    },
-                    required: ["state"]
-                }
-            },
-            required: ["element", "params"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema), {
-            state: {
-                threshold: state.threshold
-            }
-        }).length)}
-        </p>
-
-        {/* Filter then map */}
-        <ul>
-          {state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-            const x = __ct_pattern_input.key("element");
-            const state = __ct_pattern_input.key("params", "state");
-            return __ctHelpers.derive({
-                type: "object",
-                properties: {
-                    x: {
-                        type: "number",
-                        asOpaque: true
-                    },
-                    state: {
-                        type: "object",
-                        properties: {
-                            threshold: {
-                                type: "number",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["threshold"]
-                    }
-                },
-                required: ["x", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "boolean"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                x: x,
-                state: {
-                    threshold: state.key("threshold")
-                }
-            }, ({ x, state }) => x > state.threshold);
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "number"
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                threshold: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["threshold"]
-                        }
-                    },
-                    required: ["state"]
-                }
-            },
-            required: ["element", "params"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema), {
-            state: {
-                threshold: state.key("threshold")
-            }
-        }).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-            const x = __ct_pattern_input.key("element");
-            const state = __ct_pattern_input.key("params", "state");
-            return (<li>Value: {__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    x: {
-                        type: "number",
-                        asOpaque: true
-                    },
-                    state: {
-                        type: "object",
-                        properties: {
-                            factor: {
-                                type: "number",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["factor"]
-                    }
-                },
-                required: ["x", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                x: x,
-                state: {
-                    factor: state.key("factor")
-                }
-            }, ({ x, state }) => x * state.factor)}</li>);
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "number",
-                    asOpaque: true
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                factor: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["factor"]
-                        }
-                    },
-                    required: ["state"]
-                }
-            },
-            required: ["element", "params"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema), {
-            state: {
-                factor: state.key("factor")
-            }
-        })}
-        </ul>
-
-        {/* Multiple filters */}
-        <p>
-          Double filter count:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        },
-                        start: {
-                            type: "number",
-                            asOpaque: true
-                        },
-                        end: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items", "start", "end"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.key("items"),
-                start: state.key("start"),
-                end: state.key("end")
-            } }, ({ state }) => state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-            const x = __ct_pattern_input.key("element");
-            const state = __ct_pattern_input.key("params", "state");
-            return x > state.key("start");
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "number"
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                start: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["start"]
-                        }
-                    },
-                    required: ["state"]
-                }
-            },
-            required: ["element", "params"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema), {
-            state: {
-                start: state.start
-            }
-        }).filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-            const x = __ct_pattern_input.key("element");
-            const state = __ct_pattern_input.key("params", "state");
-            return x < state.key("end");
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "number",
-                    asOpaque: true
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                end: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["end"]
-                        }
-                    },
-                    required: ["state"]
-                }
-            },
-            required: ["element", "params"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema), {
-            state: {
-                end: state.end
-            }
-        }).length)}
-        </p>
-
-        <h3>Methods with Reactive Arguments</h3>
-        {/* Slice with reactive indices */}
-        <p>
-          Sliced items: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        },
-                        start: {
-                            type: "number",
-                            asOpaque: true
-                        },
-                        end: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items", "start", "end"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.key("items"),
-                start: state.key("start"),
-                end: state.key("end")
-            } }, ({ state }) => state.items.slice(state.start, state.end).join(", "))}
-        </p>
-
-        {/* String methods with reactive args */}
-        <p>
-          Starts with:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        names: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            },
-                            asOpaque: true
-                        },
-                        prefix: {
-                            type: "string",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["names", "prefix"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                names: state.key("names"),
-                prefix: state.key("prefix")
-            } }, ({ state }) => state.names.filter((n) => n.startsWith(state.prefix)).join(", "))}
-        </p>
-
-        {/* Array find with reactive predicate */}
-        <p>
-          First match: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        names: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            },
-                            asOpaque: true
-                        },
-                        searchTerm: {
-                            type: "string",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["names", "searchTerm"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "string",
-                    asOpaque: true
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                names: state.key("names"),
-                searchTerm: state.key("searchTerm")
-            } }, ({ state }) => state.names.find((n) => n.includes(state.searchTerm)))}
-        </p>
-
-        <h3>Complex Method Combinations</h3>
-        {/* Map with chained operations inside */}
-        <ul>
-          {state.key("names").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-                const name = __ct_pattern_input.key("element");
-                return (<li>{__ctHelpers.derive({
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["name"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                text: {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, { name: name }, ({ name }) => name.trim().toLowerCase().replace(" ", "-"))}</li>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
+                }
+            },
+            required: ["text"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_2 = __cfHelpers.lift<{
+    state: {
+        text: string;
+        searchTerm: string;
+    };
+}, boolean>(({ state }) => state.text.toLowerCase().includes(state.searchTerm.toLowerCase()), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                text: {
+                    type: "string"
+                },
+                searchTerm: {
+                    type: "string"
+                }
+            },
+            required: ["text", "searchTerm"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_3 = __cfHelpers.lift<{
+    state: {
+        text: string;
+    };
+}, string>(({ state }) => state.text.trim().toLowerCase().replace("old", "new").toUpperCase(), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                text: {
+                    type: "string"
+                }
+            },
+            required: ["text"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_4 = __cfHelpers.lift<{
+    state: {
+        items: number[];
+        threshold: number;
+    };
+}, number>(({ state }) => state.items.filter((x) => x > state.threshold).length, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                },
+                threshold: {
+                    type: "number"
+                }
+            },
+            required: ["items", "threshold"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const x = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    return x > state.key("threshold");
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        threshold: {
+                            type: "number"
+                        }
+                    },
+                    required: ["threshold"]
+                }
+            },
+            required: ["state"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_5 = __cfHelpers.lift<{
+    x: number;
+    state: {
+        factor: number;
+    };
+}, number>(({ x, state }) => x * state.factor, {
+    type: "object",
+    properties: {
+        x: {
+            type: "number"
+        },
+        state: {
+            type: "object",
+            properties: {
+                factor: {
+                    type: "number"
+                }
+            },
+            required: ["factor"]
+        }
+    },
+    required: ["x", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
+    const x = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<li>Value: {__cfLift_5({
+        x: x,
+        state: {
+            factor: state.key("factor")
+        }
+    })}</li>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        factor: {
+                            type: "number"
+                        }
+                    },
+                    required: ["factor"]
+                }
+            },
+            required: ["state"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_6 = __cfHelpers.lift<{
+    state: {
+        items: number[];
+        start: number;
+        end: number;
+    };
+}, number>(({ state }) => state.items.filter((x) => x > state.start).filter((x) => x < state.end).length, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                },
+                end: {
+                    type: "number"
+                },
+                start: {
+                    type: "number"
+                }
+            },
+            required: ["items", "end", "start"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_7 = __cfHelpers.lift<{
+    state: {
+        items: number[];
+        start: number;
+        end: number;
+    };
+}, string>(({ state }) => state.items.slice(state.start, state.end).join(", "), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                },
+                start: {
+                    type: "number"
+                },
+                end: {
+                    type: "number"
+                }
+            },
+            required: ["items", "start", "end"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_8 = __cfHelpers.lift<{
+    state: {
+        names: string[];
+        prefix: string;
+    };
+}, string>(({ state }) => state.names.filter((n) => n.startsWith(state.prefix)).join(", "), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                names: {
+                    type: "array",
+                    items: {
                         type: "string"
                     }
                 },
-                required: ["element"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
+                prefix: {
+                    type: "string"
+                }
+            },
+            required: ["names", "prefix"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_9 = __cfHelpers.lift<{
+    state: {
+        names: string[];
+        searchTerm: string;
+    };
+}, string | undefined>(({ state }) => state.names.find((n) => n.includes(state.searchTerm)), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                names: {
+                    type: "array",
+                    items: {
+                        type: "string"
                     }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
-        </ul>
-
-        {/* Reduce with reactive accumulator */}
-        <p>
-          Total with discount: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        prices: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        },
-                        discount: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["prices", "discount"]
+                },
+                searchTerm: {
+                    type: "string"
                 }
             },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                prices: state.key("prices"),
-                discount: state.key("discount")
-            } }, ({ state }) => state.prices.reduce((sum, price) => sum + price * (1 - state.discount), 0))}
-        </p>
-
-        {/* Method result used in computation */}
-        <p>
-          Average * factor:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        },
-                        factor: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items", "factor"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.key("items"),
-                factor: state.key("factor")
-            } }, ({ state }) => (state.items.reduce((a, b) => a + b, 0) / state.items.length) *
-            state.factor)}
-        </p>
-
-        <h3>Methods on Computed Values</h3>
-        {/* Method on binary expression result */}
-        <p>
-          Formatted price: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        prices: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        },
-                        discount: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["prices", "discount"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+            required: ["names", "searchTerm"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["string", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_10 = __cfHelpers.lift<{
+    name: string;
+}, string>(({ name }) => name.trim().toLowerCase().replace(" ", "-"), {
+    type: "object",
+    properties: {
+        name: {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                prices: state.key("prices"),
-                discount: state.key("discount")
-            } }, ({ state }) => (state.prices[0]! * (1 - state.discount)).toFixed(2))}
-        </p>
-
-        {/* Method on conditional result */}
-        <p>
-          Conditional trim:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        text: {
-                            type: "string",
-                            asOpaque: true
-                        },
-                        prefix: {
-                            type: "string",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["text", "prefix"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        }
+    },
+    required: ["name"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
+    const name = __cf_pattern_input.key("element");
+    return (<li>{__cfLift_10({ name: name })}</li>);
+}, {
+    type: "object",
+    properties: {
+        element: {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                text: state.key("text"),
-                prefix: state.key("prefix")
-            } }, ({ state }) => (state.text.length > 10 ? state.text : state.prefix).trim())}
-        </p>
-
-        {/* Method chain on computed value */}
-        <p>
-          Complex:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        text: {
-                            type: "string",
-                            asOpaque: true
-                        },
-                        prefix: {
-                            type: "string",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["text", "prefix"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                text: state.key("text"),
-                prefix: state.key("prefix")
-            } }, ({ state }) => (state.text + " " + state.prefix).trim().toLowerCase().split(" ")
-            .join("-"))}
-        </p>
-
-        <h3>Array Methods with Complex Predicates</h3>
-        {/* Filter with multiple conditions */}
-        <p>
-          Active adults:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        users: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    },
-                                    age: {
-                                        type: "number"
-                                    },
-                                    active: {
-                                        type: "boolean"
-                                    }
-                                },
-                                required: ["name", "age", "active"]
-                            },
-                            asOpaque: true
-                        },
-                        minAge: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["users", "minAge"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                users: state.key("users"),
-                minAge: state.key("minAge")
-            } }, ({ state }) => state.key("users").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-            const u = __ct_pattern_input.key("element");
-            const state = __ct_pattern_input.key("params", "state");
-            return u.key("age") >= state.key("minAge") && u.key("active");
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
         }, {
             type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
             properties: {
-                element: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
-                        },
-                        age: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["name", "age", "active"]
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                minAge: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["minAge"]
-                        }
-                    },
-                    required: ["state"]
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
                 }
             },
-            required: ["element", "params"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema), {
-            state: {
-                minAge: state.minAge
-            }
-        }).length)}
-        </p>
-
-        {/* Map with conditional logic */}
-        <ul>
-          {state.key("users").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-                const u = __ct_pattern_input.key("element");
-                return (<li>{__ctHelpers.ifElse({
-                    type: "boolean",
-                    asOpaque: true
-                } as const satisfies __ctHelpers.JSONSchema, {
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_11 = __cfHelpers.lift<{
+    state: {
+        prices: number[];
+        discount: number;
+    };
+}, number>(({ state }) => state.prices.reduce((sum, price) => sum + price * (1 - state.discount), 0), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                prices: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                },
+                discount: {
+                    type: "number"
+                }
+            },
+            required: ["prices", "discount"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_12 = __cfHelpers.lift<{
+    state: {
+        items: number[];
+        factor: number;
+    };
+}, number>(({ state }) => (state.items.reduce((a, b) => a + b, 0) / state.items.length) *
+    state.factor, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                },
+                factor: {
+                    type: "number"
+                }
+            },
+            required: ["items", "factor"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_13 = __cfHelpers.lift<{
+    state: {
+        prices: number[];
+        discount: number;
+    };
+}, string>(({ state }) => (state.prices[0]! * (1 - state.discount)).toFixed(2), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                prices: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                },
+                discount: {
+                    type: "number"
+                }
+            },
+            required: ["prices", "discount"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_14 = __cfHelpers.lift<{
+    state: {
+        text: string;
+        prefix: string;
+    };
+}, string>(({ state }) => (state.text.length > 10 ? state.text : state.prefix).trim(), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                text: {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                },
+                prefix: {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                }
+            },
+            required: ["text", "prefix"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_15 = __cfHelpers.lift<{
+    state: {
+        text: string;
+        prefix: string;
+    };
+}, string>(({ state }) => (state.text + " " + state.prefix).trim().toLowerCase().split(" ")
+    .join("-"), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                text: {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, u.key("active"), __ctHelpers.derive({
-                    type: "object",
-                    properties: {
-                        u: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    },
-                    required: ["u"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                },
+                prefix: {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, { u: {
-                        name: u.key("name")
-                    } }, ({ u }) => u.name.toUpperCase()), __ctHelpers.derive({
-                    type: "object",
-                    properties: {
-                        u: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    },
-                    required: ["u"]
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, { u: {
-                        name: u.key("name")
-                    } }, ({ u }) => u.name.toLowerCase()))}</li>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
+                }
+            },
+            required: ["text", "prefix"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_16 = __cfHelpers.lift<{
+    state: {
+        users: { name: string; age: number; active: boolean; }[];
+        minAge: number;
+    };
+}, number>(({ state }) => state.users.filter((u) => u.age >= state.minAge && u.active).length, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                users: {
+                    type: "array",
+                    items: {
                         type: "object",
                         properties: {
-                            name: {
-                                type: "string"
-                            },
                             age: {
                                 type: "number"
                             },
@@ -907,226 +560,475 @@ export default pattern((state) => {
                                 type: "boolean"
                             }
                         },
-                        required: ["name", "age", "active"]
+                        required: ["age", "active"]
                     }
                 },
-                required: ["element"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
+                minAge: {
+                    type: "number"
+                }
+            },
+            required: ["users", "minAge"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_17 = __cfHelpers.lift<{
+    u: {
+        name: string;
+    };
+}, string>(({ u }) => u.name.toUpperCase(), {
+    type: "object",
+    properties: {
+        u: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    },
+    required: ["u"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_18 = __cfHelpers.lift<{
+    u: {
+        name: string;
+    };
+}, string>(({ u }) => u.name.toLowerCase(), {
+    type: "object",
+    properties: {
+        u: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    },
+    required: ["u"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
+    const u = __cf_pattern_input.key("element");
+    return (<li>{__cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, u.key("active"), __cfLift_17({ u: {
+            name: u.key("name")
+        } }), __cfLift_18({ u: {
+            name: u.key("name")
+        } }))}</li>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                age: {
+                    type: "number"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["name", "age", "active"]
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_19 = __cfHelpers.lift<{
+    state: {
+        users: { name: string; age: number; active: boolean; }[];
+        minAge: number;
+    };
+}, boolean>(({ state }) => state.users.some((u) => u.age >= state.minAge), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                users: {
+                    type: "array",
+                    items: {
                         type: "object",
                         properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            age: {
+                                type: "number"
                             }
                         },
-                        required: ["$UI"]
+                        required: ["age"]
+                    }
+                },
+                minAge: {
+                    type: "number"
+                }
+            },
+            required: ["users", "minAge"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_20 = __cfHelpers.lift<{
+    state: {
+        users: { name: string; age: number; active: boolean; }[];
+    };
+}, boolean>(({ state }) => state.users.every((u) => u.active), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                users: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            active: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["active"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+            },
+            required: ["users"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_21 = __cfHelpers.lift<{
+    state: {
+        text: string;
+        prefix: string;
+    };
+}, number>(({ state }) => state.text.trim().length + state.prefix.trim().length, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                text: {
+                    type: "string"
+                },
+                prefix: {
+                    type: "string"
+                }
+            },
+            required: ["text", "prefix"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_22 = __cfHelpers.lift<{
+    state: {
+        text: string;
+        threshold: number;
+    };
+}, boolean>(({ state }) => state.text.trim().length > state.threshold, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                text: {
+                    type: "string"
+                },
+                threshold: {
+                    type: "number"
+                }
+            },
+            required: ["text", "threshold"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_23 = __cfHelpers.lift<{
+    state: {
+        words: string[];
+        separator: string;
+    };
+}, string>(({ state }) => state.words.join(state.separator).toUpperCase(), {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                words: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                },
+                separator: {
+                    type: "string"
+                }
+            },
+            required: ["words", "separator"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+// FIXTURE: method-chains
+// Verifies: chained method calls and array method chains in JSX are wrapped in a lift-applied computation
+//   state.text.trim().toLowerCase()          → lift(...)({ text })
+//   state.items.filter(fn).map(fn)           → .filterWithPattern(...).mapWithPattern(...)
+//   state.prices.reduce(fn, 0)               → lift(...)({ prices, discount })
+// Context: Covers string chains, filter/map chains, reactive args, computed values, complex predicates
+export default pattern((state) => {
+    return {
+        [UI]: (<div>
+        <h3>Chained String Methods</h3>
+        {/* Simple chain */}
+        <p>Trimmed lower: {__cfLift_1({ state: {
+                text: state.key("text")
+            } })}</p>
+
+        {/* Chain with reactive argument */}
+        <p>
+          Contains search:{" "}
+          {__cfLift_2({ state: {
+                text: state.key("text"),
+                searchTerm: state.key("searchTerm")
+            } })}
+        </p>
+
+        {/* Longer chain */}
+        <p>
+          Processed:{" "}
+          {__cfLift_3({ state: {
+                text: state.key("text")
+            } })}
+        </p>
+
+        <h3>Array Method Chains</h3>
+        {/* Filter then length */}
+        <p>
+          Count above threshold:{" "}
+          {__cfLift_4({ state: {
+                items: state.key("items"),
+                threshold: state.key("threshold")
+            } })}
+        </p>
+
+        {/* Filter then map */}
+        <ul>
+          {state.key("items").filterWithPattern(__cfPattern_1, {
+                state: {
+                    threshold: state.key("threshold")
+                }
+            }).mapWithPattern(__cfPattern_2, {
+                state: {
+                    factor: state.key("factor")
+                }
+            })}
+        </ul>
+
+        {/* Multiple filters */}
+        <p>
+          Double filter count:{" "}
+          {__cfLift_6({ state: {
+                items: state.key("items"),
+                start: state.key("start"),
+                end: state.key("end")
+            } })}
+        </p>
+
+        <h3>Methods with Reactive Arguments</h3>
+        {/* Slice with reactive indices */}
+        <p>
+          Sliced items: {__cfLift_7({ state: {
+                items: state.key("items"),
+                start: state.key("start"),
+                end: state.key("end")
+            } })}
+        </p>
+
+        {/* String methods with reactive args */}
+        <p>
+          Starts with:{" "}
+          {__cfLift_8({ state: {
+                names: state.key("names"),
+                prefix: state.key("prefix")
+            } })}
+        </p>
+
+        {/* Array find with reactive predicate */}
+        <p>
+          First match: {__cfLift_9({ state: {
+                names: state.key("names"),
+                searchTerm: state.key("searchTerm")
+            } })}
+        </p>
+
+        <h3>Complex Method Combinations</h3>
+        {/* Map with chained operations inside */}
+        <ul>
+          {state.key("names").mapWithPattern(__cfPattern_3, {})}
+        </ul>
+
+        {/* Reduce with reactive accumulator */}
+        <p>
+          Total with discount: {__cfLift_11({ state: {
+                prices: state.key("prices"),
+                discount: state.key("discount")
+            } })}
+        </p>
+
+        {/* Method result used in computation */}
+        <p>
+          Average * factor:{" "}
+          {__cfLift_12({ state: {
+                items: state.key("items"),
+                factor: state.key("factor")
+            } })}
+        </p>
+
+        <h3>Methods on Computed Values</h3>
+        {/* Method on binary expression result */}
+        <p>
+          Formatted price: {__cfLift_13({ state: {
+                prices: state.key("prices"),
+                discount: state.key("discount")
+            } })}
+        </p>
+
+        {/* Method on conditional result */}
+        <p>
+          Conditional trim:{" "}
+          {__cfLift_14({ state: {
+                text: state.key("text"),
+                prefix: state.key("prefix")
+            } })}
+        </p>
+
+        {/* Method chain on computed value */}
+        <p>
+          Complex:{" "}
+          {__cfLift_15({ state: {
+                text: state.key("text"),
+                prefix: state.key("prefix")
+            } })}
+        </p>
+
+        <h3>Array Methods with Complex Predicates</h3>
+        {/* Filter with multiple conditions */}
+        <p>
+          Active adults:{" "}
+          {__cfLift_16({ state: {
+                users: state.key("users"),
+                minAge: state.key("minAge")
+            } })}
+        </p>
+
+        {/* Map with conditional logic */}
+        <ul>
+          {state.key("users").mapWithPattern(__cfPattern_4, {})}
         </ul>
 
         {/* Some/every with reactive predicates */}
         <p>
           Has adults:{" "}
-          {__ctHelpers.ifElse({
+          {__cfHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        users: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    },
-                                    age: {
-                                        type: "number"
-                                    },
-                                    active: {
-                                        type: "boolean"
-                                    }
-                                },
-                                required: ["name", "age", "active"]
-                            },
-                            asOpaque: true
-                        },
-                        minAge: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["users", "minAge"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_19({ state: {
                 users: state.key("users"),
                 minAge: state.key("minAge")
-            } }, ({ state }) => state.users.some((u) => u.age >= state.minAge)), "Yes", "No")}
+            } }), "Yes", "No")}
         </p>
-        <p>All active: {__ctHelpers.ifElse({
+        <p>All active: {__cfHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        users: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    },
-                                    age: {
-                                        type: "number"
-                                    },
-                                    active: {
-                                        type: "boolean"
-                                    }
-                                },
-                                required: ["name", "age", "active"]
-                            },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["users"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_20({ state: {
                 users: state.key("users")
-            } }, ({ state }) => state.users.every((u) => u.active)), "Yes", "No")}</p>
+            } }), "Yes", "No")}</p>
 
         <h3>Method Calls in Expressions</h3>
         {/* Method result in arithmetic */}
         <p>
-          Length sum: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        text: {
-                            type: "string",
-                            asOpaque: true
-                        },
-                        prefix: {
-                            type: "string",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["text", "prefix"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          Length sum: {__cfLift_21({ state: {
                 text: state.key("text"),
                 prefix: state.key("prefix")
-            } }, ({ state }) => state.text.trim().length + state.prefix.trim().length)}
+            } })}
         </p>
 
         {/* Method result in comparison */}
         <p>
-          Is long: {__ctHelpers.ifElse({
+          Is long: {__cfHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        text: {
-                            type: "string",
-                            asOpaque: true
-                        },
-                        threshold: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["text", "threshold"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_22({ state: {
                 text: state.key("text"),
                 threshold: state.key("threshold")
-            } }, ({ state }) => state.text.trim().length > state.threshold), "Yes", "No")}
+            } }), "Yes", "No")}
         </p>
 
         {/* Multiple method results combined */}
-        <p>Joined: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        words: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            },
-                            asOpaque: true
-                        },
-                        separator: {
-                            type: "string",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["words", "separator"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Joined: {__cfLift_23({ state: {
                 words: state.key("words"),
                 separator: state.key("separator")
-            } }, ({ state }) => state.words.join(state.separator).toUpperCase())}</p>
+            } })}</p>
       </div>),
     };
 }, {
@@ -1209,7 +1111,7 @@ export default pattern((state) => {
         }
     },
     required: ["text", "searchTerm", "items", "start", "end", "threshold", "factor", "names", "prefix", "prices", "discount", "taxRate", "users", "minAge", "words", "separator"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -1222,11 +1124,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -1239,8 +1140,36 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2,
+    __cfLift_3,
+    __cfLift_4,
+    __cfPattern_1,
+    __cfLift_5,
+    __cfPattern_2,
+    __cfLift_6,
+    __cfLift_7,
+    __cfLift_8,
+    __cfLift_9,
+    __cfLift_10,
+    __cfPattern_3,
+    __cfLift_11,
+    __cfLift_12,
+    __cfLift_13,
+    __cfLift_14,
+    __cfLift_15,
+    __cfLift_16,
+    __cfLift_17,
+    __cfLift_18,
+    __cfPattern_4,
+    __cfLift_19,
+    __cfLift_20,
+    __cfLift_21,
+    __cfLift_22,
+    __cfLift_23
+});

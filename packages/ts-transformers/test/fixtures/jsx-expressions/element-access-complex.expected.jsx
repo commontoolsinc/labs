@@ -1,5 +1,16 @@
-import * as __ctHelpers from "commontools";
-import { ifElse, pattern, UI } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { ifElse, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     matrix: number[][];
     row: number;
@@ -20,703 +31,729 @@ interface State {
     selectedUser: number;
     selectedScore: number;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        matrix: number[][];
+        row: number;
+        col: number;
+    };
+}, number | undefined>(({ state }) => state.matrix[state.row]![state.col], {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                matrix: {
+                    type: "array",
+                    items: {
+                        type: "array",
+                        items: {
+                            type: "number"
+                        }
+                    }
+                },
+                row: {
+                    type: "number"
+                },
+                col: {
+                    type: "number"
+                }
+            },
+            required: ["matrix", "row", "col"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["number", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_2 = __cfHelpers.lift<{
+    state: {
+        nested: {
+            arrays: string[][];
+            index: number;
+        };
+        row: number;
+    };
+}, string | undefined>(({ state }) => state.nested.arrays[state.nested.index]![state.row], {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                nested: {
+                    type: "object",
+                    properties: {
+                        arrays: {
+                            type: "array",
+                            items: {
+                                type: "array",
+                                items: {
+                                    type: "string"
+                                }
+                            }
+                        },
+                        index: {
+                            type: "number"
+                        }
+                    },
+                    required: ["arrays", "index"]
+                },
+                row: {
+                    type: "number"
+                }
+            },
+            required: ["nested", "row"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["string", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_3 = __cfHelpers.lift<{
+    state: {
+        items: string[];
+    };
+}, string | undefined>(({ state }) => state.items[state.items.length - 1], {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["string", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_4 = __cfHelpers.lift<{
+    state: {
+        arr: number[];
+    };
+}, number>(({ state }) => state.arr[0]! + state.arr[state.arr.length - 1]!, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                arr: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                }
+            },
+            required: ["arr"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_5 = __cfHelpers.lift<{
+    state: {
+        arr: number[];
+        a: number;
+        b: number;
+    };
+}, number | undefined>(({ state }) => state.arr[state.a + state.b], {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                arr: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                },
+                a: {
+                    type: "number"
+                },
+                b: {
+                    type: "number"
+                }
+            },
+            required: ["arr", "a", "b"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["number", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_6 = __cfHelpers.lift<{
+    state: {
+        items: string[];
+        row: number;
+    };
+}, string | undefined>(({ state }) => state.items[state.row % state.items.length], {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                },
+                row: {
+                    type: "number"
+                }
+            },
+            required: ["items", "row"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["string", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_7 = __cfHelpers.lift<{
+    state: {
+        arr: number[];
+        a: number;
+    };
+}, number | undefined>(({ state }) => state.arr[Math.min(state.a * 2, state.arr.length - 1)], {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                arr: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                },
+                a: {
+                    type: "number"
+                }
+            },
+            required: ["arr", "a"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["number", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_8 = __cfHelpers.lift<{
+    state: {
+        users: { name: string; scores: number[]; }[];
+        selectedUser: number;
+        selectedScore: number;
+    };
+}, number | undefined>(({ state }) => state.users[state.selectedUser]!.scores[state.selectedScore], {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                users: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type: "string"
+                            },
+                            scores: {
+                                type: "array",
+                                items: {
+                                    type: "number"
+                                }
+                            }
+                        },
+                        required: ["name", "scores"]
+                    }
+                },
+                selectedUser: {
+                    type: "number"
+                },
+                selectedScore: {
+                    type: "number"
+                }
+            },
+            required: ["users", "selectedUser", "selectedScore"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["number", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_9 = __cfHelpers.lift<{
+    state: {
+        items: string[];
+        indices: number[];
+    };
+}, string | undefined>(({ state }) => state.items[state.indices[0]!], {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                },
+                indices: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                }
+            },
+            required: ["items", "indices"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["string", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_10 = __cfHelpers.lift<{
+    state: {
+        arr: number[];
+    };
+}, number | undefined>(({ state }) => state.arr[state.arr[0]!], {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                arr: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                }
+            },
+            required: ["arr"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["number", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_11 = __cfHelpers.lift<{
+    state: {
+        nested: {
+            arrays: string[][];
+            index: number;
+        };
+    };
+}, number>(({ state }) => state.nested.arrays[state.nested.index]!.length, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                nested: {
+                    type: "object",
+                    properties: {
+                        arrays: {
+                            type: "array",
+                            items: {
+                                type: "array",
+                                items: {
+                                    type: "string"
+                                }
+                            }
+                        },
+                        index: {
+                            type: "number"
+                        }
+                    },
+                    required: ["arrays", "index"]
+                }
+            },
+            required: ["nested"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_12 = __cfHelpers.lift<{
+    state: {
+        users: { name: string; scores: number[]; }[];
+        selectedUser: number;
+    };
+}, number>(({ state }) => state.users[state.selectedUser]!.name.length, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                users: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type: "string"
+                            },
+                            scores: {
+                                type: "array",
+                                items: {
+                                    type: "number"
+                                }
+                            }
+                        },
+                        required: ["name", "scores"]
+                    }
+                },
+                selectedUser: {
+                    type: "number"
+                }
+            },
+            required: ["users", "selectedUser"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_13 = __cfHelpers.lift<{
+    state: {
+        arr: number[];
+        a: number;
+    };
+}, boolean>(({ state }) => state.arr[state.a]! > 10, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                arr: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                },
+                a: {
+                    type: "number"
+                }
+            },
+            required: ["arr", "a"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_14 = __cfHelpers.lift<{
+    state: {
+        items: string[];
+        b: number;
+    };
+}, string>(({ state }) => state.items[state.b]!, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                },
+                b: {
+                    type: "number"
+                }
+            },
+            required: ["items", "b"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_15 = __cfHelpers.lift<{
+    state: {
+        matrix: number[][];
+        row: number;
+        col: number;
+    };
+}, boolean>(({ state }) => state.matrix[state.row]![state.col]! > 0, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                matrix: {
+                    type: "array",
+                    items: {
+                        type: "array",
+                        items: {
+                            type: "number"
+                        }
+                    }
+                },
+                row: {
+                    type: "number"
+                },
+                col: {
+                    type: "number"
+                }
+            },
+            required: ["matrix", "row", "col"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_16 = __cfHelpers.lift<{
+    state: {
+        arr: number[];
+        a: number;
+        b: number;
+    };
+}, number>(({ state }) => state.arr[state.a]! * state.arr[state.b]!, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                arr: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                },
+                a: {
+                    type: "number"
+                },
+                b: {
+                    type: "number"
+                }
+            },
+            required: ["arr", "a", "b"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_17 = __cfHelpers.lift<{
+    state: {
+        items: string[];
+        indices: number[];
+    };
+}, string>(({ state }) => state.items[0]! + " - " + state.items[state.indices[0]!]!, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                },
+                indices: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                }
+            },
+            required: ["items", "indices"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_18 = __cfHelpers.lift<{
+    state: {
+        arr: number[];
+    };
+}, number>(({ state }) => state.arr[0]! + state.arr[1]! + state.arr[2]!, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                arr: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                }
+            },
+            required: ["arr"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: element-access-complex
-// Verifies: complex element-access patterns (nested, computed, chained, conditional) are wrapped in derive()
-//   state.matrix[state.row]![state.col]         → derive({matrix, row, col}, ...)
-//   state.arr[state.a + state.b]                → derive({arr, a, b}, ...)
-//   state.users[state.selectedUser]!.scores[..] → derive({users, selectedUser, selectedScore}, ...)
+// Verifies: complex element-access patterns (nested, computed, chained, conditional) are wrapped in a lift-applied computation
+//   state.matrix[state.row]![state.col]         → lift(...)({ matrix, row, col })
+//   state.arr[state.a + state.b]                → lift(...)({ arr, a, b })
+//   state.users[state.selectedUser]!.scores[..] → lift(...)({ users, selectedUser, selectedScore })
 // Context: Covers nested indexing, computed indices, chained access, conditions, operators
 export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>Nested Element Access</h3>
         {/* Double indexing into matrix */}
-        <p>Matrix value: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        matrix: {
-                            type: "array",
-                            items: {
-                                type: "array",
-                                items: {
-                                    type: "number"
-                                }
-                            },
-                            asOpaque: true
-                        },
-                        row: {
-                            type: "number",
-                            asOpaque: true
-                        },
-                        col: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["matrix", "row", "col"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "number",
-                    asOpaque: true
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Matrix value: {__cfLift_1({ state: {
                 matrix: state.key("matrix"),
                 row: state.key("row"),
                 col: state.key("col")
-            } }, ({ state }) => state.matrix[state.row]![state.col])}</p>
+            } })}</p>
 
         {/* Triple nested access */}
-        <p>Deep nested: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        nested: {
-                            type: "object",
-                            properties: {
-                                arrays: {
-                                    type: "array",
-                                    items: {
-                                        type: "array",
-                                        items: {
-                                            type: "string"
-                                        }
-                                    },
-                                    asOpaque: true
-                                },
-                                index: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["arrays", "index"]
-                        },
-                        row: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["nested", "row"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "string",
-                    asOpaque: true
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Deep nested: {__cfLift_2({ state: {
                 nested: {
-                    arrays: state.key("nested").arrays,
-                    index: state.key("nested").index
+                    arrays: state.key("nested", "arrays"),
+                    index: state.key("nested", "index")
                 },
                 row: state.key("row")
-            } }, ({ state }) => state.nested.arrays[state.nested.index]![state.row])}</p>
+            } })}</p>
 
         <h3>Multiple References to Same Array</h3>
         {/* Same array accessed multiple times with different indices */}
         <p>
           First and last: {state.key("items", "0")} and{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "string",
-                    asOpaque: true
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          {__cfLift_3({ state: {
                 items: state.key("items")
-            } }, ({ state }) => state.items[state.items.length - 1])}
+            } })}
         </p>
 
         {/* Array used in computation and access */}
-        <p>Sum of ends: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        arr: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["arr"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Sum of ends: {__cfLift_4({ state: {
                 arr: state.key("arr")
-            } }, ({ state }) => state.arr[0]! + state.arr[state.arr.length - 1]!)}</p>
+            } })}</p>
 
         <h3>Computed Indices</h3>
         {/* Index from multiple state values */}
-        <p>Computed index: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        arr: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        },
-                        a: {
-                            type: "number",
-                            asOpaque: true
-                        },
-                        b: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["arr", "a", "b"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "number",
-                    asOpaque: true
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Computed index: {__cfLift_5({ state: {
                 arr: state.key("arr"),
                 a: state.key("a"),
                 b: state.key("b")
-            } }, ({ state }) => state.arr[state.a + state.b])}</p>
+            } })}</p>
 
         {/* Index from computation involving array */}
-        <p>Modulo index: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            },
-                            asOpaque: true
-                        },
-                        row: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items", "row"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "string",
-                    asOpaque: true
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Modulo index: {__cfLift_6({ state: {
                 items: state.key("items"),
                 row: state.key("row")
-            } }, ({ state }) => state.items[state.row % state.items.length])}</p>
+            } })}</p>
 
         {/* Complex index expression */}
-        <p>Complex: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        arr: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        },
-                        a: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["arr", "a"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "number",
-                    asOpaque: true
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Complex: {__cfLift_7({ state: {
                 arr: state.key("arr"),
                 a: state.key("a")
-            } }, ({ state }) => state.arr[Math.min(state.a * 2, state.arr.length - 1)])}</p>
+            } })}</p>
 
         <h3>Chained Element Access</h3>
         {/* Element access returning array, then accessing that */}
         <p>
           User score:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        users: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    },
-                                    scores: {
-                                        type: "array",
-                                        items: {
-                                            type: "number"
-                                        }
-                                    }
-                                },
-                                required: ["name", "scores"]
-                            },
-                            asOpaque: true
-                        },
-                        selectedUser: {
-                            type: "number",
-                            asOpaque: true
-                        },
-                        selectedScore: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["users", "selectedUser", "selectedScore"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "number",
-                    asOpaque: true
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          {__cfLift_8({ state: {
                 users: state.key("users"),
                 selectedUser: state.key("selectedUser"),
                 selectedScore: state.key("selectedScore")
-            } }, ({ state }) => state.users[state.selectedUser]!.scores[state.selectedScore])!}
+            } })!}
         </p>
 
         {/* Using one array element as index for another */}
-        <p>Indirect: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            },
-                            asOpaque: true
-                        },
-                        indices: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items", "indices"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "string",
-                    asOpaque: true
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Indirect: {__cfLift_9({ state: {
                 items: state.key("items"),
                 indices: state.key("indices")
-            } }, ({ state }) => state.items[state.indices[0]!])}</p>
+            } })}</p>
 
         {/* Array element used as index for same array */}
-        <p>Self reference: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        arr: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["arr"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "number",
-                    asOpaque: true
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Self reference: {__cfLift_10({ state: {
                 arr: state.key("arr")
-            } }, ({ state }) => state.arr[state.arr[0]!])}</p>
+            } })}</p>
 
         <h3>Mixed Property and Element Access</h3>
         {/* Property access followed by element access with computed index */}
-        <p>Mixed: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        nested: {
-                            type: "object",
-                            properties: {
-                                arrays: {
-                                    type: "array",
-                                    items: {
-                                        type: "array",
-                                        items: {
-                                            type: "string"
-                                        }
-                                    },
-                                    asOpaque: true
-                                },
-                                index: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["arrays", "index"]
-                        }
-                    },
-                    required: ["nested"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Mixed: {__cfLift_11({ state: {
                 nested: {
-                    arrays: state.key("nested").arrays,
-                    index: state.key("nested").index
+                    arrays: state.key("nested", "arrays"),
+                    index: state.key("nested", "index")
                 }
-            } }, ({ state }) => state.nested.arrays[state.nested.index]!.length)}</p>
+            } })}</p>
 
         {/* Element access followed by property access */}
-        <p>User name length: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        users: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    },
-                                    scores: {
-                                        type: "array",
-                                        items: {
-                                            type: "number"
-                                        }
-                                    }
-                                },
-                                required: ["name", "scores"]
-                            },
-                            asOpaque: true
-                        },
-                        selectedUser: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["users", "selectedUser"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>User name length: {__cfLift_12({ state: {
                 users: state.key("users"),
                 selectedUser: state.key("selectedUser")
-            } }, ({ state }) => state.users[state.selectedUser]!.name.length)}</p>
+            } })}</p>
 
         <h3>Element Access in Conditions</h3>
         {/* Element access in ternary */}
         <p>
           Conditional:{" "}
-          {__ctHelpers.ifElse({
+          {__cfHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        arr: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        },
-                        a: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["arr", "a"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_13({ state: {
                 arr: state.key("arr"),
                 a: state.key("a")
-            } }, ({ state }) => state.arr[state.a]! > 10), __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            },
-                            asOpaque: true
-                        },
-                        b: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items", "b"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+            } }), __cfLift_14({ state: {
                 items: state.key("items"),
                 b: state.key("b")
-            } }, ({ state }) => state.items[state.b]!), state.key("items", "0")!)}
+            } }), state.key("items", "0")!)}
         </p>
 
         {/* Element access in boolean expression */}
         <p>
           Has value: {ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
-            "enum": ["positive", "non-positive"],
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        matrix: {
-                            type: "array",
-                            items: {
-                                type: "array",
-                                items: {
-                                    type: "number"
-                                }
-                            },
-                            asOpaque: true
-                        },
-                        row: {
-                            type: "number",
-                            asOpaque: true
-                        },
-                        col: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["matrix", "row", "col"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, {
+            "enum": ["positive", "non-positive"]
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_15({ state: {
                 matrix: state.key("matrix"),
                 row: state.key("row"),
                 col: state.key("col")
-            } }, ({ state }) => state.matrix[state.row]![state.col]! > 0), "positive", "non-positive")}
+            } }), "positive", "non-positive")}
         </p>
 
         <h3>Element Access with Operators</h3>
         {/* Element access with arithmetic */}
-        <p>Product: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        arr: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        },
-                        a: {
-                            type: "number",
-                            asOpaque: true
-                        },
-                        b: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["arr", "a", "b"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Product: {__cfLift_16({ state: {
                 arr: state.key("arr"),
                 a: state.key("a"),
                 b: state.key("b")
-            } }, ({ state }) => state.arr[state.a]! * state.arr[state.b]!)}</p>
+            } })}</p>
 
         {/* Element access with string concatenation */}
-        <p>Concat: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            },
-                            asOpaque: true
-                        },
-                        indices: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items", "indices"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Concat: {__cfLift_17({ state: {
                 items: state.key("items"),
                 indices: state.key("indices")
-            } }, ({ state }) => state.items[0]! + " - " + state.items[state.indices[0]!]!)}</p>
+            } })}</p>
 
         {/* Multiple element accesses in single expression */}
-        <p>Sum: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        arr: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["arr"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Sum: {__cfLift_18({ state: {
                 arr: state.key("arr")
-            } }, ({ state }) => state.arr[0]! + state.arr[1]! + state.arr[2]!)}</p>
+            } })}</p>
       </div>),
     };
 }, {
@@ -805,7 +842,7 @@ export default pattern((state) => {
         }
     },
     required: ["matrix", "row", "col", "items", "arr", "a", "b", "indices", "nested", "users", "selectedUser", "selectedScore"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -818,11 +855,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -835,8 +871,27 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2,
+    __cfLift_3,
+    __cfLift_4,
+    __cfLift_5,
+    __cfLift_6,
+    __cfLift_7,
+    __cfLift_8,
+    __cfLift_9,
+    __cfLift_10,
+    __cfLift_11,
+    __cfLift_12,
+    __cfLift_13,
+    __cfLift_14,
+    __cfLift_15,
+    __cfLift_16,
+    __cfLift_17,
+    __cfLift_18
+});

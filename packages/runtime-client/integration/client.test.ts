@@ -5,21 +5,22 @@ import {
   Identity,
   IdentityCreateConfig,
   Session,
-} from "@commontools/identity";
-import { env, waitFor } from "@commontools/integration";
+} from "@commonfabric/identity";
+import { env, waitFor } from "@commonfabric/integration";
 import {
   CellHandle,
   type JSONSchema,
   RuntimeClient,
+  type RuntimeClientOptions,
   type VNode,
-} from "@commontools/runtime-client";
-import { rendererVDOMSchema } from "@commontools/runner/schemas";
+} from "@commonfabric/runtime-client";
+import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { assertEquals, assertExists } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { Program } from "@commontools/js-compiler";
-import { render } from "@commontools/html/client";
-import { MockDoc } from "@commontools/html/mock-doc";
-import { WebWorkerRuntimeTransport } from "@commontools/runtime-client/transports/web-worker";
+import { Program } from "@commonfabric/js-compiler";
+import { render } from "@commonfabric/html/client";
+import { MockDoc } from "@commonfabric/html/mock-doc";
+import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
 
 const { API_URL } = env;
 
@@ -31,12 +32,10 @@ const keyConfig: IdentityCreateConfig = {
 };
 
 const identity = await Identity.fromPassphrase("test operator", keyConfig);
-const spaceName = globalThis.crypto.randomUUID();
 
-const TEST_PROGRAM = `/// <cts-enable />
-import { Cell, NAME, pattern, UI } from "commontools";
+const TEST_PROGRAM = `import { Cell, NAME, pattern, UI } from "commonfabric";
 export default pattern((_) => {
-  const cell = Cell.of("hello");
+  const cell = new Cell("hello");
   return {
     [NAME]: "Home",
     [UI]: (
@@ -47,8 +46,7 @@ export default pattern((_) => {
   };
 });`;
 
-const TEMP_PATTERN = `/// <cts-enable />
-import { Default, NAME, pattern, UI } from "commontools";
+const TEMP_PATTERN = `import { Default, NAME, pattern, UI } from "commonfabric";
 
 interface PatternState {
   count: Default<number, 0>;
@@ -70,7 +68,7 @@ export default pattern<PatternState>((state) => {
 describe("RuntimeClient", () => {
   describe("lifecycle", () => {
     it("initializes and reaches ready state", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       const rt = await createRuntimeClient(session);
       await rt.dispose();
     });
@@ -78,7 +76,7 @@ describe("RuntimeClient", () => {
 
   describe("cell operations", () => {
     it("creates a cell with getCell and syncs its value", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const schema = {
@@ -108,15 +106,15 @@ describe("RuntimeClient", () => {
     });
 
     it("recursively returns VNodes inline with schema-driven serialization", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEMP_PATTERN, {
+      const page = await rt.createPage(TEMP_PATTERN, session.space, {
         run: true,
       });
       const cell = page.cell();
       const value = await cell.sync() as { $UI?: VNode; $NAME?: string };
-      // With schema-driven serialization (asCell: true), children are resolved
+      // With schema-driven serialization (asCell: ["cell"]), children are resolved
       // inline as VNodes rather than wrapped in CellHandle indirection.
       const children = value.$UI?.children as VNode[];
       const firstChild = children?.[0];
@@ -125,7 +123,7 @@ describe("RuntimeClient", () => {
     });
 
     it("resolves cell links with resolveAsCell()", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       // Create a target cell with some data
@@ -166,7 +164,7 @@ describe("RuntimeClient", () => {
     });
 
     it("subscribes to cell updates via subscribe()", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const schema = {
@@ -206,7 +204,7 @@ describe("RuntimeClient", () => {
     });
 
     it("updates multiple instances of the same cell with different schema", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const schema = {
@@ -242,14 +240,14 @@ describe("RuntimeClient", () => {
 
     it("late subscribers receive initial value from existing subscription", async () => {
       // Regression test for bug where text interpolation {value} would show blank
-      // when used alongside ct-input bound to the same cell. The issue was that
+      // when used alongside cf-input bound to the same cell. The issue was that
       // late subscribers (those joining an existing subscription) would miss the
       // initial value that was already sent to earlier subscribers.
       //
       // Fix: connection.subscribe() copies cached value from existing subscriber
       // to new subscriber when joining an existing subscription.
 
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const schema = {
@@ -269,7 +267,7 @@ describe("RuntimeClient", () => {
 
       // Create two CellHandles with the SAME schema - this produces the same
       // subscription key (space:id:path:schema). In the real bug, this happens
-      // when ct-input and text interpolation both call asSchema(stringSchema).
+      // when cf-input and text interpolation both call asSchema(stringSchema).
       const cellA = cell.asSchema<{ message: string }>(schema);
       const cellB = cell.asSchema<{ message: string }>(schema);
 
@@ -334,20 +332,39 @@ describe("RuntimeClient", () => {
 
   describe("page operations", () => {
     it("creates a page from URL and retrieves it", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, {
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
         run: true,
       });
       assertExists(page.id());
     });
 
-    it("starts and stops page execution", async () => {
-      const session = await createSession({ identity, spaceName });
+    it("retrieves a page with its result schema, including UI", async () => {
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, {
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
+        run: true,
+      });
+      const retrieved = await rt.getPage(page.id(), session.space, true);
+      assertExists(retrieved);
+
+      const cell = retrieved.cell();
+      await cell.sync();
+      const value = cell.get() as { $UI?: VNode; $NAME?: string };
+
+      assertEquals(value.$NAME, "Home");
+      assertExists(value.$UI, "Retrieved page cell should include $UI");
+      assertEquals(value.$UI.name, "h1");
+    });
+
+    it("starts and stops page execution", async () => {
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
         run: false,
       });
       await page.start();
@@ -356,14 +373,14 @@ describe("RuntimeClient", () => {
     });
 
     it("removes a page", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, {
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
         run: false,
       });
-      await rt.removePage(page.id());
-      await rt.synced();
+      await rt.removePage(page.id(), session.space);
+      await rt.synced(session.space);
 
       // Note: getPage may still return a reference to a removed page
       // because the ID still maps to a cell that existed. The removal
@@ -371,10 +388,10 @@ describe("RuntimeClient", () => {
     });
 
     it("gets the pages list cell", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const piecesListCell = await rt.getPiecesListCell();
+      const piecesListCell = await rt.getPiecesListCell(session.space);
       assertExists(piecesListCell);
 
       await piecesListCell.sync();
@@ -385,8 +402,7 @@ describe("RuntimeClient", () => {
 
   describe("events", () => {
     it("emits console events from page execution", async () => {
-      const consolePattern = `/// <cts-enable />
-import { NAME, pattern, UI } from "commontools";
+      const consolePattern = `import { NAME, pattern, UI } from "commonfabric";
 export default pattern((_) => {
   console.log('hello');
   return {
@@ -402,7 +418,7 @@ export default pattern((_) => {
           contents: consolePattern,
         }],
       };
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const consoleEvents: { method: string; args: unknown[] }[] = [];
@@ -415,7 +431,7 @@ export default pattern((_) => {
         },
       );
 
-      await rt.createPage(consoleProgram, { run: true });
+      await rt.createPage(consoleProgram, session.space, { run: true });
       await rt.idle();
 
       await waitFor(
@@ -432,7 +448,7 @@ export default pattern((_) => {
 
   describe("event handlers", () => {
     it("sends events to stream cells without schema error", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       // Create a cell with undefined schema (simulating what happens with handler streams)
@@ -453,10 +469,10 @@ export default pattern((_) => {
     });
 
     it("sends events to nested stream cell paths without schema error", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      // Create a root cell that will have the structure like a process cell
+      // Create a root cell with nested runtime metadata-shaped content.
       const rootCell = await rt.getCell(
         session.space,
         "test-nested-stream-" + Date.now(),
@@ -480,10 +496,10 @@ export default pattern((_) => {
 
   describe("html render", () => {
     it("retrieves UI markup from page cell", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, {
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
         run: true,
       });
       const cell = page.cell();
@@ -497,10 +513,10 @@ export default pattern((_) => {
     });
 
     it("renders page UI using html render function with CellHandle", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(TEST_PROGRAM, {
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
         run: true,
       });
       const cell = page.cell();
@@ -528,10 +544,83 @@ export default pattern((_) => {
       cancel();
     });
 
+    it("renders nested pattern components when page UI is typed unknown", async () => {
+      const unknownUiPattern =
+        `import { NAME, pattern, UI } from "commonfabric";
+
+interface ChildOutput {
+  [NAME]: string;
+  [UI]: unknown;
+}
+
+interface ParentOutput {
+  [NAME]: string;
+  [UI]: unknown;
+}
+
+const Child = pattern<unknown, ChildOutput>(() => {
+  return {
+    [NAME]: "Nested child",
+    [UI]: <span id="nested-child">Nested child rendered</span>,
+  };
+});
+
+export default pattern<unknown, ParentOutput>(() => {
+  const child = Child({});
+  return {
+    [NAME]: "Unknown UI parent",
+    [UI]: (
+      <div id="unknown-ui-parent">
+        {child}
+        <p id="sibling-after-child">Sibling rendered</p>
+      </div>
+    ),
+  };
+});`;
+
+      const unknownUiProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: unknownUiPattern,
+        }],
+      };
+
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const page = await rt.createPage(unknownUiProgram, session.space, {
+        run: true,
+      });
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+
+      const cancel = render(root, page.cell() as any, renderOptions);
+
+      await waitFor(
+        () =>
+          Promise.resolve(
+            root.innerHTML.includes("Nested child rendered") &&
+              root.innerHTML.includes("Sibling rendered"),
+          ),
+        { timeout: 5000 },
+      );
+      assertEquals(
+        root.innerHTML.includes('id="nested-child"'),
+        true,
+        "Should render the nested child pattern UI",
+      );
+
+      cancel();
+    });
+
     it("renders cell values in VNode children", async () => {
       // Pattern that renders a state value in the UI
-      const valuePattern = `/// <cts-enable />
-import { Default, NAME, pattern, UI } from "commontools";
+      const valuePattern =
+        `import { Default, NAME, pattern, UI } from "commonfabric";
 
 interface State {
   value: Default<number, 10>;
@@ -556,10 +645,10 @@ export default pattern<State>(({ value }) => {
         }],
       };
 
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(valueProgram, {
+      const page = await rt.createPage(valueProgram, session.space, {
         run: true,
       });
       const mock = new MockDoc(
@@ -580,8 +669,8 @@ export default pattern<State>(({ value }) => {
 
     it("renders derived cell values (like nth function)", async () => {
       // Pattern that uses a derived expression similar to counter's nth(state.value)
-      const derivedPattern = `/// <cts-enable />
-import { Default, NAME, pattern, UI } from "commontools";
+      const derivedPattern =
+        `import { Default, NAME, pattern, UI } from "commonfabric";
 
 function formatValue(n: number): string {
   return "number-" + n;
@@ -610,10 +699,10 @@ export default pattern<State>(({ value }) => {
         }],
       };
 
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(derivedProgram, {
+      const page = await rt.createPage(derivedProgram, session.space, {
         run: true,
       });
       const cell = page.cell() as CellHandle<VNode>;
@@ -631,10 +720,542 @@ export default pattern<State>(({ value }) => {
       );
       cancel();
     });
+
+    it("renders PerUser-derived computed JSX inside cf-screen header slot (CT-1606)", async () => {
+      const scopedHeaderPattern = `import {
+  computed,
+  Default,
+  NAME,
+  pattern,
+  type PerSpace,
+  type PerUser,
+  UI,
+  type VNode,
+} from "commonfabric";
+
+const trimmedName = (name: string | undefined) => (name ?? "").trim();
+
+interface Input {
+  question?: PerSpace<string | Default<"Where should we eat?">>;
+  myName?: PerUser<string | Default<"">>;
+}
+
+interface Output {
+  [NAME]: string;
+  [UI]: VNode;
+  myName: PerUser<string | Default<"">>;
+}
+
+export default pattern<Input, Output>(({ question, myName }) => {
+  return {
+    [NAME]: "ct-1606-scoped-header-slot",
+    myName,
+    [UI]: (
+      <cf-screen>
+        <div slot="header">
+          <h2>{question}</h2>
+          {computed(() => {
+            const value = trimmedName(myName);
+            return <div>me is: "{value}"</div>;
+          })}
+        </div>
+        <div>body renders</div>
+      </cf-screen>
+    ),
+  };
+});`;
+
+      const scopedHeaderProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: scopedHeaderPattern,
+        }],
+      };
+
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const page = await rt.createPage(scopedHeaderProgram, session.space, {
+        run: true,
+      });
+      const cell = page.cell() as CellHandle<VNode>;
+      const nameCell = (page.cell() as any).key("myName").asSchema({
+        type: "string",
+        scope: "user",
+      });
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+
+      const cancel = render(root, cell, renderOptions);
+
+      try {
+        await waitFor(
+          () => {
+            const html = root.innerHTML;
+            return Promise.resolve(
+              html.includes("Where should we eat?") &&
+                html.includes("me is: &quot;&quot;") &&
+                html.includes("body renders"),
+            );
+          },
+          { timeout: 15000 },
+        );
+
+        await nameCell.set("Alex");
+        await waitFor(
+          () =>
+            Promise.resolve(
+              root.innerHTML.includes("me is: &quot;Alex&quot;"),
+            ),
+          { timeout: 5000 },
+        );
+      } finally {
+        cancel();
+      }
+    });
+
+    it("dispatches click events through rendered page handlers", async () => {
+      const clickPattern =
+        `import { action, Default, NAME, pattern, UI, Writable } from "commonfabric";
+
+interface State {
+  value: Writable<Default<number, 0>>;
+}
+
+export default pattern<State>(({ value }) => {
+  const increment = action(() => {
+    value.set(value.get() + 1);
+  });
+
+  return {
+    [NAME]: "Click Test",
+    value,
+    [UI]: (
+      <div>
+        <button id="increment" onClick={increment}>Increment</button>
+        <span id="value">{value}</span>
+      </div>
+    ),
+  };
+});`;
+
+      const clickProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: clickPattern,
+        }],
+      };
+
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const page = await rt.createPage(clickProgram, session.space, {
+        run: true,
+      });
+      const valueCell = (page.cell() as any).key("value").asSchema({
+        type: "number",
+      });
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+
+      const cancel = render(root, page.cell() as any, renderOptions);
+
+      await waitFor(
+        () => Promise.resolve(root.innerHTML.length > 0),
+        { timeout: 5000 },
+      );
+      assertEquals(await valueCell.sync(), 0);
+
+      const button = root.getElementsByTagName("button")[0] as any;
+      assertExists(button);
+
+      button.dispatchEvent({ type: "click", target: button });
+
+      await waitFor(
+        async () => await valueCell.sync() === 1,
+        { timeout: 5000 },
+      );
+
+      await waitFor(
+        () => Promise.resolve(root.innerHTML.includes(">1</span>")),
+        { timeout: 5000 },
+      );
+
+      cancel();
+    });
+
+    it("commits click events through rendered handler streams", async () => {
+      const clickPattern =
+        `import { Default, handler, NAME, pattern, UI, Writable } from "commonfabric";
+
+interface State {
+  value: Writable<Default<number, 0>>;
+}
+
+const increment = handler<void, { value: Writable<number> }>((_, { value }) => {
+  value.set(value.get() + 1);
+});
+
+export default pattern<State>(({ value }) => {
+  return {
+    [NAME]: "Handler Click Test",
+    value,
+    [UI]: (
+      <div>
+        <button id="increment" onClick={increment({ value })}>Increment</button>
+        <span id="value">{value}</span>
+      </div>
+    ),
+  };
+});`;
+
+      const clickProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: clickPattern,
+        }],
+      };
+
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const page = await rt.createPage(clickProgram, session.space, {
+        run: true,
+      });
+      const valueCell = (page.cell() as any).key("value").asSchema({
+        type: "number",
+      });
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+
+      const cancel = render(root, page.cell() as any, renderOptions);
+
+      await waitFor(
+        () => Promise.resolve(root.innerHTML.length > 0),
+        { timeout: 5000 },
+      );
+      assertEquals(await valueCell.sync(), 0);
+
+      const button = root.getElementsByTagName("button")[0] as any;
+      assertExists(button);
+
+      button.dispatchEvent({ type: "click", target: button });
+
+      await waitFor(
+        async () => await valueCell.sync() === 1,
+        { timeout: 5000 },
+      );
+
+      await waitFor(
+        () => Promise.resolve(root.innerHTML.includes(">1</span>")),
+        { timeout: 5000 },
+      );
+
+      cancel();
+    });
+
+    it("dispatches navigateTo from rendered handler streams", async () => {
+      const navigatePattern =
+        `import { Default, handler, NAME, navigateTo, pattern, UI } from "commonfabric";
+
+interface ChildState {
+  label: Default<string, "target">;
+}
+
+const Child = pattern<ChildState>(({ label }) => ({
+  [NAME]: "Target Child",
+  label,
+  [UI]: <div id="child">{label}</div>,
+}));
+
+const go = handler<void, Record<string, never>>(() => {
+  return navigateTo(Child({ label: "target" }));
+});
+
+export default pattern<Record<string, never>>(() => {
+  return {
+    [NAME]: "Navigate Handler Test",
+    [UI]: <button id="go" onClick={go({})}>Go</button>,
+  };
+});`;
+
+      const navigateProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: navigatePattern,
+        }],
+      };
+
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const page = await rt.createPage(navigateProgram, session.space, {
+        run: true,
+      });
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+
+      const navigation = new Promise<string>((resolve) => {
+        rt.on("navigaterequest", ({ cell }) => {
+          resolve(cell.id());
+        });
+      });
+
+      const cancel = render(root, page.cell() as any, renderOptions);
+
+      await waitFor(
+        () => Promise.resolve(root.innerHTML.length > 0),
+        { timeout: 5000 },
+      );
+
+      const button = root.getElementsByTagName("button")[0] as any;
+      assertExists(button);
+
+      button.dispatchEvent({ type: "click", target: button });
+
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const timeoutPromise = new Promise<string>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("timed out waiting for navigaterequest")),
+          5000,
+        );
+      });
+      const navigatedPieceId = await Promise.race([
+        navigation,
+        timeoutPromise,
+      ]).finally(() => {
+        if (timeout !== undefined) {
+          clearTimeout(timeout);
+        }
+      });
+      assertExists(navigatedPieceId);
+
+      cancel();
+    });
+
+    it("dispatches one navigateTo when a rendered handler changes local state", async () => {
+      const navigatePattern =
+        `import { Default, computed, handler, NAME, navigateTo, pattern, UI, Writable } from "commonfabric";
+
+interface ChildState {
+  label: Default<string, "target">;
+}
+
+const Child = pattern<ChildState>(({ label }) => ({
+  [NAME]: "Target Child",
+  label,
+  [UI]: <div id="child">{label}</div>,
+}));
+
+const go = handler<void, { menuOpen: Writable<boolean> }>((_, { menuOpen }) => {
+  menuOpen.set(false);
+  return navigateTo(Child({ label: "target" }));
+});
+
+export default pattern<Record<string, never>>(() => {
+  const menuOpen = new Writable(true);
+  return {
+    [NAME]: "Navigate Handler State Test",
+    menuOpen,
+    [UI]: (
+      <button
+        id="go"
+        onClick={go({ menuOpen })}
+        style={{ display: computed(() => menuOpen.get() ? "block" : "none") }}
+      >
+        Go
+      </button>
+    ),
+  };
+});`;
+
+      const navigateProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: navigatePattern,
+        }],
+      };
+
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const page = await rt.createPage(navigateProgram, session.space, {
+        run: true,
+      });
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+      const navigations: string[] = [];
+      rt.on("navigaterequest", ({ cell }) => {
+        navigations.push(cell.id());
+      });
+
+      const cancel = render(root, page.cell() as any, renderOptions);
+
+      await waitFor(
+        () => Promise.resolve(root.innerHTML.length > 0),
+        { timeout: 5000 },
+      );
+
+      const button = root.getElementsByTagName("button")[0] as any;
+      assertExists(button);
+
+      button.dispatchEvent({ type: "click", target: button });
+
+      await waitFor(
+        () => Promise.resolve(navigations.length > 0),
+        { timeout: 5000 },
+      );
+      await rt.idle();
+
+      assertEquals(navigations.length, 1);
+
+      cancel();
+    });
+  });
+
+  describe("CFC render-policy threading (S15)", () => {
+    // Guards the field-by-field copy in RuntimeClient.initialize() and the
+    // RuntimeProcessor.initialize() -> WorkerReconciler plumbing: during
+    // #3994's own review cycle the initialize() payload DROPPED
+    // renderDeclassificationPolicy, so {renderDeclassificationPolicy: "deny"}
+    // silently behaved as "allow" (fail open). This exercises the REAL
+    // threading end to end: initialize -> worker InitializationData ->
+    // RuntimeProcessor -> every mount's reconciler.
+    const SECRET_TEXT = "Sensitive diagnosis: migraine";
+    const SECRET_ATOM = "s15-threading-secret";
+    const BLOCKED_TEXT = "Content hidden by policy";
+
+    // Mount (via the worker renderer) a <cf-cfc-render-boundary> whose author
+    // props declassify the label of a confidential cell rendered as its child.
+    async function renderAuthorDeclassifiedSecret(
+      rt: RuntimeClient,
+      space: Session["space"],
+    ) {
+      const nonce = crypto.randomUUID();
+      const secretSchema = {
+        type: "string",
+        ifc: { confidentiality: [SECRET_ATOM] },
+      } as const satisfies JSONSchema;
+      const secret = await rt.getCell<string>(
+        space,
+        "s15-render-policy-secret-" + nonce,
+        secretSchema,
+      );
+      await secret.set(SECRET_TEXT);
+      await rt.idle();
+      await secret.sync();
+
+      const vdom = await rt.getCell(
+        space,
+        "s15-render-policy-vdom-" + nonce,
+        undefined,
+      );
+      await vdom.set({
+        type: "vnode",
+        name: "cf-cfc-render-boundary",
+        props: {
+          maxConfidentiality: [],
+          declassifyConfidentiality: [SECRET_ATOM],
+        },
+        children: [secret],
+      });
+      await rt.idle();
+      await vdom.sync();
+
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+      const cancel = render(
+        root,
+        vdom.asSchema(rendererVDOMSchema) as any,
+        renderOptions,
+      );
+      return { root, cancel };
+    }
+
+    it("threads renderDeclassificationPolicy 'deny' through initialize to the worker reconciler", async () => {
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session, {
+        renderDeclassificationPolicy: "deny",
+      });
+
+      const { root, cancel } = await renderAuthorDeclassifiedSecret(
+        rt,
+        session.space,
+      );
+      try {
+        // Wait for the blocked placeholder (positive signal) rather than for
+        // the absence of the secret, which would pass vacuously pre-render.
+        await waitFor(
+          () => Promise.resolve(root.innerHTML.includes(BLOCKED_TEXT)),
+          { timeout: 10000 },
+        );
+        assertEquals(
+          root.innerHTML.includes(SECRET_TEXT),
+          false,
+          "deny must ignore the author's declassifyConfidentiality",
+        );
+      } finally {
+        cancel();
+      }
+    });
+
+    it("absent renderDeclassificationPolicy keeps the 'allow' default (control)", async () => {
+      // Same fixtures as the deny case: proves the block above comes from the
+      // threaded policy, not from broken fixtures or an always-blocking gate.
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const { root, cancel } = await renderAuthorDeclassifiedSecret(
+        rt,
+        session.space,
+      );
+      try {
+        await waitFor(
+          () => Promise.resolve(root.innerHTML.includes(SECRET_TEXT)),
+          { timeout: 10000 },
+        );
+        assertEquals(root.innerHTML.includes(BLOCKED_TEXT), false);
+      } finally {
+        cancel();
+      }
+    });
   });
 });
 
-async function createRuntimeClient(session: Session): Promise<RuntimeClient> {
+async function createTestSession(): Promise<Session> {
+  return await createSession({
+    identity,
+    spaceName: globalThis.crypto.randomUUID(),
+  });
+}
+
+async function createRuntimeClient(
+  session: Session,
+  extraOptions: Partial<RuntimeClientOptions> = {},
+): Promise<RuntimeClient> {
   // If a space identity was created, replace it with a transferrable
   // key in Deno using the same derivation as Session
   if (session.spaceIdentity && session.spaceName) {
@@ -650,8 +1271,9 @@ async function createRuntimeClient(session: Session): Promise<RuntimeClient> {
     spaceIdentity: session.spaceIdentity,
     spaceDid: session.space,
     spaceName: session.spaceName,
+    ...extraOptions,
   });
 
-  await worker.synced();
+  await worker.synced(session.space);
   return worker;
 }

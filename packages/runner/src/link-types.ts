@@ -1,5 +1,9 @@
-import { isObject, isRecord } from "@commontools/utils/types";
-import { type JSONSchema } from "./builder/types.ts";
+import { isObject, isRecord } from "@commonfabric/utils/types";
+import {
+  type CellScope,
+  type JSONSchema,
+  type LinkScope,
+} from "./builder/types.ts";
 import { type MemorySpace } from "./cell.ts";
 import {
   type LegacyAlias,
@@ -16,6 +20,26 @@ import type {
   MemoryAddressPathComponent,
 } from "./storage/interface.ts";
 
+const CELL_SCOPE_VALUES = new Set(["space", "user", "session"]);
+
+function parseScopedIdSegment(idSegment: string): {
+  id: string;
+  scope?: CellScope;
+} {
+  const scopeSeparator = idSegment.lastIndexOf("@");
+  if (scopeSeparator === -1) return { id: idSegment };
+
+  const id = idSegment.slice(0, scopeSeparator);
+  const scope = idSegment.slice(scopeSeparator + 1);
+  if (!id || !CELL_SCOPE_VALUES.has(scope)) {
+    throw new Error(
+      `Invalid scope suffix "@${scope}" in link handle. Expected @space, @user, or @session.`,
+    );
+  }
+
+  return { id, scope: scope as CellScope };
+}
+
 /**
  * Normalized link structure returned by parsers
  */
@@ -23,18 +47,41 @@ export type NormalizedLink = {
   id?: URI; // URI format with "of:" prefix
   path: readonly MemoryAddressPathComponent[];
   space?: MemorySpace;
-  type?: string; // Default is "application/json"
+  scope?: LinkScope;
   schema?: JSONSchema;
   overwrite?: "redirect"; // "this" gets normalized away to undefined
 };
 
 /**
- * Full normalized link that from a complete link, i.e. with required id, space
- * and type. Gets created by parseLink if a base is provided.
+ * Full normalized link from a complete link, i.e. with required id and space.
+ * Gets created by parseLink if a base is provided.
  *
- * Any such link can be used as a memory address.
+ * Normalized link paths are value-relative. Use `toMemorySpaceAddress` when a
+ * document-root memory address is required.
  */
-export type NormalizedFullLink = NormalizedLink & IMemorySpaceAddress;
+export type NormalizedFullLink = NormalizedLink & {
+  id: URI;
+  space: MemorySpace;
+  scope: CellScope;
+};
+
+export type ValuePath = readonly ["value", ...string[]];
+export type IMemorySpaceValueAddress = IMemorySpaceAddress & {
+  path: ValuePath;
+};
+/**
+ * Convert a value-relative normalized link into a document-root memory address.
+ */
+export function toMemorySpaceAddress(
+  link: NormalizedFullLink,
+): IMemorySpaceValueAddress {
+  return {
+    space: link.space,
+    id: link.id,
+    scope: link.scope,
+    path: ["value", ...link.path],
+  };
+}
 
 /**
  * Primitive cell link types that can be serialized.
@@ -78,11 +125,12 @@ export function isPrimitiveCellLink(
 
 export function isNormalizedLink(value: any): value is NormalizedLink {
   if (!isRecord(value)) return false;
-  const { path, id, type, space } = value;
+  const { path, id, space, scope } = value;
   return Array.isArray(path) &&
     (typeof id === "string" || id === undefined) &&
-    (typeof type === "string" || type === undefined) &&
-    (typeof space === "string" || space === undefined);
+    (typeof space === "string" || space === undefined) &&
+    (scope === undefined || scope === "inherit" || scope === "space" ||
+      scope === "user" || scope === "session");
 }
 
 /**
@@ -97,7 +145,8 @@ export function isNormalizedFullLink(value: any): value is NormalizedFullLink {
     isRecord(value) &&
     typeof value.id === "string" &&
     typeof value.space === "string" &&
-    typeof value.type === "string" &&
+    (value.scope === "space" || value.scope === "user" ||
+      value.scope === "session") &&
     Array.isArray(value.path)
   );
 }
@@ -123,7 +172,10 @@ export function isWriteRedirectLink(
 
 /**
  * Check if value is a legacy alias.
- * @deprecated Switch to isWriteRedirectLink instead.
+ *
+ * While legacy aliases are no longer used as links, we do still use them in
+ * bindings in the intermediate form where we don't have enough detail to
+ * point to an actual cell.
  */
 export function isLegacyAlias(value: any): value is LegacyAlias {
   return isRecord(value) && "$alias" in value && isRecord(value.$alias) &&
@@ -147,6 +199,9 @@ export function parseLinkPrimitive(
     let id = link.id;
     const path = link.path || [];
     const resolvedSpace = link.space || base?.space;
+    const resolvedScope = link.scope === undefined || link.scope === "inherit"
+      ? base?.scope
+      : link.scope;
 
     // If no id provided, use base cell's document
     if (!id && base) {
@@ -157,7 +212,7 @@ export function parseLinkPrimitive(
       ...(id && { id }),
       path: path.map((p) => p.toString()),
       ...(resolvedSpace && { space: resolvedSpace }),
-      type: "application/json",
+      ...(resolvedScope && { scope: resolvedScope }),
       ...(link.schema !== undefined && { schema: link.schema }),
       ...(link.overwrite === "redirect" && { overwrite: "redirect" }),
     };
@@ -179,11 +234,13 @@ export function parseLinkPrimitive(
 
     return {
       ...(id && { id }),
-      path: Array.isArray(alias.path)
-        ? alias.path.map((p) => p.toString())
-        : [],
+      path: alias.path,
       ...(base?.space && { space: base.space }),
-      type: "application/json",
+      ...(alias.scope !== undefined
+        ? { scope: alias.scope }
+        : base?.scope
+        ? { scope: base.scope }
+        : {}),
       ...(alias.schema !== undefined && { schema: alias.schema }),
       overwrite: "redirect",
     };
@@ -199,17 +256,38 @@ export function areNormalizedLinksSame(
   link2: NormalizedLink,
 ): boolean {
   return link1.id === link2.id && link1.space === link2.space &&
-    arrayEqual(link1.path, link2.path) &&
-    (link1.type ?? "application/json") === (link2.type ?? "application/json");
+    (link1.scope ?? "space") === (link2.scope ?? "space") &&
+    arrayEqual(link1.path, link2.path);
+}
+
+export function areNormalizedLinksSameIgnoringScope(
+  link1: NormalizedLink,
+  link2: NormalizedLink,
+): boolean {
+  return link1.id === link2.id && link1.space === link2.space &&
+    arrayEqual(link1.path, link2.path);
 }
 
 /**
  * Serialize an address to a string key for use in Maps/Sets/memoization.
- * Includes space, id, type, and path — the same fields compared by
- * areNormalizedLinksSame.
+ * Includes space, id, and path — the same fields compared by
+ * areNormalizedLinksSame for document links.
+ *
+ * Because links are relative to "value", the IMemorySpaceAddress and
+ * NormalizedFullLink version of the same address will return different
+ * keys, so they should not be mixed up.
  */
-export function addressKey(addr: IMemorySpaceAddress): string {
-  return JSON.stringify([addr.space, addr.id, addr.type, addr.path]);
+type ScopedMemorySpaceAddress = IMemorySpaceAddress & { scope: CellScope };
+
+export function addressKey(
+  addr: ScopedMemorySpaceAddress | NormalizedFullLink,
+): string {
+  return JSON.stringify([
+    addr.space,
+    addr.id,
+    addr.scope,
+    addr.path,
+  ]);
 }
 
 /**
@@ -279,7 +357,7 @@ export function parseLLMFriendlyLink(
   }
 
   // Check if first segment is a space DID (cross-space link)
-  let id: string;
+  let id: string | undefined;
   let path: string[];
   const spaceMatch = firstSegment?.match(matchSpacePrefix);
   if (spaceMatch) {
@@ -292,6 +370,13 @@ export function parseLLMFriendlyLink(
     id = firstSegment;
     path = rest;
   }
+  if (id === undefined) {
+    throw new Error(
+      'Target must include a piece handle, e.g. "/of:bafyabc123/path".',
+    );
+  }
+  const scopedId = parseScopedIdSegment(id);
+  id = scopedId.id;
 
   // Check if first segment looks like a CID/handle by length
   //
@@ -314,7 +399,7 @@ export function parseLLMFriendlyLink(
     id: id as `${string}:${string}`,
     path,
     ...(space && { space }),
-    type: "application/json",
+    ...(scopedId.scope && { scope: scopedId.scope }),
   };
 }
 
@@ -331,9 +416,12 @@ export function createLLMFriendlyLink(
   link: NormalizedFullLink,
   contextSpace?: MemorySpace,
 ): string {
+  const id = link.scope && link.scope !== "space"
+    ? `${link.id}@${link.scope}`
+    : link.id;
   // If contextSpace provided and differs, include space in link
   if (contextSpace && link.space && link.space !== contextSpace) {
-    return encodeJsonPointer(["", `@${link.space}`, link.id, ...link.path]);
+    return encodeJsonPointer(["", `@${link.space}`, id, ...link.path]);
   }
-  return encodeJsonPointer(["", link.id, ...link.path]);
+  return encodeJsonPointer(["", id, ...link.path]);
 }

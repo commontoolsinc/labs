@@ -5,14 +5,20 @@
  * for interacting with cells across the worker boundary.
  */
 
-import type { DID, Identity } from "@commontools/identity";
+import type { DID, Identity } from "@commonfabric/identity";
 import type {
+  ActionRunTraceEntry,
   JSONSchema,
   RuntimeTelemetryMarkerResult,
   SchedulerDiagnosisResult,
   SchedulerGraphSnapshot,
-} from "@commontools/runner/shared";
-import { Program } from "@commontools/js-compiler/interface";
+  SettleStats,
+  SettleStatsHistoryEntry,
+  TriggerTraceEntry,
+  WriteStackTraceEntry,
+  WriteStackTraceMatcher,
+} from "@commonfabric/runner/shared";
+import { Program } from "@commonfabric/js-compiler/interface";
 import { CellHandle } from "./cell-handle.ts";
 import {
   type CellRef,
@@ -26,15 +32,18 @@ import {
   type LoggerTimingData,
   type LogLevel,
   NavigateRequestNotification,
+  type PatternSourcesResponse,
   RequestType,
   TelemetryNotification,
+  type UploadBlobResponse,
 } from "./protocol/mod.ts";
-import { NameSchema } from "@commontools/runner/schemas";
+import { NameSchema } from "@commonfabric/runner/schemas";
 import { RuntimeTransport } from "./client/transport.ts";
 import { EventEmitter } from "./client/emitter.ts";
 import {
   InitializedRuntimeConnection,
   RuntimeConnection,
+  type SubscriptionDiagnostics,
 } from "./client/connection.ts";
 import { PageHandle } from "./page-handle.ts";
 
@@ -76,14 +85,33 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     transport: RuntimeTransport,
     options: RuntimeClientOptions,
   ): Promise<RuntimeClient> {
+    // renderDeclassificationPolicy is a security knob: reject unknown values
+    // loudly here, where the host's own config error can surface early. The
+    // worker side additionally fails CLOSED (treats unknown as "deny") for
+    // peers that don't go through this entry point.
+    const renderPolicy = options.renderDeclassificationPolicy;
+    if (
+      renderPolicy !== undefined && renderPolicy !== "allow" &&
+      renderPolicy !== "deny"
+    ) {
+      throw new Error(
+        `Invalid renderDeclassificationPolicy: ${
+          JSON.stringify(renderPolicy)
+        } (expected "allow" or "deny")`,
+      );
+    }
     const initialized = await (new RuntimeConnection(transport)).initialize({
       apiUrl: options.apiUrl.toString(),
+      spaceHostMap: options.spaceHostMap,
       identity: options.identity.serialize(),
       spaceIdentity: options.spaceIdentity?.serialize(),
       spaceDid: options.spaceDid,
       spaceName: options.spaceName,
       experimental: options.experimental,
-      buildHash: options.buildHash,
+      cfcEnforcementMode: options.cfcEnforcementMode,
+      renderDeclassificationPolicy: options.renderDeclassificationPolicy,
+      renderConfidentialityCeiling: options.renderConfidentialityCeiling,
+      trustSnapshot: options.trustSnapshot,
     });
     return new RuntimeClient(initialized, options);
   }
@@ -137,8 +165,21 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     await this.#conn.request<RequestType.Idle>({ type: RequestType.Idle });
   }
 
+  /**
+   * Await all in-flight compile-cache write-backs in the worker. Distinct from
+   * `idle()` (reactive/scheduler quiescence): this guarantees persistence
+   * durability, so a subsequent load of an already-compiled pattern reads the
+   * cached entry instead of recompiling in-client.
+   */
+  async flushCompileCacheWrites(): Promise<void> {
+    await this.#conn.request<RequestType.FlushCompileCacheWrites>({
+      type: RequestType.FlushCompileCacheWrites,
+    });
+  }
+
   async createPage<T = unknown>(
     input: string | URL | Program,
+    space: DID,
     options?: { argument?: JSONValue; run?: boolean },
   ): Promise<PageHandle<T>> {
     const source = input instanceof URL
@@ -159,6 +200,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       RequestType.PageCreate
     >({
       type: RequestType.PageCreate,
+      space,
       source,
       argument: options?.argument,
       run: options?.run,
@@ -167,32 +209,43 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new PageHandle<T>(this, response.page);
   }
 
-  async getSpaceRootPattern(): Promise<PageHandle<NameSchema>> {
+  // Page operations name their space explicitly — there is no
+  // implicit/default space at this layer. The worker resolves each
+  // operation against that space's piece context over the same
+  // connection.
+
+  async getSpaceRootPattern(space: DID): Promise<PageHandle<NameSchema>> {
     const response = await this.#conn.request<
       RequestType.GetSpaceRootPattern
     >({
       type: RequestType.GetSpaceRootPattern,
+      space,
     });
     return new PageHandle<NameSchema>(this, response.page);
   }
 
-  async recreateSpaceRootPattern(): Promise<PageHandle<NameSchema>> {
+  async recreateSpaceRootPattern(
+    space: DID,
+  ): Promise<PageHandle<NameSchema>> {
     const response = await this.#conn.request<
       RequestType.RecreateSpaceRootPattern
     >({
       type: RequestType.RecreateSpaceRootPattern,
+      space,
     });
     return new PageHandle<NameSchema>(this, response.page);
   }
 
   async getPage<T = unknown>(
     pageId: string,
+    space: DID,
     runIt?: boolean,
   ): Promise<PageHandle<T> | null> {
     const response = await this.#conn.request<RequestType.PageGet>({
       type: RequestType.PageGet,
       pageId: pageId,
       runIt,
+      space,
     });
 
     if (!response) return null;
@@ -200,10 +253,20 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new PageHandle<T>(this, response.page);
   }
 
-  async removePage(pageId: string): Promise<boolean> {
+  async getPageSlug(pageId: string, space: DID): Promise<string | undefined> {
+    const response = await this.#conn.request<RequestType.PageGetSlug>({
+      type: RequestType.PageGetSlug,
+      pageId,
+      space,
+    });
+    return response.slug;
+  }
+
+  async removePage(pageId: string, space: DID): Promise<boolean> {
     const res = await this.#conn.request<RequestType.PageRemove>({
       type: RequestType.PageRemove,
       pageId: pageId,
+      space,
     });
     return res.value;
   }
@@ -212,9 +275,10 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * Get the pieces list cell.
    * Subscribe to this cell to get reactive updates of all pieces in the space.
    */
-  async getPiecesListCell<T>(): Promise<CellHandle<T[]>> {
+  async getPiecesListCell<T>(space: DID): Promise<CellHandle<T[]>> {
     const response = await this.#conn.request<RequestType.PageGetAll>({
       type: RequestType.PageGetAll,
+      space,
     });
 
     return new CellHandle<T[]>(this, response.cell);
@@ -222,10 +286,43 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   /**
    * Wait for the PieceManager to be synced with storage.
+   *
+   * Note: storage sync is connection-wide, so this awaits all open
+   * spaces; `space` only selects which space's piece context (and its
+   * space-cell sync) to await — and lazily opens that context if this
+   * is the first operation to touch the space.
    */
-  async synced(): Promise<void> {
+  async synced(space: DID): Promise<void> {
     await this.#conn.request<RequestType.PageSynced>({
       type: RequestType.PageSynced,
+      space,
+    });
+  }
+
+  /**
+   * Record a runtime-learned host hint for a space (site-table v0):
+   * makes a just-learned `space → host` fact effective on the live
+   * runtime. The durable record belongs in the home-space site table;
+   * this is the immediate, in-session half. Returns whether the hint
+   * is in effect (seed wins; an opened space is never re-pointed).
+   */
+  async registerSpaceHost(space: DID, host: string): Promise<boolean> {
+    const res = await this.#conn.request<RequestType.RegisterSpaceHost>({
+      type: RequestType.RegisterSpaceHost,
+      space,
+      host,
+    });
+    return res.value;
+  }
+
+  /**
+   * Wait for convergence across EVERY space this worker has opened.
+   * Spaceless by design (like idle) — for quiescence checks that don't
+   * care about any particular space, e.g. test/debug harnesses.
+   */
+  async allSynced(): Promise<void> {
+    await this.#conn.request<RequestType.RuntimeSynced>({
+      type: RequestType.RuntimeSynced,
     });
   }
 
@@ -236,11 +333,12 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return res.snapshot;
   }
 
-  async setPullMode(pullMode: boolean): Promise<void> {
-    await this.#conn.request<RequestType.SetPullMode>({
-      type: RequestType.SetPullMode,
-      pullMode,
-    });
+  getSubscriptionDiagnostics(): SubscriptionDiagnostics {
+    return this.#conn.getSubscriptionDiagnostics();
+  }
+
+  resetSubscriptionDiagnostics(): void {
+    this.#conn.resetSubscriptionDiagnostics();
   }
 
   async getLoggerCounts(): Promise<{
@@ -309,12 +407,144 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   /**
+   * Enable or disable collection of settle stats in the worker scheduler.
+   * When disabled, the last captured settle stats are cleared.
+   */
+  async setSettleStatsEnabled(enabled: boolean): Promise<void> {
+    await this.#conn.request<RequestType.SetSettleStatsEnabled>({
+      type: RequestType.SetSettleStatsEnabled,
+      enabled,
+    });
+  }
+
+  /**
+   * Return settle stats captured during the last worker scheduler execute() call.
+   * Returns null if settle stats are disabled or no execute() has been captured yet.
+   */
+  async getSettleStats(): Promise<SettleStats | null> {
+    const res = await this.#conn.request<RequestType.GetSettleStats>({
+      type: RequestType.GetSettleStats,
+    });
+    return res.stats;
+  }
+
+  /**
+   * Return recent settle stats history captured from worker execute() calls.
+   * Entries are ordered oldest first.
+   */
+  async getSettleStatsHistory(): Promise<SettleStatsHistoryEntry[]> {
+    const res = await this.#conn.request<RequestType.GetSettleStatsHistory>({
+      type: RequestType.GetSettleStatsHistory,
+    });
+    return res.history;
+  }
+
+  /**
+   * Return recent exact action-run history captured from worker scheduler runs.
+   * Entries are ordered oldest first.
+   */
+  async getActionRunTrace(): Promise<ActionRunTraceEntry[]> {
+    const res = await this.#conn.request<RequestType.GetActionRunTrace>({
+      type: RequestType.GetActionRunTrace,
+    });
+    return res.trace;
+  }
+
+  /**
+   * Enable or disable collection of exact action-run history in the worker scheduler.
+   * When disabled, the current action-run history buffer is cleared.
+   */
+  async setActionRunTraceEnabled(enabled: boolean): Promise<void> {
+    await this.#conn.request<RequestType.SetActionRunTraceEnabled>({
+      type: RequestType.SetActionRunTraceEnabled,
+      enabled,
+    });
+  }
+
+  /**
+   * Enable or disable collection of structured trigger-trace entries in the worker scheduler.
+   * When disabled, the current trigger trace buffer is cleared.
+   */
+  async setTriggerTraceEnabled(enabled: boolean): Promise<void> {
+    await this.#conn.request<RequestType.SetTriggerTraceEnabled>({
+      type: RequestType.SetTriggerTraceEnabled,
+      enabled,
+    });
+  }
+
+  /**
+   * Return recent structured trigger-trace entries captured from worker storage changes.
+   * Entries are ordered oldest first.
+   */
+  async getTriggerTrace(): Promise<TriggerTraceEntry[]> {
+    const res = await this.#conn.request<RequestType.GetTriggerTrace>({
+      type: RequestType.GetTriggerTrace,
+    });
+    return res.trace;
+  }
+
+  /**
+   * Configure transaction-level write stack tracing in the worker.
+   * Passing an empty matcher list disables the probe and clears prior entries.
+   */
+  async setWriteStackTraceMatchers(
+    matchers: WriteStackTraceMatcher[],
+  ): Promise<void> {
+    await this.#conn.request<RequestType.SetWriteStackTraceMatchers>({
+      type: RequestType.SetWriteStackTraceMatchers,
+      matchers,
+    });
+  }
+
+  /**
+   * Return recent transaction-level write stack trace entries from the worker.
+   * Entries are ordered oldest first.
+   */
+  async getWriteStackTrace(): Promise<WriteStackTraceEntry[]> {
+    const res = await this.#conn.request<RequestType.GetWriteStackTrace>({
+      type: RequestType.GetWriteStackTrace,
+    });
+    return res.trace;
+  }
+
+  /**
    * Run non-idempotent computation detection.
    * Returns a report of non-idempotent actions found.
    */
-  async detectNonIdempotent(): Promise<SchedulerDiagnosisResult> {
+  async getPatternSources(): Promise<PatternSourcesResponse> {
+    return await this.#conn.request<RequestType.GetPatternSources>({
+      type: RequestType.GetPatternSources,
+    });
+  }
+
+  async setBreakpoints(actionIds: string[]): Promise<void> {
+    await this.#conn.request<RequestType.SetBreakpoints>({
+      type: RequestType.SetBreakpoints,
+      actionIds,
+    });
+  }
+
+  async uploadBlob(options: {
+    space: DID;
+    contentType: string;
+    body: Uint8Array;
+    suffix?: string;
+  }): Promise<UploadBlobResponse> {
+    return await this.#conn.request<RequestType.UploadBlob>({
+      type: RequestType.UploadBlob,
+      space: options.space,
+      contentType: options.contentType,
+      body: Array.from(options.body),
+      suffix: options.suffix,
+    });
+  }
+
+  async detectNonIdempotent(
+    durationMs?: number,
+  ): Promise<SchedulerDiagnosisResult> {
     const res = await this.#conn.request<RequestType.DetectNonIdempotent>({
       type: RequestType.DetectNonIdempotent,
+      durationMs,
     });
     return res.result;
   }

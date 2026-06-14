@@ -7,6 +7,10 @@ export type {
   RuntimeOptions,
   SpaceCellContents,
 } from "./runtime.ts";
+export type {
+  UnsafeHostTrust,
+  UnsafeHostTrustOptions,
+} from "./unsafe-host-trust.ts";
 export * from "./interface.ts";
 export { raw } from "./module.ts";
 export type { Cell, Stream } from "./cell.ts";
@@ -53,6 +57,7 @@ export { addCommonIDfromObjectID } from "./data-updating.ts";
 export { resolveLink } from "./link-resolution.ts";
 export {
   areLinksSame,
+  getMetaLink,
   isCellLink as isLink,
   isWriteRedirectLink,
   parseLink,
@@ -61,8 +66,8 @@ export {
 } from "./link-utils.ts";
 export * from "./pattern-manager.ts";
 
-// Builder functionality (migrated from @commontools/builder package)
-export { createBuilder } from "./builder/factory.ts";
+// Builder functionality (migrated from @commonfabric/builder package)
+export { createBuilder, type CreateBuilderOptions } from "./builder/factory.ts";
 export type {
   BuilderFunctionsAndConstants as BuilderFunctions,
   BuilderRuntime,
@@ -87,6 +92,8 @@ export {
   AuthSchema,
   type Cell as BuilderCell,
   type Frame,
+  FS,
+  type FsProjection,
   type HandlerFactory,
   ID,
   ID_FIELD,
@@ -96,7 +103,7 @@ export {
   isStreamValue,
   type JSONObject,
   type JSONSchema,
-  type JSONSchemaMutable,
+  type JSONSchemaObjMutable,
   type JSONValue,
   type Module,
   type ModuleFactory,
@@ -116,17 +123,22 @@ export {
   type toJSON,
   TYPE,
   UI,
-  unsafe_materializeFactory,
-  unsafe_originalPattern,
-  unsafe_parentPattern,
   type UnsafeBinding,
   type VNode,
   WebhookConfigSchema,
 } from "./builder/types.ts";
 export { createNodeFactory } from "./builder/module.ts";
 export { opaqueRef as cell } from "./builder/opaque-ref.ts";
-export { Classification, ContextualFlowControl } from "./cfc.ts";
-export type { Mutable } from "@commontools/utils/types";
+export {
+  CFC_ATOM_BASE,
+  CFC_ATOM_TYPE,
+  CFC_CONCEPT_KIND,
+  CFC_FUSE_ATOM_CLASS,
+  CFC_RUNTIME_SUBJECT,
+  cfcAtom,
+  ContextualFlowControl,
+} from "./cfc.ts";
+export type { Mutable } from "@commonfabric/utils/types";
 export {
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
@@ -139,5 +151,36 @@ export {
 
 // Utility functions (split from utils.ts)
 export { createJsonSchema } from "./builder/json-utils.ts";
-export { deepEqual } from "@commontools/utils/deep-equal";
+export { deepEqual } from "@commonfabric/utils/deep-equal";
 export { getValueAtPath, setValueAtPath } from "./path-utils.ts";
+export { schemaToTypeString } from "./schema-format.ts";
+export type { SchemaFormatOptions } from "./schema-format.ts";
+export { ACLManager } from "./acl-manager.ts";
+export {
+  cellEntityIdString,
+  type CellPath,
+  compileAndSavePattern,
+  parseCellPath,
+  resolveCellPath,
+} from "./piece-helpers.ts";
+export {
+  isSlugAddress,
+  slugCause,
+  slugIdForSpace,
+  validateSlug,
+} from "./slugs.ts";
+export {
+  type FabricChaseResult,
+  resolveFabricRefToIdentity,
+} from "./fabric-ref-resolution.ts";
+export {
+  type FabricRef,
+  FabricRefError,
+  isFabricImportSpecifier,
+  parseFabricRef,
+} from "./sandbox/fabric-import-specifier.ts";
+export { type PinRewrite, rewriteFabricPins } from "./fabric-pin-rewrite.ts";
+export {
+  resolveSlugTargetCell,
+  SlugResolutionError,
+} from "./slug-resolution.ts";

@@ -1,47 +1,60 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { computed, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    items: number[] & {} & { [SELF]: OpaqueRef<any>; };
+}, number[]>(({ items }) => items.map((n) => n * 2), {
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "number"
+            }
+        }
+    },
+    required: ["items"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "number"
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-computed-opaque-ref-map
 // Verifies: .map() on an OpaqueRef inside computed() is NOT transformed to mapWithPattern
-//   computed(() => items.map((n) => n * 2)) → derive({ items }, ({ items }) => items.map((n) => n * 2))
-// Context: Inside computed/derive, OpaqueRef auto-unwraps to a plain array, so
+//   computed(() => items.map((n) => n * 2)) → lift(({ items }) => items.map((n) => n * 2))({ items })
+// Context: Inside the lift-applied computation, OpaqueRef auto-unwraps to a plain array, so
 //   .map() is a standard Array.prototype.map — it must remain untransformed.
 //   This is a negative test for reactive method detection.
 export default pattern((items) => {
     // items is OpaqueRef<number[]> as a pattern parameter
-    // Inside the computed callback (which becomes derive), items.map should NOT be transformed
-    const doubled = __ctHelpers.derive({
-        type: "object",
-        properties: {
-            items: {
-                type: "array",
-                items: {
-                    type: "number"
-                },
-                asOpaque: true
-            }
-        },
-        required: ["items"]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "number"
-        },
-        asOpaque: true
-    } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.map((n) => n * 2));
+    // Inside the computed callback (which becomes a lift-applied computation), items.map should NOT be transformed
+    const doubled = __cfLift_1({ items: items }).for("doubled", true);
     return doubled;
 }, {
     type: "array",
     items: {
         type: "number"
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "array",
     items: {
         type: "number"
-    },
-    asOpaque: true
-} as const satisfies __ctHelpers.JSONSchema);
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

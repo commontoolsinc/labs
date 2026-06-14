@@ -4,6 +4,8 @@
     "./packages/background-charm-service",
     "./packages/piece",
     "./packages/cli",
+    "./packages/content-hash",
+    "./packages/data-model",
     "./packages/deno-web-test",
     "./packages/felt",
     "./packages/generated-patterns",
@@ -13,17 +15,17 @@
     "./packages/iframe-sandbox",
     "./packages/integration",
     "./packages/js-compiler",
-    "./packages/js-sandbox",
+    "./packages/lib-shell",
     "./packages/ts-transformers",
     "./packages/test-support",
     "./packages/schema-generator",
+    "./packages/cf-harness",
     "./packages/llm",
     "./packages/memory",
     "./packages/patterns",
     "./packages/patterns/auth",
     "./packages/runner",
     "./packages/runtime-client",
-    "./packages/seeder",
     "./packages/shell",
     "./packages/static",
     "./packages/toolshed",
@@ -36,16 +38,22 @@
   ],
   "tasks": {
     "check": "./tasks/check.sh",
-    "ct": "ROOT=$(pwd) && cd $INIT_CWD && deno run --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run \"$ROOT/packages/cli/mod.ts\"",
+    "check-skill-facts": "deno test --allow-read skills/cf-review/check-facts.ts",
+    "cf": "deno run --allow-run --allow-env --allow-read ./packages/cli/launcher.ts",
     "test": "./tasks/test.ts",
     "test-all": "echo \"Use 'deno task test' instead.\" && exit 1",
     "build-binaries": "./tasks/build-binaries.ts",
+    "install-hooks": "./scripts/install-git-hooks.sh",
     "initialize-db": "./tasks/initialize-db.sh",
-    "integration": "./tasks/integration.ts"
+    "integration": "./tasks/integration.ts",
+    "profile": "./scripts/restart-local-dev.sh --inspect-brk",
+    "cf-profile": "ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && deno run -A \"$ROOT/scripts/cf-profile.ts\"",
+    "cf-inspect-brk": "bash -lc 'ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && CF_CLI_NAME=cf deno run --inspect-brk --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run \"$ROOT/packages/cli/mod.ts\" \"$@\"' --",
+    "cf-profile-brk": "bash -lc 'ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && CF_CLI_NAME=cf deno run --inspect-brk --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run \"$ROOT/packages/cli/mod.ts\" \"$@\"' --"
   },
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "@commontools/html",
+    "jsxImportSource": "@commonfabric/html",
     "types": [
       "./packages/html/src/jsx.d.ts"
     ],
@@ -55,8 +63,7 @@
       "dom.iterable",
       "dom.asynciterable",
       "esnext"
-    ],
-    "experimentalDecorators": true
+    ]
   },
   "exclude": [
     "**/node_modules/",
@@ -69,9 +76,9 @@
   "lint": {
     "exclude": [
       ".agents/",
+      ".claude/",
       ".beads/",
       "./packages/static/assets",
-      "./packages/ui/src/v2/components/ct-outliner",
       "./packages/vendor-astral",
       "./packages/patterns-saves-backup/",
       "./tmp/",
@@ -107,24 +114,28 @@
       ".beads/",
       ".claude/",
       "docs/",
-      "packages/seeder/templates/",
       "packages/static/assets/",
       "packages/ts-transformers/test/fixtures",
       "packages/schema-generator/test/fixtures",
-      "packages/ui/src/v2/components/ct-chart/ct-chart.ts",
-      "packages/ui/src/v2/components/ct-chart/lib/axes.ts",
-      "packages/ui/src/v2/components/ct-chart/lib/render.ts",
+      "packages/ui/src/v2/components/cf-chart/cf-chart.ts",
+      "packages/ui/src/v2/components/cf-chart/lib/axes.ts",
+      "packages/ui/src/v2/components/cf-chart/lib/render.ts",
+      "packages/ui/src/v2/components/cf-toggle/cf-toggle.ts",
+      "packages/ui/src/v2/components/cf-checkbox/cf-checkbox.ts",
+      "packages/ui/src/v2/components/cf-select/cf-select.ts",
       "packages/vendor-astral",
       "tutorials/"
     ]
   },
   "imports": {
-    "commontools": "./packages/api/index.ts",
-    "commontools/schema": "./packages/api/schema.ts",
+    "commonfabric": "./packages/api/index.ts",
+    "commonfabric/schema": "./packages/api/schema.ts",
     "core-js/proposals/explicit-resource-management": "https://esm.sh/core-js@3.46.0/proposals/explicit-resource-management",
     "core-js/proposals/async-explicit-resource-management": "https://esm.sh/core-js@3.46.0/proposals/async-explicit-resource-management",
+    "@commonfabric/ports": "./ports.json",
     "@astral/astral": "./packages/vendor-astral/mod.ts",
     "@cliffy/command": "jsr:@cliffy/command@^1.0.0-rc.8",
+    "@noble/hashes": "npm:@noble/hashes@^2.2.0",
     "@std/assert": "jsr:@std/assert@^1",
     "@std/async": "jsr:@std/async@^1",
     "@std/cli": "jsr:@std/cli@^1",
@@ -137,10 +148,10 @@
     "@std/path": "jsr:@std/path@^1",
     "@std/testing": "jsr:@std/testing@^1",
     "dagre": "npm:dagre@^0.8.5",
-    "hash-wasm": "npm:hash-wasm@^4.11.0",
+    "hash-wasm": "npm:hash-wasm@^4.12.0",
     "lit": "npm:lit@^3.3.0",
-    "merkle-reference": "npm:merkle-reference@^2.2.0",
     "multiformats": "npm:multiformats@^13.3.2",
+    "ses": "npm:ses@^1.15.0",
     "turndown": "npm:turndown@^7.1.2",
     "zod": "npm:zod@^3.24.1"
   }

@@ -10,16 +10,25 @@ import {
   LINK_V1_TAG,
   type SigilLink,
   type URI,
-} from "@commontools/runner/shared";
+} from "@commonfabric/runner/shared";
+import {
+  cfcLabelViewsEqual,
+  rebaseCfcLabelView,
+} from "@commonfabric/runner/cfc/label-view-core";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
-import { type CellRef, JSONValue, RequestType } from "./protocol/mod.ts";
-import { DID } from "@commontools/identity";
-import { isRecord } from "@commontools/utils/types";
+import {
+  type CellRef,
+  type CfcLabelView,
+  JSONValue,
+  RequestType,
+} from "./protocol/mod.ts";
+import { DID } from "@commonfabric/identity";
+import { isRecord } from "@commonfabric/utils/types";
 import { InitializedRuntimeConnection } from "./client/connection.ts";
-import { getLogger } from "@commontools/utils/logger";
+import { getLogger } from "@commonfabric/utils/logger";
 
 // Logger for schema warnings - disabled by default.
-// Enable via: globalThis.commontools.logger["cell-handle"].disabled = false
+// Enable via: globalThis.commonfabric.logger["cell-handle"].disabled = false
 const logger = getLogger("cell-handle", { enabled: false });
 
 export const $onCellUpdate = Symbol("$onCellUpdate");
@@ -46,7 +55,7 @@ export class CellHandle<T = unknown> {
   /**
    * Check if this cell has a schema defined. Warns if no schema is set.
    * Warning is disabled by default; enable via:
-   * globalThis.commontools.logger["cell-handle"].disabled = false
+   * globalThis.commonfabric.logger["cell-handle"].disabled = false
    */
   #requireSchema(method: string): void {
     if (!this.#ref.schema && !this.#schemaWarned) {
@@ -238,6 +247,16 @@ export class CellHandle<T = unknown> {
     return new CellHandle<T>(this.#rt, response.cell);
   }
 
+  async getCfcLabel(): Promise<CfcLabelView | undefined> {
+    const response = await this.#conn.request<
+      RequestType.CellGetCfcLabel
+    >({
+      type: RequestType.CellGetCfcLabel,
+      cell: this.ref(),
+    });
+    return response.cfcLabel;
+  }
+
   equals(other: unknown): boolean {
     if (this === other) return true;
     if (!isCellHandle(other)) return false;
@@ -261,9 +280,12 @@ export class CellHandle<T = unknown> {
     return {
       id: this.#ref.id,
       space: this.#ref.space,
+      scope: this.#ref.scope,
       path: [...this.#ref.path, key],
-      type: this.#ref.type,
       // Child schema is unknown, so we don't include it
+      ...(this.#ref.cfcLabelView !== undefined && {
+        cfcLabelView: rebaseCfcLabelView(this.#ref.cfcLabelView, [key]),
+      }),
     };
   }
 
@@ -272,7 +294,18 @@ export class CellHandle<T = unknown> {
     // and dereferences it (e.g., when passed through event.detail.sourceCell)
     return {
       "/": {
-        [LINK_V1_TAG]: { ...this.ref() },
+        [LINK_V1_TAG]: {
+          id: this.#ref.id,
+          space: this.#ref.space,
+          scope: this.#ref.scope,
+          path: this.#ref.path,
+          ...(this.#ref.schema !== undefined && { schema: this.#ref.schema }),
+          ...(this.#ref.overwrite !== undefined &&
+            { overwrite: this.#ref.overwrite }),
+          ...(this.#ref.cfcLabelView !== undefined && {
+            cfcLabelView: this.#ref.cfcLabelView,
+          }),
+        } as never,
       },
     };
   }
@@ -429,8 +462,10 @@ function cellRefsEqual(a: CellRef, b: CellRef): boolean {
   for (let i = 0; i < a.path.length; i++) {
     if (a.path[i] !== b.path[i]) return false;
   }
+  if (!cfcLabelViewsEqual(a.cfcLabelView, b.cfcLabelView)) return false;
   return true;
 }
+
 /**
  * Deep equality check for cell values.
  * Handles primitives, arrays, objects, and CellHandles.
@@ -482,9 +517,17 @@ function parseAsCellRef(
     return {
       id: linkData.id ?? from.id,
       space: linkData.space ?? from.space,
+      scope: linkData.scope === "space" || linkData.scope === "user" ||
+          linkData.scope === "session"
+        ? linkData.scope
+        : from.scope,
       path: (linkData.path ?? []).map((p) => p.toString()),
-      type: "application/json",
       ...(linkData.schema !== undefined && { schema: linkData.schema }),
+      ...((linkData as { cfcLabelView?: CfcLabelView }).cfcLabelView !==
+          undefined && {
+        cfcLabelView: (linkData as { cfcLabelView?: CfcLabelView })
+          .cfcLabelView,
+      }),
     };
   } else if (isLegacyAlias(value)) {
     const alias = value.$alias;
@@ -501,8 +544,8 @@ function parseAsCellRef(
     return {
       id: entityId,
       space: from.space,
+      scope: from.scope,
       path: aliasPath,
-      type: "application/json",
       ...(alias.schema !== undefined && { schema: alias.schema }),
     };
   }

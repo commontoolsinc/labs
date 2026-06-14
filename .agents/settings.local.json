@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(blackboard query)",
+      "Bash(blackboard)",
+      "Bash(deno task check)"
+    ]
+  }
+}

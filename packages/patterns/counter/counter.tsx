@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   action,
   computed,
@@ -10,15 +9,15 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // ===== Types =====
 
 interface CounterInput {
-  value?: Writable<Default<number, 0>>;
+  value?: Writable<number | Default<0>>;
 }
 
-interface CounterOutput {
+export interface CounterOutput {
   [NAME]: string;
   [UI]: VNode;
   value: number;
@@ -70,12 +69,12 @@ const Counter = pattern<CounterInput, CounterOutput>(({ value }) => {
   return {
     [NAME]: displayName,
     [UI]: (
-      <ct-screen>
-        <ct-vstack slot="header" gap="1">
-          <ct-heading level={4}>Simple Counter</ct-heading>
-        </ct-vstack>
+      <cf-screen>
+        <cf-vstack slot="header" gap="1">
+          <cf-heading level={4}>Simple Counter</cf-heading>
+        </cf-vstack>
 
-        <ct-vstack gap="3" style="padding: 2rem; align-items: center;">
+        <cf-vstack gap="3" style="padding: 2rem; align-items: center;">
           <div
             style={{
               fontSize: "3rem",
@@ -88,34 +87,34 @@ const Counter = pattern<CounterInput, CounterOutput>(({ value }) => {
 
           <div
             id="counter-result"
-            style={{ color: "var(--ct-color-gray-500)" }}
+            style={{ color: "var(--cf-colors-gray-500)" }}
           >
             Counter is the {ordinalDisplay} number
           </div>
 
-          <ct-hstack gap="2">
+          <cf-hstack gap="2">
             {/* onClick can take a Stream directly - runtime calls .send() */}
-            <ct-button
+            <cf-button
               id="counter-decrement"
               variant="secondary"
               onClick={decrement}
             >
               - Decrement
-            </ct-button>
+            </cf-button>
             {/* onClick can also take a function that calls .send() explicitly */}
-            <ct-button
+            <cf-button
               id="counter-increment"
               variant="primary"
               onClick={() => boundIncrement.send()}
             >
               + Increment
-            </ct-button>
-          </ct-hstack>
-        </ct-vstack>
-      </ct-screen>
+            </cf-button>
+          </cf-hstack>
+        </cf-vstack>
+      </cf-screen>
     ),
     value,
-    // Both approaches can be exported and tested via the `ct` CLI
+    // Both approaches can be exported and tested via the `cf` CLI
     // and with automated pattern tests. See counter.test.tsx.
     increment: boundIncrement, // Module-scope handler, bound in pattern
     decrement, // Pattern-body action, closes over value directly

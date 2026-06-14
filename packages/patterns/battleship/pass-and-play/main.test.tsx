@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: Battleship Pass-and-Play
  *
@@ -28,9 +27,9 @@
  * - Submarine (3): rows 7-9, col 4 (vertical)
  * - Destroyer (2): row 9, cols 8-9 (horizontal)
  *
- * Run: deno task ct test packages/patterns/battleship/pass-and-play/main.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/battleship/pass-and-play/main.test.tsx --verbose
  */
-import { action, computed, pattern } from "commontools";
+import { action, computed, pattern } from "commonfabric";
 import Battleship, { type SquareState } from "./main.tsx";
 
 export default pattern(() => {
@@ -72,78 +71,78 @@ export default pattern(() => {
 
   // Initial state assertions
   const assert_initial_phase_playing = computed(
-    () => game.game.phase === "playing",
+    () => game.game.get().phase === "playing",
   );
   const assert_initial_turn_player1 = computed(
-    () => game.game.currentTurn === 1,
+    () => game.game.get().currentTurn === 1,
   );
   const assert_initial_viewingAs_null = computed(
-    () => game.game.viewingAs === null,
+    () => game.game.get().viewingAs === null,
   );
   const assert_initial_winner_null = computed(
-    () => game.game.winner === null,
+    () => game.game.get().winner === null,
   );
   const assert_initial_not_awaiting_pass = computed(
-    () => game.game.awaitingPass === false,
+    () => game.game.get().awaitingPass === false,
   );
 
   // After playerReady - Player 1 is now viewing
   const assert_viewingAs_player1 = computed(
-    () => game.game.viewingAs === 1,
+    () => game.game.get().viewingAs === 1,
   );
   const assert_still_turn_player1 = computed(
-    () => game.game.currentTurn === 1,
+    () => game.game.get().currentTurn === 1,
   );
 
   // After firing a miss
   const assert_shot_recorded_miss = computed(() => {
-    return game.game.player2.shots[9][0] === "miss";
+    return game.game.get().player2.shots[9][0] === "miss";
   });
   const assert_turn_switched_to_player2 = computed(
-    () => game.game.currentTurn === 2,
+    () => game.game.get().currentTurn === 2,
   );
   const assert_awaiting_pass_after_shot = computed(
-    () => game.game.awaitingPass === true,
+    () => game.game.get().awaitingPass === true,
   );
 
   // After passDevice
   const assert_viewingAs_null_after_pass = computed(
-    () => game.game.viewingAs === null,
+    () => game.game.get().viewingAs === null,
   );
   const assert_not_awaiting_pass_after_pass = computed(
-    () => game.game.awaitingPass === false,
+    () => game.game.get().awaitingPass === false,
   );
 
   // After player 2 ready
   const assert_viewingAs_player2 = computed(
-    () => game.game.viewingAs === 2,
+    () => game.game.get().viewingAs === 2,
   );
 
   // After player 2 fires a hit
   const assert_shot_recorded_hit = computed(() => {
     // Player 2 fires at Player 1's carrier at row 0, col 0
-    return game.game.player1.shots[0][0] === "hit";
+    return game.game.get().player1.shots[0][0] === "hit";
   });
   const assert_turn_back_to_player1 = computed(
-    () => game.game.currentTurn === 1,
+    () => game.game.get().currentTurn === 1,
   );
 
   // After reset
   const assert_reset_phase_playing = computed(
-    () => game.game.phase === "playing",
+    () => game.game.get().phase === "playing",
   );
   const assert_reset_turn_player1 = computed(
-    () => game.game.currentTurn === 1,
+    () => game.game.get().currentTurn === 1,
   );
   const assert_reset_viewingAs_null = computed(
-    () => game.game.viewingAs === null,
+    () => game.game.get().viewingAs === null,
   );
   const assert_reset_shots_cleared = computed(() => {
     // All shots should be empty after reset
-    const p1Clear = game.game.player1.shots.every((row: SquareState[]) =>
+    const p1Clear = game.game.get().player1.shots.every((row: SquareState[]) =>
       row.every((cell: SquareState) => cell === "empty")
     );
-    const p2Clear = game.game.player2.shots.every((row: SquareState[]) =>
+    const p2Clear = game.game.get().player2.shots.every((row: SquareState[]) =>
       row.every((cell: SquareState) => cell === "empty")
     );
     return p1Clear && p2Clear;

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: JSX is Automatically Reactive
  *
@@ -25,7 +24,7 @@
  * 4. Verify all values update: Count=1, User="Bob", Items=4, Status="Active"
  * 5. Click multiple times to verify continuous updates
  */
-import { Default, handler, NAME, pattern, UI, Writable } from "commontools";
+import { Default, handler, NAME, pattern, UI, Writable } from "commonfabric";
 
 interface Item {
   title: string;
@@ -37,12 +36,11 @@ interface User {
 }
 
 interface TestInput {
-  count: Default<number, 0>;
-  user: Default<User, { name: "Alice"; age: 30 }>;
-  items: Default<
-    Item[],
-    [{ title: "Item 1" }, { title: "Item 2" }, { title: "Item 3" }]
-  >;
+  count: number | Default<0>;
+  user: User | Default<{ name: "Alice"; age: 30 }>;
+  items:
+    | Item[]
+    | Default<[{ title: "Item 1" }, { title: "Item 2" }, { title: "Item 3" }]>;
 }
 
 const updateAllValues = handler<
@@ -158,9 +156,9 @@ export default pattern<TestInput>(({ count, user, items }) => {
           </div>
         </div>
 
-        <ct-button onClick={updateAllValues({ count, user, items })}>
+        <cf-button onClick={updateAllValues({ count, user, items })}>
           Update All Values
-        </ct-button>
+        </cf-button>
 
         <div
           style={{

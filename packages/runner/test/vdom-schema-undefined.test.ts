@@ -68,7 +68,7 @@ Deno.test("rendererVDOMSchema child arrays recurse through vdomRenderNode", () =
     items: unknown;
   };
   const nestedArrayVariant = getArrayVariant(vdomRenderNode) as {
-    items: { $ref: string; asCell?: boolean };
+    items: { $ref: string; asCell?: readonly string[] };
   };
 
   assert(
@@ -82,11 +82,14 @@ Deno.test("rendererVDOMSchema child arrays recurse through vdomRenderNode", () =
   );
   assertEquals(
     nestedArrayVariant.items.asCell,
-    true,
+    ["cell"],
     "renderer nested array items should preserve asCell",
   );
 
-  const childItems = childrenSchema.items as { $ref: string; asCell?: boolean };
+  const childItems = childrenSchema.items as {
+    $ref: string;
+    asCell?: readonly string[];
+  };
   assertEquals(
     childItems.$ref,
     "#/$defs/vdomRenderNode",
@@ -94,7 +97,7 @@ Deno.test("rendererVDOMSchema child arrays recurse through vdomRenderNode", () =
   );
   assertEquals(
     childItems.asCell,
-    true,
+    ["cell"],
     "renderer children items should preserve asCell",
   );
 });
@@ -109,7 +112,7 @@ Deno.test("debugVDOMSchema child arrays recurse through vdomRenderNode", () => {
     items: unknown;
   };
   const nestedArrayVariant = getArrayVariant(vdomRenderNode) as {
-    items: { $ref: string; asCell?: boolean };
+    items: { $ref: string; asCell?: unknown };
   };
 
   assert(

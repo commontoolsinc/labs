@@ -1,121 +1,131 @@
-import * as __ctHelpers from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 /**
  * Regression: .map() on a computed result assigned to a local variable
  * inside another computed() should NOT be transformed to .mapWithPattern().
  *
- * Inside a derive callback, OpaqueRef values are unwrapped to plain JS,
+ * Inside a lift-applied callback, OpaqueRef values are unwrapped to plain JS,
  * so `localVar` is a plain array and .mapWithPattern() doesn't exist on it.
  */
-import { computed, pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Item {
     name: string;
     price: number;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    items: {
+        price: number;
+    }[];
+}, Item[]>(({ items }) => items.filter((i) => i.price > 100), {
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    price: {
+                        type: "number"
+                    }
+                },
+                required: ["price"]
+            }
+        }
+    },
+    required: ["items"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        $ref: "#/$defs/Item"
+    },
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["name", "price"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_2 = __cfHelpers.lift<{
+    filtered: {
+        name: string;
+    }[];
+}, __cfHelpers.JSXElement[]>(({ filtered }) => {
+    const localVar = filtered;
+    return localVar.map((item) => <li>{item.name}</li>);
+}, {
+    type: "object",
+    properties: {
+        filtered: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    name: {
+                        type: "string"
+                    }
+                },
+                required: ["name"]
+            }
+        }
+    },
+    required: ["filtered"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        $ref: "#/$defs/JSXElement"
+    },
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
+                    type: "object",
+                    properties: {}
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-local-var-map
 // Verifies: .map() on a local variable assigned from a computed result inside another computed() is NOT transformed to .mapWithPattern()
-//   computed(() => { const localVar = filtered; return localVar.map(fn) }) → derive(..., ({ filtered }) => { const localVar = filtered; return localVar.map(fn) })
-// Context: Inside a derive callback, OpaqueRef values are unwrapped to plain JS,
+//   computed(() => { const localVar = filtered; return localVar.map(fn) }) → lift(({ filtered }) => { const localVar = filtered; return localVar.map(fn) })(...)
+// Context: Inside a lift-applied callback, OpaqueRef values are unwrapped to plain JS,
 //   so `localVar` is a plain array. The .map() must remain untransformed.
 //   This is a negative test for reactive .map() detection on local aliases.
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
-    const filtered = __ctHelpers.derive({
-        type: "object",
-        properties: {
-            items: {
-                type: "array",
-                items: {
-                    $ref: "#/$defs/Item"
-                },
-                asOpaque: true
-            }
-        },
-        required: ["items"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    price: {
-                        type: "number"
-                    }
-                },
-                required: ["name", "price"]
-            }
-        }
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            $ref: "#/$defs/Item",
-            asOpaque: true
-        },
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    price: {
-                        type: "number"
-                    }
-                },
-                required: ["name", "price"]
-            }
-        }
-    } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.filter((i) => i.price > 100));
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
+    const filtered = __cfLift_1({ items: items }).for("filtered", true);
     return {
         [UI]: (<div>
-        {__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    filtered: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Item",
-                            asOpaque: true
-                        },
-                        asOpaque: true
-                    }
-                },
-                required: ["filtered"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            },
-                            price: {
-                                type: "number"
-                            }
-                        },
-                        required: ["name", "price"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "array",
-                items: {
-                    $ref: "#/$defs/UIRenderable"
-                },
-                asOpaque: true,
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, { filtered: filtered }, ({ filtered }) => {
-                const localVar = filtered;
-                return localVar.map((item) => <li>{item.name}</li>);
-            })}
+        {__cfLift_2({ filtered: filtered })}
       </div>),
     };
 }, {
@@ -143,7 +153,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["name", "price"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -156,11 +166,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -173,8 +182,11 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2
+});

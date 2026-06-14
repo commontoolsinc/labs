@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/shell",
+  "name": "@commonfabric/shell",
   "tasks": {
     "clean": "rm -rf dist",
     "build": "deno task clean && deno run -A ../felt/cli.ts build .",
@@ -9,7 +9,7 @@
     "dev-local": "deno task clean && API_URL=http://localhost:$TOOLSHED_PORT deno run -A ../felt/cli.ts dev .",
     "dev-clusterduck": "deno task clean && API_URL='http://localhost:7001' deno run -A ../felt/cli.ts dev .",
     "integration": "LOG_LEVEL=warn deno test -A $INTEGRATION_TEST_FLAGS ./integration/*.test.ts",
-    "test": "deno test test/*.test.ts"
+    "test": "deno test --allow-read --allow-write --allow-run --allow-env test/*.test.ts"
   },
   "exports": {
     "./shared": "./shared/mod.ts"

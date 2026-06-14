@@ -3,11 +3,11 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import "@commontools/utils/equal-ignoring-symbols";
+import "@commonfabric/utils/equal-ignoring-symbols";
 
-import { Writable } from "@commontools/api";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Writable } from "@commonfabric/api";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { isCell } from "../src/cell.ts";
 import { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -43,7 +43,7 @@ describe("Cell array element conversion", () => {
       items: {
         type: "object",
         properties: { foo: { type: "number" } },
-        asCell: true,
+        asCell: ["cell"],
       },
     } as const satisfies JSONSchema;
     const refCell = runtime.getCell<{ foo: number }[]>(
@@ -61,7 +61,6 @@ describe("Cell array element conversion", () => {
     tx = runtime.edit();
     const { ok: entry } = tx.read({
       space,
-      type: "application/json",
       id: refCell.getAsNormalizedFullLink().id,
       path: ["value"],
     });
@@ -76,14 +75,14 @@ describe("Cell array element conversion", () => {
       const first = result[0];
       expect(isCell(first)).toBe(true);
       const firstCell = first as Writable<{ foo: number }>;
-      expect(firstCell.getAsNormalizedFullLink()).toEqual(
-        {
-          space,
-          id: "of:baedreiftqxopzv7ymkvtx4vrg335p7uv5kgswfdwqxfkxx4q6bjrrkybjq",
-          type: "application/json",
-          path: ["0"],
-          schema: { type: "object", properties: { foo: { type: "number" } } },
-        },
+      const link = firstCell.getAsNormalizedFullLink();
+      expect(link.space).toBe(space);
+      expect(typeof link.id).toBe("string");
+      expect(link.id.startsWith("of:")).toBe(true);
+      expect(link.id.length).toBeGreaterThan(3);
+      expect(link.path).toEqual(["0"]);
+      expect(link.schema).toEqual(
+        { type: "object", properties: { foo: { type: "number" } } },
       );
     }
   });

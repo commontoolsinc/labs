@@ -1,11 +1,10 @@
-/// <cts-enable />
-import { NAME, pattern, UI, type VNode } from "commontools";
+import { NAME, pattern, UI, type VNode } from "commonfabric";
 
 import Note from "../../notes/note.tsx";
 
 // deno-lint-ignore no-empty-interface
 interface NoteStoryInput {}
-interface NoteStoryOutput {
+export interface NoteStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

@@ -1,10 +1,25 @@
 import ts from "typescript";
 import {
+  createDataFlowAnalyzer,
+  type DataFlowAnalysis,
+} from "../ast/dataflow.ts";
+import type { NormalizedDataFlow } from "../ast/normalize.ts";
+import {
+  type CallbackContext,
+  classifyReactiveContext,
+  findEnclosingCallbackContext,
+  type ReactiveContextInfo,
+} from "../ast/reactive-context.ts";
+import { getRelevantDataFlows } from "../ast/normalize.ts";
+import {
   DiagnosticInput,
+  type FunctionCapabilitySummary,
+  type SchemaHint,
   TransformationDiagnostic,
   TransformationOptions,
 } from "./transformers.ts";
-import { CTHelpers } from "./ct-helpers.ts";
+import { CrossStageState } from "./cross-stage-state.ts";
+import { CFHelpers } from "./cf-helpers.ts";
 
 const DEFAULT_OPTIONS: TransformationOptions = {
   mode: "transform",
@@ -19,12 +34,19 @@ export interface TransformationContextConfig {
 }
 
 export class TransformationContext {
+  #dataFlowAnalyzer?: ReturnType<typeof createDataFlowAnalyzer>;
+  #reactiveContextCache = new WeakMap<ts.Node, ReactiveContextInfo>();
+  #callbackContextCache = new WeakMap<ts.Node, CallbackContext | null>();
+  #relevantDataFlowCache = new WeakMap<
+    DataFlowAnalysis,
+    readonly NormalizedDataFlow[]
+  >();
   readonly program: ts.Program;
   readonly checker: ts.TypeChecker;
   readonly factory: ts.NodeFactory;
   readonly sourceFile: ts.SourceFile;
   readonly options: TransformationOptions;
-  readonly ctHelpers: CTHelpers;
+  readonly cfHelpers: CFHelpers;
   readonly diagnostics: TransformationDiagnostic[] = [];
   readonly tsContext: ts.TransformationContext;
 
@@ -34,13 +56,14 @@ export class TransformationContext {
     this.tsContext = config.tsContext;
     this.factory = config.tsContext.factory;
     this.sourceFile = config.sourceFile;
-    this.ctHelpers = new CTHelpers({
+    this.cfHelpers = new CFHelpers({
       factory: this.factory,
       sourceFile: this.sourceFile,
     });
     this.options = {
       ...DEFAULT_OPTIONS,
       ...config.options,
+      state: config.options?.state ?? new CrossStageState(),
     };
   }
 
@@ -112,15 +135,239 @@ export class TransformationContext {
    * array method callback scopes.
    */
   markAsArrayMethodCallback(node: ts.Node): void {
-    if (this.options.mapCallbackRegistry) {
-      this.options.mapCallbackRegistry.add(node);
-    }
+    this.options.state?.markArrayMethodCallback(node);
+    this.invalidateReactiveAnalysisCaches();
   }
 
   /**
    * Check if a node is an array method callback created by ClosureTransformer.
    */
   isArrayMethodCallback(node: ts.Node): boolean {
-    return this.options.mapCallbackRegistry?.has(node) ?? false;
+    return this.options.state?.isArrayMethodCallback(node) ?? false;
   }
+
+  /**
+   * Mark a synthetic callback introduced by a compute wrapper so later phases
+   * can classify its contents as compute-owned even when they originate from
+   * authored nodes with original parent chains in pattern context.
+   */
+  markAsSyntheticComputeCallback(node: ts.Node): void {
+    this.options.state?.markSyntheticComputeCallback(node);
+    this.invalidateReactiveAnalysisCaches();
+  }
+
+  /**
+   * Check if a node is a synthetic compute wrapper callback.
+   */
+  isSyntheticComputeCallback(node: ts.Node): boolean {
+    return this.options.state?.isSyntheticComputeCallback(node) ?? false;
+  }
+
+  markSyntheticComputeOwnedSubtree(node: ts.Node): void {
+    this.options.state?.markSyntheticComputeOwnedSubtree(node);
+    this.invalidateReactiveAnalysisCaches();
+  }
+
+  isSyntheticComputeOwnedNode(node: ts.Node): boolean {
+    return this.options.state?.isSyntheticComputeOwnedNode(node) ?? false;
+  }
+
+  /**
+   * Mark a builder call/new node that SchemaInjection has finalized, so a
+   * later re-traversal of the transformer's own output skips re-injection.
+   * Replaces the arg-count idempotency guards in schema-injection.ts. See
+   * the `nodeLinks.schemaInjected` docs in core/mod.ts (CT-1621).
+   */
+  markSchemaInjected(node: ts.Node): void {
+    this.options.state?.markSchemaInjected(node);
+  }
+
+  /**
+   * Whether SchemaInjection has already finalized this node. Returns false
+   * when no state is present (so a missing registry never suppresses a real
+   * first-pass injection).
+   */
+  isSchemaInjected(node: ts.Node): boolean {
+    return this.options.state?.isSchemaInjected(node) ?? false;
+  }
+
+  /**
+   * Record a schema-generation hint for a node (and its original node, so the
+   * hint survives visitor node-replacement). Overwrites any existing hint for
+   * the node, matching the prior direct-`.set` behavior. See `SchemaHints`
+   * docs in core/mod.ts: producers are schema-injection + jsx-site-router,
+   * consumers are schema-injection + the schema generator.
+   */
+  recordSchemaHint(node: ts.Node, hint: SchemaHint): void {
+    this.options.state?.recordSchemaHint(node, hint);
+  }
+
+  /**
+   * Look up a schema-generation hint for a node, falling back to its original
+   * node (handles visitor-replaced nodes). Returns undefined when absent.
+   */
+  lookupSchemaHint(node: ts.Node): SchemaHint | undefined {
+    return this.options.state?.lookupSchemaHint(node);
+  }
+
+  /**
+   * Record a per-function capability summary computed by
+   * PatternCallbackLoweringTransformer (expensive interprocedural analysis;
+   * cached here for SchemaInjection to reuse). See the
+   * `nodeLinks.capabilitySummary` docs in core/mod.ts.
+   */
+  recordCapabilitySummary(
+    fn: ts.Node,
+    summary: FunctionCapabilitySummary,
+  ): void {
+    this.options.state?.recordCapabilitySummary(fn, summary);
+  }
+
+  /**
+   * Look up a previously-recorded capability summary. Returns undefined when
+   * absent; callers fall through to computing the summary on demand.
+   */
+  lookupCapabilitySummary(
+    fn: ts.Node,
+  ): FunctionCapabilitySummary | undefined {
+    return this.options.state?.lookupCapabilitySummary(fn);
+  }
+
+  markSyntheticReactiveCollectionDeclaration(node: ts.Node): void {
+    const symbol = ts.isVariableDeclaration(node)
+      ? (ts.isIdentifier(node.name)
+        ? this.checker.getSymbolAtLocation(node.name)
+        : undefined)
+      : ts.isIdentifier(node)
+      ? this.checker.getSymbolAtLocation(node)
+      : undefined;
+    if (!symbol) {
+      return;
+    }
+    this.options.state?.markSyntheticReactiveCollection(symbol);
+    this.invalidateReactiveAnalysisCaches();
+  }
+
+  /**
+   * Returns true if the given identifier resolves to the per-element binding
+   * of an array-method pattern callback (one whose declaring function-like is
+   * registered in `mapCallbackRegistry`).
+   *
+   * Uses node-walking rather than symbol identity because symbols can be
+   * re-instantiated across pipeline stages while node parent links remain
+   * stable.
+   */
+  isArrayMethodElementBindingReference(identifier: ts.Identifier): boolean {
+    const symbol = this.checker.getSymbolAtLocation(identifier);
+    const declaration = symbol?.valueDeclaration ??
+      symbol?.declarations?.[0];
+    if (!declaration) return false;
+    if (
+      !ts.isParameter(declaration) &&
+      !ts.isBindingElement(declaration)
+    ) {
+      return false;
+    }
+
+    // Walk up to the enclosing function-like.
+    let cursor: ts.Node | undefined = declaration.parent;
+    while (cursor && !ts.isFunctionLike(cursor)) {
+      cursor = cursor.parent;
+    }
+    if (!cursor) return false;
+
+    // Only the FIRST parameter of an array-method callback counts as the
+    // element binding. Index/array params and non-first decls are not.
+    const fn = cursor as ts.SignatureDeclarationBase;
+    const firstParam = fn.parameters?.[0];
+    if (!firstParam) return false;
+    if (!declarationBelongsToFirstParam(declaration, firstParam)) {
+      return false;
+    }
+
+    return this.isArrayMethodCallback(cursor);
+  }
+
+  getDataFlowAnalyzer(): ReturnType<typeof createDataFlowAnalyzer> {
+    this.#dataFlowAnalyzer ??= createDataFlowAnalyzer(this.checker, {
+      isArrayMethodElementBindingReference: (id) =>
+        this.isArrayMethodElementBindingReference(id),
+    });
+    return this.#dataFlowAnalyzer;
+  }
+
+  analyzeExpression(node: ts.Expression): DataFlowAnalysis {
+    return this.getDataFlowAnalyzer()(node);
+  }
+
+  getRelevantDataFlows(node: ts.Expression): readonly NormalizedDataFlow[] {
+    return this.getRelevantDataFlowsFromAnalysis(this.analyzeExpression(node));
+  }
+
+  getRelevantDataFlowsFromAnalysis(
+    analysis: DataFlowAnalysis,
+  ): readonly NormalizedDataFlow[] {
+    const cached = this.#relevantDataFlowCache.get(analysis);
+    if (cached) {
+      return cached;
+    }
+
+    const relevant = getRelevantDataFlows(analysis, this.checker, this);
+    this.#relevantDataFlowCache.set(analysis, relevant);
+    return relevant;
+  }
+
+  getReactiveContext(node: ts.Node): ReactiveContextInfo {
+    const cached = this.#reactiveContextCache.get(node);
+    if (cached) {
+      return cached;
+    }
+
+    const info = classifyReactiveContext(node, this.checker, this);
+    this.#reactiveContextCache.set(node, info);
+    return info;
+  }
+
+  getEnclosingCallbackContext(node: ts.Node): CallbackContext | undefined {
+    if (this.#callbackContextCache.has(node)) {
+      return this.#callbackContextCache.get(node) ?? undefined;
+    }
+
+    const info = findEnclosingCallbackContext(node);
+    this.#callbackContextCache.set(node, info ?? null);
+    return info;
+  }
+
+  private invalidateReactiveAnalysisCaches(): void {
+    this.#reactiveContextCache = new WeakMap<ts.Node, ReactiveContextInfo>();
+    this.#relevantDataFlowCache = new WeakMap<
+      DataFlowAnalysis,
+      readonly NormalizedDataFlow[]
+    >();
+    // The dataflow analyzer holds its own per-expression cache. Drop the
+    // analyzer instance so the next consumer recreates it with a fresh cache.
+    // Critical when downstream registries (array-method element bindings,
+    // synthetic reactive collections, etc.) gain new entries between queries
+    // — a cached "not opaque" result from before registration would otherwise
+    // win.
+    this.#dataFlowAnalyzer = undefined;
+  }
+}
+
+function declarationBelongsToFirstParam(
+  decl: ts.Declaration,
+  firstParam: ts.ParameterDeclaration,
+): boolean {
+  // Identifier-form: the declaration itself is the parameter.
+  if (decl === firstParam) return true;
+  // Destructured: the declaration is a binding element nested under the
+  // parameter's binding pattern. Walk parents until we hit firstParam (or
+  // exit the function-like).
+  let cursor: ts.Node | undefined = decl.parent;
+  while (cursor) {
+    if (cursor === firstParam) return true;
+    if (ts.isFunctionLike(cursor)) return false;
+    cursor = cursor.parent;
+  }
+  return false;
 }

@@ -1,19 +1,22 @@
-// CT-1316: derive() callback crashes with message:null when returning
-// a recursive pattern instantiation (tail-call).
+// CT-1316: a reactive lift() callback crashes with message:null when returning
+// a recursive pattern instantiation (tail-call). (Originally surfaced via the
+// now-removed derive() builder, which delegated to lift; the runtime behavior
+// under test is identical.)
 //
-// When a derive() callback returns a pattern instantiation that recursively
+// When a lift() callback returns a pattern instantiation that recursively
 // calls itself, the runtime crashes with {type: callback:error, message: null}.
 // In the builder path, this manifests as "Too many iterations" in the scheduler
-// because the derive action is re-triggered ~100 times per execute cycle, even
+// because the lift action is re-triggered ~100 times per execute cycle, even
 // though the actual callback only runs a handful of times (the rest are
 // invalid-argument no-ops).
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -24,9 +27,8 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let derive: ReturnType<typeof createBuilder>["commontools"]["derive"];
-  let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -37,12 +39,11 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({
-      derive,
       lift,
       pattern,
-    } = commontools);
+    } = commonfabric);
   });
 
   afterEach(async () => {
@@ -60,9 +61,9 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
     });
 
     const outerPattern = pattern<{ value: number }>(({ value }) => {
-      return derive({ value }, ({ value: v }: { value: number }) => {
+      return lift(({ value: v }: { value: number }) => {
         return innerPattern({ value: v });
-      });
+      })({ value });
     });
 
     const resultCell = runtime.getCell<{ result: number }>(
@@ -99,9 +100,12 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
       accumulated: number[];
       pageSize: number;
     }>(({ remaining, accumulated, pageSize }) => {
-      return derive(
-        { remaining, accumulated, pageSize },
-        ({ remaining: rem, accumulated: acc, pageSize: ps }) => {
+      return lift(
+        ({ remaining: rem, accumulated: acc, pageSize: ps }: {
+          remaining: number;
+          accumulated: number[];
+          pageSize: number;
+        }) => {
           deriveCallCount++;
 
           // Guard against initial reactive pass with undefined values
@@ -124,7 +128,7 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
             pageSize: ps,
           });
         },
-      );
+      )({ remaining, accumulated, pageSize });
     });
 
     const resultCell = runtime.getCell<{ items: number[]; done: boolean }>(
@@ -179,13 +183,13 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
     // pattern structure is identical — the cache should prevent duplicate
     // sub-pattern runs.
     const outerPattern = pattern<{ trigger: number }>(({ trigger }) => {
-      return derive({ trigger }, ({ trigger: t }: { trigger: number }) => {
+      return lift(({ trigger: t }: { trigger: number }) => {
         deriveCallCount++;
         // Read `t` so the reactive system tracks it as a dependency,
         // but don't use it in the returned pattern args.
         if (t < 0) throw new Error("unreachable");
         return innerPattern({ value: 42 });
-      });
+      })({ trigger });
     });
 
     // Create a mutable input cell so we can change trigger later
@@ -238,6 +242,98 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
     expect(innerLiftRunCount).toBe(innerLiftsAfterFirstRun);
   });
 
+  it("should not spuriously rerun parent derive when returned child pattern changes", async () => {
+    let deriveCallCount = 0;
+    let doubleRunCount = 0;
+    let tripleRunCount = 0;
+
+    const doublePattern = pattern<{ value: number }>(({ value }) => {
+      const doubled = lift((x: number) => {
+        doubleRunCount++;
+        return x * 2;
+      })(value);
+      return { result: doubled };
+    });
+
+    const triplePattern = pattern<{ value: number }>(({ value }) => {
+      const tripled = lift((x: number) => {
+        tripleRunCount++;
+        return x * 3;
+      })(value);
+      return { result: tripled };
+    });
+
+    const outerPattern = pattern<{ mode: string; value: number }>(
+      ({ mode, value }) => {
+        return lift(
+          ({ mode: currentMode, value: currentValue }: {
+            mode: string;
+            value: number;
+          }) => {
+            deriveCallCount++;
+            return currentMode === "double"
+              ? doublePattern({ value: currentValue })
+              : triplePattern({ value: currentValue });
+          },
+        )({ mode, value });
+      },
+    );
+
+    const modeCell = runtime.getCell<string>(
+      space,
+      "derive-pattern-replacement-mode",
+    );
+    const valueCell = runtime.getCell<number>(
+      space,
+      "derive-pattern-replacement-value",
+    );
+    modeCell.withTx(tx).set("double");
+    valueCell.withTx(tx).set(5);
+    await tx.commit();
+    await runtime.storageManager.synced();
+    tx = runtime.edit();
+
+    const resultCell = runtime.getCell<{ result: number }>(
+      space,
+      "derive-pattern-replacement-result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      outerPattern,
+      { mode: modeCell, value: valueCell },
+      resultCell,
+    );
+    await tx.commit();
+    await runtime.storageManager.synced();
+
+    expect(await result.pull()).toEqual({ result: 10 });
+    expect(deriveCallCount).toBe(1);
+    expect(doubleRunCount).toBe(1);
+    expect(tripleRunCount).toBe(0);
+
+    tx = runtime.edit();
+    modeCell.withTx(tx).send("triple");
+    await tx.commit();
+    await runtime.storageManager.synced();
+
+    expect(await result.pull()).toEqual({ result: 15 });
+    expect(deriveCallCount).toBe(2);
+    expect(doubleRunCount).toBe(1);
+    expect(tripleRunCount).toBe(1);
+
+    tx = runtime.edit();
+    modeCell.withTx(tx).send("double");
+    await tx.commit();
+    await runtime.storageManager.synced();
+
+    expect(await result.pull()).toEqual({ result: 10 });
+    expect(deriveCallCount).toBe(3);
+    expect(doubleRunCount).toBe(2);
+    expect(tripleRunCount).toBe(1);
+  });
+
   it("should handle derive conditionally returning plain value or pattern", async () => {
     // Tests the branch where derive sometimes returns a plain value
     // and sometimes returns a pattern instantiation.
@@ -249,15 +345,17 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
 
     const conditionalPattern = pattern<{ value: number; usePattern: boolean }>(
       ({ value, usePattern }) => {
-        return derive(
-          { value, usePattern },
-          ({ value: v, usePattern: up }) => {
+        return lift(
+          ({ value: v, usePattern: up }: {
+            value: number;
+            usePattern: boolean;
+          }) => {
             if (up) {
               return innerPattern({ value: v });
             }
             return { result: v * 2 };
           },
-        );
+        )({ value, usePattern });
       },
     );
 

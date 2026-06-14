@@ -1,4 +1,6 @@
-import type { StorableDatum, URI } from "./interface.ts";
+import type { URI } from "./interface.ts";
+import type { FabricValue } from "@commonfabric/api";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import {
   Assertion,
   Fact,
@@ -10,13 +12,7 @@ import {
   State,
   Unclaimed,
 } from "./interface.ts";
-import {
-  ContentId,
-  contentIdFromJSON,
-  fromString,
-  isContentId,
-  refer,
-} from "./reference.ts";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 
 /**
  * Creates an unclaimed fact.
@@ -26,9 +22,8 @@ export const unclaimed = (
 ): Unclaimed => ({ the, of });
 
 /**
- * Cache of frozen `{ the, of }` objects keyed by `"${the}\0${of}"`. Reusing
- * the same frozen object identity lets downstream caches (WeakMap in
- * `canonicalHash()`, merkle-reference's internal WeakMap) hit on every
+ * Cache of frozen `{ the, of }` objects keyed by `"${the}\0${of}"`. Reusing the
+ * same frozen object identity lets the downstream hashing cache hit on every
  * repeat instead of re-hashing a fresh object each time.
  */
 const frozenUnclaimedCache = new Map<
@@ -43,18 +38,18 @@ const frozenUnclaimedCache = new Map<
  */
 export const unclaimedRef = (
   { the, of }: { the: MIME; of: URI },
-): ContentId<Unclaimed> => {
+): FabricHash => {
   const key = `${the}\0${of}`;
   let frozen = frozenUnclaimedCache.get(key);
   if (!frozen) {
     frozen = Object.freeze({ the, of });
     frozenUnclaimedCache.set(key, frozen);
   }
-  return refer(frozen);
+  return hashOf(frozen);
 };
 
 export const assert = <
-  Is extends StorableDatum,
+  Is extends FabricValue,
   T extends MIME,
   Of extends URI,
 >({
@@ -66,17 +61,17 @@ export const assert = <
   the: T;
   of: Of;
   is: Is;
-  cause?: Fact | ContentId<Fact> | null | undefined;
+  cause?: Fact | FabricHash | null | undefined;
 }) =>
   ({
     the,
     of,
     is,
-    cause: isContentId(cause)
+    cause: (cause instanceof FabricHash)
       ? cause
       : cause == null
       ? unclaimedRef({ the, of })
-      : refer({
+      : hashOf({
         the: cause.the,
         of: cause.of,
         cause: cause.cause,
@@ -87,19 +82,19 @@ export const assert = <
 export const retract = (assertion: Assertion): Retraction => ({
   the: assertion.the,
   of: assertion.of,
-  cause: refer(normalizeFact(assertion)),
+  cause: hashOf(normalizeFact(assertion)),
 });
 
 export const claim = (fact: Fact): Invariant => ({
   the: fact.the,
   of: fact.of,
-  fact: refer(normalizeFact(fact)),
+  fact: hashOf(normalizeFact(fact)),
 });
 
 export const claimState = (state: State): Invariant => ({
   the: state.the,
   of: state.of,
-  fact: refer(state.cause ? normalizeFact(state) : unclaimed(state)),
+  fact: hashOf(state.cause ? normalizeFact(state) : unclaimed(state)),
 });
 
 export const iterate = function* (
@@ -113,7 +108,7 @@ export const iterate = function* (
         yield {
           the: the as MIME,
           of: of as URI,
-          cause: fromString(cause),
+          cause: FabricHash.fromString(cause),
           since,
           ...(is ? { is } : undefined),
         };
@@ -128,16 +123,14 @@ export const iterate = function* (
 export function normalizeFact<
   T extends MIME,
   Of extends URI,
-  Is extends StorableDatum,
+  Is extends FabricValue,
 >(
   arg: {
     the: T;
     of: Of;
     is: Is;
     cause?:
-      | ContentId<Assertion<T, Of, Is>>
-      | ContentId<Retraction<T, Of, Is>>
-      | ContentId<Unclaimed<T, Of>>
+      | FabricHash
       | Fact
       | { "/": string };
   },
@@ -146,15 +139,13 @@ export function normalizeFact<
 export function normalizeFact<
   T extends MIME,
   Of extends URI,
-  Is extends StorableDatum,
+  Is extends FabricValue,
 >(
   arg: {
     the: T;
     of: Of;
     cause?:
-      | ContentId<Assertion<T, Of, Is>>
-      | ContentId<Retraction<T, Of, Is>>
-      | ContentId<Unclaimed<T, Of>>
+      | FabricHash
       | Fact
       | { "/": string };
   },
@@ -163,27 +154,25 @@ export function normalizeFact<
 export function normalizeFact<
   T extends MIME,
   Of extends URI,
-  Is extends StorableDatum,
+  Is extends FabricValue,
 >(
   arg: {
     the: T;
     of: Of;
     is?: Is;
     cause?:
-      | ContentId<Assertion<T, Of, Is>>
-      | ContentId<Retraction<T, Of, Is>>
-      | ContentId<Unclaimed<T, Of>>
+      | FabricHash
       | Fact
       | { "/": string };
   },
 ): Assertion<T, Of, Is> | Retraction<T, Of, Is> {
-  const newCause = isContentId(arg.cause)
+  const newCause = (arg.cause instanceof FabricHash)
     ? arg.cause
     : arg.cause == null
     ? unclaimedRef({ the: arg.the, of: arg.of })
     : "/" in arg.cause
-    ? contentIdFromJSON(arg.cause as unknown as { "/": string })
-    : refer({
+    ? FabricHash.fromJson(arg.cause as unknown as { "/": string })
+    : hashOf({
       the: arg.cause.the,
       of: arg.cause.of,
       cause: arg.cause.cause,
@@ -205,6 +194,6 @@ export function normalizeFact<
   }
 }
 
-export const factReference = (fact: Fact): ContentId<Fact> => {
-  return refer(normalizeFact(fact));
+export const factReference = (fact: Fact): FabricHash => {
+  return hashOf(normalizeFact(fact));
 };

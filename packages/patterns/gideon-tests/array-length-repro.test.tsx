@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test: Does .length track reactively?
  *
@@ -9,9 +8,9 @@
  * If both pass: .length tracking works fine
  * If only filter passes: .length doesn't establish reactive dependency
  *
- * Run: deno task ct test packages/patterns/gideon-tests/array-length-repro.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/gideon-tests/array-length-repro.test.tsx --verbose
  */
-import { action, computed, pattern } from "commontools";
+import { action, computed, pattern } from "commonfabric";
 import ArrayLengthRepro from "./array-length-repro.tsx";
 
 export default pattern(() => {

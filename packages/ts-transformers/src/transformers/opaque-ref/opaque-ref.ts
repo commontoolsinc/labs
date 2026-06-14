@@ -1,14 +1,15 @@
 import ts from "typescript";
 import {
+  type CellBrand,
   getCellBrand,
   getCellKind as utilGetCellKind,
-} from "@commontools/schema-generator/cell-brand";
+} from "@commonfabric/schema-generator/cell-brand";
 
 /**
  * Check if a type is a cell type by looking for the CELL_BRAND property.
  * This includes OpaqueCell, Cell, Stream, and other cell variants.
  */
-export function isOpaqueRefType(
+export function isBrandedCellType(
   type: ts.Type,
   checker: ts.TypeChecker,
 ): boolean {
@@ -17,20 +18,29 @@ export function isOpaqueRefType(
   }
   if (type.flags & ts.TypeFlags.Union) {
     return (type as ts.UnionType).types.some((t) =>
-      isOpaqueRefType(t, checker)
+      isBrandedCellType(t, checker)
     );
   }
   if (type.flags & ts.TypeFlags.Intersection) {
     return (type as ts.IntersectionType).types.some((t) =>
-      isOpaqueRefType(t, checker)
+      isBrandedCellType(t, checker)
     );
   }
 
   // Look for the CELL_BRAND unique symbol on the type.
   const brand = getCellBrand(type, checker);
   if (brand !== undefined) {
-    // Valid cell brands: "opaque", "cell", "stream", "comparable", "readonly", "writeonly"
-    return ["opaque", "cell", "stream", "comparable", "readonly", "writeonly"]
+    // Valid cell brands: "opaque", "cell", "stream", "comparable", "readonly",
+    // "writeonly", "sqlite"
+    return [
+      "opaque",
+      "cell",
+      "stream",
+      "comparable",
+      "readonly",
+      "writeonly",
+      "sqlite",
+    ]
       .includes(brand);
   }
 
@@ -45,7 +55,7 @@ export function isOpaqueRefType(
 export function getCellKind(
   type: ts.Type,
   checker: ts.TypeChecker,
-): "opaque" | "cell" | "stream" | undefined {
+): CellBrand | undefined {
   return utilGetCellKind(type, checker);
 }
 
@@ -57,7 +67,7 @@ export function isSimpleOpaqueRefAccess(
     ts.isIdentifier(expression) || ts.isPropertyAccessExpression(expression)
   ) {
     const type = checker.getTypeAtLocation(expression);
-    return isOpaqueRefType(type, checker);
+    return isBrandedCellType(type, checker);
   }
   return false;
 }

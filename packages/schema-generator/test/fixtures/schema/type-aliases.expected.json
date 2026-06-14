@@ -1,11 +1,16 @@
 {
   "properties": {
     "a": {
-      "asCell": true,
+      "asCell": [
+        "cell"
+      ],
       "type": "number"
     },
     "b": {
-      "asStream": true,
+      "asCell": [
+        "stream",
+        "cell"
+      ],
       "type": "string"
     },
     "c": {

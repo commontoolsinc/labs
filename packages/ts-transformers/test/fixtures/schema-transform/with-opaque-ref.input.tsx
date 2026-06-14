@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { Cell, derive, pattern, toSchema, UI } from "commontools";
+import { Cell, pattern, toSchema, UI } from "commonfabric";
 
 interface State {
   value: Cell<number>;
@@ -10,12 +9,12 @@ const model = toSchema<State>({
 });
 
 // FIXTURE: with-opaque-ref
-// Verifies: Cell<> fields generate asCell in schema and derive() gets input/output type schemas injected
+// Verifies: Cell<> fields generate asCell in schema and a reactive builder gets input/output schemas injected
 //   Cell<number> → { type: "number", asCell: true }
 //   toSchema<State>({default: ...}) → schema with "default" key preserved
-//   derive(cell.value, fn) → derive(inputSchema, outputSchema, cell.key("value"), fn)
+//   bare `cell.value.get() * 2` → auto-wraps, capturing cell.key("value") into lift(inputSchema, outputSchema, fn)
 export default pattern<State, State>((cell) => {
-  const doubled = derive(cell.value, (v: number) => v * 2);
+  const doubled = cell.value.get() * 2;
 
   return {
     [UI]: (

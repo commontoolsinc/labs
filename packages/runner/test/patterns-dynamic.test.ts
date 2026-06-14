@@ -4,22 +4,65 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import type { OpaqueCell } from "@commonfabric/api";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
+const numberSchema = {
+  type: "number",
+} as const satisfies JSONSchema;
+
+const booleanSchema = {
+  type: "boolean",
+} as const satisfies JSONSchema;
+
+const numberArraySchema = {
+  type: "array",
+  items: { type: "number" },
+} as const satisfies JSONSchema;
+
+const numberElementArgumentSchema = {
+  type: "object",
+  properties: {
+    element: numberSchema,
+  },
+  required: ["element"],
+  additionalProperties: false,
+} as const satisfies JSONSchema;
+
+const numberOrNumberArraySchema = {
+  anyOf: [
+    numberSchema,
+    numberArraySchema,
+  ],
+} as const satisfies JSONSchema;
+
 describe("Pattern Runner - Dynamic Patterns", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+
+  function unaryNumberListOpPattern(
+    // deno-lint-ignore no-explicit-any
+    fn: (element: any) => any,
+    resultSchema: JSONSchema,
+  ) {
+    return pattern<{ element: number }, unknown>(
+      ({ element }) => fn(element),
+      numberElementArgumentSchema,
+      resultSchema,
+    );
+  }
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -30,15 +73,23 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({
       lift,
       pattern,
-    } = commontools);
+    } = commonfabric);
   });
 
+  async function commitTx() {
+    if (tx.status().status !== "ready") {
+      return { ok: undefined, error: undefined };
+    }
+    runtime.prepareTxForCommit(tx);
+    return await tx.commit();
+  }
+
   afterEach(async () => {
-    await tx.commit();
+    await commitTx();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -59,12 +110,12 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       ({ values }) => {
         // Compute item count from values
         const itemCount = lift(
+          (arr: number[]) => (Array.isArray(arr) ? arr.length : 0),
           {
             type: "array",
             items: { type: "number" },
           } as const satisfies JSONSchema,
           { type: "number" } as const satisfies JSONSchema,
-          (arr: number[]) => (Array.isArray(arr) ? arr.length : 0),
         )(values);
 
         return { values, itemCount };
@@ -93,6 +144,20 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     // Lift that dynamically instantiates itemCountPattern for each group
     const instantiateGroups = lift(
+      ({ groups }: any) => {
+        const raw = groups.get();
+        const list = Array.isArray(raw) ? raw : [];
+        const children = [];
+        for (let index = 0; index < list.length; index++) {
+          const groupCell = groups.key(index)!;
+          const valuesCell = groupCell.key("values");
+          const child = itemCountPattern({
+            values: valuesCell,
+          });
+          children.push(child);
+        }
+        return children;
+      },
       {
         type: "object",
         properties: {
@@ -105,7 +170,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
               },
               required: ["values"],
             },
-            asCell: true,
+            asCell: ["cell"],
           },
         },
         required: ["groups"],
@@ -120,24 +185,19 @@ describe("Pattern Runner - Dynamic Patterns", () => {
           },
         },
       } as const satisfies JSONSchema,
-      ({ groups }) => {
-        const raw = groups.get();
-        const list = Array.isArray(raw) ? raw : [];
-        const children = [];
-        for (let index = 0; index < list.length; index++) {
-          const groupCell = groups.key(index)!;
-          const valuesCell = groupCell.key("values");
-          const child = itemCountPattern({
-            values: valuesCell,
-          });
-          children.push(child);
-        }
-        return children;
-      },
     );
 
     // Lift that sums itemCount from all groups
     const computeTotalItems = lift(
+      (entries: Array<{ itemCount?: number }>) => {
+        if (!Array.isArray(entries)) {
+          return 0;
+        }
+        return entries.reduce((sum, entry) => {
+          const count = entry?.itemCount;
+          return typeof count === "number" ? sum + count : sum;
+        }, 0);
+      },
       {
         type: "array",
         items: {
@@ -148,15 +208,6 @@ describe("Pattern Runner - Dynamic Patterns", () => {
         },
       } as const satisfies JSONSchema,
       { type: "number" } as const satisfies JSONSchema,
-      (entries: Array<{ itemCount?: number }>) => {
-        if (!Array.isArray(entries)) {
-          return 0;
-        }
-        return entries.reduce((sum, entry) => {
-          const count = entry?.itemCount;
-          return typeof count === "number" ? sum + count : sum;
-        }, 0);
-      },
     );
 
     // Outer pattern that uses instantiateGroups and computeTotalItems
@@ -217,7 +268,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
         { values: [4, 5] },
       ],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     const value = await result.pull();
 
@@ -244,11 +295,22 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       runCount++;
       return x * 2;
     });
+    const doublePattern = unaryNumberListOpPattern(
+      (element) => double(element),
+      numberSchema,
+    );
 
     // Pass `values` through in the return so we can mutate the input list
     // via the result cell (same technique as the CT-1158 test).
     const doubleArray = pattern<{ values: number[] }>(({ values }) => {
-      return { values, doubled: values.map((x) => double(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        doubled: (values as unknown as OpaqueCell<number[]>).mapWithPattern(
+          doublePattern as any,
+          {},
+        ),
+      };
     });
 
     const resultCell = runtime.getCell<{ values: number[]; doubled: number[] }>(
@@ -260,7 +322,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, doubleArray, {
       values: [1, 2, 3],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -272,7 +334,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     // Insert 99 at index 1: [1, 2, 3] → [1, 99, 2, 3]
     result.withTx(tx).key("values").set([1, 99, 2, 3]);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -297,6 +359,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       runCount++;
       return x * 2;
     });
+    const doublePattern = unaryNumberListOpPattern(
+      (element) => double(element),
+      numberSchema,
+    );
 
     // Create individual cells for each value so they have stable entity IDs
     const cellA = runtime.getCell<number>(space, "cell-a", undefined, tx);
@@ -308,7 +374,14 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     // Pattern that takes a list of values and doubles each one
     const doubleArray = pattern<{ values: number[] }>(({ values }) => {
-      return { values, doubled: values.map((x) => double(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        doubled: (values as unknown as OpaqueCell<number[]>).mapWithPattern(
+          doublePattern as any,
+          {},
+        ),
+      };
     });
 
     const resultCell = runtime.getCell<{ values: number[]; doubled: number[] }>(
@@ -320,7 +393,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, doubleArray, {
       values: [cellA, cellB, cellC],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -335,7 +408,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     cellX.withTx(tx).set(99);
 
     result.withTx(tx).key("values").set([cellA, cellX, cellB, cellC]);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -360,6 +433,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       runCount++;
       return x * 2;
     });
+    const doublePattern = unaryNumberListOpPattern(
+      (element) => double(element),
+      numberSchema,
+    );
 
     const cellA = runtime.getCell<number>(space, "dup-cell-a", undefined, tx);
     cellA.withTx(tx).set(5);
@@ -367,7 +444,14 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     cellB.withTx(tx).set(10);
 
     const doubleArray = pattern<{ values: number[] }>(({ values }) => {
-      return { values, doubled: values.map((x) => double(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        doubled: (values as unknown as OpaqueCell<number[]>).mapWithPattern(
+          doublePattern as any,
+          {},
+        ),
+      };
     });
 
     const resultCell = runtime.getCell<{ values: number[]; doubled: number[] }>(
@@ -379,7 +463,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, doubleArray, {
       values: [cellA, cellB, cellA],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -395,9 +479,20 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       runCount++;
       return x * 2;
     });
+    const doublePattern = unaryNumberListOpPattern(
+      (element) => double(element),
+      numberSchema,
+    );
 
     const mapPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, doubled: values.map((x) => double(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        doubled: (values as unknown as OpaqueCell<number[]>).mapWithPattern(
+          doublePattern as any,
+          {},
+        ),
+      };
     });
 
     const resultCell = runtime.getCell<
@@ -411,7 +506,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, mapPattern, {
       values: [1, 2, 3],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -420,7 +515,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     // Set list to undefined — should clean up and produce empty output
     result.withTx(tx).key("values").set(undefined as any);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -429,7 +524,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     // Restore list — runs must re-execute (old runs were stopped)
     const runsBeforeRestore = runCount;
     result.withTx(tx).key("values").set([4, 5]);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -441,9 +536,20 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
   it("should filter an array by predicate", async () => {
     const isEven = lift((x: number) => x % 2 === 0);
+    const isEvenPattern = unaryNumberListOpPattern(
+      (element) => isEven(element),
+      booleanSchema,
+    );
 
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, evens: values.filter((x) => isEven(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        evens: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
+          isEvenPattern as any,
+          {},
+        ),
+      };
     });
 
     const resultCell = runtime.getCell<{ values: number[]; evens: number[] }>(
@@ -455,7 +561,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, filterPattern, {
       values: [1, 2, 3, 4, 5],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     await result.pull();
     expect(result.key("evens").get()).toEqual([2, 4]);
@@ -463,9 +569,21 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
   it("should reactively update filter when element value changes", async () => {
     const isPositive = lift((x: number) => x > 0);
+    const isPositivePattern = unaryNumberListOpPattern(
+      (element) => isPositive(element),
+      booleanSchema,
+    );
 
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, positives: values.filter((x) => isPositive(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        positives: (values as unknown as OpaqueCell<number[]>)
+          .filterWithPattern(
+            isPositivePattern as any,
+            {},
+          ),
+      };
     });
 
     const cellA = runtime.getCell<number>(
@@ -501,7 +619,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, filterPattern, {
       values: [cellA, cellB, cellC],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -510,7 +628,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     // Flip B from negative to positive
     cellB.withTx(tx).set(7);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -524,9 +642,21 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       predRunCount++;
       return x > 0;
     });
+    const isPositivePattern = unaryNumberListOpPattern(
+      (element) => isPositive(element),
+      booleanSchema,
+    );
 
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, positives: values.filter((x) => isPositive(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        positives: (values as unknown as OpaqueCell<number[]>)
+          .filterWithPattern(
+            isPositivePattern as any,
+            {},
+          ),
+      };
     });
 
     const cellA = runtime.getCell<number>(
@@ -562,7 +692,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, filterPattern, {
       values: [cellA, cellB, cellC],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -580,7 +710,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     cellX.withTx(tx).set(99);
 
     result.withTx(tx).key("values").set([cellA, cellX, cellB, cellC]);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -593,7 +723,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     // Remove B: [A, X, B, C] → [A, X, C]
     const runsBeforeRemoval = predRunCount;
     result.withTx(tx).key("values").set([cellA, cellX, cellC]);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -606,6 +736,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
   it("should handle duplicate cell references in filter", async () => {
     const isPositive = lift((x: number) => x > 0);
+    const isPositivePattern = unaryNumberListOpPattern(
+      (element) => isPositive(element),
+      booleanSchema,
+    );
 
     const cellA = runtime.getCell<number>(space, "filter-dup-a", undefined, tx);
     cellA.withTx(tx).set(5);
@@ -613,7 +747,15 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     cellB.withTx(tx).set(-1);
 
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, positives: values.filter((x) => isPositive(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        positives: (values as unknown as OpaqueCell<number[]>)
+          .filterWithPattern(
+            isPositivePattern as any,
+            {},
+          ),
+      };
     });
 
     const resultCell = runtime.getCell<
@@ -628,7 +770,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, filterPattern, {
       values: [cellA, cellB, cellA],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -638,9 +780,20 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
   it("should handle empty and undefined filter inputs", async () => {
     const isEven = lift((x: number) => x % 2 === 0);
+    const isEvenPattern = unaryNumberListOpPattern(
+      (element) => isEven(element),
+      booleanSchema,
+    );
 
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, evens: values.filter((x) => isEven(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        evens: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
+          isEvenPattern as any,
+          {},
+        ),
+      };
     });
 
     const resultCell = runtime.getCell<{ values: number[]; evens: number[] }>(
@@ -652,7 +805,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, filterPattern, {
       values: [],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     await result.pull();
     expect(result.key("evens").get()).toEqual([]);
@@ -664,9 +817,21 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       predRunCount++;
       return x > 0;
     });
+    const isPositivePattern = unaryNumberListOpPattern(
+      (element) => isPositive(element),
+      booleanSchema,
+    );
 
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, positives: values.filter((x) => isPositive(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        positives: (values as unknown as OpaqueCell<number[]>)
+          .filterWithPattern(
+            isPositivePattern as any,
+            {},
+          ),
+      };
     });
 
     const resultCell = runtime.getCell<
@@ -680,7 +845,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, filterPattern, {
       values: [1, 2, 3],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -689,7 +854,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     // Set list to undefined — should clean up and produce empty output
     result.withTx(tx).key("values").set(undefined as any);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -698,7 +863,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     // Restore list — predicates must re-run (old runs were stopped)
     const runsBeforeRestore = predRunCount;
     result.withTx(tx).key("values").set([4, 5]);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -712,9 +877,21 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       predRunCount++;
       return x > 0;
     });
+    const isPositivePattern = unaryNumberListOpPattern(
+      (element) => isPositive(element),
+      booleanSchema,
+    );
 
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, positives: values.filter((x) => isPositive(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        positives: (values as unknown as OpaqueCell<number[]>)
+          .filterWithPattern(
+            isPositivePattern as any,
+            {},
+          ),
+      };
     });
 
     // deno-lint-ignore no-sparse-arrays
@@ -731,7 +908,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, filterPattern, {
       values: sparseInput,
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     await result.pull();
     // Only 2 predicate runs (hole skipped), both positive
@@ -743,9 +920,20 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
   it("should flatMap an array", async () => {
     const duplicate = lift((x: number) => [x, x * 10]);
+    const duplicatePattern = unaryNumberListOpPattern(
+      (element) => duplicate(element),
+      numberArraySchema,
+    );
 
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, flat: values.flatMap((x) => duplicate(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
+          duplicatePattern as any,
+          {},
+        ),
+      };
     });
 
     const resultCell = runtime.getCell<{ values: number[]; flat: number[] }>(
@@ -757,7 +945,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, flatMapPattern, {
       values: [1, 2, 3],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     await result.pull();
     expect(result.key("flat").get()).toEqual([1, 10, 2, 20, 3, 30]);
@@ -768,9 +956,20 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       if (x > 0) return [x, x * 2];
       return [];
     });
+    const expandPattern = unaryNumberListOpPattern(
+      (element) => expand(element),
+      numberArraySchema,
+    );
 
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, flat: values.flatMap((x) => expand(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
+          expandPattern as any,
+          {},
+        ),
+      };
     });
 
     const cellA = runtime.getCell<number>(
@@ -797,7 +996,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, flatMapPattern, {
       values: [cellA, cellB],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -806,7 +1005,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     // Flip B to positive
     cellB.withTx(tx).set(3);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -819,9 +1018,20 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       runCount++;
       return [x, x * 10];
     });
+    const duplicatePattern = unaryNumberListOpPattern(
+      (element) => duplicate(element),
+      numberArraySchema,
+    );
 
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, flat: values.flatMap((x) => duplicate(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
+          duplicatePattern as any,
+          {},
+        ),
+      };
     });
 
     const cellA = runtime.getCell<number>(
@@ -855,7 +1065,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, flatMapPattern, {
       values: [cellA, cellB, cellC],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -873,7 +1083,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     cellX.withTx(tx).set(99);
 
     result.withTx(tx).key("values").set([cellA, cellX, cellB, cellC]);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -886,7 +1096,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     // Remove B: [A, X, B, C] → [A, X, C]
     const runsBeforeRemoval = runCount;
     result.withTx(tx).key("values").set([cellA, cellX, cellC]);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -902,9 +1112,20 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       if (x % 2 === 0) return [x];
       return []; // Odd numbers produce empty arrays
     });
+    const maybeExpandPattern = unaryNumberListOpPattern(
+      (element) => maybeExpand(element),
+      numberArraySchema,
+    );
 
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, flat: values.flatMap((x) => maybeExpand(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
+          maybeExpandPattern as any,
+          {},
+        ),
+      };
     });
 
     const resultCell = runtime.getCell<{ values: number[]; flat: number[] }>(
@@ -916,7 +1137,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, flatMapPattern, {
       values: [1, 2, 3, 4],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     await result.pull();
     // Odd numbers contribute nothing
@@ -929,9 +1150,20 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       if (x === 2) return [20, 21];
       return x; // scalar, not wrapped in array
     });
+    const expandOrPassthroughPattern = unaryNumberListOpPattern(
+      (element) => expandOrPassthrough(element),
+      numberOrNumberArraySchema,
+    );
 
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, flat: values.flatMap((x) => expandOrPassthrough(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
+          expandOrPassthroughPattern as any,
+          {},
+        ),
+      };
     });
 
     const resultCell = runtime.getCell<{ values: number[]; flat: number[] }>(
@@ -943,7 +1175,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, flatMapPattern, {
       values: [1, 2, 3],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     await result.pull();
     expect(result.key("flat").get()).toEqual([1, 20, 21, 3]);
@@ -955,9 +1187,20 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       runCount++;
       return [x, x * 10];
     });
+    const duplicatePattern = unaryNumberListOpPattern(
+      (element) => duplicate(element),
+      numberArraySchema,
+    );
 
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, flat: values.flatMap((x) => duplicate(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
+          duplicatePattern as any,
+          {},
+        ),
+      };
     });
 
     // deno-lint-ignore no-sparse-arrays
@@ -972,7 +1215,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, flatMapPattern, {
       values: sparseInput,
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     await result.pull();
     // Only 2 pattern runs (hole skipped)
@@ -986,9 +1229,20 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       runCount++;
       return [x, x * 10];
     });
+    const duplicatePattern = unaryNumberListOpPattern(
+      (element) => duplicate(element),
+      numberArraySchema,
+    );
 
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, flat: values.flatMap((x) => duplicate(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
+          duplicatePattern as any,
+          {},
+        ),
+      };
     });
 
     const resultCell = runtime.getCell<{ values: number[]; flat: number[] }>(
@@ -1000,7 +1254,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, flatMapPattern, {
       values: [1, 2, 3],
     }, resultCell);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -1009,7 +1263,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     // Set list to undefined — should clean up and produce empty output
     result.withTx(tx).key("values").set(undefined as any);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -1018,7 +1272,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     // Restore list — patterns must re-run (old runs were stopped)
     const runsBeforeRestore = runCount;
     result.withTx(tx).key("values").set([4, 5]);
-    tx.commit();
+    await commitTx();
     tx = runtime.edit();
 
     await result.pull();
@@ -1032,19 +1286,21 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     // The WithPattern variants receive { element, index, array, params } at
     // runtime (same as map). The PatternFactory type doesn't fully capture
     // this shape — see IDerivable note in api/index.ts.
-    const isEvenPattern = pattern<{ element: number }>(({ element }) => {
-      return lift(
-        { type: "number" } as const satisfies JSONSchema,
-        { type: "boolean" } as const satisfies JSONSchema,
-        (x: number) => x % 2 === 0,
-      )(element);
-    });
+    const isEvenPattern = pattern<{ element: number }>(
+      ({ element }) => {
+        return lift((x: number) => x % 2 === 0, numberSchema, booleanSchema)(
+          element,
+        );
+      },
+      numberElementArgumentSchema,
+      booleanSchema,
+    );
 
     const outerPattern = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        evens: values.filterWithPattern(isEvenPattern as any, {}),
+        evens: (values as any).filterWithPattern(isEvenPattern as any, {}),
       };
     });
 
@@ -1057,7 +1313,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, outerPattern, {
       values: [1, 2, 3, 4, 5],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     await result.pull();
     expect(result.key("evens").get()).toEqual([2, 4]);
@@ -1065,22 +1321,25 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
   it("should flatMap with a pre-defined pattern (flatMapWithPattern)", async () => {
     // Same type gap as filterWithPattern — see comment above.
-    const duplicatePattern = pattern<{ element: number }>(({ element }) => {
-      return lift(
-        { type: "number" } as const satisfies JSONSchema,
-        {
-          type: "array",
-          items: { type: "number" },
-        } as const satisfies JSONSchema,
-        (x: number) => [x, x * 10],
-      )(element);
-    });
+    const duplicatePattern = pattern<{ element: number }>(
+      ({ element }) => {
+        return lift(
+          (x: number) => [x, x * 10],
+          numberSchema,
+          numberArraySchema,
+        )(
+          element,
+        );
+      },
+      numberElementArgumentSchema,
+      numberArraySchema,
+    );
 
     const outerPattern = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: values.flatMapWithPattern(duplicatePattern as any, {}),
+        flat: (values as any).flatMapWithPattern(duplicatePattern as any, {}),
       };
     });
 
@@ -1093,7 +1352,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const result = runtime.run(tx, outerPattern, {
       values: [1, 2, 3],
     }, resultCell);
-    tx.commit();
+    await commitTx();
 
     await result.pull();
     expect(result.key("flat").get()).toEqual([1, 10, 2, 20, 3, 30]);

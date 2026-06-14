@@ -2,7 +2,7 @@
  * Pure schema utilities - no external dependencies.
  *
  * These functions only use stored schema and don't fall back to registry.
- * This module can be imported in tests without pulling in the commontools runtime.
+ * This module can be imported in tests without pulling in the Common Fabric runtime.
  */
 
 import type { SubPieceEntry } from "../types.ts";

@@ -1,17 +1,17 @@
-/// <cts-enable />
 import {
   computed,
   Default,
   handler,
   NAME,
   navigateTo,
+  nonPrivateRandom,
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface PatternState {
-  value: Default<number, 0>;
+  value: number | Default<0>;
 }
 
 const increment = handler<unknown, { value: Writable<number> }>((_, state) => {
@@ -44,15 +44,15 @@ export const Counter = pattern<PatternState>((state) => {
     [NAME]: computed(() => `Simple counter: ${state.value}`),
     [UI]: (
       <div>
-        <ct-button onClick={decrement(state)}>
+        <cf-button onClick={decrement(state)}>
           dec to {previous(state.value)}
-        </ct-button>
+        </cf-button>
         <span id="counter-result">
           Counter is the {nth(state.value)} number
         </span>
-        <ct-button onClick={increment({ value: state.value })}>
+        <cf-button onClick={increment({ value: state.value })}>
           inc to {state.value + 1}
-        </ct-button>
+        </cf-button>
       </div>
     ),
     value: state.value,
@@ -61,11 +61,11 @@ export const Counter = pattern<PatternState>((state) => {
 
 interface FactoryInput {
   // Provided by the shell; not used directly here
-  allPieces: Default<unknown[], []>;
+  allPieces: unknown[] | Default<[]>;
 }
 
 // No additional outputs beyond name and UI
-type FactoryOutput = {
+export type FactoryOutput = {
   [NAME]: string;
   [UI]: any;
 };
@@ -73,7 +73,7 @@ type FactoryOutput = {
 type InputEvent = { detail: { message: string } };
 
 const newCounter = handler<InputEvent, Record<string, never>>((_, __) => {
-  const piece = Counter({ value: Math.round(Math.random() * 10) });
+  const piece = Counter({ value: Math.round(nonPrivateRandom() * 10) });
   return navigateTo(piece);
 });
 
@@ -82,11 +82,11 @@ export default pattern<FactoryInput, FactoryOutput>((_) => {
     [NAME]: "Counter Factory",
     [UI]: (
       <div>
-        <ct-message-input
+        <cf-message-input
           button-text="Add"
           placeholder="New counter"
           appearance="rounded"
-          onct-send={newCounter({})}
+          oncf-send={newCounter({})}
         />
       </div>
     ),

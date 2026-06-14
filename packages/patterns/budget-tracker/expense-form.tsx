@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Budget Tracker - Expense Form Sub-Pattern
  *
@@ -15,9 +14,10 @@ import {
   NAME,
   pattern,
   Stream,
+  toIndentedDebugString,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { type CategoryBudget, type Expense, getTodayDate } from "./schemas.tsx";
 
 // ============ INPUT/OUTPUT TYPES ============
@@ -71,9 +71,11 @@ const setBudgetHandler = handler<
   );
 
   if (existingIndex >= 0) {
-    budgets.set(
-      current.map((b, i) => (i === existingIndex ? { ...b, limit } : b)),
-    );
+    // Write through the element's cell — rebuilding the array with a fresh
+    // object literal for the matched budget would re-mint its entity identity
+    // and orphan previously-held references (see
+    // packages/patterns/primitives/editable-list.tsx).
+    budgets.key(existingIndex).key("limit").set(limit);
   } else {
     budgets.push({ category: category.trim(), limit });
   }
@@ -97,13 +99,13 @@ export default pattern<Input>(({ expenses, budgets }) => {
   const todayDate = getTodayDate();
 
   // Local state for form inputs
-  const newDescription = Writable.of("");
-  const newAmount = Writable.of("");
-  const newCategory = Writable.of("Other");
+  const newDescription = new Writable("");
+  const newAmount = new Writable("");
+  const newCategory = new Writable("Other");
 
   // Budget form inputs
-  const budgetCategory = Writable.of("");
-  const budgetLimit = Writable.of("");
+  const budgetCategory = new Writable("");
+  const budgetLimit = new Writable("");
 
   // Counts for display
   const expenseCount = computed(() => expenses.get().length);
@@ -129,10 +131,10 @@ export default pattern<Input>(({ expenses, budgets }) => {
             marginBottom: "1rem",
           }}
         >
-          <ct-input $value={newDescription} placeholder="Description" />
-          <ct-input $value={newAmount} placeholder="Amount" />
-          <ct-input $value={newCategory} placeholder="Category" />
-          <ct-button
+          <cf-input $value={newDescription} placeholder="Description" />
+          <cf-input $value={newAmount} placeholder="Amount" />
+          <cf-input $value={newCategory} placeholder="Category" />
+          <cf-button
             onClick={() => {
               const desc = newDescription.get().trim();
               const amt = parseFloat(newAmount.get());
@@ -153,7 +155,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
             }}
           >
             Add Expense
-          </ct-button>
+          </cf-button>
         </div>
 
         {/* Expense List with Remove */}
@@ -172,7 +174,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
               <span>
                 {expense.description} - ${expense.amount} ({expense.category})
               </span>
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={() => {
                   const current = expenses.get();
@@ -183,7 +185,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
                 }}
               >
                 ×
-              </ct-button>
+              </cf-button>
             </div>
           ))}
         </div>
@@ -198,12 +200,12 @@ export default pattern<Input>(({ expenses, budgets }) => {
             marginBottom: "1rem",
           }}
         >
-          <ct-input
+          <cf-input
             $value={budgetCategory}
             placeholder="Category (e.g. Food)"
           />
-          <ct-input $value={budgetLimit} placeholder="Monthly limit" />
-          <ct-button
+          <cf-input $value={budgetLimit} placeholder="Monthly limit" />
+          <cf-button
             onClick={() => {
               const cat = budgetCategory.get().trim();
               const limitVal = parseFloat(budgetLimit.get());
@@ -215,12 +217,10 @@ export default pattern<Input>(({ expenses, budgets }) => {
                 );
 
                 if (existingIndex >= 0) {
-                  budgets.set(
-                    current.map((
-                      b,
-                      i,
-                    ) => (i === existingIndex ? { ...b, limit: limitVal } : b)),
-                  );
+                  // In-place element-cell write — a fresh literal would
+                  // re-mint the budget's entity identity (see
+                  // setBudgetHandler above).
+                  budgets.key(existingIndex).key("limit").set(limitVal);
                 } else {
                   budgets.push({ category: cat, limit: limitVal });
                 }
@@ -231,7 +231,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
             }}
           >
             Set Budget
-          </ct-button>
+          </cf-button>
         </div>
 
         {/* Budget List */}
@@ -250,7 +250,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
               <span>
                 {budget.category}: ${budget.limit}
               </span>
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={() => {
                   const current = budgets.get();
@@ -261,7 +261,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
                 }}
               >
                 ×
-              </ct-button>
+              </cf-button>
             </div>
           ))}
         </div>
@@ -279,7 +279,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
             }}
           >
             {computed(() =>
-              JSON.stringify(
+              toIndentedDebugString(
                 {
                   newDescription: newDescription.get(),
                   newAmount: newAmount.get(),
@@ -287,8 +287,6 @@ export default pattern<Input>(({ expenses, budgets }) => {
                   budgetCategory: budgetCategory.get(),
                   budgetLimit: budgetLimit.get(),
                 },
-                null,
-                2
               )
             )}
           </pre>
@@ -306,13 +304,11 @@ export default pattern<Input>(({ expenses, budgets }) => {
             }}
           >
             {computed(() =>
-              JSON.stringify(
+              toIndentedDebugString(
                 {
                   expenses: expenses.get(),
                   budgets: budgets.get(),
                 },
-                null,
-                2
               )
             )}
           </pre>

@@ -99,7 +99,7 @@ The `when()` function handles the short-circuit semantics correctly at runtime.
 
 ### Step 1: Add `inSafeContext` to EmitterContext
 
-**File:** `src/transformers/opaque-ref/types.ts`
+**File:** `src/transformers/expression-rewrite/types.ts`
 
 ```typescript
 export interface EmitterContext {
@@ -204,7 +204,7 @@ function hasBinaryLogicalOperator(expr: ts.Expression): boolean {
 
 ### Step 3: Update rewriteExpression
 
-**File:** `src/transformers/opaque-ref/rewrite.ts`
+**File:** `src/transformers/expression-rewrite/rewrite-expression.ts`
 
 Pass `inSafeContext` through to EmitterContext:
 
@@ -234,7 +234,7 @@ export function rewriteExpression(
 
 ### Step 4: Update emitBinaryExpression
 
-**File:** `src/transformers/opaque-ref/emitters/binary-expression.ts`
+**File:** `src/transformers/expression-rewrite/emitters/binary-expression.ts`
 
 The `when()`/`unless()` logic stays the same. Only guard the fallback `derive()`
 wrap:
@@ -257,7 +257,7 @@ export const emitBinaryExpression: Emitter = ({
   }
 
   const relevantDataFlows = filterRelevantDataFlows(
-    dataFlows.all,
+    dataFlows,
     analysis,
     context,
   );
@@ -298,7 +298,7 @@ export const emitXxx: Emitter = ({
 
 ### Step 6: Update emitCallExpression
 
-**File:** `src/transformers/opaque-ref/emitters/call-expression.ts`
+**File:** `src/transformers/expression-rewrite/emitters/call-expression.ts`
 
 The ifElse predicate handling should still work (it wraps predicates, not the
 whole expression). Guard only the fallback:
@@ -394,17 +394,17 @@ However, these are correctness improvements, not regressions.
 
 ## Files Changed Summary
 
-| File                                                                | Change                                    |
-| ------------------------------------------------------------------- | ----------------------------------------- |
-| `src/transformers/opaque-ref/types.ts`                              | Add `inSafeContext` to interfaces         |
-| `src/transformers/opaque-ref-jsx.ts`                                | Remove early return, pass `inSafeContext` |
-| `src/transformers/opaque-ref/rewrite.ts`                            | Pass `inSafeContext` through              |
-| `src/transformers/opaque-ref/emitters/binary-expression.ts`         | Guard fallback derive                     |
-| `src/transformers/opaque-ref/emitters/call-expression.ts`           | Guard fallback derive                     |
-| `src/transformers/opaque-ref/emitters/property-access.ts`           | Early return in safe context              |
-| `src/transformers/opaque-ref/emitters/template-expression.ts`       | Early return in safe context              |
-| `src/transformers/opaque-ref/emitters/conditional-expression.ts`    | Early return in safe context              |
-| `src/transformers/opaque-ref/emitters/element-access-expression.ts` | Early return in safe context              |
-| `src/transformers/opaque-ref/emitters/prefix-unary-expression.ts`   | Early return in safe context              |
-| `src/transformers/opaque-ref/emitters/container-expression.ts`      | Early return in safe context              |
-| `test/*.test.ts`                                                    | Add new test cases                        |
+| File                                                                        | Change                                    |
+| --------------------------------------------------------------------------- | ----------------------------------------- |
+| `src/transformers/expression-rewrite/types.ts`                              | Add `inSafeContext` to interfaces         |
+| `src/transformers/opaque-ref-jsx.ts`                                        | Remove early return, pass `inSafeContext` |
+| `src/transformers/expression-rewrite/rewrite-expression.ts`                 | Pass `inSafeContext` through              |
+| `src/transformers/expression-rewrite/emitters/binary-expression.ts`         | Guard fallback derive                     |
+| `src/transformers/expression-rewrite/emitters/call-expression.ts`           | Guard fallback derive                     |
+| `src/transformers/expression-rewrite/emitters/property-access.ts`           | Early return in safe context              |
+| `src/transformers/expression-rewrite/emitters/template-expression.ts`       | Early return in safe context              |
+| `src/transformers/expression-rewrite/emitters/conditional-expression.ts`    | Early return in safe context              |
+| `src/transformers/expression-rewrite/emitters/element-access-expression.ts` | Early return in safe context              |
+| `src/transformers/expression-rewrite/emitters/prefix-unary-expression.ts`   | Early return in safe context              |
+| `src/transformers/expression-rewrite/emitters/container-expression.ts`      | Early return in safe context              |
+| `test/*.test.ts`                                                            | Add new test cases                        |

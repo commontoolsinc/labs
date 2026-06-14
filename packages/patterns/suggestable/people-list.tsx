@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   computed,
   Default,
@@ -7,7 +6,7 @@ import {
   UI,
   type VNode,
   wish,
-} from "commontools";
+} from "commonfabric";
 
 // ===== Types =====
 
@@ -16,11 +15,11 @@ type PersonListInput = Record<string, never>;
 type Person = {
   contact: {
     name: string;
-    email: Default<string, "">;
+    email: string | Default<"">;
   };
 };
 
-type PersonListOutput = {
+export type PersonListOutput = {
   [NAME]: string;
   [UI]: VNode;
   people: Person[];
@@ -38,16 +37,16 @@ const PersonList = pattern<PersonListInput, PersonListOutput>(() => {
         : "People"
     ),
     [UI]: (
-      <ct-vstack gap="2" style="padding: 1.5rem;">
+      <cf-vstack gap="2" style="padding: 1.5rem;">
         <div>
           {people.candidates.map((person) => (
-            <ct-hstack gap="2" align="center">
+            <cf-hstack gap="2" align="center">
               <span>{person.contact.name}</span>
               <span>{person.contact.email}</span>
-            </ct-hstack>
+            </cf-hstack>
           ))}
         </div>
-      </ct-vstack>
+      </cf-vstack>
     ),
     people: people.candidates,
   };

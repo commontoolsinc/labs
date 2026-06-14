@@ -1,17 +1,16 @@
-/// <cts-enable />
 /**
  * Budget Tracker - Data View Sub-Pattern
  *
  * Displays computed summaries: totals, by-category breakdown, budget status.
- * Read-only view - uses OpaqueRef<> since it only reads data.
+ * Read-only view - uses Reactive<> since it only reads data.
  */
-import { computed, NAME, OpaqueRef, pattern, UI } from "commontools";
+import { computed, NAME, pattern, Reactive, UI } from "commonfabric";
 import { type CategoryBudget, type Expense } from "./schemas.tsx";
 
-// Sub-patterns use OpaqueRef for read-only access (no Writable<> needed)
+// Sub-patterns use Reactive for read-only access (no Writable<> needed)
 interface Input {
-  expenses: OpaqueRef<Expense[]>;
-  budgets: OpaqueRef<CategoryBudget[]>;
+  expenses: Reactive<Expense[]>;
+  budgets: Reactive<CategoryBudget[]>;
 }
 
 // Use single type param to avoid conflict bug

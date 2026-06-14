@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Minimal pattern exposing a computed array and a string output.
  * Used to reproduce the .length bug on reactive proxy values.
@@ -14,17 +13,17 @@ import {
   pattern,
   Stream,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface Item {
   name: string;
 }
 
 interface Input {
-  items: Writable<Default<Item[], []>>;
+  items: Writable<Item[] | Default<[]>>;
 }
 
-interface Output {
+export interface Output {
   [NAME]: string;
   items: Item[];
   filteredItems: Item[];

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Person - Canonical base pattern for person data.
  *
@@ -21,7 +20,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import type { ContactPiece, Person, PersonLike } from "./contact-types.tsx";
 
@@ -183,32 +182,30 @@ const removeSocialProfile = handler<
 
 interface Input {
   person: Writable<
-    Default<
-      Person,
-      {
-        firstName: "";
-        lastName: "";
-        middleName: "";
-        nickname: "";
-        prefix: "";
-        suffix: "";
-        pronouns: "";
-        birthday: { month: 0; day: 0; year: 0 };
-        photo: "";
-        email: "";
-        phone: "";
-        notes: "";
-        tags: [];
-        addresses: [];
-        socialProfiles: [];
-      }
-    >
+    | Person
+    | Default<{
+      firstName: "";
+      lastName: "";
+      middleName: "";
+      nickname: "";
+      prefix: "";
+      suffix: "";
+      pronouns: "";
+      birthday: { month: 0; day: 0; year: 0 };
+      photo: "";
+      email: "";
+      phone: "";
+      notes: "";
+      tags: [];
+      addresses: [];
+      socialProfiles: [];
+    }>
   >;
   // Optional: reactive source of sibling contacts for sameAs linking.
   sameAs?: Writable<ContactPiece[]>;
 }
 
-interface Output {
+export interface Output {
   [NAME]: string;
   [UI]: VNode;
   person: Person;
@@ -218,13 +215,20 @@ interface Output {
 // UI Helpers
 // ============================================================================
 
-function sectionHeader(
+function buildSectionHeaderLabel(
   label: string,
-  expanded: Writable<boolean>,
-  count?: () => number,
-) {
+  expanded: boolean,
+  count = 0,
+  showCount = false,
+): string {
+  const arrow = expanded ? "▾" : "▸";
+  const suffix = showCount && count > 0 ? ` (${count})` : "";
+  return `${arrow} ${label}${suffix}`;
+}
+
+function sectionHeader(labelContent: any, expanded: Writable<boolean>) {
   return (
-    <ct-hstack
+    <cf-hstack
       style={{
         justifyContent: "space-between",
         alignItems: "center",
@@ -235,14 +239,9 @@ function sectionHeader(
       onClick={toggleSection({ section: expanded })}
     >
       <label style={{ fontSize: "12px", color: "#6b7280", fontWeight: "600" }}>
-        {computed(() => {
-          const arrow = expanded.get() ? "▾" : "▸";
-          const c = count ? count() : 0;
-          const suffix = count && c > 0 ? ` (${c})` : "";
-          return `${arrow} ${label}${suffix}`;
-        })}
+        {labelContent}
       </label>
-    </ct-hstack>
+    </cf-hstack>
   );
 }
 
@@ -274,14 +273,40 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
   });
 
   // State: whether the sameAs picker is expanded
-  const showPicker = Writable.of(false);
+  const showPicker = new Writable(false);
 
   // Section expansion state
-  const showNameDetails = Writable.of(false);
-  const showContactInfo = Writable.of(true);
-  const showAddresses = Writable.of(false);
-  const showSocial = Writable.of(false);
-  const showNotes = Writable.of(false);
+  const showNameDetails = new Writable(false);
+  const showContactInfo = new Writable(true);
+  const showAddresses = new Writable(false);
+  const showSocial = new Writable(false);
+  const showNotes = new Writable(false);
+
+  const nameDetailsHeader = computed(() =>
+    buildSectionHeaderLabel("Name Details", showNameDetails.get())
+  );
+  const contactInfoHeader = computed(() =>
+    buildSectionHeaderLabel("Contact Info", showContactInfo.get())
+  );
+  const addressesHeader = computed(() =>
+    buildSectionHeaderLabel(
+      "Addresses",
+      showAddresses.get(),
+      (person.key("addresses").get() || []).length,
+      true,
+    )
+  );
+  const socialHeader = computed(() =>
+    buildSectionHeaderLabel(
+      "Social Profiles",
+      showSocial.get(),
+      (person.key("socialProfiles").get() || []).length,
+      true,
+    )
+  );
+  const notesHeader = computed(() =>
+    buildSectionHeaderLabel("Notes", showNotes.get())
+  );
 
   // Computed: autocomplete items from reactive sibling source, filtering self
   const sameAsItems = computed(() => {
@@ -319,120 +344,120 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
   return {
     [NAME]: displayName,
     [UI]: (
-      <ct-screen>
-        <ct-vstack style={{ gap: "16px", padding: "16px" }}>
+      <cf-screen>
+        <cf-vstack style={{ gap: "16px", padding: "16px" }}>
           {/* Basic Info - always visible */}
-          <ct-hstack style={{ gap: "8px" }}>
-            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+          <cf-hstack style={{ gap: "8px" }}>
+            <cf-vstack style={{ gap: "4px", flex: 1 }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 First Name
               </label>
-              <ct-input
+              <cf-input
                 $value={person.key("firstName")}
                 placeholder="First name"
               />
-            </ct-vstack>
-            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+            </cf-vstack>
+            <cf-vstack style={{ gap: "4px", flex: 1 }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 Last Name
               </label>
-              <ct-input
+              <cf-input
                 $value={person.key("lastName")}
                 placeholder="Last name"
               />
-            </ct-vstack>
-          </ct-hstack>
+            </cf-vstack>
+          </cf-hstack>
 
           {/* Pronouns */}
-          <ct-vstack style={{ gap: "4px" }}>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Pronouns
             </label>
-            <ct-input
+            <cf-input
               $value={person.key("pronouns")}
               placeholder="e.g. he/him, she/her, they/them"
             />
-          </ct-vstack>
+          </cf-vstack>
 
           {/* Tags */}
-          <ct-vstack style={{ gap: "4px" }}>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Tags</label>
-            <ct-tags
+            <cf-tags
               tags={person.key("tags")}
-              onct-change={updateTags({ person })}
+              oncf-change={updateTags({ person })}
             />
-          </ct-vstack>
+          </cf-vstack>
 
           {/* Name Details Section */}
           <div>
-            {sectionHeader("Name Details", showNameDetails)}
+            {sectionHeader(nameDetailsHeader, showNameDetails)}
             {computed(() => {
               if (!showNameDetails.get()) return null;
               return (
-                <ct-vstack style={{ gap: "8px" }}>
-                  <ct-hstack style={{ gap: "8px" }}>
-                    <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                <cf-vstack style={{ gap: "8px" }}>
+                  <cf-hstack style={{ gap: "8px" }}>
+                    <cf-vstack style={{ gap: "4px", flex: 1 }}>
                       <label style={{ fontSize: "12px", color: "#6b7280" }}>
                         Prefix
                       </label>
-                      <ct-input
+                      <cf-input
                         $value={person.key("prefix")}
                         placeholder="Dr., Mr., Prof."
                       />
-                    </ct-vstack>
-                    <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                    </cf-vstack>
+                    <cf-vstack style={{ gap: "4px", flex: 1 }}>
                       <label style={{ fontSize: "12px", color: "#6b7280" }}>
                         Suffix
                       </label>
-                      <ct-input
+                      <cf-input
                         $value={person.key("suffix")}
                         placeholder="Jr., III, Ph.D."
                       />
-                    </ct-vstack>
-                  </ct-hstack>
-                  <ct-vstack style={{ gap: "4px" }}>
+                    </cf-vstack>
+                  </cf-hstack>
+                  <cf-vstack style={{ gap: "4px" }}>
                     <label style={{ fontSize: "12px", color: "#6b7280" }}>
                       Middle Name
                     </label>
-                    <ct-input
+                    <cf-input
                       $value={person.key("middleName")}
                       placeholder="Middle name"
                     />
-                  </ct-vstack>
-                  <ct-vstack style={{ gap: "4px" }}>
+                  </cf-vstack>
+                  <cf-vstack style={{ gap: "4px" }}>
                     <label style={{ fontSize: "12px", color: "#6b7280" }}>
                       Nickname
                     </label>
-                    <ct-input
+                    <cf-input
                       $value={person.key("nickname")}
                       placeholder="Preferred name / what they go by"
                     />
-                  </ct-vstack>
-                </ct-vstack>
+                  </cf-vstack>
+                </cf-vstack>
               );
             })}
           </div>
 
           {/* Birthday Section */}
-          <ct-vstack style={{ gap: "4px" }}>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Birthday
             </label>
-            <ct-hstack style={{ gap: "8px", alignItems: "center" }}>
-              <ct-select
+            <cf-hstack style={{ gap: "8px", alignItems: "center" }}>
+              <cf-select
                 $value={person.key("birthday").key("month")}
                 items={MONTH_OPTIONS}
               />
-              <ct-select
+              <cf-select
                 $value={person.key("birthday").key("day")}
                 items={DAY_OPTIONS}
               />
-              <ct-input
+              <cf-input
                 $value={person.key("birthday").key("year")}
                 placeholder="Year"
                 style={{ width: "80px" }}
               />
-            </ct-hstack>
+            </cf-hstack>
             {computed(() => {
               const month = person.key("birthday").key("month").get() || 0;
               const day = person.key("birthday").key("day").get() || 0;
@@ -448,19 +473,19 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                 </span>
               );
             })}
-          </ct-vstack>
+          </cf-vstack>
 
           {/* Photo URL */}
-          <ct-vstack style={{ gap: "4px" }}>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Photo URL
             </label>
-            <ct-input
+            <cf-input
               $value={person.key("photo")}
               placeholder="https://..."
               type="url"
             />
-          </ct-vstack>
+          </cf-vstack>
 
           {
             /* Contact Info Section
@@ -470,81 +495,77 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
            */
           }
           <div>
-            {sectionHeader("Contact Info", showContactInfo)}
+            {sectionHeader(contactInfoHeader, showContactInfo)}
             {computed(() => {
               if (!showContactInfo.get()) return null;
               return (
-                <ct-vstack style={{ gap: "8px" }}>
-                  <ct-vstack style={{ gap: "4px" }}>
+                <cf-vstack style={{ gap: "8px" }}>
+                  <cf-vstack style={{ gap: "4px" }}>
                     <label style={{ fontSize: "12px", color: "#6b7280" }}>
                       Email
                     </label>
-                    <ct-input
+                    <cf-input
                       $value={person.key("email")}
                       placeholder="Email"
                       type="email"
                     />
-                  </ct-vstack>
-                  <ct-vstack style={{ gap: "4px" }}>
+                  </cf-vstack>
+                  <cf-vstack style={{ gap: "4px" }}>
                     <label style={{ fontSize: "12px", color: "#6b7280" }}>
                       Phone
                     </label>
-                    <ct-input
+                    <cf-input
                       $value={person.key("phone")}
                       placeholder="Phone"
                       type="tel"
                     />
-                  </ct-vstack>
-                </ct-vstack>
+                  </cf-vstack>
+                </cf-vstack>
               );
             })}
           </div>
 
           {/* Addresses Section */}
           <div>
-            {sectionHeader(
-              "Addresses",
-              showAddresses,
-              () => (person.key("addresses").get() || []).length,
-            )}
+            {sectionHeader(addressesHeader, showAddresses)}
             {computed(() => {
               if (!showAddresses.get()) return null;
               const addresses = person.key("addresses").get() || [];
               return (
-                <ct-vstack style={{ gap: "8px" }}>
+                <cf-vstack style={{ gap: "8px" }}>
                   {addresses.map((_addr, i) => (
-                    <ct-card>
-                      <ct-vstack style={{ gap: "4px" }}>
-                        <ct-hstack
+                    <cf-card>
+                      <cf-vstack style={{ gap: "4px" }}>
+                        <cf-hstack
                           style={{
                             justifyContent: "space-between",
                             alignItems: "center",
                           }}
                         >
-                          <ct-select
+                          <cf-select
                             $value={person
                               .key("addresses")
                               .key(i)
                               .key("label")}
                             items={ADDRESS_LABEL_OPTIONS}
                           />
-                          <ct-button
+                          <cf-button
                             variant="ghost"
                             size="sm"
                             onClick={removeAddress({ person, index: i })}
                           >
                             ×
-                          </ct-button>
-                        </ct-hstack>
-                        <ct-input
+                          </cf-button>
+                        </cf-hstack>
+                        <cf-input
                           $value={person
                             .key("addresses")
                             .key(i)
                             .key("street")}
                           placeholder="Street"
                         />
-                        <ct-hstack style={{ gap: "4px" }}>
-                          <ct-input
+                        <cf-hstack style={{ gap: "4px" }}>
+                          <cf-input
                             $value={person
                               .key("addresses")
                               .key(i)
@@ -552,7 +573,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                             placeholder="City"
                             style={{ flex: "1" }}
                           />
-                          <ct-input
+                          <cf-input
                             $value={person
                               .key("addresses")
                               .key(i)
@@ -560,56 +581,52 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                             placeholder="State"
                             style={{ width: "60px" }}
                           />
-                          <ct-input
+                          <cf-input
                             $value={person.key("addresses").key(i).key("zip")}
                             placeholder="Zip"
                             style={{ width: "80px" }}
                           />
-                        </ct-hstack>
-                        <ct-input
+                        </cf-hstack>
+                        <cf-input
                           $value={person
                             .key("addresses")
                             .key(i)
                             .key("country")}
                           placeholder="Country"
                         />
-                      </ct-vstack>
-                    </ct-card>
+                      </cf-vstack>
+                    </cf-card>
                   ))}
-                  <ct-button
+                  <cf-button
                     variant="ghost"
                     size="sm"
                     onClick={addAddress({ person })}
                   >
                     + Add Address
-                  </ct-button>
-                </ct-vstack>
+                  </cf-button>
+                </cf-vstack>
               );
             })}
           </div>
 
           {/* Social Profiles Section */}
           <div>
-            {sectionHeader(
-              "Social Profiles",
-              showSocial,
-              () => (person.key("socialProfiles").get() || []).length,
-            )}
+            {sectionHeader(socialHeader, showSocial)}
             {computed(() => {
               if (!showSocial.get()) return null;
               const profiles = person.key("socialProfiles").get() || [];
               return (
-                <ct-vstack style={{ gap: "8px" }}>
+                <cf-vstack style={{ gap: "8px" }}>
                   {profiles.map((_profile, i) => (
-                    <ct-hstack style={{ gap: "4px", alignItems: "center" }}>
-                      <ct-select
+                    <cf-hstack style={{ gap: "4px", alignItems: "center" }}>
+                      <cf-select
                         $value={person
                           .key("socialProfiles")
                           .key(i)
                           .key("platform")}
                         items={SOCIAL_PLATFORM_OPTIONS}
                       />
-                      <ct-input
+                      <cf-input
                         $value={person
                           .key("socialProfiles")
                           .key(i)
@@ -617,40 +634,40 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                         placeholder="URL"
                         style={{ flex: "1" }}
                       />
-                      <ct-button
+                      <cf-button
                         variant="ghost"
                         size="sm"
                         onClick={removeSocialProfile({ person, index: i })}
                       >
                         ×
-                      </ct-button>
-                    </ct-hstack>
+                      </cf-button>
+                    </cf-hstack>
                   ))}
-                  <ct-button
+                  <cf-button
                     variant="ghost"
                     size="sm"
                     onClick={addSocialProfile({ person })}
                   >
                     + Add Profile
-                  </ct-button>
-                </ct-vstack>
+                  </cf-button>
+                </cf-vstack>
               );
             })}
           </div>
 
           {/* Notes Section */}
           <div>
-            {sectionHeader("Notes", showNotes)}
+            {sectionHeader(notesHeader, showNotes)}
             {computed(() => {
               if (!showNotes.get()) return null;
               return (
-                <ct-vstack style={{ gap: "4px" }}>
-                  <ct-input
+                <cf-vstack style={{ gap: "4px" }}>
+                  <cf-input
                     $value={person.key("notes")}
                     placeholder="Notes about this person..."
                     multiple
                   />
-                </ct-vstack>
+                </cf-vstack>
               );
             })}
           </div>
@@ -690,44 +707,44 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
               // If picker is open, show autocomplete
               if (showPicker.get()) {
                 return (
-                  <ct-vstack
+                  <cf-vstack
                     style={{
                       gap: "4px",
                       paddingTop: "8px",
                       borderTop: "1px solid #e5e7eb",
                     }}
                   >
-                    <ct-autocomplete
+                    <cf-autocomplete
                       items={sameAsItems}
                       placeholder="Search contacts..."
-                      onct-select={selectSameAs({ person, showPicker })}
+                      oncf-select={selectSameAs({ person, showPicker })}
                     />
-                  </ct-vstack>
+                  </cf-vstack>
                 );
               }
 
               // Collapsed: small link to expand
               return (
-                <ct-hstack
+                <cf-hstack
                   style={{
                     paddingTop: "8px",
                     borderTop: "1px solid #e5e7eb",
                   }}
                 >
-                  <ct-button
+                  <cf-button
                     variant="ghost"
                     size="sm"
                     onClick={togglePicker({ showPicker })}
                     style={{ fontSize: "12px", color: "#6b7280" }}
                   >
                     Link to another contact...
-                  </ct-button>
-                </ct-hstack>
+                  </cf-button>
+                </cf-hstack>
               );
             })}
           </div>
-        </ct-vstack>
-      </ct-screen>
+        </cf-vstack>
+      </cf-screen>
     ),
     person,
   };

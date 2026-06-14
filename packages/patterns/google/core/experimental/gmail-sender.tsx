@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Gmail Sender Pattern
  *
@@ -30,7 +29,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { GmailSendClient } from "../util/gmail-send-client.ts";
 import { type Auth, createGoogleAuth } from "../util/google-auth-manager.tsx";
 
@@ -40,19 +39,19 @@ import { type Auth, createGoogleAuth } from "../util/google-auth-manager.tsx";
 
 type EmailDraft = {
   /** Recipient email address */
-  to: Default<string, "">;
+  to: string | Default<"">;
   /** Email subject line */
-  subject: Default<string, "">;
+  subject: string | Default<"">;
   /** Plain text body */
-  body: Default<string, "">;
+  body: string | Default<"">;
   /** CC recipients (comma-separated) */
-  cc: Default<string, "">;
+  cc: string | Default<"">;
   /** BCC recipients (comma-separated) */
-  bcc: Default<string, "">;
+  bcc: string | Default<"">;
   /** Message ID to reply to (for threading) */
-  replyToMessageId: Default<string, "">;
+  replyToMessageId: string | Default<"">;
   /** Thread ID to reply to (for threading) */
-  replyToThreadId: Default<string, "">;
+  replyToThreadId: string | Default<"">;
 };
 
 type SendResult = {
@@ -65,9 +64,9 @@ type SendResult = {
 
 interface Input {
   /** Email draft to compose/send */
-  draft: Default<
-    EmailDraft,
-    {
+  draft:
+    | EmailDraft
+    | Default<{
       to: "";
       subject: "";
       body: "";
@@ -75,12 +74,11 @@ interface Input {
       bcc: "";
       replyToMessageId: "";
       replyToThreadId: "";
-    }
-  >;
+    }>;
 }
 
 /** Gmail email sender with confirmation dialog. #gmailSender */
-interface Output {
+export interface Output {
   [UI]: VNode;
   draft: EmailDraft;
   result: SendResult | null;
@@ -183,9 +181,9 @@ export default pattern<Input, Output>(({ draft }) => {
   });
 
   // UI state
-  const showConfirmation = Writable.of(false);
-  const sending = Writable.of(false);
-  const result = Writable.of<SendResult | null>(null);
+  const showConfirmation = new Writable(false);
+  const sending = new Writable(false);
+  const result = new Writable<SendResult | null>(null);
 
   // Validation
   const canSend = computed(() =>
@@ -337,7 +335,7 @@ export default pattern<Input, Output>(({ draft }) => {
             >
               To <span style={{ color: "#ef4444" }}>*</span>
             </label>
-            <ct-input
+            <cf-input
               type="email"
               $value={draft.to}
               placeholder="recipient@example.com"
@@ -357,7 +355,7 @@ export default pattern<Input, Output>(({ draft }) => {
               >
                 CC
               </label>
-              <ct-input
+              <cf-input
                 type="text"
                 $value={draft.cc}
                 placeholder="cc@example.com"
@@ -375,7 +373,7 @@ export default pattern<Input, Output>(({ draft }) => {
               >
                 BCC
               </label>
-              <ct-input
+              <cf-input
                 type="text"
                 $value={draft.bcc}
                 placeholder="bcc@example.com"
@@ -395,7 +393,7 @@ export default pattern<Input, Output>(({ draft }) => {
             >
               Subject <span style={{ color: "#ef4444" }}>*</span>
             </label>
-            <ct-input
+            <cf-input
               type="text"
               $value={draft.subject}
               placeholder="Email subject"
@@ -414,7 +412,7 @@ export default pattern<Input, Output>(({ draft }) => {
             >
               Message <span style={{ color: "#ef4444" }}>*</span>
             </label>
-            <ct-input
+            <cf-input
               $value={draft.body}
               placeholder="Write your message..."
               style="width: 100%; padding: 8px 12px; min-height: 150px;"
@@ -672,7 +670,7 @@ export default pattern<Input, Output>(({ draft }) => {
                     opacity: computed(() => sending.get() ? 0.7 : 1),
                   }}
                 >
-                  {ifElse(sending, "Sending...", "Send Email")}
+                  {sending ? "Sending..." : "Send Email"}
                 </button>
               </div>
             </div>

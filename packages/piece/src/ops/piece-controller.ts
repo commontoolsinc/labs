@@ -1,20 +1,16 @@
 import {
   Cell,
+  type CellPath,
+  getMetaLink,
   NAME,
-  Pattern,
-  PatternMeta,
-  RuntimeProgram,
-  TYPE,
-} from "@commontools/runner";
+  type Pattern,
+  type PatternMeta,
+  resolveCellPath,
+  type RuntimeProgram,
+} from "@commonfabric/runner";
 import { pieceId, PieceManager } from "../manager.ts";
-import { nameSchema, processSchema } from "@commontools/runner/schemas";
-import { CellPath, compileProgram, resolveCellPath } from "./utils.ts";
-import { injectUserCode } from "../iframe/static.ts";
-import {
-  buildFullPattern,
-  getIframePattern,
-  IFramePattern,
-} from "../iframe/pattern.ts";
+import { nameSchema } from "@commonfabric/runner/schemas";
+import { compileProgram } from "./utils.ts";
 
 interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;
@@ -34,6 +30,7 @@ class PiecePropIo implements PieceCellIo {
 
   async get(path?: CellPath) {
     const targetCell = await this.#getTargetCell();
+    await targetCell.pull();
     return resolveCellPath(targetCell, path ?? []);
   }
 
@@ -55,7 +52,11 @@ class PiecePropIo implements PieceCellIo {
       txCell.set(value);
     });
 
-    await manager.runtime.idle();
+    if (this.#type === "input") {
+      await manager.getResult(this.#cc.getCell()).pull();
+    } else {
+      await targetCell.pull();
+    }
     await manager.synced();
   }
 
@@ -106,7 +107,8 @@ export class PieceController<T = unknown> {
   }
 
   async getPattern(): Promise<Pattern> {
-    const patternId = getPatternIdFromPiece(this.#cell);
+    const patternId = getMetaLink(this.#cell, "pattern", {})?.id;
+    if (!patternId) throw new Error("piece missing pattern ID");
     const runtime = this.#manager.runtime;
     const pattern = await runtime.patternManager.loadPattern(
       patternId,
@@ -116,7 +118,8 @@ export class PieceController<T = unknown> {
   }
 
   getPatternMeta(): Promise<PatternMeta> {
-    const patternId = getPatternIdFromPiece(this.#cell);
+    const patternId = getMetaLink(this.#cell, "pattern", {})?.id;
+    if (!patternId) throw new Error("piece missing pattern ID");
     const space = this.#manager.getSpace();
     return this.#manager.runtime.patternManager.loadPatternMeta(
       patternId,
@@ -124,29 +127,8 @@ export class PieceController<T = unknown> {
     );
   }
 
-  // Returns an `IFramePattern` for the piece, or `undefined`
-  // if not an iframe pattern.
-  getIframePattern(): IFramePattern | undefined {
-    return getIframePattern(this.#cell, this.#manager.runtime).iframe;
-  }
-
   async setPattern(program: RuntimeProgram): Promise<void> {
     const pattern = await compileProgram(this.#manager, program);
-    await execute(this.#manager, this.id, pattern);
-  }
-
-  // Update piece's pattern with usercode for an iframe pattern.
-  // Throws if pattern is not an iframe pattern.
-  async setIframePattern(src: string): Promise<void> {
-    const iframePattern = getIframePattern(this.#cell, this.#manager.runtime);
-    if (!iframePattern.iframe) {
-      throw new Error(`Expected piece "${this.id}" to be an iframe pattern.`);
-    }
-    iframePattern.iframe.src = injectUserCode(src);
-    const pattern = await compileProgram(
-      this.#manager,
-      buildFullPattern(iframePattern.iframe),
-    );
     await execute(this.#manager, this.id, pattern);
   }
 
@@ -173,12 +155,4 @@ async function execute(
   options?: { start?: boolean },
 ): Promise<void> {
   await manager.runWithPattern(pattern, pieceId, input, options);
-  await manager.runtime.idle();
-  await manager.synced();
 }
-
-export const getPatternIdFromPiece = (piece: Cell<unknown>): string => {
-  const sourceCell = piece.getSourceCell(processSchema);
-  if (!sourceCell) throw new Error("piece missing source cell");
-  return sourceCell.get()?.[TYPE];
-};

@@ -39,10 +39,6 @@ class BuildConfig {
     return this.path("deno.lock");
   }
 
-  workspaceTempLockPath() {
-    return this.path("_deno.lock");
-  }
-
   shellProjectPath() {
     return this.path("packages", "shell");
   }
@@ -102,6 +98,14 @@ class BuildConfig {
 
   cliEntryPath() {
     return this.path("packages", "cli", "mod.ts");
+  }
+
+  cliMultiUserTestWorkerPath() {
+    return this.path("packages", "cli", "lib", "multi-user-test-worker.ts");
+  }
+
+  fusePackagePath() {
+    return this.path("packages", "fuse");
   }
 
   distDir() {
@@ -185,7 +189,7 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
       OTEL_DENO: "true",
     },
     args: [
-      "compile",
+      ...lockedCompileArgs(config),
       // Run `--no-check` here, as the `--include`'d
       // `es2023.d.ts` file will attempt to be checked
       // as a non-static asset. Checking should be done
@@ -222,7 +226,7 @@ async function buildBgCharmService(config: BuildConfig): Promise<void> {
   console.log("Building background charm service binary...");
   const { success } = await new Deno.Command(Deno.execPath(), {
     args: [
-      "compile",
+      ...lockedCompileArgs(config),
       // Run `--no-check` here, as the `--include`'d
       // `es2023.d.ts` file will attempt to be checked
       // as a non-static asset. Checking should be done
@@ -280,9 +284,9 @@ async function buildCli(config: BuildConfig): Promise<void> {
   ];
   const { success } = await new Deno.Command(Deno.execPath(), {
     args: [
-      "compile",
+      ...lockedCompileArgs(config),
       "--output",
-      config.distPath("ct"),
+      config.distPath("cf"),
       // Run `--no-check` here, as the `--include`'d
       // `es2023.d.ts` file will attempt to be checked
       // as a non-static asset. Checking should be done
@@ -291,12 +295,19 @@ async function buildCli(config: BuildConfig): Promise<void> {
       "--allow-write",
       "--allow-read",
       "--allow-env",
+      "--allow-run",
       "--allow-ffi", // for @db/sqlite
       "--allow-net", // for @db/sqlite lazy download
       "--include",
       config.staticTypesPath(),
       "--include",
       config.docsCommonPath(),
+      "--include",
+      config.fusePackagePath(),
+      // Worker module spawned by cf test's multi-user mode — workers are not
+      // followed by compile's static analysis, so include it explicitly.
+      "--include",
+      config.cliMultiUserTestWorkerPath(),
       config.cliEntryPath(),
     ],
     cwd: config.root,
@@ -310,24 +321,31 @@ async function buildCli(config: BuildConfig): Promise<void> {
   console.log("CLI binary built successfully");
 }
 
-// `deno compile` appears to bundle *all* workspace
-// dependencies e.g. dev dependencies. We can sidestep
-// this by removing the lock file, and only calling compile
-// from `toolshed`, not the project root.
-// https://github.com/denoland/deno/issues/21504
-//
-// Additionally, we have some frontend types that
+function lockedCompileArgs(config: BuildConfig): string[] {
+  // Keep compiled binaries on the same resolved dependency graph as normal
+  // install/test flows, even when compile runs from a package cwd.
+  return [
+    "compile",
+    "--lock",
+    config.workspaceLockPath(),
+    "--frozen=true",
+  ];
+}
+
+// Some frontend types in the workspace manifest
 // must be removed from the compiler options
 // that do not work with toolshed.
 async function prepareWorkspace(
   config: BuildConfig,
 ): Promise<void> {
   const denoJsonPath = config.workspaceManifestPath();
-  const denoLockPath = config.workspaceLockPath();
-  const denoTempLockPath = config.workspaceTempLockPath();
 
-  // "Remove" the lock file
-  await Deno.rename(denoLockPath, denoTempLockPath);
+  if (!(await exists(config.workspaceLockPath()))) {
+    throw new Error(
+      `Cannot build binaries without ${config.workspaceLockPath()}`,
+    );
+  }
+
   // Remove `compilerOptions.types`
   const manifest = config.manifest();
   delete manifest.compilerOptions.types;
@@ -335,24 +353,22 @@ async function prepareWorkspace(
     denoJsonPath,
     `${JSON.stringify(manifest, null, 2)}\n`,
   );
-  // Add a COMPILED file to toolshed. This could
-  // contain buildargs/metadata in the future.
-  await Deno.writeTextFile(config.toolshedEnvPath(), "");
+  // Write build metadata into the COMPILED file. Included via `--include`
+  // when the toolshed binary is compiled, so the values travel with the
+  // artifact and can be read at runtime (see packages/toolshed/lib/build-info.ts).
+  const buildInfo = {
+    commitSha: Deno.env.get("COMMIT_SHA") ?? "",
+    builtAt: new Date().toISOString(),
+  };
+  await Deno.writeTextFile(
+    config.toolshedEnvPath(),
+    JSON.stringify(buildInfo, null, 2) + "\n",
+  );
 }
 
 async function revertWorkspace(config: BuildConfig): Promise<void> {
   const denoJsonPath = config.workspaceManifestPath();
-  const denoLockPath = config.workspaceLockPath();
-  const denoTempLockPath = config.workspaceTempLockPath();
   const toolshedEnvPath = config.toolshedEnvPath();
-
-  // Move temp lock file back
-  if ((await exists(denoTempLockPath))) {
-    await Deno.rename(
-      denoTempLockPath,
-      denoLockPath,
-    );
-  }
 
   // Restore the workspace manifest
   await Deno.writeTextFile(

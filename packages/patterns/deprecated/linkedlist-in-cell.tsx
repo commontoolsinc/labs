@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   Default,
   derive,
@@ -7,7 +6,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface LinkedList {
   value: string;
@@ -15,7 +14,7 @@ interface LinkedList {
 }
 
 interface InputSchema {
-  title: Default<string, "untitled">;
+  title: string | Default<"untitled">;
 }
 
 type InputEventType = {
@@ -70,11 +69,11 @@ export default pattern<InputSchema>(({ title }) => {
       <div>
         <h3>{title}</h3>
         <p>Super Simple LinkedList</p>
-        <ct-message-input
+        <cf-message-input
           name="Send"
           placeholder="Type a message..."
           appearance="rounded"
-          onct-send={addItem({ items_list })}
+          oncf-send={addItem({ items_list })}
         />
         <div
           style={{

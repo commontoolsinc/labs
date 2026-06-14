@@ -1,4 +1,4 @@
-import { type Cell } from "../cell.ts";
+import { type Cell, createCell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import { type RawBuiltinResult } from "../module.ts";
 import { type Runtime } from "../runtime.ts";
@@ -14,9 +14,15 @@ export function navigateTo(
 ): RawBuiltinResult {
   let isInitialized = false;
   let navigated = false;
+  let navigationAttempt = 0;
   let resultCell: Cell<boolean>;
+  const targetCellSchema = {
+    type: "object",
+    properties: {},
+    asCell: ["cell"],
+  } as const;
 
-  const action: Action = async (tx: IExtendedStorageTransaction) => {
+  const action: Action = (tx: IExtendedStorageTransaction) => {
     // The main reason we might be called again after navigating is that the
     // transaction to update the result cell failed, so we'll just set it again.
     if (navigated) {
@@ -26,10 +32,18 @@ export function navigateTo(
 
     // Initialize the result cell if it hasn't been initialized yet.
     if (!isInitialized) {
-      resultCell = runtime.getCell<any>(
+      const baseResultCell = runtime.getCell<any>(
         parentCell.space,
         { navigateTo: { result: cause } },
         { type: "boolean" },
+        tx,
+      );
+      resultCell = createCell(
+        runtime,
+        {
+          ...baseResultCell.getAsNormalizedFullLink(),
+          scope: "session",
+        },
         tx,
       );
 
@@ -44,18 +58,13 @@ export function navigateTo(
     if (resultCell.withTx(tx).get()) return;
 
     // Read with a schema that won't subscribe to the whole piece
-    const inputsWithLog = inputsCell.asSchema({
-      type: "object",
-      properties: {},
-      asCell: true,
-    })
-      .withTx(tx);
+    const inputsWithLog = inputsCell.asSchema(targetCellSchema).withTx(tx);
     const target = inputsWithLog.get();
 
-    // If we have a target and the value isn't `undefined`, navigate to it.
-    const targetValue = target?.asSchema({ type: "object", properties: {} })
-      .get();
-    if (target && targetValue) {
+    // Pattern creation can yield a navigable cell before every reactive
+    // dependency has materialized its value. The cell identity is enough for
+    // navigation; requiring a current value can block valid piece targets.
+    if (target) {
       if (!runtime.navigateCallback) {
         throw new Error("navigateCallback is not set");
       }
@@ -63,18 +72,35 @@ export function navigateTo(
       // Resolve to root piece - follows links until path is empty
       const resolvedTarget = target.resolveAsCell();
 
-      // Sync the target cell to ensure data is loaded before navigation
-      await resolvedTarget.sync();
-
-      runtime.navigateCallback(resolvedTarget);
-
+      const previousNavigated = navigated;
+      const thisAttempt = ++navigationAttempt;
       navigated = true;
-      resultCell.set(true);
+      tx.addCommitCallback((_committedTx, commitResult) => {
+        if (commitResult.error && navigationAttempt === thisAttempt) {
+          navigated = previousNavigated;
+        }
+      });
+      // TODO(seefeld): This post-commit handoff regresses the previous
+      // speculative-navigation latency. Model navigation as an event instead.
+      tx.enqueuePostCommitEffect({
+        id: `navigate-to:${JSON.stringify(resolvedTarget.getAsLink())}`,
+        kind: "navigate-to",
+        idempotencyKey: `navigate-to:${
+          JSON.stringify(resolvedTarget.getAsLink())
+        }`,
+        async flush() {
+          await runtime.navigateCallback!(resolvedTarget);
+        },
+      });
+      resultCell.withTx(tx).set(true);
     }
   };
 
   return {
     action,
     isEffect: true,
+    populateDependencies: (depTx) => {
+      inputsCell.asSchema(targetCellSchema).withTx(depTx).get();
+    },
   };
 }

@@ -1,12 +1,25 @@
-import * as __ctHelpers from "commontools";
-import { Cell, handler } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { Cell, handler } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Item {
     text: string;
 }
 interface ListState {
     items: Cell<Item[]>;
 }
-const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const removeItem = handler({
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         items: {
@@ -14,7 +27,7 @@ const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
             items: {
                 $ref: "#/$defs/Item"
             },
-            asCell: true
+            asCell: ["cell"]
         },
         index: {
             type: "number"
@@ -32,7 +45,7 @@ const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
             required: ["text"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, (_, { items, index }) => {
+} as const satisfies __cfHelpers.JSONSchema, (_, { items, index }) => {
     const next = items.get().slice();
     if (index >= 0 && index < next.length)
         next.splice(index, 1);
@@ -42,20 +55,35 @@ const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
 type ListStateWithIndex = ListState & {
     index: number;
 };
-const removeItemAlias = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const removeItemAlias = handler({
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         items: {
             type: "array",
-            items: true,
-            asCell: true
+            items: {
+                $ref: "#/$defs/Item"
+            },
+            asCell: ["cell"]
         },
         index: {
             type: "number"
         }
     },
-    required: ["items", "index"]
-} as const satisfies __ctHelpers.JSONSchema, (_, { items, index }) => {
+    required: ["items", "index"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                text: {
+                    type: "string"
+                }
+            },
+            required: ["text"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, (_, { items, index }) => {
     const next = items.get().slice();
     if (index >= 0 && index < next.length)
         next.splice(index, 1);
@@ -68,6 +96,5 @@ const removeItemAlias = handler(true as const satisfies __ctHelpers.JSONSchema, 
 // Context: inline intersection vs type alias intersection; alias variant loses $defs (items: true)
 export { removeItem, removeItemAlias };
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);

@@ -1,40 +1,76 @@
-import { refer } from "@commontools/memory/reference";
-import { storableFromNativeValue } from "@commontools/memory/storable-value";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { stripUndefinedProps } from "@commonfabric/utils/strip-undefined-props";
 import { type Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { JSONSchema, Schema } from "../builder/types.ts";
+import type { Schema } from "../builder/types.ts";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 
 export const REQUEST_TIMEOUT = 1000 * 5; // 5 seconds
 
-export const internalSchema = {
-  type: "object",
-  properties: {
-    requestId: { type: "string", default: "" },
-    lastActivity: { type: "number", default: 0 },
-    inputHash: { type: "string", default: "" },
+export const internalSchema = internSchema(
+  {
+    type: "object",
+    properties: {
+      requestId: { type: "string", default: "" },
+      lastActivity: { type: "number", default: 0 },
+      inputHash: { type: "string", default: "" },
+    },
+    default: {},
+    required: ["requestId", "lastActivity", "inputHash"],
   },
-  default: {},
-  required: ["requestId", "lastActivity", "inputHash"],
-} as const satisfies JSONSchema;
+);
 
 /**
- * Computes a hash of inputs for comparison.
- * Excludes the 'result' field which is used only as a TypeScript type hint,
- * not as an actual input parameter.
+ * Computes a stable string hash of fetch-style inputs, suitable for use as
+ * a comparison key (e.g. an idempotency key or mutex identifier).
+ *
+ * Two normalizations are applied before hashing:
+ *
+ * (1) The top-level `result` property and `options.mutexTimeoutMs` property
+ *     are dropped. `result` exists only as a TypeScript type hint at call
+ *     sites, and `mutexTimeoutMs` is a local scheduling knob. Neither is a
+ *     real fetch parameter, so neither must influence the hash.
+ *
+ * (2) `undefined`-valued object properties are dropped, recursively.
+ *     Callers commonly materialize snapshots via unconditional object
+ *     construction (e.g. `{ url, mode, options }`, or one level deeper
+ *     `{ method, body }`), and the resulting hash needs to be the same
+ *     regardless of whether an absent field is omitted entirely or
+ *     present-but-`undefined`. The fabric-value layer preserves
+ *     `undefined`-valued properties, so this function must do the
+ *     JSON-style normalization itself.
+ *
+ * `hashStringOf()` itself is happy to hash `undefined` values; no
+ * normalization for hashability per se is needed.
  */
 export function computeInputHashFromValue<T extends Record<string, any>>(
   inputs: T | undefined,
 ): string {
-  const safeInputs = inputs ?? {};
-  // Exclude 'result' type hint from the hash - only hash actual fetch parameters
-  const inputsOnly = { ...(safeInputs as Record<string, unknown>) };
-  delete (inputsOnly as Record<string, unknown>).result;
-  // refer() cannot hash undefined values; normalize to a deep storable shape
-  // (omits undefined object props, converts undefined array elements to null).
-  const storableInputs = storableFromNativeValue(inputsOnly);
-  const normalized = storableInputs === undefined ? {} : storableInputs;
-  return refer(normalized as Record<string, unknown>).toString();
+  const { result: _result, ...inputsOnly } = (inputs ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const options = inputsOnly.options;
+  if (
+    options !== null && typeof options === "object" &&
+    !Array.isArray(options)
+  ) {
+    const {
+      mutexTimeoutMs: _mutexTimeoutMs,
+      ...requestOptions
+    } = options as Record<string, unknown>;
+    const normalizedOptions = stripUndefinedProps(requestOptions) as Record<
+      string,
+      unknown
+    >;
+    if (Object.keys(normalizedOptions).length > 0) {
+      inputsOnly.options = normalizedOptions;
+    } else {
+      delete inputsOnly.options;
+    }
+  }
+  return hashStringOf(stripUndefinedProps(inputsOnly));
 }
 
 export function computeInputHash<T extends Record<string, any>>(
@@ -60,6 +96,7 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   internal: Cell<Schema<typeof internalSchema>>,
   requestId: string,
   snapshotInputs: (cell: Cell<T>) => T,
+  expectedInputHash?: string,
   timeout: number = REQUEST_TIMEOUT,
 ): Promise<{
   claimed: boolean;
@@ -88,6 +125,10 @@ export async function tryClaimMutex<T extends Record<string, any>>(
     // Hash the snapshot (plain object) to avoid proxy/undefined issues
     // from partially-initialized reactive inputs.
     inputHash = computeInputHashFromValue(inputs);
+    if (expectedInputHash !== undefined && inputHash !== expectedInputHash) {
+      claimed = false;
+      return;
+    }
     // Can claim if:
     // 1. Nothing is pending, OR
     // 2. Previous request timed out

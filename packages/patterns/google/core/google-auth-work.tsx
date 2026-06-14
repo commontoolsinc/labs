@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Work Google Auth Wrapper
  *
@@ -9,7 +8,7 @@
  * 1. Pre-hoc: Create this directly, log in, and favorite
  * 2. Post-hoc: Created by google-auth-switcher after login
  */
-import { computed, Default, ifElse, NAME, pattern, UI } from "commontools";
+import { computed, Default, ifElse, NAME, pattern, UI } from "commonfabric";
 import GoogleAuth, {
   Auth,
   createPreviewUI,
@@ -17,19 +16,21 @@ import GoogleAuth, {
 } from "./google-auth.tsx";
 
 interface Input {
-  selectedScopes: Default<SelectedScopes, {
-    gmail: true;
-    gmailSend: true;
-    gmailModify: true;
-    calendar: true;
-    calendarWrite: true;
-    drive: true;
-    docs: true;
-    contacts: true;
-  }>;
-  auth: Default<
-    Auth,
-    {
+  selectedScopes:
+    | SelectedScopes
+    | Default<{
+      gmail: true;
+      gmailSend: true;
+      gmailModify: true;
+      calendar: true;
+      calendarWrite: true;
+      drive: true;
+      docs: true;
+      contacts: true;
+    }>;
+  auth:
+    | Auth
+    | Default<{
       token: "";
       tokenType: "";
       scope: [];
@@ -37,12 +38,11 @@ interface Input {
       expiresAt: 0;
       refreshToken: "";
       user: { email: ""; name: ""; picture: "" };
-    }
-  >;
+    }>;
 }
 
 /** Work Google account. #googleAuth #googleAuthWork */
-interface Output {
+export interface Output {
   auth: Auth;
   accountType: "work";
   /** Minimal preview for picker display with WORK badge */

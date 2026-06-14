@@ -1,0 +1,32 @@
+{
+  "name": "@commonfabric/content-hash",
+  "imports": {
+    "@/": "./src/"
+  },
+  "tasks": {
+    "check": "deno check .",
+    "just-test": {
+      "description": "Run unit tests",
+      "command": "deno test --allow-read"
+    },
+    "test": {
+      "description": "Type check & run tests",
+      "dependencies": [
+        "check",
+        "just-test"
+      ]
+    },
+    "bench": {
+      "description": "Run SHA-256 implementation benchmarks",
+      "command": "deno bench --allow-read"
+    }
+  },
+  "test": {
+    "include": [
+      "test/*.test.ts"
+    ]
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

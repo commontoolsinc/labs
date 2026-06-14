@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: Todo List (fs-sync)
  *
@@ -13,9 +12,9 @@
  * Per-item handlers are accessed via `list.actions[i].toggle` / `.delete`
  * which are handler streams wrapped in objects (safe from spurious invocation).
  *
- * Run: deno task ct test packages/fs-sync-example/src/todo-list-pattern.test.tsx --verbose
+ * Run: deno task cf test packages/fs-sync-example/src/todo-list-pattern.test.tsx --verbose
  */
-import { action, computed, pattern } from "commontools";
+import { action, computed, pattern } from "commonfabric";
 import TodoList from "./todo-list-pattern.tsx";
 
 export default pattern(() => {

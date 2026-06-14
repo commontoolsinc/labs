@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Cell } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   type IExtendedStorageTransaction,
@@ -22,10 +23,10 @@ describe("Conflict Reproduction", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
-  let cell: ReturnType<typeof createBuilder>["commontools"]["cell"];
-  let handler: ReturnType<typeof createBuilder>["commontools"]["handler"];
+  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+  let cell: ReturnType<typeof createBuilder>["commonfabric"]["cell"];
+  let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
   let conflictErrors: Error[];
 
   beforeEach(() => {
@@ -52,8 +53,8 @@ describe("Conflict Reproduction", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
-    ({ lift, pattern, cell, handler } = commontools);
+    const { commonfabric } = createTrustedBuilder(runtime);
+    ({ lift, pattern, cell, handler } = commonfabric);
   });
 
   afterEach(async () => {
@@ -72,9 +73,9 @@ describe("Conflict Reproduction", () => {
         items: {
           type: "array",
           items: { type: "object", properties: { id: { type: "string" } } },
-          asCell: true,
+          asCell: ["cell"],
         },
-        sequence: { asCell: true },
+        sequence: { asCell: ["cell"] },
       },
       required: ["items", "sequence"],
     }, (_event, context) => {
@@ -144,9 +145,9 @@ describe("Conflict Reproduction", () => {
         items: {
           type: "array",
           items: { type: "object", properties: { id: { type: "string" } } },
-          asCell: true,
+          asCell: ["cell"],
         },
-        sequence: { asCell: true },
+        sequence: { asCell: ["cell"] },
       },
       required: ["items", "sequence"],
     }, (_event, context) => {

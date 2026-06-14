@@ -1,15 +1,24 @@
-/// <cts-enable />
 import {
   computed,
   equals,
   handler,
   NAME,
   pattern,
+  Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import FavoritesManager from "./favorites-manager.tsx";
-import { EMPTY_LEARNED, type LearnedSection } from "../profile.tsx";
+import Self from "../self.tsx";
+import {
+  type CreateProfileEvent,
+  submitProfileCreation,
+  type TrustedDefaultProfile,
+  type TrustedProfileList,
+  type TrustedProfileMru,
+} from "./profile-create.tsx";
+import ProfilePicker from "./profile-picker.tsx";
+import type { ProfileHomeOutput } from "./profile-home.tsx";
 
 // Types from favorites-manager.tsx
 type Favorite = {
@@ -17,7 +26,6 @@ type Favorite = {
   tag: string;
   userTags: string[];
   spaceName?: string;
-  spaceDid?: string;
 };
 
 type JournalEntry = {
@@ -36,6 +44,19 @@ type SpaceEntry = {
   did?: string;
 };
 
+export type HomeOutput = {
+  [NAME]: string;
+  [UI]: unknown;
+  favorites: Writable<Favorite[]>;
+  journal: Writable<JournalEntry[]>;
+  spaces: Writable<SpaceEntry[]>;
+  defaultAppUrl: Writable<string>;
+  profiles: TrustedProfileList;
+  defaultProfile: TrustedDefaultProfile;
+  mru: TrustedProfileMru;
+  createProfile: Stream<CreateProfileEvent>;
+};
+
 // Handler to add a favorite
 const addFavorite = handler<
   { piece: Writable<{ [NAME]?: string }>; tag?: string; spaceName?: string },
@@ -49,7 +70,6 @@ const addFavorite = handler<
       .asSchemaFromLinks?.()?.schema;
     if (typeof schema !== "object") schema = "";
 
-    const spaceDid = (piece as any)?.space as string | undefined;
     const schemaTag = tag || JSON.stringify(schema) || "";
 
     favorites.push({
@@ -57,7 +77,6 @@ const addFavorite = handler<
       tag: schemaTag,
       userTags: [],
       spaceName,
-      spaceDid,
     });
   }
 });
@@ -104,109 +123,123 @@ const removeSpaceHandler = handler<
   spaces.set(filtered);
 });
 
-export default pattern((_) => {
+export default pattern<Record<string, never>, HomeOutput>((_) => {
   // OWN the data cells (.for for id stability)
-  const favorites = Writable.of<Favorite[]>([]).for("favorites");
-  const journal = Writable.of<JournalEntry[]>([]).for("journal");
-  const learned = Writable.of<LearnedSection>(EMPTY_LEARNED).for("learned");
-  const spaces = Writable.of<SpaceEntry[]>([]).for("spaces");
-  const defaultAppUrl = Writable.of("").for("defaultAppUrl");
+  const favorites = new Writable<Favorite[]>([]).for("favorites");
+  const journal = new Writable<JournalEntry[]>([]).for("journal");
+  const spaces = new Writable<SpaceEntry[]>([]).for("spaces");
+  const defaultAppUrl = new Writable("").for("defaultAppUrl");
+  // NOTE(CT-1628): the `as any` casts around the profile cells below are
+  // required because the CFC wrapper types (TrustedProfile*) don't yet compose
+  // with Writable/the pattern factory output type. Tracked for a proper type
+  // fix.
+  //
+  // Multi-profile model: a user has many profiles, each in its own `inSpace`
+  // space. `profiles` is the durable list (appended on create). `defaultProfile`
+  // is the one `#profile` resolves to in headless mode and orders first in the
+  // picker; `mru` is the recency-ordered list driving the rest of the ordering.
+  const profiles = new Writable<ProfileHomeOutput[]>([]).for("profiles");
+  const defaultProfile = new Writable<ProfileHomeOutput | undefined>(undefined)
+    .for("defaultProfile");
+  const mru = new Writable<ProfileHomeOutput[]>([]).for("mru");
+  // Untrusted-write regression surface: this stream is exported so tests can
+  // verify that sending it from outside the trusted create surface does NOT
+  // create a profile. The actual create UI lives in the profile picker below.
+  const createProfileStream = submitProfileCreation({
+    profiles: profiles as any,
+  });
+  // The home Profile tab IS the profile picker: it lists profiles natively,
+  // sets the default, stamps MRU on selection, and creates more inline.
+  const profilePicker = ProfilePicker({
+    profiles: profiles as any,
+    defaultProfile: defaultProfile as any,
+    mru: mru as any,
+  });
 
   // Child components
   const favoritesComponent = FavoritesManager({});
-  const activeTab = Writable.of("spaces").for("activeTab");
+  // Private self-model — the "real you" tier (values, neurotype, meaning Q&A),
+  // home-local and never shared. Distinct from the outward profile/personas in
+  // the Profile tab. Owns its own durable cell (seeded via Default<>).
+  const selfComponent = Self({});
+  const activeTab = new Writable("spaces").for("activeTab");
 
   return {
     [NAME]: `Home`,
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <h1>
           home<strong>space</strong>
         </h1>
 
-        <ct-tabs $value={activeTab}>
-          <ct-tab-list>
-            <ct-tab value="spaces">Spaces</ct-tab>
-            <ct-tab value="favorites">Favorites</ct-tab>
-            <ct-tab value="profile">Profile</ct-tab>
-          </ct-tab-list>
-          <ct-tab-panel value="favorites">{favoritesComponent}</ct-tab-panel>
-          <ct-tab-panel value="profile">
-            <ct-vstack gap="4" style={{ padding: "1rem" }}>
-              <h2 style={{ margin: 0, fontSize: "16px" }}>Profile Summary</h2>
+        <cf-tabs $value={activeTab}>
+          <cf-tab-list>
+            <cf-tab value="spaces">Spaces</cf-tab>
+            <cf-tab value="favorites">Favorites</cf-tab>
+            <cf-tab value="profile">Profile</cf-tab>
+            <cf-tab value="self">Self</cf-tab>
+          </cf-tab-list>
+          <cf-tab-panel value="favorites">{favoritesComponent}</cf-tab-panel>
+          <cf-tab-panel value="self">{selfComponent}</cf-tab-panel>
+          <cf-tab-panel value="profile">
+            <cf-vstack gap="4" style={{ padding: "1rem" }}>
+              <h2 style={{ margin: 0, fontSize: "16px" }}>Profile</h2>
 
-              <ct-vstack gap="1">
-                <ct-textarea
-                  $value={learned.key("summary")}
-                  placeholder="Write a short profile summary about yourself..."
-                  rows={6}
-                  style={{
-                    width: "100%",
-                    fontFamily: "system-ui, sans-serif",
-                    fontSize: "14px",
-                    lineHeight: "1.5",
-                    padding: "12px",
-                    border: "1px solid #e5e5e7",
-                    borderRadius: "8px",
-                    resize: "vertical",
-                  }}
-                />
-                <span style={{ fontSize: "11px", color: "#888" }}>
-                  Edit your profile summary above.
-                </span>
-              </ct-vstack>
-            </ct-vstack>
-          </ct-tab-panel>
-          <ct-tab-panel value="spaces">
-            <ct-vstack gap="4" style={{ padding: "1rem" }}>
+              <div id="home-profile-summary">{profilePicker}</div>
+            </cf-vstack>
+          </cf-tab-panel>
+          <cf-tab-panel value="spaces">
+            <cf-vstack gap="4" style={{ padding: "1rem" }}>
               <h2 style={{ margin: 0, fontSize: "16px" }}>My Spaces</h2>
 
-              <ct-vstack gap="2">
+              <cf-vstack gap="2">
                 {spaces.map((space) => (
-                  <ct-hstack gap="2" align="center">
+                  <cf-hstack gap="2" align="center">
                     <div style={{ flex: "1" }}>
-                      <ct-space-link
+                      <cf-space-link
                         spaceName={space.name}
                         spaceDid={space.did}
                       />
                     </div>
-                    <ct-button
+                    <cf-button
                       size="sm"
                       variant="ghost"
                       onClick={removeSpaceHandler({ name: space.name, spaces })}
                     >
                       ✕
-                    </ct-button>
-                  </ct-hstack>
+                    </cf-button>
+                  </cf-hstack>
                 ))}
-                {computed(() => spaces.get().length === 0) && (
-                  <p
-                    style={{
-                      color: "#888",
-                      fontStyle: "italic",
-                      textAlign: "center",
-                    }}
-                  >
-                    No spaces yet. Add one below.
-                  </p>
-                )}
-              </ct-vstack>
+                {computed(() => spaces.get().length === 0)
+                  ? (
+                    <p
+                      style={{
+                        color: "#888",
+                        fontStyle: "italic",
+                        textAlign: "center",
+                      }}
+                    >
+                      No spaces yet. Add one below.
+                    </p>
+                  )
+                  : null}
+              </cf-vstack>
 
               <hr style={{ border: "none", borderTop: "1px solid #e5e5e7" }} />
 
-              <ct-vstack gap="1">
+              <cf-vstack gap="1">
                 <h3 style={{ margin: 0, fontSize: "14px" }}>
                   Add or Create Space
                 </h3>
-                <ct-message-input
+                <cf-message-input
                   placeholder="Space name..."
                   appearance="rounded"
-                  onct-send={addSpaceHandler({ spaces })}
+                  oncf-send={addSpaceHandler({ spaces })}
                 />
                 <span style={{ fontSize: "11px", color: "#888" }}>
                   Type a name and press enter. Click the link to navigate.
                 </span>
-              </ct-vstack>
+              </cf-vstack>
 
               <hr
                 style={{
@@ -216,12 +249,12 @@ export default pattern((_) => {
                 }}
               />
 
-              <ct-vstack gap="1">
+              <cf-vstack gap="1">
                 <h3 style={{ margin: 0, fontSize: "14px" }}>Settings</h3>
                 <label style={{ fontSize: "13px", color: "#666" }}>
                   Default App Pattern URL
                 </label>
-                <ct-input
+                <cf-input
                   $value={defaultAppUrl}
                   placeholder="/api/patterns/system/default-app.tsx"
                   style={{
@@ -233,23 +266,26 @@ export default pattern((_) => {
                 <span style={{ fontSize: "11px", color: "#888" }}>
                   Pattern URL for new spaces. Leave empty for system default.
                 </span>
-              </ct-vstack>
-            </ct-vstack>
-          </ct-tab-panel>
-        </ct-tabs>
-      </ct-screen>
+              </cf-vstack>
+            </cf-vstack>
+          </cf-tab-panel>
+        </cf-tabs>
+      </cf-screen>
     ),
 
     // Exported data
     favorites,
     journal,
-    learned,
     spaces,
     defaultAppUrl,
+    profiles: profiles as any,
+    defaultProfile: defaultProfile as any,
+    mru: mru as any,
 
     // Exported handlers
     addFavorite: addFavorite({ favorites }),
     removeFavorite: removeFavorite({ favorites }),
     addJournalEntry: addJournalEntry({ journal }),
+    createProfile: createProfileStream,
   };
 });

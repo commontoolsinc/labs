@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: Note Markdown Viewer
  *
@@ -11,15 +10,15 @@
  * - Edge cases: regular markdown links, special characters, missing checkboxes, empty content
  * - sourceNoteRef and goToEdit action
  *
- * Run: deno task ct test packages/patterns/notes/note-md.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/notes/note-md.test.tsx --verbose
  */
-import { action, computed, NAME, pattern, Writable } from "commontools";
+import { action, computed, NAME, pattern, Writable } from "commonfabric";
 import NoteMd from "./note-md.tsx";
 import Note from "./note.tsx";
 
 export default pattern(() => {
   // Writable content cell for basic testing
-  const contentCell = Writable.of("Hello world");
+  const contentCell = new Writable("Hello world");
 
   const md = NoteMd({
     note: {
@@ -31,7 +30,7 @@ export default pattern(() => {
   });
 
   // Second instance with wiki-links in content
-  const wikiContent = Writable.of(
+  const wikiContent = new Writable(
     "See [[Alice (abc123)]] and [[Bob (def456)]] for details",
   );
 
@@ -45,7 +44,7 @@ export default pattern(() => {
   });
 
   // Third instance with no wiki-links (passthrough)
-  const plainContent = Writable.of("No links here, just plain text.");
+  const plainContent = new Writable("No links here, just plain text.");
 
   const mdPlain = NoteMd({
     note: {
@@ -57,7 +56,7 @@ export default pattern(() => {
   });
 
   // Fourth instance with checkboxes for toggle testing
-  const checkboxContent = Writable.of(
+  const checkboxContent = new Writable(
     "- [ ] Task one\n- [x] Task two\n- [ ] Task three",
   );
 
@@ -71,7 +70,7 @@ export default pattern(() => {
   });
 
   // === Edge case - regular markdown links ===
-  const regularLinksContent = Writable.of(
+  const regularLinksContent = new Writable(
     "Use [regular markdown](http://example.com) links",
   );
 
@@ -85,7 +84,7 @@ export default pattern(() => {
   });
 
   // === Edge case - wiki-link with special characters ===
-  const specialCharsContent = Writable.of("See [[Alice & Bob (special-123)]]");
+  const specialCharsContent = new Writable("See [[Alice & Bob (special-123)]]");
 
   const mdSpecialChars = NoteMd({
     note: {
@@ -97,7 +96,7 @@ export default pattern(() => {
   });
 
   // === Edge case - no checkboxes ===
-  const noCheckboxContent = Writable.of("Just regular text\nNo checkboxes");
+  const noCheckboxContent = new Writable("Just regular text\nNo checkboxes");
 
   const mdNoCheckbox = NoteMd({
     note: {
@@ -109,7 +108,7 @@ export default pattern(() => {
   });
 
   // === Edge case - mixed markdown with checkboxes ===
-  const mixedContent = Writable.of(
+  const mixedContent = new Writable(
     "# Title\n\n- [ ] First task\n\nSome text\n\n- [x] Second task",
   );
 
@@ -123,7 +122,7 @@ export default pattern(() => {
   });
 
   // === Edge case - empty content ===
-  const emptyContent = Writable.of("");
+  const emptyContent = new Writable("");
 
   const mdEmpty = NoteMd({
     note: {
@@ -135,7 +134,7 @@ export default pattern(() => {
   });
 
   // === Edge case - whitespace only content ===
-  const whitespaceContent = Writable.of("   \n\n   ");
+  const whitespaceContent = new Writable("   \n\n   ");
 
   const mdWhitespace = NoteMd({
     note: {
@@ -153,7 +152,7 @@ export default pattern(() => {
     isHidden: false,
   });
 
-  const sourceContent = Writable.of("Content from source");
+  const sourceContent = new Writable("Content from source");
 
   const mdWithSource = NoteMd({
     note: {
@@ -172,7 +171,7 @@ export default pattern(() => {
       content: "Content without source ref",
       backlinks: [],
     },
-    content: Writable.of("Direct content"),
+    content: new Writable("Direct content"),
   });
 
   // ==========================================================================

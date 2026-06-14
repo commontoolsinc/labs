@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: Shopping List
  *
@@ -8,11 +7,24 @@
  * - Marking items as done
  * - Removing items
  * - Statistics (totalCount, doneCount, remainingCount)
+ * - held-reference survival (CT-1715): a reference stashed in a cell BEFORE
+ *   an aisle correction (selectAisle) must still `equals()`-match and still
+ *   drive a subsequent equals()-located removal AFTER the correction. The
+ *   correction writes through the element's cell; replacing the array slot
+ *   with a fresh object literal would re-mint the entity identity and
+ *   orphan every held reference.
  *
- * Run: deno task ct test packages/patterns/shopping-list.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/shopping-list.test.tsx --verbose
  */
-import { computed, handler, pattern, Writable } from "commontools";
-import ShoppingList from "./shopping-list.tsx";
+import {
+  action,
+  computed,
+  equals,
+  handler,
+  pattern,
+  Writable,
+} from "commonfabric";
+import ShoppingList, { removeItem, selectAisle } from "./shopping-list.tsx";
 
 interface ShoppingItem {
   title: string;
@@ -21,14 +33,21 @@ interface ShoppingItem {
   aisleOverride: string;
 }
 
-// Handler to set items
+// Handler to set items. Builds fresh literals (not copies of the
+// state-bound data proxies) so each item becomes an entity doc with its own
+// identity — the same shape the pattern's own add handlers produce. Entity
+// identity is what the held-reference tests below exercise.
 const setItems = handler<
   void,
   { items: Writable<ShoppingItem[]>; data: ShoppingItem[] }
 >(
   (_event, { items, data }) => {
-    // Copy to make mutable
-    items.set([...data]);
+    items.set(data.map((d) => ({
+      title: d.title,
+      done: d.done,
+      aisleSeed: d.aisleSeed,
+      aisleOverride: d.aisleOverride,
+    })));
   },
 );
 
@@ -44,14 +63,26 @@ const setLayout = handler<
 
 export default pattern(() => {
   // Create writable cells that we control
-  const itemsCell = Writable.of<ShoppingItem[]>([]);
-  const layoutCell = Writable.of("");
+  const itemsCell = new Writable<ShoppingItem[]>([]);
+  const layoutCell = new Writable("");
 
   // Instantiate the shopping list pattern
   const list = ShoppingList({
     items: itemsCell,
     storeLayout: layoutCell,
   });
+
+  // Held-reference survival plumbing: an external holder (selection cell)
+  // that read an item once and keeps the reference across later mutations.
+  // Typed non-null (placeholder initial value) so the cell can be bound
+  // directly as handler state.
+  const heldItem = new Writable<ShoppingItem>({
+    title: "",
+    done: false,
+    aisleSeed: 0,
+    aisleOverride: "",
+  });
+  const correctionIndexCell = new Writable<number>(-1);
 
   // ==========================================================================
   // Actions - bind handlers with hardcoded data
@@ -106,6 +137,28 @@ Fresh vegetables and fruits
     layout: "",
   });
 
+  // === Held-reference survival actions (CT-1715) ===
+  // After test 5 the list is [Bread, Eggs]; stash a reference to Bread.
+  const action_stash_held_item = action(() => {
+    const item = itemsCell.get()[0];
+    if (item) heldItem.set(item);
+  });
+  const action_open_correction = action(() => {
+    correctionIndexCell.set(0);
+  });
+  // The REAL exported selectAisle handler, bound to the test-owned cells.
+  const action_select_aisle = selectAisle({
+    items: itemsCell,
+    correctionIndex: correctionIndexCell,
+    selectedAisle: "Aisle 2",
+  });
+  // The REAL exported removeItem handler, driven by the held reference
+  // (removeItem locates the item with equals()).
+  const action_remove_via_held = removeItem({
+    items: itemsCell,
+    item: heldItem,
+  });
+
   // ==========================================================================
   // Assertions
   // ==========================================================================
@@ -156,6 +209,33 @@ Fresh vegetables and fruits
     String(list.storeLayout).trim().length === 0
   );
 
+  // === Held-reference survival assertions (CT-1715) ===
+  const assert_held_stashed = computed(() => {
+    const h = heldItem.get();
+    return h.title === "Bread" && equals(itemsCell.get()[0], h);
+  });
+  const assert_override_set = computed(() =>
+    itemsCell.get()[0]?.aisleOverride === "Aisle 2"
+  );
+  const assert_correction_closed = computed(() =>
+    correctionIndexCell.get() === -1
+  );
+  // KEY: the stale-but-once-valid reference still equals()-matches the item
+  // AFTER selectAisle updated it.
+  const assert_held_survives_correction = computed(() => {
+    const h = heldItem.get();
+    return equals(itemsCell.get()[0], h);
+  });
+  // The held reference also READS the update (it would show the stale,
+  // orphaned entity if selectAisle had re-minted identity).
+  const assert_held_reads_correction = computed(() =>
+    heldItem.get().aisleOverride === "Aisle 2"
+  );
+  // KEY: the held reference still DRIVES an equals()-located removal.
+  const assert_removed_via_held = computed(() =>
+    list.totalCount === 1 && list.items[0]?.title === "Eggs"
+  );
+
   // ==========================================================================
   // Test Sequence
   // ==========================================================================
@@ -200,6 +280,18 @@ Fresh vegetables and fruits
       { assertion: assert_has_layout },
       { action: action_clear_store_layout },
       { assertion: assert_layout_cleared },
+
+      // === Test 7: Held-reference survival across an aisle correction ===
+      { action: action_stash_held_item },
+      { assertion: assert_held_stashed },
+      { action: action_open_correction },
+      { action: action_select_aisle },
+      { assertion: assert_override_set },
+      { assertion: assert_correction_closed },
+      { assertion: assert_held_survives_correction },
+      { assertion: assert_held_reads_correction },
+      { action: action_remove_via_held },
+      { assertion: assert_removed_via_held },
     ],
     list,
   };

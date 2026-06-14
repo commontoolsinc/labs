@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { type CellHandle } from "@commontools/runtime-client";
+import { type CellHandle } from "@commonfabric/runtime-client";
 import { createMockCellHandle } from "../test-utils/mock-cell-handle.ts";
 import {
   type DragState,

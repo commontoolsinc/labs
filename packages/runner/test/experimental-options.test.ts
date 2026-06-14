@@ -1,49 +1,65 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import {
-  getExperimentalStorableConfig,
-  isStorableValue,
-  resetStorableValueConfig,
-  setStorableValueConfig,
-  shallowStorableFromNativeValue,
-  storableFromNativeValue,
-} from "@commontools/memory/storable-value";
-import { StorableError } from "@commontools/memory/storable-native-instances";
+  getModernCellRepConfig,
+  resetModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
 import {
-  refer,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
-} from "@commontools/memory/reference";
+  getCommitPreconditionsConfig,
+  getPersistentSchedulerStateConfig,
+  resetCommitPreconditionsConfig,
+  resetPersistentSchedulerStateConfig,
+} from "@commonfabric/memory/v2";
 
 const signer = await Identity.fromPassphrase("test experimental");
 
 /**
  * Tests for the `ExperimentalOptions` feature-flag system: verifies that
- * Runtime construction/disposal correctly propagates flags to the ambient
- * storable-value config, and that `shallowStorableFromNativeValue`/`storableFromNativeValue`
- * respect the `richStorableValues` gate.
+ * `Runtime` construction/disposal correctly propagates flags to all the ambient
+ * configs.
  */
 describe("ExperimentalOptions", () => {
   afterEach(() => {
-    resetStorableValueConfig();
-    resetCanonicalHashConfig();
+    resetModernCellRepConfig();
+    resetCommitPreconditionsConfig();
+    resetPersistentSchedulerStateConfig();
   });
 
   describe("Runtime construction", () => {
-    it("defaults all flags to false when no experimental options given", async () => {
+    it("respects explicitly-set flags (all false)", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
+        experimental: {
+          modernCellRep: false,
+        },
       });
       expect(runtime.experimental).toEqual({
-        richStorableValues: false,
-        storableProtocol: false,
-        unifiedJsonEncoding: false,
-        canonicalHashing: false,
+        modernCellRep: false,
+        persistentSchedulerState: false,
+        commitPreconditions: false,
+      });
+      await runtime.dispose();
+      await sm.close();
+    });
+
+    it("respects explicitly-set flags (all true)", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          modernCellRep: true,
+        },
+      });
+      expect(runtime.experimental).toEqual({
+        modernCellRep: true,
+        persistentSchedulerState: false,
+        commitPreconditions: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -54,325 +70,114 @@ describe("ExperimentalOptions", () => {
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
-        experimental: {
-          richStorableValues: true,
-          canonicalHashing: true,
-        },
+        experimental: {},
       });
       expect(runtime.experimental).toEqual({
-        richStorableValues: true,
-        storableProtocol: false,
-        unifiedJsonEncoding: false,
-        canonicalHashing: true,
+        modernCellRep: false,
+        persistentSchedulerState: false,
+        commitPreconditions: false,
       });
       await runtime.dispose();
       await sm.close();
-    });
-  });
-
-  describe("shallowStorableFromNativeValue with richStorableValues flag", () => {
-    it("works normally when flag is OFF", () => {
-      setStorableValueConfig({ richStorableValues: false });
-      expect(shallowStorableFromNativeValue("hello")).toBe("hello");
-      expect(shallowStorableFromNativeValue(42)).toBe(42);
-      expect(shallowStorableFromNativeValue(null)).toBe(null);
-      expect(shallowStorableFromNativeValue(true)).toBe(true);
-      expect(shallowStorableFromNativeValue({ a: 1 })).toEqual({ a: 1 });
-    });
-
-    it("converts Error to @Error object when flag is OFF", () => {
-      setStorableValueConfig({ richStorableValues: false });
-      const err = new Error("test error");
-      const result = shallowStorableFromNativeValue(err);
-      expect(result).toEqual({
-        "@Error": {
-          name: "Error",
-          message: "test error",
-          stack: err.stack,
-          cause: undefined,
-        },
-      });
-    });
-
-    it("converts undefined in arrays to null when flag is OFF", () => {
-      setStorableValueConfig({ richStorableValues: false });
-      const result = shallowStorableFromNativeValue([1, undefined, 3]);
-      expect(result).toEqual([1, null, 3]);
-    });
-
-    it("wraps Error in StorableError when flag is ON", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      const err = new Error("test error");
-      const result = shallowStorableFromNativeValue(err);
-      expect(result).toBeInstanceOf(StorableError);
-      expect((result as StorableError).error.message).toBe("test error");
-    });
-
-    it("preserves undefined in arrays when flag is ON", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      const arr = [1, undefined, 3];
-      const result = shallowStorableFromNativeValue(arr);
-      expect(result).toEqual(arr);
-      expect((result as unknown[])[1]).toBe(undefined);
-    });
-
-    it("returns to flag-OFF behavior after reset", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      resetStorableValueConfig();
-      const err = new Error("test");
-      const result = shallowStorableFromNativeValue(err);
-      expect(result).toHaveProperty("@Error");
-    });
-  });
-
-  describe("storableFromNativeValue with richStorableValues flag", () => {
-    it("works normally when flag is OFF", () => {
-      setStorableValueConfig({ richStorableValues: false });
-      expect(storableFromNativeValue({ a: { b: 1 } })).toEqual({ a: { b: 1 } });
-      expect(storableFromNativeValue([1, 2, 3])).toEqual([1, 2, 3]);
-    });
-
-    it("converts nested Error to @Error object when flag is OFF", () => {
-      setStorableValueConfig({ richStorableValues: false });
-      const err = new Error("nested");
-      const result = storableFromNativeValue({ data: err });
-      expect(result).toEqual({
-        data: {
-          "@Error": {
-            name: "Error",
-            message: "nested",
-            stack: err.stack,
-            cause: undefined,
-          },
-        },
-      });
-    });
-
-    it("omits undefined-valued object properties when flag is OFF", () => {
-      setStorableValueConfig({ richStorableValues: false });
-      const result = storableFromNativeValue({ a: 1, b: undefined, c: 3 });
-      expect(result).toEqual({ a: 1, c: 3 });
-    });
-
-    it("wraps nested Error in StorableError when flag is ON", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      const err = new Error("nested");
-      const result = storableFromNativeValue({ data: err }) as Record<
-        string,
-        unknown
-      >;
-      expect(result.data).toBeInstanceOf(StorableError);
-      expect((result.data as StorableError).error.message).toBe("nested");
-    });
-
-    it("preserves undefined-valued object properties when flag is ON", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      const result = storableFromNativeValue({ a: 1, b: undefined, c: 3 });
-      expect(result).toEqual({ a: 1, b: undefined, c: 3 });
-      expect(Object.hasOwn(result as object, "b")).toBe(true);
-    });
-
-    it("wraps Error in array in StorableError when flag is ON", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      const err = new Error("in array");
-      const result = storableFromNativeValue([1, err, 3]) as unknown[];
-      expect(result[1]).toBeInstanceOf(StorableError);
-      expect((result[1] as StorableError).error.message).toBe("in array");
-    });
-
-    it("preserves sparse array holes when flag is ON", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      // deno-lint-ignore no-sparse-arrays
-      const sparse = [1, , 3];
-      const result = storableFromNativeValue(sparse) as unknown[];
-      expect(result.length).toBe(3);
-      expect(0 in result).toBe(true);
-      expect(1 in result).toBe(false); // hole preserved
-      expect(2 in result).toBe(true);
-    });
-
-    it("returns to flag-OFF behavior after reset", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      resetStorableValueConfig();
-      const result = storableFromNativeValue({ a: 1, b: undefined });
-      expect(result).toEqual({ a: 1 });
-    });
-
-    it("caches correctly when toJSON() returns undefined (no false cache miss)", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      // An object whose toJSON() returns undefined. In the rich path, undefined
-      // is a valid StorableValue, so this gets stored in the converted map as
-      // `undefined`. The bug (before the has() fix) would treat a subsequent
-      // lookup as a cache miss because `converted.get(obj) === undefined` can't
-      // distinguish "stored undefined" from "key not found".
-      const undef = { toJSON: () => undefined };
-      const result = storableFromNativeValue({ a: undef, b: undef }) as Record<
-        string,
-        unknown
-      >;
-      // Both slots should be undefined (the converted value).
-      expect(result.a).toBe(undefined);
-      expect(result.b).toBe(undefined);
-      expect(Object.hasOwn(result, "a")).toBe(true);
-      expect(Object.hasOwn(result, "b")).toBe(true);
-      // No error thrown -- without the fix, the second encounter would re-mark
-      // the object as PROCESSING and then attempt to re-convert it, which could
-      // produce incorrect results or throw on circular reference detection.
-    });
-  });
-
-  describe("isStorableValue with richStorableValues flag", () => {
-    it("rejects Error when flag is OFF", () => {
-      setStorableValueConfig({ richStorableValues: false });
-      expect(isStorableValue(new Error("test"))).toBe(false);
-    });
-
-    it("rejects [undefined] when flag is OFF", () => {
-      setStorableValueConfig({ richStorableValues: false });
-      expect(isStorableValue([undefined])).toBe(false);
-    });
-
-    it("rejects Error even when flag is ON (needs conversion to StorableError)", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      expect(isStorableValue(new Error("test"))).toBe(false);
-    });
-
-    it("accepts [undefined] when flag is ON", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      expect(isStorableValue([undefined])).toBe(true);
-    });
-
-    it("accepts sparse arrays when flag is ON", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      // deno-lint-ignore no-sparse-arrays
-      const sparse = [1, , 3];
-      expect(isStorableValue(sparse)).toBe(true);
-    });
-
-    it("accepts sparse arrays when flag is OFF", () => {
-      setStorableValueConfig({ richStorableValues: false });
-      // deno-lint-ignore no-sparse-arrays
-      const sparse = [1, , 3];
-      expect(isStorableValue(sparse)).toBe(true);
-    });
-
-    it("returns to flag-OFF behavior after reset", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      resetStorableValueConfig();
-      expect(isStorableValue(new Error("test"))).toBe(false);
-      expect(isStorableValue([undefined])).toBe(false);
     });
   });
 
   describe("Runtime sets and resets global config", () => {
-    it("constructing Runtime with richStorableValues sets global config", async () => {
+    it("constructing Runtime with modernCellRep sets global config", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
         experimental: {
-          richStorableValues: true,
-          canonicalHashing: true,
+          modernCellRep: true,
         },
       });
 
-      const config = getExperimentalStorableConfig();
-      expect(config.richStorableValues).toBe(true);
+      expect(getModernCellRepConfig()).toBe(true);
 
       await runtime.dispose();
       await sm.close();
     });
 
-    it("constructing Runtime without experimental leaves config at defaults", async () => {
-      const sm = StorageManager.emulate({ as: signer });
-      const runtime = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager: sm,
-      });
-
-      const config = getExperimentalStorableConfig();
-      expect(config.richStorableValues).toBe(false);
-
-      await runtime.dispose();
-      await sm.close();
-    });
-
-    it("disposing Runtime resets global config", async () => {
+    it("constructing Runtime with persistentSchedulerState sets global config", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
         experimental: {
-          richStorableValues: true,
-          canonicalHashing: true,
+          persistentSchedulerState: true,
         },
       });
 
-      expect(getExperimentalStorableConfig().richStorableValues).toBe(true);
+      expect(getPersistentSchedulerStateConfig()).toBe(true);
 
       await runtime.dispose();
       await sm.close();
-
-      expect(getExperimentalStorableConfig().richStorableValues).toBe(false);
-    });
-  });
-
-  describe("refer() with canonicalHashing flag", () => {
-    it("works normally when canonicalHashing is false", () => {
-      setCanonicalHashConfig(false);
-      const ref = refer("hello");
-      expect(ref).toBeDefined();
-      expect(typeof ref.toString()).toBe("string");
     });
 
-    it("produces a valid reference when canonicalHashing is true", () => {
-      setCanonicalHashConfig(true);
-      const ref = refer("hello");
-      expect(ref).toBeDefined();
-      expect(typeof ref.toString()).toBe("string");
-    });
-
-    it("works again after reset", () => {
-      setCanonicalHashConfig(true);
-      resetCanonicalHashConfig();
-      const ref = refer("hello");
-      expect(ref).toBeDefined();
-    });
-  });
-
-  describe("Runtime sets and resets canonicalHashing config", () => {
-    it("constructing Runtime with canonicalHashing enables canonical refer()", async () => {
+    it("constructing Runtime with commitPreconditions sets global config", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
-        experimental: { canonicalHashing: true },
+        experimental: {
+          commitPreconditions: true,
+        },
       });
 
-      const ref = refer("test");
-      expect(ref).toBeDefined();
-      expect(typeof ref.toString()).toBe("string");
+      expect(getCommitPreconditionsConfig()).toBe(true);
 
       await runtime.dispose();
       await sm.close();
     });
 
-    it("disposing Runtime resets canonicalHashing so refer() uses default path", async () => {
+    it("constructing Runtime with explicit false sets config to false", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
-        experimental: { canonicalHashing: true },
+        experimental: { modernCellRep: false },
       });
 
-      const canonicalRef = refer("test");
-      expect(canonicalRef).toBeDefined();
+      expect(getModernCellRepConfig()).toBe(false);
+
+      await runtime.dispose();
+      await sm.close();
+    });
+
+    it("constructing Runtime with explicit true sets config to true", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: { modernCellRep: true },
+      });
+
+      expect(getModernCellRepConfig()).toBe(true);
+
+      await runtime.dispose();
+      await sm.close();
+    });
+
+    it("disposing Runtime resets global config to the default", async () => {
+      const initial = getModernCellRepConfig();
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          modernCellRep: !initial,
+        },
+      });
+
+      expect(getModernCellRepConfig()).toBe(!initial);
 
       await runtime.dispose();
       await sm.close();
 
-      const defaultRef = refer("test");
-      expect(defaultRef).toBeDefined();
+      expect(getModernCellRepConfig()).toBe(initial);
+      expect(getPersistentSchedulerStateConfig()).toBe(false);
+      expect(getCommitPreconditionsConfig()).toBe(false);
     });
   });
 });

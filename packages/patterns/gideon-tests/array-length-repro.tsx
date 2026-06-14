@@ -1,11 +1,10 @@
-/// <cts-enable />
 /**
  * Minimal reproduction: Does .length track reactively on arrays?
  *
  * Hypothesis: Direct .length access doesn't establish reactive tracking,
  * but .filter(() => true).length does (because it iterates).
  *
- * Run: deno task ct test packages/patterns/gideon-tests/array-length-repro.tsx --verbose
+ * Run: deno task cf test packages/patterns/gideon-tests/array-length-repro.tsx --verbose
  */
 import {
   action,
@@ -17,17 +16,17 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface Item {
   name: string;
 }
 
 interface Input {
-  items: Writable<Default<Item[], []>>;
+  items: Writable<Item[] | Default<[]>>;
 }
 
-interface Output {
+export interface Output {
   [NAME]: string;
   [UI]: VNode;
   items: Item[];

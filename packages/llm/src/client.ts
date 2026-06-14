@@ -1,6 +1,8 @@
 import {
+  isLLMNativeModelToolResults,
   LLMGenerateObjectRequest,
   LLMGenerateObjectResponse,
+  type LLMNativeModelToolResult,
   LLMRequest,
   LLMResponse,
   LLMToolCall,
@@ -8,6 +10,13 @@ import {
 } from "./types.ts";
 
 type PartialCallback = (text: string) => void;
+
+export class LLMStreamError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LLMStreamError";
+  }
+}
 
 /**
  * Detect if we're running in a test environment.
@@ -26,6 +35,27 @@ const _isTestEnvironment = (() => {
 const TEST_GUARD_MESSAGE =
   "LLMClient: live LLM calls are blocked in test environments. " +
   "Use enableMockMode() and addMockResponse() to set up mocks.";
+
+export function normalizeLLMResponse(data: unknown, id: string): LLMResponse {
+  const message = data && typeof data === "object"
+    ? data as Record<string, unknown>
+    : {};
+  const nativeModelToolResults = isLLMNativeModelToolResults(
+      message.nativeModelToolResults,
+    )
+    ? message.nativeModelToolResults
+    : undefined;
+  const rest = { ...message };
+  delete rest.nativeModelToolResults;
+
+  return {
+    ...rest,
+    role: typeof message.role === "string" ? message.role : "assistant",
+    content: message.content,
+    id: typeof message.id === "string" ? message.id : id,
+    ...(nativeModelToolResults !== undefined ? { nativeModelToolResults } : {}),
+  } as LLMResponse;
+}
 
 function getInitialLLMUrl(): string {
   if (typeof globalThis.location !== "undefined") {
@@ -56,104 +86,76 @@ export const setLLMUrl = (toolshedUrl: string) => {
 type MockResponseMatcher = (request: LLMRequest) => boolean;
 type MockObjectResponseMatcher = (request: LLMGenerateObjectRequest) => boolean;
 
-interface MockResponse {
-  matcher: MockResponseMatcher;
-  response: LLMResponse;
-}
-
-interface MockObjectResponse {
-  matcher: MockObjectResponseMatcher;
-  response: LLMGenerateObjectResponse;
-}
+type MockEntry =
+  | { type: "sendRequest"; matcher: MockResponseMatcher; response: LLMResponse }
+  | {
+    type: "generateObject";
+    matcher: MockObjectResponseMatcher;
+    response: LLMGenerateObjectResponse;
+  };
 
 class MockCatalog {
-  private mockResponses: MockResponse[] = [];
-  private mockObjectResponses: MockObjectResponse[] = [];
+  private mocks: MockEntry[] = [];
   private enabled = false;
 
-  /**
-   * Enable mock mode - all LLM requests will be intercepted and matched
-   * against registered mock responses instead of hitting the API.
-   */
   enable(): void {
     this.enabled = true;
   }
 
-  /**
-   * Disable mock mode - requests will go to the real API.
-   */
   disable(): void {
     this.enabled = false;
   }
 
-  /**
-   * Clear all registered mock responses.
-   */
   clear(): void {
-    this.mockResponses = [];
-    this.mockObjectResponses = [];
+    this.mocks = [];
   }
 
-  /**
-   * Reset mock mode - disable and clear all responses.
-   */
   reset(): void {
     this.disable();
     this.clear();
   }
 
-  /**
-   * Check if mock mode is currently enabled.
-   */
   isEnabled(): boolean {
     return this.enabled;
   }
 
-  /**
-   * Register a mock response for sendRequest calls.
-   * The matcher function should return true if this mock should be used for the given request.
-   */
   addResponse(matcher: MockResponseMatcher, response: LLMResponse): void {
-    this.mockResponses.push({ matcher, response });
+    this.mocks.push({ type: "sendRequest", matcher, response });
   }
 
-  /**
-   * Register a mock response for generateObject calls.
-   */
   addObjectResponse(
     matcher: MockObjectResponseMatcher,
     response: LLMGenerateObjectResponse,
   ): void {
-    this.mockObjectResponses.push({ matcher, response });
+    this.mocks.push({ type: "generateObject", matcher, response });
   }
 
   /**
-   * Find a matching mock response for the given request.
-   * Returns undefined if no match is found.
-   * Removes the matched mock from the catalog after finding it (one-time use).
+   * Find a matching sendRequest mock. Skips generateObject entries.
+   * Removes the matched mock (one-time use).
    */
   findResponse(request: LLMRequest): LLMResponse | undefined {
-    const index = this.mockResponses.findIndex((m) => m.matcher(request));
+    const index = this.mocks.findIndex((m) =>
+      m.type === "sendRequest" && m.matcher(request)
+    );
     if (index === -1) return undefined;
-
-    // Remove and return the matched mock (one-time use)
-    const [mock] = this.mockResponses.splice(index, 1);
-    return mock.response;
+    const [mock] = this.mocks.splice(index, 1);
+    if (mock.type === "sendRequest") return mock.response;
   }
 
   /**
-   * Find a matching mock object response for the given request.
-   * Removes the matched mock from the catalog after finding it (one-time use).
+   * Find a matching generateObject mock. Skips sendRequest entries.
+   * Removes the matched mock (one-time use).
    */
   findObjectResponse(
     request: LLMGenerateObjectRequest,
   ): LLMGenerateObjectResponse | undefined {
-    const index = this.mockObjectResponses.findIndex((m) => m.matcher(request));
+    const index = this.mocks.findIndex((m) =>
+      m.type === "generateObject" && m.matcher(request)
+    );
     if (index === -1) return undefined;
-
-    // Remove and return the matched mock (one-time use)
-    const [mock] = this.mockObjectResponses.splice(index, 1);
-    return mock.response;
+    const [mock] = this.mocks.splice(index, 1);
+    if (mock.type === "generateObject") return mock.response;
   }
 }
 
@@ -169,7 +171,7 @@ const mockCatalog = new MockCatalog();
  *
  * Example:
  * ```ts
- * import { enableMockMode, addMockResponse } from "@commontools/llm/client";
+ * import { enableMockMode, addMockResponse } from "@commonfabric/llm/client";
  *
  * enableMockMode();
  * addMockResponse(
@@ -245,10 +247,210 @@ export function addMockObjectResponse(
   mockCatalog.addObjectResponse(matcher, response);
 }
 
+// ============================================================================
+// Conversation Fixtures for Testing
+// ============================================================================
+
+/**
+ * Optional assertions to validate the request when a fixture entry is matched.
+ * If any assertion fails, the test gets a descriptive error.
+ */
+export interface ConversationFixtureAssertions {
+  /** Assert request has exactly this many messages */
+  messageCount?: number;
+  /** Assert each string appears in at least one message (strings may match different messages) */
+  messagesContain?: string[];
+  /** Assert the last message content contains this string */
+  lastMessageContains?: string;
+  /** Assert these tool names are present in the request */
+  hasTools?: string[];
+  /** Assert system prompt contains this string */
+  systemContains?: string;
+}
+
+export type ConversationFixtureEntry =
+  | {
+    type: "sendRequest";
+    expectRequest?: ConversationFixtureAssertions;
+    response: LLMResponse;
+  }
+  | {
+    type: "generateObject";
+    expectRequest?: ConversationFixtureAssertions;
+    response: LLMGenerateObjectResponse;
+  };
+
+/**
+ * A declarative fixture describing a sequence of LLM responses.
+ * Responses are consumed in order (sequential matching).
+ */
+export interface ConversationFixture {
+  description?: string;
+  responses: ConversationFixtureEntry[];
+}
+
+function extractMessageText(
+  content: unknown,
+): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((p: any) => p.type === "text")
+      .map((p: any) => p.text ?? "")
+      .join(" ");
+  }
+  return "";
+}
+
+function runAssertions(
+  assertions: ConversationFixtureAssertions,
+  request: LLMRequest | LLMGenerateObjectRequest,
+  entryIndex: number,
+  fixtureDescription?: string,
+): void {
+  const label = fixtureDescription
+    ? `Fixture "${fixtureDescription}" entry ${entryIndex}`
+    : `Fixture entry ${entryIndex}`;
+
+  if (assertions.messageCount !== undefined) {
+    if (request.messages.length !== assertions.messageCount) {
+      throw new Error(
+        `${label}: expected ${assertions.messageCount} messages, got ${request.messages.length}`,
+      );
+    }
+  }
+
+  if (assertions.messagesContain) {
+    for (const needle of assertions.messagesContain) {
+      const found = request.messages.some((m) =>
+        extractMessageText(m.content).includes(needle)
+      );
+      if (!found) {
+        throw new Error(
+          `${label}: expected some message to contain "${needle}"`,
+        );
+      }
+    }
+  }
+
+  if (assertions.lastMessageContains) {
+    const last = request.messages[request.messages.length - 1];
+    const text = last ? extractMessageText(last.content) : "";
+    if (!text.includes(assertions.lastMessageContains)) {
+      throw new Error(
+        `${label}: expected last message to contain "${assertions.lastMessageContains}", got "${text}"`,
+      );
+    }
+  }
+
+  if (assertions.hasTools) {
+    const tools = "tools" in request && request.tools
+      ? Object.keys(request.tools)
+      : [];
+    for (const toolName of assertions.hasTools) {
+      if (!tools.includes(toolName)) {
+        throw new Error(
+          `${label}: expected tool "${toolName}" in request, got [${
+            tools.join(", ")
+          }]`,
+        );
+      }
+    }
+  }
+
+  if (assertions.systemContains) {
+    const system = request.system ?? "";
+    if (!system.includes(assertions.systemContains)) {
+      throw new Error(
+        `${label}: expected system prompt to contain "${assertions.systemContains}"`,
+      );
+    }
+  }
+}
+
+/**
+ * Load a conversation fixture, queueing all responses as sequential mocks.
+ * Enables mock mode automatically.
+ *
+ * Example:
+ * ```ts
+ * import { loadConversationFixture } from "@commonfabric/llm/client";
+ *
+ * loadConversationFixture({
+ *   responses: [
+ *     { type: "sendRequest", response: { role: "assistant", content: "Hi!", id: "1" } },
+ *     { type: "sendRequest", response: { role: "assistant", content: "Bye!", id: "2" } },
+ *   ]
+ * });
+ * ```
+ */
+export function loadConversationFixture(fixture: ConversationFixture): void {
+  mockCatalog.enable();
+
+  const description = fixture.description;
+
+  for (let i = 0; i < fixture.responses.length; i++) {
+    const entry = fixture.responses[i];
+    const entryIndex = i;
+
+    if (entry.type === "sendRequest") {
+      const assertions = entry.expectRequest;
+      mockCatalog.addResponse(
+        (request) => {
+          if (assertions) {
+            runAssertions(assertions, request, entryIndex, description);
+          }
+          return true;
+        },
+        entry.response,
+      );
+    } else if (entry.type === "generateObject") {
+      const assertions = entry.expectRequest;
+      mockCatalog.addObjectResponse(
+        (request) => {
+          if (assertions) {
+            runAssertions(assertions, request, entryIndex, description);
+          }
+          return true;
+        },
+        entry.response,
+      );
+    }
+  }
+}
+
+/**
+ * Load a conversation fixture from a JSON file path.
+ * Enables mock mode automatically.
+ */
+export async function loadConversationFixtureFile(
+  path: string,
+): Promise<void> {
+  const text = await Deno.readTextFile(path);
+  const fixture: ConversationFixture = JSON.parse(text);
+  if (
+    !fixture || typeof fixture !== "object" || !Array.isArray(fixture.responses)
+  ) {
+    throw new Error(
+      `Invalid fixture at ${path}: "responses" must be an array`,
+    );
+  }
+  loadConversationFixture(fixture);
+}
+
 export class LLMClient {
   async generateObject(
     request: LLMGenerateObjectRequest,
     abortSignal?: AbortSignal,
+    opts?: {
+      /**
+       * Full LLM endpoint URL for THIS call (e.g.
+       * `new URL("/api/ai/llm", host)`); the module-level default
+       * (setLLMUrl) is the fallback. Lets one runtime route per-space
+       * work to that space's host.
+       */
+      endpoint?: string | URL;
+    },
   ): Promise<LLMGenerateObjectResponse> {
     // Check for mock mode
     if (mockCatalog.isEnabled()) {
@@ -268,7 +470,8 @@ export class LLMClient {
       throw new Error(TEST_GUARD_MESSAGE);
     }
 
-    const response = await fetch(llmApiUrl + "/generateObject", {
+    const endpoint = opts?.endpoint?.toString() ?? llmApiUrl;
+    const response = await fetch(endpoint + "/generateObject", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
@@ -307,6 +510,10 @@ export class LLMClient {
     request: LLMRequest,
     callback?: PartialCallback,
     abortSignal?: AbortSignal,
+    opts?: {
+      /** Per-call LLM endpoint; module-level default is the fallback. */
+      endpoint?: string | URL;
+    },
   ): Promise<LLMResponse> {
     if (request.stream && !callback) {
       throw new Error(
@@ -356,7 +563,7 @@ export class LLMClient {
       throw new Error(TEST_GUARD_MESSAGE);
     }
 
-    const response = await fetch(llmApiUrl, {
+    const response = await fetch(opts?.endpoint?.toString() ?? llmApiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
@@ -382,16 +589,12 @@ export class LLMClient {
       throw new Error("No response body");
     }
 
-    const id = response.headers.get("x-ct-llm-trace-id") as string;
+    const id = response.headers.get("x-cf-llm-trace-id") as string;
 
     // the server might return cached data instead of a stream
-    if (response.headers.get("content-type") === "application/json") {
+    if (response.headers.get("content-type")?.includes("application/json")) {
       const data = await response.json();
-      return {
-        role: "assistant" as const,
-        content: data.content,
-        id,
-      } as LLMResponse;
+      return normalizeLLMResponse(data, id);
     }
     return await this.stream(response.body, id, callback);
   }
@@ -409,6 +612,7 @@ export class LLMClient {
     let text = "";
     const toolCalls: LLMToolCall[] = [];
     const toolResults: LLMToolResult[] = [];
+    let nativeModelToolResults: LLMNativeModelToolResult[] | undefined;
 
     while (!doneReading) {
       const { value, done } = await reader.read();
@@ -452,10 +656,18 @@ export class LLMClient {
                 };
                 toolResults.push(toolResult);
               } else if (event.type === "finish") {
+                if (
+                  isLLMNativeModelToolResults(event.nativeModelToolResults)
+                ) {
+                  nativeModelToolResults = event.nativeModelToolResults;
+                }
                 // Stream finished
                 break;
+              } else if (event.type === "error") {
+                throw new LLMStreamError(event.error ?? "LLM stream error");
               }
             } catch (error) {
+              if (error instanceof LLMStreamError) throw error;
               console.error("Failed to parse JSON line:", line, error);
             }
           }
@@ -470,8 +682,15 @@ export class LLMClient {
         if (typeof event === "string") {
           text += event;
           if (callback) callback(text);
+        } else if (event.type === "error") {
+          throw new LLMStreamError(event.error ?? "LLM stream error");
+        } else if (event.type === "finish") {
+          if (isLLMNativeModelToolResults(event.nativeModelToolResults)) {
+            nativeModelToolResults = event.nativeModelToolResults;
+          }
         }
       } catch (error) {
+        if (error instanceof LLMStreamError) throw error;
         console.error("Failed to parse final JSON line:", buffer, error);
       }
     }
@@ -497,6 +716,9 @@ export class LLMClient {
       role: "assistant",
       content: content.length > 0 ? content : text,
       id,
+      ...(nativeModelToolResults !== undefined
+        ? { nativeModelToolResults }
+        : {}),
     };
   }
 }

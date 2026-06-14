@@ -1,10 +1,10 @@
 #!/usr/bin/env -S deno run -A
 
-import { deepEqual, Runtime } from "@commontools/runner";
-import { Identity, IdentityCreateConfig } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { type JSONSchema } from "@commontools/runner";
-import { env } from "@commontools/integration";
+import { deepEqual, Runtime } from "@commonfabric/runner";
+import { Identity, IdentityCreateConfig } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { type JSONSchema } from "@commonfabric/runner";
+import { env } from "@commonfabric/integration";
 const { API_URL } = env;
 
 // Create test identity
@@ -23,7 +23,7 @@ async function test() {
     apiUrl: new URL(API_URL),
     storageManager: StorageManager.open({
       as: identity,
-      address: new URL("/api/storage/memory", API_URL),
+      memoryHost: new URL(API_URL),
     }),
   });
 
@@ -54,7 +54,7 @@ async function test() {
     apiUrl: new URL(API_URL),
     storageManager: StorageManager.open({
       as: identity,
-      address: new URL("/api/storage/memory", API_URL),
+      memoryHost: new URL(API_URL),
     }),
   });
 
@@ -87,7 +87,7 @@ async function runTest() {
 Deno.test({
   name: "basic persistence test",
   fn: async () => {
-    let timeoutHandle: number;
+    let timeoutHandle: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise((_, reject) => {
       timeoutHandle = setTimeout(() => {
         reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));

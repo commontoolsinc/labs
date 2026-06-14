@@ -1,13 +1,13 @@
-/// <cts-enable />
 import {
   compileAndRun,
   computed,
   fetchProgram,
   NAME,
   pattern,
+  toIndentedDebugString,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 /**
  * Test pattern for fetchProgram builtin.
@@ -15,7 +15,7 @@ import {
  */
 export default pattern(() => {
   // URL to a simple pattern file
-  const url = Writable.of(
+  const url = new Writable(
     "https://raw.githubusercontent.com/commontoolsinc/labs/main/packages/patterns/counter.tsx",
   );
 
@@ -40,7 +40,7 @@ export default pattern(() => {
         <h1>Fetch Program Test</h1>
         <div>
           <label>URL:</label>
-          <ct-input type="text" $value={url} />
+          <cf-input type="text" $value={url} />
         </div>
         {fetchPending && <div>Fetching program...</div>}
         {compilePending && <div>Compiling...</div>}
@@ -51,7 +51,7 @@ export default pattern(() => {
         {result && (
           <div style="color: green">
             Successfully compiled pattern! Piece ID: {result}
-            <pre>{computed(() => JSON.stringify(result, null, 2))}</pre>
+            <pre>{computed(() => toIndentedDebugString(result))}</pre>
           </div>
         )}
       </div>

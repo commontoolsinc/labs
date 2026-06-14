@@ -1,13 +1,4 @@
-/// <cts-enable />
-import {
-  type Cell,
-  cell,
-  Default,
-  derive,
-  handler,
-  lift,
-  pattern,
-} from "commontools";
+import { type Cell, cell, Default, handler, lift, pattern } from "commonfabric";
 
 type WorkflowStage =
   | "draft"
@@ -239,26 +230,16 @@ export const workflowStateMachine = pattern<WorkflowArgs>(
 
     const availableTransitions = liftAvailableTransitions(normalizedStage);
 
-    const availableLabel = derive(
-      availableTransitions,
-      (options) => (options.length === 0 ? "none" : options.join(",")),
-    );
+    const availableLabel = availableTransitions.length === 0
+      ? "none"
+      : availableTransitions.join(",");
 
     const stageMetadata = liftStageMetadata(normalizedStage);
 
     const lastTransitionStatus = liftLastTransitionStatus(historyView);
 
-    const summary = derive(
-      {
-        stage: normalizedStage,
-        attempts: attemptCount,
-        accepted: acceptedCount,
-        rejected: rejectedCount,
-      },
-      (snapshot) =>
-        `stage:${snapshot.stage} attempts:${snapshot.attempts}` +
-        ` accepted:${snapshot.accepted} rejected:${snapshot.rejected}`,
-    );
+    const summary = `stage:${normalizedStage} attempts:${attemptCount}` +
+      ` accepted:${acceptedCount} rejected:${rejectedCount}`;
 
     return {
       stage: normalizedStage,

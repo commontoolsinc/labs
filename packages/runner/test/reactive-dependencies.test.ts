@@ -7,13 +7,13 @@ import {
   sortAndCompactPaths,
   type SortedAndCompactPaths,
 } from "../src/reactive-dependencies.ts";
-import type { Action, SpaceAndURI } from "../src/scheduler.ts";
-import type { StorableDatum } from "@commontools/memory/interface";
+import type { Action, SpaceScopeAndURI } from "../src/scheduler.ts";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
 } from "../src/storage/interface.ts";
-import type { MemorySpace } from "@commontools/memory/interface";
+import type { MemorySpace } from "@commonfabric/memory/interface";
 
 // Helper function to create IMemorySpaceAddress for testing
 const createAddress = (
@@ -25,6 +25,7 @@ const createAddress = (
   space,
   id: id as `${string}:${string}`, // URI type alias
   type: type as `${string}/${string}`, // MediaType type alias
+  scope: "space",
   path,
 });
 
@@ -212,7 +213,7 @@ describe("sortAndCompactPaths", () => {
     ]));
   });
 
-  it("sorts by space, id, type, then path", () => {
+  it("sorts by space, id, then path", () => {
     const addresses: IMemorySpaceAddress[] = [
       createAddress(
         ["a"],
@@ -260,13 +261,13 @@ describe("sortAndCompactPaths", () => {
         "test://entity1",
         "application/json",
       ),
+      createAddress(["e"], "did:test:space1", "test://entity1", "text/plain"),
       createAddress(
         ["f"],
         "did:test:space1",
         "test://entity1",
         "application/json",
       ),
-      createAddress(["e"], "did:test:space1", "test://entity1", "text/plain"),
       createAddress(
         ["c"],
         "did:test:space1",
@@ -383,36 +384,42 @@ describe("addresssesToPathByEntity", () => {
 
     expect(result.size).toBe(3);
     expect(
-      result.has("did:test:space1/https://example.com/entity1" as SpaceAndURI),
+      result.has(
+        "did:test:space1/space/https://example.com/entity1" as SpaceScopeAndURI,
+      ),
     ).toBe(true);
     expect(
-      result.has("did:test:space1/https://example.com/entity2" as SpaceAndURI),
+      result.has(
+        "did:test:space1/space/https://example.com/entity2" as SpaceScopeAndURI,
+      ),
     ).toBe(true);
     expect(
-      result.has("did:test:space2/https://example.com/entity1" as SpaceAndURI),
+      result.has(
+        "did:test:space2/space/https://example.com/entity1" as SpaceScopeAndURI,
+      ),
     ).toBe(true);
 
     const space1Entity1 = result.get(
-      "did:test:space1/https://example.com/entity1" as SpaceAndURI,
+      "did:test:space1/space/https://example.com/entity1" as SpaceScopeAndURI,
     )!;
     expect(space1Entity1).toHaveLength(2);
     expect(space1Entity1[0]).toEqual(["a"]);
     expect(space1Entity1[1]).toEqual(["b"]);
 
     const space1Entity2 = result.get(
-      "did:test:space1/https://example.com/entity2" as SpaceAndURI,
+      "did:test:space1/space/https://example.com/entity2" as SpaceScopeAndURI,
     )!;
     expect(space1Entity2).toHaveLength(1);
     expect(space1Entity2[0]).toEqual(["c"]);
 
     const space2Entity1 = result.get(
-      "did:test:space2/https://example.com/entity1" as SpaceAndURI,
+      "did:test:space2/space/https://example.com/entity1" as SpaceScopeAndURI,
     )!;
     expect(space2Entity1).toHaveLength(1);
     expect(space2Entity1[0]).toEqual(["d"]);
   });
 
-  it("filters out non-JSON types", () => {
+  it("groups document addresses without considering type", () => {
     const addresses: IMemorySpaceAddress[] = [
       createAddress(
         ["a"],
@@ -445,13 +452,15 @@ describe("addresssesToPathByEntity", () => {
     expect(result.size).toBe(2);
 
     const space1Entity1 = result.get(
-      "did:test:space1/https://example.com/entity1" as SpaceAndURI,
+      "did:test:space1/space/https://example.com/entity1" as SpaceScopeAndURI,
     )!;
-    expect(space1Entity1).toHaveLength(1);
+    expect(space1Entity1).toHaveLength(3);
     expect(space1Entity1[0]).toEqual(["a"]);
+    expect(space1Entity1[1]).toEqual(["b"]);
+    expect(space1Entity1[2]).toEqual(["c"]);
 
     const space1Entity2 = result.get(
-      "did:test:space1/https://example.com/entity2" as SpaceAndURI,
+      "did:test:space1/space/https://example.com/entity2" as SpaceScopeAndURI,
     )!;
     expect(space1Entity2).toHaveLength(1);
     expect(space1Entity2[0]).toEqual(["d"]);
@@ -482,7 +491,7 @@ describe("addresssesToPathByEntity", () => {
     const result = addressesToPathByEntity(addresses);
 
     const paths = result.get(
-      "did:test:space1/https://example.com/entity1" as SpaceAndURI,
+      "did:test:space1/space/https://example.com/entity1" as SpaceScopeAndURI,
     )!;
     expect(paths).toHaveLength(3);
     expect(paths[0]).toEqual(["z"]);
@@ -524,7 +533,7 @@ describe("addresssesToPathByEntity", () => {
         "did:test:space1",
         "https://api.example.com/settings",
         "text/plain",
-      ), // Filtered out
+      ),
 
       // Space 2, Entity 1 (same URI as space1 but different space)
       createAddress(
@@ -549,7 +558,7 @@ describe("addresssesToPathByEntity", () => {
 
     // Check Space 1, Entity 1
     const s1e1 = result.get(
-      "did:test:space1/https://api.example.com/data" as SpaceAndURI,
+      "did:test:space1/space/https://api.example.com/data" as SpaceScopeAndURI,
     )!;
     expect(s1e1).toHaveLength(3);
     expect(s1e1).toEqual([
@@ -560,21 +569,22 @@ describe("addresssesToPathByEntity", () => {
 
     // Check Space 1, Entity 2
     const s1e2 = result.get(
-      "did:test:space1/https://api.example.com/settings" as SpaceAndURI,
+      "did:test:space1/space/https://api.example.com/settings" as SpaceScopeAndURI,
     )!;
-    expect(s1e2).toHaveLength(1);
+    expect(s1e2).toHaveLength(2);
     expect(s1e2[0]).toEqual(["config"]);
+    expect(s1e2[1]).toEqual(["theme"]);
 
     // Check Space 2, Entity 1
     const s2e1 = result.get(
-      "did:test:space2/https://api.example.com/data" as SpaceAndURI,
+      "did:test:space2/space/https://api.example.com/data" as SpaceScopeAndURI,
     )!;
     expect(s2e1).toHaveLength(1);
     expect(s2e1[0]).toEqual(["users", "789"]);
 
     // Check Space 2, Entity 3
     const s2e3 = result.get(
-      "did:test:space2/https://api.example.com/metrics" as SpaceAndURI,
+      "did:test:space2/space/https://api.example.com/metrics" as SpaceScopeAndURI,
     )!;
     expect(s2e3).toHaveLength(1);
     expect(s2e3[0]).toEqual(["analytics"]);
@@ -744,7 +754,7 @@ describe("determineTriggeredActions", () => {
       const result = determineTriggeredActions(
         dependencies,
         { a: 1 },
-        { a: undefined } as StorableDatum,
+        { a: undefined } as FabricValue,
       );
       expect(result).toEqual([action1]);
     });
@@ -1566,8 +1576,8 @@ describe("determineTriggeredActions", () => {
         dependencies.set(action, [[`item${i}`]]);
       }
 
-      const before: StorableDatum = {};
-      const after: StorableDatum = {};
+      const before: FabricValue = {};
+      const after: FabricValue = {};
       for (let i = 0; i < 1000; i++) {
         (before as any)[`item${i}`] = i;
         (after as any)[`item${i}`] = i;
@@ -1716,8 +1726,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as StorableDatum,
-        after as StorableDatum,
+        before as FabricValue,
+        after as FabricValue,
       );
 
       // Action B and C should trigger because __#0 appeared,
@@ -1882,8 +1892,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as StorableDatum,
-        after as StorableDatum,
+        before as FabricValue,
+        after as FabricValue,
       );
 
       // Should trigger
@@ -1911,8 +1921,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as StorableDatum,
-        after as StorableDatum,
+        before as FabricValue,
+        after as FabricValue,
         ["value", "a", "existing"],
         { nonRecursive: true },
       );
@@ -1929,8 +1939,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as StorableDatum,
-        after as StorableDatum,
+        before as FabricValue,
+        after as FabricValue,
         ["value", "a", "added"],
         { nonRecursive: true },
       );
@@ -1947,8 +1957,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as StorableDatum,
-        after as StorableDatum,
+        before as FabricValue,
+        after as FabricValue,
         ["value", "a", "added"],
         { nonRecursive: true },
       );
@@ -1965,8 +1975,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as StorableDatum,
-        after as StorableDatum,
+        before as FabricValue,
+        after as FabricValue,
         ["value", "a"],
         { nonRecursive: true },
       );
@@ -1986,16 +1996,16 @@ describe("determineTriggeredActions", () => {
 
       const recursiveResult = determineTriggeredActions(
         new Map([[recursiveAction, [["value", "a"]]]]),
-        before as StorableDatum,
-        after as StorableDatum,
+        before as FabricValue,
+        after as FabricValue,
         ["value", "a", "existing"],
       );
       expect(recursiveResult).toEqual([recursiveAction]);
 
       const nonRecursiveResult = determineTriggeredActions(
         new Map([[nonRecursiveAction, [["value", "a"]]]]),
-        before as StorableDatum,
-        after as StorableDatum,
+        before as FabricValue,
+        after as FabricValue,
         ["value", "a", "existing"],
         { nonRecursive: true },
       );
@@ -2012,8 +2022,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as StorableDatum,
-        after as StorableDatum,
+        before as FabricValue,
+        after as FabricValue,
         ["value"],
         { nonRecursive: true },
       );
@@ -2122,8 +2132,8 @@ Deno.bench("determineTriggeredActions - many dependencies", () => {
 
   determineTriggeredActions(
     dependencies,
-    before as StorableDatum,
-    after as StorableDatum,
+    before as FabricValue,
+    after as FabricValue,
   );
 });
 
@@ -2231,7 +2241,7 @@ Deno.bench("determineTriggeredActions - complex real-world", () => {
 
   determineTriggeredActions(
     dependencies,
-    before as StorableDatum,
-    after as StorableDatum,
+    before as FabricValue,
+    after as FabricValue,
   );
 });

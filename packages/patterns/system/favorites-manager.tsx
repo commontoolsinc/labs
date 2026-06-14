@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Favorites Manager pattern.
  */
@@ -10,19 +9,21 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Favorite = {
   cell: Writable<{ [NAME]?: string }>;
   tag: string;
   userTags: Writable<string[]>;
   spaceName?: string;
-  spaceDid?: string;
 };
 
 const onRemoveFavorite = handler<
   Record<string, never>,
-  { favorites: Writable<Default<Array<Favorite>, []>>; item: Writable<unknown> }
+  {
+    favorites: Writable<Array<Favorite> | Default<[]>>;
+    item: Writable<unknown>;
+  }
 >((_, { favorites, item }) => {
   const favorite = favorites.get().find((f: Favorite) => f.cell.equals(item));
   if (favorite) favorites.remove(favorite);
@@ -37,39 +38,39 @@ const onUpdateUserTags = handler<
 
 export default pattern<Record<string, never>>((_) => {
   // Use wish() to access favorites from home.tsx via defaultPattern
-  const { result: favorites } = wish<Default<Array<Favorite>, []>>({
+  const { result: favorites } = wish<Array<Favorite> | Default<[]>>({
     query: "#favorites",
   });
 
   return {
     [NAME]: "Favorites Manager",
     [UI]: (
-      <ct-vstack gap="3">
-        {favorites.map((item) => (
-          <ct-cell-context $cell={item.cell}>
-            <ct-vstack gap="2">
-              <ct-hstack gap="2" align="center">
-                <ct-cell-link $cell={item.cell} />
-                <ct-button
+      <cf-vstack gap="3">
+        {favorites!.map((item) => (
+          <cf-cell-context $cell={item.cell}>
+            <cf-vstack gap="2">
+              <cf-hstack gap="2" align="center">
+                <cf-cell-link $cell={item.cell} spaceName={item.spaceName} />
+                <cf-button
                   variant="destructive"
                   size="sm"
                   onClick={onRemoveFavorite({
-                    favorites,
+                    favorites: favorites!,
                     item: item.cell,
                   })}
                 >
                   Remove
-                </ct-button>
-              </ct-hstack>
-              <ct-tags
+                </cf-button>
+              </cf-hstack>
+              <cf-tags
                 tags={item.userTags}
-                onct-change={onUpdateUserTags({ userTags: item.userTags })}
+                oncf-change={onUpdateUserTags({ userTags: item.userTags })}
               />
-            </ct-vstack>
-          </ct-cell-context>
+            </cf-vstack>
+          </cf-cell-context>
         ))}
-        {favorites.length === 0 && <ct-text>No favorites yet.</ct-text>}
-      </ct-vstack>
+        {favorites!.length === 0 && <p>No favorites yet.</p>}
+      </cf-vstack>
     ),
   };
 });

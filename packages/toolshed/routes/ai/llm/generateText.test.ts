@@ -1,7 +1,12 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
+import { GOOGLE_SEARCH_NATIVE_MODEL_TOOL } from "@commonfabric/llm/types";
 import env from "@/env.ts";
-import { cleanJsonResponse, configureJsonMode } from "./generateText.ts";
+import {
+  applyNativeModelTools,
+  cleanJsonResponse,
+  configureJsonMode,
+} from "./generateText.ts";
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
@@ -281,5 +286,64 @@ describe("cleanJsonResponse", () => {
   it("returns original text if code block format is incorrect", () => {
     const input = '```json {"name": "Test", "value": 123}```';
     assertEquals(cleanJsonResponse(input), input);
+  });
+});
+
+describe("applyNativeModelTools", () => {
+  it("adds provider-native Google Search tools to stream params", () => {
+    const googleSearchTool = { providerTool: "google-search" };
+    const streamParams: Record<string, unknown> = {
+      tools: { existing_tool: { description: "existing" } },
+    };
+
+    applyNativeModelTools(
+      streamParams,
+      [GOOGLE_SEARCH_NATIVE_MODEL_TOOL],
+      {
+        name: "google:gemini-3.5-flash",
+        nativeModelToolFactories: {
+          [GOOGLE_SEARCH_NATIVE_MODEL_TOOL]: () => googleSearchTool,
+        },
+      },
+    );
+
+    assertEquals(streamParams.tools, {
+      existing_tool: { description: "existing" },
+      google_search: googleSearchTool,
+    });
+  });
+
+  it("rejects native tools unsupported by the selected model", () => {
+    assertThrows(
+      () =>
+        applyNativeModelTools(
+          {},
+          [GOOGLE_SEARCH_NATIVE_MODEL_TOOL],
+          {
+            name: "openai:gpt-5",
+            nativeModelToolFactories: {},
+          },
+        ),
+      Error,
+      "Native model tool 'google_search' is not supported by model 'openai:gpt-5'",
+    );
+  });
+
+  it("rejects name collisions with client-side tools", () => {
+    assertThrows(
+      () =>
+        applyNativeModelTools(
+          { tools: { google_search: { description: "existing" } } },
+          [GOOGLE_SEARCH_NATIVE_MODEL_TOOL],
+          {
+            name: "google:gemini-3.5-flash",
+            nativeModelToolFactories: {
+              [GOOGLE_SEARCH_NATIVE_MODEL_TOOL]: () => ({}),
+            },
+          },
+        ),
+      Error,
+      "Native model tool 'google_search' conflicts with an existing tool definition",
+    );
   });
 });

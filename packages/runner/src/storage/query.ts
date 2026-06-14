@@ -1,4 +1,4 @@
-import type { Revision, State } from "@commontools/memory/interface";
+import type { Revision, State } from "@commonfabric/memory/interface";
 
 import {
   type BaseMemoryAddress,
@@ -9,7 +9,7 @@ import {
 /**
  * Object Manager backed by a store map.
  *
- * The keys for the store map are of the form: `${address.id}/${address.type}`
+ * The keys for the store map are of the form: `${address.id}/application/json`
  */
 export class StoreObjectManager implements ObjectStorageManager {
   private readValues = new Map<string, IAttestation>();
@@ -29,7 +29,7 @@ export class StoreObjectManager implements ObjectStorageManager {
 
   // Returns null if there is no matching fact
   load(address: BaseMemoryAddress): IAttestation | null {
-    const key = `${address.id}/${address.type}`;
+    const key = `${address.id}/${address.type ?? "application/json"}`;
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;
     }

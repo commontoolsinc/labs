@@ -1,19 +1,79 @@
 import ts from "typescript";
 import type {
-  GenerationContext,
-  SchemaDefinition,
-  TypeFormatter,
-} from "../interface.ts";
+  JSONSchemaMutable,
+  JSONSchemaObjMutable,
+} from "@commonfabric/api";
+import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
   cloneSchemaDefinition,
+  detectWrapperViaNode,
   getNativeTypeSchema,
+  getPropertyNameText,
+  resolveWrapperNode,
   TypeWithInternals,
 } from "../type-utils.ts";
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 
 // Simple primitive schemas only have these keys (possibly just one)
 const PRIMITIVE_SCHEMA_KEY_SET = new Set(["type", "enum"]);
+
+type DefaultUnionKind = "Default" | "DeepDefault";
+
+interface DefaultUnionEntry {
+  readonly kind: DefaultUnionKind;
+  readonly valueTypeNode: ts.TypeNode;
+  readonly defaultTypeNode: ts.TypeNode;
+  readonly valueType: ts.Type;
+  readonly defaultType: ts.Type;
+  readonly defaultValue: unknown;
+}
+
+function getTypeNodeMemberType(
+  node: ts.TypeNode,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  try {
+    return checker.getTypeFromTypeNode(node);
+  } catch {
+    return undefined;
+  }
+}
+
+function unionMemberTypesMatch(
+  left: ts.Type,
+  right: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+
+  return checker.typeToString(left) === checker.typeToString(right);
+}
+
+function orderMemberNodesBySemanticType(
+  members: readonly ts.Type[],
+  memberNodes: readonly ts.TypeNode[],
+  checker: ts.TypeChecker,
+): Array<ts.TypeNode | undefined> {
+  const remaining = memberNodes.map((node) => ({
+    node,
+    type: getTypeNodeMemberType(node, checker),
+  }));
+
+  return members.map((member) => {
+    const matchIndex = remaining.findIndex(({ type }) =>
+      type !== undefined && unionMemberTypesMatch(type, member, checker)
+    );
+    if (matchIndex === -1) {
+      return undefined;
+    }
+
+    const [match] = remaining.splice(matchIndex, 1);
+    return match?.node;
+  });
+}
 
 export class UnionFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
@@ -22,12 +82,51 @@ export class UnionFormatter implements TypeFormatter {
     return (type.flags & ts.TypeFlags.Union) !== 0;
   }
 
-  formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
+  formatType(
+    type: ts.Type,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
     const union = type as ts.UnionType;
     const members = union.types ?? [];
+    const unionNode = this.getUnionTypeNode(
+      context.typeNode,
+      context.typeChecker,
+    );
+    const memberNodes = unionNode ? unionNode.types : undefined;
+    const orderedMemberNodes = memberNodes
+      ? orderMemberNodesBySemanticType(
+        members,
+        memberNodes,
+        context.typeChecker,
+      )
+      : undefined;
 
     if (members.length === 0) {
       throw new Error("UnionFormatter received empty union type");
+    }
+
+    const defaultUnionSchema = memberNodes
+      ? this.tryFormatDefaultUnion(memberNodes, context)
+      : undefined;
+    if (defaultUnionSchema !== undefined) {
+      return defaultUnionSchema;
+    }
+
+    // CT-1639: when Default<[]> reaches us already EXPANDED by the checker (no
+    // intact `Default<>` alias node — e.g. via a synthesized handler/map context
+    // schema), the union looks like `RealArray | ([] & DefaultMarker<[]>) | []`.
+    // tryFormatDefaultUnion can't recognize it (no Default node), so it would
+    // fall through to a multi-branch anyOf that splits the real array from the
+    // empty-array branch — dropping per-element capabilities like
+    // asCell:["comparable"] from the consumer's view. Collapse the degenerate
+    // empty-array members into the real array member and carry an empty default.
+    const expandedEmptyDefault = this.tryFormatExpandedEmptyArrayDefault(
+      members,
+      orderedMemberNodes,
+      context,
+    );
+    if (expandedEmptyDefault !== undefined) {
+      return expandedEmptyDefault;
     }
 
     // Detect presence of null
@@ -36,12 +135,27 @@ export class UnionFormatter implements TypeFormatter {
     // now represented explicitly as { type: "undefined" } rather than being stripped.
     const nonNull = members.filter((m) => (m.flags & ts.TypeFlags.Null) === 0);
 
-    const generate = (t: ts.Type, typeNode?: ts.TypeNode): SchemaDefinition => {
-      const native = getNativeTypeSchema(t, context.typeChecker);
+    const generate = (
+      t: ts.Type,
+      memberIndex: number,
+      typeNode?: ts.TypeNode,
+    ): JSONSchemaMutable => {
+      const memberNode = typeNode ?? orderedMemberNodes?.[memberIndex];
+      const wrapperKind = detectWrapperViaNode(
+        memberNode,
+        context.typeChecker,
+      );
+      const native = wrapperKind === undefined
+        ? getNativeTypeSchema(t, context.typeChecker)
+        : undefined;
       if (native !== undefined) {
         return cloneSchemaDefinition(native);
       }
-      return this.schemaGenerator.formatChildType(t, context, typeNode);
+      return this.schemaGenerator.formatChildType(
+        t,
+        context,
+        memberNode,
+      );
     };
 
     // Case: exactly one non-null member + null => anyOf (nullable type).
@@ -51,7 +165,7 @@ export class UnionFormatter implements TypeFormatter {
     // Note: if undefined is also present (T | null | undefined), nonNull.length > 1,
     // so we fall through to the anyOf path which emits { type: "undefined" } explicitly.
     if (hasNull && nonNull.length === 1) {
-      const item = generate(nonNull[0]!);
+      const item = generate(nonNull[0]!, members.indexOf(nonNull[0]!));
       return { anyOf: [item, { type: "null" }] };
     }
 
@@ -101,13 +215,13 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     // Fallback: anyOf of member schemas (excluding null/undefined handled above)
-    let unionOptions = members.map((m) => generate(m));
+    let unionOptions = members.map((m, index) => generate(m, index));
     // When widenLiterals is true, try to merge structurally identical schemas
     // that only differ in literal enum values
     if (context.widenLiterals && unionOptions.length > 1) {
       unionOptions = this.mergeIdenticalSchemas(unionOptions);
     }
-    const anyOf: SchemaDefinition[] = [];
+    const anyOf: JSONSchemaObjMutable[] = [];
     for (const option of unionOptions) {
       // mergePrimitiveSchemaIntoAnyOf mutates anyOf in place; returns true to short-circuit
       if (this.mergePrimitiveSchemaIntoAnyOf(anyOf, option)) {
@@ -123,18 +237,818 @@ export class UnionFormatter implements TypeFormatter {
     return { anyOf };
   }
 
+  private tryFormatDefaultUnion(
+    memberNodes: readonly ts.TypeNode[],
+    context: GenerationContext,
+  ): JSONSchemaMutable | undefined {
+    const defaultEntries = memberNodes
+      .map((node, index) => ({
+        index,
+        node,
+        entry: this.getDefaultUnionEntry(node, context),
+      }))
+      .filter((item): item is {
+        index: number;
+        node: ts.TypeNode;
+        entry: DefaultUnionEntry;
+      } => item.entry !== undefined);
+
+    if (defaultEntries.length === 0) {
+      return undefined;
+    }
+    if (defaultEntries.length > 1) {
+      throw new Error(
+        "Union types may contain at most one Default<> member.",
+      );
+    }
+
+    const defaultEntry = defaultEntries[0]!;
+    const nonDefaultNodes = memberNodes.filter((_, index) =>
+      index !== defaultEntry.index
+    );
+
+    const schemas: JSONSchemaMutable[] = [];
+    for (const node of nonDefaultNodes) {
+      schemas.push(this.formatTypeNodeMember(node, context));
+    }
+
+    if (defaultEntry.entry.kind === "DeepDefault") {
+      this.assertDeepDefaultHasObjectTarget(
+        defaultEntry.entry,
+        nonDefaultNodes,
+        context.typeChecker,
+      );
+      return this.applyDeepDefaultToSchema(
+        this.combineUnionSchemas(schemas, context),
+        defaultEntry.entry.defaultValue,
+        context.definitions,
+      );
+    }
+
+    const isCovered = this.isDefaultCoveredByUnion(
+      defaultEntry.entry,
+      nonDefaultNodes,
+      context.typeChecker,
+    );
+    this.assertDefaultObjectDoesNotWidenExistingObject(
+      defaultEntry.entry,
+      nonDefaultNodes,
+      isCovered,
+      context.typeChecker,
+    );
+
+    if (!isCovered) {
+      schemas.push(
+        this.formatTypeNodeMember(defaultEntry.entry.valueTypeNode, context),
+      );
+    }
+
+    return this.applySchemaDefault(
+      this.combineUnionSchemas(schemas, context),
+      defaultEntry.entry.defaultValue,
+    );
+  }
+
+  /**
+   * CT-1639: collapse an EXPANDED `Default<[]>` array union.
+   *
+   * When `Default<[]>` is expanded by the checker (the intact alias node is
+   * gone), the union is `RealArray | ([] & DefaultMarker<[]>) | []` — one real
+   * (possibly element-capability-bearing) array member plus one or more
+   * degenerate empty-array members (the empty tuple `[]`/`never[]`, optionally
+   * intersected with the Default brand). Emitting these as separate `anyOf`
+   * branches loses the real array's per-element annotations from a consumer's
+   * view. Instead, format only the real array member and attach `default: []`.
+   *
+   * Returns undefined when the pattern doesn't apply (so the caller proceeds
+   * with its normal union handling) — notably when there is more than one real
+   * array member, or a non-array member is present.
+   */
+  private tryFormatExpandedEmptyArrayDefault(
+    members: readonly ts.Type[],
+    orderedMemberNodes: ReadonlyArray<ts.TypeNode | undefined> | undefined,
+    context: GenerationContext,
+  ): JSONSchemaMutable | undefined {
+    const checker = context.typeChecker;
+
+    let realArrayIndex = -1;
+    // Only the BRANDED empty member (`[] & DefaultMarker<[]>`) proves this is an
+    // expanded `Default<[]>`. A bare `[]` / `never[]` is the *unbranded* arm of
+    // that same Default union — but it also appears in ordinary unions like
+    // `string[] | []` that have nothing to do with defaults. So we require at
+    // least one branded empty member before collapsing + attaching `default:[]`;
+    // a bare empty member alone is left to normal union handling. (CT-1639)
+    let sawBrandedEmpty = false;
+
+    for (let i = 0; i < members.length; i++) {
+      const member = members[i]!;
+      if (this.isDegenerateEmptyArrayMember(member, checker)) {
+        if (this.hasDefaultBrand(member, checker)) {
+          sawBrandedEmpty = true;
+        }
+        continue;
+      }
+      if (!checker.isArrayType(member) && !checker.isTupleType(member)) {
+        // A non-array, non-degenerate member means this isn't the
+        // `RealArray | Default<[]>` shape we collapse here.
+        return undefined;
+      }
+      if (realArrayIndex === -1) {
+        realArrayIndex = i;
+      } else {
+        // More than one real array member — not the Default<[]> collapse shape.
+        return undefined;
+      }
+    }
+
+    if (realArrayIndex === -1 || !sawBrandedEmpty) {
+      return undefined;
+    }
+
+    const realArraySchema = this.schemaGenerator.formatChildType(
+      members[realArrayIndex]!,
+      context,
+      orderedMemberNodes?.[realArrayIndex],
+    );
+    return this.applySchemaDefault(realArraySchema, []);
+  }
+
+  /**
+   * True for a member that contributes only an empty array to the union: the
+   * empty tuple `[]` / `never[]`, optionally intersected with the Default brand
+   * (`[] & DefaultMarker<[]>`). For the intersection form we strip the brand
+   * constituents and check that the substantive remainder is an empty array.
+   */
+  private isDegenerateEmptyArrayMember(
+    member: ts.Type,
+    checker: ts.TypeChecker,
+  ): boolean {
+    if ((member.flags & ts.TypeFlags.Intersection) !== 0) {
+      const parts = (member as ts.IntersectionType).types ?? [];
+      const substantive = parts.filter(
+        (p) => !this.isBrandOnlyMarker(p, checker),
+      );
+      // Brand intersected with exactly one empty-array part (e.g.
+      // `[] & DefaultMarker<[]>`).
+      return substantive.length === 1 &&
+        this.isEmptyArrayType(substantive[0]!, checker);
+    }
+    return this.isEmptyArrayType(member, checker);
+  }
+
+  /** Empty tuple `[]`, or `never[]`. */
+  private isEmptyArrayType(type: ts.Type, checker: ts.TypeChecker): boolean {
+    if (checker.isTupleType(type)) {
+      return checker.getTypeArguments(type as ts.TypeReference).length === 0;
+    }
+    if (checker.isArrayType(type)) {
+      const elementType = checker.getTypeArguments(
+        type as ts.TypeReference,
+      )[0];
+      return !!elementType && (elementType.flags & ts.TypeFlags.Never) !== 0;
+    }
+    return false;
+  }
+
+  /**
+   * True if `member` carries the Default brand — i.e. it is an intersection with
+   * a brand-only marker constituent (`X & DefaultMarker<V>`). This is what
+   * distinguishes the unbranded `[]` arm of an *expanded* `Default<[]>` union
+   * from a bare `[]` in an ordinary union like `string[] | []`.
+   */
+  private hasDefaultBrand(member: ts.Type, checker: ts.TypeChecker): boolean {
+    if ((member.flags & ts.TypeFlags.Intersection) === 0) return false;
+    const parts = (member as ts.IntersectionType).types ?? [];
+    return parts.some((p) => this.isBrandOnlyMarker(p, checker));
+  }
+
+  /**
+   * True for a "brand-only" object type that carries only symbol-keyed markers
+   * (e.g. `{ readonly [DEFAULT_MARKER]: T }`) — no string-keyed data properties.
+   * TypeScript encodes unique-symbol property names as "__@..." internally; a
+   * type with only such properties is a brand, not data. (Mirrors the same
+   * convention used by IntersectionFormatter.isBrandOnlyOrEmpty.)
+   */
+  private isBrandOnlyMarker(type: ts.Type, checker: ts.TypeChecker): boolean {
+    if ((type.flags & ts.TypeFlags.Object) === 0) return false;
+    const props = checker.getPropertiesOfType(type);
+    if (props.length === 0) return true; // empty object `{}`
+    return props.every((prop) =>
+      String(prop.escapedName as string).startsWith("__@")
+    );
+  }
+
+  private getUnionTypeNode(
+    typeNode: ts.TypeNode | undefined,
+    checker: ts.TypeChecker,
+    visited = new Set<string>(),
+  ): ts.UnionTypeNode | undefined {
+    if (!typeNode) {
+      return undefined;
+    }
+
+    const unwrapped = ts.isParenthesizedTypeNode(typeNode)
+      ? typeNode.type
+      : typeNode;
+    if (ts.isUnionTypeNode(unwrapped)) {
+      return unwrapped;
+    }
+    if (
+      !ts.isTypeReferenceNode(unwrapped) ||
+      !ts.isIdentifier(unwrapped.typeName) ||
+      unwrapped.typeArguments?.length
+    ) {
+      return undefined;
+    }
+
+    const symbol = checker.getSymbolAtLocation(unwrapped.typeName);
+    const resolvedSymbol = symbol && (symbol.flags & ts.SymbolFlags.Alias)
+      ? checker.getAliasedSymbol(symbol)
+      : symbol;
+    const aliasDeclaration = resolvedSymbol?.declarations?.find((
+      declaration,
+    ): declaration is ts.TypeAliasDeclaration =>
+      ts.isTypeAliasDeclaration(declaration)
+    );
+    if (!aliasDeclaration || aliasDeclaration.typeParameters?.length) {
+      return undefined;
+    }
+
+    const aliasKey = this.getTypeAliasDeclarationKey(aliasDeclaration);
+    if (visited.has(aliasKey)) {
+      throw new Error(
+        `Circular type alias detected: ${aliasDeclaration.name.text}`,
+      );
+    }
+    visited.add(aliasKey);
+    return this.getUnionTypeNode(aliasDeclaration.type, checker, visited);
+  }
+
+  private getTypeAliasDeclarationKey(
+    declaration: ts.TypeAliasDeclaration,
+  ): string {
+    const sourceFile = declaration.getSourceFile();
+    return `${sourceFile.fileName}:${declaration.pos}:${declaration.end}`;
+  }
+
+  private getDefaultUnionEntry(
+    memberNode: ts.TypeNode,
+    context: GenerationContext,
+  ): DefaultUnionEntry | undefined {
+    if (!ts.isTypeReferenceNode(memberNode)) {
+      return undefined;
+    }
+
+    const directName = this.getTypeReferenceName(memberNode);
+    if (directName === "DeepDefault") {
+      const typeArgs = memberNode.typeArguments;
+      if (!typeArgs || typeArgs.length !== 1 || !typeArgs[0]) {
+        throw new Error("DeepDefault<V> requires exactly 1 type argument");
+      }
+      const valueTypeNode = typeArgs[0];
+      return {
+        kind: "DeepDefault",
+        valueTypeNode,
+        defaultTypeNode: valueTypeNode,
+        valueType: context.typeChecker.getTypeFromTypeNode(valueTypeNode),
+        defaultType: context.typeChecker.getTypeFromTypeNode(valueTypeNode),
+        defaultValue: this.extractDefaultValueFromNode(
+          valueTypeNode,
+          context,
+        ),
+      };
+    }
+
+    const resolved = resolveWrapperNode(memberNode, context.typeChecker);
+    if (resolved?.kind !== "Default") {
+      return undefined;
+    }
+    const defaultNode = memberNode.typeArguments ? memberNode : resolved.node;
+    const typeArgs = defaultNode.typeArguments;
+    if (!typeArgs || typeArgs.length < 1 || typeArgs.length > 2) {
+      throw new Error("Default<T,V> requires 1 or 2 type arguments");
+    }
+
+    const valueTypeNode = typeArgs[0];
+    const defaultTypeNode = typeArgs[1] ?? valueTypeNode;
+    if (!valueTypeNode || !defaultTypeNode) {
+      throw new Error("Default<T,V> type arguments cannot be undefined");
+    }
+    const valueType = context.typeChecker.getTypeFromTypeNode(valueTypeNode);
+    const defaultType = context.typeChecker.getTypeFromTypeNode(
+      defaultTypeNode,
+    );
+    if (typeArgs.length === 1 && this.isUndefinedType(valueType)) {
+      throw new Error(
+        "Default<undefined> is unsupported; use an optional field or a JSON value default.",
+      );
+    }
+
+    return {
+      kind: "Default",
+      valueTypeNode,
+      defaultTypeNode,
+      valueType,
+      defaultType,
+      defaultValue: this.extractDefaultValueFromNode(defaultTypeNode, context),
+    };
+  }
+
+  private getTypeReferenceName(typeNode: ts.TypeReferenceNode): string {
+    const typeName = typeNode.typeName;
+    return ts.isIdentifier(typeName) ? typeName.text : typeName.right.text;
+  }
+
+  private isDefaultCoveredByUnion(
+    defaultEntry: DefaultUnionEntry,
+    nonDefaultNodes: readonly ts.TypeNode[],
+    checker: ts.TypeChecker,
+  ): boolean {
+    return nonDefaultNodes.some((node) => {
+      const memberType = checker.getTypeFromTypeNode(node);
+      return checker.isTypeAssignableTo(
+        defaultEntry.defaultType,
+        memberType,
+      );
+    });
+  }
+
+  private assertDefaultObjectDoesNotWidenExistingObject(
+    defaultEntry: DefaultUnionEntry,
+    nonDefaultNodes: readonly ts.TypeNode[],
+    isCovered: boolean,
+    checker: ts.TypeChecker,
+  ): void {
+    if (
+      isCovered || !this.isPlainObjectType(defaultEntry.defaultType, checker)
+    ) {
+      return;
+    }
+
+    const hasObjectTarget = nonDefaultNodes.some((node) =>
+      this.isPlainObjectType(checker.getTypeFromTypeNode(node), checker)
+    );
+    if (!hasObjectTarget) {
+      return;
+    }
+
+    throw new Error(
+      "Default object union member is not assignable to the existing object type. Use T | Default<V> for full defaults or T | DeepDefault<V> for partial object defaults.",
+    );
+  }
+
+  private assertDeepDefaultHasObjectTarget(
+    defaultEntry: DefaultUnionEntry,
+    nonDefaultNodes: readonly ts.TypeNode[],
+    checker: ts.TypeChecker,
+  ): void {
+    const hasObjectTarget = nonDefaultNodes.some((node) =>
+      this.isPlainObjectType(checker.getTypeFromTypeNode(node), checker)
+    );
+    if (
+      hasObjectTarget &&
+      this.isPlainObjectType(defaultEntry.defaultType, checker)
+    ) {
+      return;
+    }
+
+    throw new Error(
+      "DeepDefault must be unioned with an object type and must provide an object default.",
+    );
+  }
+
+  private isPlainObjectType(
+    type: ts.Type,
+    checker: ts.TypeChecker,
+  ): boolean {
+    if ((type.flags & ts.TypeFlags.Object) === 0) {
+      return false;
+    }
+    if (checker.isArrayType(type) || checker.isTupleType(type)) {
+      return false;
+    }
+    const symbolName = type.getSymbol()?.getName();
+    return symbolName !== "Array" && symbolName !== "ReadonlyArray";
+  }
+
+  private formatTypeNodeMember(
+    typeNode: ts.TypeNode,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
+    const type = context.typeChecker.getTypeFromTypeNode(typeNode);
+    const native = detectWrapperViaNode(typeNode, context.typeChecker) ===
+        undefined
+      ? getNativeTypeSchema(type, context.typeChecker)
+      : undefined;
+    if (native !== undefined) {
+      return cloneSchemaDefinition(native);
+    }
+    return this.schemaGenerator.formatChildType(type, context, typeNode);
+  }
+
+  private combineUnionSchemas(
+    schemas: JSONSchemaMutable[],
+    context: GenerationContext,
+  ): JSONSchemaMutable {
+    if (schemas.length === 0) {
+      return true;
+    }
+    if (schemas.length === 1) {
+      return schemas[0]!;
+    }
+    const nullSchema = schemas.find((schema) =>
+      isRecord(schema) && schema.type === "null"
+    );
+    const nonNullSchemas = schemas.filter((schema) => schema !== nullSchema);
+    if (nullSchema && nonNullSchemas.length === 1) {
+      return { anyOf: [nonNullSchemas[0]!, nullSchema] };
+    }
+
+    let unionOptions = schemas;
+    if (context.widenLiterals && unionOptions.length > 1) {
+      unionOptions = this.mergeIdenticalSchemas(unionOptions);
+    }
+
+    const anyOf: JSONSchemaObjMutable[] = [];
+    for (const option of unionOptions) {
+      if (this.mergePrimitiveSchemaIntoAnyOf(anyOf, option)) {
+        return true;
+      }
+    }
+
+    if (anyOf.length === 0) {
+      return false;
+    }
+    if (anyOf.length === 1) {
+      return anyOf[0]!;
+    }
+
+    return { anyOf };
+  }
+
+  private applySchemaDefault(
+    schema: JSONSchemaMutable,
+    defaultValue: unknown,
+  ): JSONSchemaMutable {
+    if (defaultValue === undefined) {
+      return schema;
+    }
+    const value = defaultValue as NonNullable<JSONSchemaObjMutable["default"]>;
+
+    if (typeof schema === "boolean") {
+      return schema === false
+        ? { not: true, default: value }
+        : { default: value };
+    }
+
+    return {
+      ...schema,
+      default: value,
+    };
+  }
+
+  private applyDeepDefaultToSchema(
+    schema: JSONSchemaMutable,
+    defaultValue: unknown,
+    rootDefs?: Record<string, unknown>,
+  ): JSONSchemaMutable {
+    const withDefault = this.applySchemaDefault(schema, defaultValue);
+    if (!this.isDefaultObject(defaultValue) || !isRecord(withDefault)) {
+      return withDefault;
+    }
+
+    return this.applyObjectPropertyDefaults(
+      withDefault,
+      defaultValue,
+      [],
+      this.getSchemaDefs(withDefault) ?? rootDefs,
+    );
+  }
+
+  private applyObjectPropertyDefaults(
+    schema: JSONSchemaObjMutable,
+    defaults: Record<string, unknown>,
+    path: string[] = [],
+    rootDefs?: Record<string, unknown>,
+    targetSchema?: JSONSchemaMutable,
+  ): JSONSchemaObjMutable {
+    const properties = isRecord(schema.properties)
+      ? { ...schema.properties }
+      : {};
+    const targetProperties = this.getObjectTargetProperties(
+      isRecord(targetSchema) ? targetSchema : schema,
+      rootDefs,
+    );
+
+    for (const [name, value] of Object.entries(defaults)) {
+      const fullPath = [...path, name];
+      const targetExisting = (properties[name] ??
+        targetProperties?.[name]) as JSONSchemaMutable | undefined;
+      if (targetExisting === undefined) {
+        throw new Error(
+          `DeepDefault key "${
+            fullPath.join(".")
+          }" does not exist on the target object type.`,
+        );
+      }
+      properties[name] = this.applyDeepDefaultToProperty(
+        properties[name] as JSONSchemaMutable | undefined,
+        value,
+        fullPath,
+        rootDefs,
+        targetExisting,
+      );
+    }
+
+    return {
+      ...schema,
+      properties,
+    };
+  }
+
+  private applyDeepDefaultToProperty(
+    schema: JSONSchemaMutable | undefined,
+    defaultValue: unknown,
+    path: string[] = [],
+    rootDefs?: Record<string, unknown>,
+    targetSchema?: JSONSchemaMutable,
+  ): JSONSchemaMutable {
+    const withDefault = this.applySchemaDefault(schema ?? true, defaultValue);
+    if (!this.isDefaultObject(defaultValue) || !isRecord(withDefault)) {
+      return withDefault;
+    }
+
+    return this.applyObjectPropertyDefaults(
+      withDefault,
+      defaultValue,
+      path,
+      rootDefs,
+      targetSchema,
+    );
+  }
+
+  private getObjectTargetProperties(
+    schema: JSONSchemaObjMutable,
+    rootDefs?: Record<string, unknown>,
+    seen = new Set<JSONSchemaObjMutable>(),
+  ): Record<string, unknown> | undefined {
+    if (seen.has(schema)) {
+      return undefined;
+    }
+    seen.add(schema);
+
+    if (isRecord(schema.properties)) {
+      return schema.properties;
+    }
+
+    const refSchema = this.resolveLocalRefSchema(schema, rootDefs);
+    if (refSchema) {
+      return this.getObjectTargetProperties(refSchema, rootDefs, seen);
+    }
+
+    if (Array.isArray(schema.anyOf)) {
+      const candidates = schema.anyOf
+        .map((option) =>
+          isRecord(option)
+            ? this.getObjectTargetProperties(
+              option as JSONSchemaObjMutable,
+              rootDefs,
+              new Set(seen),
+            )
+            : undefined
+        )
+        .filter((properties): properties is Record<string, unknown> =>
+          properties !== undefined
+        );
+
+      if (candidates.length === 1) {
+        return candidates[0];
+      }
+    }
+
+    return undefined;
+  }
+
+  private resolveLocalRefSchema(
+    schema: JSONSchemaObjMutable,
+    rootDefs?: Record<string, unknown>,
+  ): JSONSchemaObjMutable | undefined {
+    if (typeof schema.$ref !== "string") {
+      return undefined;
+    }
+    const prefix = "#/$defs/";
+    if (!schema.$ref.startsWith(prefix)) {
+      return undefined;
+    }
+
+    const defs = this.getSchemaDefs(schema) ?? rootDefs;
+    const resolved = defs?.[schema.$ref.slice(prefix.length)];
+    return isRecord(resolved) ? resolved as JSONSchemaObjMutable : undefined;
+  }
+
+  private getSchemaDefs(
+    schema: JSONSchemaObjMutable,
+  ): Record<string, unknown> | undefined {
+    if (isRecord(schema.$defs)) {
+      return schema.$defs;
+    }
+    return isRecord(schema.definitions) ? schema.definitions : undefined;
+  }
+
+  private isDefaultObject(value: unknown): value is Record<string, unknown> {
+    return isRecord(value) && !Array.isArray(value);
+  }
+
+  private extractDefaultValueFromNode(
+    typeNode: ts.TypeNode,
+    context: GenerationContext,
+  ): unknown {
+    if (ts.isTypeQueryNode(typeNode)) {
+      return this.extractValueFromTypeQuery(typeNode, context);
+    }
+
+    if (ts.isLiteralTypeNode(typeNode)) {
+      const literal = typeNode.literal;
+      if (ts.isStringLiteral(literal)) return literal.text;
+      if (ts.isNumericLiteral(literal)) return Number(literal.text);
+      if (literal.kind === ts.SyntaxKind.TrueKeyword) return true;
+      if (literal.kind === ts.SyntaxKind.FalseKeyword) return false;
+      if (literal.kind === ts.SyntaxKind.NullKeyword) return null;
+    }
+
+    if (ts.isTupleTypeNode(typeNode)) {
+      return typeNode.elements.map((element) =>
+        this.extractDefaultValueFromNode(element, context)
+      );
+    }
+
+    if (ts.isTypeLiteralNode(typeNode)) {
+      const obj: Record<string, unknown> = {};
+      for (const member of typeNode.members) {
+        if (!ts.isPropertySignature(member) || !member.name || !member.type) {
+          continue;
+        }
+        const propName = getPropertyNameText(member.name, context.typeChecker);
+        if (!propName) {
+          continue;
+        }
+        obj[propName] = this.extractDefaultValueFromNode(
+          member.type,
+          context,
+        );
+      }
+      return obj;
+    }
+
+    if (typeNode.kind === ts.SyntaxKind.NullKeyword) return null;
+    if (typeNode.kind === ts.SyntaxKind.UndefinedKeyword) return undefined;
+
+    return this.extractDefaultValue(
+      context.typeChecker.getTypeFromTypeNode(typeNode),
+      context,
+    );
+  }
+
+  private extractDefaultValue(
+    type: ts.Type,
+    context: GenerationContext,
+  ): unknown {
+    if (type.flags & ts.TypeFlags.StringLiteral) {
+      return (type as ts.StringLiteralType).value;
+    }
+    if (type.flags & ts.TypeFlags.NumberLiteral) {
+      return (type as ts.NumberLiteralType).value;
+    }
+    if (type.flags & ts.TypeFlags.BooleanLiteral) {
+      return (type as TypeWithInternals).intrinsicName === "true";
+    }
+    if (type.flags & ts.TypeFlags.Null) {
+      return null;
+    }
+    if (type.flags & ts.TypeFlags.Undefined) {
+      return undefined;
+    }
+
+    const symbol = type.getSymbol();
+    if (symbol?.valueDeclaration) {
+      return this.extractValueFromSymbol(symbol, context);
+    }
+
+    return undefined;
+  }
+
+  private extractValueFromTypeQuery(
+    typeQueryNode: ts.TypeQueryNode,
+    context: GenerationContext,
+  ): unknown {
+    const symbol = context.typeChecker.getSymbolAtLocation(
+      typeQueryNode.exprName,
+    );
+    return symbol ? this.extractValueFromSymbol(symbol, context) : undefined;
+  }
+
+  private extractValueFromSymbol(
+    symbol: ts.Symbol,
+    context: GenerationContext,
+  ): unknown {
+    const valueDeclaration = symbol.valueDeclaration;
+    if (
+      valueDeclaration &&
+      ts.isVariableDeclaration(valueDeclaration) &&
+      valueDeclaration.initializer
+    ) {
+      return this.extractValueFromExpression(
+        valueDeclaration.initializer,
+        context,
+      );
+    }
+
+    return undefined;
+  }
+
+  private extractValueFromExpression(
+    expr: ts.Expression,
+    context: GenerationContext,
+  ): unknown {
+    if (
+      ts.isAsExpression(expr) ||
+      ts.isTypeAssertionExpression(expr) ||
+      ts.isSatisfiesExpression(expr) ||
+      ts.isParenthesizedExpression(expr)
+    ) {
+      return this.extractValueFromExpression(expr.expression, context);
+    }
+
+    if (ts.isArrayLiteralExpression(expr)) {
+      return expr.elements.map((element) =>
+        this.extractValueFromExpression(element, context)
+      );
+    }
+
+    if (ts.isObjectLiteralExpression(expr)) {
+      const obj: Record<string, unknown> = {};
+      for (const property of expr.properties) {
+        if (ts.isPropertyAssignment(property)) {
+          const propName = getPropertyNameText(
+            property.name,
+            context.typeChecker,
+          );
+          if (propName) {
+            obj[propName] = this.extractValueFromExpression(
+              property.initializer,
+              context,
+            );
+          }
+        } else if (ts.isShorthandPropertyAssignment(property)) {
+          obj[property.name.text] = this.extractValueFromShorthandProperty(
+            property,
+            context,
+          );
+        }
+      }
+      return obj;
+    }
+
+    if (ts.isStringLiteral(expr)) return expr.text;
+    if (ts.isNumericLiteral(expr)) return Number(expr.text);
+    if (expr.kind === ts.SyntaxKind.TrueKeyword) return true;
+    if (expr.kind === ts.SyntaxKind.FalseKeyword) return false;
+    if (expr.kind === ts.SyntaxKind.NullKeyword) return null;
+
+    return undefined;
+  }
+
+  private extractValueFromShorthandProperty(
+    property: ts.ShorthandPropertyAssignment,
+    context: GenerationContext,
+  ): unknown {
+    const checker = context.typeChecker as ts.TypeChecker & {
+      getShorthandAssignmentValueSymbol?: (
+        node: ts.ShorthandPropertyAssignment,
+      ) => ts.Symbol | undefined;
+    };
+    const symbol = checker.getShorthandAssignmentValueSymbol?.(property) ??
+      context.typeChecker.getSymbolAtLocation(property.name);
+
+    return symbol ? this.extractValueFromSymbol(symbol, context) : undefined;
+  }
+
+  private isUndefinedType(type: ts.Type): boolean {
+    return (type.flags & ts.TypeFlags.Undefined) !== 0;
+  }
+
   /**
    * Merge schemas that are structurally identical except for literal enum values.
    * Used when widenLiterals is true to collapse unions like
    * {x: {enum: [10]}} | {x: {enum: [20]}} into {x: {type: "number"}}
    */
   private mergeIdenticalSchemas(
-    schemas: SchemaDefinition[],
-  ): SchemaDefinition[] {
+    schemas: JSONSchemaMutable[],
+  ): JSONSchemaMutable[] {
     if (schemas.length <= 1) return schemas;
 
     // Group schemas by their structure (ignoring enum values)
-    const groups = new Map<string, SchemaDefinition[]>();
+    const groups = new Map<string, JSONSchemaMutable[]>();
 
     for (const schema of schemas) {
       const normalized = this.normalizeSchemaForComparison(schema);
@@ -145,7 +1059,7 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     // For each group with multiple schemas, try to merge them
-    const result: SchemaDefinition[] = [];
+    const result: JSONSchemaMutable[] = [];
     for (const group of groups.values()) {
       if (group.length === 1) {
         result.push(group[0]!);
@@ -163,8 +1077,8 @@ export class UnionFormatter implements TypeFormatter {
    * Returns true if the result is the permissive schema (short-circuit the caller).
    */
   private mergePrimitiveSchemaIntoAnyOf(
-    anyOf: SchemaDefinition[],
-    cur: SchemaDefinition,
+    anyOf: JSONSchemaObjMutable[],
+    cur: JSONSchemaMutable,
   ): boolean {
     if (cur === true) {
       // One of our anyOf values was true, so return true to let our caller
@@ -181,7 +1095,7 @@ export class UnionFormatter implements TypeFormatter {
     }
     // See if we can merge into one of the anyOf options
     const matchingTypeIdx = anyOf.findIndex((option) =>
-      isObject(option) &&
+      isRecord(option) &&
       PRIMITIVE_SCHEMA_KEY_SET.isSupersetOf(new Set(Object.keys(option))) &&
       "type" in option && option.type === cur.type
     );
@@ -231,7 +1145,7 @@ export class UnionFormatter implements TypeFormatter {
       const matchingNonEnum = matchingNonEnumIdx !== -1
         ? anyOf[matchingNonEnumIdx]
         : undefined;
-      if (isObject(matchingNonEnum) && matchingNonEnumIdx !== -1) {
+      if (isRecord(matchingNonEnum) && matchingNonEnumIdx !== -1) {
         const curTypes = Array.isArray(cur.type) ? cur.type : [cur.type];
         const matchingNonEnumTypes = matchingNonEnum.type === undefined
           ? []
@@ -256,7 +1170,7 @@ export class UnionFormatter implements TypeFormatter {
    * and converting them to base types
    */
   private normalizeSchemaForComparison(
-    schema: SchemaDefinition,
+    schema: JSONSchemaMutable,
   ): Record<string, unknown> {
     if (typeof schema === "boolean") return { _bool: schema };
 
@@ -281,7 +1195,7 @@ export class UnionFormatter implements TypeFormatter {
       const props: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(schema.properties)) {
         props[key] = this.normalizeSchemaForComparison(
-          value as SchemaDefinition,
+          value as JSONSchemaMutable,
         );
       }
       result.properties = props;
@@ -290,7 +1204,7 @@ export class UnionFormatter implements TypeFormatter {
     // Recursively normalize items
     if ("items" in schema && schema.items) {
       result.items = this.normalizeSchemaForComparison(
-        schema.items as SchemaDefinition,
+        schema.items as JSONSchemaMutable,
       );
     }
 
@@ -306,7 +1220,9 @@ export class UnionFormatter implements TypeFormatter {
   /**
    * Merge a group of structurally identical schemas by widening their enums
    */
-  private mergeSchemaGroup(schemas: SchemaDefinition[]): SchemaDefinition {
+  private mergeSchemaGroup(
+    schemas: JSONSchemaMutable[],
+  ): JSONSchemaMutable {
     if (schemas.length === 0) {
       throw new Error("Cannot merge empty schema group");
     }
@@ -314,7 +1230,7 @@ export class UnionFormatter implements TypeFormatter {
     const first = schemas[0]!;
     if (typeof first === "boolean") return first;
 
-    const result: SchemaDefinition = {};
+    const result: JSONSchemaObjMutable = {};
 
     // Handle enum -> base type conversion
     if ("enum" in first && first.enum) {
@@ -332,7 +1248,7 @@ export class UnionFormatter implements TypeFormatter {
 
     // Recursively merge properties
     if ("properties" in first && isRecord(first.properties)) {
-      const props: Record<string, SchemaDefinition> = {};
+      const props: Record<string, JSONSchemaMutable> = {};
       for (const key of Object.keys(first.properties)) {
         const propSchemas = schemas
           .map((s) =>
@@ -340,9 +1256,7 @@ export class UnionFormatter implements TypeFormatter {
               ? s.properties[key]
               : undefined
           )
-          .filter((p): p is Exclude<SchemaDefinition, undefined> =>
-            p !== undefined
-          );
+          .filter((p): p is JSONSchemaMutable => p !== undefined);
 
         if (propSchemas.length > 0) {
           props[key] = this.mergeSchemaGroup(propSchemas);
@@ -359,9 +1273,7 @@ export class UnionFormatter implements TypeFormatter {
             ? s.items
             : undefined
         )
-        .filter((i): i is Exclude<SchemaDefinition, undefined> =>
-          i !== undefined
-        );
+        .filter((i): i is JSONSchemaMutable => i !== undefined);
 
       if (itemSchemas.length > 0) {
         result.items = this.mergeSchemaGroup(itemSchemas);

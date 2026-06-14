@@ -1,207 +1,147 @@
-import { JSONSchemaObj } from "@commontools/api";
-import { isObject, isRecord } from "@commontools/utils/types";
-import { getLogger } from "@commontools/utils/logger";
-import type { JSONSchema } from "./builder/types.ts";
+import { type ImmutableJSONValue, JSONSchemaObj } from "@commonfabric/api";
+import { isRecord } from "@commonfabric/utils/types";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import type {
+  AsCellEntry,
+  CellKind,
+  JSONSchema,
+  SchemaScope,
+} from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
-import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
-import { rendererVDOMSchema, vnodeSchema } from "@commontools/runner/schemas";
+import { isSchemaScope } from "./scope.ts";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { uniqueCfcAtoms } from "./cfc/observation.ts";
+import {
+  cfcSchemaIsFalse,
+  cfcSchemaIsInternalKey,
+  cfcSchemaIsTrue,
+  cfcSchemaToObject,
+  findCfcSchemaRefs,
+  isEmbeddedCfcSchemaRef,
+  resolveCfcSchemaRef,
+  resolveCfcSchemaRefs,
+  resolveCfcSchemaRefsOrThrow,
+} from "./cfc/schema-refs.ts";
+export {
+  CFC_ATOM_BASE,
+  CFC_ATOM_TYPE,
+  CFC_CONCEPT_KIND,
+  CFC_FUSE_ATOM_CLASS,
+  CFC_RUNTIME_SUBJECT,
+  cfcAtom,
+} from "@commonfabric/api/cfc";
 
-const logger = getLogger("cfc");
+type IFCAtom = ImmutableJSONValue;
 
-// Mapping from ref url to schema object
-// Any $ref links in these must be self contained or absolute
-const embeddedSchemas: Record<string, JSONSchema> = {
-  "https://commonfabric.org/schemas/vdom.json": rendererVDOMSchema,
-  "https://commonfabric.org/schemas/vnode.json": vnodeSchema,
-};
-
-// I use these strings in other code, so make them available as
-// constants. These are just strings, and real meaning would be
-// up to implementation.
-export const Classification = {
-  Unclassified: "unclassified",
-  Confidential: "confidential",
-  Secret: "secret",
-  TopSecret: "topsecret",
-} as const;
-
-// We'll often work with the transitive closure of this graph.
-// I currently require this to be a DAG, but I could support cycles
-// Technically, this is required to be a join-semilattice.
-const classificationLattice = new Map<string, string[]>([
-  [Classification.Unclassified, []],
-  [Classification.Confidential, [Classification.Unclassified]],
-  [Classification.Secret, [Classification.Confidential]],
-  [Classification.TopSecret, [Classification.Secret]],
-]);
-
-// This class lets me sort with strongly connected components.
-// These are not technically a partial order, since they violate antisymmetry.
-// This uses an implementation of Tarjan's algorithm, which is O(V+E).
-class _TarjanSCC {
-  private index: number = 0;
-  private vertexIndices: number[];
-  private vertexLowLink: number[];
-  private vertexOnStack: boolean[];
-  private stack: number[] = [];
-  private adjacency: number[][];
-  private sorted: number[][];
-  constructor(nodeCount: number, edges: [number, number][]) {
-    // Build an array with each item having the list of nodes that point to it.
-    this.adjacency = Array.from({ length: nodeCount }, () => []);
-    for (const [from, to] of edges) {
-      this.adjacency[from].push(to);
-    }
-    this.sorted = [];
-    this.vertexIndices = new Array(nodeCount);
-    this.vertexLowLink = new Array(nodeCount);
-    this.vertexOnStack = new Array(nodeCount);
-    for (let v = 0; v < nodeCount; v++) {
-      if (this.vertexIndices[v] === undefined) {
-        this.strongConnect(v);
-      }
-    }
-    this.sorted.reverse();
-  }
-
-  // Groups are ordered such that if we have an edge [0,1], we get [[0], [1]]
-  get result() {
-    return this.sorted;
-  }
-
-  private strongConnect(v: number) {
-    this.vertexIndices[v] = this.index;
-    this.vertexLowLink[v] = this.index;
-    this.index = this.index + 1;
-    this.stack.push(v);
-    this.vertexOnStack[v] = true;
-
-    for (const w of this.adjacency[v]) {
-      if (this.vertexIndices[w] === undefined) {
-        // vertex w not yet visited
-        this.strongConnect(w);
-        this.vertexLowLink[v] = this.vertexLowLink[v] < this.vertexLowLink[w]
-          ? this.vertexLowLink[v]
-          : this.vertexLowLink[w];
-      } else if (this.vertexOnStack[w]) {
-        // vertex w is on the stack, so it's in our SCC
-        this.vertexLowLink[v] = this.vertexLowLink[v] < this.vertexLowLink[w]
-          ? this.vertexLowLink[v]
-          : this.vertexLowLink[w];
-      }
-    }
-
-    if (this.vertexLowLink[v] === this.vertexIndices[v]) {
-      // this is a new SCC
-      let w;
-      const scc = [];
-      do {
-        w = this.stack.pop()!;
-        this.vertexOnStack[w] = false;
-        scc.push(w);
-      } while (w != v);
-      this.sorted.push(scc);
-    }
-  }
-}
-
-// Based on the edges, returns the indexes of the nodes in topological order.
-// The result is sorted so the node's children are after it in the list
-// This uses an implementation of Kahn's algorithm, which is O(V+E).
-// It assumes the graph is a DAG (Directed Acyclic Graph)
-// We implement topological sort in other places, but this is a simpler version
-class KahnTopologicalSort {
-  private sorted: number[];
-  constructor(nodeCount: number, edges: [number, number][]) {
-    // Build an array with each item having the list of nodes that poitnt to it.
-    const adjacency: number[][] = Array.from({ length: nodeCount }, () => []);
-    for (const [from, to] of edges) {
-      adjacency[from].push(to);
-    }
-
-    const indegree = Array(nodeCount).fill(0); // count of incoming edges
-    for (let i = 0; i < nodeCount; i++) {
-      for (const j of adjacency[i]) {
-        indegree[j]++;
-      }
-    }
-
-    const queue: number[] = [];
-    for (let i = 0; i < nodeCount; i++) {
-      if (indegree[i] === 0) queue.push(i);
-    }
-
-    const result = [];
-    while (queue.length > 0) {
-      const node = queue.shift()!;
-      result.push(node);
-
-      for (const neighbor of adjacency[node!]) {
-        indegree[neighbor]--;
-        if (indegree[neighbor] === 0) {
-          queue.push(neighbor);
-        }
-      }
-    }
-
-    if (result.length !== nodeCount) {
-      throw new Error("Graph is not a DAG (cycle detected)");
-    }
-
-    this.sorted = result;
-  }
-
-  // Items are ordered such that if we have an edge [0,1], we get [0, 1]
-  get result() {
-    return this.sorted;
-  }
-}
+// schemaAtPath derivations per deep-frozen schema identity. The derivation is
+// pure given (schema, path, boolean default flags) when no extra
+// confidentiality is passed — instance state never enters it (`lub` delegates
+// to a static and has no subclasses) — and it runs per array element / object
+// property on read and write-diff paths, so identical lookups repeat
+// constantly. Module-level rather than per-instance: several hot paths create
+// a fresh ContextualFlowControl per call (storage pull/watch, traversal
+// contexts), which would leave a per-instance cache permanently cold.
+// Mutable schemas are never cached (in-place edits must be observed).
+const schemaAtPathCache = new WeakMap<object, Map<string, JSONSchema>>();
 
 // Class for handling cfc rules.
-// Right now, we just drop this constructor all over, but eventually
-// we'll get our lattice from the user, so we should be constructing
-// these objects where we have access to the user's preferences.
-// These preferences are likely per user/space combination.
+// The spec's confidentiality model is based on structured atoms.
 export class ContextualFlowControl {
-  private reachable: Map<string, Set<string>>;
-  constructor(
-    private lattice: Map<string, string[]> = classificationLattice,
-  ) {
-    this.reachable = ContextualFlowControl.reachableNodes(lattice);
+  private static childFullSchema(
+    schema: JSONSchema,
+    fallback: JSONSchema,
+  ): JSONSchema {
+    // Once a subtree carries its own $defs, that subtree becomes the root for
+    // resolving deeper local $refs. Otherwise keep the inherited root schema.
+    return isRecord(schema) && isRecord(schema.$defs) ? schema : fallback;
+  }
+
+  static uniqueAtoms(atoms: Iterable<unknown>): IFCAtom[] {
+    return uniqueCfcAtoms(atoms);
+  }
+
+  static addIfcAtoms(
+    joined: Set<unknown>,
+    atoms: readonly IFCAtom[] | undefined,
+  ): void {
+    if (!Array.isArray(atoms)) {
+      return;
+    }
+    for (const atom of atoms) {
+      joined.add(atom);
+    }
   }
 
   /**
-   * Collect any required classification tags required by the schema.
+   * Collect any required confidentiality atoms required by the schema.
    * This could be made more conservative by combining the schema with the object
-   * If our object lacks any of the fields that would have a higher classification,
+   * If our object lacks any of the fields that would add confidentiality,
    * we don't need to consider them.
    *
-   * @param joined set to which we will add any classification tags
+   * @param joined set to which we will add any confidentiality atoms
    * @param schema the schema with tags
    * @param fullSchema the full schema with any $defs needed
    * @param cycleTracker used to avoid reference cycles
    */
   static joinSchema(
-    joined: Set<string>,
+    joined: Set<unknown>,
     schema: JSONSchema,
     fullSchema: JSONSchema = schema,
-    cycleTracker: CycleTracker<string> = new CycleTracker<string>(true),
-  ): Set<string> {
+    cycleTracker: CycleTracker<JSONSchema> = new CycleTracker<JSONSchema>(true),
+  ): Set<unknown> {
     if (typeof schema === "boolean") {
       return joined;
     }
     // A resolved schema is often unique, since it's generated by combining
-    // other schema. This means that we need to use the stringified form in
-    // our cycle tracker, so we get proper equality checks.
-    using t = cycleTracker.include(JSON.stringify(schema));
+    // other schema. `internSchema()` returns the canonical (identity-unique)
+    // schema object, so structurally-equal schemas collapse to the same
+    // reference — the cycle tracker can then dedup by identity. Also
+    // correctly handles non-JSON-compatible `FabricValue`s (e.g.
+    // `FabricEpochNsec`, `FabricBytes`, `FabricHash`) that may appear in
+    // schema `default` fields; plain `JSON.stringify` would silently
+    // mis-encode them.
+    using t = cycleTracker.include(internSchema(schema));
     if (t === null) {
       // we've already joined this
       return joined;
     }
     if (schema.ifc) {
-      if (schema.ifc?.classification) {
-        for (const classification of schema.ifc.classification) {
-          joined.add(classification);
+      ContextualFlowControl.addIfcAtoms(joined, schema.ifc.confidentiality);
+    }
+    // A value validates against one (anyOf/oneOf) or all (allOf) branches, so the
+    // confidentiality LUB must union every branch's atoms; otherwise branch-local
+    // confidentiality is silently dropped (under-tainting fail-open, audit 1.6).
+    for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+      const branches = (schema as Record<string, unknown>)[key];
+      if (Array.isArray(branches)) {
+        for (const branch of branches) {
+          if (branch !== undefined && typeof branch === "object") {
+            ContextualFlowControl.joinSchema(
+              joined,
+              branch as JSONSchema,
+              ContextualFlowControl.childFullSchema(
+                branch as JSONSchema,
+                fullSchema,
+              ),
+              cycleTracker,
+            );
+          }
+        }
+      }
+    }
+    // Tuple element schemas carry their own confidentiality too.
+    if (Array.isArray((schema as Record<string, unknown>).prefixItems)) {
+      for (
+        const item of (schema as { prefixItems: JSONSchema[] }).prefixItems
+      ) {
+        if (item !== undefined && typeof item === "object") {
+          ContextualFlowControl.joinSchema(
+            joined,
+            item,
+            ContextualFlowControl.childFullSchema(item, fullSchema),
+            cycleTracker,
+          );
         }
       }
     }
@@ -210,7 +150,7 @@ export class ContextualFlowControl {
         ContextualFlowControl.joinSchema(
           joined,
           value,
-          fullSchema,
+          ContextualFlowControl.childFullSchema(value, fullSchema),
           cycleTracker,
         );
       }
@@ -222,14 +162,18 @@ export class ContextualFlowControl {
       ContextualFlowControl.joinSchema(
         joined,
         schema.additionalProperties,
-        fullSchema,
+        ContextualFlowControl.childFullSchema(
+          schema.additionalProperties,
+          fullSchema,
+        ),
         cycleTracker,
       );
     } else if (schema.items && typeof schema.items === "object") {
+      // TODO(@ubik2): need to handle prefixItems -- also probably not else if here
       ContextualFlowControl.joinSchema(
         joined,
         schema.items,
-        fullSchema,
+        ContextualFlowControl.childFullSchema(schema.items, fullSchema),
         cycleTracker,
       );
     } else if (schema.$ref) {
@@ -238,7 +182,7 @@ export class ContextualFlowControl {
         schema,
         fullSchema,
       );
-      if (schema.$ref in embeddedSchemas) {
+      if (isEmbeddedCfcSchemaRef(schema.$ref)) {
         // Absolute $ref means we should reset our fullSchema
         fullSchema = resolvedSchema;
       }
@@ -252,37 +196,33 @@ export class ContextualFlowControl {
     return joined;
   }
 
-  // Get the least upper bound classification from the schema.
+  // Get the joined confidentiality atoms from the schema.
   public lubSchema(
     schema: JSONSchema,
-    extraClassifications?: Set<string>,
-  ): string | undefined {
-    const classifications = (extraClassifications !== undefined)
-      ? new Set<string>(extraClassifications)
-      : new Set<string>();
-    ContextualFlowControl.joinSchema(classifications, schema);
+    extraConfidentiality?: Set<unknown>,
+  ): IFCAtom[] | undefined {
+    const confidentiality = (extraConfidentiality !== undefined)
+      ? new Set<unknown>(extraConfidentiality)
+      : new Set<unknown>();
+    ContextualFlowControl.joinSchema(confidentiality, schema);
 
-    return (classifications.size === 0) ? undefined : this.lub(classifications);
+    return (confidentiality.size === 0) ? undefined : this.lub(confidentiality);
   }
 
-  public lub(joined: Set<string>): string {
-    return ContextualFlowControl.findLub(this.lattice, joined);
+  public lub(joined: Set<unknown>): IFCAtom[] {
+    return ContextualFlowControl.uniqueAtoms(joined);
   }
 
-  // Return a copy of the schema with the least upper bound classifcation.
+  // Return a copy of the schema with joined confidentiality atoms.
   public schemaWithLub(
     schema: JSONSchema,
-    classification: string,
+    confidentiality: readonly unknown[],
   ): JSONSchema {
-    const joined = new Set<string>([classification]);
-    if (isObject(schema) && schema.ifc !== undefined) {
-      if (schema.ifc.classification !== undefined) {
-        for (const item of schema.ifc.classification) {
-          joined.add(item);
-        }
-      }
+    const joined = new Set<unknown>(confidentiality);
+    if (isRecord(schema) && schema.ifc !== undefined) {
+      ContextualFlowControl.addIfcAtoms(joined, schema.ifc.confidentiality);
     }
-    // If we have no classification, we can leave the schema
+    // If we have no confidentiality, we can leave the schema
     if (joined.size === 0) {
       return schema;
     }
@@ -291,7 +231,7 @@ export class ContextualFlowControl {
     const schemaObj = ContextualFlowControl.toSchemaObj(schema);
     const restrictedSchema = {
       ...schemaObj,
-      ifc: { classification: [this.lub(joined)] },
+      ifc: { ...schemaObj.ifc, confidentiality: this.lub(joined) },
     };
     return restrictedSchema;
   }
@@ -302,54 +242,7 @@ export class ContextualFlowControl {
    * @param schema optional schema to convert
    */
   static toSchemaObj(schema?: JSONSchema): JSONSchemaObj {
-    return (schema === true || schema === undefined)
-      ? {}
-      : schema === false
-      ? { not: true }
-      : schema;
-  }
-
-  // Compute the transitive closure, which is the set of all nodes reachable from each node.
-  // May want to consider Warshall algorithm for this.
-  static reachableNodes<T>(graph: Map<T, T[]>): Map<T, Set<T>> {
-    const sortedNodes = ContextualFlowControl.sortedGraphNodes(graph);
-    const reachable = new Map<T, Set<T>>();
-    for (const [from, tos] of sortedNodes.reverse()) {
-      const reachableFrom = new Set<T>();
-      for (const to of tos) {
-        // Add the elements in tos to reachableFrom
-        for (const tutu of reachable.get(to)!) {
-          reachableFrom.add(tutu);
-        }
-        reachableFrom.add(to);
-      }
-      reachableFrom.add(from);
-      reachable.set(from, reachableFrom);
-    }
-    return reachable;
-  }
-
-  // Return the Least Upper Bound for the set of classification values
-  // This could be almost certainly be more efficient.
-  static findLub<T>(graph: Map<T, T[]>, joined: Set<T>): T {
-    const sortedNodes = ContextualFlowControl.sortedGraphNodes(graph);
-    const reachable = new Map<T, Set<T>>();
-    for (const [from, tos] of sortedNodes.reverse()) {
-      const reachableFrom = new Set<T>();
-      for (const to of tos) {
-        // Add the elements in tos to reachableFrom
-        for (const tutu of reachable.get(to)!) {
-          reachableFrom.add(tutu);
-        }
-        reachableFrom.add(to);
-      }
-      reachableFrom.add(from);
-      if (reachableFrom.isSupersetOf(joined)) {
-        return from;
-      }
-      reachable.set(from, reachableFrom);
-    }
-    throw Error("Improper lattice");
+    return cfcSchemaToObject(schema);
   }
 
   /**
@@ -369,50 +262,7 @@ export class ContextualFlowControl {
     schemaObj: JSONSchemaObj,
     fullSchema: JSONSchema = schemaObj,
   ): JSONSchema | undefined {
-    // Track seen refs to avoid cycles
-    const seenRefs = new Set<string>();
-    while (true) {
-      const { $ref, ...rest } = schemaObj;
-      if ($ref === undefined) { // no more refs to resolve
-        return schemaObj;
-      } else if (seenRefs.has($ref)) {
-        // Cycle -- equivalent to non-existent ref
-        return undefined;
-      }
-      seenRefs.add($ref);
-      const resolved = ContextualFlowControl.resolveSchemaRef(
-        fullSchema,
-        $ref,
-      );
-      if (resolved === undefined) { // Non-existent ref
-        return undefined;
-      } else if ($ref in embeddedSchemas) {
-        // Absolute $ref means we should reset our fullSchema
-        fullSchema = resolved;
-      }
-      // If we have other properties, we need to keep them as we resolve refs.
-      // They will override any properties in those refs.
-      if (Object.keys(rest).length > 0) {
-        if (isRecord(resolved)) {
-          // Merge our attributes with those in the ref
-          // If we replaced the fullSchema, pull in those $defs instead
-          schemaObj = {
-            ...resolved,
-            ...rest,
-            ...(fullSchema && isObject(fullSchema) && fullSchema.$defs &&
-              { $defs: fullSchema.$defs }),
-          } as JSONSchemaObj;
-        } else {
-          // Resolved to a boolean schema, so we can stop
-          const schema = ContextualFlowControl.toSchemaObj(resolved);
-          schemaObj = { ...schema, ...rest } as JSONSchemaObj;
-        }
-      } else if (typeof resolved === "boolean") {
-        return resolved;
-      } else {
-        schemaObj = resolved;
-      }
-    }
+    return resolveCfcSchemaRefs(schemaObj, fullSchema);
   }
 
   // TODO(@ubik2): We may need to collect ifc labels as we walk the tree
@@ -440,53 +290,7 @@ export class ContextualFlowControl {
     fullSchema: JSONSchema,
     schemaRef: string,
   ): JSONSchema | undefined {
-    // Allow for some absolute schema refs
-    if (schemaRef in embeddedSchemas) {
-      return embeddedSchemas[schemaRef];
-    }
-    // We only support schemaRefs that are URI fragments
-    if (!schemaRef.startsWith("#")) {
-      logger.warn("cfc", () => ["Unsupported $ref in schema: ", schemaRef]);
-      return undefined;
-    }
-    // URI fragment schemaRefs are JSONPointers, so split and unescape
-    const pathToDef = schemaRef.split("/").map((p) =>
-      p.replace("~1", "/").replace("~0", "~")
-    );
-    // We don't support anchors yet (e.g. `"$ref": "#address"`)
-    if (pathToDef[0] !== "#") {
-      logger.warn(
-        "cfc",
-        () => ["Unsupported anchor $ref in schema: ", schemaRef],
-      );
-      return undefined;
-    }
-    let schemaCursor: unknown = fullSchema;
-    // start at 1, since the 0 element is "#"
-    for (let i = 1; i < pathToDef.length; i++) {
-      if (!isRecord(schemaCursor) || !(pathToDef[i] in schemaCursor)) {
-        logger.warn(
-          "cfc",
-          () => ["Unresolved $ref in schema: ", schemaRef, fullSchema],
-        );
-        return undefined;
-      }
-      schemaCursor = schemaCursor[pathToDef[i]];
-    }
-    // If our schema cursor is an object, carry the $defs in
-    if (typeof schemaCursor === "object") {
-      const schemaRefs = new Set<string>();
-      this.findRefs(schemaCursor as JSONSchema, schemaRefs);
-      // TODO(@ubik2): We could just carry in the $defs we need
-      if (schemaRefs.size > 0) {
-        schemaCursor = {
-          ...schemaCursor,
-          ...(isObject(fullSchema) && fullSchema.$defs &&
-            { $defs: fullSchema.$defs }),
-        };
-      }
-    }
-    return schemaCursor as JSONSchema;
+    return resolveCfcSchemaRef(fullSchema, schemaRef);
   }
 
   /**
@@ -503,69 +307,14 @@ export class ContextualFlowControl {
     schema: JSONSchema,
     refSet: Set<string> = new Set<string>(),
   ): void {
-    if (typeof schema === "boolean") {
-      return;
-    }
-    if (schema.$ref !== undefined) {
-      refSet.add(schema.$ref);
-    }
-    if (schema.type === "array") {
-      if (schema.items !== undefined) {
-        ContextualFlowControl.findRefs(schema.items, refSet);
-      }
-      if (schema.prefixItems != undefined) {
-        for (const item of schema.prefixItems) {
-          ContextualFlowControl.findRefs(item, refSet);
-        }
-      }
-    } else if (schema.type === "object") {
-      if (schema.additionalProperties !== undefined) {
-        ContextualFlowControl.findRefs(schema.additionalProperties, refSet);
-      }
-      if (schema.properties !== undefined) {
-        for (const [_key, propSchema] of Object.entries(schema.properties)) {
-          ContextualFlowControl.findRefs(propSchema, refSet);
-        }
-      }
-    }
-    const optSchemas = [
-      ...(schema.anyOf ? schema.anyOf : []),
-      ...(schema.oneOf ? schema.oneOf : []),
-      ...(schema.allOf ? schema.allOf : []),
-    ];
-    for (const optSchema of optSchemas) {
-      ContextualFlowControl.findRefs(optSchema, refSet);
-    }
+    return findCfcSchemaRefs(schema, refSet);
   }
 
   static resolveSchemaRefsOrThrow(
     schemaObj: JSONSchemaObj,
     fullSchema: JSONSchema = schemaObj,
   ) {
-    if (!isObject(fullSchema)) {
-      // We'd need a fullSchema to make this work
-      // We don't need to do real cycle detection, since the path is limited
-      throw new Error("Found $ref without fullSchema object");
-    }
-    const resolved = ContextualFlowControl.resolveSchemaRefs(
-      schemaObj,
-      fullSchema,
-    );
-    if (resolved === undefined) {
-      const ref = "$ref" in schemaObj
-        ? schemaObj.$ref
-        : JSON.stringify(schemaObj);
-      throw new Error(
-        `Failed to resolve $ref: ${ref}. ` +
-          (typeof ref === "string" && ref.startsWith("http")
-            ? `External $ref URLs must be registered in embeddedSchemas (packages/runner/src/cfc.ts). ` +
-              `If you added a new native type to NATIVE_TYPE_SCHEMAS in ` +
-              `packages/schema-generator/src/formatters/native-type-formatter.ts, ` +
-              `add its schema to embeddedSchemas as well.`
-            : `Schema: ${JSON.stringify(schemaObj)}`),
-      );
-    }
-    return resolved;
+    return resolveCfcSchemaRefsOrThrow(schemaObj, fullSchema);
   }
 
   // This is a variant of schemaAtPath that allows for an undefined schema.
@@ -573,12 +322,12 @@ export class ContextualFlowControl {
   getSchemaAtPath(
     schema: JSONSchema | undefined,
     path: string[],
-    extraClassifications?: Set<string>,
+    extraConfidentiality?: Set<unknown>,
   ): JSONSchema | undefined {
     if (schema === undefined) {
       return undefined;
     }
-    const result = this.schemaAtPath(schema, path, extraClassifications);
+    const result = this.schemaAtPath(schema, path, extraConfidentiality);
     return result === false ? undefined : result === true ? {} : result;
   }
 
@@ -612,33 +361,67 @@ export class ContextualFlowControl {
   schemaAtPath(
     schema: JSONSchema,
     path: readonly string[],
-    extraClassifications?: Set<string>,
+    extraConfidentiality?: Set<unknown>,
     defaultEmptyProperties: JSONSchema = true,
     defaultMissingProperty: JSONSchema = true,
   ): JSONSchema {
     // Take defs from schema if available
-    const defs = isObject(schema) && schema.$defs ? schema.$defs : undefined;
-    return this.schemaAtPathInternal(
-      schema,
-      path,
-      defs,
-      extraClassifications,
-      defaultEmptyProperties,
-      defaultMissingProperty,
-    );
+    const defs = isRecord(schema) && schema.$defs ? schema.$defs : undefined;
+    const cacheable = extraConfidentiality === undefined &&
+      typeof defaultEmptyProperties === "boolean" &&
+      typeof defaultMissingProperty === "boolean" &&
+      isRecord(schema) && isDeepFrozen(schema);
+    if (!cacheable) {
+      return this.schemaAtPathInternal(
+        schema,
+        path,
+        defs,
+        extraConfidentiality,
+        defaultEmptyProperties,
+        defaultMissingProperty,
+      );
+    }
+    let byKey = schemaAtPathCache.get(schema);
+    if (byKey === undefined) {
+      byKey = new Map();
+      schemaAtPathCache.set(schema, byKey);
+    }
+    // Length-prefix each segment so a segment containing the separator (a
+    // NUL-bearing property name) cannot collide with a differently-split
+    // path — same idiom as traverse.ts's pathKey.
+    let key = `${defaultEmptyProperties}|${defaultMissingProperty}`;
+    for (const part of path) {
+      key += `|${part.length}:${part}`;
+    }
+    let result = byKey.get(key);
+    if (result === undefined) {
+      // Intern the derivation so the cached result is the canonical frozen
+      // instance: downstream identity-keyed caches (standardization, value
+      // hashing) hit instead of re-walking a fresh anyOf rebuild every time.
+      result = internSchema(this.schemaAtPathInternal(
+        schema,
+        path,
+        defs,
+        undefined,
+        defaultEmptyProperties,
+        defaultMissingProperty,
+      ));
+      byKey.set(key, result);
+    }
+    return result;
   }
 
   private schemaAtPathInternal(
     schema: JSONSchema,
     path: readonly string[],
     defs: Record<string, JSONSchema> | undefined,
-    extraClassifications: Set<string> | undefined,
+    extraConfidentiality: Set<unknown> | undefined,
     defaultEmptyProperties: JSONSchema,
     defaultMissingProperty: JSONSchema,
   ): JSONSchema {
-    const joined = (extraClassifications !== undefined)
-      ? new Set<string>(extraClassifications)
-      : new Set<string>();
+    const joined = (extraConfidentiality !== undefined)
+      ? new Set<unknown>(extraConfidentiality)
+      : new Set<unknown>();
     let cursor = schema;
     for (
       const [index, part] of path.map((value, index) =>
@@ -646,7 +429,7 @@ export class ContextualFlowControl {
       )
     ) {
       // If the cursor is a $ref, get the target location
-      if (isObject(cursor) && "$ref" in cursor) {
+      if (isRecord(cursor) && "$ref" in cursor) {
         // Follow the reference
         cursor = ContextualFlowControl.resolveSchemaRefsOrThrow(
           cursor,
@@ -654,13 +437,12 @@ export class ContextualFlowControl {
         );
         // Resolve schema refs can resolve to a fullSchema, in which case we
         // need to replace our defs.
-        if (isObject(cursor) && cursor.$defs) {
+        if (isRecord(cursor) && cursor.$defs) {
           defs = cursor.$defs;
         }
       }
-      if (isObject(cursor) && ("anyOf" in cursor || "oneOf" in cursor)) {
-        const subSchemas: JSONSchema[] = [];
-        const subSchemaStrings: string[] = [];
+      if (isRecord(cursor) && ("anyOf" in cursor || "oneOf" in cursor)) {
+        const subSchemas = new Set<JSONSchema>();
         const options = (cursor.anyOf && cursor.oneOf)
           ? [...cursor.anyOf, ...cursor.oneOf]
           : cursor.anyOf ?? cursor.oneOf ?? [];
@@ -669,7 +451,7 @@ export class ContextualFlowControl {
             entry,
             path.slice(index),
             defs,
-            extraClassifications,
+            extraConfidentiality,
             defaultEmptyProperties,
             defaultMissingProperty,
           );
@@ -683,23 +465,25 @@ export class ContextualFlowControl {
             cursor = true;
             break;
           } else {
-            const subSchemaString = JSON.stringify(subSchema);
-            if (subSchemaStrings.includes(subSchemaString)) {
-              continue;
-            }
-            subSchemas.push(subSchema as JSONSchema);
-            subSchemaStrings.push(subSchemaString);
+            // `internSchema()` returns the canonical (identity-unique)
+            // schema object, so structurally-equal schemas collapse to
+            // the same reference. That gives identity-based dedup via
+            // `Set<JSONSchema>`, and correctly handles non-JSON-compatible
+            // `FabricValue`s (e.g. `FabricEpochNsec`, `FabricBytes`,
+            // `FabricHash`) that may appear in schema `default` fields.
+            subSchemas.add(internSchema(subSchema as JSONSchema));
           }
         }
         // Only update cursor from subSchemas if the isTrueSchema branch
         // didn't already set cursor = true and break out of the loop.
         if (cursor !== true) {
-          if (subSchemas.length === 0) {
+          const subSchemaArr = [...subSchemas];
+          if (subSchemaArr.length === 0) {
             cursor = false;
-          } else if (subSchemas.length === 1) {
-            cursor = subSchemas[0];
+          } else if (subSchemaArr.length === 1) {
+            cursor = subSchemaArr[0];
           } else {
-            cursor = { "anyOf": subSchemas };
+            cursor = { "anyOf": subSchemaArr };
           }
         }
         break;
@@ -710,10 +494,11 @@ export class ContextualFlowControl {
         // wildcard schema -- equivalent to true, but we can add ifc tags
         break;
       } else if (cursor.type === "object") {
-        if (cursor.ifc !== undefined && cursor.ifc.classification) {
-          for (const classification of cursor.ifc.classification) {
-            joined.add(classification);
-          }
+        if (cursor.ifc !== undefined) {
+          ContextualFlowControl.addIfcAtoms(
+            joined,
+            cursor.ifc.confidentiality,
+          );
         }
         if (cursor.properties && part in cursor.properties) {
           const cursorObj = cursor.properties as Record<string, JSONSchema>;
@@ -721,13 +506,11 @@ export class ContextualFlowControl {
           if (typeof cursor === "boolean") {
             break;
           } else {
-            if (
-              cursor.ifc !== undefined &&
-              cursor.ifc.classification !== undefined
-            ) {
-              for (const classification of cursor.ifc.classification) {
-                joined.add(classification);
-              }
+            if (cursor.ifc !== undefined) {
+              ContextualFlowControl.addIfcAtoms(
+                joined,
+                cursor.ifc.confidentiality,
+              );
             }
           }
         } else if (cursor.additionalProperties !== undefined) {
@@ -764,14 +547,12 @@ export class ContextualFlowControl {
         // we can only descend into objects and arrays or unknown
         return false;
       }
-    }
-    if (
-      isObject(cursor) && cursor.ifc !== undefined &&
-      cursor.ifc?.classification !== undefined
-    ) {
-      for (const classification of cursor.ifc.classification!) {
-        joined.add(classification);
+      if (isRecord(cursor) && cursor.$defs) {
+        defs = cursor.$defs;
       }
+    }
+    if (isRecord(cursor) && cursor.ifc !== undefined) {
+      ContextualFlowControl.addIfcAtoms(joined, cursor.ifc.confidentiality);
     }
     if (typeof cursor === "boolean") {
       if (!cursor) {
@@ -781,62 +562,73 @@ export class ContextualFlowControl {
       }
       cursor = {}; // change to use the empty object schema, so we can attach ifc.
     }
-    // If we've encountered any classification tags while walking down the schema, we need to add them to the returned object
+    // If we've encountered any confidentiality atoms while walking down the
+    // schema, we need to add them to the returned object.
     const ifc = (joined.size !== 0)
-      ? { ...cursor.ifc, classification: [this.lub(joined)] }
+      ? { ...cursor.ifc, confidentiality: this.lub(joined) }
       : cursor.ifc;
     // Merge any ifc and defs
     return { ...cursor, ...(ifc && { ifc }), ...(defs && { $defs: defs }) };
   }
 
-  private static sortedGraphNodes<T>(graph: Map<T, T[]>) {
-    const [nodeCount, edges] = ContextualFlowControl.graphToEdges(graph);
-    const sortHelper = new KahnTopologicalSort(nodeCount, edges);
-    // We haven't changed the graph, so the index in the entries matches the nodeId used
-    const entries = Array.from(graph.entries());
-    return sortHelper.result.map((index) => entries[index]);
-  }
-
-  private static graphToEdges<T>(
-    graph: Map<T, T[]>,
-  ): [number, [number, number][]] {
-    const nodeIds: Map<T, number> = new Map();
-    let nodeCount = 0;
-    // First, assign each key an id
-    for (const [from, _tos] of graph.entries()) {
-      nodeIds.set(from, nodeCount++);
-    }
-    // Second pass to build the edges, now that we have ids
-    const edges: [number, number][] = [];
-    for (const [from, tos] of graph.entries()) {
-      const fromIndex = nodeIds.get(from);
-      for (const to of tos) {
-        edges.push([fromIndex!, nodeIds.get(to)!]);
-      }
-    }
-    return [nodeCount, edges];
-  }
-
   // Check to see if the specified schema is one of the special values meaning
   // it should always validate.
   static isTrueSchema(schema: JSONSchema): boolean {
-    if (schema === true) {
-      return true;
-    }
-    return isObject(schema) &&
-      Object.keys(schema).every((k) =>
-        this.isInternalSchemaKey(k) || k === "default" || k === "$defs"
-      );
+    return cfcSchemaIsTrue(schema);
   }
 
   // We don't need to check ID and ID_FIELD, since they won't be included
   // in Object.keys return values.
   static isInternalSchemaKey(key: string): boolean {
-    return key === "ifc" || key === "asCell" || key === "asStream" ||
-      key === "asOpaque";
+    return cfcSchemaIsInternalKey(key);
   }
 
   static isFalseSchema(schema: JSONSchema): boolean {
-    return schema === false || (isObject(schema) && schema["not"] === true);
+    return cfcSchemaIsFalse(schema);
+  }
+
+  // Utility function to handle the asCell array tag.
+  static getAsCellValues(
+    schema: JSONSchema | undefined,
+  ): readonly AsCellEntry[] {
+    if (isRecord(schema) && Array.isArray(schema.asCell)) {
+      return schema.asCell;
+    }
+    return [];
+  }
+
+  static getAsCellKind(entry: AsCellEntry | undefined): CellKind | undefined {
+    return typeof entry === "string" ? entry : entry?.kind;
+  }
+
+  static getAsCellScope(
+    entry: AsCellEntry | undefined,
+  ): SchemaScope | undefined {
+    return typeof entry === "string" ? undefined : entry?.scope;
+  }
+
+  /**
+   * The scope a schema declares at this level: the outermost `asCell` entry's
+   * scope if present, otherwise the top-level `scope`. The outermost `asCell`
+   * entry describes the immediate cell/slot (the addressing scope of the link
+   * to it, and the read follow-cap for that immediate hop); the top-level
+   * `scope` applies only when there is no `asCell` wrapper.
+   *
+   * This single precedence is used both for the read follow-cap (which link
+   * scopes a read may follow — see link-resolution.ts / traverse.ts) and for
+   * the write target scope (where content is stored — see data-updating.ts), so
+   * the two never disagree. It is a schema-level declaration only; it must never
+   * be stamped onto a navigated link's own scope (see CT-1623).
+   */
+  static getSchemaScopeCap(
+    schema: JSONSchema | undefined,
+  ): SchemaScope | undefined {
+    if (!isRecord(schema)) return undefined;
+    const entryScope = ContextualFlowControl.getAsCellScope(
+      ContextualFlowControl.getAsCellValues(schema).at(0),
+    );
+    if (isSchemaScope(entryScope)) return entryScope;
+    if (isSchemaScope(schema.scope)) return schema.scope;
+    return undefined;
   }
 }

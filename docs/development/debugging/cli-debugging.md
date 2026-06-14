@@ -2,6 +2,30 @@
 
 When patterns misbehave, the CLI often provides faster diagnosis than browser DevTools. This approach isolates data logic from UI rendering issues.
 
+## Local Checks Before Deploying
+
+```bash
+# Check syntax only (fast)
+deno task cf check pattern.tsx --no-run
+
+# Run locally
+deno task cf check pattern.tsx
+
+# View transformer output (debug compile issues — see below)
+deno task cf check pattern.tsx --show-transformed
+```
+
+## Deploying a Test Piece
+
+```bash
+# Deploy — returns a piece-id used by all commands below
+deno task cf piece new --identity key.json --api-url URL --space SPACE pattern.tsx
+
+# Set test data
+echo '{"title": "Test", "done": false}' | \
+  deno task cf piece set --identity key.json --api-url URL --space SPACE --piece ID testItem
+```
+
 ## When to Use CLI vs Browser
 
 **Use CLI when:**
@@ -10,6 +34,7 @@ When patterns misbehave, the CLI often provides faster diagnosis than browser De
 - Handlers don't modify state correctly
 - You need to test specific input combinations
 - Debugging reactivity chains
+- You need to inspect the exact source emitted by `ts-transformers`
 
 **Use Browser when:**
 - UI doesn't render correctly
@@ -23,32 +48,57 @@ When patterns misbehave, the CLI often provides faster diagnosis than browser De
 
 ```bash
 # WRONG: Returns stale computed values
-echo '[...]' | deno task ct piece set --piece ID expenses ...
-deno task ct piece get --piece ID totalSpent ...  # May return old value!
+echo '[...]' | deno task cf piece set --piece ID expenses ...
+deno task cf piece get --piece ID totalSpent ...  # May return old value!
 
 # CORRECT: Run piece step to trigger recompute
-echo '[...]' | deno task ct piece set --piece ID expenses ...
-deno task ct piece step --piece ID ...  # Runs scheduling step, triggers recompute
-deno task ct piece get --piece ID totalSpent ...  # Now correct
+echo '[...]' | deno task cf piece set --piece ID expenses ...
+deno task cf piece step --piece ID ...  # Runs scheduling step, triggers recompute
+deno task cf piece get --piece ID totalSpent ...  # Now correct
+```
+
+## Inspect Transformed Output
+
+When the question is "what did the compiler emit?", use `cf check` with
+`--show-transformed` instead of reaching for ad hoc test harness code.
+
+```bash
+deno task cf check ./packages/patterns/my-pattern.tsx --root $(pwd) --show-transformed
+```
+
+This is the fastest way to inspect how `ts-transformers` rewrote:
+
+- JSX expressions
+- reactive array-method chains like `.map()` / `.filter()`
+- `computed()` wrapping
+- downstream schema/capability lowering effects
+
+It also works on fixture inputs while debugging the compiler itself:
+
+```bash
+deno task cf check \
+  packages/ts-transformers/test/fixtures/jsx-expressions/jsx-property-access.input.tsx \
+  --root $(pwd) \
+  --show-transformed
 ```
 
 ## Quick Diagnostic Sequence
 
 ```bash
 # 1. What's the full state?
-deno task ct piece inspect --piece <piece-id> -i claude.key -a URL -s space
+deno task cf piece inspect --piece <piece-id> -i claude.key -a URL -s space
 
 # 2. What are the inputs?
-deno task ct piece get --piece <piece-id> /input -i claude.key -a URL -s space
+deno task cf piece get --piece <piece-id> /input -i claude.key -a URL -s space
 
 # 3. What's a specific computed value?
-deno task ct piece get --piece <piece-id> myComputedField -i claude.key -a URL -s space
+deno task cf piece get --piece <piece-id> myComputedField -i claude.key -a URL -s space
 
 # 4. Set known input, trigger recompute, verify output
 echo '{"items":[{"title":"test","done":false}]}' | \
-  deno task ct piece set --piece <piece-id> /input -i claude.key -a URL -s space
-deno task ct piece step --piece <piece-id> -i claude.key -a URL -s space
-deno task ct piece get --piece <piece-id> itemCount -i claude.key -a URL -s space
+  deno task cf piece set --piece <piece-id> /input -i claude.key -a URL -s space
+deno task cf piece step --piece <piece-id> -i claude.key -a URL -s space
+deno task cf piece get --piece <piece-id> itemCount -i claude.key -a URL -s space
 ```
 
 ## Common CLI Debugging Patterns
@@ -82,15 +132,14 @@ When iterating on fixes, always use `setsrc` instead of `new`:
 
 ```bash
 # Make a fix to your pattern, then:
-deno task ct piece setsrc --piece <piece-id> pattern.tsx -i claude.key -a URL -s space
+deno task cf piece setsrc --piece <piece-id> pattern.tsx -i claude.key -a URL -s space
 
 # Test again
-deno task ct piece get --piece <piece-id> brokenField -i claude.key -a URL -s space
+deno task cf piece get --piece <piece-id> brokenField -i claude.key -a URL -s space
 ```
 
 This keeps you working with the same piece instance, preserving any test data you've set up.
 
 ## See Also
 
-- ./testing.md - Local and deployed testing workflows
 - ./workflow.md - General debugging workflow

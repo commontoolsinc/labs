@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern for Superstition #30
  *
@@ -13,8 +12,8 @@
  * 1. Static fetchData at top level (control - should work)
  * 2. fetchData inside .map() with expression callback (claimed to fail)
  */
-import { computed, Default, NAME, pattern, UI } from "commontools";
-import { fetchData } from "commontools";
+import { computed, Default, NAME, pattern, UI } from "commonfabric";
+import { fetchData } from "commonfabric";
 
 interface Repo {
   id: string;
@@ -22,14 +21,16 @@ interface Repo {
 }
 
 interface InputSchema {
-  repos: Default<Repo[], [
-    { id: "1"; name: "react" },
-    { id: "2"; name: "vue" },
-    { id: "3"; name: "angular" },
-  ]>;
+  repos:
+    | Repo[]
+    | Default<[
+      { id: "1"; name: "react" },
+      { id: "2"; name: "vue" },
+      { id: "3"; name: "angular" },
+    ]>;
 }
 
-interface Input {
+export interface Input {
   repos: Repo[];
 }
 

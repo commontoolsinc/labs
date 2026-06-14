@@ -1,146 +1,122 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  getTypeScriptEnvironmentTypes,
-  InMemoryProgram,
-  JsScript,
-  TypeScriptCompiler,
-} from "@commontools/js-compiler";
-import { UnsafeEvalRuntime } from "../src/harness/eval-runtime.ts";
-import { StaticCacheFS } from "@commontools/static";
+import { Identity } from "@commonfabric/identity";
 
-const types = await getTypeScriptEnvironmentTypes(new StaticCacheFS());
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { Runtime } from "../src/runtime.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
+import { SESRuntime } from "../src/sandbox/mod.ts";
 
-describe("Runtime", () => {
-  it("Compiles and executes a set of typescript files", async () => {
-    const compiler = new TypeScriptCompiler(types);
-    const program = new InMemoryProgram("/main.tsx", {
-      "/main.tsx": "import { add } from './utils.ts';export default add(10,2)",
-      "/utils.ts": "export const add=(x:number,y:number):number =>x+y;",
-    });
-    const compiled = await compiler.resolveAndCompile(program, {
-      bundleExportAll: true,
-    });
-    const { main, exportMap: _ } = execute(compiled);
-    expect(main.default).toBe(12);
+const signer = await Identity.fromPassphrase("test operator");
+
+describe("SESRuntime", () => {
+  it("creates distinct isolates per key and resets them on clear", () => {
+    const runtime = new SESRuntime({ lockdown: true });
+
+    const alpha = runtime.getIsolate("alpha");
+    const beta = runtime.getIsolate("beta");
+
+    expect(alpha).not.toBe(beta);
+
+    runtime.clear();
+
+    const alphaAfterClear = runtime.getIsolate("alpha");
+    expect(alphaAfterClear).not.toBe(alpha);
   });
 
-  it("Executes with runtime dependencies", async () => {
-    const compiler = new TypeScriptCompiler(types);
-    const program = new InMemoryProgram("/main.tsx", {
-      "/main.tsx": "import { add } from '@std/math';export default add(10,2)",
-      "@std/math.d.ts":
-        "export declare function add(x: number, y: number): number;",
-    });
-    const compiled = await compiler.resolveAndCompile(program, {
-      runtimeModules: ["@std/math"],
-      bundleExportAll: true,
-    });
-    const { main, exportMap: _ } = execute(compiled, {
-      "@std/math": {
-        add(x: number, y: number): number {
-          return x + y;
-        },
-      },
-    });
-    expect(main.default).toBe(12);
-  });
+  it("clears cached callback creators on runtime.clear", () => {
+    const runtime = new SESRuntime({ lockdown: true });
 
-  it("Source maps errors on invoke", async () => {
-    const compiler = new TypeScriptCompiler(types);
-    const program = new InMemoryProgram("/main.tsx", {
-      "/main.tsx": `// main.tsx
-      import { doubleOrThrow } from "./utils.ts";
+    const next = runtime.evaluateCallback(
+      "function next(x) { return x + 1; }",
+    ) as (x: number) => number;
 
-      export default doubleOrThrow(undefined);
-      `,
-      "/utils.ts": `// utils.ts
-      export function doubleOrThrow(input: number | undefined): number {
-        if (typeof input === "number") {
-          return input * 2;
-        }
-        throw new Error("throwing!");
-      }
-      `,
-    });
-    const compiled = await compiler.resolveAndCompile(program, {
-      filename: "pattern-abc.js",
-      bundleExportAll: true,
-    });
-    let thrown: Error | undefined;
-    try {
-      const { main, exportMap: _ } = execute(compiled);
-      expect(main.default).toBe(12);
-    } catch (e: unknown) {
-      thrown = e as Error;
-    } finally {
-      expect(thrown).toBeDefined();
-      const stack = thrown!.stack!.split("\n");
-      stack.length = 6;
-      const expected = [
-        "Error: throwing!",
-        "    at doubleOrThrow (utils.ts:6:14)",
-        "    at Object.eval (main.tsx:4:35)",
-        "    at <CT_INTERNAL>",
-        "    at <CT_INTERNAL>",
-        "    at <CT_INTERNAL>",
-      ];
+    expect(next(1)).toBe(2);
+    expect(
+      (runtime as unknown as {
+        callbackEvaluator: { callbackCreatorCache: Map<string, () => unknown> };
+      }).callbackEvaluator.callbackCreatorCache.size,
+    ).toBe(1);
 
-      expect(stack.join("\n")).toBe(expected.join("\n"));
-    }
-  });
+    runtime.clear();
 
-  it("Exports all file exports", async () => {
-    const compiler = new TypeScriptCompiler(types);
-    const program = new InMemoryProgram("/main.tsx", {
-      "/main.tsx":
-        "import { add } from '/utils/foo.ts';export default add(10,2); export const foo = 'bar';",
-      "/utils/foo.ts":
-        "import * as math from '@std/math'; export const add = (x: number, y: number) => math.add(x, y); export const sub = (x: number, y: number): number => x - y;",
-      "@std/math.d.ts":
-        "export declare function add(x: number, y: number): number;",
-    });
-    const compiled = await compiler.resolveAndCompile(program, {
-      runtimeModules: ["@std/math"],
-      bundleExportAll: true,
-    });
-    const { main: _, exportMap } = execute(compiled, {
-      "@std/math": {
-        add(x: number, y: number): number {
-          return x + y;
-        },
-      },
-    });
-    expect(Object.keys(exportMap).length).toBe(2);
-    expect(Object.keys(exportMap["/main.tsx"]).length).toBe(2);
-    expect(exportMap["/main.tsx"]["default"]).toBe(12);
-    expect(exportMap["/main.tsx"]["foo"]).toBe("bar");
-    expect(exportMap["/utils/foo.ts"]["add"]).toBeInstanceOf(Function);
-    expect(exportMap["/utils/foo.ts"]["sub"]).toBeInstanceOf(Function);
+    expect(
+      (runtime as unknown as {
+        callbackEvaluator: { callbackCreatorCache: Map<string, () => unknown> };
+      }).callbackEvaluator.callbackCreatorCache.size,
+    ).toBe(0);
   });
 });
 
-function execute(
-  bundled: JsScript,
-  rtBundle?: object,
-): {
-  main: Record<string, unknown>;
-  exportMap: Record<string, Record<string, unknown>>;
-} {
-  const runtime = new UnsafeEvalRuntime();
-  const isolate = runtime.getIsolate("");
-  const evaledBundle = isolate.execute(bundled);
-  const result = rtBundle !== undefined
-    ? evaledBundle.invoke(rtBundle).inner()
-    : evaledBundle.invoke().inner();
-  if (
-    result && typeof result === "object" && "main" in result &&
-    "exportMap" in result
-  ) {
-    return {
-      main: result.main as Record<string, unknown>,
-      exportMap: result.exportMap as Record<string, Record<string, unknown>>,
+describe("Engine module evaluation", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  // NOTE: arbitrary top-level call results (`export default add(10, 2)`) are
+  // rejected by the SES module-scope policy under the ESM record loader, so
+  // these execute imported functions via exported functions instead.
+  it("Compiles and executes a set of typescript files", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { add } from './utils.ts';",
+            "export default function compute(): number { return add(10, 2); }",
+          ].join("\n"),
+        },
+        {
+          name: "/utils.ts",
+          contents: "export const add=(x:number,y:number):number =>x+y;",
+        },
+      ],
     };
-  }
-  throw new Error("Unexpected evaluation result.");
-}
+    const { main } = await runtime.harness.compileAndEvaluateModules(program);
+    expect((main!.default as () => number)()).toBe(12);
+  });
+
+  it("Exports all file exports", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { add } from './utils/foo.ts';",
+            "export function compute(): number { return add(10, 2); }",
+            "export const foo = 'bar';",
+          ].join("\n"),
+        },
+        {
+          name: "/utils/foo.ts",
+          contents:
+            "export const add = (x: number, y: number): number => x + y; export const sub = (x: number, y: number): number => x - y;",
+        },
+      ],
+    };
+    const { exportMap } = await runtime.harness.compileAndEvaluateModules(
+      program,
+    );
+    expect(exportMap).toBeDefined();
+    // The export map is keyed by normalized authored paths and includes every
+    // authored module's full export namespace.
+    expect((exportMap!["/main.tsx"]["compute"] as () => number)()).toBe(12);
+    expect(exportMap!["/main.tsx"]["foo"]).toBe("bar");
+    expect(exportMap!["/utils/foo.ts"]["add"]).toBeInstanceOf(Function);
+    expect(exportMap!["/utils/foo.ts"]["sub"]).toBeInstanceOf(Function);
+  });
+});

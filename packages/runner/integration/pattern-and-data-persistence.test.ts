@@ -14,12 +14,12 @@
  * and data are truly persisted and can be loaded fresh from storage.
  */
 
-import { assertEquals } from "@std/assert";
-import { Runtime, type RuntimeProgram } from "@commontools/runner";
-import { Identity, type IdentityCreateConfig } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import type { Cell, JSONSchema, MemorySpace } from "@commontools/runner";
-import { env } from "@commontools/integration";
+import { assert, assertEquals } from "@std/assert";
+import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
+import { Identity, type IdentityCreateConfig } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { Cell, JSONSchema, MemorySpace, URI } from "@commonfabric/runner";
+import { env } from "@commonfabric/integration";
 
 const API_URL = new URL(env.API_URL);
 
@@ -46,10 +46,11 @@ const patternProgram: RuntimeProgram = {
     {
       name: "/main.tsx",
       contents: [
-        "import { pattern, lift } from 'commontools';",
+        "import { pattern, lift } from 'commonfabric';",
         "",
         "// Define lifts outside the pattern body",
         "const computeSum = lift((data: { values: number[] }) => {",
+        "  console.log('[computeSum]', JSON.stringify(data));",
         "  return data.values.reduce((acc: number, v: number) => acc + v, 0);",
         "});",
         "",
@@ -94,7 +95,7 @@ interface TestContext {
 function createTestContext(identity: Identity): TestContext {
   const storageManager = StorageManager.open({
     as: identity,
-    address: new URL("/api/storage/memory", API_URL),
+    memoryHost: new URL(API_URL),
   });
   const runtime = new Runtime({
     apiUrl: API_URL,
@@ -137,7 +138,7 @@ function getResultCell(
 async function phase1SavePatternAndData(
   identity: Identity,
   space: MemorySpace,
-): Promise<string> {
+): Promise<URI> {
   console.log("\n--- Phase 1: Save pattern and data ---");
 
   const ctx = createTestContext(identity);
@@ -174,7 +175,7 @@ async function phase1SavePatternAndData(
 async function phase2LoadAndVerify(
   identity: Identity,
   space: MemorySpace,
-  patternId: string,
+  patternId: URI,
 ): Promise<void> {
   console.log("\n--- Phase 2: Load pattern and data from storage ---");
 
@@ -202,9 +203,10 @@ async function phase2LoadAndVerify(
     resultCell,
   );
   await tx.commit();
-  await runResult.pull();
+  const pulled = await runResult.pull();
 
   const output = runResult.getAsQueryResult();
+  console.log(`Pulled result: ${JSON.stringify(pulled)}`);
   console.log(`Computed result: ${JSON.stringify(output)}`);
 
   // Verify
@@ -230,7 +232,7 @@ async function phase2LoadAndVerify(
 async function phase3ReactivityAndIsolation(
   identity: Identity,
   space: MemorySpace,
-  patternId: string,
+  patternId: URI,
 ): Promise<void> {
   console.log("\n--- Phase 3: Reactivity and instance isolation ---");
 
@@ -260,6 +262,12 @@ async function phase3ReactivityAndIsolation(
     resultCell3,
   );
 
+  const phase3Commit = await tx.commit();
+  assert(
+    phase3Commit.ok,
+    `Phase 3 setup commit failed: ${JSON.stringify(phase3Commit)}`,
+  );
+
   // Also load and start Phase 2's instance to verify isolation
   // NOTE: This sync is required - without it, Phase 2's pattern sees undefined inputs
   // because the input cell data isn't auto-loaded from storage.
@@ -269,8 +277,6 @@ async function phase3ReactivityAndIsolation(
   const resultCell2 = getResultCell(ctx.runtime, space, RESULT_CELL_ID_PHASE_2);
   await ctx.runtime.start(resultCell2);
   console.log("Started Phase 2's instance for isolation check");
-
-  await tx.commit();
   await runResult3.pull();
   await resultCell2.pull();
 
@@ -423,7 +429,7 @@ async function testPatternAndDataPersistence() {
 Deno.test({
   name: "pattern and data persistence - full reactive cycle",
   fn: async () => {
-    let timeoutHandle: number;
+    let timeoutHandle: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise((_, reject) => {
       timeoutHandle = setTimeout(() => {
         reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));

@@ -1,14 +1,4 @@
-/// <cts-enable />
-import {
-  Cell,
-  cell,
-  Default,
-  derive,
-  handler,
-  lift,
-  pattern,
-  str,
-} from "commontools";
+import { Cell, cell, Default, handler, lift, pattern, str } from "commonfabric";
 
 interface NoOpCounterArgs {
   value: Default<number, 0>;
@@ -69,11 +59,8 @@ export const counterNoOpEvents = pattern<NoOpCounterArgs>(
     const currentValue = liftCurrentValue(value);
     const updateCount = liftUpdateCount(updates);
     const lastEventView = liftLastEventView(lastEvent);
-    const hasChanges = derive(updateCount, (count) => count > 0);
-    const status = derive(
-      hasChanges,
-      (changed) => (changed ? "changed" : "no changes"),
-    );
+    const hasChanges = updateCount > 0;
+    const status = hasChanges ? "changed" : "no changes";
     const label = str`Counter value ${currentValue} (${status})`;
 
     return {

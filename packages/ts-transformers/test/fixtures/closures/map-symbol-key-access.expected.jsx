@@ -1,5 +1,16 @@
-import * as __ctHelpers from "commontools";
-import { NAME, UI, pattern } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { NAME, UI, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Entry {
     [NAME]: string;
     [UI]: string;
@@ -7,52 +18,51 @@ interface Entry {
 interface Input {
     items: Entry[];
 }
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    return ({ n: item.key(__cfHelpers.NAME), u: item.key(__cfHelpers.UI) });
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Entry"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        Entry: {
+            type: "object",
+            properties: {
+                $NAME: {
+                    type: "string"
+                },
+                $UI: {
+                    type: "string"
+                }
+            },
+            required: ["$NAME", "$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        n: {
+            type: "string"
+        },
+        u: {
+            type: "string"
+        }
+    },
+    required: ["n", "u"]
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-symbol-key-access
 // Verifies: .map() on reactive array is transformed when callback uses symbol key access
 //   .map(fn) → .mapWithPattern(pattern(...), {})
-//   item[NAME] → item.key(__ctHelpers.NAME), item[UI] → item.key(__ctHelpers.UI)
+//   item[NAME] → item.key(__cfHelpers.NAME), item[UI] → item.key(__cfHelpers.UI)
 // Context: Symbol-keyed property access (NAME, UI) is lowered to .key() with helper references
-const _p = pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
-    return items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-        const item = __ct_pattern_input.key("element");
-        return ({ n: item.key(__ctHelpers.NAME), u: item.key(__ctHelpers.UI) });
-    }, {
-        type: "object",
-        properties: {
-            element: {
-                $ref: "#/$defs/Entry"
-            }
-        },
-        required: ["element"],
-        $defs: {
-            Entry: {
-                type: "object",
-                properties: {
-                    $NAME: {
-                        type: "string"
-                    },
-                    $UI: {
-                        type: "string"
-                    }
-                },
-                required: ["$NAME", "$UI"]
-            }
-        }
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            n: {
-                type: "string",
-                asOpaque: true
-            },
-            u: {
-                type: "string",
-                asOpaque: true
-            }
-        },
-        required: ["n", "u"]
-    } as const satisfies __ctHelpers.JSONSchema), {});
+const _p = pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
+    return items.mapWithPattern(__cfPattern_1, {});
 }, {
     type: "object",
     properties: {
@@ -78,25 +88,25 @@ const _p = pattern((__ct_pattern_input) => {
             required: ["$NAME", "$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "array",
     items: {
         type: "object",
         properties: {
             n: {
-                type: "string",
-                asOpaque: true
+                type: "string"
             },
             u: {
-                type: "string",
-                asOpaque: true
+                type: "string"
             }
         },
         required: ["n", "u"]
-    },
-    asOpaque: true
-} as const satisfies __ctHelpers.JSONSchema);
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    _p,
+    __cfPattern_1
+});

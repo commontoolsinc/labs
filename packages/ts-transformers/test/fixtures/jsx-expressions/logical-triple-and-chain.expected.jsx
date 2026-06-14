@@ -1,10 +1,64 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern, UI } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { cell, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    user: __cfHelpers.Cell<{ active: boolean; verified: boolean; name: string; }>;
+}, boolean>(({ user }) => user.get().active && user.get().verified, {
+    type: "object",
+    properties: {
+        user: {
+            type: "object",
+            properties: {
+                active: {
+                    type: "boolean"
+                },
+                verified: {
+                    type: "boolean"
+                }
+            },
+            required: ["active", "verified"],
+            asCell: ["readonly"]
+        }
+    },
+    required: ["user"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_2 = __cfHelpers.lift<{
+    user: __cfHelpers.Cell<{ active: boolean; verified: boolean; name: string; }>;
+}, string>(({ user }) => user.get().name, {
+    type: "object",
+    properties: {
+        user: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"],
+            asCell: ["readonly"]
+        }
+    },
+    required: ["user"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
 // Tests triple && chain: a && b && c
-// Should produce nested when calls or derive the entire chain
+// Should produce nested when calls or lower the entire chain to a lift-applied computation
 // FIXTURE: logical-triple-and-chain
-// Verifies: triple && chain (a && b && <JSX>) is transformed to nested when() or derive()
-//   user.get().active && user.get().verified && <span> → when(derive({user}, ...), <span>)
+// Verifies: triple && chain (a && b && <JSX>) is transformed to nested when() or a lift-applied computation
+//   user.get().active && user.get().verified && <span> → when(lift(...)({ user }), <span>)
 export default pattern((_state) => {
     const user = cell<{
         active: boolean;
@@ -24,74 +78,28 @@ export default pattern((_state) => {
             }
         },
         required: ["active", "verified", "name"]
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("user", true);
     return {
         [UI]: (<div>
         {/* Triple && chain with complex conditions */}
-        {__ctHelpers.when({
+        {__cfHelpers.when({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{
                     type: "boolean"
                 }, {}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                user: {
-                    type: "object",
-                    properties: {
-                        active: {
-                            type: "boolean"
-                        },
-                        verified: {
-                            type: "boolean"
-                        },
-                        name: {
-                            type: "string"
-                        }
-                    },
-                    required: ["active", "verified", "name"],
-                    asCell: true
-                }
-            },
-            required: ["user"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().active && user.get().verified), <span>Welcome, {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                user: {
-                    type: "object",
-                    properties: {
-                        active: {
-                            type: "boolean"
-                        },
-                        verified: {
-                            type: "boolean"
-                        },
-                        name: {
-                            type: "string"
-                        }
-                    },
-                    required: ["active", "verified", "name"],
-                    asCell: true
-                }
-            },
-            required: ["user"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name)}!</span>)}
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ user: user }), <span>Welcome, {__cfLift_2({ user: user })}!</span>)}
       </div>),
     };
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -104,11 +112,10 @@ export default pattern((_state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -121,8 +128,11 @@ export default pattern((_state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2
+});

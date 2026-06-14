@@ -1,7 +1,9 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { expect } from "@std/expect";
-import type { BuiltInLLMMessage, BuiltInLLMToolCallPart } from "commontools";
+import type { BuiltInLLMMessage, BuiltInLLMToolCallPart } from "commonfabric";
 import { llmDialogTestHelpers } from "../src/builtins/llm-dialog.ts";
+import { schemaWithInjectionSafeAnnotations } from "../src/cfc/schema-sanitization.ts";
+import type { NormalizedFullLink } from "../src/link-utils.ts";
 
 const {
   parseLLMFriendlyLink,
@@ -14,6 +16,8 @@ const {
   simplifySchemaForContext,
   prepareSchemaForLLM,
   resolveRefsForLLM,
+  serializeForLLMObservation,
+  toolAllowsObservedConfidentiality,
 } = llmDialogTestHelpers;
 
 Deno.test("parseTargetString recognizes handle format", () => {
@@ -259,18 +263,213 @@ Deno.test("createToolResultMessages handles null result with explicit null", () 
   assertEquals(outputPart.output, { type: "json", value: null });
 });
 
+Deno.test("serializeForLLMObservation keeps below-ceiling data inline", () => {
+  const rootLink: NormalizedFullLink = {
+    id: "of:test-inline",
+    space: "did:test:inline",
+    scope: "space",
+    path: [],
+  };
+  const result = serializeForLLMObservation({
+    value: { body: "hello" },
+    schema: {
+      type: "object",
+      properties: {
+        body: {
+          type: "string",
+          ifc: { confidentiality: ["internal"] },
+        },
+      },
+    },
+    contextSpace: "did:test:inline",
+    rootLink,
+    observationMaxConfidentiality: ["internal"],
+  });
+
+  assertEquals(result.value, { body: "hello" });
+  assertEquals(result.observedConfidentiality, ["internal"]);
+});
+
+Deno.test("serializeForLLMObservation redacts above-ceiling fields to links", () => {
+  const rootLink: NormalizedFullLink = {
+    id: "of:test-redacted",
+    space: "did:test:redacted",
+    scope: "space",
+    path: [],
+  };
+  const result = serializeForLLMObservation({
+    value: { public: "ok", secret: "classified" },
+    schema: {
+      type: "object",
+      properties: {
+        public: { type: "string" },
+        secret: {
+          type: "string",
+          ifc: { confidentiality: ["secret"] },
+        },
+      },
+    },
+    contextSpace: "did:test:redacted",
+    rootLink,
+    observationMaxConfidentiality: ["internal"],
+  });
+
+  assertEquals(result.value, {
+    public: "ok",
+    secret: { "@link": "/of:test-redacted/secret" },
+  });
+  assertEquals(result.observedConfidentiality, []);
+});
+
+Deno.test("serializeForLLMObservation exposes injection-safe booleans but links free strings", () => {
+  const promptRisk = {
+    type: "https://commonfabric.org/cfc/atom/Caveat",
+    kind:
+      "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
+    source: "of:hostile",
+  } as const;
+  const promptInfluence = {
+    type: "https://commonfabric.org/cfc/atom/Caveat",
+    kind: "https://commonfabric.org/cfc/concepts/prompt-influence",
+    source: "of:hostile",
+  } as const;
+  const rootLink: NormalizedFullLink = {
+    id: "of:test-assessment",
+    space: "did:test:assessment",
+    scope: "space",
+    path: [],
+  };
+  const schema = schemaWithInjectionSafeAnnotations({
+    type: "object",
+    properties: {
+      approved: { type: "boolean" },
+      reasoning: { type: "string" },
+    },
+    required: ["approved", "reasoning"],
+    additionalProperties: false,
+  }, [promptRisk, promptInfluence]);
+
+  const result = serializeForLLMObservation({
+    value: {
+      approved: false,
+      reasoning: "The briefing includes untrusted free-form text.",
+    },
+    schema,
+    contextSpace: "did:test:assessment",
+    rootLink,
+    observationMaxConfidentiality: [promptInfluence],
+  });
+
+  assertEquals(result.value, {
+    approved: false,
+    reasoning: { "@link": "/of:test-assessment/reasoning" },
+  });
+  assertEquals(result.observedConfidentiality, [promptInfluence]);
+});
+
+Deno.test("serializeForLLMObservation does not taint from redacted nested values", () => {
+  const rootLink: NormalizedFullLink = {
+    id: "of:test-mixed",
+    space: "did:test:mixed",
+    scope: "space",
+    path: [],
+  };
+  const result = serializeForLLMObservation({
+    value: {
+      headline: "public",
+      details: {
+        safe: "allowed",
+        secret: "hidden",
+      },
+    },
+    schema: {
+      type: "object",
+      properties: {
+        headline: { type: "string" },
+        details: {
+          type: "object",
+          properties: {
+            safe: {
+              type: "string",
+              ifc: { confidentiality: ["internal"] },
+            },
+            secret: {
+              type: "string",
+              ifc: { confidentiality: ["secret"] },
+            },
+          },
+        },
+      },
+    },
+    contextSpace: "did:test:mixed",
+    rootLink,
+    observationMaxConfidentiality: ["internal"],
+  });
+
+  assertEquals(result.value, {
+    headline: "public",
+    details: {
+      safe: "allowed",
+      secret: { "@link": "/of:test-mixed/details/secret" },
+    },
+  });
+  assertEquals(result.observedConfidentiality, ["internal"]);
+});
+
+Deno.test("toolAllowsObservedConfidentiality denies tools above maxConfidentiality", () => {
+  const allowed = toolAllowsObservedConfidentiality(
+    {
+      llmTools: {
+        restrictedTool: {
+          description: "restricted",
+          inputSchema: {
+            type: "object",
+            ifc: { maxConfidentiality: ["internal"] },
+          },
+        },
+      },
+      dynamicToolCells: new Map(),
+    },
+    "restrictedTool",
+    ["secret"],
+  );
+
+  assertEquals(allowed, false);
+});
+
+Deno.test("toolAllowsObservedConfidentiality permits tools within maxConfidentiality", () => {
+  const allowed = toolAllowsObservedConfidentiality(
+    {
+      llmTools: {
+        restrictedTool: {
+          description: "restricted",
+          inputSchema: {
+            type: "object",
+            ifc: { maxConfidentiality: ["secret"] },
+          },
+        },
+      },
+      dynamicToolCells: new Map(),
+    },
+    "restrictedTool",
+    ["secret"],
+  );
+
+  assertEquals(allowed, true);
+});
+
 // Tests for simplifySchemaForContext
 // Note: We cast schemas to `any` to avoid strict type checking on `type` field literals
 
-Deno.test("simplifySchemaForContext preserves asStream marker", () => {
+Deno.test("simplifySchemaForContext preserves asCell stream marker", () => {
   const schema: any = {
     type: "object",
     properties: {
-      events: { asStream: true, type: "string" },
+      events: { asCell: ["stream"], type: "string" },
     },
   };
   const result = simplifySchemaForContext(schema) as any;
-  assertEquals(result.properties?.events?.asStream, true);
+  assertEquals(result.properties?.events?.asCell, ["stream"]);
   assertEquals(result.properties?.events?.type, "string");
 });
 
@@ -279,7 +478,7 @@ Deno.test("simplifySchemaForContext preserves asCell marker with nested properti
     type: "object",
     properties: {
       user: {
-        asCell: true,
+        asCell: ["cell"],
         type: "object",
         properties: {
           name: { type: "string" },
@@ -290,21 +489,10 @@ Deno.test("simplifySchemaForContext preserves asCell marker with nested properti
     },
   };
   const result = simplifySchemaForContext(schema) as any;
-  assertEquals(result.properties?.user?.asCell, true);
+  assertEquals(result.properties?.user?.asCell, ["cell"]);
   assertEquals(result.properties?.user?.properties?.name?.type, "string");
   assertEquals(result.properties?.user?.properties?.age?.type, "number");
   assertEquals(result.properties?.user?.required, ["name", "age"]);
-});
-
-Deno.test("simplifySchemaForContext preserves asOpaque marker", () => {
-  const schema: any = {
-    type: "object",
-    properties: {
-      state: { asOpaque: true, type: "object" },
-    },
-  };
-  const result = simplifySchemaForContext(schema) as any;
-  assertEquals(result.properties?.state?.asOpaque, true);
 });
 
 Deno.test("simplifySchemaForContext preserves small enums", () => {
@@ -373,7 +561,7 @@ Deno.test("simplifySchemaForContext limits recursion depth", () => {
             properties: {
               c: {
                 type: "object",
-                asStream: true, // wrapper marker to verify it's preserved at depth limit
+                asCell: ["stream"], // wrapper marker to verify it's preserved at depth limit
                 properties: {
                   d: { type: "string", description: "deep field" },
                 },
@@ -390,7 +578,7 @@ Deno.test("simplifySchemaForContext limits recursion depth", () => {
   const deep = result.properties?.a?.properties?.b?.properties?.c;
   // At max depth, only type and wrapper markers are preserved, properties are dropped
   assertEquals(deep?.type, "object");
-  assertEquals(deep?.asStream, true);
+  assertEquals(deep?.asCell, ["stream"]);
   assertEquals(deep?.properties, undefined); // nested properties dropped at max depth
 });
 
@@ -431,7 +619,7 @@ Deno.test("simplifySchemaForContext handles Stream with nested detail structure"
     type: "object",
     properties: {
       editContent: {
-        asStream: true,
+        asCell: ["stream"],
         type: "object",
         properties: {
           detail: {
@@ -445,7 +633,7 @@ Deno.test("simplifySchemaForContext handles Stream with nested detail structure"
     },
   };
   const result = simplifySchemaForContext(schema) as any;
-  assertEquals(result.properties?.editContent?.asStream, true);
+  assertEquals(result.properties?.editContent?.asCell, ["stream"]);
   assertEquals(result.properties?.editContent?.type, "object");
   assertEquals(
     result.properties?.editContent?.properties?.detail?.properties?.value?.type,
@@ -613,16 +801,16 @@ Deno.test("prepareSchemaForLLM strips internal markers and resolves $ref", () =>
       Item: { type: "string" },
     },
     properties: {
-      data: { $ref: "#/$defs/Item", asCell: true },
-      stream: { type: "number", asStream: true },
-      hidden: { type: "object", asOpaque: true },
+      data: { $ref: "#/$defs/Item", asCell: ["cell"] },
+      stream: { type: "number", asCell: ["stream"] },
+      hidden: { type: "object", asCell: ["opaque"] },
     },
   };
   const result = prepareSchemaForLLM(schema) as any;
   // asCell, asStream, asOpaque should be stripped
   assertEquals(result.properties?.data?.asCell, undefined);
-  assertEquals(result.properties?.stream?.asStream, undefined);
-  assertEquals(result.properties?.hidden?.asOpaque, undefined);
+  assertEquals(result.properties?.stream?.asCell, undefined);
+  assertEquals(result.properties?.hidden?.asCell, undefined);
   // $ref should be resolved
   assertEquals(result.properties?.data?.type, "string");
   assertEquals(result.$defs, undefined);
@@ -639,7 +827,11 @@ Deno.test("prepareSchemaForLLM handles recursive TodoItem schema", () => {
       TodoItem: {
         properties: {
           done: { default: false, type: "boolean" },
-          items: { $ref: "#/$defs/AnonymousType_1", asCell: true, default: [] },
+          items: {
+            $ref: "#/$defs/AnonymousType_1",
+            asCell: ["cell"],
+            default: [],
+          },
           title: { type: "string" },
         },
         required: ["done", "items", "title"],

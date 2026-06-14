@@ -1,9 +1,10 @@
-/// <cts-enable />
 import {
   action,
   computed,
   type Default,
   equals,
+  FS,
+  type FsProjection,
   generateText,
   handler,
   NAME,
@@ -13,11 +14,12 @@ import {
   type PatternToolResult,
   SELF,
   type Stream,
+  toCompactDebugString,
   UI,
   type VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import NoteMd from "./note-md.tsx";
 import {
   type MentionablePiece,
@@ -32,23 +34,25 @@ export { NotePiece };
 // ===== Output Type =====
 
 /** Represents a small #note a user took to remember some text. */
-interface NoteOutput extends NotePiece {
+export interface NoteOutput extends NotePiece {
   [NAME]: string;
   [UI]: VNode;
+  [FS]: FsProjection;
   title: string;
   content: string;
   summary: string;
-  mentioned: Default<MentionablePiece[], []>;
+  mentioned: MentionablePiece[] | Default<[]>;
   backlinks: MentionablePiece[];
   isHidden: boolean;
   grep: PatternToolResult<{ content: string }>;
   translate: PatternToolResult<{ content: string }>;
   editContent: Stream<{ detail: { value: string } }>;
+  setTitle: Stream<string>;
   appendLink: Stream<{ piece: Writable<MentionablePiece> }>;
   createNewNote: Stream<void>;
   /** Parent notebook reference, null if not in a notebook */
   parentNotebook: NotebookPiece | null;
-  /** Minimal UI for embedding in containers like Record. Use via ct-render variant="embedded". */
+  /** Minimal UI for embedding in containers like Record. Use via cf-render variant="embedded". */
   embeddedUI: VNode;
   // Test-accessible state
   menuOpen: boolean;
@@ -62,7 +66,7 @@ interface NoteOutput extends NotePiece {
 
 // ===== Module-scope handlers (reused with different bindings) =====
 
-// Used in ct-code-editor - binds mentionable and allPieces
+// Used in cf-code-editor - binds mentionable and allPieces
 const handleNewBacklink = handler<
   {
     detail: {
@@ -139,9 +143,13 @@ const Note = pattern<NoteInput, NoteOutput>(
     content,
     isHidden,
     linkPattern,
-    parentNotebook,
+    parentNotebook: _parentNotebook,
     [SELF]: self,
   }) => {
+    // Ensure parentNotebook is always a Writable (input is optional)
+    const parentNotebook = _parentNotebook ??
+      new Writable(null as NotebookPiece | null);
+
     // Type-based discovery for notebooks and "All Notes" piece
     const notebookWish = wish<NotebookPiece>({
       query: "#notebook",
@@ -161,21 +169,21 @@ const Note = pattern<NoteInput, NoteOutput>(
     // Still need allPieces for write operations (push new notes, push backlinks)
     const { allPieces } = wish<{ allPieces: Writable<MinimalPiece[]> }>(
       { query: "#default", headless: true },
-    ).result;
-    const mentionable = wish<Default<MentionablePiece[], []>>(
+    ).result!;
+    const mentionable = wish<MentionablePiece[] | Default<[]>>(
       { query: "#mentionable", headless: true },
     ).result;
     const _recentPieces = wish<MinimalPiece[]>(
       { query: "#recent", headless: true },
     ).result;
-    const mentioned = Writable.of<MentionablePiece[]>([]);
+    const mentioned = new Writable<MentionablePiece[]>([]);
 
     // UI state
-    const menuOpen = Writable.of(false);
-    const isEditingTitle = Writable.of(false);
+    const menuOpen = new Writable(false);
+    const isEditingTitle = new Writable(false);
 
     // Backlinks - populated by backlinks-index.tsx
-    const backlinks = Writable.of<MentionablePiece[]>([]);
+    const backlinks = new Writable<MentionablePiece[]>([]);
 
     // Summary - truncated content for search indexing
     const summary = computed(() => {
@@ -259,10 +267,26 @@ const Note = pattern<NoteInput, NoteOutput>(
 
     // Exported stream for external content editing
     const editContent = action(
-      ({ detail }: { detail: { value: string } }) => {
-        content.set(detail.value);
+      (rawInput: { detail: { value: string } }) => {
+        // Single widening cast to allow runtime validation of unexpected shapes
+        const loose = rawInput as { detail?: { value?: unknown } };
+        const value = loose?.detail?.value;
+        if (typeof value !== "string") {
+          console.error(
+            `editContent: invalid input shape. Expected { detail: { value: string } }, got: ${
+              toCompactDebugString(rawInput)
+            }`,
+          );
+          return;
+        }
+        content.set(value);
       },
     );
+
+    // Exported stream for external title editing
+    const setTitle = action((newTitle: string) => {
+      title.set(newTitle);
+    });
 
     // Append a wiki-link to another piece at the end of the note content
     const appendLink = action(
@@ -341,13 +365,16 @@ const Note = pattern<NoteInput, NoteOutput>(
     // ===== UI =====
 
     const editorUI = (
-      <ct-code-editor
+      <cf-code-editor
         $value={content}
-        $mentionable={mentionable}
+        $mentionable={mentionable!}
         $mentioned={mentioned}
         $pattern={patternJson}
         onbacklink-click={handlePieceLinkClick}
-        onbacklink-create={handleNewBacklink({ mentionable, allPieces })}
+        onbacklink-create={handleNewBacklink({
+          mentionable: mentionable!,
+          allPieces,
+        })}
         language="text/markdown"
         mode="prose"
         wordWrap
@@ -358,18 +385,23 @@ const Note = pattern<NoteInput, NoteOutput>(
 
     return {
       [NAME]: computed(() => `📝 ${title.get()}`),
+      [FS]: {
+        type: "text/markdown",
+        frontmatter: { title },
+        content,
+      },
       [UI]: (
-        <ct-screen>
-          <ct-vstack
+        <cf-screen>
+          <cf-vstack
             slot="header"
             gap="2"
             padding="4"
             style={{
-              borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
+              borderBottom: "1px solid var(--cf-theme-color-border, #e5e5e7)",
             }}
           >
             {/* Parent notebook chip */}
-            <ct-hstack
+            <cf-hstack
               gap="2"
               align="center"
               style={{
@@ -380,19 +412,19 @@ const Note = pattern<NoteInput, NoteOutput>(
               <span
                 style={{
                   fontSize: "13px",
-                  color: "var(--ct-color-text-secondary)",
+                  color: "var(--cf-theme-color-text-secondary)",
                 }}
               >
                 In:
               </span>
-              <ct-chip
+              <cf-chip
                 label={parentNotebookLabel}
                 interactive
-                onct-click={goToParent}
+                oncf-click={goToParent}
               />
-            </ct-hstack>
+            </cf-hstack>
 
-            <ct-hstack gap="3" style={{ alignItems: "center" }}>
+            <cf-hstack gap="3" style={{ alignItems: "center" }}>
               {/* Editable Title - click to edit */}
               <div
                 style={{
@@ -417,42 +449,42 @@ const Note = pattern<NoteInput, NoteOutput>(
                   marginRight: "12px",
                 }}
               >
-                <ct-input
+                <cf-input
                   $value={title}
                   placeholder="Note title..."
                   style={{ flex: 1 }}
-                  onct-blur={stopEditingTitle}
-                  onct-keydown={handleTitleKeydown}
+                  oncf-blur={stopEditingTitle}
+                  oncf-keydown={handleTitleKeydown}
                 />
               </div>
 
               {/* View Mode button */}
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={goToViewer}
                 style={headerButtonStyle}
                 title="View as markdown"
               >
                 View
-              </ct-button>
+              </cf-button>
 
               {/* New Note button */}
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={createNewNote}
                 style={{ ...headerButtonStyle, gap: "4px" }}
                 title="Create new note"
               >
                 📝 New
-              </ct-button>
+              </cf-button>
 
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={toggleMenu}
                 style={{ ...headerButtonStyle, padding: "8px 16px" }}
               >
                 Notebooks ▾
-              </ct-button>
+              </cf-button>
 
               {/* Backdrop to close menu */}
               <div
@@ -466,15 +498,15 @@ const Note = pattern<NoteInput, NoteOutput>(
               />
 
               {/* Dropdown Menu */}
-              <ct-vstack
+              <cf-vstack
                 gap="0"
                 style={{
                   display: menuDisplayStyle,
                   position: "fixed",
                   top: "112px",
                   right: "16px",
-                  background: "var(--ct-color-bg, white)",
-                  border: "1px solid var(--ct-color-border, #e5e5e7)",
+                  background: "var(--cf-theme-color-background, white)",
+                  border: "1px solid var(--cf-theme-color-border, #e5e5e7)",
                   borderRadius: "12px",
                   boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
                   minWidth: "180px",
@@ -483,7 +515,7 @@ const Note = pattern<NoteInput, NoteOutput>(
                 }}
               >
                 {notebooks.map((notebook) => (
-                  <ct-button
+                  <cf-button
                     variant="ghost"
                     onClick={menuGoToNotebook({ menuOpen, notebook })}
                     style={{ justifyContent: "flex-start" }}
@@ -496,7 +528,7 @@ const Note = pattern<NoteInput, NoteOutput>(
                         ? " ✓"
                         : "";
                     })}
-                  </ct-button>
+                  </cf-button>
                 ))}
 
                 {/* Divider + All Notes - only show if All Notes piece exists */}
@@ -504,12 +536,12 @@ const Note = pattern<NoteInput, NoteOutput>(
                   style={{
                     display: allNotesDividerDisplay,
                     height: "1px",
-                    background: "var(--ct-color-border, #e5e5e7)",
+                    background: "var(--cf-theme-color-border, #e5e5e7)",
                     margin: "4px 8px",
                   }}
                 />
 
-                <ct-button
+                <cf-button
                   variant="ghost"
                   onClick={menuAllNotebooks}
                   style={{
@@ -518,21 +550,21 @@ const Note = pattern<NoteInput, NoteOutput>(
                   }}
                 >
                   {"  "}📁 All Notes
-                </ct-button>
-              </ct-vstack>
-            </ct-hstack>
-          </ct-vstack>
+                </cf-button>
+              </cf-vstack>
+            </cf-hstack>
+          </cf-vstack>
 
           {editorUI}
 
-          <ct-hstack slot="footer">
+          <cf-hstack slot="footer">
             {backlinks?.map((piece) => (
-              <ct-button onClick={handleBacklinkClick({ piece })}>
+              <cf-button onClick={handleBacklinkClick({ piece })}>
                 {piece?.[NAME]}
-              </ct-button>
+              </cf-button>
             ))}
-          </ct-hstack>
-        </ct-screen>
+          </cf-hstack>
+        </cf-screen>
       ),
       title,
       content,
@@ -544,6 +576,7 @@ const Note = pattern<NoteInput, NoteOutput>(
       grep: patternTool(grepPattern, { content }),
       translate: patternTool(translatePattern, { content }),
       editContent,
+      setTitle,
       appendLink,
       createNewNote,
       embeddedUI: editorUI,

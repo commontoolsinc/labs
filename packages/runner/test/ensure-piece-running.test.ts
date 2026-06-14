@@ -1,11 +1,15 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { type Pattern, TYPE } from "../src/builder/types.ts";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { type Pattern } from "../src/builder/types.ts";
+import { getSigilLink } from "../src/runner-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { ensurePieceRunning } from "../src/ensure-piece-running.ts";
+import { trustPattern } from "./support/trusted-builder.ts";
+import { getDerivedInternalCell, getMetaCell } from "../src/link-utils.ts";
+import { setResultCell } from "../src/result-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -30,8 +34,8 @@ describe("ensurePieceRunning", () => {
     await storageManager?.close();
   });
 
-  it("should return false for cells without process cell structure", async () => {
-    // Create a cell that has no piece structure (no process cell, no pattern)
+  it("should return false for cells without result metadata", async () => {
+    // Create a cell that has no piece structure (no result metadata, no pattern)
     const orphanCell = runtime.getCell<{ $stream: true }>(
       space,
       "orphan-cell-test",
@@ -52,36 +56,22 @@ describe("ensurePieceRunning", () => {
     expect(result).toBe(false);
   });
 
-  it("should return false for cells without TYPE in process cell", async () => {
-    // Create a result cell that points to a process cell without TYPE
+  it("should return false for cells without pattern metadata", async () => {
+    // Create a result cell with no pattern metadata.
     const resultCell = runtime.getCell(
       space,
-      "no-type-test-result",
+      "no-pattern-test-result",
       undefined,
       tx,
     );
 
-    const processCell = runtime.getCell(
-      space,
-      "no-type-test-process",
-      undefined,
-      tx,
-    );
-
-    // Set up the result cell to point to the process cell
     resultCell.set({ value: 1 });
-    resultCell.setSourceCell(processCell);
-
-    // Process cell has no TYPE
-    processCell.set({
-      argument: { value: 1 },
-      resultRef: resultCell.getAsLink({ base: processCell }),
-    });
+    resultCell.setMetaRaw("argument", { value: 1 });
 
     await tx.commit();
     tx = runtime.edit();
 
-    // ensurePieceRunning should return false - no TYPE means no pattern
+    // ensurePieceRunning should return false - no pattern in result metadata
     const result = await ensurePieceRunning(
       runtime,
       resultCell.getAsNormalizedFullLink(),
@@ -90,18 +80,8 @@ describe("ensurePieceRunning", () => {
     expect(result).toBe(false);
   });
 
-  it("should return false for cells without resultRef in process cell", async () => {
-    // Create a simple pattern
-    const pattern: Pattern = {
-      argumentSchema: { type: "object" },
-      resultSchema: { type: "object" },
-      result: {},
-      nodes: [],
-    };
-
-    const patternId = runtime.patternManager.registerPattern(pattern);
-
-    // Create a result cell that points to a process cell without resultRef
+  it("should return false when result cell pattern cannot be loaded", async () => {
+    // Create a result cell whose pattern metadata points at a missing pattern.
     const resultCell = runtime.getCell(
       space,
       "no-resultref-test-result",
@@ -109,27 +89,14 @@ describe("ensurePieceRunning", () => {
       tx,
     );
 
-    const processCell = runtime.getCell(
-      space,
-      "no-resultref-test-process",
-      undefined,
-      tx,
-    );
-
     resultCell.set({ value: 1 });
-    resultCell.setSourceCell(processCell);
-
-    // Process cell has TYPE but no resultRef
-    processCell.set({
-      [TYPE]: patternId,
-      argument: { value: 1 },
-      // Missing resultRef!
-    });
+    resultCell.setMetaRaw("pattern", getSigilLink("of:missing-pattern-test"));
+    resultCell.setMetaRaw("argument", { value: 1 });
 
     await tx.commit();
     tx = runtime.edit();
 
-    // ensurePieceRunning should return false - no resultRef
+    // ensurePieceRunning should return false - pattern cannot be loaded
     const result = await ensurePieceRunning(
       runtime,
       resultCell.getAsNormalizedFullLink(),
@@ -138,7 +105,7 @@ describe("ensurePieceRunning", () => {
     expect(result).toBe(false);
   });
 
-  it("should start a piece with valid process cell structure", async () => {
+  it("should start a piece with valid result metadata", async () => {
     // Create a simple pattern
     let patternRan = false;
     const pattern: Pattern = {
@@ -151,7 +118,7 @@ describe("ensurePieceRunning", () => {
         properties: { doubled: { type: "number" } },
       },
       result: {
-        doubled: { $alias: { path: ["internal", "doubled"] } },
+        doubled: { $alias: { partialCause: "doubled", path: [] } }, // bound to resultCell.internal.doubled
       },
       nodes: [
         {
@@ -162,44 +129,42 @@ describe("ensurePieceRunning", () => {
               return value * 2;
             },
           },
-          inputs: { $alias: { path: ["argument", "value"] } },
-          outputs: { $alias: { path: ["internal", "doubled"] } },
+          inputs: { $alias: { cell: "argument", path: ["value"] } }, // bound to resultCell.argument.value
+          outputs: { $alias: { partialCause: "doubled", path: [] } }, // bound to resultCell.internal.doubled
         },
       ],
     };
 
-    const patternId = runtime.patternManager.registerPattern(pattern);
+    const patternId = runtime.patternManager.registerPattern(
+      trustPattern(runtime, pattern),
+    );
 
     // Create result cell
     const resultCell = runtime.getCell(
       space,
       "valid-piece-test-result",
-      undefined,
+      pattern.resultSchema,
       tx,
     );
 
-    // Create process cell
-    const processCell = runtime.getCell(
-      space,
-      "valid-piece-test-process",
-      undefined,
+    const argumentCell = getMetaCell(
+      resultCell,
+      "argument",
       tx,
+      pattern.argumentSchema,
     );
+    const doubledCell = getDerivedInternalCell(resultCell, {
+      partialCause: "doubled",
+    }, tx);
 
     // Set up the structure
-    resultCell.set({
-      doubled: {
-        $alias: { path: ["internal", "doubled"], cell: processCell.entityId },
-      },
+    resultCell.setRaw({
+      doubled: doubledCell.getAsWriteRedirectLink(),
     });
-    resultCell.setSourceCell(processCell);
-
-    processCell.set({
-      [TYPE]: patternId,
-      argument: { value: 5 },
-      resultRef: resultCell.getAsLink({ base: processCell }),
-      internal: {},
-    });
+    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
+    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    setResultCell(doubledCell, resultCell);
+    argumentCell.set({ value: 5 });
 
     await tx.commit();
     tx = runtime.edit();
@@ -239,7 +204,9 @@ describe("ensurePieceRunning", () => {
       ],
     };
 
-    const patternId = runtime.patternManager.registerPattern(pattern);
+    const patternId = runtime.patternManager.registerPattern(
+      trustPattern(runtime, pattern),
+    );
 
     const resultCell = runtime.getCell(
       space,
@@ -248,22 +215,17 @@ describe("ensurePieceRunning", () => {
       tx,
     );
 
-    const processCell = runtime.getCell(
-      space,
-      "idempotent-start-test-process",
-      undefined,
+    const argumentCell = getMetaCell(
+      resultCell,
+      "argument",
       tx,
+      pattern.argumentSchema,
     );
 
     resultCell.set({});
-    resultCell.setSourceCell(processCell);
-
-    processCell.set({
-      [TYPE]: patternId,
-      argument: {},
-      resultRef: resultCell.getAsLink({ base: processCell }),
-      internal: {},
-    });
+    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
+    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    argumentCell.set({});
 
     await tx.commit();
     tx = runtime.edit();
@@ -310,7 +272,9 @@ describe("ensurePieceRunning", () => {
       ],
     };
 
-    const patternId = runtime.patternManager.registerPattern(pattern);
+    const patternId = runtime.patternManager.registerPattern(
+      trustPattern(runtime, pattern),
+    );
 
     const resultCell = runtime.getCell(
       space,
@@ -319,22 +283,17 @@ describe("ensurePieceRunning", () => {
       tx,
     );
 
-    const processCell = runtime.getCell(
-      space,
-      "restart-after-stop-test-process",
-      undefined,
+    const argumentCell = getMetaCell(
+      resultCell,
+      "argument",
       tx,
+      pattern.argumentSchema,
     );
 
     resultCell.set({});
-    resultCell.setSourceCell(processCell);
-
-    processCell.set({
-      [TYPE]: patternId,
-      argument: {},
-      resultRef: resultCell.getAsLink({ base: processCell }),
-      internal: {},
-    });
+    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
+    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    argumentCell.set({});
 
     await tx.commit();
     tx = runtime.edit();
@@ -432,14 +391,16 @@ describe("queueEvent with auto-start", () => {
           events: { type: "object" },
         },
       },
-      initial: {
-        internal: {
-          events: { $stream: true },
+      derivedInternalCells: [
+        { partialCause: "doubled" },
+        {
+          partialCause: "events",
+          schema: { default: { $stream: true } },
         },
-      },
+      ],
       result: {
-        doubled: { $alias: { path: ["internal", "doubled"] } },
-        events: { $alias: { path: ["internal", "events"] } },
+        doubled: { $alias: { partialCause: "doubled", path: [] } },
+        events: { $alias: { partialCause: "events", path: [] } },
       },
       nodes: [
         {
@@ -451,14 +412,16 @@ describe("queueEvent with auto-start", () => {
               return value * 2;
             },
           },
-          inputs: { $alias: { path: ["argument", "value"] } },
-          outputs: { $alias: { path: ["internal", "doubled"] } },
+          inputs: { $alias: { cell: "argument", path: ["value"] } },
+          outputs: { $alias: { partialCause: "doubled", path: [] } },
         },
         // Note: NO handler node for events - this is intentional
       ],
     };
 
-    const patternId = runtime.patternManager.registerPattern(pattern);
+    const patternId = runtime.patternManager.registerPattern(
+      trustPattern(runtime, pattern),
+    );
 
     // Create result cell
     const resultCell = runtime.getCell(
@@ -468,35 +431,28 @@ describe("queueEvent with auto-start", () => {
       tx,
     );
 
-    // Create process cell
-    const processCell = runtime.getCell(
-      space,
-      "no-handler-start-test-process",
-      undefined,
-      tx,
-    );
+    // Create a internal and argument cells, and attach them to resultCell.
+    // This would be done inside setupInternal, but we want to proactively set up links
+    // to that internal cell in our result cell.
+    const argumentCell = getMetaCell(resultCell, "argument", tx);
+    const doubledCell = getDerivedInternalCell(resultCell, {
+      partialCause: "doubled",
+    }, tx);
+    const eventsCell = getDerivedInternalCell(resultCell, {
+      partialCause: "events",
+    }, tx);
 
-    // Set up result cell - events points to internal/events in process cell
-    resultCell.set({
-      doubled: {
-        $alias: { path: ["internal", "doubled"], cell: processCell.entityId },
-      },
-      events: {
-        $alias: { path: ["internal", "events"], cell: processCell.entityId },
-      },
+    // Set up result cell - events points to internal/events through metadata
+    resultCell.setRaw({
+      doubled: doubledCell.getAsWriteRedirectLink(),
+      events: eventsCell.getAsWriteRedirectLink(),
     });
-    resultCell.setSourceCell(processCell);
-
-    // Set up process cell - internal.events must be set to $stream: true
-    // (both in pattern.initial and directly on the cell)
-    processCell.set({
-      [TYPE]: patternId,
-      argument: { value: 5 },
-      resultRef: resultCell.getAsLink({ base: processCell }),
-      internal: {
-        events: { $stream: true },
-      },
-    });
+    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
+    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    setResultCell(doubledCell, resultCell);
+    setResultCell(eventsCell, resultCell);
+    argumentCell.set({ value: 5 });
+    eventsCell.setRaw({ $stream: true });
 
     await tx.commit();
     tx = runtime.edit();
@@ -507,14 +463,14 @@ describe("queueEvent with auto-start", () => {
     // Send an event to the result cell's events path
     // ensurePieceRunning will:
     // 1. Get cell at resultCell (with path removed)
-    // 2. Follow getSourceCell() to find processCell
-    // 3. Find TYPE and resultRef in processCell
-    // 4. Start the piece
-    const eventsLink = resultCell.key("events").getAsNormalizedFullLink();
+    // 2. Find pattern metadata in resultCell
+    // 3. Start the piece
+    const eventsLink = eventsCell.getAsNormalizedFullLink();
     runtime.scheduler.queueEvent(eventsLink, { type: "click" });
 
-    // Wait for processing
-    await resultCell.pull();
+    // Wait for auto-start, then demand the output written by the started piece.
+    await runtime.idle();
+    await doubledCell.pull();
 
     // The piece should have been started (lift ran)
     expect(liftRunCount).toBe(1);
@@ -555,16 +511,18 @@ describe("queueEvent with auto-start", () => {
           eventCount: { type: "number" },
         },
       },
-      initial: {
-        internal: {
-          events: { $stream: true },
-          eventCount: 0,
+      derivedInternalCells: [
+        { partialCause: "doubled" },
+        {
+          partialCause: "events",
+          schema: { default: { $stream: true } },
         },
-      },
+        { partialCause: "eventCount", schema: { default: 0 } },
+      ],
       result: {
-        doubled: { $alias: { path: ["internal", "doubled"] } },
-        events: { $alias: { path: ["internal", "events"] } },
-        eventCount: { $alias: { path: ["internal", "eventCount"] } },
+        doubled: { $alias: { partialCause: "doubled", path: [] } },
+        events: { $alias: { partialCause: "events", path: [] } },
+        eventCount: { $alias: { partialCause: "eventCount", path: [] } },
       },
       nodes: [
         {
@@ -576,8 +534,8 @@ describe("queueEvent with auto-start", () => {
               return value * 2;
             },
           },
-          inputs: { $alias: { path: ["argument", "value"] } },
-          outputs: { $alias: { path: ["internal", "doubled"] } },
+          inputs: { $alias: { cell: "argument", path: ["value"] } },
+          outputs: { $alias: { partialCause: "doubled", path: [] } },
         },
         {
           // Handler that reads from the stream
@@ -591,19 +549,23 @@ describe("queueEvent with auto-start", () => {
             },
           },
           inputs: {
-            $event: { $alias: { path: ["internal", "events"] } },
+            $event: { $alias: { partialCause: "events", path: [] } },
             $ctx: {
-              eventCount: { $alias: { path: ["internal", "eventCount"] } },
+              eventCount: {
+                $alias: { partialCause: "eventCount", path: [] },
+              },
             },
           },
           outputs: {
-            eventCount: { $alias: { path: ["internal", "eventCount"] } },
+            eventCount: { $alias: { partialCause: "eventCount", path: [] } },
           },
         },
       ],
     };
 
-    const patternId = runtime.patternManager.registerPattern(pattern);
+    const patternId = runtime.patternManager.registerPattern(
+      trustPattern(runtime, pattern),
+    );
 
     // Create result cell
     const resultCell = runtime.getCell(
@@ -613,42 +575,35 @@ describe("queueEvent with auto-start", () => {
       tx,
     );
 
-    // Create process cell
-    const processCell = runtime.getCell(
-      space,
-      "with-handler-start-test-process",
-      undefined,
-      tx,
-    );
+    // Create a internal and argument cells, and attach them to resultCell.
+    // This would be done inside setupInternal, but we want to proactively set up links
+    // to that internal cell in our result cell.
+    const argumentCell = getMetaCell(resultCell, "argument", tx);
+    const doubledCell = getDerivedInternalCell(resultCell, {
+      partialCause: "doubled",
+    }, tx);
+    const eventsCell = getDerivedInternalCell(resultCell, {
+      partialCause: "events",
+    }, tx);
+    const eventCountCell = getDerivedInternalCell(resultCell, {
+      partialCause: "eventCount",
+    }, tx);
 
-    // Set up result cell
-    resultCell.set({
-      doubled: {
-        $alias: { path: ["internal", "doubled"], cell: processCell.entityId },
-      },
-      events: {
-        $alias: { path: ["internal", "events"], cell: processCell.entityId },
-      },
-      eventCount: {
-        $alias: {
-          path: ["internal", "eventCount"],
-          cell: processCell.entityId,
-        },
-      },
+    // Set up result cell - events points to events in internal cell
+    resultCell.setRaw({
+      doubled: doubledCell.getAsWriteRedirectLink(),
+      events: eventsCell.getAsWriteRedirectLink(),
+      eventCount: eventCountCell.getAsWriteRedirectLink(),
     });
-    resultCell.setSourceCell(processCell);
-
-    // Set up process cell - internal.events must be set to $stream: true
-    // (both in pattern.initial and directly on the cell)
-    processCell.set({
-      [TYPE]: patternId,
-      argument: { value: 5 },
-      resultRef: resultCell.getAsLink({ base: processCell }),
-      internal: {
-        events: { $stream: true },
-        eventCount: 0,
-      },
-    });
+    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
+    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    setResultCell(doubledCell, resultCell);
+    setResultCell(eventsCell, resultCell);
+    setResultCell(eventCountCell, resultCell);
+    argumentCell.set({ value: 5 });
+    // Set up derived cells - events must be set to $stream: true
+    eventsCell.setRaw({ $stream: true });
+    eventCountCell.setRaw(0);
 
     await tx.commit();
     tx = runtime.edit();
@@ -658,9 +613,8 @@ describe("queueEvent with auto-start", () => {
     expect(handlerRunCount).toBe(0);
 
     // Send an event - should start piece and process the event
-    // The handler is registered for the internal/events path on process cell
-    const eventsLink = processCell.key("internal").key("events")
-      .getAsNormalizedFullLink();
+    // The handler is registered for the events path on internal cell
+    const eventsLink = eventsCell.getAsNormalizedFullLink();
     runtime.scheduler.queueEvent(eventsLink, { type: "click", x: 10 });
 
     // Wait for processing
@@ -691,5 +645,124 @@ describe("queueEvent with auto-start", () => {
 
     // Lift should still only have run once (piece only started once)
     expect(liftRunCount).toBe(1);
+  });
+
+  it("should follow chained result metadata before auto-starting for an event", async () => {
+    let liftRunCount = 0;
+    let handlerRunCount = 0;
+    const receivedEvents: any[] = [];
+
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          value: { type: "number" },
+        },
+      },
+      resultSchema: {
+        type: "object",
+        properties: {
+          doubled: { type: "number" },
+          events: { type: "object" },
+        },
+      },
+      derivedInternalCells: [
+        { partialCause: "doubled" },
+        {
+          partialCause: "events",
+          schema: { default: { $stream: true } },
+        },
+      ],
+      result: {
+        doubled: { $alias: { partialCause: "doubled", path: [] } },
+        events: { $alias: { partialCause: "events", path: [] } },
+      },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (value: number) => {
+              liftRunCount++;
+              return value * 2;
+            },
+          },
+          inputs: { $alias: { cell: "argument", path: ["value"] } },
+          outputs: { $alias: { partialCause: "doubled", path: [] } },
+        },
+        {
+          module: {
+            type: "javascript",
+            wrapper: "handler",
+            implementation: (event: any) => {
+              handlerRunCount++;
+              receivedEvents.push(event);
+            },
+          },
+          inputs: {
+            $event: { $alias: { partialCause: "events", path: [] } },
+          },
+          outputs: {},
+        },
+      ],
+    };
+
+    const patternId = runtime.patternManager.registerPattern(
+      trustPattern(runtime, pattern),
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "with-handler-chained-result-test-result",
+      undefined,
+      tx,
+    );
+    const intermediateCell = runtime.getCell(
+      space,
+      "with-handler-chained-result-test-intermediate",
+      undefined,
+      tx,
+    );
+
+    const argumentCell = getMetaCell(resultCell, "argument", tx);
+    const doubledCell = getDerivedInternalCell(resultCell, {
+      partialCause: "doubled",
+    }, tx);
+    const eventsCell = getDerivedInternalCell(resultCell, {
+      partialCause: "events",
+    }, tx);
+
+    resultCell.setRaw({
+      doubled: doubledCell.getAsWriteRedirectLink(),
+      events: eventsCell.getAsWriteRedirectLink(),
+    });
+    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
+    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    setResultCell(doubledCell, intermediateCell);
+    setResultCell(eventsCell, intermediateCell);
+    argumentCell.set({ value: 6 });
+    eventsCell.setRaw({ $stream: true });
+    intermediateCell.setRaw({});
+
+    setResultCell(intermediateCell, resultCell);
+
+    await tx.commit();
+    tx = runtime.edit();
+
+    expect(liftRunCount).toBe(0);
+    expect(handlerRunCount).toBe(0);
+
+    const eventsLink = eventsCell.getAsNormalizedFullLink();
+    runtime.scheduler.queueEvent(eventsLink, { type: "click", x: 42 });
+
+    await resultCell.pull();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await runtime.idle();
+
+    expect(liftRunCount).toBe(1);
+    expect(handlerRunCount).toBe(1);
+    expect(receivedEvents).toEqual([{ type: "click", x: 42 }]);
+    expect(resultCell.getAsQueryResult()).toMatchObject({
+      doubled: 12,
+    });
   });
 });

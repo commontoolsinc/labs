@@ -5,7 +5,12 @@
  * sent to the worker thread for dispatch to the appropriate handler.
  */
 
-import type { JSONValue } from "@commontools/runtime-client";
+import type { JSONValue } from "@commonfabric/runtime-client";
+import {
+  type EventProvenance,
+  getEventProvenance,
+  getEventTargetDataset,
+} from "../event-provenance.ts";
 
 /**
  * Serialized DOM event data.
@@ -14,6 +19,8 @@ import type { JSONValue } from "@commontools/runtime-client";
 export interface SerializedEvent {
   /** Event type (e.g., "click", "input", "change") */
   type: string;
+  /** Internal provenance hint from the renderer */
+  provenance?: EventProvenance;
 
   // Keyboard event properties
   key?: string;
@@ -40,6 +47,8 @@ export interface SerializedEvent {
   // Custom event detail
   detail?: JSONValue;
 }
+
+export type { EventProvenance };
 
 /**
  * Serialized event target data.
@@ -126,6 +135,10 @@ export function serializeEvent(event: Event): SerializedEvent {
   const serialized: SerializedEvent = {
     type: event.type,
   };
+  const provenance = getEventProvenance(event, event.target);
+  if (provenance) {
+    serialized.provenance = provenance;
+  }
 
   // Copy allowlisted event properties
   for (const prop of ALLOWLISTED_EVENT_PROPERTIES) {
@@ -160,17 +173,12 @@ export function serializeEvent(event: Event): SerializedEvent {
       hasTargetProps = true;
     }
 
-    // Handle dataset
-    if ("dataset" in target && target.dataset) {
-      const dataset: Record<string, string> = {};
-      const targetDataset = target.dataset as DOMStringMap;
-      for (const key in targetDataset) {
-        dataset[key] = String(targetDataset[key]);
-      }
-      if (Object.keys(dataset).length > 0) {
-        serializedTarget.dataset = dataset;
-        hasTargetProps = true;
-      }
+    // Handle the event target's own dataset. UI contract markers from the
+    // composed path are serialized separately in provenance.
+    const dataset = getEventTargetDataset(target);
+    if (dataset) {
+      serializedTarget.dataset = dataset;
+      hasTargetProps = true;
     }
 
     if (hasTargetProps) {

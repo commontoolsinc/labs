@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: GmailAgenticSearch
  *
@@ -9,9 +8,9 @@
  *
  * Note: Actual Gmail API calls are not tested here - only state management.
  *
- * Run: deno task ct test packages/patterns/google/core/experimental/gmail-agentic-search.test.tsx --root packages/patterns/google --verbose
+ * Run: deno task cf test packages/patterns/google/core/experimental/gmail-agentic-search.test.tsx --root packages/patterns/google --verbose
  */
-import { computed, pattern } from "commontools";
+import { computed, pattern } from "commonfabric";
 import GmailAgenticSearch from "./gmail-agentic-search.tsx";
 
 export default pattern(() => {

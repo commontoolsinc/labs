@@ -1,10 +1,21 @@
-import * as __ctHelpers from "commontools";
-import { Cell, cell, handler, ifElse, lift, NAME, navigateTo, pattern, UI, } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { Cell, cell, handler, ifElse, lift, NAME, navigateTo, pattern, UI, } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // the simple charm (to which we'll store references within a cell)
 const SimplePattern = pattern(() => ({
     [NAME]: "Some Simple Pattern",
     [UI]: <div>Some Simple Pattern</div>,
-}), false as const satisfies __ctHelpers.JSONSchema, {
+}), false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
@@ -20,11 +31,10 @@ const SimplePattern = pattern(() => ({
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -37,23 +47,20 @@ const SimplePattern = pattern(() => ({
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // Create a cell to store an array of charms
-const createCellRef = lift({
-    type: "object",
-    properties: {
-        isInitialized: { type: "boolean", "default": false, asCell: true },
-        storedCellRef: { type: "object", asCell: true },
-    },
-}, undefined, ({ isInitialized, storedCellRef }) => {
+const createCellRef = lift(({ isInitialized, storedCellRef }) => {
     if (!isInitialized.get()) {
         console.log("Creating cellRef - first time");
         const newCellRef = Cell.for<any[]>("charmsArray").asSchema({
             type: "array",
             items: true
-        } as const satisfies __ctHelpers.JSONSchema);
+        } as const satisfies __cfHelpers.JSONSchema);
         newCellRef.set([]);
-        storedCellRef.set(newCellRef);
+        // Local cast: the schema types storedCellRef as a cell of a generic object,
+        // but this fixture stores an array cell into it; the schema accuracy isn't
+        // what this transformer fixture exercises.
+        (storedCellRef as Cell<unknown>).set(newCellRef);
         isInitialized.set(true);
         return {
             cellRef: newCellRef,
@@ -66,20 +73,20 @@ const createCellRef = lift({
     return {
         cellRef: storedCellRef,
     };
+}, {
+    type: "object",
+    properties: {
+        isInitialized: { type: "boolean", "default": false, asCell: ["cell"] },
+        storedCellRef: { type: "object", asCell: ["cell"] },
+    },
+    required: ["isInitialized", "storedCellRef"],
 });
 // Add a charm to the array and navigate to it
 // we get a new isInitialized passed in for each
 // charm we add to the list. this makes sure
 // we only try to add the charm once to the list
 // and we only call navigateTo once
-const addCharmAndNavigate = lift({
-    type: "object",
-    properties: {
-        charm: { type: "object" },
-        cellRef: { type: "array", asCell: true },
-        isInitialized: { type: "boolean", asCell: true },
-    },
-}, undefined, ({ charm, cellRef, isInitialized }) => {
+const addCharmAndNavigate = lift(({ charm, cellRef, isInitialized }) => {
     if (!isInitialized.get()) {
         if (cellRef) {
             cellRef.push(charm);
@@ -91,133 +98,170 @@ const addCharmAndNavigate = lift({
         }
     }
     return undefined;
+}, {
+    type: "object",
+    properties: {
+        charm: { type: "object" },
+        cellRef: { type: "array", asCell: ["cell"] },
+        isInitialized: { type: "boolean", asCell: ["cell"] },
+    },
+    required: ["charm", "isInitialized"],
 });
 // Create a new SimplePattern and add it to the array
-const createSimplePattern = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const createSimplePattern = handler({
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         cellRef: {
             type: "array",
             items: true,
-            asCell: true
+            asCell: ["readonly"]
         }
     },
     required: ["cellRef"]
-} as const satisfies __ctHelpers.JSONSchema, (_, { cellRef }) => {
+} as const satisfies __cfHelpers.JSONSchema, (_, { cellRef }) => {
     // Create isInitialized cell for this charm addition
     const isInitialized = cell(false, {
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("isInitialized", true);
     // Create the charm
     const charm = SimplePattern({});
     // Store the charm in the array and navigate
     return addCharmAndNavigate({ charm, cellRef, isInitialized });
 });
 // Handler to navigate to a specific charm from the list
-const goToCharm = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const goToCharm = handler({
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        charm: {
+            type: "unknown",
+            asCell: ["opaque"]
+        }
+    },
+    required: ["charm"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { charm }) => {
+    console.log("goToCharm clicked");
+    return navigateTo(charm);
+});
+const __cfLift_1 = __cfHelpers.lift<{
+    cellRef: unknown[];
+}, boolean>(({ cellRef }) => !cellRef?.length, {
+    type: "object",
+    properties: {
+        cellRef: {
+            type: "array",
+            items: {
+                type: "unknown"
+            }
+        }
+    },
+    required: ["cellRef"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_2 = __cfHelpers.lift<{
+    charm: any;
+}, any>(({ charm }) => charm[__cfHelpers.NAME], {
     type: "object",
     properties: {
         charm: true
     },
     required: ["charm"]
-} as const satisfies __ctHelpers.JSONSchema, (_, { charm }) => {
-    console.log("goToCharm clicked");
-    return navigateTo(charm);
-});
+} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const charm = __cf_pattern_input.key("element");
+    const index = __cf_pattern_input.key("index");
+    return (<li>
+                <cf-button onClick={goToCharm({ charm })}>
+                  Go to Charm {index + 1}
+                </cf-button>
+                <span>Charm {index + 1}: {__cfHelpers.unless(true as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ charm: charm }), "Unnamed")}</span>
+              </li>);
+}, {
+    type: "object",
+    properties: {
+        element: true,
+        index: {
+            type: "number"
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: opaque-ref-cell-map
-// Verifies: OpaqueRef<any[]>.map() inside ifElse is transformed to mapWithPattern()
-//   typedCellRef.map((charm, index) => <li>...)  → typedCellRef.mapWithPattern(pattern(...), {})
-//   ifElse(!typedCellRef?.length, <div>, <ul>)   → ifElse(schema..., derive(...), <div>, <ul>)
+// Verifies: a reactive factory result still rewrites JSX ifElse predicates after
+//           the forbidden OpaqueRef cast is removed
+//   ifElse(!cellRef?.length, <div>, <ul>) → ifElse(schema..., lift(...)(...), <div>, <ul>)
+//   cellRef.map((charm, index) => <li>...) → mapWithPattern(...) even with
+//     `as { cellRef: any[] }`, because the cast does not change the reactive origin
 // Context: Real-world pattern using Cell.for<any[]>(), handler, lift, and navigateTo
 // create the named cell inside the pattern body, so we do it just once
 export default pattern(() => {
     // cell to store array of charms we created
-    const { cellRef } = createCellRef({
+    const __cf_destructure_1 = createCellRef({
         isInitialized: cell(false, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema),
+        } as const satisfies __cfHelpers.JSONSchema),
         storedCellRef: cell(),
     }) as {
         cellRef: any[];
-    };
+    }, cellRef = __cf_destructure_1.key("cellRef").for("cellRef", true);
     return {
         [NAME]: "Charms Launcher",
         [UI]: (<div>
         <h3>Stored Charms:</h3>
         {ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            $ref: "#/$defs/UIRenderable",
-            asOpaque: true,
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, !cellRef?.length, <div>No charms created yet</div>, <ul>
-            {cellRef.map((charm: any, index: number) => (<li>
-                <ct-button onClick={goToCharm({ charm })}>
-                  Go to Charm {__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    index: {
-                        type: "number"
-                    }
-                },
-                required: ["index"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}
-                </ct-button>
-                <span>Charm {__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    index: {
-                        type: "number"
-                    }
-                },
-                required: ["index"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}: {__ctHelpers.unless(true as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-                type: "object",
-                properties: {
-                    charm: true
-                },
-                required: ["charm"]
-            } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { charm: charm }, ({ charm }) => charm[NAME]), "Unnamed")}</span>
-              </li>))}
+        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ cellRef: cellRef }), <div>No charms created yet</div>, <ul>
+            {cellRef.mapWithPattern(__cfPattern_1, {})}
           </ul>)}
 
-        <ct-button onClick={createSimplePattern({ cellRef })}>
+        <cf-button onClick={createSimplePattern({ cellRef })}>
           Create New Charm
-        </ct-button>
+        </cf-button>
       </div>),
         cellRef,
     };
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
-            type: "string"
+            type: "string",
+            "enum": ["Charms Launcher"]
         },
         $UI: {
             $ref: "#/$defs/JSXElement"
@@ -233,11 +277,10 @@ export default pattern(() => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -250,8 +293,17 @@ export default pattern(() => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    SimplePattern,
+    createCellRef,
+    addCharmAndNavigate,
+    createSimplePattern,
+    goToCharm,
+    __cfLift_1,
+    __cfLift_2,
+    __cfPattern_1
+});

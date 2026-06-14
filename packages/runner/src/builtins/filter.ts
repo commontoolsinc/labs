@@ -1,10 +1,42 @@
-import type { JSONSchema, Pattern } from "../builder/types.ts";
+import type { Pattern } from "../builder/types.ts";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+
+// Presence probe for the result container: slots resolve as cells, so the
+// coordinator can ask "is the container initialized?" without materializing
+// element contents. A content-schema get() here would journal real value
+// reads of every element result — under flow labels (S16) that smears every
+// element's taint into the coordinator's per-tx join and from there onto
+// sibling scaffolding (the read-own-output feedback).
+const RESULT_PRESENCE_SCHEMA = internSchema({
+  type: "array",
+  items: { asCell: ["cell"], type: "unknown" },
+});
+
+const FILTER_INPUT_SCHEMA = internSchema({
+  type: "object",
+  properties: {
+    list: { type: "array", items: { asCell: ["cell"], type: "unknown" } },
+    op: { asCell: ["cell"] },
+  },
+  required: ["op"],
+});
 
 import type { Cell } from "../cell.ts";
 import type { Action } from "../scheduler.ts";
 import type { AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
+import { listResultSchema } from "./list-result-schema.ts";
+import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
+import { setPatternCell, setResultCell } from "../result-utils.ts";
+import {
+  cellIdentityKey,
+  narrowestCellScope,
+  outputSpotFromBinding,
+  scopedCell,
+} from "./scope-policy.ts";
+import { resolveOpPattern } from "./op-pattern-ref.ts";
 
 /**
  * Implementation of built-in filter module. Like map, this is called once at
@@ -35,6 +67,7 @@ export function filter(
   cause: any,
   parentCell: Cell<any>,
   runtime: Runtime,
+  outputBinding?: NormalizedFullLink,
 ): Action {
   let result: Cell<any[]> | undefined;
 
@@ -45,35 +78,64 @@ export function filter(
     { resultCell: Cell<any>; lastIndex: number }
   >();
 
+  // Only the initial (resume) reconcile defers its per-element sub-pattern runs
+  // until sync completes; elements from later (post-resume) reconciles are fresh
+  // and must not wait. Cleared once a non-empty resume batch is processed.
+  let resumeBatchAwaitSync = !!(cause as { awaitSync?: boolean } | undefined)
+    ?.awaitSync;
+
   return (tx: IExtendedStorageTransaction) => {
-    if (!result) {
-      result = runtime.getCell<any[]>(
+    const elementAwaitSync = resumeBatchAwaitSync;
+    const { list, op } = inputsCell.asSchema(FILTER_INPUT_SCHEMA)
+      .withTx(tx).get();
+
+    const opPattern = resolveOpPattern(runtime, op.getRaw(), "filter");
+    const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
+    const outputScope = narrowestCellScope(runtime, tx, [
+      inputsCell.key("list"),
+      ...(Array.isArray(list) && argumentUsage.usesElement ? list : []),
+      argumentUsage.usesArray ? inputsCell.key("list") : undefined,
+      argumentUsage.usesParams ? inputsCell.key("params") : undefined,
+    ]);
+
+    if (!result || result.getAsNormalizedFullLink().scope !== outputScope) {
+      const resultSchema = listResultSchema();
+      // CT-1623: identify the result container by the reserved output spot
+      // (stable, program-independent). See map.ts for rationale.
+      const outputSpot = outputSpotFromBinding(outputBinding);
+      if (!outputSpot) {
+        throw new Error(
+          "filter: result container requires a write-redirect output binding",
+        );
+      }
+      const baseResult = runtime.getCell<any[]>(
         parentCell.space,
-        {
-          filter: parentCell.entityId,
-          op: inputsCell.getAsQueryResult([], tx)?.op,
-          cause,
-        },
-        undefined,
+        { filter: parentCell.entityId, outputSpot },
+        resultSchema,
         tx,
       );
+      result = scopedCell(runtime, tx, baseResult, outputScope);
       result.send([]);
-      result.setSourceCell(parentCell);
+      // Link this cell to the parent cell
+      setResultCell(result, parentCell);
+      // Link the new result cells to the pattern cell too
+      setPatternCell(result, parentCell.key("pattern"));
       sendResult(tx, result);
     }
-    const resultWithLog = result.withTx(tx);
-    const { list, op } = inputsCell.asSchema(
-      {
-        type: "object",
-        properties: {
-          list: { type: "array", items: { asCell: true, type: "unknown" } },
-          op: { asCell: true },
-        },
-        required: ["op"],
-      } as const satisfies JSONSchema,
-    ).withTx(tx).get();
-
-    const opPattern = op.getRaw();
+    // The coordinator's view of the result container is links-only
+    // (RESULT_PRESENCE_SCHEMA): get() probes presence and set() diffs
+    // prior slots as links, never materializing element contents. A
+    // content-schema view here journals value reads of every element
+    // result on each reconcile — under flow labels (S16) that smears
+    // every element's taint into the coordinator's per-tx join.
+    const resultWithLog = result.asSchema(RESULT_PRESENCE_SCHEMA)
+      .withTx(tx);
+    const createRunInput = (element: Cell<any>, index: number) => ({
+      ...(argumentUsage.usesElement ? { element } : {}),
+      ...(argumentUsage.usesIndex ? { index } : {}),
+      ...(argumentUsage.usesArray ? { array: inputsCell.key("list") } : {}),
+      ...(argumentUsage.usesParams ? { params: inputsCell.key("params") } : {}),
+    });
 
     if (resultWithLog.get() === undefined) {
       resultWithLog.set([]);
@@ -91,35 +153,34 @@ export function filter(
       throw new Error("filter currently only supports arrays");
     }
 
+    if (list.length > 0) resumeBatchAwaitSync = false;
+
     const keyCounts = new Map<string, number>();
     const newArrayValue: any[] = [];
     for (let i = 0; i < list.length; i++) {
       // Skip sparse holes — don't create predicate runs for them
       if (!(i in list)) continue;
 
-      const { space: s, id, type, path } = list[i].getAsNormalizedFullLink();
-      const dedupKey = JSON.stringify([s, id, type, path]);
+      const { dedupKey, linkKey } = cellIdentityKey(list[i]);
       const occurrence = keyCounts.get(dedupKey) ?? 0;
       keyCounts.set(dedupKey, occurrence + 1);
-      const elementKey = JSON.stringify([s, id, type, path, occurrence]);
+      const elementKey = JSON.stringify([...linkKey, occurrence]);
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
-        if (existing.lastIndex !== i) {
+        if (argumentUsage.usesIndex && existing.lastIndex !== i) {
           runtime.runner.run(
             tx,
             opPattern,
-            {
-              element: list[i],
-              index: i,
-              array: inputsCell.key("list"),
-              params: inputsCell.key("params"),
-            },
+            createRunInput(list[i], i),
             existing.resultCell,
-            { doNotUpdateOnPatternChange: true },
+            {
+              doNotUpdateOnPatternChange: true,
+              awaitSyncBeforeInitialRun: elementAwaitSync,
+            },
           );
-          existing.lastIndex = i;
         }
+        existing.lastIndex = i;
       } else {
         const resultCell = runtime.getCell(
           parentCell.space,
@@ -130,16 +191,18 @@ export function filter(
         runtime.runner.run(
           tx,
           opPattern,
-          {
-            element: list[i],
-            index: i,
-            array: inputsCell.key("list"),
-            params: inputsCell.key("params"),
-          },
+          createRunInput(list[i], i),
           resultCell,
-          { doNotUpdateOnPatternChange: true },
+          {
+            doNotUpdateOnPatternChange: true,
+            awaitSyncBeforeInitialRun: elementAwaitSync,
+          },
         );
-        resultCell.getSourceCell()!.setSourceCell(parentCell);
+        // Link these individual cells to the top cell
+        setResultCell(resultCell, parentCell);
+        // Link the new result cells to the pattern cell too
+        setPatternCell(resultCell, parentCell.key("pattern"));
+
         addCancel(() => runtime.runner.stop(resultCell));
         elementRuns.set(elementKey, { resultCell, lastIndex: i });
       }

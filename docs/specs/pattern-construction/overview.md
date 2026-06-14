@@ -30,9 +30,9 @@ metadata, and lifts and handlers gain cause-based identifier stability.
 
 - Redesigning scheduler semantics beyond the current "ignore self-writes" and
   100-iteration cap.
-- Guaranteeing backward compatibility for the existing process cell layout; the
-  process cell will be replaced by the graph snapshot stored on the result
-  cell.
+- Guaranteeing backward compatibility for the pre-metadata execution layout; it
+  has been replaced by result-cell metadata and will later be complemented by a
+  graph snapshot stored on the result cell.
 - Delivering a full type-level capability system across the entire codebase in
   this phase; scope is builder APIs and runtime interfaces.
 
@@ -44,10 +44,10 @@ metadata, and lifts and handlers gain cause-based identifier stability.
   factory immediately, and records every `OpaqueRef` and node it touches.
 - Inputs are wrapped in `opaqueRef` proxies so the builder can serialize graphs
   before runtime cells exist.
-- `factoryFromPattern` walks the returned structure, synthesizes paths
-  ("argument" and `internal/__#n`), infers defaults, and emits JSON with
-  `argumentSchema`, `resultSchema`, `initial`, `result`, and serialized nodes.
-  No runtime cell ids exist yet.
+- `factoryFromPattern` walks the returned structure, records argument/result
+  aliases, records derived internal cell descriptors, infers defaults, and
+  emits JSON with `argumentSchema`, `resultSchema`, `derivedInternalCells`,
+  `result`, and serialized nodes. No runtime cell ids exist yet.
 - `OpaqueRef` proxies track connected nodes, expose helpers like `.map()`, and
   rely on shadow refs to reuse parent cells without leaking frames.
 - `lift` transforms a function into a module factory whose implementation runs
@@ -56,11 +56,14 @@ metadata, and lifts and handlers gain cause-based identifier stability.
 
 ### Runtime instantiation today
 
-- `Runner.setup` ensures each result cell has a paired process cell storing
-  `TYPE` (pattern id), `argument`, `internal` state, `resultRef`, and optional
-  spell links. Result cells expose generated data plus `source` metadata.
-- `setupInternal` merges defaults into the process cell and binds the serialized
-  pattern graph via `unwrapOneLevelAndBindtoDoc`; aliases remain path based.
+- `Runner.setup` ensures each result cell has metadata links for `pattern` and
+  `argument`, schema metadata, and raw `internal` manifest metadata. The
+  manifest lists the derived internal cells associated with the result cell.
+  The argument cell and each derived internal cell link back to their owning
+  result cell through `result` metadata.
+- Setup merges defaults into the argument cell, materializes
+  `derivedInternalCells` into result-relative internal cells, and binds the
+  serialized pattern graph via `unwrapOneLevelAndBindtoDoc`.
 - `startWithTx` iterates serialized nodes, resolves modules, and calls
   `instantiateNode`, turning aliases into real `Cell` instances through
   `sendValueToBinding`. The scheduler maintains reactivity.
@@ -76,10 +79,11 @@ metadata, and lifts and handlers gain cause-based identifier stability.
 - `packages/runner/src/builder/factory.ts` pushes frames before calling the
   author factory. `createCell` expects the frame to provide a `cause` and an
   `unsafe_binding`, so the new wrappers must keep the frame lifecycle intact.
-- `packages/runner/src/runner.ts` writes pattern metadata into a process cell
-  (`TYPE`, `argument`, `internal`, `resultRef`) and later instantiates nodes by
-  unwrapping aliases in `unwrapOneLevelAndBindtoDoc`. Snapshot generation should
-  hook into this instantiation path to capture concrete cell ids.
+- `packages/runner/src/runner.ts` writes pattern and argument metadata links,
+  schema metadata, and the raw internal manifest onto the result cell. It later
+  instantiates nodes by unwrapping aliases in `unwrapOneLevelAndBindtoDoc`.
+  Snapshot generation should hook into this instantiation path to capture
+  concrete cell ids.
 - `packages/runner/src/create-ref.ts` hashes the supplied `cause` and recorded
   structure to derive entity ids. Stable causes therefore hinge on the data we
   pass into frames when new cells are materialized.
@@ -125,9 +129,9 @@ metadata, and lifts and handlers gain cause-based identifier stability.
 
 - Instantiating a pattern produces a concrete graph snapshot with real cell ids,
   capability kinds, aliases, and module bindings.
-- The snapshot is stored alongside `value` and `source` metadata on the result
-  cell. Documents written by the graph keep `source` pointing back to that
-  result cell.
+- The snapshot is stored alongside the result cell's value and execution metadata.
+  Documents written by the graph keep `result` metadata pointing back to their
+  owning result cell.
 - Snapshot metadata is sufficient to rehydrate handler-generated graphs and to
   tear down dynamic graphs before rebuilding them on change.
 
@@ -138,8 +142,10 @@ metadata, and lifts and handlers gain cause-based identifier stability.
   - `cells`: id, capability, cause, schema hash, redirect targets.
   - `nodes`: module reference plus input/output bindings rewritten to concrete
     cell ids.
-- Maintain backward compatibility by leaving existing `resultRef`/`source`
-  fields untouched and appending a `graph` payload.
+- The shipped result-cell metadata layout is not backward compatible with the old
+  execution layout. Snapshot rollout should append a `graph` payload without
+  changing the existing `pattern`, `argument`, `internal`, and `result` metadata
+  links.
 
 ### Cause generation
 
@@ -182,7 +188,7 @@ than a separate V2 system. See `rollout-plan.md` for detailed task breakdown.
 
 1. **Graph snapshot generation**
    - Build runtime graph snapshots during instantiation and store them in result
-     cell metadata (implements the `process` metadata described in rollout plan)
+     cell metadata (implements the graph metadata described in the rollout plan)
    - Update rehydration/teardown logic to consume the snapshot
    - See `graph-snapshot.md` for schema details
 2. **Serializable node factories** (Deferred - see `node-factory-shipping.md`)

@@ -1,6 +1,5 @@
-/// <cts-enable />
-import { Cell, handler, pattern } from "commontools";
-import "commontools/schema";
+import { Cell, handler, pattern } from "commonfabric";
+import "commonfabric/schema";
 
 interface State {
   value: Cell<number>;
@@ -31,8 +30,8 @@ export default pattern<State>((state) => {
 }, {
   type: "object",
   properties: {
-    value: { type: "number", asCell: true },
-    name: { type: "string", asCell: true },
+    value: { type: "number", asCell: ["cell"] },
+    name: { type: "string", asCell: ["cell"] },
   },
   required: ["value"],
 });

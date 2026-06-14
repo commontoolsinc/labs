@@ -1,0 +1,754 @@
+#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-run --allow-write
+
+/**
+ * PR Performance Check
+ *
+ * Runs as part of PR CI after all test jobs complete. Compares the current
+ * run's job/step timings against a baseline computed from recent main-branch
+ * push runs.  Fails (exit 1) if any metric exceeds the baseline threshold,
+ * unless the PR description contains an override.
+ *
+ * Environment:
+ *   GITHUB_TOKEN        - Required.
+ *   GITHUB_REPOSITORY   - Optional, defaults to "commontoolsinc/labs".
+ *   GITHUB_RUN_ID       - Required. Current workflow run ID.
+ *   PR_NUMBER           - Required. Pull request number.
+ */
+
+import {
+  addSample,
+  API_CONCURRENCY,
+  applyBaselineOverrides,
+  type Artifact,
+  type BaselineOverrides,
+  computeBaseline,
+  computeCiWallTimeRevisitSignals,
+  downloadAndParseJUnit,
+  downloadAndParsePerfMetrics,
+  downloadAndParsePerfMetricsBackfill,
+  extractMetrics,
+  extractTestFileMetrics,
+  fetchArtifactsForRun,
+  fetchCurrentPRBody,
+  fetchJobsForRun,
+  fetchPRForCommit,
+  formatMetricValue,
+  formatOverrideSuggestion,
+  githubGet,
+  mapConcurrent,
+  type MetricTimeline,
+  MIN_ABSOLUTE_DELTA,
+  MIN_REGRESSION_PCT,
+  MIN_SAMPLES,
+  newestArtifactsByName,
+  parseBaselineOverrides,
+  PERF_METRICS_ARTIFACT_NAME,
+  PERF_METRICS_BACKFILL_ARTIFACT_NAME,
+  PERF_METRICS_BACKFILL_FILE,
+  PERF_METRICS_FILE,
+  type PRInfo,
+  readAndParseEvent,
+  REPO,
+  STDDEV_FACTOR,
+  timingArtifactLabel,
+  type TimingSample,
+  TOKEN,
+  WORKFLOW_FILE,
+  type WorkflowRun,
+  writePerfMetricsBackfillFile,
+  writePerfMetricsFile,
+} from "./perf-lib.ts";
+
+/** How many recent main-branch runs to use for baseline. */
+const BASELINE_RUNS = 20;
+
+/** Recent completed workflow runs to scan for fallback backfill artifacts. */
+const BACKFILL_SOURCE_RUNS = 20;
+
+function currentWorkflowRunFromEvent(
+  event: object | undefined,
+  runId: number,
+): WorkflowRun {
+  const payload = event as {
+    after?: unknown;
+    pull_request?: {
+      head?: { sha?: unknown };
+    };
+  } | undefined;
+
+  const headSha = typeof payload?.pull_request?.head?.sha === "string"
+    ? payload.pull_request.head.sha
+    : typeof payload?.after === "string"
+    ? payload.after
+    : Deno.env.get("GITHUB_SHA") ?? "";
+
+  return {
+    id: runId,
+    html_url: `https://github.com/${REPO}/actions/runs/${runId}`,
+    head_sha: headSha,
+    created_at: new Date().toISOString(),
+    conclusion: "",
+    event: Deno.env.get("GITHUB_EVENT_NAME") ?? "",
+  };
+}
+
+function isGitHubRateLimitError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b(rate limit|rate-limited|ratelimit)\b/i.test(message);
+}
+
+async function githubApiOrSkip<T>(
+  description: string,
+  operation: () => Promise<T>,
+  metricsForArtifact: Map<string, TimingSample>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isGitHubRateLimitError(error)) throw error;
+
+    console.warn(
+      `  Warning: GitHub API rate limit while ${description}: ${error}`,
+    );
+    await writePerfMetricsFile(PERF_METRICS_FILE, metricsForArtifact);
+    console.log(
+      `Wrote ${PERF_METRICS_FILE} with ${metricsForArtifact.size} metrics.`,
+    );
+    console.log(
+      "Skipping performance regression check because GitHub API rate limits prevent collecting required CI timing data.",
+    );
+    Deno.exit(0);
+  }
+}
+
+/**
+ * Metrics to exclude from regression checks because their aggregate values
+ * naturally grow as new tests are added.  Per-test timings from JUnit
+ * artifacts are tracked instead.
+ */
+const EXCLUDED_METRIC_PATTERNS = [
+  /^job: Pattern Unit Tests/,
+  /^step: pattern unit tests$/,
+];
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+async function main() {
+  const runId = Deno.env.get("GITHUB_RUN_ID");
+  const rawPrNumber = Deno.env.get("PR_NUMBER");
+  const prNumber = (rawPrNumber === "") ? null : rawPrNumber;
+  const informationalOnly = prNumber === null;
+
+  if (!TOKEN) {
+    console.error("GITHUB_TOKEN is required.");
+    Deno.exit(1);
+  }
+  if (!runId) {
+    console.error("GITHUB_RUN_ID is required.");
+    Deno.exit(1);
+  }
+
+  const event = await readAndParseEvent();
+  console.log("::group::Triggered by event:\n%o\n::endgroup::", event);
+
+  // 1. Check PR description for overrides, if there's a PR to check.
+  let prOverrides;
+  if (prNumber) {
+    console.log(`Fetching live PR #${prNumber} description...`);
+    const prBody = await fetchCurrentPRBody(parseInt(prNumber), event);
+    if (prBody.source === "live") {
+      console.log("Using live PR description from GitHub API.");
+    } else if (prBody.source === "event-fallback") {
+      console.warn(
+        `  Warning: could not fetch live PR body; using pull_request event payload: ${prBody.errorMessage}`,
+      );
+    } else {
+      console.warn(
+        `  Warning: could not fetch live PR body and no pull_request event body was available: ${prBody.errorMessage}`,
+      );
+    }
+    prOverrides = parseBaselineOverrides(prBody.body);
+  } else {
+    prOverrides = { metrics: new Map() };
+  }
+
+  if (prOverrides.metrics.size > 0) {
+    console.log(
+      `PR description contains ${prOverrides.metrics.size} NEW_PERF_BASELINE override(s).`,
+    );
+  }
+
+  // 2. Get current run's job/step metrics and per-test timing artifacts
+  console.log(`Fetching jobs for current run ${runId}...`);
+  const runIdNum = parseInt(runId);
+  const currentMetrics = new Map<string, TimingSample>();
+  const currentJobs = await githubApiOrSkip(
+    `fetching jobs for current run ${runId}`,
+    () => fetchJobsForRun(runIdNum),
+    currentMetrics,
+  );
+
+  // The event payload has the metadata needed for samples, so avoid spending
+  // another API request on the current workflow run.
+  const currentRunInfo = currentWorkflowRunFromEvent(event, runIdNum);
+
+  // Extract job/step metrics
+  for (const [name, sample] of extractMetrics(currentRunInfo, currentJobs)) {
+    currentMetrics.set(name, sample);
+  }
+
+  // Extract per-test metrics from JUnit artifacts
+  try {
+    const artifacts = await fetchArtifactsForRun(runIdNum);
+    // Newest per name: a re-run of a flagged test job must refresh its metric.
+    const timingArtifacts = newestArtifactsByName(artifacts.filter(
+      (a) => a.name.startsWith("test-timing-") && !a.expired,
+    ));
+    for (const artifact of timingArtifacts) {
+      const suites = await downloadAndParseJUnit(artifact.id);
+      const testMetrics = extractTestFileMetrics(
+        currentRunInfo,
+        timingArtifactLabel(artifact.name),
+        suites,
+      );
+      for (const [name, sample] of testMetrics) {
+        currentMetrics.set(name, sample);
+      }
+    }
+  } catch (e) {
+    console.warn(`  Warning: could not fetch artifacts for current run: ${e}`);
+  }
+
+  await writePerfMetricsFile(PERF_METRICS_FILE, currentMetrics);
+  console.log(
+    `Wrote ${PERF_METRICS_FILE} with ${currentMetrics.size} metrics.`,
+  );
+
+  if (currentMetrics.size === 0) {
+    console.log("No metrics extracted from current run. Nothing to check.");
+    Deno.exit(0);
+  }
+
+  console.log(`Extracted ${currentMetrics.size} metrics from current run.`);
+  const wallTimeSignals = computeCiWallTimeRevisitSignals(currentJobs);
+
+  // 3. Fetch recent main-branch push runs for baseline
+  console.log("Fetching recent main-branch runs for baseline...");
+  const baselineData = await githubApiOrSkip(
+    "fetching recent main-branch runs for baseline",
+    () =>
+      githubGet<{ workflow_runs: WorkflowRun[] }>(
+        `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?branch=main&status=success&event=push&per_page=${BASELINE_RUNS}`,
+      ),
+    currentMetrics,
+  );
+  const baselineRuns = baselineData.workflow_runs;
+
+  if (baselineRuns.length < MIN_SAMPLES) {
+    console.log(
+      `Only ${baselineRuns.length} baseline runs available (need ${MIN_SAMPLES}). Skipping check.`,
+    );
+    Deno.exit(0);
+  }
+
+  console.log(`Using ${baselineRuns.length} main-branch runs as baseline.`);
+
+  // 4. Fetch job/step metrics for baseline runs + check for baseline overrides
+  const timelines = new Map<string, MetricTimeline>();
+  const overridesBySha = new Map<string, BaselineOverrides>();
+  const prInfoBySha = new Map<string, PRInfo>();
+  const newBackfills = new Map<number, Map<string, TimingSample>>();
+
+  interface BaselineRunContext {
+    run: WorkflowRun;
+    artifacts: Artifact[];
+    pr: PRInfo | null;
+  }
+
+  async function fetchArtifactsForRunBestEffort(
+    run: WorkflowRun,
+  ): Promise<Artifact[]> {
+    try {
+      return await fetchArtifactsForRun(run.id);
+    } catch (error) {
+      console.warn(
+        `  Warning: could not fetch artifacts for run ${run.id}: ${error}`,
+      );
+      return [];
+    }
+  }
+
+  const baselineContexts = await githubApiOrSkip(
+    "fetching baseline run context",
+    () =>
+      mapConcurrent(
+        baselineRuns,
+        API_CONCURRENCY,
+        async (run): Promise<BaselineRunContext> => {
+          const [artifacts, pr] = await Promise.all([
+            fetchArtifactsForRunBestEffort(run),
+            fetchPRForCommit(run.head_sha),
+          ]);
+          return { run, artifacts, pr };
+        },
+      ),
+    currentMetrics,
+  );
+
+  console.log("Fetching recent perf metric backfills...");
+  const backfillSourceData = await githubApiOrSkip(
+    "fetching recent perf metric backfill sources",
+    () =>
+      githubGet<{ workflow_runs: WorkflowRun[] }>(
+        `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?branch=main&event=push&status=success&per_page=${BACKFILL_SOURCE_RUNS}`,
+      ),
+    currentMetrics,
+  );
+  const baselineRunIds = new Set(baselineRuns.map((run) => run.id));
+  const backfillSourceRuns = backfillSourceData.workflow_runs.filter((run) =>
+    !baselineRunIds.has(run.id) && run.id !== runIdNum
+  );
+  const extraBackfillContexts = await githubApiOrSkip(
+    "fetching extra perf metric backfill context",
+    () =>
+      mapConcurrent(
+        backfillSourceRuns,
+        API_CONCURRENCY,
+        async (run): Promise<BaselineRunContext> => ({
+          run,
+          artifacts: await fetchArtifactsForRunBestEffort(run),
+          pr: null,
+        }),
+      ),
+    currentMetrics,
+  );
+
+  const backfilledMetricsByRunId = new Map<number, Map<string, TimingSample>>();
+  const backfillSourceContexts = [
+    ...baselineContexts,
+    ...extraBackfillContexts,
+  ].sort((a, b) =>
+    b.run.created_at.localeCompare(a.run.created_at) || b.run.id - a.run.id
+  );
+  const parsedBackfillSources = await githubApiOrSkip(
+    "downloading perf metric backfills",
+    () =>
+      mapConcurrent(
+        backfillSourceContexts,
+        API_CONCURRENCY,
+        async ({ artifacts }) => {
+          const artifact = artifacts.find(
+            (a) => a.name === PERF_METRICS_BACKFILL_ARTIFACT_NAME && !a.expired,
+          );
+          if (!artifact) return null;
+
+          return await downloadAndParsePerfMetricsBackfill(artifact.id);
+        },
+      ),
+    currentMetrics,
+  );
+
+  for (const backfills of parsedBackfillSources) {
+    if (!backfills) continue;
+
+    for (const [backfilledRunId, metrics] of backfills) {
+      if (!backfilledMetricsByRunId.has(backfilledRunId)) {
+        backfilledMetricsByRunId.set(backfilledRunId, metrics);
+      }
+    }
+  }
+  if (backfilledMetricsByRunId.size > 0) {
+    console.log(
+      `Loaded perf metric backfills for ${backfilledMetricsByRunId.size} run(s).`,
+    );
+  }
+
+  await githubApiOrSkip(
+    "building baseline timelines",
+    () =>
+      mapConcurrent(baselineContexts, API_CONCURRENCY, async (context) => {
+        const { run, artifacts, pr } = context;
+
+        if (pr) {
+          prInfoBySha.set(run.head_sha, pr);
+          const overrides = parseBaselineOverrides(pr.body ?? "");
+          if (overrides.metrics.size > 0) {
+            overridesBySha.set(run.head_sha, overrides);
+          }
+        }
+
+        const perfMetricsArtifact = artifacts.find(
+          (a) => a.name === PERF_METRICS_ARTIFACT_NAME && !a.expired,
+        );
+        if (perfMetricsArtifact) {
+          const metrics = await downloadAndParsePerfMetrics(
+            perfMetricsArtifact.id,
+          );
+          if (metrics) {
+            for (const [name, sample] of metrics) {
+              addSample(timelines, name, sample);
+            }
+            return;
+          }
+        }
+
+        const backfilledMetrics = backfilledMetricsByRunId.get(run.id);
+        if (backfilledMetrics) {
+          for (const [name, sample] of backfilledMetrics) {
+            addSample(timelines, name, sample);
+          }
+          return;
+        }
+
+        const jobs = await fetchJobsForRun(run.id);
+        const metrics = new Map(extractMetrics(run, jobs));
+        for (const [name, sample] of metrics) {
+          addSample(timelines, name, sample);
+        }
+
+        // Fetch per-test timing artifacts
+        let canBackfill = true;
+        try {
+          const timingArtifacts = artifacts.filter(
+            (a) => a.name.startsWith("test-timing-") && !a.expired,
+          );
+          for (const artifact of timingArtifacts) {
+            const suites = await downloadAndParseJUnit(artifact.id);
+            if (suites.length === 0) {
+              canBackfill = false;
+              continue;
+            }
+            const testMetrics = extractTestFileMetrics(
+              run,
+              timingArtifactLabel(artifact.name),
+              suites,
+            );
+            for (const [name, sample] of testMetrics) {
+              metrics.set(name, sample);
+              addSample(timelines, name, sample);
+            }
+          }
+        } catch {
+          // Artifacts may not exist for older runs
+          canBackfill = false;
+        }
+
+        if (metrics.size > 0 && canBackfill) {
+          newBackfills.set(run.id, metrics);
+        }
+      }),
+    currentMetrics,
+  );
+
+  if (newBackfills.size > 0) {
+    await writePerfMetricsBackfillFile(
+      PERF_METRICS_BACKFILL_FILE,
+      newBackfills,
+    );
+    console.log(
+      `Wrote ${PERF_METRICS_BACKFILL_FILE} for ${newBackfills.size} fallback run(s).`,
+    );
+  }
+
+  // Sort timelines chronologically
+  for (const timeline of timelines.values()) {
+    timeline.samples.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  // Apply baseline overrides from merged PRs
+  if (overridesBySha.size > 0) {
+    console.log(
+      `Found ${overridesBySha.size} baseline override(s) from merged PRs.`,
+    );
+    applyBaselineOverrides(timelines, overridesBySha);
+  }
+
+  // 5. Compare current metrics against baseline
+  type Status = "OVER" | "CLOSE" | "OK" | "ovrd" | "excl" | "n/a";
+  interface Row {
+    metric: string;
+    status: Status;
+    current: number;
+    median?: number;
+    variance?: number;
+    stddev?: number;
+    threshold?: number;
+    n: number;
+    pctIncrease?: number;
+    /**
+     * How much of the median→threshold margin the current value has consumed,
+     * as a percentage. 0% = at median; 100% = at threshold; >100% = over.
+     */
+    headroomPct?: number;
+  }
+
+  const rows: Row[] = [];
+  const failures: Row[] = [];
+
+  for (const [metric, currentSample] of currentMetrics) {
+    const current = currentSample.durationSeconds;
+    const timeline = timelines.get(metric);
+    const n = timeline?.samples.length ?? 0;
+    const baseline = timeline && n >= MIN_SAMPLES
+      ? computeBaseline(
+        timeline.samples.map((s) => s.durationSeconds),
+        metric.startsWith("bench:") ? 0 : MIN_ABSOLUTE_DELTA,
+      )
+      : null;
+
+    const stats = baseline && {
+      median: baseline.median,
+      variance: baseline.variance,
+      stddev: baseline.stddev,
+      threshold: baseline.threshold,
+      pctIncrease: ((current - baseline.median) / baseline.median) * 100,
+      headroomPct: baseline.threshold > baseline.median
+        ? ((current - baseline.median) /
+          (baseline.threshold - baseline.median)) * 100
+        : 0,
+    };
+
+    // Metrics whose aggregate values grow as tests are added — never fail,
+    // but still shown so the log has full context.
+    if (EXCLUDED_METRIC_PATTERNS.some((re) => re.test(metric))) {
+      rows.push({ metric, status: "excl", current, n, ...(stats ?? {}) });
+      continue;
+    }
+
+    // Not enough baseline data — show anyway.
+    if (!baseline) {
+      rows.push({ metric, status: "n/a", current, n });
+      continue;
+    }
+
+    // PR has an override saving this metric.
+    if (prOverrides.metrics.has(metric)) {
+      const override = prOverrides.metrics.get(metric)!;
+      if (current <= override) {
+        rows.push({ metric, status: "ovrd", current, n, ...stats! });
+        continue;
+      }
+    }
+
+    if (current > baseline.threshold) {
+      const row: Row = { metric, status: "OVER", current, n, ...stats! };
+      rows.push(row);
+      failures.push(row);
+    } else if ((stats!.headroomPct ?? 0) >= 50) {
+      rows.push({ metric, status: "CLOSE", current, n, ...stats! });
+    } else {
+      rows.push({ metric, status: "OK", current, n, ...stats! });
+    }
+  }
+
+  // 6. Report results
+
+  // 6a. Prominent failure callout up top, so it's unmissable.
+  if (failures.length > 0) {
+    console.log(
+      "\n!!!" +
+        `\n!!! PERFORMANCE REGRESSION DETECTED in ${failures.length} metric(s) !!!` +
+        "\n!!!",
+    );
+  }
+
+  // 6b. Informational CI wall-time policy signals. These are intentionally
+  // non-blocking; they tell us when to consider CI split/rebalance work again.
+  if (wallTimeSignals.length > 0) {
+    console.log("\n## CI Wall-Time Revisit Signals");
+    console.log(
+      "Informational only. See docs/development/CI_PERFORMANCE.md before starting CI-splitting work.",
+    );
+    console.log("| signal | detail |");
+    console.log("|:--|:--|");
+    for (const signal of wallTimeSignals) {
+      console.log(`| ${signal.title} | ${signal.detail} |`);
+    }
+  }
+
+  // 6c. Full metric table — always emitted, grouped by metric kind.
+  console.log(
+    "\n::group::All collected metrics:" +
+      `\nThresholds: median + ${STDDEV_FACTOR}σ or +${
+        MIN_REGRESSION_PCT * 100
+      }% (whichever is higher); non-bench metrics also require at least +${MIN_ABSOLUTE_DELTA}s.`,
+  );
+  console.log(
+    "Status key: OVER = over threshold (fails); CLOSE = ≥50% of margin consumed;",
+  );
+  console.log(
+    "  OK = <50% consumed; ovrd = saved by a PR override; excl = metric excluded from the check;",
+  );
+  console.log(
+    `  n/a = fewer than ${MIN_SAMPLES} baseline samples.`,
+  );
+  console.log(
+    `  head% = fraction of the median→threshold margin currently consumed.`,
+  );
+
+  const kindOf = (metric: string): string => {
+    const colon = metric.indexOf(":");
+    if (colon < 0) return "other";
+    const prefix = metric.slice(0, colon);
+    switch (prefix) {
+      case "job":
+        return "Jobs";
+      case "step":
+        return "Steps";
+      case "test":
+        return "Test files";
+      case "subtest":
+        return "Subtests";
+      case "bench":
+        return "Benchmarks";
+      default:
+        return prefix;
+    }
+  };
+  const KIND_ORDER = ["Jobs", "Steps", "Test files", "Subtests", "Benchmarks"];
+  // Sort order within each kind: most at-risk of failing the check first.
+  // `ovrd` sits below `OK` because an override-protected metric is at strictly
+  // lower risk of tripping the check than an unguarded OK metric — the author
+  // has already authorized its current level.
+  const STATUS_ORDER: Record<Status, number> = {
+    OVER: 5,
+    CLOSE: 4,
+    OK: 3,
+    ovrd: 2,
+    excl: 1,
+    "n/a": 0,
+  };
+
+  const byKind = new Map<string, Row[]>();
+  for (const r of rows) {
+    const k = kindOf(r.metric);
+    if (!byKind.has(k)) byKind.set(k, []);
+    byKind.get(k)!.push(r);
+  }
+  const kindsSeen = [
+    ...KIND_ORDER.filter((k) => byKind.has(k)),
+    ...[...byKind.keys()].filter((k) => !KIND_ORDER.includes(k)).sort(),
+  ];
+
+  const counts = {
+    OVER: 0,
+    CLOSE: 0,
+    OK: 0,
+    ovrd: 0,
+    excl: 0,
+    "n/a": 0,
+  } as Record<Status, number>;
+  for (const r of rows) counts[r.status]++;
+
+  console.log(
+    `\n## All metrics checked  (${rows.length} total — OVER: ${counts.OVER}, CLOSE: ${counts.CLOSE}, OK: ${counts.OK}, ovrd: ${counts.ovrd}, excl: ${counts.excl}, n/a: ${
+      counts["n/a"]
+    })`,
+  );
+
+  for (const kind of kindsSeen) {
+    const rs = byKind.get(kind)!;
+    rs.sort((a, b) => {
+      const s = STATUS_ORDER[b.status] - STATUS_ORDER[a.status];
+      if (s !== 0) return s;
+      return (b.headroomPct ?? -Infinity) - (a.headroomPct ?? -Infinity);
+    });
+    console.log(`\n### ${kind}  (${rs.length})`);
+    console.log(
+      "| status | head% | Δ% | current | baseline median | threshold | n | metric |",
+    );
+    console.log("|:---|---:|---:|---:|---:|---:|---:|:--|");
+    for (const r of rs) {
+      const fmt = (v: number | undefined) =>
+        v === undefined ? "—" : formatMetricValue(r.metric, v);
+      const pct = r.pctIncrease === undefined
+        ? "—"
+        : `${r.pctIncrease >= 0 ? "+" : ""}${r.pctIncrease.toFixed(1)}%`;
+      const head = r.headroomPct === undefined
+        ? "—"
+        : `${r.headroomPct.toFixed(0)}%`;
+      console.log(
+        `| ${r.status} | ${head} | ${pct} | ${fmt(r.current)} | ${
+          fmt(r.median)
+        } | ${fmt(r.threshold)} | ${r.n} | ${r.metric} |`,
+      );
+    }
+  }
+
+  console.log("::endgroup::");
+
+  // 6d. Failure metric details.
+  if (failures.length > 0) {
+    failures.sort((a, b) => (b.pctIncrease ?? 0) - (a.pctIncrease ?? 0));
+
+    console.log(
+      "\n## Performance regression details:\n" +
+        "\n| Metric | Current | Baseline (median) | Threshold | Change |",
+    );
+    console.log(
+      "|--------|---------|-------------------|-----------|--------|",
+    );
+    for (const f of failures) {
+      const fmt = (v: number) => formatMetricValue(f.metric, v);
+      console.log(
+        `| ${f.metric} | ${fmt(f.current)} | ${fmt(f.median!)} | ${
+          fmt(f.threshold!)
+        } | +${f.pctIncrease!.toFixed(0)}% |`,
+      );
+    }
+
+    console.log("\n::group::Baseline sample breakdown:\n");
+    for (const f of failures) {
+      const timeline = timelines.get(f.metric);
+      if (!timeline) continue;
+
+      const fmt = (v: number) => formatMetricValue(f.metric, v);
+      console.log(
+        `  ${f.metric} (n=${timeline.samples.length}, median=${
+          fmt(f.median!)
+        }, variance=${fmt(f.variance!)}, stddev=${fmt(f.stddev!)}):`,
+      );
+      for (const s of timeline.samples) {
+        const pr = prInfoBySha.get(s.sha);
+        const prStr = pr ? `PR #${pr.number}` : s.sha.slice(0, 8);
+        console.log(
+          `    ${fmt(s.durationSeconds)} — ${prStr} (${
+            s.createdAt.slice(0, 10)
+          })`,
+        );
+      }
+    }
+
+    console.log("::endgroup::");
+  }
+
+  // 6e. Pass/fail outcome + override copy-paste block pinned at the bottom.
+  if (informationalOnly) {
+    console.log("\nInformational Only:");
+  }
+
+  if (failures.length === 0) {
+    console.log("\nAll metrics within normal range.");
+    Deno.exit(0);
+  } else if (informationalOnly) {
+    console.log("\nOne or more metrics are out-of-range.");
+    console.log("This build would fail if it were a PR.");
+    Deno.exit(0);
+  }
+
+  console.log(
+    "\nTo accept these regressions, add the following to your PR description:\n",
+  );
+  console.log("---BEGIN COPY-PASTE---");
+  for (const f of failures) {
+    const suggested = formatOverrideSuggestion(f.metric, f.current);
+    console.log(`NEW_PERF_BASELINE: ${f.metric} = ${suggested}`);
+  }
+  console.log("---END COPY-PASTE---");
+
+  Deno.exit(1);
+}
+
+main();

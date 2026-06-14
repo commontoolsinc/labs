@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Dietary Restrictions Module - Pattern for tracking all dietary needs
  *
@@ -22,7 +21,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -79,7 +78,7 @@ export interface RestrictionEntry {
 export type RestrictionInput = string | RestrictionEntry;
 
 export interface DietaryRestrictionsInput {
-  restrictions: Default<RestrictionInput[], []>;
+  restrictions: RestrictionInput[] | Default<[]>;
 }
 
 // ===== Restriction Categories =====
@@ -1220,7 +1219,7 @@ function _getContextualLabel(name: string, level: RestrictionLevel): string {
 }
 
 // ===== Autocomplete Items =====
-// Build items for ct-autocomplete with searchAliases for bidirectional search
+// Build items for cf-autocomplete with searchAliases for bidirectional search
 
 interface AutocompleteItem {
   value: string;
@@ -1242,7 +1241,9 @@ function buildAutocompleteItems(): AutocompleteItem[] {
       group: info.category,
       // No searchAliases - typing "milk" finds "milk" item, "dairy" finds "dairy" group
     });
-    info.members.forEach((m) => allMembers.add(m));
+    for (const member of info.members) {
+      allMembers.add(member);
+    }
   }
 
   // Add individual members with parent groups as searchAliases
@@ -1259,27 +1260,20 @@ function buildAutocompleteItems(): AutocompleteItem[] {
   return items;
 }
 
-// Lazy-init singleton for autocomplete items (defers work until first use)
-let _cachedAutocompleteItems: AutocompleteItem[] | null = null;
-function getAutocompleteItems(): AutocompleteItem[] {
-  if (!_cachedAutocompleteItems) {
-    _cachedAutocompleteItems = buildAutocompleteItems();
-  }
-  return _cachedAutocompleteItems;
-}
-
 // ===== Computed UI helpers (stable identity, no inline callbacks) =====
 
 // Empty state for when no restrictions
-const emptyState = (
-  <ct-vstack style="padding: 24px; text-align: center; color: #9ca3af;">
-    <span style="font-size: 32px; margin-bottom: 8px;">🍽️</span>
-    <span>No dietary restrictions added</span>
-    <span style="font-size: 13px;">
-      Search for allergies, diets (vegetarian, keto), or intolerances
-    </span>
-  </ct-vstack>
-);
+function renderEmptyState() {
+  return (
+    <cf-vstack style="padding: 24px; text-align: center; color: #9ca3af;">
+      <span style="font-size: 32px; margin-bottom: 8px;">🍽️</span>
+      <span>No dietary restrictions added</span>
+      <span style="font-size: 13px;">
+        Search for allergies, diets (vegetarian, keto), or intolerances
+      </span>
+    </cf-vstack>
+  );
+}
 
 // ===== Handlers =====
 
@@ -1344,7 +1338,7 @@ const _selectSuggestion = handler<
   input.set("");
 });
 
-// Handler for ct-autocomplete's ct-select event
+// Handler for cf-autocomplete's cf-select event
 const onSelectRestriction = handler<
   CustomEvent<{ value: string; label: string; isCustom?: boolean }>,
   {
@@ -1400,7 +1394,8 @@ export const DietaryRestrictionsModule = pattern<
   DietaryRestrictionsInput,
   DietaryRestrictionsInput
 >(({ restrictions }) => {
-  const selectedLevel = Writable.of<RestrictionLevel>("prefer");
+  const autocompleteItems = buildAutocompleteItems();
+  const selectedLevel = new Writable<RestrictionLevel>("prefer");
 
   // Normalize raw restrictions to RestrictionEntry[] format
   // Handles both string[] (from LLM extraction) and RestrictionEntry[] (from UI)
@@ -1418,31 +1413,12 @@ export const DietaryRestrictionsModule = pattern<
       .filter((entry) => entry.name && entry.name.trim() !== "");
   });
 
-  // Cache for impliedItems to avoid recomputation when restrictions haven't changed
-  let _cachedImpliedItems: Array<{
-    name: string;
-    level: RestrictionLevel;
-    sources: string[];
-  }> = [];
-  let _lastRestrictionsHash = "";
-
   // Compute implied items (expanded from groups) - memoized
   // VERIFIED: This computed() only runs when restrictions change, not on autocomplete keypress.
   // Console instrumentation confirmed memoization works correctly (Dec 2025).
   const impliedItems = computed(() => {
     // Access the normalized array - normalizedRestrictions is already a computed OpaqueRef
     const current = (normalizedRestrictions || []) as RestrictionEntry[];
-
-    // Full hash to catch ALL item changes (including middle items)
-    // Defensive: handle potentially missing name/level
-    const hash = current
-      .filter((e) => e?.name)
-      .map((e) => `${e.name}:${e.level || "prefer"}`)
-      .join("|");
-    if (hash === _lastRestrictionsHash) {
-      return _cachedImpliedItems;
-    }
-    _lastRestrictionsHash = hash;
 
     const implied = new Map<
       string,
@@ -1475,11 +1451,9 @@ export const DietaryRestrictionsModule = pattern<
       }
     }
 
-    _cachedImpliedItems = [...implied.entries()]
+    return [...implied.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([name, info]) => ({ name, ...info }));
-
-    return _cachedImpliedItems;
   });
 
   const displayText = computed(() => {
@@ -1494,7 +1468,7 @@ export const DietaryRestrictionsModule = pattern<
     return raw.filter((item) => item != null).length > 0;
   });
 
-  // Level options for ct-select
+  // Level options for cf-select
   const levelOptions = [
     { value: "flexible", label: "Flexible" },
     { value: "prefer", label: "Prefer" },
@@ -1505,32 +1479,32 @@ export const DietaryRestrictionsModule = pattern<
   return {
     [NAME]: computed(() => `🍽️ Dietary: ${displayText}`),
     [UI]: (
-      <ct-vstack gap="4">
+      <cf-vstack gap="4">
         {/* Input row */}
-        <ct-hstack gap="2" align="center">
-          <ct-autocomplete
-            items={getAutocompleteItems()}
+        <cf-hstack gap="2" align="center">
+          <cf-autocomplete
+            items={autocompleteItems}
             placeholder="Search allergies, diets, intolerances..."
             allowCustom
-            onct-select={onSelectRestriction({ restrictions, selectedLevel })}
+            oncf-select={onSelectRestriction({ restrictions, selectedLevel })}
             style="flex: 1;"
           />
 
-          <ct-select
+          <cf-select
             $value={selectedLevel}
             items={levelOptions}
             style="width: 120px;"
           />
-        </ct-hstack>
+        </cf-hstack>
 
         {/* Restrictions list - map directly over Cell for reactive $value binding */}
         {ifElse(
           hasRestrictions,
-          <ct-vstack gap="2">
+          <cf-vstack gap="2">
             <span style="font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase;">
               Your Restrictions
             </span>
-            <ct-hstack gap="2" wrap>
+            <cf-hstack gap="2" wrap>
               {restrictions.map(
                 // deno-lint-ignore no-explicit-any
                 (item: any, index: number) => {
@@ -1553,7 +1527,7 @@ export const DietaryRestrictionsModule = pattern<
                         whiteSpace: "nowrap",
                       }}
                     >
-                      <ct-select
+                      <cf-select
                         $value={item.level}
                         items={levelOptions}
                         style={{
@@ -1592,22 +1566,22 @@ export const DietaryRestrictionsModule = pattern<
                   );
                 },
               )}
-            </ct-hstack>
-          </ct-vstack>,
-          emptyState,
+            </cf-hstack>
+          </cf-vstack>,
+          renderEmptyState(),
         )}
 
         {/* Implied items section */}
         {ifElse(
           hasImpliedItems(impliedItems),
-          <ct-vstack
+          <cf-vstack
             gap="2"
             style="padding-top: 8px; border-top: 1px solid #e5e7eb;"
           >
             <span style="font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase;">
               What This Means (Avoid These)
             </span>
-            <ct-hstack gap="1" wrap>
+            <cf-hstack gap="1" wrap>
               {impliedItems.map(
                 (
                   item: {
@@ -1629,11 +1603,11 @@ export const DietaryRestrictionsModule = pattern<
                   );
                 },
               )}
-            </ct-hstack>
-          </ct-vstack>,
+            </cf-hstack>
+          </cf-vstack>,
           null,
         )}
-      </ct-vstack>
+      </cf-vstack>
     ),
     restrictions,
   };

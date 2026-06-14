@@ -1,11 +1,22 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  ExtendedStorageTransaction,
+  TransactionWrapper,
+} from "../src/storage/extended-storage-transaction.ts";
 import { setPatternEnvironment } from "../src/env.ts";
+import {
+  computeInputHashFromValue,
+  internalSchema,
+  tryClaimMutex,
+} from "../src/builtins/fetch-utils.ts";
+import type { Schema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("test fetch-data mutex");
 const space = signer.did();
@@ -14,9 +25,9 @@ describe("fetch-data mutex mechanism", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
-  let computed: ReturnType<typeof createBuilder>["commontools"]["computed"];
-  let byRef: ReturnType<typeof createBuilder>["commontools"]["byRef"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+  let computed: ReturnType<typeof createBuilder>["commonfabric"]["computed"];
+  let byRef: ReturnType<typeof createBuilder>["commonfabric"]["byRef"];
   let originalFetch: typeof globalThis.fetch;
   let fetchCalls: Array<{ url: string; init?: RequestInit }>;
 
@@ -28,10 +39,10 @@ describe("fetch-data mutex mechanism", () => {
     });
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
-    pattern = commontools.pattern;
-    computed = commontools.computed;
-    byRef = commontools.byRef;
+    const { commonfabric } = createTrustedBuilder(runtime);
+    pattern = commonfabric.pattern;
+    computed = commonfabric.computed;
+    byRef = commonfabric.byRef;
 
     // Set up pattern environment with a mock base URL
     setPatternEnvironment({
@@ -110,6 +121,189 @@ describe("fetch-data mutex mechanism", () => {
     // Should have made the fetch call
     expect(fetchCalls.length).toBeGreaterThan(0);
     expect(fetchCalls[0].url).toContain("/api/test");
+  });
+
+  it("resolves relative fetchData URLs against the pattern API URL", async () => {
+    setPatternEnvironment({
+      apiUrl: new URL("http://mock-test-server.local/api/root/"),
+    });
+
+    const fetchData = byRef("fetchData");
+    const testPattern = pattern<{ url: string }>(
+      ({ url }) => fetchData({ url, mode: "json" }),
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "relative-url-test",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      testPattern,
+      { url: "data/items.json" },
+      resultCell,
+    );
+    tx.commit();
+
+    await result.pull();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await result.pull();
+
+    expect(fetchCalls.length).toBeGreaterThan(0);
+    expect(fetchCalls[0].url).toBe(
+      "http://mock-test-server.local/api/root/data/items.json",
+    );
+  });
+
+  it("should enqueue fetchData work behind the post-commit outbox", async () => {
+    const fetchData = byRef("fetchData");
+    const testPattern = pattern<{ url: string }>(
+      ({ url }) => fetchData({ url, mode: "json" }),
+    );
+
+    const txPrototype = ExtendedStorageTransaction.prototype;
+    const wrapperPrototype = TransactionWrapper.prototype;
+    const originalTxCommit = txPrototype.commit;
+    const originalWrapperCommit = wrapperPrototype.commit;
+    let committed = false;
+
+    txPrototype.commit = function (...args) {
+      committed = true;
+      return originalTxCommit.apply(this, args as never);
+    };
+    wrapperPrototype.commit = function (...args) {
+      committed = true;
+      return originalWrapperCommit.apply(this, args as never);
+    };
+
+    const resultCell = runtime.getCell(space, "pre-commit-test", undefined, tx);
+    const result = runtime.run(tx, testPattern, {
+      url: "http://mock-test-server.local/api/pre-commit",
+    }, resultCell);
+
+    try {
+      tx.commit();
+      await result.pull();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      expect(committed).toBe(true);
+      expect(fetchCalls.length).toBeGreaterThan(0);
+      expect(fetchCalls[0].url).toContain("/api/pre-commit");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    } finally {
+      txPrototype.commit = originalTxCommit;
+      wrapperPrototype.commit = originalWrapperCommit;
+    }
+  });
+
+  it("uses a stable fetchData idempotency key for identical inputs", async () => {
+    const fetchData = byRef("fetchData");
+    const testPattern = pattern<{ url: string }>(
+      ({ url }) =>
+        fetchData({ url, mode: "json", options: { mutexTimeoutMs: 30_000 } }),
+    );
+
+    const txPrototype = ExtendedStorageTransaction.prototype;
+    const wrapperPrototype = TransactionWrapper.prototype;
+    const originalTxEnqueue = txPrototype.enqueuePostCommitEffect;
+    const originalWrapperEnqueue = wrapperPrototype.enqueuePostCommitEffect;
+    const outboxIds: string[] = [];
+
+    txPrototype.enqueuePostCommitEffect = function (...args) {
+      outboxIds.push((args[0] as { id: string }).id);
+      return originalTxEnqueue.apply(this, args as never);
+    };
+    wrapperPrototype.enqueuePostCommitEffect = function (...args) {
+      outboxIds.push((args[0] as { id: string }).id);
+      return originalWrapperEnqueue.apply(this, args as never);
+    };
+
+    try {
+      const resultCell = runtime.getCell(
+        space,
+        "fetch-idempotency-test",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {
+        url: "http://mock-test-server.local/api/idempotency",
+      }, resultCell);
+      tx.commit();
+      await result.pull();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const expectedHash = computeInputHashFromValue({
+        url: "http://mock-test-server.local/api/idempotency",
+        mode: "json",
+      });
+
+      expect(computeInputHashFromValue({
+        url: "http://mock-test-server.local/api/idempotency",
+        mode: "json",
+        options: { mutexTimeoutMs: 30_000 },
+      })).toBe(expectedHash);
+      expect(outboxIds.length).toBeGreaterThan(0);
+      expect(outboxIds[0]).toBe(`fetchData:${expectedHash}`);
+    } finally {
+      txPrototype.enqueuePostCommitEffect = originalTxEnqueue;
+      wrapperPrototype.enqueuePostCommitEffect = originalWrapperEnqueue;
+    }
+  });
+
+  it("does not claim a post-commit fetch mutex when live inputs differ from the approved snapshot", async () => {
+    const inputs = runtime.getCell<{
+      url?: string;
+      mode?: "json" | "text";
+    }>(space, "fetch-mutex-approved-inputs", undefined, tx);
+    const pending = runtime.getCell<boolean>(
+      space,
+      "fetch-mutex-approved-pending",
+      undefined,
+      tx,
+    );
+    const result = runtime.getCell<unknown>(
+      space,
+      "fetch-mutex-approved-result",
+      undefined,
+      tx,
+    );
+    const error = runtime.getCell<unknown>(
+      space,
+      "fetch-mutex-approved-error",
+      undefined,
+      tx,
+    );
+    const internal = runtime.getCell<Schema<typeof internalSchema>>(
+      space,
+      "fetch-mutex-approved-internal",
+      undefined,
+      tx,
+    );
+    inputs.set({ url: "/api/mutated", mode: "json" });
+    pending.set(false);
+    internal.set({ requestId: "", lastActivity: 0, inputHash: "" });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const approvedSnapshot = { url: "/api/approved", mode: "json" as const };
+    const approvedHash = computeInputHashFromValue(approvedSnapshot);
+    const claim = await tryClaimMutex(
+      runtime,
+      inputs,
+      pending,
+      result,
+      error,
+      internal,
+      approvedHash,
+      (cell) => cell.get() ?? {},
+      approvedHash,
+    );
+
+    expect(claim.claimed).toBe(false);
+    expect(claim.inputHash).not.toBe(approvedHash);
+    expect(pending.get()).toBe(false);
   });
 
   it("should handle concurrent requests with same inputs (mutex test)", async () => {
@@ -238,6 +432,51 @@ describe("fetch-data mutex mechanism", () => {
     expect(fetchCalls.length).toBeGreaterThan(jsonCallCount);
   });
 
+  it("converts dataUrl mode responses into a serializable data URL", async () => {
+    globalThis.fetch = (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.toString()
+        : input.url;
+      fetchCalls.push({ url, init });
+      return Promise.resolve(
+        new Response(new Uint8Array([1, 2, 3, 4]), {
+          status: 200,
+          headers: { "Content-Type": "image/webp" },
+        }),
+      );
+    };
+
+    const fetchData = byRef("fetchData");
+    const testPattern = pattern<{ url: string }>(
+      ({ url }) => fetchData({ url, mode: "dataUrl" }),
+    );
+
+    const resultCell = runtime.getCell(space, "data-url-test", undefined, tx);
+    const result = runtime.run(tx, testPattern, {
+      url: "/api/image",
+    }, resultCell);
+    tx.commit();
+
+    await result.pull();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await result.pull();
+
+    const rawData = result.get() as {
+      pending: boolean;
+      result?: string;
+      error?: unknown;
+    };
+
+    expect(rawData.pending).toBe(false);
+    expect(rawData.error).toBeUndefined();
+    expect(rawData.result).toBe("data:image/webp;base64,AQIDBA==");
+  });
+
   it("should set pending to true during fetch and false after", async () => {
     // Use a longer delay to observe pending state
     const slowFetch = globalThis.fetch;
@@ -297,47 +536,66 @@ describe("fetch-data mutex mechanism", () => {
     globalThis.fetch = slowFetch;
   });
 
-  it("should handle fetch errors gracefully", async () => {
-    // Mock fetch to return an error
+  const error404Fetch = () => {
     globalThis.fetch = async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
       return new Response("Not Found", { status: 404 });
     };
+  };
 
-    const fetchData = byRef("fetchData");
-    const testPattern = pattern<{ url: string }>(
+  it("should handle fetch errors gracefully", async () => {
+    error404Fetch();
+    const sm = StorageManager.emulate({ as: signer });
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+    });
+    const localTx = rt.edit();
+    const { commonfabric } = createTrustedBuilder(rt);
+    const fetchData = commonfabric.byRef("fetchData");
+    const testPattern = commonfabric.pattern<{ url: string }>(
       ({ url }) => fetchData({ url, mode: "json" }),
     );
 
-    const resultCell = runtime.getCell(space, "error-test", undefined, tx);
-    const result = runtime.run(
-      tx,
+    const resultCell = rt.getCell(
+      space,
+      "error-test-modern",
+      undefined,
+      localTx,
+    );
+    const result = rt.run(
+      localTx,
       testPattern,
       { url: "/api/error" },
       resultCell,
     );
-    tx.commit();
+    localTx.commit();
 
-    // Pull first to trigger computation (starts the fetch)
     await result.pull();
-
-    // Wait for async work
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     const data = (await result.pull()) as {
       error?: unknown;
-      result?: unknown;
       pending?: boolean;
     };
 
-    // Should have an error with proper @Error wrapper structure
+    // Regression guard for the `memory/v2/patch.ts` `structuredClone()`
+    // class-stripping bug, which made errors round-trip back as `{ ... }`
+    // with message/stack lost.
     expect(data.error).toBeDefined();
-    expect(data.error).toHaveProperty("@Error");
-    const errorInfo =
-      (data.error as { "@Error": Record<string, unknown> })["@Error"];
-    expect(errorInfo.name).toBe("Error");
-    expect(errorInfo.message).toMatch(/HTTP 404/);
+    const fe = data.error as {
+      name: string;
+      message: string;
+      stack: string;
+    };
+    expect(fe.name).toBe("Error");
+    expect(fe.message).toMatch(/HTTP 404/);
+    expect(typeof fe.stack).toBe("string");
     expect(data.pending).toBe(false);
+
+    await localTx.commit();
+    await rt.dispose();
+    await sm.close();
   });
 
   it("should abort and clear state if URL becomes empty while waiting for mutex", async () => {

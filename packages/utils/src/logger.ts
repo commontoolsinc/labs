@@ -13,7 +13,7 @@
  *
  * @example Typical usage - disabled by default with debug level
  * ```typescript
- * import { getLogger } from "@commontools/utils/logger";
+ * import { getLogger } from "@commonfabric/utils/logger";
  *
  * // Common pattern: create a debug logger that's disabled by default
  * // pass in function for lazy evaluation of parameters
@@ -23,7 +23,7 @@
  *
  * @example Basic usage
  * ```typescript
- * import { log } from "@commontools/utils/logger";
+ * import { log } from "@commonfabric/utils/logger";
  *
  * // Global logger instance - no module tag
  * // First parameter is always a string key for tracking
@@ -36,7 +36,7 @@
  *
  * @example Module-tagged logging
  * ```typescript
- * import { getLogger } from "@commontools/utils/logger";
+ * import { getLogger } from "@commonfabric/utils/logger";
  *
  * // Explicitly specify module name - recommended approach
  * const logger = getLogger("user-service");
@@ -97,11 +97,11 @@
  * logger.resetCounts();
  *
  * // Get total across ALL loggers (in TypeScript/Deno)
- * import { getTotalLoggerCounts } from "@commontools/utils/logger";
+ * import { getTotalLoggerCounts } from "@commonfabric/utils/logger";
  * const total = getTotalLoggerCounts(); // Sum of all logger counts
  *
  * // Get breakdown by logger and message key (in TypeScript/Deno)
- * import { getLoggerCountsBreakdown } from "@commontools/utils/logger";
+ * import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
  * const breakdown = getLoggerCountsBreakdown();
  * // {
  * //   "module-1": {
@@ -113,14 +113,14 @@
  * // }
  *
  * // Reset all logger counts (in TypeScript/Deno)
- * import { resetAllLoggerCounts } from "@commontools/utils/logger";
+ * import { resetAllLoggerCounts } from "@commonfabric/utils/logger";
  * resetAllLoggerCounts();
  * ```
  *
  * @example Browser console usage for metrics
  * ```javascript
  * // Get breakdown of all logger counts by name and message key
- * globalThis.commontools.getLoggerCountsBreakdown()
+ * globalThis.commonfabric.getLoggerCountsBreakdown()
  * // Returns: {
  * //   "module-1": {
  * //     "user-login": { debug: 5, info: 10, warn: 2, error: 0, total: 17 },
@@ -130,22 +130,22 @@
  * // }
  *
  * // Get just the total count
- * globalThis.commontools.getTotalLoggerCounts()
+ * globalThis.commonfabric.getTotalLoggerCounts()
  * // Returns: 17
  *
  * // Reset all counts
- * globalThis.commontools.resetAllLoggerCounts()
+ * globalThis.commonfabric.resetAllLoggerCounts()
  *
  * // Access individual logger counts
- * globalThis.commontools.logger["module-name"].counts
+ * globalThis.commonfabric.logger["module-name"].counts
  * // Returns: { debug: 5, info: 10, warn: 2, error: 1, total: 18 }
  *
  * // Access individual logger counts by key
- * globalThis.commontools.logger["module-name"].countsByKey
+ * globalThis.commonfabric.logger["module-name"].countsByKey
  * // Returns: { "user-login": { debug: 5, info: 10, warn: 2, error: 0, total: 17 }, ... }
  *
  * // Reset specific logger
- * globalThis.commontools.logger["module-name"].resetCounts()
+ * globalThis.commonfabric.logger["module-name"].resetCounts()
  * ```
  *
  * @example Automatic count summaries
@@ -167,7 +167,7 @@
  * ```
  */
 
-import { isDeno } from "@commontools/utils/env";
+import { isDeno } from "@commonfabric/utils/env";
 
 export type LogMessage = unknown | (() => unknown);
 
@@ -194,6 +194,9 @@ export interface TimingStats {
   max: number; // Maximum time (ms)
   totalTime: number; // Sum for average calculation
   average: number; // totalTime / count
+  countSinceBaseline: number; // Measurements since most recent baseline reset
+  totalTimeSinceBaseline: number; // Sum of measurements since baseline reset
+  averageSinceBaseline: number; // totalTimeSinceBaseline / countSinceBaseline
   p50: number; // Median (50th percentile)
   p95: number; // 95th percentile
   lastTime: number; // Most recent measurement
@@ -221,7 +224,9 @@ class TimingDataStore {
   private lastTime = 0;
   private lastTimestamp = 0;
   private samples: number[] = [];
+  private hasBaseline = false;
   private baselineCount = 0;
+  private baselineTotalTime = 0;
   private deltaSamples: number[] = []; // Reservoir for samples since baseline
   private deltaCount = 0; // Count of samples since baseline
 
@@ -249,7 +254,7 @@ class TimingDataStore {
     }
 
     // Also record to delta reservoir if baseline is set
-    if (this.baselineCount > 0) {
+    if (this.hasBaseline) {
       this.deltaCount++;
       if (this.deltaSamples.length < TIMING_RESERVOIR_SIZE) {
         this.deltaSamples.push(elapsed);
@@ -267,7 +272,9 @@ class TimingDataStore {
    * After calling this, new samples will be tracked separately for delta CDF.
    */
   setBaseline(): void {
+    this.hasBaseline = true;
     this.baselineCount = this.count;
+    this.baselineTotalTime = this.totalTime;
     this.deltaSamples = [];
     this.deltaCount = 0;
   }
@@ -283,6 +290,9 @@ class TimingDataStore {
         max: 0,
         totalTime: 0,
         average: 0,
+        countSinceBaseline: 0,
+        totalTimeSinceBaseline: 0,
+        averageSinceBaseline: 0,
         p50: 0,
         p95: 0,
         lastTime: 0,
@@ -308,12 +318,25 @@ class TimingDataStore {
       cdfSinceBaseline = this.calculateCDF(deltaSorted);
     }
 
+    const countSinceBaseline = this.hasBaseline
+      ? this.count - this.baselineCount
+      : 0;
+    const totalTimeSinceBaseline = this.hasBaseline
+      ? this.totalTime - this.baselineTotalTime
+      : 0;
+    const averageSinceBaseline = countSinceBaseline > 0
+      ? totalTimeSinceBaseline / countSinceBaseline
+      : 0;
+
     return {
       count: this.count,
       min: this.min,
       max: this.max,
       totalTime: this.totalTime,
       average: this.totalTime / this.count,
+      countSinceBaseline,
+      totalTimeSinceBaseline,
+      averageSinceBaseline,
       p50: median,
       p95: sorted[p95Index] ?? sorted[sorted.length - 1] ?? 0,
       lastTime: this.lastTime,
@@ -412,20 +435,20 @@ export function getGlobalLogFloor(): LogLevel | undefined {
 }
 
 /**
- * Read `CT_LOG_LEVEL` from the environment (Deno only).
+ * Read `CF_LOG_LEVEL` from the environment (Deno only).
  * Returns undefined when not set or not a valid level.
  */
 function getEnvFloor(): LogLevel | undefined {
   if (isDeno()) {
     try {
-      const envLevel = Deno.env.get("CT_LOG_LEVEL");
+      const envLevel = Deno.env.get("CF_LOG_LEVEL");
       if (envLevel && envLevel in LOG_LEVELS) return envLevel as LogLevel;
     } catch { /* ignore permission errors */ }
   }
   return undefined;
 }
 
-// Auto-initialize floor from CT_LOG_LEVEL so workers inherit it.
+// Auto-initialize floor from CF_LOG_LEVEL so workers inherit it.
 _globalLevelFloor = getEnvFloor();
 
 /**
@@ -484,6 +507,24 @@ export interface GetLoggerOptions {
 }
 
 /**
+ * Optional timing-output bridge for exporting selected logger timings to
+ * Performance entries and/or console output.
+ *
+ * Matching is prefix-based against:
+ * - the timing key path, e.g. "scheduler/execute"
+ * - the logger module name, e.g. "scheduler"
+ * - the combined form "<module>:<keyPath>", e.g. "scheduler:scheduler/execute"
+ *
+ * Use ["*"] to match every timed span.
+ */
+export interface TimingOutputConfig {
+  include: string[];
+  measure?: boolean;
+  console?: boolean;
+  minMs?: number;
+}
+
+/**
  * Call counts for each log level
  */
 export interface LogCounts {
@@ -492,6 +533,88 @@ export interface LogCounts {
   warn: number;
   error: number;
   readonly total: number;
+}
+
+let _globalTimingOutputConfig: TimingOutputConfig | undefined =
+  getEnvTimingOutputConfig();
+
+function parseBooleanEnv(value: string | undefined): boolean | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return undefined;
+}
+
+function parseTimingInclude(source: string | undefined): string[] {
+  if (!source) return [];
+  return source
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+function getEnvTimingOutputConfig(): TimingOutputConfig | undefined {
+  if (!isDeno()) return undefined;
+
+  try {
+    const include = parseTimingInclude(Deno.env.get("CF_LOG_TIMING"));
+    if (include.length === 0) return undefined;
+
+    const consoleEnabled = parseBooleanEnv(
+      Deno.env.get("CF_LOG_TIMING_CONSOLE"),
+    ) ?? false;
+    const measureEnabled = parseBooleanEnv(
+      Deno.env.get("CF_LOG_TIMING_MEASURE"),
+    ) ?? true;
+    const minMsRaw = Deno.env.get("CF_LOG_TIMING_MIN_MS");
+    const minMs = minMsRaw !== undefined ? Number(minMsRaw) : undefined;
+
+    const config: TimingOutputConfig = {
+      include,
+      console: consoleEnabled,
+      measure: measureEnabled,
+    };
+    if (typeof minMs === "number" && Number.isFinite(minMs)) {
+      config.minMs = minMs;
+    }
+    return config;
+  } catch {
+    return undefined;
+  }
+}
+
+export function setGlobalTimingOutputConfig(
+  config: TimingOutputConfig | undefined,
+): void {
+  _globalTimingOutputConfig = config ?? getEnvTimingOutputConfig();
+}
+
+export function getGlobalTimingOutputConfig():
+  | TimingOutputConfig
+  | undefined {
+  return _globalTimingOutputConfig
+    ? {
+      ..._globalTimingOutputConfig,
+      include: [..._globalTimingOutputConfig.include],
+    }
+    : undefined;
+}
+
+function matchesTimingOutputConfig(
+  config: TimingOutputConfig,
+  moduleName: string | undefined,
+  keyPath: string,
+): boolean {
+  if (config.include.length === 0) return false;
+  if (config.include.includes("*")) return true;
+
+  const combined = moduleName ? `${moduleName}:${keyPath}` : keyPath;
+  return config.include.some((pattern) =>
+    combined.startsWith(pattern) ||
+    keyPath.startsWith(pattern) ||
+    (moduleName?.startsWith(pattern) ?? false)
+  );
 }
 
 /**
@@ -518,6 +641,7 @@ export class Logger {
   private _lastLoggedAt: number;
   private _timingsByKey: Map<string, TimingDataStore> = new Map();
   private _activeTimers: Map<string, number> = new Map();
+  private _timingBaselineActive = false;
   private _countBaseline: {
     debug: number;
     info: number;
@@ -623,6 +747,50 @@ export class Logger {
       this._countsByKey[key] = { debug: 0, info: 0, warn: 0, error: 0 };
     }
     this._countsByKey[key][level]++;
+  }
+
+  private emitTimingOutputs(
+    keyPath: string,
+    startTime: number,
+    endTime: number,
+    elapsed: number,
+  ): void {
+    const config = _globalTimingOutputConfig;
+    if (
+      !config || !matchesTimingOutputConfig(config, this.moduleName, keyPath)
+    ) {
+      return;
+    }
+    if (config.minMs !== undefined && elapsed < config.minMs) {
+      return;
+    }
+
+    const measureName = this.moduleName
+      ? `logger:${this.moduleName}:${keyPath}`
+      : `logger:${keyPath}`;
+
+    if (config.measure !== false) {
+      try {
+        performance.measure(measureName, {
+          start: startTime,
+          end: endTime,
+        });
+      } catch {
+        // Ignore measure failures in runtimes with partial support.
+      }
+    }
+
+    if (config.console) {
+      const prefix = this.moduleName
+        ? `%c[TIMING][${this.moduleName}::${getTimeStamp()}]`
+        : `%c[TIMING][${getTimeStamp()}]`;
+      const duration = `${elapsed.toFixed(3)}ms`;
+      if (shouldLogToStderr()) {
+        logToStderr(prefix.replace("%c", ""), keyPath, duration);
+      } else {
+        console.log(prefix, LOG_COLORS.debug, keyPath, duration);
+      }
+    }
   }
 
   /**
@@ -804,8 +972,10 @@ export class Logger {
     }
     this._activeTimers.delete(keyPath);
 
-    const elapsed = performance.now() - startTime;
+    const endTime = performance.now();
+    const elapsed = endTime - startTime;
     this._recordTime(elapsed, keys);
+    this.emitTimingOutputs(keyPath, startTime, endTime, elapsed);
     return elapsed;
   }
 
@@ -841,7 +1011,9 @@ export class Logger {
 
     const elapsed = endTime - startTime;
     if (keys.length > 0) {
+      const keyPath = keys.join("/");
       this._recordTime(elapsed, keys);
+      this.emitTimingOutputs(keyPath, startTime, endTime, elapsed);
     }
     return elapsed;
   }
@@ -854,6 +1026,9 @@ export class Logger {
     let store = this._timingsByKey.get(path);
     if (!store) {
       store = new TimingDataStore();
+      if (this._timingBaselineActive) {
+        store.setBaseline();
+      }
       this._timingsByKey.set(path, store);
     }
     store.record(elapsed);
@@ -891,6 +1066,7 @@ export class Logger {
   resetTimeStats(): void {
     this._timingsByKey.clear();
     this._activeTimers.clear();
+    this._timingBaselineActive = false;
   }
 
   // ============================================================
@@ -910,6 +1086,7 @@ export class Logger {
    * After calling this, CDF delta curves will show samples since this baseline.
    */
   resetTimingBaseline(): void {
+    this._timingBaselineActive = true;
     for (const store of this._timingsByKey.values()) {
       store.setBaseline();
     }
@@ -1080,37 +1257,37 @@ export function getLogger(
 ): Logger {
   // Initialize global storage if needed
   const global = globalThis as unknown as {
-    commontools: { logger: Record<string, Logger> };
+    commonfabric: { logger: Record<string, Logger> };
   };
-  if (!global.commontools) {
-    global.commontools = { logger: {} };
+  if (!global.commonfabric) {
+    global.commonfabric = { logger: {} };
   }
-  if (!global.commontools.logger) {
-    global.commontools.logger = {};
+  if (!global.commonfabric.logger) {
+    global.commonfabric.logger = {};
   }
 
   // Return existing logger if one exists
-  if (global.commontools.logger[moduleName]) {
-    return global.commontools.logger[moduleName];
+  if (global.commonfabric.logger[moduleName]) {
+    return global.commonfabric.logger[moduleName];
   }
 
   // Create and store new logger
   const logger = new Logger(moduleName, options);
-  global.commontools.logger[moduleName] = logger;
+  global.commonfabric.logger[moduleName] = logger;
 
   return logger;
 }
 
 /**
  * Reset call counts for all registered loggers.
- * Iterates through all loggers in globalThis.commontools.logger and resets their counts.
+ * Iterates through all loggers in globalThis.commonfabric.logger and resets their counts.
  */
 export function resetAllLoggerCounts(): void {
   const global = globalThis as unknown as {
-    commontools?: { logger?: Record<string, Logger> };
+    commonfabric?: { logger?: Record<string, Logger> };
   };
-  if (global.commontools?.logger) {
-    Object.values(global.commontools.logger).forEach((logger) =>
+  if (global.commonfabric?.logger) {
+    Object.values(global.commonfabric.logger).forEach((logger) =>
       logger.resetCounts()
     );
   }
@@ -1122,12 +1299,12 @@ export function resetAllLoggerCounts(): void {
  */
 export function getTotalLoggerCounts(): number {
   const global = globalThis as unknown as {
-    commontools?: { logger?: Record<string, Logger> };
+    commonfabric?: { logger?: Record<string, Logger> };
   };
-  if (!global.commontools?.logger) {
+  if (!global.commonfabric?.logger) {
     return 0;
   }
-  return Object.values(global.commontools.logger)
+  return Object.values(global.commonfabric.logger)
     .reduce((sum, logger) => sum + logger.counts.total, 0);
 }
 
@@ -1139,14 +1316,14 @@ export function getLoggerCountsBreakdown(): Record<string, LoggerBreakdown> & {
   total: number;
 } {
   const global = globalThis as unknown as {
-    commontools?: { logger?: Record<string, Logger> };
+    commonfabric?: { logger?: Record<string, Logger> };
   };
 
   const breakdown: Record<string, LoggerBreakdown> = {};
   let total = 0;
 
-  if (global.commontools?.logger) {
-    for (const [name, logger] of Object.entries(global.commontools.logger)) {
+  if (global.commonfabric?.logger) {
+    for (const [name, logger] of Object.entries(global.commonfabric.logger)) {
       const loggerBreakdown = { total: 0 } as LoggerBreakdown;
 
       // Add counts by key (skip "total" to avoid overwriting the reserved property)
@@ -1194,13 +1371,13 @@ export type TimingStatsBreakdown = {
  */
 export function getTimingStatsBreakdown(): TimingStatsBreakdown {
   const global = globalThis as unknown as {
-    commontools?: { logger?: Record<string, Logger> };
+    commonfabric?: { logger?: Record<string, Logger> };
   };
 
   const breakdown: TimingStatsBreakdown = {};
 
-  if (global.commontools?.logger) {
-    for (const [name, logger] of Object.entries(global.commontools.logger)) {
+  if (global.commonfabric?.logger) {
+    for (const [name, logger] of Object.entries(global.commonfabric.logger)) {
       const stats = logger.timeStats;
       if (Object.keys(stats).length > 0) {
         breakdown[name] = stats;
@@ -1226,13 +1403,13 @@ export type LoggerFlagsBreakdown = Record<
  */
 export function getLoggerFlagsBreakdown(): LoggerFlagsBreakdown {
   const global = globalThis as unknown as {
-    commontools?: { logger?: Record<string, Logger> };
+    commonfabric?: { logger?: Record<string, Logger> };
   };
 
   const breakdown: LoggerFlagsBreakdown = {};
 
-  if (global.commontools?.logger) {
-    for (const [name, logger] of Object.entries(global.commontools.logger)) {
+  if (global.commonfabric?.logger) {
+    for (const [name, logger] of Object.entries(global.commonfabric.logger)) {
       const flags = logger.flags;
       if (Object.keys(flags).length > 0) {
         breakdown[name] = flags;
@@ -1245,14 +1422,14 @@ export function getLoggerFlagsBreakdown(): LoggerFlagsBreakdown {
 
 /**
  * Reset timing statistics for all registered loggers.
- * Iterates through all loggers in globalThis.commontools.logger and resets their timing stats.
+ * Iterates through all loggers in globalThis.commonfabric.logger and resets their timing stats.
  */
 export function resetAllTimingStats(): void {
   const global = globalThis as unknown as {
-    commontools?: { logger?: Record<string, Logger> };
+    commonfabric?: { logger?: Record<string, Logger> };
   };
-  if (global.commontools?.logger) {
-    Object.values(global.commontools.logger).forEach((logger) =>
+  if (global.commonfabric?.logger) {
+    Object.values(global.commonfabric.logger).forEach((logger) =>
       logger.resetTimeStats()
     );
   }
@@ -1264,10 +1441,10 @@ export function resetAllTimingStats(): void {
  */
 export function resetAllCountBaselines(): void {
   const global = globalThis as unknown as {
-    commontools?: { logger?: Record<string, Logger> };
+    commonfabric?: { logger?: Record<string, Logger> };
   };
-  if (global.commontools?.logger) {
-    Object.values(global.commontools.logger).forEach((logger) =>
+  if (global.commonfabric?.logger) {
+    Object.values(global.commonfabric.logger).forEach((logger) =>
       logger.resetCountBaseline()
     );
   }
@@ -1279,10 +1456,10 @@ export function resetAllCountBaselines(): void {
  */
 export function resetAllTimingBaselines(): void {
   const global = globalThis as unknown as {
-    commontools?: { logger?: Record<string, Logger> };
+    commonfabric?: { logger?: Record<string, Logger> };
   };
-  if (global.commontools?.logger) {
-    Object.values(global.commontools.logger).forEach((logger) =>
+  if (global.commonfabric?.logger) {
+    Object.values(global.commonfabric.logger).forEach((logger) =>
       logger.resetTimingBaseline()
     );
   }
@@ -1291,7 +1468,7 @@ export function resetAllTimingBaselines(): void {
 // Make helper functions available globally for browser console access
 if (typeof globalThis !== "undefined") {
   const global = globalThis as unknown as {
-    commontools: {
+    commonfabric: {
       logger: Record<string, Logger>;
       getTotalLoggerCounts?: typeof getTotalLoggerCounts;
       getLoggerCountsBreakdown?: typeof getLoggerCountsBreakdown;
@@ -1303,19 +1480,23 @@ if (typeof globalThis !== "undefined") {
       resetAllTimingBaselines?: typeof resetAllTimingBaselines;
       setGlobalLogFloor?: typeof setGlobalLogFloor;
       getGlobalLogFloor?: typeof getGlobalLogFloor;
+      setGlobalTimingOutputConfig?: typeof setGlobalTimingOutputConfig;
+      getGlobalTimingOutputConfig?: typeof getGlobalTimingOutputConfig;
     };
   };
-  if (!global.commontools) {
-    global.commontools = { logger: {} } as typeof global.commontools;
+  if (!global.commonfabric) {
+    global.commonfabric = { logger: {} } as typeof global.commonfabric;
   }
-  global.commontools.getTotalLoggerCounts = getTotalLoggerCounts;
-  global.commontools.getLoggerCountsBreakdown = getLoggerCountsBreakdown;
-  global.commontools.resetAllLoggerCounts = resetAllLoggerCounts;
-  global.commontools.getTimingStatsBreakdown = getTimingStatsBreakdown;
-  global.commontools.getLoggerFlagsBreakdown = getLoggerFlagsBreakdown;
-  global.commontools.resetAllTimingStats = resetAllTimingStats;
-  global.commontools.resetAllCountBaselines = resetAllCountBaselines;
-  global.commontools.resetAllTimingBaselines = resetAllTimingBaselines;
-  global.commontools.setGlobalLogFloor = setGlobalLogFloor;
-  global.commontools.getGlobalLogFloor = getGlobalLogFloor;
+  global.commonfabric.getTotalLoggerCounts = getTotalLoggerCounts;
+  global.commonfabric.getLoggerCountsBreakdown = getLoggerCountsBreakdown;
+  global.commonfabric.resetAllLoggerCounts = resetAllLoggerCounts;
+  global.commonfabric.getTimingStatsBreakdown = getTimingStatsBreakdown;
+  global.commonfabric.getLoggerFlagsBreakdown = getLoggerFlagsBreakdown;
+  global.commonfabric.resetAllTimingStats = resetAllTimingStats;
+  global.commonfabric.resetAllCountBaselines = resetAllCountBaselines;
+  global.commonfabric.resetAllTimingBaselines = resetAllTimingBaselines;
+  global.commonfabric.setGlobalLogFloor = setGlobalLogFloor;
+  global.commonfabric.getGlobalLogFloor = getGlobalLogFloor;
+  global.commonfabric.setGlobalTimingOutputConfig = setGlobalTimingOutputConfig;
+  global.commonfabric.getGlobalTimingOutputConfig = getGlobalTimingOutputConfig;
 }

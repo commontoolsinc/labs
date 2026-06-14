@@ -1,9 +1,9 @@
 import type ts from "typescript";
-import type { JSONSchema } from "@commontools/api";
-import { type Mutable } from "@commontools/utils/types";
+import type { JSONSchema } from "@commonfabric/api";
+import { type Mutable } from "@commonfabric/utils/types";
 
 /**
- * JSON Schema object type - mutable version of the CommonTools JSONSchema interface
+ * JSON Schema object type - mutable version of the Common Fabric JSONSchema interface
  */
 export type SchemaDefinition = Mutable<JSONSchema>;
 
@@ -34,14 +34,32 @@ export interface GenerationContext {
   // Optional context
   /** Type node for additional context */
   typeNode?: ts.TypeNode;
+  /** Source file name for authoring metadata that needs stable file identity */
+  sourceFileName?: string;
+  /** Source file for resolving names from synthetic type nodes */
+  sourceFile?: ts.SourceFile;
   /** Optional type registry for synthetic nodes */
   typeRegistry?: WeakMap<ts.Node, ts.Type>;
   /** Widen literal types to base types during schema generation */
   widenLiterals?: boolean;
   /** Schema hints for overriding default behavior (keyed by TypeNode) */
-  schemaHints?: WeakMap<ts.Node, { items?: unknown }>;
+  schemaHints?: WeakMap<
+    ts.Node,
+    {
+      items?: unknown;
+      cfcUiContract?: {
+        helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+        action?: string;
+        surface?: string;
+        role?: string;
+        kind?: string;
+        trustedPattern?: string;
+        requiredEventIntegrity?: string[];
+      };
+    }
+  >;
   /** Override for array items schema, propagated from wrapper types */
-  arrayItemsOverride?: unknown;
+  arrayItemsOverride?: JSONSchema;
 }
 
 /**
@@ -56,7 +74,10 @@ export interface TypeFormatter {
   /**
    * Convert the type to JSON Schema
    */
-  formatType(type: ts.Type, context: GenerationContext): SchemaDefinition;
+  formatType(
+    type: ts.Type,
+    context: GenerationContext,
+  ): SchemaDefinition;
 }
 
 /**
@@ -71,7 +92,22 @@ export interface SchemaGenerator {
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
     options?: { widenLiterals?: boolean },
-    schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
+    schemaHints?: WeakMap<
+      ts.Node,
+      {
+        items?: unknown;
+        cfcUiContract?: {
+          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+          action?: string;
+          surface?: string;
+          role?: string;
+          kind?: string;
+          trustedPattern?: string;
+          requiredEventIntegrity?: string[];
+        };
+      }
+    >,
+    sourceFile?: ts.SourceFile,
   ): SchemaDefinition;
 
   /**
@@ -87,6 +123,21 @@ export interface SchemaGenerator {
     typeNode: ts.TypeNode,
     checker: ts.TypeChecker,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
-    schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
+    schemaHints?: WeakMap<
+      ts.Node,
+      {
+        items?: unknown;
+        cfcUiContract?: {
+          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+          action?: string;
+          surface?: string;
+          role?: string;
+          kind?: string;
+          trustedPattern?: string;
+          requiredEventIntegrity?: string[];
+        };
+      }
+    >,
+    sourceFile?: ts.SourceFile,
   ): SchemaDefinition;
 }

@@ -1,9 +1,9 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { compilePattern, PieceManager } from "@commontools/piece";
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { type DID } from "@commontools/identity";
-import { createSession } from "@commontools/identity";
+import { PieceManager } from "@commonfabric/piece";
+import { compileAndSavePattern, Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { type DID } from "@commonfabric/identity";
+import { createSession } from "@commonfabric/identity";
 import {
   BG_CELL_CAUSE,
   BG_SYSTEM_SPACE_ID,
@@ -58,7 +58,7 @@ async function castPattern() {
     apiUrl: new URL(toolshedUrl),
     storageManager: StorageManager.open({
       as: identity,
-      address: new URL("/api/storage/memory", toolshedUrl),
+      memoryHost: new URL(toolshedUrl),
     }),
   });
 
@@ -95,11 +95,10 @@ async function castPattern() {
     // Create charm manager for the specified space
     const charmManager = new PieceManager(session, runtime);
     await charmManager.ready;
-    const pattern = await compilePattern(
-      patternSrc,
-      "pattern",
+    const pattern = await compileAndSavePattern(
       runtime,
-      spaceId,
+      patternSrc,
+      { spec: "pattern", space: spaceId },
     );
     console.log("Pattern compiled successfully");
 

@@ -1,13 +1,13 @@
-# Common Tools Platform
+# Common Fabric Platform
 
 **Common Labs** - Radioactive experiments. Turn back! You will find no API
 stability here.
 
 ![A loom, by Midjourney](./docs/images/loom.jpg)
 
-## What is Common Tools?
+## What is Common Fabric?
 
-Common Tools is a nascent distributed computing platform that provides both a
+Common Fabric is a nascent distributed computing platform that provides both a
 runtime and storage layer. The design allows instrumentation of all information
 flow in the system, enabling safe & private collaboration at scale.
 
@@ -18,11 +18,11 @@ and program networks. They're written in TypeScript/JSX and run in a secure
 sandbox environment. Patterns can:
 
 - Process and transform data
-- Render interactive UIs using `ct-` prefixed components
+- Render interactive UIs using `cf-` prefixed components
 - React to changes from linked patterns
 - Connect to external APIs
 
-**Pieces** are deployed instances of patterns running in CommonTools spaces.
+**Pieces** are deployed instances of patterns running in Common Fabric spaces.
 Pieces can be linked together to create complex workflows where data flows
 automatically between connected components.
 
@@ -33,8 +33,9 @@ can run their own spaces or use hosted versions.
 
 1. Install [Deno 2](https://docs.deno.com/runtime/getting_started/installation/)
 2. Clone this repo
-3. Start local dev servers: `./scripts/start-local-dev.sh`
-4. Access the application at <http://localhost:8000>
+3. Install the Git hooks: `deno task install-hooks`
+4. Start local dev servers: `./scripts/start-local-dev.sh`
+5. Access the application at <http://localhost:8000>
 
 For Claude Code users, run `/deps` to verify prerequisites and
 `/start-local-dev` to start the dev servers. See
@@ -49,34 +50,41 @@ This is a multi-package monorepo with several key components:
 written in Deno2, that provides the distributed runtime and storage.
 
 **Frontend ([Shell](./packages/shell))**: A web client interface written with
-Lit Web Components for interacting with CommonTools spaces.
+Lit Web Components for interacting with Common Fabric spaces.
 
-**CLI (ct)**: Command-line interface for managing pieces, linking patterns, and
-deploying to spaces. Run `deno task ct --help` for command reference.
+**CLI (cf)**: Command-line interface for managing pieces, linking patterns, and
+deploying to spaces. Run `deno task cf --help` for command reference.
 
-**UI Components ([packages/ui](./packages/ui))**: Custom VDOM layer and `ct-`
+**UI Components ([packages/ui](./packages/ui))**: Custom VDOM layer and `cf-`
 prefixed components for pattern UIs.
 
 **Examples & Patterns ([packages/patterns](./packages/patterns))**: Example
-patterns for building with CommonTools.
+patterns for building with Common Fabric.
 
-**Pattern Development**: Patterns can be developed using LLM assistance with the
-`/pattern-dev` skill. See [Pattern Documentation](./docs/common/) for patterns,
+**Pattern Development**: Patterns can be developed using the repo-local
+`skills/pattern-dev/` skill package. Claude compatibility still exposes this as
+`/pattern-dev`. See [Pattern Documentation](./docs/common/) for patterns,
 components, and handlers.
 
 ## Development & Integrations
 
-### Claude Code Skills & Commands
+### AI Skills & Commands
 
-This repository includes Claude Code skills and commands for common workflows:
+This repository includes repo-local skills plus runtime-specific discovery
+surfaces and Claude compatibility commands for common workflows:
 
-- `/pattern-dev` - Develop patterns with LLM assistance
-- `/pattern-test` - Write and run pattern tests
-- `/pattern-deploy` - Deploy patterns and test with CLI
+- `skills/pattern-dev/` - Develop patterns with LLM assistance
+- `skills/pattern-test/` - Write and run pattern tests
+- `skills/pattern-deploy/` - Deploy patterns and test with CLI
 - `/start-local-dev` - Start local dev servers
 - `/deps` - Dependency and integration setup
 - `/fix-issue` - Fix a specific issue
 - `/oracle` - Investigate how things actually work
+
+`skills/` is the canonical authored source. Codex discovers repo-local skills
+through `/.agents/skills/`, while Claude compatibility preserves the existing
+`/pattern-dev`, `/pattern-test`, and related skill names through
+`/.claude/skills/`.
 
 ### Dependencies & Integrations
 

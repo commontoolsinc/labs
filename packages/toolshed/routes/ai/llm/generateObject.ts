@@ -1,7 +1,7 @@
 import {
   type LLMGenerateObjectRequest,
   type LLMGenerateObjectResponse,
-} from "@commontools/llm/types";
+} from "@commonfabric/llm/types";
 import { findModel } from "./models.ts";
 import {
   generateObject as generateObjectCore,
@@ -9,18 +9,23 @@ import {
   type ModelMessage,
 } from "ai";
 import { Ajv } from "ajv";
-import { DEFAULT_GENERATE_OBJECT_MODELS } from "@commontools/llm";
+import { DEFAULT_GENERATE_OBJECT_MODELS } from "@commonfabric/llm";
 import { trace } from "@opentelemetry/api";
+import { normalizeSchemaForProvider } from "./schema.ts";
 
 export async function generateObject(
   params: LLMGenerateObjectRequest,
 ): Promise<LLMGenerateObjectResponse> {
   try {
+    const providerSchema = normalizeSchemaForProvider(params.schema) as Record<
+      string,
+      unknown
+    >;
     const modelConfig = findModel(
       params.model ?? DEFAULT_GENERATE_OBJECT_MODELS,
     );
     const ajv = new Ajv({ allErrors: true, strict: false });
-    const validator = ajv.compile(params.schema);
+    const validator = ajv.compile(providerSchema);
 
     const activeSpan = trace.getActiveSpan();
     const spanId = activeSpan?.spanContext().spanId;
@@ -54,7 +59,7 @@ export async function generateObject(
     const { object } = await generateObjectCore({
       model: modelConfig.model,
       messages,
-      schema: jsonSchema(params.schema, {
+      schema: jsonSchema(providerSchema, {
         validate: (value: unknown) => {
           if (!validator(value)) {
             return {

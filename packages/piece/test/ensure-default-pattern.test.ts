@@ -1,12 +1,36 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { createSession, Identity } from "@commontools/identity";
+import { NAME, Runtime } from "@commonfabric/runner";
+import type { RuntimeProgram } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { createSession, Identity } from "@commonfabric/identity";
 import { PieceManager } from "../src/manager.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase("test default pattern");
+
+const defaultPatternProgram: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [
+    {
+      name: "/main.tsx",
+      contents: [
+        "/// <cf-disable-transform />",
+        "import { handler, pattern } from 'commonfabric';",
+        "const addPiece = handler<{ piece: unknown }, { allPieces: unknown[] }>(",
+        "  ({ piece }, { allPieces }) => {",
+        "    allPieces.push(piece);",
+        "  },",
+        "  { proxy: true },",
+        ");",
+        "export default pattern<{ allPieces: unknown[] }>(({ allPieces }) => ({",
+        "  allPieces,",
+        "  addPiece: addPiece({ allPieces }),",
+        "}));",
+      ].join("\n"),
+    },
+  ],
+};
 
 describe("PiecesController.ensureDefaultPattern", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -81,6 +105,36 @@ describe("PiecesController.ensureDefaultPattern", () => {
     // The cell should have a reference linked
     const value = defaultPatternCell.get();
     expect(value).toBeDefined();
+  });
+
+  it("should find defaultPattern when its untyped schema view is undefined", async () => {
+    const schema = {
+      type: "object",
+      properties: {
+        [NAME]: { type: "string" },
+        missing: { type: "string" },
+      },
+      required: ["missing"],
+    } as const;
+    const mockPieceCell = runtime.getCell(
+      manager.getSpace(),
+      "schema-invalid-default-pattern",
+      schema,
+    );
+
+    await runtime.editWithRetry((tx) => {
+      mockPieceCell.withTx(tx).setRawUntyped({
+        [NAME]: "MockDefaultPattern",
+      });
+    });
+    await manager.linkDefaultPattern(mockPieceCell);
+
+    const linked = manager.getSpaceCellContents().key("defaultPattern").get();
+    expect(linked?.get()).toBeUndefined();
+
+    const defaultPattern = await manager.getDefaultPattern(false);
+    expect(defaultPattern).toBeDefined();
+    expect(defaultPattern?.get()?.[NAME]).toBe("MockDefaultPattern");
   });
 
   describe("initial state", () => {
@@ -243,5 +297,33 @@ describe("PiecesController.recreateDefaultPattern", () => {
 
     // Should still attempt to create (and fail due to fake server)
     await expect(controller.recreateDefaultPattern()).rejects.toThrow();
+  });
+
+  it("should explain storage transaction errors when updating defaultPattern fails", async () => {
+    const storageError = {
+      name: "StorageTransactionAborted" as const,
+      message: "commit rejected for test",
+      reason: new Error("storage reason"),
+    };
+    runtime.editWithRetry = (() =>
+      Promise.resolve({
+        error: storageError,
+      })) as typeof runtime.editWithRetry;
+
+    try {
+      await controller.recreateDefaultPattern({
+        customProgram: defaultPatternProgram,
+      });
+      throw new Error("Expected recreateDefaultPattern to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain(
+        "Updating the default pattern failed",
+      );
+      expect((error as Error).message).toContain(
+        "StorageTransactionAborted",
+      );
+      expect((error as Error).cause).toBe(storageError);
+    }
   });
 });

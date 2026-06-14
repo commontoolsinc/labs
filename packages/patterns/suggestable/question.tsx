@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   computed,
   Default,
@@ -10,16 +9,16 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // ===== Types =====
 
 type QuestionInput = {
-  topic?: Default<string, "">;
-  context?: Default<Record<string, any>, Record<string, never>>;
+  topic?: string | Default<"">;
+  context?: Record<string, any> | Default<Record<string, never>>;
 };
 
-type QuestionOutput = {
+export type QuestionOutput = {
   [NAME]: string;
   [UI]: VNode;
   topic: string;
@@ -74,36 +73,36 @@ const Question = pattern<QuestionInput, QuestionOutput>(
       model: "anthropic:claude-haiku-4-5",
     });
 
-    const answer = Writable.of("");
+    const answer = new Writable("");
 
     return {
       [NAME]: computed(() => (topic ? `Question: ${topic}` : "Question")),
       [UI]: (
-        <ct-screen>
-          <ct-vstack slot="header" gap="1">
-            <ct-heading level={4}>
+        <cf-screen>
+          <cf-vstack slot="header" gap="1">
+            <cf-heading level={4}>
               {computed(() => topic || "Question")}
-            </ct-heading>
-          </ct-vstack>
+            </cf-heading>
+          </cf-vstack>
 
-          <ct-vstack gap="3" style="padding: 1.5rem;">
+          <cf-vstack gap="3" style="padding: 1.5rem;">
             {ifElse(
               response.pending,
-              <div style="color: var(--ct-color-text-secondary);">
-                <ct-loader show-elapsed /> Generating question...
+              <div style="color: var(--cf-theme-color-text-secondary);">
+                <cf-loader show-elapsed /> Generating question...
               </div>,
-              <ct-question
+              <cf-question
                 question={computed(
                   () => response.result?.question || "",
                 )}
                 options={computed(
                   () => response.result?.options || [],
                 )}
-                onct-answer={onAnswer({ answer })}
+                oncf-answer={onAnswer({ answer })}
               />,
             )}
-          </ct-vstack>
-        </ct-screen>
+          </cf-vstack>
+        </cf-screen>
       ),
       topic,
       question: computed(() => response.result?.question || ""),

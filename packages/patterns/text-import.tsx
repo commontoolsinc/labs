@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Text Import Module - Pattern for importing text files
  *
@@ -16,7 +15,7 @@ import {
   str,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -36,13 +35,13 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface TextImportModuleInput {
   /** The text content from the uploaded file */
-  content: Default<string, "">;
+  content: string | Default<"">;
   /** The original filename */
-  filename: Default<string, "">;
+  filename: string | Default<"">;
 }
 
 // Output interface with unknown for UI properties to prevent OOM (CT-1148)
-interface TextImportModuleOutput {
+export interface TextImportModuleOutput {
   [NAME]: unknown;
   [UI]: unknown;
   content: string;
@@ -56,11 +55,10 @@ interface TextImportModuleOutput {
  * Handles data URLs like "data:text/plain;base64,SGVsbG8gV29ybGQ="
  */
 function decodeBase64ToText(dataUrl: string): string {
-  // Extract the base64 portion after the comma
   const commaIndex = dataUrl.indexOf(",");
-  if (commaIndex === -1) return dataUrl; // Not a data URL, return as-is
-
-  const base64Data = dataUrl.slice(commaIndex + 1);
+  const base64Data = commaIndex === -1
+    ? dataUrl
+    : dataUrl.slice(commaIndex + 1);
 
   try {
     // Decode base64 to binary string, then convert to UTF-8
@@ -76,15 +74,15 @@ function decodeBase64ToText(dataUrl: string): string {
 
 // ===== Handlers =====
 
-// Define the expected event shape from ct-file-input
+// Define the expected event shape from cf-file-input
 interface FileUploadEvent {
   detail: {
     files: Array<{
       name: string;
       type: string;
       size: number;
-      data: string; // data URL
       url: string;
+      data?: string;
     }>;
   };
 }
@@ -95,9 +93,8 @@ const handleFileUpload = handler<
   { content: Writable<string>; filename: Writable<string> }
 >(({ detail }, state) => {
   const file = detail?.files?.[0];
-  if (!file) return;
+  if (!file?.data) return;
 
-  // Decode the base64 data URL to text
   const textContent = decodeBase64ToText(file.data);
 
   state.content.set(textContent);
@@ -142,7 +139,7 @@ export const TextImportModule = pattern<
   const contentSize = computed(() => {
     const c = content;
     if (!c) return "";
-    const bytes = new Blob([c]).size;
+    const bytes = new TextEncoder().encode(c).length;
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -151,11 +148,11 @@ export const TextImportModule = pattern<
   return {
     [NAME]: str`${MODULE_METADATA.icon} ${displayText}`,
     [UI]: (
-      <ct-vstack style={{ gap: "12px" }}>
+      <cf-vstack style={{ gap: "12px" }}>
         {ifElse(
           hasContent,
           // File is uploaded - show preview with clear button
-          <ct-vstack style={{ gap: "8px" }}>
+          <cf-vstack style={{ gap: "8px" }}>
             {/* Header with filename and clear button */}
             <div
               style={{
@@ -245,17 +242,18 @@ export const TextImportModule = pattern<
                 {contentPreview}
               </pre>
             </div>
-          </ct-vstack>,
+          </cf-vstack>,
           // No file yet - show upload input
-          <ct-file-input
+          <cf-file-input
             accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
+            includeData
             buttonText={`${MODULE_METADATA.icon} Import Text File`}
             showPreview={false}
-            onct-change={handleFileUpload({ content, filename })}
+            oncf-change={handleFileUpload({ content, filename })}
             style={{ width: "100%" }}
           />,
         )}
-      </ct-vstack>
+      </cf-vstack>
     ),
     content,
     filename,

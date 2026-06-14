@@ -1,5 +1,8 @@
 import ts from "typescript";
-import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
+import {
+  getCellKind,
+  isBrandedCellType,
+} from "../transformers/opaque-ref/opaque-ref.ts";
 import {
   getTypeAtLocationWithFallback,
   isDefaultAliasSymbol,
@@ -7,21 +10,44 @@ import {
 
 /**
  * Type inference utilities for function signatures
- * Used primarily by schema-injection to infer types for lift/derive/handler
+ * Used primarily by schema-injection to infer types for lift/handler
  */
 
 const TYPE_NODE_FLAGS = ts.NodeBuilderFlags.NoTruncation |
   ts.NodeBuilderFlags.UseStructuralFallback;
 
 /**
- * Check if a type is 'any', 'unknown', or an uninstantiated type parameter
- * These types cannot be used to generate schemas at compile time
+ * Check if a type is 'any', 'unknown', or an uninstantiated type parameter.
+ *
+ * This is a conservative predicate used at fallback seams where we do not want
+ * to trust the type for structural recovery. It is intentionally broader than
+ * "cannot emit a schema": `any` and `unknown` are both schemaable, but they
+ * are not structurally precise.
  */
 export function isAnyOrUnknownType(type: ts.Type | undefined): boolean {
   if (!type) return false;
   return (type.flags &
     (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.TypeParameter)) !==
     0;
+}
+
+export function isAnyType(type: ts.Type | undefined): boolean {
+  if (!type) return false;
+  return (type.flags & ts.TypeFlags.Any) !== 0;
+}
+
+export function isUnknownType(type: ts.Type | undefined): boolean {
+  if (!type) return false;
+  return (type.flags & ts.TypeFlags.Unknown) !== 0;
+}
+
+/**
+ * Type parameters without a concrete constraint/default are the main
+ * "truly unresolved" schema case that should stay conservative.
+ */
+export function isUnresolvedSchemaType(type: ts.Type | undefined): boolean {
+  if (!type) return false;
+  return (type.flags & ts.TypeFlags.TypeParameter) !== 0;
 }
 
 /**
@@ -127,8 +153,10 @@ export function widenLiteralType(
 export function inferWidenedTypeFromExpression(
   expr: ts.Expression,
   checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
 ): ts.Type {
-  const type = checker.getTypeAtLocation(expr);
+  const type = getTypeAtLocationWithFallback(expr, checker, typeRegistry) ??
+    checker.getTypeAtLocation(expr);
   return widenLiteralType(type, checker);
 }
 
@@ -171,8 +199,13 @@ export function inferParameterType(
     return explicitType;
   }
 
-  // Try to infer from parameter location
-  let paramType = checker.getTypeAtLocation(parameter);
+  // Try to infer from parameter location. Check typeRegistry first so that
+  // transformer-stage overrides (e.g. lift-applied lowering registering the
+  // input expression's type against the callback parameter) take precedence
+  // over the checker's contextual inference, which may unwrap or otherwise
+  // lose information when the parameter is reached from a curried call form.
+  const registered = typeRegistry?.get(parameter);
+  let paramType = registered ?? checker.getTypeAtLocation(parameter);
 
   // If it's 'any' and we have a fallback, use that
   if (isAnyOrUnknownType(paramType) && fallbackType) {
@@ -231,6 +264,15 @@ export function getTypeReferenceArgument(type: ts.Type): ts.Type | undefined {
   return undefined;
 }
 
+export function isCellLikeType(
+  type: ts.Type | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  if (!type) return false;
+  return getCellKind(type, checker) !== undefined ||
+    isBrandedCellType(type, checker);
+}
+
 /**
  * Unwrap OpaqueRef-like types to get the underlying type
  * Handles unions, intersections, and nested OpaqueRef types
@@ -259,7 +301,7 @@ export function unwrapOpaqueLikeType(
     // For OpaqueRef<T> = OpaqueCell<T> & OpaqueRefInner<T>, we want to extract T
     // Look for an OpaqueCell<T> part and extract its type argument
     for (const part of type.types) {
-      if (isOpaqueRefType(part, checker)) {
+      if (isBrandedCellType(part, checker)) {
         const inner = getTypeReferenceArgument(part);
         if (inner) {
           // Recursively unwrap in case T itself contains OpaqueRef types
@@ -280,7 +322,7 @@ export function unwrapOpaqueLikeType(
     return type;
   }
 
-  if (isOpaqueRefType(type, checker)) {
+  if (isBrandedCellType(type, checker)) {
     const inner = unwrapOpaqueLikeType(
       getTypeReferenceArgument(type),
       checker,
@@ -290,6 +332,23 @@ export function unwrapOpaqueLikeType(
   }
 
   return type;
+}
+
+export function unwrapCellLikeType(
+  type: ts.Type | undefined,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  if (!type) return undefined;
+  if (!isCellLikeType(type, checker)) {
+    return type;
+  }
+
+  const opaqueUnwrapped = unwrapOpaqueLikeType(type, checker);
+  if (opaqueUnwrapped && opaqueUnwrapped !== type) {
+    return opaqueUnwrapped;
+  }
+
+  return getTypeReferenceArgument(type) ?? type;
 }
 
 /**
@@ -353,6 +412,272 @@ export function registerTypeForNode(
   return typeNode;
 }
 
+type InternalSymbolWithLinks = ts.Symbol & {
+  links?: {
+    type?: ts.Type;
+  };
+};
+
+// Intentionally quarantined TypeScript-internal entry points.
+// We use these only to materialize composite synthetic TypeNodes that the
+// public checker APIs resolve as unresolved any/unknown. Do not spread this
+// pattern elsewhere in the pipeline.
+type InternalTypeChecker = ts.TypeChecker & {
+  createAnonymousType?: (
+    symbol: ts.Symbol | undefined,
+    members: ts.SymbolTable,
+    callSignatures: readonly ts.Signature[],
+    constructSignatures: readonly ts.Signature[],
+    indexInfos: readonly ts.IndexInfo[],
+  ) => ts.Type;
+  createArrayType?: (elementType: ts.Type, readonly?: boolean) => ts.Type;
+  createSymbol?: (
+    flags: ts.SymbolFlags,
+    name: string,
+    checkFlags?: number,
+  ) => InternalSymbolWithLinks;
+  getUnionType?: (types: readonly ts.Type[]) => ts.Type;
+};
+
+function createInternalSymbolName(name: string): string {
+  const escapeLeadingUnderscores = (ts as typeof ts & {
+    escapeLeadingUnderscores?: (text: string) => string;
+  }).escapeLeadingUnderscores;
+  return escapeLeadingUnderscores?.(name) ?? name;
+}
+
+function createInternalSymbolTable(
+  symbols: readonly ts.Symbol[],
+): ts.SymbolTable {
+  const createSymbolTable = (ts as typeof ts & {
+    createSymbolTable?: (symbols: readonly ts.Symbol[]) => ts.SymbolTable;
+  }).createSymbolTable;
+  if (createSymbolTable) {
+    return createSymbolTable(symbols);
+  }
+
+  // Fallback for environments where the helper is not exposed at runtime.
+  const table = new Map<ts.__String, ts.Symbol>();
+  for (const symbol of symbols) {
+    table.set(symbol.escapedName as ts.__String, symbol);
+  }
+  return table as ts.SymbolTable;
+}
+
+function tryGetSyntheticPropertyName(
+  name: ts.PropertyName,
+): string | undefined {
+  if (ts.isIdentifier(name) || ts.isPrivateIdentifier(name)) {
+    return name.text;
+  }
+  if (
+    ts.isStringLiteralLike(name) || ts.isNumericLiteral(name) ||
+    ts.isNoSubstitutionTemplateLiteral(name)
+  ) {
+    return name.text;
+  }
+  if (
+    ts.isComputedPropertyName(name) &&
+    (ts.isStringLiteralLike(name.expression) ||
+      ts.isNumericLiteral(name.expression) ||
+      ts.isNoSubstitutionTemplateLiteral(name.expression))
+  ) {
+    return name.expression.text;
+  }
+  return undefined;
+}
+
+function tryGetTypeFromTypeNodeDirect(
+  typeNode: ts.TypeNode,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  try {
+    return checker.getTypeFromTypeNode(typeNode);
+  } catch {
+    return undefined;
+  }
+}
+
+function ensureCompositeChildTypesRegistered(
+  typeNode: ts.TypeNode,
+  checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): void {
+  if (!typeRegistry) return;
+
+  if (ts.isParenthesizedTypeNode(typeNode)) {
+    ensureTypeNodeRegistered(typeNode.type, checker, typeRegistry);
+    return;
+  }
+
+  if (ts.isArrayTypeNode(typeNode)) {
+    ensureTypeNodeRegistered(typeNode.elementType, checker, typeRegistry);
+    return;
+  }
+
+  if (ts.isTypeReferenceNode(typeNode)) {
+    for (const arg of typeNode.typeArguments ?? []) {
+      ensureTypeNodeRegistered(arg, checker, typeRegistry);
+    }
+    return;
+  }
+
+  if (ts.isUnionTypeNode(typeNode)) {
+    for (const member of typeNode.types) {
+      ensureTypeNodeRegistered(member, checker, typeRegistry);
+    }
+    return;
+  }
+
+  if (ts.isTypeLiteralNode(typeNode)) {
+    for (const member of typeNode.members) {
+      if (ts.isPropertySignature(member) && member.type) {
+        ensureTypeNodeRegistered(member.type, checker, typeRegistry);
+      }
+    }
+  }
+}
+
+function tryRegisterCompositeSyntheticType(
+  typeNode: ts.TypeNode,
+  checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.Type | undefined {
+  if (!typeRegistry) return undefined;
+
+  const existing = typeRegistry.get(typeNode);
+  if (existing) return existing;
+
+  ensureCompositeChildTypesRegistered(typeNode, checker, typeRegistry);
+
+  const retried = tryGetTypeFromTypeNodeDirect(typeNode, checker);
+  if (retried && !isAnyOrUnknownType(retried)) {
+    typeRegistry.set(typeNode, retried);
+    return retried;
+  }
+
+  const internalChecker = checker as InternalTypeChecker;
+
+  if (ts.isParenthesizedTypeNode(typeNode)) {
+    const inner = ensureTypeNodeRegistered(
+      typeNode.type,
+      checker,
+      typeRegistry,
+    );
+    if (inner) {
+      typeRegistry.set(typeNode, inner);
+      return inner;
+    }
+    return retried;
+  }
+
+  if (ts.isArrayTypeNode(typeNode) && internalChecker.createArrayType) {
+    const elementType = ensureTypeNodeRegistered(
+      typeNode.elementType,
+      checker,
+      typeRegistry,
+    );
+    if (elementType && !isAnyOrUnknownType(elementType)) {
+      const arrayType = internalChecker.createArrayType(elementType);
+      typeRegistry.set(typeNode, arrayType);
+      return arrayType;
+    }
+    return retried;
+  }
+
+  if (ts.isUnionTypeNode(typeNode) && internalChecker.getUnionType) {
+    const memberTypes = typeNode.types.map((member) =>
+      ensureTypeNodeRegistered(member, checker, typeRegistry)
+    ).filter((member): member is ts.Type => !!member);
+    if (
+      memberTypes.length === typeNode.types.length &&
+      memberTypes.every((member) => !isAnyOrUnknownType(member))
+    ) {
+      const unionType = internalChecker.getUnionType(memberTypes);
+      typeRegistry.set(typeNode, unionType);
+      return unionType;
+    }
+    return retried;
+  }
+
+  if (
+    ts.isTypeLiteralNode(typeNode) &&
+    typeNode.members.length > 0 &&
+    internalChecker.createAnonymousType &&
+    internalChecker.createSymbol
+  ) {
+    const membersList: ts.Symbol[] = [];
+    for (const member of typeNode.members) {
+      if (!ts.isPropertySignature(member) || !member.type || !member.name) {
+        return retried;
+      }
+
+      const propertyName = tryGetSyntheticPropertyName(member.name);
+      if (!propertyName) {
+        return retried;
+      }
+
+      const propertyType = ensureTypeNodeRegistered(
+        member.type,
+        checker,
+        typeRegistry,
+      ) ?? tryGetTypeFromTypeNodeDirect(member.type, checker);
+      if (!propertyType || isAnyOrUnknownType(propertyType)) {
+        return retried;
+      }
+
+      const symbol = internalChecker.createSymbol(
+        ts.SymbolFlags.Property |
+          (member.questionToken ? ts.SymbolFlags.Optional : 0),
+        createInternalSymbolName(propertyName),
+      );
+      symbol.links ??= {};
+      symbol.links.type = propertyType;
+      membersList.push(symbol);
+    }
+
+    const symbol = internalChecker.createSymbol(
+      ts.SymbolFlags.TypeLiteral,
+      createInternalSymbolName("__type"),
+    );
+    const members = createInternalSymbolTable(membersList);
+    const anonymousType = internalChecker.createAnonymousType(
+      symbol,
+      members,
+      [],
+      [],
+      [],
+    );
+    typeRegistry.set(typeNode, anonymousType);
+    return anonymousType;
+  }
+
+  return retried;
+}
+
+export function ensureTypeNodeRegistered(
+  typeNode: ts.TypeNode,
+  checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.Type | undefined {
+  if (typeRegistry?.has(typeNode)) {
+    return typeRegistry.get(typeNode);
+  }
+
+  const direct = tryGetTypeFromTypeNodeDirect(typeNode, checker);
+  if (!typeRegistry || !direct) {
+    return direct;
+  }
+
+  if (!isAnyOrUnknownType(direct)) {
+    typeRegistry.set(typeNode, direct);
+    return direct;
+  }
+
+  return tryRegisterCompositeSyntheticType(typeNode, checker, typeRegistry) ??
+    direct;
+}
+
 /**
  * Get the Type from a TypeNode, checking typeRegistry first.
  *
@@ -378,25 +703,25 @@ export function getTypeFromTypeNodeWithFallback(
     }
   }
 
-  // Fall back to TypeChecker
-  return checker.getTypeFromTypeNode(typeNode);
+  return ensureTypeNodeRegistered(typeNode, checker, typeRegistry) ??
+    checker.getTypeFromTypeNode(typeNode);
 }
 
 /**
- * Register the result type for a synthetic derive CallExpression.
+ * Register the result type for a synthetic lift-applied CallExpression.
  *
  * This is needed because synthetic nodes created by transformers don't have
  * type information from the TypeChecker. We need to explicitly register the
  * type so that later transformations can infer types correctly.
  *
- * @param deriveCall The synthetic derive CallExpression to register type for
- * @param resultTypeNode The TypeNode representing the derive's result type
+ * @param liftAppliedCall The synthetic lift-applied CallExpression to register type for
+ * @param resultTypeNode The TypeNode representing the call's result type
  * @param resultType Optional pre-computed Type object for the result
  * @param checker TypeChecker instance
  * @param typeRegistry The type registry to update
  */
-export function registerDeriveCallType(
-  deriveCall: ts.CallExpression,
+export function registerLiftAppliedCallType(
+  liftAppliedCall: ts.CallExpression,
   resultTypeNode: ts.TypeNode | undefined,
   resultType: ts.Type | undefined,
   checker: ts.TypeChecker,
@@ -414,12 +739,12 @@ export function registerDeriveCallType(
   }
 
   if (typeToRegister) {
-    registerSyntheticCallType(deriveCall, typeToRegister, typeRegistry);
+    registerSyntheticCallType(liftAppliedCall, typeToRegister, typeRegistry);
   }
 }
 
 /**
- * Register the result type for a synthetic call (derive, ifElse, when, unless, etc.) in the TypeRegistry.
+ * Register the result type for a synthetic call (lift-applied, ifElse, when, unless, etc.) in the TypeRegistry.
  * This enables schema injection to find the correct result type for the call.
  *
  * @param call The synthetic call node
@@ -461,7 +786,7 @@ function findOpaqueRefInUnion(
   for (const member of unionType.types) {
     if (
       member.flags & ts.TypeFlags.Intersection ||
-      isOpaqueRefType(member, checker)
+      isBrandedCellType(member, checker)
     ) {
       return member;
     }
@@ -664,7 +989,7 @@ export function inferArrayElementType(
           };
         }
       } else {
-        // Check for Default<T[]> brand union: aliasSymbol = Default from @commontools/api,
+        // Check for Default<T[]> brand union: aliasSymbol = Default from @commonfabric/api,
         // aliasTypeArguments[0] = T[]. Default<T,V> expands to a branded union at the type
         // level; the type object retains aliasSymbol so we can detect and unwrap it here.
         const innerAlias = innerType as {
@@ -764,7 +1089,7 @@ function isEffectiveArrayMember(
 
 /**
  * Helper to check if a type's type argument is an array.
- * Handles unions and intersections recursively, similar to isOpaqueRefType.
+ * Handles unions and intersections recursively, similar to isBrandedCellType.
  */
 export function hasArrayTypeArgument(
   type: ts.Type,
@@ -796,7 +1121,7 @@ export function hasArrayTypeArgument(
         if (checker.isArrayType(innerType) || checker.isTupleType(innerType)) {
           return true;
         }
-        // Handle Default<T[]> brand union: aliasSymbol is Default from @commontools/api and
+        // Handle Default<T[]> brand union: aliasSymbol is Default from @commonfabric/api and
         // first aliasTypeArgument is T[]. typeToTypeNode expands Default<T[],V> to a
         // branded union, but the type object retains aliasSymbol so we can detect it here.
         const innerAlias = innerType as {
@@ -835,77 +1160,4 @@ export function hasArrayTypeArgument(
   }
 
   return false;
-}
-
-/**
- * Check if an expression is a derive call (synthetic or user-written).
- * derive() always returns OpaqueRef<T> at runtime, but we register the
- * unwrapped callback return type in the type registry. This helper lets
- * us detect derive calls syntactically to work around that limitation.
- */
-export function isDeriveCall(expr: ts.Expression): boolean {
-  if (!ts.isCallExpression(expr)) return false;
-
-  const callee = expr.expression;
-
-  // Check for `derive(...)` direct call
-  if (ts.isIdentifier(callee) && callee.text === "derive") {
-    return true;
-  }
-
-  // Check for `__ctHelpers.derive(...)` qualified call
-  if (
-    ts.isPropertyAccessExpression(callee) &&
-    callee.name.text === "derive"
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-const REACTIVE_ARRAY_METHODS = new Set(["map", "filter", "flatMap"]);
-
-/**
- * Checks if a call expression is a .map()/.filter()/.flatMap() call on a reactive array
- * (OpaqueRef<T[]> or Cell<T[]>). Used to determine if the call will be transformed to
- * mapWithPattern/filterWithPattern/flatMapWithPattern.
- *
- * Used by both:
- * - ClosureTransformer to decide whether to transform to *WithPattern
- * - OpaqueRefJSXTransformer to decide whether to skip derive wrapping
- */
-export function isReactiveArrayMethodCall(
-  node: ts.CallExpression,
-  checker: ts.TypeChecker,
-  typeRegistry?: WeakMap<ts.Node, ts.Type>,
-  logger?: (message: string) => void,
-): boolean {
-  // Check if this is a property access expression with a reactive array method name
-  if (!ts.isPropertyAccessExpression(node.expression)) return false;
-  if (!REACTIVE_ARRAY_METHODS.has(node.expression.name.text)) return false;
-
-  // Get the type of the target (what we're calling .map on)
-  const target = node.expression.expression;
-
-  // Special case: derive() always returns OpaqueRef<T> at runtime.
-  // We can't register OpaqueRef<T> in the type registry (only the unwrapped T),
-  // so detect derive calls syntactically.
-  if (isDeriveCall(target)) {
-    return true;
-  }
-
-  const targetType = getTypeAtLocationWithFallback(
-    target,
-    checker,
-    typeRegistry,
-    logger,
-  );
-  if (!targetType) {
-    return false;
-  }
-
-  // Type-based check: target is OpaqueRef<T[]> or Cell<T[]>
-  return isOpaqueRefType(targetType, checker) &&
-    hasArrayTypeArgument(targetType, checker);
 }

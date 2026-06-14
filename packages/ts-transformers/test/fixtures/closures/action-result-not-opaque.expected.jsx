@@ -1,57 +1,70 @@
-import * as __ctHelpers from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 /**
  * action() results used as event handlers in JSX. action() is an
  * opaque origin but handler results are typically used directly
  * (no property access), so opaque classification doesn't affect them.
  */
-import { action, pattern, UI, Writable } from "commontools";
+import { action, pattern, UI, Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     label: string;
 }
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        count: {
+            type: "number",
+            asCell: ["cell"]
+        }
+    },
+    required: ["count"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
+    count.set(count.get() + 1);
+});
+const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        count: {
+            type: "number",
+            asCell: ["cell"]
+        }
+    },
+    required: ["count"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
+    count.set(count.get() - 1);
+});
 // FIXTURE: action-result-not-opaque
 // Verifies: action() results used as JSX event handlers are not marked asOpaque in the output
 //   action(() => count.set(...)) → handler(false, { count: { asCell } }, (_, { count }) => ...)({ count })
 // Context: action() is an opaque origin, but handler results are used directly (no property access)
-export default pattern((__ct_pattern_input) => {
-    const label = __ct_pattern_input.key("label");
-    const count = Writable.of(0, {
+export default pattern((__cf_pattern_input) => {
+    const label = __cf_pattern_input.key("label");
+    const count = new Writable(0, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
-    const increment = __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            count: {
-                type: "number",
-                asCell: true
-            }
-        },
-        required: ["count"]
-    } as const satisfies __ctHelpers.JSONSchema, (_, { count }) => {
-        count.set(count.get() + 1);
-    })({
+    } as const satisfies __cfHelpers.JSONSchema).for("count", true);
+    const increment = __cfHandler_1({
         count: count
-    });
-    const decrement = __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            count: {
-                type: "number",
-                asCell: true
-            }
-        },
-        required: ["count"]
-    } as const satisfies __ctHelpers.JSONSchema, (_, { count }) => {
-        count.set(count.get() - 1);
-    })({
+    }).for({ stream: "increment" }, true);
+    const decrement = __cfHandler_2({
         count: count
-    });
+    }).for({ stream: "decrement" }, true);
     return {
         [UI]: (<div>
         <span>{label}: {count}</span>
-        <ct-button onClick={increment}>+</ct-button>
-        <ct-button onClick={decrement}>-</ct-button>
+        <cf-button onClick={increment}>+</cf-button>
+        <cf-button onClick={decrement}>-</cf-button>
       </div>),
-        count,
+        count: count.for(["__patternResult", "count"], true)
     };
 }, {
     type: "object",
@@ -61,7 +74,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["label"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -69,7 +82,7 @@ export default pattern((__ct_pattern_input) => {
         },
         count: {
             type: "number",
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["$UI", "count"],
@@ -78,11 +91,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -95,8 +107,11 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfHandler_1,
+    __cfHandler_2
+});

@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { pattern, UI } from "commontools";
+import { pattern, UI } from "commonfabric";
 
 interface State {
   items: Array<{ price: number }>;
@@ -9,7 +8,7 @@ interface State {
 // FIXTURE: map-single-capture
 // Verifies: .map() on reactive array captures a single outer state property
 //   .map(fn) → .mapWithPattern(pattern(...), {state: {discount: ...}})
-//   item.price * state.discount → derive() combining element and captured state
+//   item.price * state.discount → lift(...)(...) combining element and captured state
 export default pattern<State>((state) => {
   return {
     [UI]: (

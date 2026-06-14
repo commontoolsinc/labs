@@ -1,6 +1,6 @@
 # Repository Guidelines for AI Agents
 
-This repository represents the Common Tools runtime: a fully integrated,
+This repository represents the Common Fabric runtime: a fully integrated,
 reactive runtime and execution environment for user-created programs. These
 programs are known as patterns and somewhat similar to Solid.js components. Each
 pattern is comprised of reactive `Cell`s stored in `Space`s (defined by a DID).
@@ -11,11 +11,10 @@ signatures.
 ## Pace Layers
 
 This repository contains many packages that compose and stack to create the
-Common Tools product.
+Common Fabric product.
 
 1. Foundation: api, runtime, identity, memory
-2. System: schema-generator, iframe-sandbox, ts-transformers, js-compiler,
-   js-sandbox
+2. System: schema-generator, iframe-sandbox, ts-transformers, js-compiler
 3. Capabilities: piece, html, llm
 4. Operation: background-piece-service, cli
 5. Deployed Product: toolshed, shell
@@ -24,14 +23,26 @@ Common Tools product.
 
 ## Pattern Development
 
-If you are developing patterns, use Claude Skills (pattern-dev) to do the work.
+If you are developing patterns, use the repo-local `pattern-dev` skill at
+`skills/pattern-dev/SKILL.md`. `skills/` is the canonical authored source. Codex
+discovers the repo-local skill mirror through `.agents/skills/`, and Claude
+compatibility continues to use `.claude/skills/`.
+
+When authoring or reviewing a skill itself, read
+`docs/development/skill-authoring.md` — what belongs in a skill (non-derivable
+map & values) versus what just constrains the agent (procedure a capable model
+already does).
 
 ### Useful Pattern documentation
 
 **Start here:**
 
-- `docs/common/INTRODUCTION.md` - Overview of the pattern system
-- `docs/common/components/COMPONENTS.md` - UI component reference with
+- `docs/common/README.md` - Overview of the pattern system and index of all
+  pattern documentation
+- `packages/patterns/catalog/catalog.tsx` - Authoritative, type-checked
+  component catalog; story files in `packages/patterns/catalog/stories/` show
+  live usage for each component
+- `docs/common/components/COMPONENTS.md` - UI component narrative reference with
   bidirectional binding and event handling
 
 **Core concepts:**
@@ -53,7 +64,8 @@ If you are developing patterns, use Claude Skills (pattern-dev) to do the work.
 **Reference:**
 
 - `packages/patterns/index.md` - Catalog of all pattern examples with summaries,
-  data types, and keywords
+  data types, and keywords. Check its "Status tiers" section before imitating
+  any pattern — only `exemplar` entries are style references.
 
 **Important:** Ignore the top level `deprecated-patterns` folder - it is
 defunct.
@@ -66,10 +78,19 @@ If you are developing runtime code, read the following documentation:
   practices
 - `docs/development/LOCAL_DEV_SERVERS.md` - **CRITICAL**: How to start local dev
   servers correctly (use `dev-local` for shell, not `dev`)
+- `docs/development/CI_PERFORMANCE.md` - When to stop or revisit CI wall-time
+  splitting/rebalancing work
 - `docs/development/UI_TESTING.md` - How to work with shadow dom in our
   integration tests
 - `docs/development/debugging/` - Runtime errors, type errors, and
   troubleshooting
+
+When investigating transformer behavior, inspect the emitted output directly
+before inferring from source code alone:
+
+```bash
+deno task cf check <pattern-or-fixture>.tsx --show-transformed --no-run
+```
 
 ### Adding New Packages
 

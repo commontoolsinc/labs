@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Chase Bill Tracker Pattern
  *
@@ -14,7 +13,7 @@
  * Usage:
  * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct piece link google-auth/auth chase-bill-tracker/overrideAuth
+ * 3. Link: cf piece link google-auth/auth chase-bill-tracker/overrideAuth
  */
 import {
   computed,
@@ -25,7 +24,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import BillExtractor, {
   type Auth,
   type BillAnalysis,
@@ -101,8 +100,8 @@ const unmarkAsPaid = handler<
 
 interface PatternInput {
   overrideAuth?: Auth;
-  manuallyPaid?: Writable<Default<string[], []>>;
-  demoMode?: Writable<Default<boolean, true>>;
+  manuallyPaid?: Writable<string[] | Default<[]>>;
+  demoMode?: Writable<boolean | Default<true>>;
 }
 
 export default pattern<PatternInput>(
@@ -178,13 +177,13 @@ export default pattern<PatternInput>(
       previewUI: ui.previewUI,
 
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           <div slot="header">
-            <ct-heading level={3}>{title}</ct-heading>
+            <cf-heading level={3}>{title}</cf-heading>
           </div>
 
-          <ct-vscroll flex showScrollbar>
-            <ct-vstack padding="6" gap="4">
+          <cf-vscroll flex showScrollbar>
+            <cf-vstack padding="6" gap="4">
               {/* Auth UI */}
               {ui.authStatusUI}
 
@@ -218,7 +217,7 @@ export default pattern<PatternInput>(
                 >
                   Unpaid Bills
                 </h3>
-                <ct-vstack gap="3">
+                <cf-vstack gap="3">
                   {unpaidBills.map((bill) => (
                     <div
                       style={{
@@ -287,7 +286,7 @@ export default pattern<PatternInput>(
                       </button>
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </div>
 
               {/* Likely Paid Bills Section */}
@@ -333,7 +332,7 @@ export default pattern<PatternInput>(
                     Old bills without detected payment. Click "Confirm Paid" to
                     move to paid list.
                   </div>
-                  <ct-vstack gap="2">
+                  <cf-vstack gap="2">
                     {likelyPaidBills.map((bill) => (
                       <div
                         style={{
@@ -408,7 +407,7 @@ export default pattern<PatternInput>(
                         </button>
                       </div>
                     ))}
-                  </ct-vstack>
+                  </cf-vstack>
                 </details>
               </div>
 
@@ -433,7 +432,7 @@ export default pattern<PatternInput>(
                     Paid Bills ({computed(() => paidBills?.length || 0)}
                     )
                   </summary>
-                  <ct-vstack gap="2">
+                  <cf-vstack gap="2">
                     {paidBills.map((bill) => (
                       <div
                         style={{
@@ -520,7 +519,7 @@ export default pattern<PatternInput>(
                         </button>
                       </div>
                     ))}
-                  </ct-vstack>
+                  </cf-vstack>
                 </details>
               </div>
 
@@ -537,7 +536,7 @@ export default pattern<PatternInput>(
                   marginTop: "8px",
                 }}
               >
-                <ct-checkbox $checked={demoMode!} />
+                <cf-checkbox $checked={demoMode!} />
                 <span
                   style={{ fontSize: "11px", color: "#9ca3af" }}
                   title="Uses fake numbers for privacy"
@@ -545,9 +544,9 @@ export default pattern<PatternInput>(
                   Demo mode
                 </span>
               </div>
-            </ct-vstack>
-          </ct-vscroll>
-        </ct-screen>
+            </cf-vstack>
+          </cf-vscroll>
+        </cf-screen>
       ),
     };
   },

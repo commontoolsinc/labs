@@ -1,9 +1,13 @@
-import { type Config } from "@commontools/felt";
+import { type Config } from "@commonfabric/felt";
+import ports from "@commonfabric/ports" with { type: "json" };
 
 const PRODUCTION = !!Deno.env.get("PRODUCTION");
 const ENVIRONMENT = PRODUCTION ? "production" : "development";
 
-const SHELL_PORT = parseInt(Deno.env.get("SHELL_PORT") || "5173", 10);
+const SHELL_PORT = parseInt(
+  Deno.env.get("SHELL_PORT") || String(ports.shell),
+  10,
+);
 
 const config: Config = {
   entries: [
@@ -21,7 +25,7 @@ const config: Config = {
   publicDir: "public",
   watchDir: "src",
   redirectToIndex:
-    /^\/(?!((assets|scripts|styles|static)\/.*|build-manifest\.json))/,
+    /^\/(?!((assets|scripts|styles|static|fonts)\/.*|build-manifest\.json|manifest\.webmanifest|sw\.js))/,
   staticDirs: [
     { from: "../static/assets", to: "/static" },
   ],
@@ -37,20 +41,11 @@ const config: Config = {
       "$ENVIRONMENT": ENVIRONMENT,
       "$API_URL": Deno.env.get("API_URL"),
       "$COMMIT_SHA": Deno.env.get("COMMIT_SHA"),
-      "$EXPERIMENTAL_RICH_STORABLE_VALUES": Deno.env.get(
-        "EXPERIMENTAL_RICH_STORABLE_VALUES",
+      "$EXPERIMENTAL_MODERN_CELL_REP": Deno.env.get(
+        "EXPERIMENTAL_MODERN_CELL_REP",
       ),
-      "$EXPERIMENTAL_STORABLE_PROTOCOL": Deno.env.get(
-        "EXPERIMENTAL_STORABLE_PROTOCOL",
-      ),
-      "$EXPERIMENTAL_UNIFIED_JSON_ENCODING": Deno.env.get(
-        "EXPERIMENTAL_UNIFIED_JSON_ENCODING",
-      ),
-      "$EXPERIMENTAL_CANONICAL_HASHING": Deno.env.get(
-        "EXPERIMENTAL_CANONICAL_HASHING",
-      ),
-      "$COMPILATION_CACHE_CLIENT": Deno.env.get(
-        "COMPILATION_CACHE_CLIENT",
+      "$EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE": Deno.env.get(
+        "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
       ),
     },
     supported: {
@@ -62,7 +57,6 @@ const config: Config = {
         // `useDefineForClassFields` is critical when using Lit
         // with esbuild, even when not using decorators.
         useDefineForClassFields: false,
-        experimentalDecorators: true,
       },
     },
     logOverride: {

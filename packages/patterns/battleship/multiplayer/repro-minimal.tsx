@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * ============================================================================
  * BUG REPRO: Nested array elements are undefined when reading cross-session data
@@ -19,7 +18,7 @@
  * - otherData.items[0]?.id: 10
  *
  * KEY CONDITIONS TO TRIGGER:
- * 1. Parent pattern owns cells with Writable<Default<T | null, null>>
+ * 1. Parent pattern owns cells with Writable<T | null | Default<null>>
  * 2. Child pattern receives cells as Writable<T | null> (no Default wrapper)
  * 3. Cell data is SET by one browser session (piece instance)
  * 4. Cell data is READ by a DIFFERENT browser session (piece instance)
@@ -27,8 +26,8 @@
  *
  * STEPS TO REPRODUCE:
  * 1. Deploy this pattern:
- *    CT_API_URL=http://localhost:8000 CT_IDENTITY=./claude.key \
- *    deno task ct piece new packages/patterns/battleship/multiplayer/repro-minimal.tsx \
+ *    CF_API_URL=http://localhost:8000 CF_IDENTITY=./claude.key \
+ *    deno task cf piece new packages/patterns/battleship/multiplayer/repro-minimal.tsx \
  *    --root packages/patterns/battleship --space gideon
  *
  * 2. Open the piece URL in Browser Tab 1
@@ -52,7 +51,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // ============================================================================
 // Types - Nested structure similar to battleship's Ship type
@@ -142,12 +141,12 @@ const Child = pattern<ChildInput, object>(
         >
           <h2>Child Pattern - Player {whichPlayer}</h2>
           <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
-            <ct-button onClick={() => checkMine.send()}>
+            <cf-button onClick={() => checkMine.send()}>
               Check MY Data
-            </ct-button>
-            <ct-button onClick={() => checkOther.send()}>
+            </cf-button>
+            <cf-button onClick={() => checkOther.send()}>
               Check OTHER Data
-            </ct-button>
+            </cf-button>
           </div>
         </div>
       ),
@@ -160,12 +159,12 @@ const Child = pattern<ChildInput, object>(
 // ============================================================================
 
 /**
- * Parent uses Writable<Default<T>> but child receives Writable<T>.
+ * Parent uses Writable<T | Default<...>> but child receives Writable<T>.
  * This type mismatch may be related to the bug.
  */
 interface ParentInput {
-  data1: Writable<Default<Container | null, null>>;
-  data2: Writable<Default<Container | null, null>>;
+  data1: Writable<Container | null | Default<null>>;
+  data2: Writable<Container | null | Default<null>>;
 }
 
 let nav:
@@ -231,8 +230,8 @@ const Parent = pattern<ParentInput, object>(({ data1, data2 }) => ({
       <h1>Two-Cell Repro (like Battleship)</h1>
       <p>Join as one player, then check the OTHER player's data</p>
       <div style={{ display: "flex", gap: "20px", marginTop: "20px" }}>
-        <ct-button onClick={joinAsP1({ data1, data2 })}>Join as P1</ct-button>
-        <ct-button onClick={joinAsP2({ data1, data2 })}>Join as P2</ct-button>
+        <cf-button onClick={joinAsP1({ data1, data2 })}>Join as P1</cf-button>
+        <cf-button onClick={joinAsP2({ data1, data2 })}>Join as P2</cf-button>
       </div>
     </div>
   ),

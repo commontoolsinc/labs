@@ -19,7 +19,9 @@
   },
   "properties": {
     "cellArray": {
-      "asCell": true,
+      "asCell": [
+        "cell"
+      ],
       "items": {
         "type": "string"
       },

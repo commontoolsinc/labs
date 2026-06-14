@@ -1,14 +1,4 @@
-/// <cts-enable />
-import {
-  type Cell,
-  cell,
-  Default,
-  handler,
-  lift,
-  pattern,
-  str,
-  toSchema,
-} from "commontools";
+import { type Cell, Default, handler, pattern, str } from "commonfabric";
 
 const childIncrement = handler(
   (
@@ -41,23 +31,6 @@ interface HandlerSpawnArgs {
   children: Default<SpawnedChildState[], []>;
 }
 
-const addChild = lift(
-  toSchema<
-    {
-      child: Cell<number>;
-      children: Cell<SpawnedChildState[]>;
-      initialized: Cell<boolean>;
-    }
-  >(),
-  toSchema<never>(),
-  ({ child, children, initialized }) => {
-    if (!initialized.get()) {
-      children.push(child);
-      initialized.set(true);
-    }
-  },
-);
-
 const spawnChild = handler(
   (
     event: { seed?: number },
@@ -65,11 +38,7 @@ const spawnChild = handler(
   ) => {
     const seed = typeof event?.seed === "number" ? event.seed : 0;
     const child = spawnedChild({ value: seed });
-    return addChild({
-      child,
-      children: context.children,
-      initialized: cell(false),
-    });
+    context.children.push(child);
   },
 );
 

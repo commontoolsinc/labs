@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * TEST PATTERN: Top-Level Button with Disabled Attribute - WORKING
  *
@@ -43,12 +42,12 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface State {
-  count: Default<number, 0>;
-  pending: Default<boolean, false>;
-  isProcessing: Default<boolean, false>;
+  count: number | Default<0>;
+  pending: boolean | Default<false>;
+  isProcessing: boolean | Default<false>;
 }
 
 const incrementHandler = handler<
@@ -84,22 +83,22 @@ export default pattern<State>(({ count, pending, isProcessing }) => {
         <p>Current count: {count}</p>
 
         <div style={{ marginBottom: "1rem" }}>
-          <ct-checkbox $checked={pending}>Simulate pending state</ct-checkbox>
+          <cf-checkbox $checked={pending}>Simulate pending state</cf-checkbox>
         </div>
 
         <div style={{ marginBottom: "1rem" }}>
-          <ct-checkbox $checked={isProcessing}>
+          <cf-checkbox $checked={isProcessing}>
             Simulate processing state
-          </ct-checkbox>
+          </cf-checkbox>
         </div>
 
         {/* WORKING: Button always rendered at top level */}
-        <ct-button
+        <cf-button
           onClick={incrementHandler({ count, pending, isProcessing })}
           disabled={isDisabled}
         >
           {buttonText}
-        </ct-button>
+        </cf-button>
 
         <p style={{ color: "green", marginTop: "16px" }}>
           This pattern works correctly! Button always rendered, uses disabled

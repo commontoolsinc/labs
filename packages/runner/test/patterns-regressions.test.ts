@@ -4,9 +4,12 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { NAME, type Opaque } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import type { Pattern } from "../src/builder/types.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -17,9 +20,20 @@ describe("Pattern Runner - Regressions", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let derive: ReturnType<typeof createBuilder>["commontools"]["derive"];
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
-  let ifElse: ReturnType<typeof createBuilder>["commontools"]["ifElse"];
+  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+  let ifElse: ReturnType<typeof createBuilder>["commonfabric"]["ifElse"];
+  let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
+
+  const bindBuilder = () => {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    ({
+      lift,
+      pattern,
+      ifElse,
+      handler,
+    } = commonfabric);
+  };
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -29,17 +43,19 @@ describe("Pattern Runner - Regressions", () => {
     });
 
     tx = runtime.edit();
-
-    const { commontools } = createBuilder();
-    ({
-      derive,
-      pattern,
-      ifElse,
-    } = commontools);
+    bindBuilder();
   });
 
+  async function commitTx() {
+    if (tx.status().status !== "ready") {
+      return { ok: undefined, error: undefined };
+    }
+    runtime.prepareTxForCommit(tx);
+    return await tx.commit();
+  }
+
   afterEach(async () => {
-    await tx.commit();
+    await commitTx();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -58,12 +74,18 @@ describe("Pattern Runner - Regressions", () => {
     >(
       ({ items }) => {
         // Map over items, returning item name if visible, null otherwise
-        const mapped = items.map((item) =>
-          ifElse(
-            derive(item, (i) => i.visible),
-            derive(item, (i) => i.name),
-            null,
-          )
+        const mapped = (items as any).mapWithPattern(
+          pattern(({ element, index, array }: Opaque<any>) =>
+            (((item: any) =>
+              ifElse(
+                lift((i: { name: string; visible: boolean }) => i.visible)(
+                  item,
+                ),
+                lift((i: { name: string; visible: boolean }) => i.name)(item),
+                null,
+              )) as any)(element, index, array)
+          ),
+          {},
         );
         return { items, mapped };
       },
@@ -87,7 +109,7 @@ describe("Pattern Runner - Regressions", () => {
         { name: "C", visible: true },
       ],
     }, resultCell);
-    await tx.commit();
+    await commitTx();
 
     await result.pull();
 
@@ -103,7 +125,7 @@ describe("Pattern Runner - Regressions", () => {
     tx = runtime.edit();
     const currentItems = result.withTx(tx).key("items").get();
     result.withTx(tx).key("items").set(currentItems.slice(0, 2)); // Keep first 2
-    tx.commit();
+    await commitTx();
 
     await result.pull();
 
@@ -114,5 +136,195 @@ describe("Pattern Runner - Regressions", () => {
     expect(afterMapped).toHaveLength(2);
     expect(afterMapped[0]).toBe("A"); // A was visible
     expect(afterMapped[1]).toBe(null); // B was hidden, null preserved correctly
+  });
+
+  it("keeps Notebook NAME current after createNote once pulled in v2", async () => {
+    await commitTx();
+    await runtime.dispose();
+    await storageManager.close();
+    storageManager = StorageManager.emulate({
+      as: signer,
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+    bindBuilder();
+
+    const notePattern = pattern<{ title: string }>(({ title }) => ({
+      title,
+      [NAME]: lift((value: string) => `📝 ${value}`)(title),
+    }));
+
+    const createNote = handler<
+      void,
+      { notes: Array<ReturnType<typeof notePattern>> }
+    >(
+      (_, { notes }) => {
+        const newNote = notePattern({ title: "Stream Created Note" });
+        notes.push(newNote);
+      },
+      { proxy: true },
+    );
+
+    const notebookLikePattern = pattern<{
+      title: string;
+      notes: Array<ReturnType<typeof notePattern>>;
+    }>(({ title, notes }) => {
+      const noteCount = lift(
+        (items: Array<{ title: string }>) => items.length,
+      )(notes);
+      const displayName = lift(
+        ({ title, noteCount }: { title: string; noteCount: number }) =>
+          `📓 ${title} (${noteCount})`,
+      )({ title, noteCount });
+      return {
+        title,
+        notes,
+        noteCount,
+        [NAME]: displayName,
+        createNote: createNote({ notes }),
+      };
+    });
+
+    const resultCell = runtime.getCell<any>(
+      space,
+      "ct-notebook-name-regression",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, notebookLikePattern, {
+      title: "Test Notebook",
+      notes: [],
+    }, resultCell);
+    await commitTx();
+
+    await runtime.idle();
+    await storageManager.synced();
+    await runtime.idle();
+
+    await result.pull();
+
+    expect(result.key("noteCount").get()).toBe(0);
+    expect(result.key(NAME).get()).toBe("📓 Test Notebook (0)");
+
+    result.key("createNote").send();
+
+    await runtime.idle();
+    await storageManager.synced();
+    await runtime.idle();
+
+    await result.pull();
+
+    expect(result.key("noteCount").get()).toBe(1);
+    expect(result.key(NAME).get()).toBe("📓 Test Notebook (1)");
+  });
+
+  it("clears locally prepared results when a run transaction fails to commit in v2", async () => {
+    await commitTx();
+    await runtime.dispose();
+    await storageManager.close();
+
+    storageManager = StorageManager.emulate({
+      as: signer,
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+    bindBuilder();
+
+    const echoPattern = pattern<{ title: string }>(({ title }) => ({ title }));
+    const resultCell = runtime.getCell<{ title: string }>(
+      space,
+      "ct-locally-prepared-results-rollback",
+      undefined,
+      tx,
+    );
+
+    const runner = runtime.runner as any;
+    runner.setupInternal(tx, echoPattern, { title: "draft" }, resultCell);
+    const key = runner.getDocKey(resultCell);
+    expect(runner.locallyPreparedResults.has(key)).toBe(true);
+
+    const originalCommit = tx.tx.commit.bind(tx.tx);
+    (tx.tx as any).commit = () =>
+      Promise.resolve({
+        error: {
+          name: "ConflictError",
+          message: "synthetic conflict",
+        },
+      });
+
+    const result = await commitTx();
+    expect(result.error?.name).toBe("ConflictError");
+    expect(runner.locallyPreparedResults.has(key)).toBe(false);
+
+    (tx.tx as any).commit = originalCommit;
+    tx = runtime.edit();
+  });
+
+  it("normalizes nested toJSON values before raw runner writes in v2", async () => {
+    await commitTx();
+    await runtime.dispose();
+    await storageManager.close();
+
+    storageManager = StorageManager.emulate({
+      as: signer,
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+    bindBuilder();
+
+    const initialRecipe = Object.assign(() => {}, {
+      toJSON() {
+        return { name: "initial recipe" };
+      },
+    });
+    const resultRecipe = Object.assign(() => {}, {
+      toJSON() {
+        return { name: "result recipe" };
+      },
+    });
+
+    const rawValuePattern = {
+      argumentSchema: {},
+      resultSchema: {},
+      derivedInternalCells: [{
+        partialCause: "recipe",
+        schema: { default: initialRecipe.toJSON() },
+      }],
+      result: {
+        internalRecipe: {
+          $alias: { partialCause: "recipe", path: [] },
+        },
+        resultRecipe: resultRecipe as unknown,
+      },
+      nodes: [],
+    } as unknown as Pattern;
+
+    const resultCell = runtime.getCell<{
+      internalRecipe: { name: string };
+      resultRecipe: { name: string };
+    }>(
+      space,
+      "ct-v2-raw-runner-normalization",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, rawValuePattern, {}, resultCell);
+    await commitTx();
+
+    const value = await result.pull();
+    expect(value).toMatchObject({
+      internalRecipe: { name: "initial recipe" },
+      resultRecipe: { name: "result recipe" },
+    });
   });
 });

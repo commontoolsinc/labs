@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Gift Preferences Module - Pattern for gift giving preferences
  *
@@ -13,7 +12,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -48,11 +47,11 @@ type GiftTier = "always" | "occasions" | "reciprocal" | "none";
 
 export interface GiftPrefsModuleInput {
   /** Gift giving tier */
-  giftTier: Default<GiftTier | "", "">;
+  giftTier: GiftTier | "" | Default<"">;
   /** Favorite things (interests, hobbies, brands) */
-  favorites: Default<string[], []>;
+  favorites: string[] | Default<[]>;
   /** Things to avoid (allergies, dislikes) */
-  avoid: Default<string[], []>;
+  avoid: string[] | Default<[]>;
 }
 
 // ===== Constants =====
@@ -116,8 +115,8 @@ export const GiftPrefsModule = pattern<
   GiftPrefsModuleInput
 >(
   ({ giftTier, favorites, avoid }) => {
-    const favoriteInput = Writable.of<string>("");
-    const avoidInput = Writable.of<string>("");
+    const favoriteInput = new Writable<string>("");
+    const avoidInput = new Writable<string>("");
 
     const displayText = computed(() => {
       const opt = TIER_OPTIONS.find((o) => o.value === giftTier);
@@ -129,31 +128,31 @@ export const GiftPrefsModule = pattern<
         `${MODULE_METADATA.icon} Gift Prefs: ${displayText}`
       ),
       [UI]: (
-        <ct-vstack style={{ gap: "16px" }}>
+        <cf-vstack style={{ gap: "16px" }}>
           {/* Gift tier */}
-          <ct-vstack style={{ gap: "4px" }}>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Gift Giving Tier
             </label>
-            <ct-select $value={giftTier} items={TIER_OPTIONS} />
-          </ct-vstack>
+            <cf-select $value={giftTier} items={TIER_OPTIONS} />
+          </cf-vstack>
 
           {/* Favorites */}
-          <ct-vstack style={{ gap: "8px" }}>
+          <cf-vstack style={{ gap: "8px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Favorites / Likes
             </label>
-            <ct-hstack style={{ gap: "8px" }}>
-              <ct-input
+            <cf-hstack style={{ gap: "8px" }}>
+              <cf-input
                 $value={favoriteInput}
                 placeholder="Add favorite..."
                 style={{ flex: "1" }}
               />
-              <ct-button onClick={addFavorite({ favorites, favoriteInput })}>
+              <cf-button onClick={addFavorite({ favorites, favoriteInput })}>
                 +
-              </ct-button>
-            </ct-hstack>
-            <ct-hstack style={{ gap: "6px", flexWrap: "wrap" }}>
+              </cf-button>
+            </cf-hstack>
+            <cf-hstack style={{ gap: "6px", flexWrap: "wrap" }}>
               {favorites.map((item: string, index: number) => (
                 <span
                   key={index}
@@ -184,23 +183,23 @@ export const GiftPrefsModule = pattern<
                   </button>
                 </span>
               ))}
-            </ct-hstack>
-          </ct-vstack>
+            </cf-hstack>
+          </cf-vstack>
 
           {/* Avoid */}
-          <ct-vstack style={{ gap: "8px" }}>
+          <cf-vstack style={{ gap: "8px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Avoid / Dislikes
             </label>
-            <ct-hstack style={{ gap: "8px" }}>
-              <ct-input
+            <cf-hstack style={{ gap: "8px" }}>
+              <cf-input
                 $value={avoidInput}
                 placeholder="Add item to avoid..."
                 style={{ flex: "1" }}
               />
-              <ct-button onClick={addAvoid({ avoid, avoidInput })}>+</ct-button>
-            </ct-hstack>
-            <ct-hstack style={{ gap: "6px", flexWrap: "wrap" }}>
+              <cf-button onClick={addAvoid({ avoid, avoidInput })}>+</cf-button>
+            </cf-hstack>
+            <cf-hstack style={{ gap: "6px", flexWrap: "wrap" }}>
               {avoid.map((item: string, index: number) => (
                 <span
                   key={index}
@@ -231,9 +230,9 @@ export const GiftPrefsModule = pattern<
                   </button>
                 </span>
               ))}
-            </ct-hstack>
-          </ct-vstack>
-        </ct-vstack>
+            </cf-hstack>
+          </cf-vstack>
+        </cf-vstack>
       ),
       giftTier,
       favorites,

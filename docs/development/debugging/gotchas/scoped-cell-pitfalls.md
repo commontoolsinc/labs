@@ -1,0 +1,205 @@
+# Scoped Cell Pitfalls
+
+Practical gotchas encountered when building patterns with the scoped cell
+instances feature (`PerSpace`, `PerUser`, `PerSession`, `PerAny`). See
+`docs/specs/scoped-cell-instances.md` for the underlying model.
+
+## 1. `.length` on a top-level scoped array doesn't lift reactively
+
+**Symptom:** Output values derived as `users.length` (where `users` is a
+top-level `PerSpace<T[]>` input) read as a stale snapshot or as `undefined`
+from outside the pattern.
+
+```typescript
+// WRONG - snapshots once, does not track reactively
+const userCount = users.length;
+```
+
+```typescript
+// CORRECT - wrap in computed
+const userCount = computed(() => users.length);
+```
+
+Nested property access through an object cell (e.g. `conversation.rooms.length`
+where `conversation: PerSpace<{rooms: Room[]}>`) works fine — the problem is
+specific to `.length` access directly on a scope-wrapped array cell.
+
+## 2. Expose scoped outputs as plain types via `computed(() => cell.get())`
+
+**Symptom:** Test assertions like `subject.users[0]?.name === "Alex"` return
+`undefined` even after the underlying cell has the right value.
+
+Returning a `PerSpace<User[]>` input directly as a pattern output leaves
+consumers fighting the reactive traversal layer. Wrap arrays/strings in
+`computed(() => cell.get())` so the output type is plain.
+
+```typescript
+export interface MyOutput {
+  users: readonly User[];     // plain type, not PerSpace<User[]>
+  myName: string;
+}
+
+return {
+  users: computed(() => users.get()),
+  myName: computed(() => myName.get()),
+  // ...
+};
+```
+
+This mirrors what `packages/patterns/scrabble/scrabble.tsx` does for its
+`players`, `board`, `bag` etc.
+
+## 3. Don't `.get()` a per-scope cell from JSX `onClick`
+
+**Symptom:** Type error `Property 'get' does not exist on type 'string & {
+readonly [SCOPE_BRAND]?: "session" | undefined; }'`.
+
+In the pattern body, scoped inputs (e.g. `joinName: PerSession<string>`) are
+typed as the scope-branded value, not as a `Writable<string>` cell — so
+`joinName.get()` does not compile.
+
+```typescript
+// WRONG
+<cf-button onClick={() => boundJoin.send({ name: joinName.get() })}>
+  Join
+</cf-button>
+```
+
+The idiom (used by `scoped-group-chat` and the new game patterns): make the
+event payload optional, have the handler fall back to reading the draft cell
+from its bound closure, and dispatch the bound stream directly.
+
+```typescript
+// In handler
+const joinAs = handler<{ name?: string }, { joinName: NameCell; ... }>(
+  ({ name }, { joinName, ... }) => {
+    const trimmed = (name ?? joinName.get()).trim();
+    // ...
+  },
+);
+
+// In JSX
+<cf-button onClick={boundJoin}>Join</cf-button>
+```
+
+## 4. Initial-state assertions before any action can read `undefined`
+
+**Symptom:** A pattern test asserts initial empty state and the framework
+reports `Expected true, got undefined`.
+
+Reactive output reads can resolve to `undefined` before defaults hydrate.
+Scrabble's tests (`packages/patterns/scrabble/scrabble.test.tsx`) sidestep this
+by always running an action before the first assertion. Follow the same
+pattern: structure the test as a sequence of `{ action }, { assertion }` pairs
+and skip the pre-action sanity check.
+
+## 5. `scopedCell.get().map()` in a render computed throws until first sync — guard with `?? []`
+
+**Symptom:** On a fresh space/session, a console **storm** of
+`TypeError: Cannot read properties of undefined (reading 'map')` (often 100s,
+re-thrown on every settle wave), and a whole section of UI silently fails to
+render — including controls (Edit/Remove buttons, pickers) that should be there.
+No single clear culprit; the error points at minified runtime frames.
+
+**Cause:** A scoped cell's `.get()` returns `undefined` **until its first sync
+settles** (the render-path counterpart of pitfall #4). A render-path `computed`
+that chains an array method straight off it then throws:
+
+```typescript
+// WRONG — throws while pendingVehicles (perSession) / people (perSpace) is
+// still undefined before the first sync; the throw repeats every settle wave.
+const rows = computed(() => pendingVehicles.get().map((v) => …));
+const sorted = computed(() => [...people.get()].sort(…));      // "not iterable"
+const active = computed(() => spots.get().filter((s) => s.active)); // "reading filter"
+```
+
+This bites **perSession** cells hardest (they reliably read `undefined` before
+sync) but also **perSpace** on a cold space. A throwing **per-row** computed
+inside a `.map()` (e.g. `activeSpotOpts = computed(() => spots.get().filter(…))`)
+crashes that row's card, which is why its inline controls never appear.
+
+```typescript
+// CORRECT — guard every render-path scoped read.
+const rows = computed(() => (pendingVehicles.get() ?? []).map((v) => …));
+const sorted = computed(() => [...(people.get() ?? [])].sort(…));
+const active = computed(() => (spots.get() ?? []).filter((s) => s.active));
+```
+
+Note `Default<[]>` on the input type is **not** sufficient — the default hasn't
+hydrated yet at the moment the computed first runs, so the `?? []` guard is still
+required (this is why pitfall #4's "run an action first" trick works for tests
+but render code can't). Handlers/actions run in a settled context, so the same
+chained reads there are usually safe; the danger is the always-evaluating render
+computeds. Fixed across `packages/patterns/factory-outputs/parking-coordinator/main.tsx`.
+
+⚠️ **Don't take this `?? []` recipe into a NESTED `.map()`.** Inside an outer
+`rows.map((row) => …)`, an inner `(cellCall() ?? []).map((el) => …)` whose
+inner closure references any pattern-scope cell aborts pattern construction —
+this is a *different* gotcha (the ts-transformer doesn't recognize binary-
+expression receivers wrapping a reactive call, so no `mapWithPattern`
+rewrite happens). The very guard that's correct at the top level is the thing
+that breaks it nested. See
+[closure-capture-in-nested-map.md](./closure-capture-in-nested-map.md) for
+the three idiomatic alternatives (map the cell directly; pre-bake into a
+top-level `computed`; local `computed()` bridge per row).
+
+## 6. Don't share `perUser`/`perSession` cells through `PerSpace` data
+
+**Symptom:** Other participants see "Unnamed user" / empty values where a
+user's profile (or similar per-user record) should appear, while the owning
+user sees their own data fine.
+
+A user/session-scoped cell instance is isolated **by reader**
+(`docs/specs/scoped-cell-instances.md`): the same link resolves to each
+reader's own instance. So registering a `Writable.perUser.of(...)` cell in a
+shared (`PerSpace`) list hands every other participant a link to *their own*
+empty instance — the data can never propagate.
+
+```typescript
+// WRONG — other users dereference this to their own empty instance.
+const profile = Writable.perUser.of<TrustedProfile>(snapshot);
+registerProfile(sharedProfiles, profile);
+
+// CORRECT — mint a space-scoped cell; per-user distinctness comes from
+// creation (per-invocation cause on each user's first save) plus a PerUser
+// pointer that remembers which cell is "mine".
+const profile = currentProfileCell(myProfile) ??
+  Writable.perSpace.of<TrustedProfile>(snapshot);
+myProfile.set({ profile });
+registerProfile(sharedProfiles, profile);
+```
+
+Rule of thumb: scope controls _who reads which instance_, not _who owns the
+data_. Anything that must be visible to other users belongs in a space-scoped
+cell; use `PerUser` for the pointer, not the shared record. Fixed in
+`packages/patterns/cfc-group-chat-demo/trusted.tsx`; guarded by the
+multi-runtime test
+`packages/patterns/integration/cfc-group-chat-demo-multi-runtime.test.ts`.
+
+## 7. `Math.random()` throws under SES
+
+**Symptom:** `TypeError: secure mode %SharedMath%.random() throws` when a
+handler runs.
+
+The pattern sandbox runs under SES, which removes ambient access to
+`Math.random()`. Use `nonPrivateRandom()` from `commonfabric` for
+non-cryptographic randomness inside patterns. This is not scope-specific but
+showed up while wiring up an option-id generator in a scoped poll.
+
+```typescript
+import { nonPrivateRandom, safeDateNow } from "commonfabric";
+
+const newId = () =>
+  `o_${safeDateNow().toString(36)}_${
+    Math.floor(nonPrivateRandom() * 1e6).toString(36)
+  }`;
+```
+
+## See Also
+
+- `docs/specs/scoped-cell-instances.md` — the underlying scope model
+- `packages/patterns/scoped-group-chat/` — canonical scope-aware pattern
+- `packages/patterns/scrabble/scrabble.tsx` — name-as-identity idiom
+- `packages/patterns/cozy-poll/` — applies all of the above
+- `packages/patterns/scoped-user-directory/` — verification of the link-pointer
+  technique (per-user pointer into a per-space array)

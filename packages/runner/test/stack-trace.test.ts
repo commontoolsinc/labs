@@ -1,120 +1,86 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  getTypeScriptEnvironmentTypes,
-  InMemoryProgram,
-  JsScript,
-  TypeScriptCompiler,
-  type TypeScriptCompilerOptions,
-} from "@commontools/js-compiler";
-import { UnsafeEvalRuntime } from "../src/harness/eval-runtime.ts";
-import { StaticCacheFS } from "@commontools/static";
-import { CommonToolsTransformerPipeline } from "@commontools/ts-transformers";
+import { Identity } from "@commonfabric/identity";
 
-const types = await getTypeScriptEnvironmentTypes(new StaticCacheFS());
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { Runtime } from "../src/runtime.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
+import { SESRuntime } from "../src/sandbox/mod.ts";
+
+const signer = await Identity.fromPassphrase("test operator");
 
 /**
  * Tests that verify stack traces from compiled pattern code are correctly
  * source-mapped back to original TypeScript source locations.
  *
- * These tests exercise the same code path that runs in production:
- * TypeScript → compile → eval → error → source map → readable stack trace.
+ * These tests exercise the production path: the Engine compiles a program to
+ * per-module ESM records (running the full CF transformer pipeline), evaluates
+ * them in the SES compartment, and registers per-module source maps so errors
+ * map back to authored TS coordinates.
  *
  * Source files use explicit \n-separated strings (no template indentation)
  * so that line numbers are predictable and match source map output exactly.
+ *
+ * Two coordinate conventions to be aware of:
+ * - The engine injects the CF helper import as a new first line of every
+ *   module, so mapped line numbers are AUTHORED LINE + 1 (the same convention
+ *   the AMD bundle path used; see the `// mapped line N` comments).
+ * - Mapped frames carry the load-prefixed module path
+ *   (`/<programHash>/main.tsx`), so assertions match on the authored
+ *   `<file>:<line>:` suffix rather than a full path.
+ *
+ * NOTE: the AMD-era "maps top-level error" case is gone — arbitrary top-level
+ * calls (`export default fail();`) are rejected by the SES module-scope policy
+ * under the ESM record loader, so the construct no longer exists in production.
+ * Module-evaluation-time error mapping is covered by
+ * stack-trace-patterns.test.ts ("mapWithPattern synthetic pattern callsite"),
+ * which throws inside an allowed trusted-builder call. The AMD-era "with CTS
+ * transformer" describe block is gone too: the Engine's module path ALWAYS
+ * runs the CommonFabricTransformerPipeline, so every test below covers it.
  */
 
-function compile(
-  files: Record<string, string>,
-  filename = "pattern-test.js",
-  extraOptions: Partial<TypeScriptCompilerOptions> = {},
-) {
-  const compiler = new TypeScriptCompiler(types);
-  const mainFile = Object.keys(files)[0];
-  const program = new InMemoryProgram(mainFile, files);
-  return compiler.resolveAndCompile(program, {
-    filename,
-    bundleExportAll: true,
-    ...extraOptions,
-  });
-}
-
-function compileWithCTS(
-  files: Record<string, string>,
-  filename = "pattern-test.js",
-) {
-  return compile(files, filename, {
-    beforeTransformers: (program) => {
-      const pipeline = new CommonToolsTransformerPipeline();
-      return {
-        factories: pipeline.toFactories(program),
-        getDiagnostics: () => pipeline.getDiagnostics(),
-      };
-    },
-  });
-}
-
-function execute(
-  bundled: JsScript,
-): {
-  main: Record<string, unknown>;
-  runtime: UnsafeEvalRuntime;
-} {
-  const runtime = new UnsafeEvalRuntime();
-  const isolate = runtime.getIsolate("");
-  const evaledBundle = isolate.execute(bundled);
-  const result = evaledBundle.invoke().inner();
-  if (
-    result && typeof result === "object" && "main" in result &&
-    "exportMap" in result
-  ) {
-    return {
-      main: result.main as Record<string, unknown>,
-      runtime,
-    };
-  }
-  throw new Error("Unexpected evaluation result.");
+function makeProgram(files: Record<string, string>): RuntimeProgram {
+  const main = Object.keys(files)[0];
+  return {
+    main,
+    files: Object.entries(files).map(([name, contents]) => ({
+      name,
+      contents,
+    })),
+  };
 }
 
 describe("Stack trace source mapping", () => {
-  it("maps top-level error to exact original source locations", async () => {
-    // helper.ts line 2 = throw, main.tsx line 2 = call site
-    const compiled = await compile({
-      "/main.tsx": [
-        "import { fail } from './helper.ts';",
-        "export default fail();",
-      ].join("\n"),
-      "/helper.ts": [
-        "export function fail(): never {",
-        "  throw new Error('compile-time boom');",
-        "}",
-      ].join("\n"),
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
     });
-
-    let thrown: Error | undefined;
-    try {
-      execute(compiled);
-    } catch (e) {
-      thrown = e as Error;
-    }
-
-    expect(thrown).toBeDefined();
-    const stack = thrown!.stack!.split("\n");
-    stack.length = 6;
-
-    expect(stack).toEqual([
-      "Error: compile-time boom",
-      "    at fail (helper.ts:2:8)",
-      "    at Object.eval (main.tsx:2:19)",
-      "    at <CT_INTERNAL>",
-      "    at <CT_INTERNAL>",
-      "    at <CT_INTERNAL>",
-    ]);
   });
 
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  /** Compile + evaluate through the production ESM record path. */
+  const evaluate = (files: Record<string, string>) =>
+    runtime.harness.compileAndEvaluateModules(makeProgram(files));
+
+  /**
+   * Invoke a compartment function through the harness so a thrown error's
+   * stack is materialized and source-mapped (the scheduler invokes actions
+   * through this same seam).
+   */
+  const invokeMapped = <T>(fn: () => T): T => runtime.harness.invoke(fn) as T;
+
   it("maps deferred function error to exact source line", async () => {
-    // Line 3 = throw new Error('negative input')
-    const compiled = await compile({
+    // Authored line 3 = throw new Error('negative input') → mapped line 4.
+    const { main } = await evaluate({
       "/main.tsx": [
         "export function riskyOperation(val: number): number {",
         "  if (val < 0) {",
@@ -122,35 +88,77 @@ describe("Stack trace source mapping", () => {
         "  }",
         "  return val * 2;",
         "}",
-        "export default { riskyOperation };",
       ].join("\n"),
     });
+    const riskyOperation = main!.riskyOperation as (val: number) => number;
 
-    const { main, runtime } = execute(compiled);
-    const riskyOperation = (main as any).riskyOperation as (
-      val: number,
-    ) => number;
-
-    expect(riskyOperation(5)).toBe(10);
+    expect(invokeMapped(() => riskyOperation(5))).toBe(10);
 
     let thrown: Error | undefined;
     try {
-      riskyOperation(-1);
+      invokeMapped(() => riskyOperation(-1));
     } catch (e) {
       thrown = e as Error;
     }
 
     expect(thrown).toBeDefined();
-    const mapped = runtime.parseStack(thrown!.stack!);
-    const lines = mapped.split("\n");
+    const lines = (thrown!.stack ?? "").split("\n");
 
     expect(lines[0]).toBe("Error: negative input");
-    expect(lines[1]).toBe("    at riskyOperation (main.tsx:3:10)");
+    expect(lines[1]).toMatch(/at riskyOperation \(.*\/main\.tsx:4:\d+\)$/);
+    // The mapped frame is a TS coordinate, not a raw compiled one.
+    expect(lines[1]).not.toMatch(/:esm:|\.js:\d+/);
+  });
+
+  it("preserves relative and absolute runner internal stack frames by default", () => {
+    const runtime = new SESRuntime({ lockdown: true });
+    const stack = [
+      "Error: boom",
+      "    at eval (main.tsx:6:12)",
+      "  at packages/runner/src/sandbox/ses-runtime.ts:100:15",
+      "    at SESInternals.exec (packages/runner/src/sandbox/ses-runtime.ts:45:22)",
+      "    at /home/runner/work/labs/labs/packages/runner/src/harness/engine.ts:244:45",
+      "  at callback (ext:deno_web/02_timers.js:42:7)",
+    ].join("\n");
+
+    expect(runtime.parseStack(stack).split("\n")).toEqual([
+      "Error: boom",
+      "    at eval (main.tsx:6:12)",
+      "  at packages/runner/src/sandbox/ses-runtime.ts:100:15",
+      "    at SESInternals.exec (packages/runner/src/sandbox/ses-runtime.ts:45:22)",
+      "    at /home/runner/work/labs/labs/packages/runner/src/harness/engine.ts:244:45",
+      "  at callback (ext:deno_web/02_timers.js:42:7)",
+    ]);
+  });
+
+  it("can sanitize relative and absolute runner internal stack frames", () => {
+    const runtime = new SESRuntime({
+      lockdown: true,
+      hideInternalStackFrames: true,
+    });
+    const stack = [
+      "Error: boom",
+      "    at eval (main.tsx:6:12)",
+      "  at packages/runner/src/sandbox/ses-runtime.ts:100:15",
+      "    at SESInternals.exec (packages/runner/src/sandbox/ses-runtime.ts:45:22)",
+      "    at /home/runner/work/labs/labs/packages/runner/src/harness/engine.ts:244:45",
+      "  at callback (ext:deno_web/02_timers.js:42:7)",
+    ].join("\n");
+
+    expect(runtime.parseStack(stack).split("\n")).toEqual([
+      "Error: boom",
+      "    at eval (main.tsx:6:12)",
+      "    at <CF_INTERNAL>",
+      "    at <CF_INTERNAL>",
+      "    at <CF_INTERNAL>",
+      "  at callback (ext:deno_web/02_timers.js:42:7)",
+    ]);
   });
 
   it("maps multi-file error with exact line numbers through call chain", async () => {
-    // validator.ts line 3 = throw, processor.ts line 3 = validate() call
-    const compiled = await compile({
+    // validator.ts authored line 3 = throw → mapped 4;
+    // processor.ts authored line 3 = validate() call → mapped 4.
+    const { main } = await evaluate({
       "/main.tsx": [
         "import { processData } from './processor.ts';",
         "export default processData;",
@@ -170,88 +178,77 @@ describe("Stack trace source mapping", () => {
         "}",
       ].join("\n"),
     });
-
-    const { main, runtime } = execute(compiled);
-    const processData = main.default as (input: string) => string;
+    const processData = main!.default as (input: string) => string;
 
     let thrown: Error | undefined;
     try {
-      processData("");
+      invokeMapped(() => processData(""));
     } catch (e) {
       thrown = e as Error;
     }
 
     expect(thrown).toBeDefined();
-    const mapped = runtime.parseStack(thrown!.stack!);
-    const lines = mapped.split("\n");
+    const lines = (thrown!.stack ?? "").split("\n");
 
     expect(lines[0]).toBe("Error: validation failed: empty input");
-    expect(lines[1]).toBe("    at validate (validator.ts:3:10)");
-    expect(lines[2]).toBe("    at processData (processor.ts:3:11)");
+    expect(lines[1]).toMatch(/at validate \(.*\/validator\.ts:4:\d+\)$/);
+    expect(lines[2]).toMatch(/at processData \(.*\/processor\.ts:4:\d+\)$/);
   });
 
   it("preserves function name with exact source location", async () => {
-    // Line 2 = throw new Error('zero!')
-    const compiled = await compile({
+    // Authored line 2 = throw new Error('zero!') → mapped line 3.
+    const { main } = await evaluate({
       "/main.tsx": [
         "export function myNamedFunction(x: number): number {",
         "  if (x === 0) throw new Error('zero!');",
         "  return 1 / x;",
         "}",
-        "export default { myNamedFunction };",
       ].join("\n"),
     });
-
-    const { main, runtime } = execute(compiled);
-    const fn = (main as any).myNamedFunction as (x: number) => number;
+    const fn = main!.myNamedFunction as (x: number) => number;
 
     let thrown: Error | undefined;
     try {
-      fn(0);
+      invokeMapped(() => fn(0));
     } catch (e) {
       thrown = e as Error;
     }
 
     expect(thrown).toBeDefined();
-    const mapped = runtime.parseStack(thrown!.stack!);
-    const lines = mapped.split("\n");
+    const lines = (thrown!.stack ?? "").split("\n");
 
     expect(lines[0]).toBe("Error: zero!");
-    expect(lines[1]).toBe("    at myNamedFunction (main.tsx:2:21)");
+    expect(lines[1]).toMatch(/at myNamedFunction \(.*\/main\.tsx:3:\d+\)$/);
   });
 
   it("maps async error to exact source line", async () => {
-    // Line 3 = throw new Error('async error')
-    const compiled = await compile({
+    // Authored line 3 = throw new Error('async error') → mapped line 4.
+    const { main } = await evaluate({
       "/main.tsx": [
         "export async function asyncBoom(): Promise<never> {",
         "  await Promise.resolve();",
         "  throw new Error('async error');",
         "}",
-        "export default { asyncBoom };",
       ].join("\n"),
     });
-
-    const { main, runtime } = execute(compiled);
-    const asyncBoom = (main as any).asyncBoom as () => Promise<never>;
+    const asyncBoom = main!.asyncBoom as () => Promise<never>;
 
     let thrown: Error | undefined;
     try {
-      await asyncBoom();
+      await invokeMapped(() => asyncBoom());
     } catch (e) {
       thrown = e as Error;
     }
 
     expect(thrown).toBeDefined();
-    const mapped = runtime.parseStack(thrown!.stack!);
-    const lines = mapped.split("\n");
+    const lines = (thrown!.stack ?? "").split("\n");
 
     expect(lines[0]).toBe("Error: async error");
-    expect(lines[1]).toBe("    at asyncBoom (main.tsx:3:8)");
+    expect(lines[1]).toMatch(/at asyncBoom \(.*\/main\.tsx:4:\d+\)$/);
   });
 
   it("returns stack unchanged when no source map is loaded", () => {
-    const runtime = new UnsafeEvalRuntime();
+    const runtime = new SESRuntime({ lockdown: true });
 
     const stack = `Error: something broke
     at someFunction (unknown-file.js:10:5)
@@ -259,46 +256,5 @@ describe("Stack trace source mapping", () => {
 
     const result = runtime.parseStack(stack);
     expect(result).toBe(stack);
-  });
-});
-
-describe("Stack trace source mapping with CTS transformer", () => {
-  // Full CTS pattern transformation + source map integration tests are in
-  // stack-trace-patterns.test.ts which uses /// <cts-enable /> to run through
-  // the real pattern compilation pipeline with full runtime types.
-
-  it("preserves source positions for non-reactive code through CTS pipeline", async () => {
-    // Even with CTS enabled, code that doesn't use reactive patterns
-    // should still have correct source maps (CTS is a no-op for this code).
-    const compiled = await compileWithCTS({
-      "/main.tsx": [
-        "export function validate(x: number): number {", // line 1
-        "  if (x < 0) {", // line 2
-        "    throw new Error('negative');", // line 3
-        "  }", // line 4
-        "  return x * 2;", // line 5
-        "}", // line 6
-        "export default { validate };", // line 7
-      ].join("\n"),
-    });
-
-    const { main, runtime } = execute(compiled);
-    const validate = (main as any).validate as (x: number) => number;
-
-    expect(validate(5)).toBe(10);
-
-    let thrown: Error | undefined;
-    try {
-      validate(-1);
-    } catch (e) {
-      thrown = e as Error;
-    }
-
-    expect(thrown).toBeDefined();
-    const mapped = runtime.parseStack(thrown!.stack!);
-    const lines = mapped.split("\n");
-
-    expect(lines[0]).toBe("Error: negative");
-    expect(lines[1]).toBe("    at validate (main.tsx:3:10)");
   });
 });

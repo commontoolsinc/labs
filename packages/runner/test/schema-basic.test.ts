@@ -3,13 +3,44 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import "@commontools/utils/equal-ignoring-symbols";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import "@commonfabric/utils/equal-ignoring-symbols";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Cell, isCell } from "../src/cell.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import { ContextualFlowControl } from "../src/cfc.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+
+// The read follow-cap (link-resolution/traverse) and the write target scope
+// (data-updating) both derive from ContextualFlowControl.getSchemaScopeCap, so
+// they can never disagree about which scoped instance a slot addresses. This
+// pins the single precedence: outermost asCell entry scope first (the immediate
+// cell/slot), then the top-level `scope` (the value when there is no wrapper).
+Deno.test("getSchemaScopeCap precedence: asCell entry before top-level scope", () => {
+  const cap = (schema: JSONSchema) =>
+    ContextualFlowControl.getSchemaScopeCap(schema);
+  assertSchemaScope(
+    cap({ type: "string", asCell: [{ kind: "cell", scope: "session" }] }),
+    "session",
+  );
+  assertSchemaScope(cap({ type: "string", scope: "user" }), "user");
+  // When both are present, the immediate (asCell) cell scope wins.
+  assertSchemaScope(
+    cap({
+      type: "object",
+      scope: "user",
+      asCell: [{ kind: "cell", scope: "session" }],
+    }),
+    "session",
+  );
+  assertSchemaScope(cap({ type: "string" }), undefined);
+  assertSchemaScope(cap({ type: "string", scope: "any" }), "any");
+});
+
+function assertSchemaScope(actual: unknown, expected: unknown) {
+  expect(actual).toBe(expected);
+}
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -101,7 +132,7 @@ describe("Schema - Basic Types and References", () => {
               name: { type: "string" },
               settings: {
                 type: "object",
-                asCell: true,
+                asCell: ["cell"],
               },
             },
             required: ["name", "settings"],
@@ -175,7 +206,7 @@ describe("Schema - Basic Types and References", () => {
           id: { type: "number" },
           metadata: {
             type: "object",
-            asCell: true,
+            asCell: ["cell"],
           },
         },
       } as const satisfies JSONSchema;
@@ -208,14 +239,14 @@ describe("Schema - Basic Types and References", () => {
       });
 
       const schema = {
-        asCell: true,
+        asCell: ["cell"],
         $ref: "#/$defs/Node",
         $defs: {
           "Node": {
             type: "object",
             properties: {
               id: { type: "number" },
-              nested: { $ref: "#/$defs/Node", asCell: true },
+              nested: { $ref: "#/$defs/Node", asCell: ["cell"] },
             },
             required: ["id"],
           },
@@ -513,7 +544,7 @@ describe("Schema - Basic Types and References", () => {
           },
         },
         $ref: "#/$defs/LinkedNode",
-        asCell: true,
+        asCell: ["cell"],
       } as const satisfies JSONSchema;
 
       const c = runtime.getCell(
@@ -570,7 +601,7 @@ describe("Schema - Basic Types and References", () => {
                   name: { type: "string" },
                   metadata: {
                     type: "object",
-                    asCell: true,
+                    asCell: ["cell"],
                   },
                 },
                 required: ["name", "metadata"],
@@ -623,7 +654,7 @@ describe("Schema - Basic Types and References", () => {
               type: "object",
               properties: { label: { type: "string" } },
               required: ["label"],
-              asCell: true,
+              asCell: ["cell"],
             },
           },
           required: ["current"],
@@ -655,6 +686,195 @@ describe("Schema - Basic Types and References", () => {
         : false;
       const _assertCurrentIsNestedCell: CurrentIsCell extends true ? true
         : never = true;
+    });
+
+    it("should allow cell.get().get() for nested Cell<string> values", () => {
+      const inner = runtime.getCell<string>(
+        space,
+        "nested-cell-inner-string",
+        { type: "string" } as const satisfies JSONSchema,
+        tx,
+      );
+      inner.set("hello nested cell");
+
+      const outer = runtime.getCell<{ current: Cell<string> }>(
+        space,
+        "nested-cell-outer-string",
+        {
+          type: "object",
+          properties: {
+            current: {
+              type: "string",
+              asCell: ["cell"],
+            },
+          },
+          required: ["current"],
+        } as const satisfies JSONSchema,
+        tx,
+      );
+      outer.set({ current: inner });
+
+      const currentCell = outer.key("current");
+      const nestedStringCell = currentCell.get();
+
+      expect(isCell(nestedStringCell)).toBe(true);
+      expect(nestedStringCell.get()).toBe("hello nested cell");
+    });
+
+    it('should honor explicit asCell: ["cell", "cell"] schema markers', () => {
+      const inner = runtime.getCell<string>(
+        space,
+        "double-ascell-inner-string",
+        { type: "string" } as const satisfies JSONSchema,
+        tx,
+      );
+      inner.set("hello double asCell");
+
+      const outer = runtime.getCell<{ current: Cell<Cell<string>> }>(
+        space,
+        "double-ascell-outer-string",
+        {
+          type: "object",
+          properties: {
+            current: {
+              type: "string",
+              asCell: ["cell", "cell"],
+            },
+          },
+          required: ["current"],
+        } as const satisfies JSONSchema,
+        tx,
+      );
+      outer.set({ current: inner });
+
+      const currentCell = outer.key("current");
+      const outerNestedCell = currentCell.get();
+      const innerStringCell = outerNestedCell.get();
+
+      expect(isCell(outerNestedCell)).toBe(true);
+      expect(isCell(innerStringCell)).toBe(true);
+      expect(innerStringCell.get()).toBe("hello double asCell");
+    });
+
+    it("keeps the asCell entry scope on the schema, not stamped on the link", () => {
+      const outer = runtime.getCell<{ current: Cell<string> }>(
+        space,
+        "scoped-ascell-object-entry",
+        {
+          type: "object",
+          properties: {
+            current: {
+              type: "string",
+              asCell: [{ kind: "cell", scope: "user" }],
+            },
+          },
+          required: ["current"],
+        } as const satisfies JSONSchema,
+        tx,
+      );
+
+      // key() must not stamp the asCell entry scope onto the container link: an
+      // asCell field is a reference whose link lives in the container at the
+      // container's own scope; the entry scope is a follow cap on the target
+      // (carried by the stored link). Stamping it here reads the wrong scoped
+      // instance of the container (see CT-1623).
+      const currentCell = outer.key("current");
+      expect(currentCell.getAsNormalizedFullLink().scope).toBe("space");
+      const schema = currentCell.getAsNormalizedFullLink().schema as any;
+      expect(schema?.asCell?.[0]?.scope ?? schema?.scope).toBe("user");
+    });
+
+    it("should preserve nested asCell wrappers through anyOf branches", () => {
+      const inner = runtime.getCell<string>(
+        space,
+        "double-ascell-anyof-inner-string",
+        { type: "string" } as const satisfies JSONSchema,
+        tx,
+      );
+      inner.set("hello anyOf nested cell");
+
+      const outer = runtime.getCell<any>(
+        space,
+        "double-ascell-anyof-outer-string",
+        {
+          type: "object",
+          properties: {
+            current: {
+              anyOf: [
+                { type: "string" },
+                { type: "string", asCell: ["cell", "cell"] },
+              ],
+            },
+          },
+          required: ["current"],
+        } as const satisfies JSONSchema,
+        tx,
+      );
+      outer.set({ current: inner });
+
+      const currentCell = outer.key("current");
+      const outerNestedCell = currentCell.get();
+      const innerStringCell = outerNestedCell.get();
+
+      expect(isCell(outerNestedCell)).toBe(true);
+      expect(isCell(innerStringCell)).toBe(true);
+      expect(innerStringCell.get()).toBe("hello anyOf nested cell");
+    });
+
+    it('should create nested default cells for asCell: ["cell", "cell"]', () => {
+      const outer = runtime.getCell<any>(
+        space,
+        "double-ascell-default-outer-string",
+        {
+          type: "object",
+          properties: {
+            current: {
+              type: "string",
+              default: "hello nested default",
+              asCell: ["cell", "cell"],
+            },
+          },
+        } as const satisfies JSONSchema,
+        tx,
+      );
+
+      const currentCell = outer.key("current");
+      const outerNestedCell = currentCell.get();
+      const innerStringCell = outerNestedCell.get();
+
+      expect(isCell(outerNestedCell)).toBe(true);
+      expect(isCell(innerStringCell)).toBe(true);
+      expect(innerStringCell.get()).toBe("hello nested default");
+    });
+
+    it("should apply nullable defaults before choosing anyOf asCell branches", () => {
+      const outer = runtime.getCell<any>(
+        space,
+        "nullable-anyof-default-cell",
+        {
+          type: "object",
+          properties: {
+            current: {
+              anyOf: [
+                {
+                  type: "object",
+                  properties: {
+                    name: { type: "string" },
+                  },
+                  required: ["name"],
+                  asCell: ["cell"],
+                },
+                { type: "null" },
+              ],
+              default: null,
+            },
+          },
+          required: ["current"],
+        } as const satisfies JSONSchema,
+        tx,
+      );
+
+      expect(outer.key("current").get()).toBe(null);
     });
   });
 });

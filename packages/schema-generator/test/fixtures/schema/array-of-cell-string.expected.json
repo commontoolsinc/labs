@@ -2,7 +2,9 @@
   "properties": {
     "items": {
       "items": {
-        "asCell": true,
+        "asCell": [
+          "cell"
+        ],
         "type": "string"
       },
       "type": "array"

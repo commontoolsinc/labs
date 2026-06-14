@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { type Cell, Default, handler, lift, pattern, str } from "commontools";
+import { type Cell, Default, handler, lift, pattern, str } from "commonfabric";
 
 interface MarkdownPreviewArgs {
   initialContent: Default<string, "# Welcome">;
@@ -7,7 +6,7 @@ interface MarkdownPreviewArgs {
 }
 
 type UpdateContentEvent = {
-  text?: unknown;
+  text?: string;
 };
 
 const sanitizeContent = (value: unknown): string => {

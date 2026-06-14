@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { Cell, handler, NAME, pattern, str, UI } from "commontools";
+import { Cell, handler, NAME, pattern, str, UI } from "commonfabric";
 
 interface PatternState {
   value: number;
@@ -16,8 +15,8 @@ const decrement = handler((_e, state: { value: Cell<number> }) => {
 // FIXTURE: pattern-statements-vs-jsx
 // Verifies: only JSX-context expressions are transformed; statement-context expressions are left alone
 //   const next = state.value + 1    → NOT transformed (statement context)
-//   <p>{state.value + 1}</p>        → derive({value}, ({state}) => state.value + 1) (JSX context)
-//   state.value > 10 ? "High":"Low" → ifElse(derive(...), "High", "Low") (JSX context)
+//   <p>{state.value + 1}</p>        → lift(({state}) => state.value + 1)({ value }) (JSX context)
+//   state.value > 10 ? "High":"Low" → ifElse(lift(...)(...), "High", "Low") (JSX context)
 // Context: Ensures the transformer distinguishes between statement and JSX expression contexts
 export default pattern<PatternState>((state) => {
   return {
@@ -26,7 +25,7 @@ export default pattern<PatternState>((state) => {
 
     [UI]: (
       <div>
-        <ct-button onClick={decrement(state)}>-</ct-button>
+        <cf-button onClick={decrement(state)}>-</cf-button>
         <p>
           {/* These SHOULD be transformed (JSX expression context) */}
           Current: {state.value}
@@ -39,7 +38,7 @@ export default pattern<PatternState>((state) => {
           <br />
           Status: {state.value > 10 ? "High" : "Low"}
         </p>
-        <ct-button onClick={increment({ value: state.value })}>+</ct-button>
+        <cf-button onClick={increment({ value: state.value })}>+</cf-button>
       </div>
     ),
 

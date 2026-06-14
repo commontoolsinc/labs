@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   type BuiltInLLMMessage,
   computed,
@@ -14,8 +13,8 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
-import { readWebpage, searchWeb } from "./system/common-tools.tsx";
+} from "commonfabric";
+import { readWebpage, searchWeb } from "./system/common-fabric.tsx";
 
 type ResearchResult = {
   summary: string;
@@ -62,11 +61,10 @@ const showRefineInput = handler<unknown, { showRefine: Writable<boolean> }>(
 
 export default pattern<
   {
-    situation: Default<
-      string,
-      "What are the latest developments in AI agents?"
-    >;
-    messages?: Writable<Default<Array<BuiltInLLMMessage>, []>>;
+    situation:
+      | string
+      | Default<"What are the latest developments in AI agents?">;
+    messages?: Writable<Array<BuiltInLLMMessage> | Default<[]>>;
     context?: { [id: string]: any };
   },
   { result: any; [UI]: VNode }
@@ -101,25 +99,25 @@ When done, call presentResult with your structured findings.`,
   });
 
   const result = computed(() => dialogResult as ResearchResult | undefined);
-  const showRefine = Writable.of(false);
+  const showRefine = new Writable(false);
 
   return {
     [NAME]: str`Research: ${situation}`,
     result,
     [UI]: (
       <div style="display:contents">
-        <ct-autostart
+        <cf-autostart
           onstart={triggerGeneration({
             addMessage,
             situation,
             result,
           })}
         />
-        <ct-message-beads
+        <cf-message-beads
           label="research"
           $messages={messages}
           pending={pending}
-          onct-refine={showRefineInput({ showRefine })}
+          oncf-refine={showRefineInput({ showRefine })}
         />
         <div>
           <h3>{computed(() => (result?.summary ? "Summary" : ""))}</h3>
@@ -144,11 +142,11 @@ When done, call presentResult with your structured findings.`,
           <h3>{computed(() => (result?.sources?.length ? "Sources" : ""))}</h3>
           <p>{computed(() => result?.sources?.join("\n") ?? "")}</p>
         </div>
-        <ct-prompt-input
+        <cf-prompt-input
           placeholder="Refine research..."
           pending={pending}
           style={computed(() => (showRefine.get() ? "" : "display:none"))}
-          onct-send={sendMessage({ addMessage })}
+          oncf-send={sendMessage({ addMessage })}
         />
       </div>
     ),

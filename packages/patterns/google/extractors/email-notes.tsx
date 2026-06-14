@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Email Notes Pattern
  *
@@ -18,16 +17,7 @@
  * 2. Authenticate with Google (will auto-prompt)
  * 3. View notes, copy content, mark as done
  */
-import {
-  computed,
-  derive,
-  handler,
-  ifElse,
-  NAME,
-  pattern,
-  UI,
-  Writable,
-} from "commontools";
+import { computed, handler, NAME, pattern, UI, Writable } from "commonfabric";
 import GmailExtractor, { type Email } from "../core/gmail-extractor.tsx";
 import type { Auth } from "../core/util/google-auth-manager.tsx";
 import {
@@ -39,7 +29,7 @@ import {
   type ScopeKey,
 } from "../core/util/google-auth-manager.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
-import type { Stream } from "commontools";
+import type { Stream } from "commonfabric";
 
 // Debug flag for development
 const DEBUG_NOTES = false;
@@ -197,7 +187,7 @@ interface PatternInput {
 }
 
 /** Email notes manager for quick notes sent to self. #emailNotes */
-interface PatternOutput {
+export interface PatternOutput {
   notes: Note[];
   noteCount: number;
   previewUI: unknown;
@@ -205,16 +195,16 @@ interface PatternOutput {
 
 export default pattern<PatternInput, PatternOutput>(() => {
   // State for label operations
-  const taskCurrentLabelId = Writable.of("").for("taskCurrentLabelId");
-  const loadingLabels = Writable.of(false).for("loadingLabels");
-  const hiddenNotes = Writable.of<string[]>([]).for("hiddenNotes");
-  const processingNotes = Writable.of<string[]>([]).for("processingNotes");
-  const sortNewestFirst = Writable.of(true).for("sortNewestFirst");
+  const taskCurrentLabelId = new Writable("").for("taskCurrentLabelId");
+  const loadingLabels = new Writable(false).for("loadingLabels");
+  const hiddenNotes = new Writable<string[]>([]).for("hiddenNotes");
+  const processingNotes = new Writable<string[]>([]).for("processingNotes");
+  const sortNewestFirst = new Writable(true).for("sortNewestFirst");
 
   // Use createGoogleAuth for scopes that include gmailModify
-  // Note: We use auth directly (not wrapped in ifElse) because GmailSendClient
-  // requires a Writable<Auth> with .get() method. Wrapping in ifElse() creates
-  // a derived value that loses writability.
+  // Note: We use auth directly (not wrapped in a reactive projection) because
+  // GmailSendClient requires a Writable<Auth> with .get() method. Wrapping it in
+  // a derived/conditional value would lose writability.
   const {
     auth,
     fullUI: authUI,
@@ -233,7 +223,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
   // NOTE: Auto-fetch labels was removed because having side effects (writes to
   // Writable cells, sending to streams) inside computed() caused infinite reactive
   // loops that kept CPU at 88%. Users can click "Load Labels" button when needed.
-  // See docs/common/concepts/computed/side-effects.md for why computed() with
+  // See docs/common/concepts/computed/computed.md for why computed() with
   // side effects is problematic.
 
   // Directly instantiate GmailExtractor with task-current filter (raw mode)
@@ -280,11 +270,11 @@ export default pattern<PatternInput, PatternOutput>(() => {
       });
   });
 
-  const noteCount = computed(() => notes?.length || 0);
+  const noteCount = notes?.length || 0;
 
   // No processing/analysis in this pattern, so pending is always 0
-  const pendingCount = computed(() => 0);
-  const completedCount = computed(() => noteCount);
+  const pendingCount = 0;
+  const completedCount = noteCount;
 
   // Preview UI for compact display
   const previewUI = (
@@ -316,8 +306,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
       <div style={{ flex: 1 }}>
         <div style={{ fontWeight: "600", fontSize: "14px" }}>Email Notes</div>
         <div style={{ fontSize: "12px", color: "#6b7280" }}>
-          {derive(noteCount, (count) =>
-            count === 1 ? "1 note" : `${count} notes`)}
+          {noteCount === 1 ? "1 note" : `${noteCount} notes`}
         </div>
         {/* Loading/progress indicator */}
         <ProcessingStatus
@@ -336,242 +325,227 @@ export default pattern<PatternInput, PatternOutput>(() => {
     previewUI,
 
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div slot="header">
-          <ct-hstack align="center" gap="2">
-            <ct-heading level={3}>Email Notes</ct-heading>
+          <cf-hstack align="center" gap="2">
+            <cf-heading level={3}>Email Notes</cf-heading>
             <span style={{ color: "#6b7280", fontSize: "14px" }}>
               ({noteCount} notes)
             </span>
-            <ct-checkbox $checked={sortNewestFirst}>Newest first</ct-checkbox>
-          </ct-hstack>
+            <cf-checkbox $checked={sortNewestFirst}>Newest first</cf-checkbox>
+          </cf-hstack>
         </div>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack padding="6" gap="4">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack padding="6" gap="4">
             {/* Auth UI */}
             {authUI}
 
             {/* Connection status and refresh */}
-            {ifElse(
-              isReady,
-              <div
-                style={{
-                  padding: "12px 16px",
-                  backgroundColor: "#d1fae5",
-                  borderRadius: "8px",
-                  border: "1px solid #10b981",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                }}
-              >
-                <span
+            {isReady
+              ? (
+                <div
                   style={{
-                    width: "10px",
-                    height: "10px",
-                    borderRadius: "50%",
-                    backgroundColor: "#10b981",
-                  }}
-                />
-                <span>Connected</span>
-                <span style={{ marginLeft: "auto", color: "#059669" }}>
-                  {noteCount} notes found
-                </span>
-                <button
-                  type="button"
-                  onClick={extractor.refresh}
-                  style={{
-                    marginLeft: "8px",
-                    padding: "6px 12px",
-                    backgroundColor: "#10b981",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "6px",
-                    cursor: "pointer",
-                    fontSize: "13px",
-                    fontWeight: "500",
+                    padding: "12px 16px",
+                    backgroundColor: "#d1fae5",
+                    borderRadius: "8px",
+                    border: "1px solid #10b981",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
                   }}
                 >
-                  Refresh
-                </button>
-              </div>,
-              null,
-            )}
+                  <span
+                    style={{
+                      width: "10px",
+                      height: "10px",
+                      borderRadius: "50%",
+                      backgroundColor: "#10b981",
+                    }}
+                  />
+                  <span>Connected</span>
+                  <span style={{ marginLeft: "auto", color: "#059669" }}>
+                    {noteCount} notes found
+                  </span>
+                  <button
+                    type="button"
+                    onClick={extractor.refresh}
+                    style={{
+                      marginLeft: "8px",
+                      padding: "6px 12px",
+                      backgroundColor: "#10b981",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                      fontWeight: "500",
+                    }}
+                  >
+                    Refresh
+                  </button>
+                </div>
+              )
+              : null}
 
             {/* Label status - only show when there's a problem or loading */}
-            {ifElse(
-              derive(
-                { isReady, taskCurrentLabelId, loadingLabels },
-                ({ isReady, taskCurrentLabelId, loadingLabels }) =>
-                  isReady && (!taskCurrentLabelId || loadingLabels),
-              ),
-              <div
-                style={{
-                  padding: "8px 12px",
-                  backgroundColor: "#fef3c7",
-                  borderRadius: "6px",
-                  fontSize: "13px",
-                  color: "#b45309",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                }}
-              >
-                {ifElse(
-                  loadingLabels,
-                  <span>Loading labels...</span>,
-                  <span>
-                    task-current label not found - click Load Labels
-                  </span>,
-                )}
-                <button
-                  type="button"
-                  onClick={labelFetcherStream}
-                  disabled={loadingLabels}
+            {isReady && (!taskCurrentLabelId.get() || loadingLabels.get())
+              ? (
+                <div
                   style={{
-                    marginLeft: "8px",
-                    padding: "4px 10px",
-                    backgroundColor: loadingLabels ? "#9ca3af" : "#6366f1",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "4px",
-                    fontSize: "12px",
-                    cursor: loadingLabels ? "not-allowed" : "pointer",
-                    fontWeight: "500",
+                    padding: "8px 12px",
+                    backgroundColor: "#fef3c7",
+                    borderRadius: "6px",
+                    fontSize: "13px",
+                    color: "#b45309",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
                   }}
                 >
-                  {ifElse(loadingLabels, "Loading...", "Load Labels")}
-                </button>
-              </div>,
-              null,
-            )}
+                  {loadingLabels.get() ? <span>Loading labels...</span> : (
+                    <span>
+                      task-current label not found - click Load Labels
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={labelFetcherStream}
+                    disabled={loadingLabels}
+                    style={{
+                      marginLeft: "8px",
+                      padding: "4px 10px",
+                      backgroundColor: loadingLabels ? "#9ca3af" : "#6366f1",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      fontSize: "12px",
+                      cursor: loadingLabels ? "not-allowed" : "pointer",
+                      fontWeight: "500",
+                    }}
+                  >
+                    {loadingLabels ? "Loading..." : "Load Labels"}
+                  </button>
+                </div>
+              )
+              : null}
 
             {/* Notes list */}
-            {ifElse(
-              derive(noteCount, (count) => count === 0),
-              <div
-                style={{
-                  padding: "24px",
-                  textAlign: "center",
-                  color: "#6b7280",
-                  backgroundColor: "#f9fafb",
-                  borderRadius: "8px",
-                }}
-              >
-                <div style={{ fontSize: "16px", marginBottom: "8px" }}>
-                  No notes found
+            {noteCount === 0
+              ? (
+                <div
+                  style={{
+                    padding: "24px",
+                    textAlign: "center",
+                    color: "#6b7280",
+                    backgroundColor: "#f9fafb",
+                    borderRadius: "8px",
+                  }}
+                >
+                  <div style={{ fontSize: "16px", marginBottom: "8px" }}>
+                    No notes found
+                  </div>
+                  <div style={{ fontSize: "13px" }}>
+                    Send yourself an email with no subject and the label
+                    "task-current" to see it here.
+                  </div>
                 </div>
-                <div style={{ fontSize: "13px" }}>
-                  Send yourself an email with no subject and the label
-                  "task-current" to see it here.
-                </div>
-              </div>,
-              <ct-vstack gap="3">
-                {notes.map((note) => {
-                  // Check if this note is being processed
-                  // Extract noteId before computed to avoid OpaqueRef issues
-                  const noteId = note.id;
-                  const isProcessing = computed(() =>
-                    (processingNotes.get() || []).includes(noteId)
-                  );
+              )
+              : (
+                <cf-vstack gap="3">
+                  {notes.map((note) => {
+                    // Check if this note is being processed
+                    // Extract noteId first to avoid OpaqueRef issues in the projection
+                    const noteId = note.id;
+                    const isProcessing = (processingNotes.get() || []).includes(
+                      noteId,
+                    );
 
-                  return (
-                    <div
-                      style={{
-                        padding: "16px",
-                        backgroundColor: "#ffffff",
-                        borderRadius: "8px",
-                        border: "1px solid #e5e7eb",
-                        boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
-                      }}
-                    >
-                      {/* Header with date and actions */}
+                    return (
                       <div
                         style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          marginBottom: "12px",
+                          padding: "16px",
+                          backgroundColor: "#ffffff",
+                          borderRadius: "8px",
+                          border: "1px solid #e5e7eb",
+                          boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
                         }}
                       >
-                        <span
+                        {/* Header with date and actions */}
+                        <div
                           style={{
-                            fontSize: "12px",
-                            color: "#9ca3af",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            marginBottom: "12px",
                           }}
                         >
-                          {derive(note, (n) => formatDate(n.date))}
-                        </span>
-                        <div style={{ display: "flex", gap: "8px" }}>
-                          {/* Copy button - copies both plain text and HTML for rich pasting */}
-                          <ct-copy-button
-                            text={derive(note, (n) => ({
-                              "text/plain": n.content,
-                              "text/html": n.htmlContent,
-                            }))}
-                            variant="outline"
-                            size="sm"
-                          />
-
-                          {/* Mark as Done button */}
-                          <button
-                            type="button"
-                            onClick={markAsDone({
-                              removeLabels: extractor.removeLabels,
-                              noteId: note.id,
-                              taskCurrentLabelId,
-                              hiddenNotes,
-                              processingNotes,
-                            })}
-                            disabled={derive(
-                              { isProcessing, taskCurrentLabelId },
-                              ({ isProcessing, taskCurrentLabelId }) =>
-                                isProcessing || !taskCurrentLabelId,
-                            )}
+                          <span
                             style={{
-                              padding: "4px 10px",
-                              backgroundColor: derive(
-                                isProcessing,
-                                (p) => p ? "#e5e7eb" : "#3b82f6",
-                              ),
-                              color: derive(
-                                isProcessing,
-                                (p) => p ? "#9ca3af" : "white",
-                              ),
-                              border: "none",
-                              borderRadius: "4px",
                               fontSize: "12px",
-                              cursor: derive(
-                                isProcessing,
-                                (p) => p ? "not-allowed" : "pointer",
-                              ),
-                              fontWeight: "500",
-                              opacity: derive(
-                                taskCurrentLabelId,
-                                (id) => id ? 1 : 0.5,
-                              ),
+                              color: "#9ca3af",
                             }}
                           >
-                            {ifElse(isProcessing, "Processing...", "Done")}
-                          </button>
-                        </div>
-                      </div>
+                            {formatDate(note.date)}
+                          </span>
+                          <div style={{ display: "flex", gap: "8px" }}>
+                            {/* Copy button - copies both plain text and HTML for rich pasting */}
+                            <cf-copy-button
+                              text={{
+                                "text/plain": note.content,
+                                "text/html": note.htmlContent,
+                              }}
+                              variant="outline"
+                              size="sm"
+                            />
 
-                      {/* Note content - rendered as markdown */}
-                      <ct-markdown
-                        content={derive(note, (n) => n.content)}
-                        compact
-                        style="font-size: 14px; line-height: 1.5; color: #374151;"
-                      />
-                    </div>
-                  );
-                })}
-              </ct-vstack>,
-            )}
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+                            {/* Mark as Done button */}
+                            <button
+                              type="button"
+                              onClick={markAsDone({
+                                removeLabels: extractor.removeLabels,
+                                noteId: note.id,
+                                taskCurrentLabelId,
+                                hiddenNotes,
+                                processingNotes,
+                              })}
+                              disabled={isProcessing ||
+                                !taskCurrentLabelId.get()}
+                              style={{
+                                padding: "4px 10px",
+                                backgroundColor: isProcessing
+                                  ? "#e5e7eb"
+                                  : "#3b82f6",
+                                color: isProcessing ? "#9ca3af" : "white",
+                                border: "none",
+                                borderRadius: "4px",
+                                fontSize: "12px",
+                                cursor: isProcessing
+                                  ? "not-allowed"
+                                  : "pointer",
+                                fontWeight: "500",
+                                opacity: taskCurrentLabelId.get() ? 1 : 0.5,
+                              }}
+                            >
+                              {isProcessing ? "Processing..." : "Done"}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Note content - rendered as markdown */}
+                        <cf-markdown
+                          content={note.content}
+                          compact
+                          style="font-size: 14px; line-height: 1.5; color: #374151;"
+                        />
+                      </div>
+                    );
+                  })}
+                </cf-vstack>
+              )}
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
   };
 });

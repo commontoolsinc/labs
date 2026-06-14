@@ -5,7 +5,7 @@
  * enabling efficient diffing and reuse of DOM nodes.
  */
 
-import { isCell } from "@commontools/runner";
+import { isCell } from "@commonfabric/runner";
 
 /**
  * Generate a stable key for a render node.

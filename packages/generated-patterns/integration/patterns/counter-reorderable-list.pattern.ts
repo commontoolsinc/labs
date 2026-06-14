@@ -1,13 +1,12 @@
-/// <cts-enable />
 import {
   type Cell,
+  computed,
   Default,
-  derive,
   handler,
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface ReorderableListArgs {
   items: Default<number[], []>;
@@ -84,22 +83,18 @@ const liftSize = lift((values: number[] | undefined) =>
 
 export const counterWithReorderableList = pattern<ReorderableListArgs>(
   ({ items }) => {
-    const positions = derive(
-      items,
-      (values): PositionState[] =>
-        normalizeItems(values).map((value, index) => ({ index, value })),
-    );
+    const positions: PositionState[] = normalizeItems(items).map((
+      value,
+      index,
+    ) => ({ index, value }));
     const size = liftSize(items);
-    const orderText = derive(
-      items,
-      (values) => {
-        const normalized = normalizeItems(values);
-        if (normalized.length === 0) {
-          return "(empty)";
-        }
-        return normalized.map((value) => `${value}`).join(" -> ");
-      },
-    );
+    const orderText = computed(() => {
+      const normalized = normalizeItems(items);
+      if (normalized.length === 0) {
+        return "(empty)";
+      }
+      return normalized.map((value) => `${value}`).join(" -> ");
+    });
 
     return {
       items,

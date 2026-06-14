@@ -1,14 +1,12 @@
-/// <cts-enable />
 import {
   type Cell,
   cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface FeatureUsageArgs {
   events: Default<FeatureUsageInput[], []>;
@@ -292,21 +290,15 @@ export const featureUsageAnalytics = pattern<FeatureUsageArgs>(
 
     const metricsData = liftComputeMetrics(usageBuckets);
 
-    const featureTotals = derive(metricsData, (view) => view.featureTotals);
-    const cohortTotals = derive(metricsData, (view) => view.cohortTotals);
-    const matrix = derive(metricsData, (view) => view.matrix);
-    const totalCount = derive(metricsData, (view) => view.total);
-    const topFeatureEntry = derive(metricsData, (view) => view.topFeature);
-    const topCohortEntry = derive(metricsData, (view) => view.topCohort);
-    const metricsSnapshot = derive(metricsData, (view) => view.snapshot);
-    const featureCount = derive(
-      featureTotals,
-      (totals) => Object.keys(totals).length,
-    );
-    const cohortCount = derive(
-      cohortTotals,
-      (totals) => Object.keys(totals).length,
-    );
+    const featureTotals = metricsData.featureTotals;
+    const cohortTotals = metricsData.cohortTotals;
+    const matrix = metricsData.matrix;
+    const totalCount = metricsData.total;
+    const topFeatureEntry = metricsData.topFeature;
+    const topCohortEntry = metricsData.topCohort;
+    const metricsSnapshot = metricsData.snapshot;
+    const featureCount = Object.keys(featureTotals).length;
+    const cohortCount = Object.keys(cohortTotals).length;
 
     const topFeatureLabel = liftFormatTopFeature(topFeatureEntry);
 
@@ -325,10 +317,10 @@ export const featureUsageAnalytics = pattern<FeatureUsageArgs>(
       totalCount,
       featureCount,
       cohortCount,
-      topFeature: derive(topFeatureEntry, (entry) => entry.name),
-      topFeatureCount: derive(topFeatureEntry, (entry) => entry.count),
-      topCohort: derive(topCohortEntry, (entry) => entry.name),
-      topCohortCount: derive(topCohortEntry, (entry) => entry.count),
+      topFeature: topFeatureEntry.name,
+      topFeatureCount: topFeatureEntry.count,
+      topCohort: topCohortEntry.name,
+      topCohortCount: topCohortEntry.count,
       statusLabel,
       lastEvent: lastEventView,
       metricsSnapshot,

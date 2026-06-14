@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   computed,
   Default,
@@ -7,7 +6,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type GithubResponse = {
   id: number;
@@ -151,7 +150,7 @@ function parseUrl(url: string): { org: string; user: string } {
 }
 
 export default pattern<
-  { repoUrl: Writable<Default<string, "https://github.com/vercel/next.js">> }
+  { repoUrl: Writable<string | Default<"https://github.com/vercel/next.js">> }
 >((state) => {
   // Parse URL and create API endpoint
   const output = computed(() => parseUrl(state.repoUrl.get()));
@@ -189,14 +188,14 @@ export default pattern<
     [UI]: (
       <div>
         <div>
-          <ct-input
+          <cf-input
             $value={state.repoUrl}
             placeholder="https://github.com/owner/repo"
             customStyle="width: 100%; padding: 8px; font-size: 14px;"
           />
         </div>
 
-        <ct-cell-context $cell={validData}>
+        <cf-cell-context $cell={validData}>
           <div>
             <h3 id="github-title">
               {validData.name}
@@ -228,7 +227,7 @@ export default pattern<
               </div>
             </div>
           </div>
-        </ct-cell-context>
+        </cf-cell-context>
       </div>
     ),
     repo: validData,

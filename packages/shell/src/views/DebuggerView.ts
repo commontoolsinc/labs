@@ -5,11 +5,11 @@ import type {
   LoggerMetadata,
   RuntimeTelemetryMarkerResult,
   TimingStats,
-} from "@commontools/runtime-client";
-import { isRecord } from "@commontools/utils/types";
+} from "@commonfabric/runtime-client";
+import { isRecord } from "@commonfabric/utils/types";
 import type { DebuggerController } from "../lib/debugger-controller.ts";
 import "./SchedulerGraphView.ts"; // Register x-scheduler-graph component
-import type { Logger, LoggerBreakdown } from "@commontools/utils/logger";
+import type { Logger, LoggerBreakdown } from "@commonfabric/utils/logger";
 
 /**
  * Hierarchical topic definitions for filtering telemetry events.
@@ -829,16 +829,16 @@ export class XDebuggerView extends LitElement {
   `;
 
   @property({ type: Boolean })
-  visible = false;
+  accessor visible = false;
 
   @property({ attribute: false })
-  telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
+  accessor telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
 
   @property({ attribute: false })
-  debuggerController?: DebuggerController;
+  accessor debuggerController: DebuggerController | undefined = undefined;
 
   @state()
-  private _activeTab:
+  private accessor _activeTab:
     | "events"
     | "watch"
     | "scheduler"
@@ -846,57 +846,66 @@ export class XDebuggerView extends LitElement {
     | "diagnosis" = "events";
 
   @state()
-  private activeSubtopics = new Set<string>();
+  private accessor activeSubtopics = new Set<string>();
 
   // Logger stats tracking
   @state()
-  private loggerBaseline: Record<string, LoggerBreakdown | number> | null =
-    null;
+  private accessor loggerBaseline:
+    | Record<string, LoggerBreakdown | number>
+    | null = null;
 
   @state()
-  private loggerSample: Record<string, LoggerBreakdown | number> | null = null;
+  private accessor loggerSample:
+    | Record<string, LoggerBreakdown | number>
+    | null = null;
 
   @state()
-  private workerLoggerMetadata: LoggerMetadata | null = null;
+  private accessor workerLoggerMetadata: LoggerMetadata | null = null;
 
   @state()
-  private loggerTimingSample:
+  private accessor loggerTimingSample:
     | Record<string, Record<string, TimingStats>>
     | null = null;
 
   @state()
-  private workerLoggerTiming:
+  private accessor workerLoggerTiming:
     | Record<string, Record<string, TimingStats>>
     | null = null;
 
   @state()
-  private expandedLoggers = new Set<string>();
+  private accessor expandedLoggers = new Set<string>();
 
   @state()
-  private openDropdowns = new Set<TopicKey>();
+  private accessor openDropdowns = new Set<TopicKey>();
 
   @state()
-  private searchText = "";
+  private accessor _isRecreatingSpaceRootPattern = false;
 
   @state()
-  private expandedEvents = new Set<number>();
+  private accessor searchText = "";
 
   @state()
-  private fullHeightEvents = new Set<number>();
+  private accessor expandedEvents = new Set<number>();
 
   @state()
-  private isPaused = false;
+  private accessor fullHeightEvents = new Set<number>();
 
   @state()
-  private pausedMarkers: RuntimeTelemetryMarkerResult[] = [];
+  private accessor isPaused = false;
 
   @state()
-  private tooltipData: {
+  private accessor pausedMarkers: RuntimeTelemetryMarkerResult[] = [];
+
+  @state()
+  private accessor tooltipData: {
     x: number;
     y: number;
     content: string;
     visible: boolean;
   } | null = null;
+
+  @state()
+  private accessor diagnosisDurationMs = 5000;
 
   private resizeController = new ResizableDrawerController(this, {
     initialHeight: 300,
@@ -1027,6 +1036,22 @@ export class XDebuggerView extends LitElement {
       // None selected, select all
       this.initializeAllSubtopics();
     }
+  }
+
+  private recreateSpaceRootPattern() {
+    if (this._isRecreatingSpaceRootPattern) return;
+    this._isRecreatingSpaceRootPattern = true;
+    this.dispatchEvent(
+      new CustomEvent("recreate-space-root-pattern", {
+        bubbles: true,
+        composed: true,
+        detail: {
+          done: () => {
+            this._isRecreatingSpaceRootPattern = false;
+          },
+        },
+      }),
+    );
   }
 
   private clearEvents() {
@@ -1433,21 +1458,21 @@ export class XDebuggerView extends LitElement {
 
   private getLoggerRegistry(): Record<string, Logger> {
     const global = globalThis as unknown as {
-      commontools?: { logger?: Record<string, Logger> };
+      commonfabric?: { logger?: Record<string, Logger> };
     };
-    return global.commontools?.logger ?? {};
+    return global.commonfabric?.logger ?? {};
   }
 
   private getLoggerBreakdown(): Record<string, LoggerBreakdown | number> {
     const global = globalThis as unknown as {
-      commontools?: {
+      commonfabric?: {
         getLoggerCountsBreakdown?: () => Record<
           string,
           LoggerBreakdown | number
         >;
       };
     };
-    return global.commontools?.getLoggerCountsBreakdown?.() ?? { total: 0 };
+    return global.commonfabric?.getLoggerCountsBreakdown?.() ?? { total: 0 };
   }
 
   private getBreakdownTotal(
@@ -1547,14 +1572,14 @@ export class XDebuggerView extends LitElement {
 
   private getLoggerTiming(): Record<string, Record<string, TimingStats>> {
     const global = globalThis as unknown as {
-      commontools?: {
+      commonfabric?: {
         getTimingStatsBreakdown?: () => Record<
           string,
           Record<string, TimingStats>
         >;
       };
     };
-    return global.commontools?.getTimingStatsBreakdown?.() ?? {};
+    return global.commonfabric?.getTimingStatsBreakdown?.() ?? {};
   }
 
   private mergeLoggerTiming(
@@ -1603,13 +1628,13 @@ export class XDebuggerView extends LitElement {
   private async resetBaseline(): Promise<void> {
     // Reset counts baseline
     const global = globalThis as unknown as {
-      commontools?: {
+      commonfabric?: {
         resetAllCountBaselines?: () => void;
         resetAllTimingBaselines?: () => void;
       };
     };
-    global.commontools?.resetAllCountBaselines?.();
-    global.commontools?.resetAllTimingBaselines?.();
+    global.commonfabric?.resetAllCountBaselines?.();
+    global.commonfabric?.resetAllTimingBaselines?.();
 
     // Reset in worker via IPC
     const runtime = this.debuggerController?.getRuntime();
@@ -2557,6 +2582,28 @@ export class XDebuggerView extends LitElement {
         <div
           style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;"
         >
+          <label
+            style="display: flex; align-items: center; gap: 0.375rem; color: #94a3b8; font-size: 0.75rem;"
+          >
+            <span>Duration</span>
+            <select
+              style="background-color: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 0.25rem; padding: 0.25rem 0.375rem;"
+              .value="${String(this.diagnosisDurationMs)}"
+              @change="${(event: Event) => {
+                const value = Number(
+                  (event.target as HTMLSelectElement).value,
+                );
+                this.diagnosisDurationMs = Number.isFinite(value) && value > 0
+                  ? value
+                  : 5000;
+              }}"
+              ?disabled="${isDiagnosing}"
+            >
+              <option value="3000">3s</option>
+              <option value="5000">5s</option>
+              <option value="10000">10s</option>
+            </select>
+          </label>
           <button
             type="button"
             class="action-button"
@@ -2565,7 +2612,7 @@ export class XDebuggerView extends LitElement {
               : "background-color: #3b82f6; color: white;"}"
             @click="${() => {
               if (!isDiagnosing) {
-                this.debuggerController?.runDiagnosis();
+                this.debuggerController?.runDiagnosis(this.diagnosisDurationMs);
               }
             }}"
             ?disabled="${isDiagnosing}"
@@ -2683,7 +2730,7 @@ export class XDebuggerView extends LitElement {
               <br><br>
               You can also run from the console:
               <code style="display: block; margin-top: 0.5rem; color: #3b82f6;">
-                await commontools.detectNonIdempotent(5000)
+                await commonfabric.detectNonIdempotent(5000)
               </code>
             </div>
           `}
@@ -2698,7 +2745,7 @@ export class XDebuggerView extends LitElement {
       return html`
         <div class="watch-empty">
           No cells being watched.<br />
-          Hold Alt and hover over a ct-cell-context to access watch controls.
+          Hold Alt and hover over a cf-cell-context to access watch controls.
         </div>
       `;
     }
@@ -2854,6 +2901,17 @@ export class XDebuggerView extends LitElement {
                   <span class="stat-label">Filters:</span>
                   <span class="stat-value">${this.activeSubtopics.size}</span>
                 </div>
+                <button
+                  type="button"
+                  class="action-button"
+                  style="background-color: #dc2626; color: white;"
+                  @click="${this.recreateSpaceRootPattern}"
+                  ?disabled="${this._isRecreatingSpaceRootPattern}"
+                >
+                  ${this._isRecreatingSpaceRootPattern
+                    ? "Recreating..."
+                    : "Recreate Root Pattern"}
+                </button>
               </div>
             </div>
 
@@ -2861,6 +2919,8 @@ export class XDebuggerView extends LitElement {
               ? html`
                 <x-scheduler-graph
                   .debuggerController="${this.debuggerController}"
+                  .patternSourcesVersion="${this.debuggerController
+                    ?.getPatternSourcesVersion() ?? 0}"
                   style="flex: 1; min-height: 0;"
                 ></x-scheduler-graph>
               `

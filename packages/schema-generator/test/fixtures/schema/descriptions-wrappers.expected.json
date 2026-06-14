@@ -1,7 +1,9 @@
 {
   "properties": {
     "count": {
-      "asStream": true,
+      "asCell": [
+        "stream"
+      ],
       "description": "Count as stream",
       "type": "number"
     },
@@ -11,7 +13,9 @@
       "type": "number"
     },
     "titles": {
-      "asCell": true,
+      "asCell": [
+        "cell"
+      ],
       "description": "Titles in a cell",
       "items": {
         "type": "string"

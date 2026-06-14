@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test case for ternary transformation inside nested Cell.map callbacks.
  *
@@ -7,9 +6,9 @@
  * back in "pattern mode" where ternaries need transformation.
  *
  * This structure mirrors pattern-nested-jsx-map: outer ternary wraps items.map,
- * causing ifElse → derive, then inner ternary is inside nested .map callback.
+ * causing ifElse → lift-applied, then inner ternary is inside nested .map callback.
  */
-import { Cell, computed, Default, pattern, UI } from "commontools";
+import { Cell, computed, Default, pattern, UI } from "commonfabric";
 
 interface Tag {
   name: string;
@@ -31,7 +30,7 @@ interface PatternInput {
 //   outer ternary → ifElse(hasItems, items.mapWithPattern(...), <p>No items</p>)
 //   outer .map(fn) → .mapWithPattern(pattern(...), {showInactive})
 //   inner .map(fn) → .mapWithPattern(pattern(...), {showInactive})
-//   inner ternary → ifElse(tag.active, tag.name, derive(... ifElse(showInactive, ...)))
+//   inner ternary → ifElse(tag.active, tag.name, ifElse(showInactive, `(${tag.name})`, ""))
 // Context: Nested maps with ternaries at both levels; captures showInactive through both map layers
 export default pattern<PatternInput>(({ items, showInactive }) => {
   const hasItems = computed(() => items.get().length > 0);

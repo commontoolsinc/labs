@@ -1,28 +1,39 @@
-import * as __ctHelpers from "commontools";
-import { cell, ComparableCell, ReadonlyCell, WriteonlyCell } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { cell, ComparableCell, ReadonlyCell, WriteonlyCell } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: cell-like-classes
-// Verifies: schema injection works for cell(), ComparableCell.of(), ReadonlyCell.of(), and WriteonlyCell.of()
+// Verifies: schema injection works for cell(), new ComparableCell(), new ReadonlyCell(), and new WriteonlyCell()
 //   cell(100) → cell(100, { type: "number" })
-//   ComparableCell.of(200) → ComparableCell.of(200, { type: "number" })
-//   ReadonlyCell.of(300) → ReadonlyCell.of(300, { type: "number" })
-//   WriteonlyCell.of(400) → WriteonlyCell.of(400, { type: "number" })
+//   new ComparableCell(200) → new ComparableCell(200, { type: "number" })
+//   new ReadonlyCell(300) → new ReadonlyCell(300, { type: "number" })
+//   new WriteonlyCell(400) → new WriteonlyCell(400, { type: "number" })
 export default function TestCellLikeClasses() {
     // Standalone cell() function
     const _standalone = cell(100, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
-    // ComparableCell.of()
-    const _comparable = ComparableCell.of(200, {
+    } as const satisfies __cfHelpers.JSONSchema).for("_standalone", true);
+    // new ComparableCell()
+    const _comparable = new ComparableCell(200, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
-    // ReadonlyCell.of()
-    const _readonly = ReadonlyCell.of(300, {
+    } as const satisfies __cfHelpers.JSONSchema).for("_comparable", true);
+    // new ReadonlyCell()
+    const _readonly = new ReadonlyCell(300, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
-    // WriteonlyCell.of()
-    const _writeonly = WriteonlyCell.of(400, {
+    } as const satisfies __cfHelpers.JSONSchema).for("_readonly", true);
+    // new WriteonlyCell()
+    const _writeonly = new WriteonlyCell(400, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_writeonly", true);
     return {
         standalone: _standalone,
         comparable: _comparable,
@@ -30,7 +41,7 @@ export default function TestCellLikeClasses() {
         writeonly: _writeonly,
     };
 }
+__cfHardenFn(TestCellLikeClasses);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);

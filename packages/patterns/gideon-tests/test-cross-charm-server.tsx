@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: Cross-Piece Stream Server
  *
@@ -18,18 +17,18 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface Input {
   // Counter value that increments each time the stream is invoked
-  counter: Default<number, 0>;
+  counter: number | Default<0>;
 
   // Log of invocation timestamps
-  invocationLog: Default<string[], []>;
+  invocationLog: string[] | Default<[]>;
 }
 
 /** A #cross-piece-test-server that exposes a stream for testing cross-piece invocation. */
-interface Output {
+export interface Output {
   counter: number;
   invocationLog: string[];
 

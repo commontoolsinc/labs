@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: Folksonomy Aggregator
  *
@@ -11,13 +10,13 @@
  * - Invalid event handling (graceful rejection)
  * - Dense scope (100 unique tags in 1 scope)
  *
- * Run: deno task ct test packages/patterns/experimental/folksonomy-aggregator.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/experimental/folksonomy-aggregator.test.tsx --verbose
  *
  * Note: Uses module-scoped handlers with explicit state parameters
  * instead of action() closures to avoid "reactive reference outside
  * reactive context" errors when accessing reactive proxy objects.
  */
-import { Cell, computed, handler, pattern, Stream } from "commontools";
+import { Cell, computed, handler, pattern, Stream } from "commonfabric";
 import AggregatorPattern from "./folksonomy-aggregator.tsx";
 
 export interface TagEvent {
@@ -315,7 +314,7 @@ const postEventHandler = handler<
 
 export default pattern(() => {
   // Instantiate aggregator with a writable events cell
-  const eventsCell = Cell.of<TagEvent[]>([]);
+  const eventsCell = new Cell<TagEvent[]>([]);
   const aggregator = AggregatorPattern({ events: eventsCell });
 
   // ========================================================================
@@ -628,5 +627,8 @@ export default pattern(() => {
       { assertion: assert_dense_100_tags },
       { assertion: assert_dense_sorted },
     ],
+    // The invalid-event test deliberately feeds malformed events, which the
+    // aggregator rejects with console.warn("Invalid event received").
+    allowConsoleWarnings: true,
   };
 });

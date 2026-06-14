@@ -1,7 +1,17 @@
-import * as Memory from "@commontools/memory";
+import * as MemoryServer from "@commonfabric/memory/v2/server";
+import { verifySessionOpenAuthorization } from "@commonfabric/memory/v2/session-open-auth";
+import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import env from "@/env.ts";
-import { identity } from "@/lib/identity.ts";
+import { resolveMemoryEngineStoreRootUrl } from "./memory-path.ts";
+
+// Session.open verification is shared with the standalone server — see
+// @commonfabric/memory/v2/session-open-auth. Audience binding is opt-in; the
+// toolshed does not yet configure an audience identity (federation PR5 design
+// doc), so this enforces signature + expiry today.
+const authorizeSessionOpen = (
+  message: Parameters<typeof verifySessionOpenAuthorization>[0],
+): Promise<string> => verifySessionOpenAuthorization(message);
 
 // Determine store URL: DB_PATH (single-file mode) or MEMORY_DIR (directory mode)
 let storeUrl: URL;
@@ -16,18 +26,28 @@ if (env.DB_PATH) {
   console.log(`Memory: Using directory mode: ${env.MEMORY_DIR}`);
 }
 
-// Initialize memory provider using top-level await
-console.log("Memory: Initializing provider...");
-const result = await Memory.Provider.open({
-  store: storeUrl,
-  serviceDid: identity.did(),
+const memoryEngineStoreUrl = resolveMemoryEngineStoreRootUrl(storeUrl, {
+  singleFileMode: Boolean(env.DB_PATH),
 });
+await FS.ensureDir(memoryEngineStoreUrl);
 
-if (result.error) {
-  throw result.error;
-}
-
-export const memory = result.ok;
+export const memoryServer = new MemoryServer.Server({
+  store: memoryEngineStoreUrl,
+  authorizeSessionOpen,
+  acl: {
+    mode: env.MEMORY_ACL_MODE,
+    serviceDids: env.MEMORY_SERVICE_DIDS
+      .split(",")
+      .map((did) => did.trim())
+      .filter((did) => did.length > 0),
+  },
+});
+export const memory = {
+  async close(): Promise<
+    { ok: Record<PropertyKey, never> } | { error: unknown }
+  > {
+    await memoryServer.close();
+    return { ok: {} };
+  },
+};
 console.log("Memory: Provider initialized successfully");
-
-export { Memory };

@@ -32,3 +32,19 @@ export type {
   SchedulerGraphNode,
   SchedulerGraphSnapshot,
 } from "./telemetry.ts";
+export type {
+  ActionRunTraceEntry,
+  SettleIterationStats,
+  SettleStats,
+  SettleStatsHistoryEntry,
+  TriggerTraceActionRecord,
+  TriggerTraceEntry,
+  TriggerTraceScheduledEffect,
+  TriggerTraceValueKind,
+  TriggerTraceValueSummary,
+} from "./scheduler.ts";
+export type {
+  WriteStackTraceEntry,
+  WriteStackTraceMatcher,
+  WriteStackTraceMatchMode,
+} from "./storage/write-stack-trace.ts";

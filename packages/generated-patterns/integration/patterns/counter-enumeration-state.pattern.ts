@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   type Cell,
   cell,
@@ -7,7 +6,7 @@ import {
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 type CounterState = "idle" | "running" | "paused" | "complete";
 
@@ -24,12 +23,12 @@ interface TransitionRecord {
 }
 
 interface TransitionEvent {
-  note?: unknown;
+  note?: string;
 }
 
 interface TickEvent {
-  amount?: unknown;
-  note?: unknown;
+  amount?: number;
+  note?: string;
 }
 
 const STATE_SEQUENCE: readonly CounterState[] = [

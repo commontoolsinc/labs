@@ -1,5 +1,16 @@
-import * as __ctHelpers from "commontools";
-import { unless, pattern, UI, NAME } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { unless, pattern, UI, NAME } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface State {
     value: string | null;
     defaultValue: string;
@@ -9,28 +20,25 @@ interface State {
 //   unless(value, defaultValue) → unless(conditionSchema, fallbackSchema, resultSchema, value, defaultValue)
 //   pattern<State>(fn)          → pattern(fn, inputSchema, outputSchema)
 // Context: unless(cond, fallback) returns cond if truthy, else fallback; schemas reflect the union type
-export default pattern((__ct_pattern_input) => {
-    const value = __ct_pattern_input.key("value");
-    const defaultValue = __ct_pattern_input.key("defaultValue");
+export default pattern((__cf_pattern_input) => {
+    const value = __cf_pattern_input.key("value");
+    const defaultValue = __cf_pattern_input.key("defaultValue");
     // unless(condition, fallback) - returns condition if truthy, else fallback
     const result = unless({
         anyOf: [{
                 type: "string"
             }, {
                 type: "null"
-            }],
-        asOpaque: true
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "string",
-        asOpaque: true
-    } as const satisfies __ctHelpers.JSONSchema, {
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
         anyOf: [{
                 type: "string"
             }, {
                 type: "null"
-            }],
-        asOpaque: true
-    } as const satisfies __ctHelpers.JSONSchema, value, defaultValue);
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, value, defaultValue).for("result", true);
     return {
         [NAME]: "unless schema test",
         [UI]: <div>{result}</div>,
@@ -50,7 +58,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["value", "defaultValue"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
@@ -66,11 +74,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -83,8 +90,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);

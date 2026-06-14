@@ -1,7 +1,8 @@
-import { Cell, JSONSchema, parseLink, SigilLink } from "@commontools/runner";
+import { Cell, JSONSchema, parseLink, SigilLink } from "@commonfabric/runner";
+import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
 import { CellRef, PageRef } from "../protocol/types.ts";
-import { Runtime } from "@commontools/runner";
-import { LINK_V1_TAG } from "@commontools/runner/shared";
+import { Runtime } from "@commonfabric/runner";
+import { LINK_V1_TAG } from "@commonfabric/runner/shared";
 import { isCellRef } from "../protocol/mod.ts";
 
 export function mapCellRefsToSigilLinks(value: unknown): any {
@@ -27,7 +28,17 @@ export function mapCellRefsToSigilLinks(value: unknown): any {
 export function cellRefToSigilLink(cell: CellRef): SigilLink {
   return {
     "/": {
-      [LINK_V1_TAG]: cell,
+      [LINK_V1_TAG]: {
+        id: cell.id,
+        space: cell.space,
+        scope: cell.scope,
+        path: cell.path,
+        ...(cell.schema !== undefined && { schema: cell.schema }),
+        ...(cell.overwrite !== undefined && { overwrite: cell.overwrite }),
+        ...(cell.cfcLabelView !== undefined && {
+          cfcLabelView: cell.cfcLabelView,
+        }),
+      } as never,
     },
   };
 }
@@ -37,23 +48,28 @@ export function createCellRef(cell: Cell<unknown>, schema?: unknown): CellRef {
     cell.getAsLink({
       includeSchema: true,
       keepAsCell: true,
-      keepStreams: true,
     }),
   );
   // Check before casting to a NormalizedFullLink
-  if (!link.id || !link.space || !link.type) {
-    throw new Error("Serialized links must contain id, space, type.");
+  if (!link.id || !link.space) {
+    throw new Error("Serialized links must contain id and space.");
   }
   const cellRef: CellRef = {
     id: link.id,
     space: link.space,
+    scope: link.scope === "inherit" || link.scope === undefined
+      ? "space"
+      : link.scope,
     path: link.path,
-    type: link.type as `${string}/${string}`,
   };
   if (link.schema != null) cellRef.schema = link.schema;
   if (link.overwrite != null) cellRef.overwrite = link.overwrite;
   if (schema !== undefined) {
     cellRef.schema = schema as JSONSchema;
+  }
+  const cfcLabelView = cfcLabelViewForCell(cell);
+  if (cfcLabelView !== undefined) {
+    cellRef.cfcLabelView = cfcLabelView;
   }
   return cellRef;
 }
@@ -68,5 +84,5 @@ export function getCell(runtime: Runtime, ref: CellRef): Cell<unknown> {
   // We explicitly do not pass in `schema`, as this function applies
   // the schema to `schema`, and cell refs already contain all this
   // information. Maybe the upstream function should change.
-  return runtime.getCellFromLink(ref);
+  return runtime.getCellFromLink(ref, undefined, undefined, ref.cfcLabelView);
 }

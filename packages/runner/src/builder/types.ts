@@ -1,5 +1,6 @@
-import { isObject, type Mutable } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import type { PatternBuilder } from "./pattern.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
 
 import type {
   ActionFunction,
@@ -11,10 +12,12 @@ import type {
   AsWriteonlyCell,
   ByRefFunction,
   Cell,
+  CellScope,
   CellTypeConstructor,
+  CfDataFunction,
+  CfSqliteHelpers,
   CompileAndRunFunction,
   ComputedFunction,
-  DeriveFunction,
   EqualsFunction,
   FetchDataFunction,
   FetchProgramFunction,
@@ -28,33 +31,42 @@ import type {
   ID_FIELD as IDFieldSymbol,
   IfElseFunction,
   JSONSchema,
-  JSONSchemaObj,
   JSONValue,
+  JSXElement,
   LiftFunction,
   LLMDialogFunction,
   LLMFunction,
   Module,
   NavigateToFunction,
+  NonPrivateRandomFunction,
   Opaque,
   OpaqueRef,
   Pattern,
   PatternToolFunction,
+  SafeDateNowFunction,
   schema as schemaFunction,
   SELF as SELFSymbol,
+  SqliteCfLinkFunction,
+  SqliteDatabaseFunction,
+  SqliteQueryFunction,
+  SqliteTableFunction,
   StreamDataFunction,
   StrFunction,
+  UiActionProps,
+  UiDisclosureProps,
+  UiPromptSlotProps,
   UnlessFunction,
   WhenFunction,
   WishFunction,
-} from "@commontools/api";
-import type { Schema } from "@commontools/api/schema";
-import { toSchema } from "@commontools/api";
+} from "@commonfabric/api";
+import type { Schema } from "@commonfabric/api/schema";
+import { toSchema } from "@commonfabric/api";
+import type { ImplementationIdentity } from "../cfc/types.ts";
 import { AuthSchema, WebhookConfigSchema } from "./schema-lib.ts";
 import {
   type IExtendedStorageTransaction,
   type MemorySpace,
 } from "../storage/interface.ts";
-import { type RuntimeProgram } from "../harness/types.ts";
 import { type Runtime } from "../runtime.ts";
 
 // Define runtime constants here - actual runtime values
@@ -68,6 +80,7 @@ export const ID_FIELD: typeof IDFieldSymbol = Symbol(
 export const TYPE = "$TYPE";
 export const NAME = "$NAME";
 export const UI = "$UI";
+export const FS = "$FS";
 
 // Symbol for accessing self-reference in patterns
 export const SELF: typeof SELFSymbol = Symbol("SELF") as any;
@@ -91,7 +104,10 @@ export type {
   AsWriteonlyCell,
   Cell,
   CellKind,
+  CellScope,
   CellTypeConstructor,
+  FabricValue,
+  FsProjection,
   Handler,
   HandlerFactory,
   HKT,
@@ -103,11 +119,16 @@ export type {
   IOpaqueCell,
   IsThisObject,
   IStreamable,
+  JSONArray,
   JSONObject,
   JSONSchema,
+  JSONSchemaMutable,
+  JSONSchemaObj,
+  JSONSchemaObjMutable,
   JSONSchemaTypes,
   JSONValue,
   KeyResultType,
+  LinkScope,
   Module,
   ModuleFactory,
   NodeFactory,
@@ -120,17 +141,20 @@ export type {
   Props,
   RenderNode,
   RequireDefaults,
+  SchemaScope,
   Stream,
   StripCell,
   StripDefaultBrand,
   toJSON,
   ToSchemaFunction,
+  UiActionProps,
+  UiDisclosureProps,
+  UiPromptSlotProps,
   UnwrapCell,
   VNode,
-} from "@commontools/api";
-export type { Schema, SchemaWithoutCell } from "@commontools/api/schema";
-
-export type JSONSchemaMutable = Mutable<JSONSchemaObj>;
+} from "@commonfabric/api";
+export type { AsCellEntry } from "@commonfabric/api";
+export type { Schema, SchemaWithoutCell } from "@commonfabric/api/schema";
 
 export const isOpaqueRefMarker = Symbol("isOpaqueRef");
 
@@ -154,18 +178,39 @@ export type StreamValue = {
 };
 
 export function isStreamValue(value: unknown): value is StreamValue {
-  return isObject(value) && "$stream" in value && value.$stream === true;
+  return isRecord(value) && "$stream" in value && value.$stream === true;
 }
 
-declare module "@commontools/api" {
+declare module "@commonfabric/api" {
   export interface Module {
     type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
     implementation?: ((...args: any[]) => any) | Pattern | string;
+    /**
+     * Content-addressed reference to the module-scope builder artifact whose
+     * implementation this module runs: the defining module's content identity
+     * and the artifact's export/`__cfReg` symbol — the ONLY serialized
+     * identity (see docs/specs/content-addressed-action-identity.md).
+     */
+    $implRef?: { identity: string; symbol: string };
     wrapper?: "handler";
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;
+    writableProxy?: boolean;
+    propagateInputIfc?: boolean;
     /** If true, this module is an effect (side-effectful) rather than a computation */
     isEffect?: boolean;
+    /** Optional scheduler debounce delay in milliseconds */
+    debounce?: number;
+    /** Opt out of scheduler auto-debounce */
+    noDebounce?: boolean;
+    /** Optional scheduler throttle period in milliseconds */
+    throttle?: number;
+    /** Pull-mode write envelopes for broad/dynamic writable-input materializers */
+    materializerWriteEnvelopes?: readonly NormalizedFullLink[];
+    /** Input paths whose writable cells should become materializer envelopes */
+    materializerWriteInputPaths?: readonly (readonly string[])[];
+    /** Run this module's result in a specific space. */
+    targetSpace?: MemorySpace;
   }
 }
 
@@ -183,24 +228,23 @@ export type Node = {
   outputs: JSONValue;
 };
 
-// Used to get back to original pattern from a JSONified representation.
-export const unsafe_originalPattern = Symbol("unsafe_originalPattern");
-export const unsafe_parentPattern = Symbol("unsafe_parentPattern");
-export const unsafe_materializeFactory = Symbol("unsafe_materializeFactory");
+export type DerivedInternalCellDescriptor = {
+  partialCause: JSONValue;
+  schema?: JSONSchema;
+  scope?: CellScope;
+};
 
-declare module "@commontools/api" {
+declare module "@commonfabric/api" {
   interface Pattern {
     argumentSchema: JSONSchema;
     resultSchema: JSONSchema;
-    initial?: JSONValue;
+    derivedInternalCells?: DerivedInternalCellDescriptor[];
     result: JSONValue;
     nodes: Node[];
-    program?: RuntimeProgram;
-    [unsafe_originalPattern]?: Pattern;
-    [unsafe_parentPattern]?: Pattern;
-    [unsafe_materializeFactory]?: (
-      tx: IExtendedStorageTransaction,
-    ) => (path: readonly PropertyKey[]) => unknown;
+    // NOTE: `program` (rehydration source) and the derivation link to a
+    // copy's original live in WeakMaps/WeakSets in ./pattern-metadata.ts (so
+    // exported patterns can be frozen, and so no own property can carry
+    // trust). Use get/setPatternProgram, noteDerivedCopy/resolveOriginal.
   }
 }
 
@@ -222,16 +266,32 @@ export type UnsafeBinding = {
   parent?: UnsafeBinding;
 };
 
+export type SourceLocationContext = {
+  script: string;
+  filename: string;
+  nextSearchOffset: number;
+};
+
 export type Frame = {
   parent?: Frame;
   cause?: unknown;
   generatedIdCounter: number;
+  implementationIdentity?: ImplementationIdentity;
   runtime?: Runtime;
   tx?: IExtendedStorageTransaction;
   space?: MemorySpace;
   inHandler?: boolean;
   opaqueRefs: Set<OpaqueRef<any>>;
   unsafe_binding?: UnsafeBinding;
+  sourceLocationContext?: SourceLocationContext;
+  /**
+   * Named/anonymous `PatternFactory.inSpace(...)` targets encountered during
+   * this frame whose space DID was not yet cached. The runner resolves these
+   * after the run and re-runs (see RetryImmediately).
+   */
+  pendingSpaceNames?: Set<string>;
+  /** Per-frame counter giving each anonymous `inSpace()` call a stable name. */
+  inSpaceCounter?: number;
 };
 
 // Builder functions interface
@@ -244,7 +304,6 @@ export interface BuilderFunctionsAndConstants {
   lift: LiftFunction;
   handler: HandlerFunction;
   action: ActionFunction;
-  derive: DeriveFunction;
   computed: ComputedFunction;
 
   // Built-in modules
@@ -260,6 +319,11 @@ export interface BuilderFunctionsAndConstants {
   fetchProgram: FetchProgramFunction;
   streamData: StreamDataFunction;
   compileAndRun: CompileAndRunFunction;
+  sqliteDatabase: SqliteDatabaseFunction;
+  sqliteQuery: SqliteQueryFunction;
+  table: SqliteTableFunction;
+  cfLink: SqliteCfLinkFunction;
+  cfSqlite: CfSqliteHelpers;
   navigateTo: NavigateToFunction;
   wish: WishFunction;
 
@@ -281,6 +345,8 @@ export interface BuilderFunctionsAndConstants {
 
   // Environment
   getPatternEnvironment: GetPatternEnvironmentFunction;
+  nonPrivateRandom: NonPrivateRandomFunction;
+  safeDateNow: SafeDateNowFunction;
 
   // Entity utilities
   getEntityId: GetEntityIdFunction;
@@ -292,15 +358,38 @@ export interface BuilderFunctionsAndConstants {
   TYPE: typeof TYPE;
   NAME: typeof NAME;
   UI: typeof UI;
+  FS: typeof FS;
 
   // Schema utilities
   schema: typeof schema;
   toSchema: typeof toSchema;
+  __cf_data: CfDataFunction;
   AuthSchema: typeof AuthSchema;
   WebhookConfigSchema: typeof WebhookConfigSchema;
 
   // Render utils
   h: HFunction;
+  UiAction: (props: UiActionProps) => JSXElement;
+  UiPromptSlot: (props: UiPromptSlotProps) => JSXElement;
+  UiDisclosure: (props: UiDisclosureProps) => JSXElement;
+
+  // Fabric value classes
+  FabricInstance:
+    typeof import("@commonfabric/data-model/fabric-value").FabricInstance;
+  FabricPrimitive:
+    typeof import("@commonfabric/data-model/fabric-value").FabricPrimitive;
+  FabricEpochNsec:
+    typeof import("@commonfabric/data-model/fabric-primitives").FabricEpochNsec;
+  FabricEpochDays:
+    typeof import("@commonfabric/data-model/fabric-primitives").FabricEpochDays;
+  FabricHash:
+    typeof import("@commonfabric/data-model/fabric-primitives").FabricHash;
+
+  // Debug stringifiers
+  toCompactDebugString:
+    typeof import("@commonfabric/data-model/value-debug").toCompactDebugString;
+  toIndentedDebugString:
+    typeof import("@commonfabric/data-model/value-debug").toIndentedDebugString;
 }
 
 // Runtime interface needed by createCell

@@ -24,15 +24,26 @@ export interface SchedulerGraphNode {
   stats?: ActionStats;
   isDirty: boolean;
   isPending: boolean;
+  isDemanded?: boolean;
+  isLiveEffect?: boolean;
+  isPullDemandRoot?: boolean;
+  isConditionallyScheduled?: boolean;
+  isDebouncedWaiting?: boolean;
+  hasActiveDebounceTimer?: boolean;
+  nextDebounceRunInMs?: number;
+  nextEligibleRunInMs?: number;
   parentId?: string; // ID of parent action if this was created during parent's execution
   childCount?: number; // Number of child actions created during this action's execution
   preview?: string; // First ~200 chars of function body for hover tooltips
   // Diagnostic info: what cells this action reads and writes
   reads?: string[]; // space/entity paths this action reads
+  shallowReads?: string[]; // non-recursive reads used for structural invalidation
   writes?: string[]; // space/entity paths this action writes (mightWrite)
   // Timing controls
   debounceMs?: number; // Current debounce delay in ms (if set)
   throttleMs?: number; // Current throttle period in ms (if set)
+  // Pattern association
+  patternId?: string; // ID of the pattern this action belongs to -- without `of:`
 }
 
 export interface SchedulerGraphEdge {
@@ -54,6 +65,43 @@ export interface SchedulerActionInfo {
   moduleName?: string;
   reads?: string[];
   writes?: string[];
+}
+
+export interface SchedulerEventPreflightStats {
+  visitCount: number;
+  memoHitCount: number;
+  cycleHitCount: number;
+  dirtyInputCount: number;
+  resultTrueCount: number;
+  workSetAddCount: number;
+  reverseDependencyActionCount: number;
+  reverseDependencyEdgeCount: number;
+  logFallbackCount: number;
+  logReadCount: number;
+  logShallowReadCount: number;
+  writerCandidateCount: number;
+  writerOverlapCount: number;
+  directWriterCount: number;
+  maxDepth: number;
+  hotActions?: SchedulerEventPreflightActionSummary[];
+  hotFanoutActions?: SchedulerEventPreflightActionSummary[];
+  rootDirectWriters?: SchedulerEventPreflightActionSummary[];
+}
+
+export interface SchedulerEventPreflightActionSummary {
+  actionId: string;
+  actionType: "effect" | "computation" | "unknown";
+  visitCount: number;
+  memoHitCount: number;
+  dirtyInputCount: number;
+  resultTrueCount: number;
+  reverseDependencyEdgeCount: number;
+  maxDirectWriterCount: number;
+  dirty: boolean;
+  pending: boolean;
+  readCount: number;
+  shallowReadCount: number;
+  writeCount: number;
 }
 
 // ============================================================
@@ -110,6 +158,35 @@ export type RuntimeTelemetryMarker = {
   handlerInfo?: SchedulerActionInfo;
   error?: string;
 } | {
+  type: "scheduler.event.commit";
+  handlerId: string;
+  handlerInfo?: SchedulerActionInfo;
+  readCount: number;
+  writeCount: number;
+  changedWriteCount: number;
+  writes: string[];
+  writesTruncated?: boolean;
+  error?: string;
+  permanentRejection?: "origin-committed" | "receipt-exists";
+} | {
+  type: "scheduler.event.preflight";
+  handlerId: string;
+  handlerInfo?: SchedulerActionInfo;
+  readCount: number;
+  shallowReadCount: number;
+  dirtySizeBefore: number;
+  pendingSizeBefore: number;
+  dirtyDependencyCount: number;
+  hasDirtyDependencies: boolean;
+  skipped: boolean;
+  populateMs: number;
+  txToLogMs: number;
+  depCommitMs: number;
+  collectMs: number;
+  scheduleMs: number;
+  stats: SchedulerEventPreflightStats;
+  error?: string;
+} | {
   type: "storage.push.start";
   id: string;
   operation: string;
@@ -151,9 +228,6 @@ export type RuntimeTelemetryMarker = {
 } | {
   type: "scheduler.graph.snapshot";
   graph: SchedulerGraphSnapshot;
-} | {
-  type: "scheduler.mode.change";
-  pullMode: boolean;
 } | {
   type: "scheduler.subscribe";
   actionId: string;

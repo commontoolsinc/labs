@@ -14,9 +14,88 @@ export type ColorToken = string | {
 };
 
 /**
- * Comprehensive theme configuration for CT components
+ * Standard component size tokens (Figma coordinated sizing scale)
  */
-export interface CTTheme {
+export type ComponentSize = "xs" | "sm" | "md" | "lg" | "xl";
+
+/** Color intent for interactive components (buttons, chips, badges). */
+export type ColorIntent = "neutral" | "primary" | "accent" | "danger";
+
+/** Status intent for feedback components (toasts, alerts). */
+export type StatusIntent = "info" | "success" | "warning" | "error";
+
+/**
+ * Coordinated sizing scale from Figma design system.
+ * Each size bundles height, radius, icon sizes, spacing, padding, and typography.
+ * These are structural constants, not theme-dependent.
+ */
+export const SIZING_SCALE = {
+  xs: {
+    height: 16,
+    radius: 4,
+    iconLg: 12,
+    iconMd: 8,
+    iconSm: 6,
+    spacing: 2,
+    paddingH: 4,
+    paddingV: 2,
+    fontSize: 9,
+    lineHeight: 12,
+  },
+  sm: {
+    height: 24,
+    radius: 5,
+    iconLg: 16,
+    iconMd: 12,
+    iconSm: 10,
+    spacing: 4,
+    paddingH: 6,
+    paddingV: 4,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  md: {
+    height: 32,
+    radius: 8,
+    iconLg: 20,
+    iconMd: 16,
+    iconSm: 12,
+    spacing: 8,
+    paddingH: 8,
+    paddingV: 8,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  lg: {
+    height: 40,
+    radius: 9,
+    iconLg: 24,
+    iconMd: 20,
+    iconSm: 16,
+    spacing: 12,
+    paddingH: 12,
+    paddingV: 8,
+    fontSize: 16,
+    lineHeight: 20,
+  },
+  xl: {
+    height: 48,
+    radius: 10,
+    iconLg: 28,
+    iconMd: 24,
+    iconSm: 20,
+    spacing: 16,
+    paddingH: 16,
+    paddingV: 12,
+    fontSize: 18,
+    lineHeight: 24,
+  },
+} as const;
+
+/**
+ * Comprehensive theme configuration for CF components
+ */
+export interface CFTheme {
   /** Font family for text content */
   fontFamily: string;
   /** Monospace font family for code */
@@ -31,6 +110,12 @@ export interface CTTheme {
   colorScheme: ColorScheme;
   /** Animation speed preference */
   animationSpeed: "none" | "slow" | "normal" | "fast";
+  /** Roundness scalar (0-1). Scales all structural radii. */
+  roundness: number;
+  /** Typography scale factor (0.8-1.2). */
+  scale: number;
+  /** Motion scalar (0-1). Scales transition durations. 0 = instant. */
+  motion: number;
   /** Color palette with semantic tokens that adapt to light/dark */
   colors: {
     /** Primary brand color */
@@ -71,6 +156,28 @@ export interface CTTheme {
     accent: ColorToken;
     /** Accent foreground */
     accentForeground: ColorToken;
+    /** Brand color (purple) */
+    brand: ColorToken;
+    /** Brand foreground (text on brand) */
+    brandForeground: ColorToken;
+    /** Tertiary text color */
+    textTertiary: ColorToken;
+    /** Disabled text color */
+    textDisabled: ColorToken;
+    /** Disabled surface color */
+    surfaceDisabled: ColorToken;
+    /** Surface pressed state */
+    surfacePressed: ColorToken;
+    /** Tertiary surface color */
+    surfaceTertiary: ColorToken;
+    /** Inverse surface color */
+    surfaceInverse: ColorToken;
+    /** Secondary text on colored backgrounds */
+    textOnColorSecondary: ColorToken;
+    /** Text on inverse surfaces */
+    textOnInverse: ColorToken;
+    /** Pressed text color */
+    textPressed: ColorToken;
   };
 }
 
@@ -102,7 +209,12 @@ const BASE_SPACING = {
  */
 export function resolveColorScheme(scheme: ColorScheme): "light" | "dark" {
   if (scheme === "auto") {
-    // Check system preference
+    // Check for explicit user override via data-theme attribute on <html>
+    if (typeof document !== "undefined") {
+      const dataTheme = document.documentElement.getAttribute("data-theme");
+      if (dataTheme === "light" || dataTheme === "dark") return dataTheme;
+    }
+    // Fall back to system preference
     if (typeof globalThis !== "undefined" && globalThis.matchMedia) {
       return globalThis.matchMedia("(prefers-color-scheme: dark)").matches
         ? "dark"
@@ -137,7 +249,7 @@ export function resolveColor(
  * @returns CSS custom property with fallback
  */
 export function getSemanticSpacing(
-  density: CTTheme["density"],
+  density: CFTheme["density"],
   size: keyof typeof BASE_SPACING,
   context: "tight" | "normal" | "loose" = "normal",
 ): string {
@@ -145,101 +257,165 @@ export function getSemanticSpacing(
   const baseValue = BASE_SPACING[size];
   const scaledValue = baseValue * scale;
 
-  // Map to closest ct-spacing level for compatibility
+  // Map to the closest spacing level for compatibility
   const spacingLevel = Math.min(4, Math.round(scaledValue * 4));
   const fallback = `${scaledValue}rem`;
 
-  return `var(--ct-spacing-${spacingLevel}, ${fallback})`;
+  return `var(--cf-spacing-${spacingLevel}, ${fallback})`;
+}
+
+/**
+ * Derive interaction state variants from a base color.
+ */
+export function deriveColorFamily(base: string): {
+  default: string;
+  pressed: string;
+  soft: string;
+  subtle: string;
+} {
+  return {
+    default: base,
+    pressed: `color-mix(in srgb, ${base} 85%, black)`,
+    soft: `color-mix(in srgb, ${base} 20%, transparent)`,
+    subtle: `color-mix(in srgb, ${base} 10%, transparent)`,
+  };
 }
 
 /**
  * Default theme values with SwiftUI-style adaptive colors
  */
-export const defaultTheme: CTTheme = {
+export const defaultTheme: CFTheme = {
   fontFamily: "system-ui, -apple-system, sans-serif",
   monoFontFamily:
     "ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, 'DejaVu Sans Mono', monospace",
   fontSize: "1rem",
   borderRadius: "0.5rem",
   density: "comfortable",
-  colorScheme: "light",
+  colorScheme: "auto",
   animationSpeed: "normal",
+  roundness: 1,
+  scale: 1,
+  motion: 1,
   colors: {
     primary: {
-      light: "#3b82f6",
-      dark: "#60a5fa",
+      light: "#4979fa",
+      dark: "#6b93ff",
     },
     primaryForeground: {
       light: "#ffffff",
-      dark: "#1e3a8a",
+      dark: "#16181d",
     },
     secondary: {
-      light: "#6b7280",
-      dark: "#9ca3af",
+      light: "#f2f3f6",
+      dark: "#2a2d33",
     },
     secondaryForeground: {
-      light: "#ffffff",
-      dark: "#374151",
+      light: "#34373c",
+      dark: "#e4e6ea",
     },
     background: {
-      light: "#ffffff",
-      dark: "#0f172a",
+      light: "#f2f3f6",
+      dark: "#16181d",
     },
     surface: {
-      light: "#f1f5f9",
-      dark: "#1e293b",
+      light: "#ffffff",
+      dark: "#1e2127",
     },
     surfaceHover: {
-      light: "#e2e8f0",
-      dark: "#334155",
+      light: "#f9fafb",
+      dark: "#2a2d33",
     },
     text: {
-      light: "#111827",
-      dark: "#f1f5f9",
+      light: "#34373c",
+      dark: "#e4e6ea",
     },
     textMuted: {
-      light: "#6b7280",
-      dark: "#94a3b8",
+      light: "#71747a",
+      dark: "#94979e",
     },
     border: {
-      light: "#e5e7eb",
-      dark: "#475569",
+      light: "rgba(79, 89, 103, 0.15)",
+      dark: "rgba(200, 210, 220, 0.15)",
     },
     borderMuted: {
-      light: "#f3f4f6",
-      dark: "#334155",
+      light: "rgba(46, 53, 64, 0.06)",
+      dark: "rgba(200, 210, 220, 0.06)",
     },
     success: {
-      light: "#16a34a",
-      dark: "#22c55e",
+      light: "#21c17b",
+      dark: "#34d399",
     },
     successForeground: {
       light: "#ffffff",
-      dark: "#14532d",
+      dark: "#064e3b",
     },
     error: {
-      light: "#dc2626",
-      dark: "#ef4444",
+      light: "#ff6057",
+      dark: "#ff8a72",
     },
     errorForeground: {
       light: "#ffffff",
-      dark: "#7f1d1d",
+      dark: "#451a03",
     },
     warning: {
-      light: "#d97706",
-      dark: "#f59e0b",
+      light: "#e5a126",
+      dark: "#f0b944",
     },
     warningForeground: {
       light: "#ffffff",
       dark: "#451a03",
     },
     accent: {
-      light: "#8b5cf6",
-      dark: "#a78bfa",
+      light: "#fc856d",
+      dark: "#ff9a87",
     },
     accentForeground: {
       light: "#ffffff",
-      dark: "#4c1d95",
+      dark: "#451a03",
+    },
+    brand: {
+      light: "#8952fd",
+      dark: "#a77dfe",
+    },
+    brandForeground: {
+      light: "#ffffff",
+      dark: "#1a0e3b",
+    },
+    textTertiary: {
+      light: "#b3b6bc",
+      dark: "#5b5f65",
+    },
+    textDisabled: {
+      light: "rgba(0, 0, 0, 0.3)",
+      dark: "rgba(255, 255, 255, 0.3)",
+    },
+    surfaceDisabled: {
+      light: "#e4e6ea",
+      dark: "#2a2d33",
+    },
+    surfacePressed: {
+      light: "rgba(54, 63, 74, 0.1)",
+      dark: "rgba(200, 210, 220, 0.1)",
+    },
+    surfaceTertiary: {
+      light: "#e4e6ea",
+      dark: "#34373c",
+    },
+    surfaceInverse: {
+      light: "#16181d",
+      dark: "#ffffff",
+    },
+    textOnColorSecondary: {
+      light: "rgba(255, 255, 255, 0.6)",
+      dark: "rgba(255, 255, 255, 0.6)",
+    },
+    textOnInverse: {
+      light: "#ffffff",
+      dark: "#16181d",
+    },
+    textPressed: {
+      light: "#16181d",
+      dark: "#ffffff",
     },
   },
 };
@@ -251,14 +427,14 @@ export const defaultTheme: CTTheme = {
  * @returns Resolved color string
  */
 export function getThemeColor(
-  value: keyof CTTheme["colors"] | ColorToken | string,
-  theme: CTTheme,
+  value: keyof CFTheme["colors"] | ColorToken | string,
+  theme: CFTheme,
 ): string {
   const colorScheme = resolveColorScheme(theme.colorScheme);
 
   // If it's a semantic color key, resolve from theme
   if (typeof value === "string" && value in theme.colors) {
-    const semanticToken = theme.colors[value as keyof CTTheme["colors"]];
+    const semanticToken = theme.colors[value as keyof CFTheme["colors"]];
     return resolveColor(semanticToken, colorScheme);
   }
 
@@ -283,16 +459,16 @@ export function getThemeColor(
 export function getThemeSpacing(
   value:
     | `${keyof typeof BASE_SPACING}-${keyof typeof DENSITY_SCALES[
-      CTTheme["density"]
+      CFTheme["density"]
     ]}`
     | string,
-  theme: CTTheme,
+  theme: CFTheme,
 ): string {
   // If it's a semantic spacing descriptor (e.g., "lg-normal", "sm-tight")
   if (typeof value === "string" && value.includes("-")) {
     const [sizeStr, contextStr] = value.split("-") as [
       keyof typeof BASE_SPACING,
-      keyof typeof DENSITY_SCALES[CTTheme["density"]],
+      keyof typeof DENSITY_SCALES[CFTheme["density"]],
     ];
     if (
       sizeStr in BASE_SPACING && contextStr in DENSITY_SCALES[theme.density]
@@ -312,11 +488,11 @@ export function getThemeSpacing(
  * @returns New theme with applied overrides
  */
 export function createThemeVariant(
-  baseTheme: CTTheme,
-  overrides: Partial<CTTheme> & {
-    colors?: Partial<CTTheme["colors"]> & Record<string, ColorToken | string>;
+  baseTheme: CFTheme,
+  overrides: Partial<CFTheme> & {
+    colors?: Partial<CFTheme["colors"]> & Record<string, ColorToken | string>;
   },
-): CTTheme {
+): CFTheme {
   return {
     ...baseTheme,
     ...overrides,
@@ -331,12 +507,12 @@ export function createThemeVariant(
  * Merge a partial theme with the default theme, supporting pattern-style partial objects
  * @param partialTheme - Partial theme object that may contain pattern-style properties
  * @param baseTheme - Base theme to merge with (defaults to defaultTheme)
- * @returns Full CTTheme with merged properties
+ * @returns Full CFTheme with merged properties
  */
 export function mergeWithDefaultTheme(
   partialTheme: any,
-  baseTheme: CTTheme = defaultTheme,
-): CTTheme {
+  baseTheme: CFTheme = defaultTheme,
+): CFTheme {
   if (!partialTheme || typeof partialTheme !== "object") {
     return baseTheme;
   }
@@ -344,7 +520,7 @@ export function mergeWithDefaultTheme(
   // Handle pattern-style theme objects with specific properties
   const mergedTheme = { ...baseTheme };
 
-  // Map common pattern theme properties to CTTheme properties
+  // Map common pattern theme properties to CFTheme properties
   if (partialTheme.accentColor) {
     mergedTheme.colors = {
       ...mergedTheme.colors,
@@ -361,7 +537,7 @@ export function mergeWithDefaultTheme(
     mergedTheme.borderRadius = partialTheme.borderRadius;
   }
 
-  // Also handle direct CTTheme properties
+  // Also handle direct CFTheme properties
   if (partialTheme.fontFamily) {
     mergedTheme.fontFamily = partialTheme.fontFamily;
   }
@@ -386,6 +562,14 @@ export function mergeWithDefaultTheme(
     mergedTheme.animationSpeed = partialTheme.animationSpeed;
   }
 
+  if (partialTheme.roundness !== undefined) {
+    mergedTheme.roundness = partialTheme.roundness;
+  }
+  if (partialTheme.scale !== undefined) mergedTheme.scale = partialTheme.scale;
+  if (partialTheme.motion !== undefined) {
+    mergedTheme.motion = partialTheme.motion;
+  }
+
   if (partialTheme.colors) {
     mergedTheme.colors = {
       ...mergedTheme.colors,
@@ -401,7 +585,7 @@ export function mergeWithDefaultTheme(
  * @param speed - Theme animation speed setting
  * @returns CSS duration value
  */
-export function getAnimationDuration(speed: CTTheme["animationSpeed"]): string {
+export function getAnimationDuration(speed: CFTheme["animationSpeed"]): string {
   switch (speed) {
     case "none":
       return "0ms";
@@ -424,7 +608,7 @@ export function getAnimationDuration(speed: CTTheme["animationSpeed"]): string {
  */
 export function applyThemeToElement(
   element: HTMLElement,
-  theme: CTTheme,
+  theme: CFTheme,
   options: {
     includeSpacing?: boolean;
     includeColors?: boolean;
@@ -432,6 +616,15 @@ export function applyThemeToElement(
     additionalSpacing?: Record<string, string>;
   } = {},
 ) {
+  /*
+   * Canonical theme contract:
+   * - Semantic colors are emitted as `--cf-theme-color-*`.
+   * - Typography is emitted as `--cf-theme-font-*` plus border radius and animation duration.
+   * - Spacing is emitted as `--cf-theme-spacing-*`.
+   *
+   * Compatibility aliases are also emitted for older v2 components that still read
+   * legacy `--cf-theme-*` names. New code should prefer the canonical namespaces above.
+   */
   const {
     includeSpacing = true,
     includeColors = true,
@@ -443,16 +636,35 @@ export function applyThemeToElement(
 
   // Typography and base properties
   if (includeTypography) {
-    element.style.setProperty("--ct-theme-font-family", theme.fontFamily);
+    element.style.setProperty("--cf-theme-font-family", theme.fontFamily);
+    element.style.setProperty("font-family", theme.fontFamily);
     element.style.setProperty(
-      "--ct-theme-mono-font-family",
+      "--cf-theme-mono-font-family",
       theme.monoFontFamily,
     );
-    element.style.setProperty("--ct-theme-font-size", theme.fontSize);
-    element.style.setProperty("--ct-theme-border-radius", theme.borderRadius);
+    element.style.setProperty("--cf-theme-font-mono", theme.monoFontFamily);
+    const effectiveBorderRadius =
+      theme.borderRadius !== defaultTheme.borderRadius
+        ? theme.borderRadius
+        : `${theme.roundness * 0.5}rem`;
     element.style.setProperty(
-      "--ct-theme-animation-duration",
-      getAnimationDuration(theme.animationSpeed),
+      "--cf-theme-border-radius",
+      effectiveBorderRadius,
+    );
+    element.style.setProperty(
+      "--cf-theme-border-radius-full",
+      "var(--cf-border-radius-full, 9999px)",
+    );
+    const effectiveFontSize = theme.fontSize !== defaultTheme.fontSize
+      ? theme.fontSize
+      : `${theme.scale}rem`;
+    element.style.setProperty("--cf-theme-font-size", effectiveFontSize);
+    const effectiveDuration = theme.animationSpeed !== "normal"
+      ? getAnimationDuration(theme.animationSpeed)
+      : `${Math.round(200 * theme.motion)}ms`;
+    element.style.setProperty(
+      "--cf-theme-animation-duration",
+      effectiveDuration,
     );
   }
 
@@ -478,14 +690,142 @@ export function applyThemeToElement(
       "warning-foreground": theme.colors.warningForeground,
       "accent": theme.colors.accent,
       "accent-foreground": theme.colors.accentForeground,
+      "brand": theme.colors.brand,
+      "brand-foreground": theme.colors.brandForeground,
+      "text-tertiary": theme.colors.textTertiary,
+      "text-disabled": theme.colors.textDisabled,
+      "surface-disabled": theme.colors.surfaceDisabled,
+      "surface-pressed": theme.colors.surfacePressed,
+      "surface-tertiary": theme.colors.surfaceTertiary,
+      "surface-inverse": theme.colors.surfaceInverse,
+      "text-on-color-secondary": theme.colors.textOnColorSecondary,
+      "text-on-inverse": theme.colors.textOnInverse,
+      "text-pressed": theme.colors.textPressed,
     };
 
     Object.entries(colorMap).forEach(([key, token]) => {
       element.style.setProperty(
-        `--ct-theme-color-${key}`,
+        `--cf-theme-color-${key}`,
         resolveColor(token, colorScheme),
       );
     });
+
+    const legacyColorAliases = {
+      "background": resolveColor(theme.colors.background, colorScheme),
+      "border": resolveColor(theme.colors.border, colorScheme),
+      "border-muted": resolveColor(theme.colors.borderMuted, colorScheme),
+      "error": resolveColor(theme.colors.error, colorScheme),
+      "primary": resolveColor(theme.colors.primary, colorScheme),
+      "success": resolveColor(theme.colors.success, colorScheme),
+      "surface": resolveColor(theme.colors.surface, colorScheme),
+      "surface-hover": resolveColor(theme.colors.surfaceHover, colorScheme),
+      "text": resolveColor(theme.colors.text, colorScheme),
+      "text-muted": resolveColor(theme.colors.textMuted, colorScheme),
+    };
+
+    Object.entries(legacyColorAliases).forEach(([key, value]) => {
+      element.style.setProperty(`--cf-theme-${key}`, value);
+    });
+
+    element.style.setProperty(
+      "--cf-theme-color-error-surface",
+      `color-mix(in srgb, ${
+        resolveColor(theme.colors.error, colorScheme)
+      } 12%, ${resolveColor(theme.colors.surface, colorScheme)})`,
+    );
+    element.style.setProperty(
+      "--cf-theme-color-error-light",
+      `color-mix(in srgb, ${
+        resolveColor(theme.colors.error, colorScheme)
+      } 18%, ${resolveColor(theme.colors.surface, colorScheme)})`,
+    );
+    element.style.setProperty(
+      "--cf-theme-color-primary-light",
+      `color-mix(in srgb, ${
+        resolveColor(theme.colors.primary, colorScheme)
+      } 18%, ${resolveColor(theme.colors.surface, colorScheme)})`,
+    );
+    element.style.setProperty(
+      "--cf-theme-color-success-light",
+      `color-mix(in srgb, ${
+        resolveColor(theme.colors.success, colorScheme)
+      } 18%, ${resolveColor(theme.colors.surface, colorScheme)})`,
+    );
+    element.style.setProperty(
+      "--cf-theme-color-muted",
+      resolveColor(theme.colors.surfaceTertiary, colorScheme),
+    );
+    element.style.setProperty(
+      "--cf-theme-color-text-secondary",
+      resolveColor(theme.colors.textMuted, colorScheme),
+    );
+
+    // Derived color families for ColorIntent
+    const intentMap: Array<{ name: string; base: ColorToken }> = [
+      { name: "primary", base: theme.colors.primary },
+      { name: "accent", base: theme.colors.accent },
+      { name: "danger", base: theme.colors.error },
+    ];
+    for (const { name, base: token } of intentMap) {
+      const base = resolveColor(token, colorScheme);
+      const family = deriveColorFamily(base);
+      element.style.setProperty(
+        `--cf-theme-color-${name}-pressed`,
+        family.pressed,
+      );
+      element.style.setProperty(`--cf-theme-color-${name}-soft`, family.soft);
+      element.style.setProperty(
+        `--cf-theme-color-${name}-subtle`,
+        family.subtle,
+      );
+    }
+
+    // Derived color families for StatusIntent
+    const statusEntries: Array<
+      { name: string; base: ColorToken; fg: ColorToken }
+    > = [
+      {
+        name: "info",
+        base: theme.colors.primary,
+        fg: theme.colors.primaryForeground,
+      },
+      {
+        name: "success",
+        base: theme.colors.success,
+        fg: theme.colors.successForeground,
+      },
+      {
+        name: "warning",
+        base: theme.colors.warning,
+        fg: theme.colors.warningForeground,
+      },
+      {
+        name: "error",
+        base: theme.colors.error,
+        fg: theme.colors.errorForeground,
+      },
+    ];
+    for (const { name, base: baseToken, fg: fgToken } of statusEntries) {
+      const base = resolveColor(baseToken, colorScheme);
+      const family = deriveColorFamily(base);
+      element.style.setProperty(`--cf-theme-color-status-${name}`, base);
+      element.style.setProperty(
+        `--cf-theme-color-status-${name}-pressed`,
+        family.pressed,
+      );
+      element.style.setProperty(
+        `--cf-theme-color-status-${name}-soft`,
+        family.soft,
+      );
+      element.style.setProperty(
+        `--cf-theme-color-status-${name}-subtle`,
+        family.subtle,
+      );
+      element.style.setProperty(
+        `--cf-theme-color-status-${name}-foreground`,
+        resolveColor(fgToken, colorScheme),
+      );
+    }
   }
 
   // Semantic spacing
@@ -501,12 +841,27 @@ export function applyThemeToElement(
     };
 
     Object.entries(spacingMap).forEach(([key, value]) => {
-      element.style.setProperty(`--ct-theme-spacing-${key}`, value);
+      element.style.setProperty(`--cf-theme-spacing-${key}`, value);
+      if (key.startsWith("padding-") || key === "message-bottom") {
+        element.style.setProperty(`--cf-theme-${key}`, value);
+      }
     });
+
+    element.style.setProperty("--cf-theme-spacing", spacingMap.normal);
+    element.style.setProperty("--cf-theme-spacing-compact", spacingMap.tight);
+    element.style.setProperty("--cf-theme-padding", spacingMap.normal);
   }
 }
 
 /**
- * Context for sharing theme across CT components
+ * Context for sharing theme across Common Fabric components.
+ *
+ * Default theme integration uses ambient CSS custom properties from `cf-theme`.
+ * Most components should read `var(--cf-theme-*)` in CSS with sane fallbacks
+ * rather than consuming this context directly.
+ *
+ * Only consume `cfThemeContext` when the JavaScript theme object is actually
+ * needed for runtime logic, derived values, or calling `applyThemeToElement()`
+ * on dynamically created elements.
  */
-export const themeContext = createContext<CTTheme>("ct-theme");
+export const cfThemeContext = createContext<CFTheme>("cf-theme");

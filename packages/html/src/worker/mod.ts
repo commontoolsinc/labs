@@ -13,10 +13,16 @@ export type {
   ChildNodeState,
   NodeState,
   ReconcileContext,
+  RenderConfidentialityCeiling,
+  RenderDeclassificationPolicy,
   WorkerJSXElement,
   WorkerProps,
   WorkerReconcilerOptions,
   WorkerRenderNode,
   WorkerVNode,
 } from "./types.ts";
-export { isWorkerVNode } from "./types.ts";
+export {
+  isWorkerVNode,
+  normalizeRenderConfidentialityCeiling,
+  normalizeRenderDeclassificationPolicy,
+} from "./types.ts";

@@ -2,10 +2,16 @@
 
 Use `navigateTo()` for drilling into detail views from list patterns.
 
+`navigateTo()` changes the current shell view while preserving the current shell
+mode. If a pattern is running under the shell embed route
+`/.embed/<space-name-or-did>/<piece-id-or-slug>`, navigation to another piece
+stays under `/.embed/...`. Pattern authors do not need to handle embedded
+navigation specially.
+
 ## List Pattern
 
 ```typescript
-import { navigateTo, pattern, UI, Writable } from "commontools";
+import { navigateTo, pattern, UI, Writable } from "commonfabric";
 import ItemDetail from "./item-detail.tsx";
 
 interface Item {
@@ -19,16 +25,16 @@ interface Input {
 
 export default pattern<Input>(({ items }) => ({
   [UI]: (
-    <ct-screen>
+    <cf-screen>
       {items.map((item) => (
-        <ct-card>
+        <cf-card>
           {item.name}
-          <ct-button onClick={() => navigateTo(ItemDetail({ item }))}>
+          <cf-button onClick={() => navigateTo(ItemDetail({ item }))}>
             Edit
-          </ct-button>
-        </ct-card>
+          </cf-button>
+        </cf-card>
       ))}
-    </ct-screen>
+    </cf-screen>
   ),
   items,
 }));
@@ -39,7 +45,7 @@ export default pattern<Input>(({ items }) => ({
 The detail pattern receives a `Writable<Item>` and uses `.key()` to access individual fields for editing:
 
 ```typescript
-import { pattern, UI, Writable } from "commontools";
+import { pattern, UI, Writable } from "commonfabric";
 
 interface Item {
   name: string;
@@ -52,16 +58,16 @@ interface Input {
 
 export default pattern<Input>(({ item }) => ({
   [UI]: (
-    <ct-screen>
-      <ct-input $value={item.key("name")} placeholder="Name" />
-      <ct-select
+    <cf-screen>
+      <cf-input $value={item.key("name")} placeholder="Name" />
+      <cf-select
         $value={item.key("status")}
         items={[
           { label: "Active", value: "active" },
           { label: "Done", value: "done" },
         ]}
       />
-    </ct-screen>
+    </cf-screen>
   ),
   item,
 }));
@@ -83,4 +89,5 @@ See `packages/patterns/reading-list/` for a complete implementation:
 
 - [Writable Methods](../concepts/types-and-schemas/writable.md) - `.key()` and other methods
 - [Two-Way Binding](./two-way-binding.md) - `$value` binding syntax
-- [Conditional Rendering](./conditional.md) - Using ifElse for show/hide
+- [Conditional Rendering](./conditional.md) - Plain ternaries for show/hide
+- [View Switching](./view-switching.md) - Switching between views inline (without navigation)

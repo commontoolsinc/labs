@@ -1,10 +1,11 @@
 import ts from "typescript";
-import { getPropertyNameText } from "@commontools/schema-generator/property-name";
+import { createRegisteredTypeLiteral } from "../ast/type-building.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import {
   cloneKeyExpression,
+  getCommonFabricKeyName,
   getKnownComputedKeyExpression,
-  isCommonToolsKeyExpression,
+  isCommonFabricKeyExpression,
 } from "../utils/reactive-keys.ts";
 import type { TransformationContext } from "../core/mod.ts";
 
@@ -138,10 +139,36 @@ export function getStaticDefaultTypeNode(
         ),
       );
     }
-    return factory.createTypeLiteralNode(members);
+    return createRegisteredTypeLiteral(
+      members,
+      {
+        factory,
+        checker: context.checker,
+        typeRegistry: context.options.state?.typeRegistry,
+      },
+    );
   }
 
   return undefined;
+}
+
+function getEmitSafeComputedKeyText(
+  expression: ts.Expression,
+  context: TransformationContext,
+): string | undefined {
+  if (
+    ts.isStringLiteral(expression) ||
+    ts.isNumericLiteral(expression) ||
+    ts.isNoSubstitutionTemplateLiteral(expression)
+  ) {
+    return expression.text;
+  }
+
+  const commonFabricKeyName = getCommonFabricKeyName(
+    expression,
+    context.checker,
+  );
+  return commonFabricKeyName ? `$${commonFabricKeyName}` : undefined;
 }
 
 export function collectDestructureBindings(
@@ -246,13 +273,13 @@ export function collectDestructureBindings(
     } else if (ts.isNumericLiteral(element.propertyName)) {
       key = element.propertyName.text;
     } else if (ts.isComputedPropertyName(element.propertyName)) {
-      const staticKey = getPropertyNameText(element.propertyName);
-      if (staticKey !== undefined) {
-        key = staticKey;
+      const computedKey = element.propertyName.expression;
+      if (isCommonFabricKeyExpression(computedKey, context, "SELF")) {
+        directKeyExpression = context.cfHelpers.getHelperExpr("SELF");
       } else {
-        const computedKey = element.propertyName.expression;
-        if (isCommonToolsKeyExpression(computedKey, context, "SELF")) {
-          directKeyExpression = context.ctHelpers.getHelperExpr("SELF");
+        const staticKey = getEmitSafeComputedKeyText(computedKey, context);
+        if (staticKey !== undefined) {
+          key = staticKey;
         } else {
           key = getKnownComputedKeyExpression(computedKey, context) ??
             computedKey;
@@ -325,7 +352,7 @@ export function createKeyCall(
 ): ts.Expression {
   const keyCall = factory.createCallExpression(
     factory.createPropertyAccessExpression(
-      factory.createIdentifier(rootIdentifier.text),
+      rootIdentifier,
       factory.createIdentifier("key"),
     ),
     undefined,

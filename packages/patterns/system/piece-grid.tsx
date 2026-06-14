@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   computed,
   equals,
@@ -7,7 +6,7 @@ import {
   SELF,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Piece = Writable<{ [NAME]?: string }>;
 
@@ -25,11 +24,11 @@ export default pattern<Input>(({ pieces, [SELF]: self }) => {
   return {
     [NAME]: "Grid View",
     [UI]: (
-      <ct-grid columns="3" gap="4" padding="4">
+      <cf-grid columns="3" gap="4" padding="4">
         {filtered.map((piece: Piece) => (
           <div
             style={{
-              border: "1px solid var(--ct-color-border, #e5e5e7)",
+              border: "1px solid var(--cf-theme-color-border, #e5e5e7)",
               borderRadius: "12px",
               overflow: "hidden",
             }}
@@ -51,15 +50,15 @@ export default pattern<Input>(({ pieces, [SELF]: self }) => {
                   pointerEvents: "none",
                 }}
               >
-                <ct-render $cell={piece} />
+                <cf-render $cell={piece} />
               </div>
             </div>
             <div style={{ padding: "8px" }}>
-              <ct-cell-link $cell={piece} />
+              <cf-cell-link $cell={piece} />
             </div>
           </div>
         ))}
-      </ct-grid>
+      </cf-grid>
     ),
   };
 });

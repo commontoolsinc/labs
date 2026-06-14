@@ -1,5 +1,5 @@
-import { isKeyPairRaw, KeyPairRaw } from "@commontools/identity";
-import { isRecord } from "@commontools/utils/types";
+import { isKeyPairRaw, KeyPairRaw } from "@commonfabric/identity";
+import { isRecord } from "@commonfabric/utils/types";
 
 export enum WorkerIPCMessageType {
   Initialize = "initialize",
@@ -12,9 +12,8 @@ export type InitializationData = {
   toolshedUrl: string;
   rawIdentity: KeyPairRaw;
   experimental?: {
-    richStorableValues?: boolean;
-    storableProtocol?: boolean;
-    unifiedJsonEncoding?: boolean;
+    modernCellRep?: boolean;
+    persistentSchedulerState?: boolean;
   };
 };
 

@@ -9,16 +9,16 @@
  * Expected behavior: Memory should stabilize or grow modestly
  * Actual behavior: Memory grows by gigabytes (1GB+ per 100 increments)
  */
-import { Identity, Session } from "@commontools/identity";
-import { env } from "@commontools/integration";
-import { StorageManager } from "../src/storage/cache.ts";
-import { Runtime } from "../src/index.ts";
-import { compilePattern, PieceManager } from "@commontools/piece";
+import { Identity, Session } from "@commonfabric/identity";
+import { env } from "@commonfabric/integration";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { compileAndSavePattern, Runtime } from "../src/index.ts";
+import { PieceManager } from "@commonfabric/piece";
 
 (Error as any).stackTraceLimit = 100;
 
 const { API_URL } = env;
-const SPACE_NAME = "runner_integration";
+const SPACE_NAME_PREFIX = "runner_integration";
 const TIMEOUT_MS = 300000;
 
 // Test parameters
@@ -82,11 +82,12 @@ async function getServerMemoryMB(): Promise<number> {
 // Main test function
 async function runTest() {
   const account = await Identity.fromPassphrase("common user");
-  const space_thingy = await account.derive(SPACE_NAME);
+  const spaceName = `${SPACE_NAME_PREFIX}-${crypto.randomUUID()}`;
+  const space_thingy = await account.derive(spaceName);
   const space_thingy_space = space_thingy.did();
   const session = {
     isPrivate: false,
-    spaceName: SPACE_NAME,
+    spaceName,
     space: space_thingy_space,
     as: space_thingy,
   } as Session;
@@ -94,7 +95,7 @@ async function runTest() {
   // Create storage manager
   const storageManager = StorageManager.open({
     as: session.as,
-    address: new URL("/api/storage/memory", API_URL),
+    memoryHost: new URL(API_URL),
   });
 
   // Create runtime
@@ -112,11 +113,10 @@ async function runTest() {
     "./integration/derive_array_leak.test.tsx",
   );
 
-  const pattern = await compilePattern(
-    patternContent,
-    "pattern",
+  const pattern = await compileAndSavePattern(
     runtime,
-    space_thingy_space,
+    patternContent,
+    { spec: "pattern", space: space_thingy_space },
   );
   console.log("Pattern compiled successfully");
 
@@ -125,7 +125,7 @@ async function runTest() {
     properties: {
       value: { type: "number" },
       increment: {
-        asStream: true,
+        asCell: ["stream"],
       },
     },
     required: ["value", "increment"],
@@ -212,7 +212,7 @@ async function runTest() {
 Deno.test({
   name: "derive array leak test",
   fn: async () => {
-    let timeoutHandle: number;
+    let timeoutHandle: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise((_, reject) => {
       timeoutHandle = setTimeout(() => {
         reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));

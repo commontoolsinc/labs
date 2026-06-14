@@ -1,15 +1,13 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import {
-  CachedCompiler,
-  MemoryCompilationCache,
-} from "../src/compilation-cache/mod.ts";
+import { patternMetaSchema } from "../src/pattern-manager.ts";
+import { getPatternProgram } from "../src/builder/pattern-metadata.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -45,7 +43,7 @@ describe("PatternManager program persistence", () => {
         {
           name: "/main.tsx",
           contents: [
-            "import { pattern, lift } from 'commontools';",
+            "import { pattern, lift } from 'commonfabric';",
             "import { double } from './util.ts';",
             "const dbl = lift((x:number)=>double(x));",
             "export default pattern<{ value: number }>(({ value }) => {",
@@ -57,17 +55,18 @@ describe("PatternManager program persistence", () => {
     };
 
     const compiled = await runtime.patternManager.compilePattern(program);
-    expect(compiled.program).toBeDefined();
-    expect(compiled.program?.main).toEqual("/main.tsx");
+    expect(getPatternProgram(compiled)).toBeDefined();
+    expect(getPatternProgram(compiled)?.main).toEqual("/main.tsx");
     // Ensure original file names are preserved (no injected prefix leaked here)
-    const fileNames = (compiled.program?.files ?? []).map((f) => f.name).sort();
+    const fileNames = (getPatternProgram(compiled)?.files ?? []).map((f) =>
+      f.name
+    ).sort();
     expect(fileNames).toEqual(["/main.tsx", "/util.ts"].sort());
 
     const patternId = runtime.patternManager.registerPattern(compiled, program);
     await runtime.patternManager.saveAndSyncPattern({ patternId, space });
 
     const meta = runtime.patternManager.getPatternMeta({ patternId });
-    expect(meta.id).toEqual(patternId);
     expect(meta.program).toBeDefined();
     expect(meta.program?.main).toEqual("/main.tsx");
     const metaFileNames = (meta.program?.files ?? []).map((f) => f.name).sort();
@@ -99,7 +98,7 @@ describe("PatternManager program persistence", () => {
         {
           name: "/main.ts",
           contents: [
-            "import { pattern } from 'commontools';",
+            "import { pattern } from 'commonfabric';",
             "export default pattern<{ x: number }>(({ x }) => ({ x }));",
           ].join("\n"),
         },
@@ -114,6 +113,84 @@ describe("PatternManager program persistence", () => {
     expect(second).toBe(true);
 
     const meta = runtime.patternManager.getPatternMeta({ patternId });
+    expect(meta.program?.main).toEqual("/main.ts");
+  });
+
+  it("stores pattern metadata at the pattern id", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "import { pattern } from 'commonfabric';",
+            "export default pattern<{ x: number }>(({ x }) => ({ x }));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const compiled = await runtime.patternManager.compilePattern(program);
+    const patternId = runtime.patternManager.registerPattern(compiled, program);
+    await runtime.patternManager.saveAndSyncPattern({ patternId, space });
+
+    const metaCell = runtime.getCellFromEntityId(
+      space,
+      patternId,
+      [],
+      patternMetaSchema,
+    );
+    expect(metaCell.getAsNormalizedFullLink().id).toEqual(patternId);
+    await metaCell.sync();
+    expect(metaCell.get()?.program?.main).toEqual("/main.ts");
+  });
+
+  it("loads pattern metadata from the legacy causal cell", async () => {
+    const patternId = "of:legacy-pattern-meta";
+    const program = {
+      main: "/legacy.ts",
+      mainExport: "default",
+      files: [
+        {
+          name: "/legacy.ts",
+          contents: "export default undefined;",
+        },
+      ],
+    };
+    const legacyCell = runtime.getCell(
+      space,
+      { patternId, type: "pattern" },
+      patternMetaSchema,
+      tx,
+    );
+
+    legacyCell.set({ program } as any);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const meta = await runtime.patternManager.loadPatternMeta(patternId, space);
+    expect(meta.program?.main).toEqual("/legacy.ts");
+  });
+
+  it("returns metadata for a registered compiled pattern factory", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "import { pattern } from 'commonfabric';",
+            "export default pattern(() => ({ name: 'factory meta' }));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const compiled = await runtime.patternManager.compilePattern(program);
+    const patternId = runtime.patternManager.registerPattern(compiled, program);
+    const meta = runtime.patternManager.getPatternMeta(compiled);
+
+    expect(patternId).toBeDefined();
     expect(meta.program?.main).toEqual("/main.ts");
   });
 });
@@ -136,7 +213,7 @@ describe("PatternManager.loadPattern error handling", () => {
   });
 
   it("throws descriptive error for missing pattern, not TypeError", async () => {
-    const bogusId = "nonexistent-pattern-id";
+    const bogusId = "of:nonexistent-pattern-id";
     try {
       await runtime.patternManager.loadPattern(bogusId, space);
       throw new Error("should have thrown");
@@ -161,7 +238,7 @@ describe("PatternManager.compileOrGetPattern", () => {
       {
         name: "/main.ts",
         contents: [
-          "import { pattern } from 'commontools';",
+          "import { pattern } from 'commonfabric';",
           "export default pattern<{ x: number }>(({ x }) => ({ doubled: x }));",
         ].join("\n"),
       },
@@ -174,7 +251,7 @@ describe("PatternManager.compileOrGetPattern", () => {
       {
         name: "/main.ts",
         contents: [
-          "import { pattern } from 'commontools';",
+          "import { pattern } from 'commonfabric';",
           "export default pattern<{ y: number }>(({ y }) => ({ tripled: y }));",
         ].join("\n"),
       },
@@ -201,8 +278,8 @@ describe("PatternManager.compileOrGetPattern", () => {
       simpleProgram,
     );
     expect(pattern).toBeDefined();
-    expect(pattern.program).toBeDefined();
-    expect(pattern.program?.main).toEqual("/main.ts");
+    expect(getPatternProgram(pattern)).toBeDefined();
+    expect(getPatternProgram(pattern)?.main).toEqual("/main.ts");
   });
 
   it("returns cached pattern on second call (same instance)", async () => {
@@ -227,8 +304,8 @@ describe("PatternManager.compileOrGetPattern", () => {
 
     // Should be different pattern instances
     expect(second).not.toBe(first);
-    expect(first.program?.files[0].contents).toContain("doubled");
-    expect(second.program?.files[0].contents).toContain("tripled");
+    expect(getPatternProgram(first)?.files[0].contents).toContain("doubled");
+    expect(getPatternProgram(second)?.files[0].contents).toContain("tripled");
   });
 
   it("single-flight: concurrent calls share one compilation", async () => {
@@ -246,13 +323,13 @@ describe("PatternManager.compileOrGetPattern", () => {
 
   it("works with string input (single file)", async () => {
     const source = [
-      "import { pattern } from 'commontools';",
+      "import { pattern } from 'commonfabric';",
       "export default pattern<{ n: number }>(({ n }) => ({ result: n }));",
     ].join("\n");
 
     const pattern = await runtime.patternManager.compileOrGetPattern(source);
     expect(pattern).toBeDefined();
-    expect(pattern.program?.main).toEqual("/main.tsx");
+    expect(getPatternProgram(pattern)?.main).toEqual("/main.tsx");
   });
 
   it("pattern is cached and returns same instance on subsequent calls", async () => {
@@ -267,89 +344,7 @@ describe("PatternManager.compileOrGetPattern", () => {
     expect(pattern2).toBe(pattern);
 
     // And the pattern should have its program attached
-    expect(pattern.program).toBeDefined();
-    expect(pattern.program?.main).toEqual("/main.ts");
-  });
-});
-
-describe("PatternManager compilation cache integration", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
-  let cacheStorage: MemoryCompilationCache;
-  let cachedCompiler: CachedCompiler;
-  let runtime: Runtime;
-
-  const simpleProgram: RuntimeProgram = {
-    main: "/main.ts",
-    files: [
-      {
-        name: "/main.ts",
-        contents: [
-          "import { pattern } from 'commontools';",
-          "export default pattern<{ x: number }>(({ x }) => ({ doubled: x }));",
-        ].join("\n"),
-      },
-    ],
-  };
-
-  beforeEach(() => {
-    cacheStorage = new MemoryCompilationCache();
-    cachedCompiler = new CachedCompiler(cacheStorage, "test-fingerprint");
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-      cachedCompiler,
-    });
-  });
-
-  afterEach(async () => {
-    await runtime?.dispose();
-    await storageManager?.close();
-  });
-
-  it("writes to cache on first compile, hits cache on second", async () => {
-    expect(await cacheStorage.count()).toBe(0);
-
-    // First compile — cache miss, should write an entry
-    const first = await runtime.patternManager.compilePattern(simpleProgram);
-    expect(first).toBeDefined();
-    expect(first.program?.main).toEqual("/main.ts");
-    expect(await cacheStorage.count()).toBe(1);
-    expect(cachedCompiler.getStats().misses).toBe(1);
-    expect(cachedCompiler.getStats().writes).toBe(1);
-
-    // Second compile — cache hit, no new writes
-    const second = await runtime.patternManager.compilePattern(simpleProgram);
-    expect(second).toBeDefined();
-    expect(second.program?.main).toEqual("/main.ts");
-    expect(await cacheStorage.count()).toBe(1);
-    expect(cachedCompiler.getStats().hits).toBe(1);
-    expect(cachedCompiler.getStats().writes).toBe(1);
-  });
-
-  it("cache miss with wrong fingerprint triggers recompile", async () => {
-    // Seed the cache with a known key and fingerprint, then use a
-    // CachedCompiler with a different fingerprint to observe the mismatch.
-    // We test CachedCompiler directly (not via Runtime) because Runtime's
-    // constructor fires evictStale() which removes old-fingerprint entries
-    // before compilePattern() can observe them.
-    const programHash = "test-program-hash";
-    await cacheStorage.set(programHash, {
-      id: "stale-id",
-      jsScript: { js: "// stale" },
-      fingerprint: "old-fingerprint",
-      cachedAt: Date.now(),
-    });
-    expect(await cacheStorage.count()).toBe(1);
-
-    const compiler2 = new CachedCompiler(
-      cacheStorage,
-      "new-fingerprint",
-    );
-
-    const miss = await compiler2.get(programHash);
-    expect(miss).toBeUndefined();
-    expect(compiler2.getStats().misses).toBe(1);
-    expect(compiler2.getStats().missReasons.fingerprintMismatch).toBe(1);
+    expect(getPatternProgram(pattern)).toBeDefined();
+    expect(getPatternProgram(pattern)?.main).toEqual("/main.ts");
   });
 });

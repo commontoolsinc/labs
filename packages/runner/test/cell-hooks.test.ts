@@ -3,10 +3,10 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import "@commontools/utils/equal-ignoring-symbols";
+import "@commonfabric/utils/equal-ignoring-symbols";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { isCell } from "../src/cell.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";
 import { toCell } from "../src/back-to-cell.ts";
@@ -527,7 +527,7 @@ describe("toCell and toOpaqueRef hooks", () => {
           cellProp: {
             type: "object",
             properties: { value: { type: "number" } },
-            asCell: true,
+            asCell: ["cell"],
           },
         },
         required: ["regular", "cellProp"],
@@ -704,38 +704,61 @@ describe("toCell and toOpaqueRef hooks", () => {
       expect(isCell(deepCell)).toBe(true);
       expect(deepCell.get().value).toBe(42);
     });
+  });
+});
 
-    it("should handle circular references gracefully", () => {
-      const schema = {
-        $ref: "#/$defs/Root",
-        $defs: {
-          Root: {
-            type: "object",
-            properties: {
-              name: { type: "string" },
-              self: { $ref: "#/$defs/Root" },
-            },
+describe("toCell and toOpaqueRef hooks: circular references", () => {
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should handle circular references gracefully", () => {
+    const schema = {
+      $ref: "#/$defs/Root",
+      $defs: {
+        Root: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            self: { $ref: "#/$defs/Root" },
           },
         },
-      } as const satisfies JSONSchema;
+      },
+    } as const satisfies JSONSchema;
 
-      const c = runtime.getCell<any>(
-        space,
-        "hook-edge-circular",
-        schema,
-        tx,
-      );
+    const c = runtime.getCell<any>(
+      space,
+      "hook-edge-circular",
+      schema,
+      tx,
+    );
 
-      const data: any = { name: "circular" };
-      data.self = data;
-      c.set(data);
+    const data: any = { name: "circular" };
+    data.self = data;
+    c.set(data);
 
-      const result = c.get();
-      expect(toCell in result).toBe(true);
-      expect(result.name).toBe("circular");
-      // With circular references, the self reference points back to the same data
-      expect(result.self.name).toBe("circular");
-      expect(result.self.self.name).toBe("circular"); // Can navigate infinitely
-    });
+    const result = c.get();
+    expect(toCell in result).toBe(true);
+    expect(result.name).toBe("circular");
+    // With circular references, the self reference points back to the
+    // same data.
+    expect(result.self.name).toBe("circular");
+    // Can navigate infinitely.
+    expect(result.self.self.name).toBe("circular");
   });
 });

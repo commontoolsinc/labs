@@ -8,15 +8,22 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Define the list of binaries we're building
 # This makes it easy to add more binaries in the future
 env:
-  BINARIES: "toolshed bg-charm-service ct"
+  BINARIES: "toolshed bg-charm-service cf"
 
 jobs:
-  build:
-    name: "Test and Build"
-    runs-on: ubuntu-24.04-64-core
+  # ---------------------------------------------------------------------------
+  # Tier 0 – These jobs all start immediately with no dependencies
+  # ---------------------------------------------------------------------------
+  check:
+    name: "Check"
+    runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -24,21 +31,42 @@ jobs:
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
 
-      # Errors if `deno.lock` file was not committed with the current change
       - name: 🔍 Verify lock file & install dependencies
         run: deno install --frozen=true
-
-      - name: 📥 Download Deno dependency binaries
-        run: deno task initialize-db
-
-      - name: 🔎 Type check codebase
-        run: deno task check
 
       - name: 🔎 Check codebase formatting
         run: deno fmt --check
 
       - name: 🧹 Lint codebase
         run: deno lint
+
+      - name: 🔎 Type check codebase
+        run: deno task check
+
+      - name: 🧭 Check cf-review skill facts
+        run: deno task check-skill-facts
+
+  test:
+    name: "Test"
+    runs-on:
+      group: labs
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        run: deno install --frozen=true
+
+      - name: 📦 Install Linux FUSE test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config gcc libfuse3-dev fuse3
+
+      - name: 📥 Download Deno dependency binaries
+        run: deno task initialize-db
 
       # For deno-web-test browser tests
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
@@ -47,6 +75,61 @@ jobs:
 
       - name: 🧪 Run parallel workspace tests
         run: deno task test
+        env:
+          TEST_DISABLED_PACKAGES: runner
+
+  runner-test:
+    name: "Runner Tests (${{ matrix.shard }}/${{ matrix.total }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+        total: [4]
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        run: deno install --frozen=true
+
+      - name: 📥 Download Deno dependency binaries
+        run: deno task initialize-db
+
+      - name: 🧪 Run runner tests
+        working-directory: packages/runner
+        run: |
+          TEST_FILES=$(deno run --allow-read ../../tasks/select-runner-test-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          if [ -z "$TEST_FILES" ]; then
+            echo "::error::No runner test files selected for shard ${{ matrix.shard }}/${{ matrix.total }}"
+            exit 1
+          fi
+          printf 'Runner test shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
+          printf '  %s\n' $TEST_FILES
+          ENV=test deno test \
+            --allow-ffi \
+            --allow-env \
+            --allow-read \
+            --allow-write=/tmp,/var/folders \
+            --allow-run=git \
+            $TEST_FILES
+
+  build-binaries:
+    name: "Build Binaries"
+    runs-on:
+      group: labs
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        run: deno install --frozen=true
 
       - name: 🏗️ Build application binaries
         run: deno task build-binaries
@@ -61,13 +144,82 @@ jobs:
           path: |
             ./dist/toolshed
             ./dist/bg-charm-service
-            ./dist/ct
+            ./dist/cf
+
+  generated-patterns-integration-test:
+    name: "Generated Patterns Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
+    runs-on: ubuntu-latest
+    environment: ci
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+        total: [4]
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        run: deno install --frozen=true
+
+      - name: 📥 Download Deno dependency binaries
+        run: deno task initialize-db
+
+      - name: 🧪 Run generated patterns integration tests
+        working-directory: packages/generated-patterns
+        run: |
+          TEST_FILES=$(deno run --allow-read ../../tasks/select-generated-pattern-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          if [ -z "$TEST_FILES" ]; then
+            echo "::error::No generated pattern files selected for shard ${{ matrix.shard }}/${{ matrix.total }}"
+            exit 1
+          fi
+          printf 'Generated patterns shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
+          printf '  %s\n' $TEST_FILES
+          mkdir -p ../../test-results
+          LOG_LEVEL=warn deno test --trace-leaks -A --parallel \
+            --junit-path=../../test-results/generated-patterns-${{ matrix.shard }}.xml \
+            $TEST_FILES
+
+      - name: 📤 Upload test timing data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-timing-generated-patterns-${{ matrix.shard }}
+          path: test-results/
+          retention-days: 90
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Tier 1 – Need built binaries
+  # ---------------------------------------------------------------------------
 
   package-integration-test:
-    name: "Package Integration Tests"
+    name: "Package Integration Tests (${{ matrix.suite_name }})"
     runs-on: ubuntu-latest
-    needs: ["build"]
+    needs: ["build-binaries"]
     environment: ci
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite_name: runner
+            package_dir: packages/runner
+            junit_name: runner
+            step_name: runner integration tests
+            headless: false
+          - suite_name: runtime-client
+            package_dir: packages/runtime-client
+            junit_name: runtime-client
+            step_name: runtime-client integration tests
+            headless: false
+          - suite_name: shell
+            package_dir: packages/shell
+            junit_name: shell
+            step_name: shell integration tests
+            headless: true
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -79,64 +231,77 @@ jobs:
         uses: actions/download-artifact@v4
 
       - name: 🚀 Start Toolshed server for testing
+        env:
+          TOOLSHED_PORT: 8000
         run: |
           chmod +x ./common-binaries/toolshed
-          CTTS_AI_LLM_ANTHROPIC_API_KEY=fake \
-          ./common-binaries/toolshed &
+          CFTS_AI_GATEWAY_URL="" \
+          CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
+          ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
 
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
       - name: 🛡️ Disable AppArmor for browser tests
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
-      - name: 🧪 Run end-to-end runner integration tests
-        working-directory: packages/runner
+      - name: 🧪 Run ${{ matrix.step_name }}
+        working-directory: ${{ matrix.package_dir }}
+        env:
+          HEADLESS_ENABLED: ${{ matrix.headless }}
+          JUNIT_NAME: ${{ matrix.junit_name }}
+          TOOLSHED_PORT: 8000
         run: |
           mkdir -p ../../test-results
-          API_URL=http://localhost:8000/ \
-          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/runner.xml" \
-          deno task integration
-
-      - name: 🧪 Run end-to-end runtime-client integration tests
-        working-directory: packages/runtime-client
-        run: |
-          mkdir -p ../../test-results
-          API_URL=http://localhost:8000/ \
-          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/runtime-client.xml" \
-          deno task integration
-
-      - name: 🧪 Run end-to-end shell integration tests
-        working-directory: packages/shell
-        run: |
-          mkdir -p ../../test-results
-          HEADLESS=1 \
-          API_URL=http://localhost:8000/ \
-          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/shell.xml" \
-          deno task integration
-
-      - name: 🧪 Run background worker integration tests
-        working-directory: packages/background-charm-service
-        run: |
-          mkdir -p ../../test-results
-          HEADLESS=1 \
-          API_URL=http://localhost:8000/ \
-          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/background-charm-service.xml" \
+          if [ "$HEADLESS_ENABLED" = "true" ]; then
+            export HEADLESS=1
+          fi
+          API_URL="http://localhost:${TOOLSHED_PORT}/" \
+          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/${JUNIT_NAME}.xml" \
           deno task integration
 
       - name: 📤 Upload test timing data
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-timing-package-integration
-          path: test-results/
+          name: test-timing-package-integration-${{ matrix.suite_name }}
+          path: test-results/${{ matrix.junit_name }}.xml
           retention-days: 90
           if-no-files-found: ignore
 
   cli-integration-test:
-    name: "CLI Integration Tests"
+    name: "CLI Integration Tests (${{ matrix.suite_name }})"
     runs-on: ubuntu-latest
-    needs: ["build"]
+    timeout-minutes: ${{ matrix.timeout_minutes }}
+    needs: ["build-binaries"]
     environment: ci
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite_name: core-piece-values
+            script: integration.sh
+            section: piece-values
+            toolshed_port: 8000
+            install_fuse_deps: false
+            timeout_minutes: 10
+          - suite_name: core-piece-links
+            script: integration.sh
+            section: piece-links
+            toolshed_port: 8001
+            install_fuse_deps: false
+            timeout_minutes: 10
+          - suite_name: core-piece-call
+            script: integration.sh
+            section: piece-call
+            toolshed_port: 8002
+            install_fuse_deps: false
+            timeout_minutes: 10
+          - suite_name: fuse
+            script: fuse-exec.sh
+            section: ""
+            toolshed_port: 8003
+            install_fuse_deps: true
+            timeout_minutes: 15
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -148,24 +313,94 @@ jobs:
         uses: actions/download-artifact@v4
 
       - name: 🚀 Start Toolshed server for testing
+        env:
+          TOOLSHED_PORT: ${{ matrix.toolshed_port }}
+          TOOLSHED_URL: http://localhost:${{ matrix.toolshed_port }}
         run: |
-          chmod +x ./common-binaries/ct
+          chmod +x ./common-binaries/cf
           chmod +x ./common-binaries/toolshed
           # Set tools to path
-          # Integration script needs `ct`
+          # Integration script needs `cf`
           echo "${{ github.workspace }}/common-binaries" >> $GITHUB_PATH
-          ./common-binaries/toolshed &
+          CFTS_AI_GATEWAY_URL="" MEMORY_URL="$TOOLSHED_URL" API_URL="$TOOLSHED_URL" ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
 
-      - name: 🧪 Run CLI integration tests
-        working-directory: packages/cli
+      - name: 📦 Install CLI integration dependencies
+        env:
+          INSTALL_FUSE_DEPS: ${{ matrix.install_fuse_deps }}
         run: |
-          API_URL=http://localhost:8000 ./integration/integration.sh
+          sudo apt-get update
+          sudo apt-get install -y jq
+          if [ "$INSTALL_FUSE_DEPS" = "true" ]; then
+            sudo apt-get install -y fuse3 libfuse3-dev
+            sudo chmod 666 /dev/fuse
+          fi
+
+      - name: 🧪 Run CLI integration suite
+        if: ${{ startsWith(matrix.suite_name, 'core-') }}
+        working-directory: packages/cli
+        env:
+          TOOLSHED_PORT: ${{ matrix.toolshed_port }}
+          CF_CLI_INTEGRATION_SECTION: ${{ matrix.section }}
+          CF_CLI_INTEGRATION_TIMINGS: "1"
+          CF_CLI_INTEGRATION_TIMINGS_FILE: "../../test-results/cli-${{ matrix.suite_name }}-cf-timings.log"
+        run: |
+          mkdir -p ../../test-results
+          : > "$CF_CLI_INTEGRATION_TIMINGS_FILE"
+          API_URL="http://localhost:${TOOLSHED_PORT}" ./integration/${{ matrix.script }}
+
+      - name: 🧪 Run CLI FUSE integration suite
+        if: ${{ matrix.suite_name == 'fuse' }}
+        working-directory: packages/cli
+        env:
+          TOOLSHED_PORT: ${{ matrix.toolshed_port }}
+          FUSE_DEEP_ENTITY_PROBE: "0"
+        run: |
+          set +e
+          API_URL="http://localhost:${TOOLSHED_PORT}" timeout 480 ./integration/${{ matrix.script }}
+          rc=$?
+          set -e
+          if [ "$rc" -eq 124 ]; then
+            echo "::error::FUSE integration timed out after 480 seconds"
+          fi
+          exit "$rc"
+
+      - name: 📋 FUSE daemon log (on failure)
+        if: ${{ failure() && matrix.suite_name == 'fuse' }}
+        # `cf fuse mount --background` writes its log to /tmp/cf-fuse-<mountpoint>.log
+        # (see packages/cli/commands/fuse.ts), not ~/.cf/fuse — the old path always
+        # printed "No daemon log found", hiding the real daemon error. The mountpoint
+        # is an mktemp dir, so glob all fuse daemon logs.
+        run: |
+          shopt -s nullglob
+          logs=(/tmp/cf-fuse-*.log)
+          if [ ${#logs[@]} -eq 0 ]; then
+            echo "No FUSE daemon log found at /tmp/cf-fuse-*.log"
+          else
+            for f in "${logs[@]}"; do
+              echo "===== ${f} ====="
+              cat "${f}"
+            done
+          fi
+
+      - name: 📤 Upload CLI integration timing data
+        if: ${{ always() && startsWith(matrix.suite_name, 'core-') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-timing-cli-${{ matrix.suite_name }}
+          path: test-results/cli-${{ matrix.suite_name }}-cf-timings.log
+          retention-days: 90
+          if-no-files-found: ignore
 
   pattern-integration-test:
-    name: "Pattern Integration Tests"
+    name: "Pattern Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
-    needs: ["build"]
+    needs: ["build-binaries"]
     environment: ci
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+        total: [4]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -179,7 +414,8 @@ jobs:
       - name: 🚀 Start Toolshed server for testing
         run: |
           chmod +x ./common-binaries/toolshed
-          CTTS_AI_LLM_ANTHROPIC_API_KEY=fake \
+          CFTS_AI_GATEWAY_URL="" \
+          CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           ./common-binaries/toolshed &
 
       # For Astral
@@ -190,17 +426,55 @@ jobs:
       - name: 🧩 Run end-to-end patterns integration tests
         working-directory: packages/patterns
         run: |
+          mapfile -t TEST_FILES < <(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          printf 'Pattern integration shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
+          printf '  %s\n' "${TEST_FILES[@]}"
           mkdir -p ../../test-results
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
-          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/patterns.xml" \
-          deno task integration
+          deno test --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
+            --junit-path=../../test-results/patterns-${{ matrix.shard }}.xml \
+            "${TEST_FILES[@]}"
 
       - name: 📤 Upload test timing data
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-timing-pattern-integration
+          name: test-timing-pattern-integration-${{ matrix.shard }}
+          path: test-results/
+          retention-days: 90
+          if-no-files-found: ignore
+
+  pattern-reload-integration-test:
+    name: "Pattern Reload Integration Tests"
+    runs-on: ubuntu-latest
+    needs: ["build-binaries"]
+    environment: ci
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      # For Astral
+      # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
+      - name: 🛡️ Disable AppArmor for browser tests
+        run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+
+      - name: 🧩 Run pattern reload integration tests
+        run: |
+          mkdir -p test-results
+          HEADLESS=1 \
+          EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true \
+          CF_EXPECT_PERSISTENT_SCHEDULER_STATE=1 \
+          deno task integration --junit-dir=test-results patterns-reload
+
+      - name: 📤 Upload test timing data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-timing-pattern-reload-integration
           path: test-results/
           retention-days: 90
           if-no-files-found: ignore
@@ -208,7 +482,7 @@ jobs:
   pattern-unit-test:
     name: "Pattern Unit Tests (${{ matrix.chunk }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
-    needs: ["build"]
+    needs: ["build-binaries"]
     strategy:
       matrix:
         chunk: [1, 2, 3, 4, 5]
@@ -220,49 +494,99 @@ jobs:
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
 
+      - name: 🔍 Verify lock file & install dependencies
+        run: deno install --frozen=true
+
+      - name: 📥 Download Deno dependency binaries
+        run: deno task initialize-db
+
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v4
 
       - name: 🧪 Run pattern unit tests
         run: |
-          chmod +x ./common-binaries/ct
-          CT_BINARY=./common-binaries/ct deno task integration pattern-tests ${{ matrix.chunk }}/${{ matrix.total }}
+          chmod +x ./common-binaries/cf
+          mkdir -p test-results
+          CF_BINARY=./common-binaries/cf deno task integration --junit-dir=test-results pattern-tests ${{ matrix.chunk }}/${{ matrix.total }}
 
-  generated-patterns-integration-test:
-    name: "Generated Patterns Integration Tests"
+      - name: 📤 Upload test timing data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-timing-pattern-unit-${{ matrix.chunk }}
+          path: test-results/
+          retention-days: 90
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Tier 2 – Post-test gates and deployments
+  # ---------------------------------------------------------------------------
+
+  perf-check:
+    name: "Performance Check"
+    if: (github.event_name == 'pull_request') || (github.ref_name == 'main')
     runs-on: ubuntu-latest
-    needs: ["build"]
-    environment: ci
+    needs:
+      - check
+      - test
+      - build-binaries
+      - package-integration-test
+      - cli-integration-test
+      - pattern-integration-test
+      - pattern-reload-integration-test
+      - pattern-unit-test
+      - generated-patterns-integration-test
+      - runner-test
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
+        with:
+          cache: false
 
-      - name: 🧪 Run generated patterns integration tests
-        working-directory: packages/generated-patterns
-        run: |
-          mkdir -p ../../test-results
-          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/generated-patterns.xml" \
-          deno task integration
+      - name: 📊 Run performance check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: deno run --allow-net --allow-env --allow-read --allow-run --allow-write tasks/perf-check.ts
 
-      - name: 📤 Upload test timing data
+      - name: 📤 Upload performance metrics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-timing-generated-patterns
-          path: test-results/
+          name: perf-metrics
+          path: perf-metrics.json
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: 📤 Upload performance metrics backfill
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-metrics-backfill
+          path: perf-metrics-backfill.json
           retention-days: 90
           if-no-files-found: ignore
 
   attest-binaries:
     name: "Attest and Upload Binaries"
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04-32-core
+    runs-on:
+      group: labs
     needs:
       [
+        "test",
+        "check",
+        "runner-test",
         "pattern-integration-test",
+        "pattern-reload-integration-test",
         "pattern-unit-test",
         "package-integration-test",
         "cli-integration-test",
@@ -315,19 +639,19 @@ jobs:
           cp ./dist/bg-charm-service ./signed/
           cp ./dist/bg-charm-service.sig ./signed/
 
-          # Process ct binary
-          echo "Processing binary: ct"
-          sha256sum ./dist/ct > ./dist/ct.hash.txt
-          CT_HASH=$(cat ./dist/ct.hash.txt | awk '{print $1}')
-          echo "ct hash: $CT_HASH"
-          echo "ct_hash=$CT_HASH" >> $GITHUB_OUTPUT
+          # Process cf binary
+          echo "Processing binary: cf"
+          sha256sum ./dist/cf > ./dist/cf.hash.txt
+          CF_HASH=$(cat ./dist/cf.hash.txt | awk '{print $1}')
+          echo "cf hash: $CF_HASH"
+          echo "cf_hash=$CF_HASH" >> $GITHUB_OUTPUT
 
-          # Sign the ct binary
-          openssl dgst -sha256 -sign <(echo "${{ secrets.ARTIFACT_SIGNING_KEY }}") -out ./dist/ct.sig ./dist/ct
+          # Sign the cf binary
+          openssl dgst -sha256 -sign <(echo "${{ secrets.ARTIFACT_SIGNING_KEY }}") -out ./dist/cf.sig ./dist/cf
 
           # Copy to signed directory
-          cp ./dist/ct ./signed/
-          cp ./dist/ct.sig ./signed/
+          cp ./dist/cf ./signed/
+          cp ./dist/cf.sig ./signed/
 
           # Create a single tarball with all binaries and signatures
           tar -czf release/labs-${{ github.sha }}.tar.gz -C signed .
@@ -353,12 +677,12 @@ jobs:
           subject-name: ./dist/bg-charm-service
           subject-digest: sha256:${{ steps.binary_processing.outputs.bg_charm_service_hash }}
 
-      - name: 📝 Generate attestation for ct binary
-        id: attest_ct
+      - name: 📝 Generate attestation for cf binary
+        id: attest_cf
         uses: actions/attest-build-provenance@v1
         with:
-          subject-name: ./dist/ct
-          subject-digest: sha256:${{ steps.binary_processing.outputs.ct_hash }}
+          subject-name: ./dist/cf
+          subject-digest: sha256:${{ steps.binary_processing.outputs.cf_hash }}
 
       - name: 📝 Generate attestation for tarball
         id: attest_tarball
@@ -375,7 +699,7 @@ jobs:
           path: |
             ${{ steps.attest_toolshed.outputs.bundle-path }}
             ${{ steps.attest_bg_charm_service.outputs.bundle-path }}
-            ${{ steps.attest_ct.outputs.bundle-path }}
+            ${{ steps.attest_cf.outputs.bundle-path }}
             ${{ steps.attest_tarball.outputs.bundle-path }}
 
       - name: 🔍 Verify binary attestations
@@ -415,14 +739,14 @@ jobs:
             exit 1
           fi
 
-          # Verify ct binary attestation
-          echo "::group::ct attestation details"
-          gh attestation verify ./dist/ct -R ${{ github.repository }} --format json | jq
+          # Verify cf binary attestation
+          echo "::group::cf attestation details"
+          gh attestation verify ./dist/cf -R ${{ github.repository }} --format json | jq
           echo "::endgroup::"
           if [ $? -eq 0 ]; then
-            echo -e "\033[32m✓ ct attestation verified successfully\033[0m"
+            echo -e "\033[32m✓ cf attestation verified successfully\033[0m"
           else
-            echo -e "\033[31m✗ ct attestation verification failed\033[0m"
+            echo -e "\033[31m✗ cf attestation verification failed\033[0m"
             exit 1
           fi
 
@@ -462,12 +786,36 @@ jobs:
           cache: false
 
       - name: 🚀 Deploy application to Toolshed (Staging)
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@1530429296e979861824d74fb800013190b5dee0
         with:
           host: ${{ secrets.BASTION_HOST }}
           username: bastion
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
-          script: /opt/ct/deploy.sh ${{ vars.DEPLOYMENT_ENVIRONMENT }} ${{ github.sha }}
+          script: /opt/cf/deploy.sh ${{ vars.DEPLOYMENT_ENVIRONMENT }} ${{ github.sha }}
+
+  # Automatic deployment to rapids during toolshed migration
+  deploy-rapids:
+    name: "Deploy to Rapids (Staging)"
+    if: github.ref == 'refs/heads/main'
+    needs: ["attest-binaries"]
+    runs-on: ubuntu-latest
+    environment: toolshed
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+        with:
+          cache: false
+
+      - name: 🚀 Deploy application to Rapids (Staging)
+        uses: appleboy/ssh-action@1530429296e979861824d74fb800013190b5dee0
+        with:
+          host: ${{ secrets.BASTION_HOST }}
+          username: bastion
+          key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
+          script: /opt/cf/deploy.sh rapids ${{ github.sha }} --skip-clusterduck
 
   # Deploy shell static assets to staging GCS bucket
   deploy-shell-staging:
@@ -475,7 +823,10 @@ jobs:
     if: github.ref == 'refs/heads/main'
     needs:
       [
+        "test",
+        "check",
         "pattern-integration-test",
+        "pattern-reload-integration-test",
         "pattern-unit-test",
         "package-integration-test",
         "cli-integration-test",
@@ -528,20 +879,20 @@ jobs:
       - name: 🧩 Run post-deploy Patterns integration tests against Toolshed (Staging)
         id: run_tests
         continue-on-error: true
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@1530429296e979861824d74fb800013190b5dee0
         with:
           host: ${{ secrets.BASTION_HOST }}
           username: bastion
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
           command_timeout: 20m
           script: |
-            /opt/ct/run-pattern-tests-against-toolshed.sh ${{ github.sha }} \
+            /opt/cf/run-pattern-tests-against-toolshed.sh ${{ github.sha }} \
               https://toolshed.saga-castor.ts.net \
               https://toolshed.saga-castor.ts.net
 
       - name: 📥 Retrieve test logs on failure
         if: steps.run_tests.outcome == 'failure'
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@1530429296e979861824d74fb800013190b5dee0
         with:
           host: ${{ secrets.BASTION_HOST }}
           username: bastion

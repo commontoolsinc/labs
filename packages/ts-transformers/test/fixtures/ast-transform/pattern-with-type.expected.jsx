@@ -1,8 +1,40 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { computed, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface MyInput {
     value: number;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    input: {
+        value: number;
+    };
+}, number>(({ input }) => input.value * 2, {
+    type: "object",
+    properties: {
+        input: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["value"]
+        }
+    },
+    required: ["input"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-with-type
 // Verifies: pattern with inline typed parameter generates input and output schemas
 //   pattern((input: MyInput) => ...)   → pattern((input) => ..., inputSchema, outputSchema)
@@ -10,25 +42,9 @@ interface MyInput {
 // Context: Identical structure to pattern-with-name-and-type; confirms consistent behavior
 export default pattern((input: MyInput) => {
     return {
-        result: __ctHelpers.derive({
-            type: "object",
-            properties: {
-                input: {
-                    type: "object",
-                    properties: {
-                        value: {
-                            type: "number"
-                        }
-                    },
-                    required: ["value"]
-                }
-            },
-            required: ["input"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { input: {
+        result: __cfLift_1({ input: {
                 value: input.key("value")
-            } }, ({ input: input_1 }) => input.value * 2),
+            } }).for(["__patternResult", "result"], true)
     };
 }, {
     type: "object",
@@ -38,17 +54,18 @@ export default pattern((input: MyInput) => {
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         result: {
-            type: "number",
-            asOpaque: true
+            type: "number"
         }
     },
     required: ["result"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

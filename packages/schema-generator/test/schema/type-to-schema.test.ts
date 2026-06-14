@@ -27,7 +27,7 @@ describe("Schema: type-to-schema parity", () => {
     expect(uNewValues?.items?.type).toBe("string");
     // PatternInput
     const iValues = i.properties?.values as any;
-    expect(iValues?.asCell).toBe(true);
+    expect(iValues?.asCell).toEqual(["cell"]);
     expect(iValues?.type).toBe("array");
     expect(iValues?.items?.type).toBe("string");
     // PatternOutput
@@ -35,7 +35,8 @@ describe("Schema: type-to-schema parity", () => {
     expect(oValues?.type).toBe("array");
     expect(oValues?.items?.type).toBe("string");
     const upd = o.properties?.updater as any;
-    expect(upd.asStream).toBe(true);
+    expect(upd.asCell).toEqual(["stream"]);
+    expect(upd.asStream).toBeUndefined();
     expect(upd.$ref).toBe("#/$defs/UpdaterInput");
     const defU = (o as any).$defs?.UpdaterInput as any;
     expect(defU.type).toBe("object");

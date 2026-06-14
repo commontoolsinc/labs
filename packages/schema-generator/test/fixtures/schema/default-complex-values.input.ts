@@ -1,7 +1,7 @@
 // Tests Default<T, V> with complex default values
 // Arrays, objects, nested structures
 
-import { Default } from "commontools";
+import { Default } from "commonfabric";
 
 interface Config {
   timeout: number;

@@ -254,10 +254,10 @@ pieces via CLI.
 
 ```bash
 # Deploy google-auth
-ct piece new google-auth.tsx
+cf piece new google-auth.tsx
 
 # Deploy gmail-importer
-ct piece new gmail-importer.tsx
+cf piece new gmail-importer.tsx
 ```
 
 #### 2. Authenticate with Google Auth piece
@@ -268,7 +268,7 @@ Navigate to the google-auth piece in browser and complete OAuth flow.
 
 ```bash
 # Format: source/path target/path
-ct piece link \
+cf piece link \
   GOOGLE_AUTH_PIECE_ID/auth \
   GMAIL_IMPORTER_PIECE_ID/overrideAuth
 ```
@@ -283,7 +283,7 @@ ct piece link \
 
 ```bash
 # Check that overrideAuth is populated
-ct piece inspect --piece GMAIL_IMPORTER_PIECE_ID
+cf piece inspect --piece GMAIL_IMPORTER_PIECE_ID
 ```
 
 You should see `overrideAuth` in the Source (Inputs) with token, user info, etc.
@@ -301,7 +301,7 @@ You should see `overrideAuth` in the Source (Inputs) with token, user info, etc.
    ```
    This optional input is what receives the linked auth data.
 
-4. **Check "Reading From" in inspect**: After linking, `ct piece inspect` shows:
+4. **Check "Reading From" in inspect**: After linking, `cf piece inspect` shows:
    ```
    --- Reading From ---
      - sourcePieceId (Google Auth (email@example.com))

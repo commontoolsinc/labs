@@ -1,27 +1,38 @@
-import * as __ctHelpers from "commontools";
-import { Writable, pattern } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { Writable, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 // FIXTURE: collections-empty
 // Verifies: empty arrays and objects produce valid degenerate schemas
 //   cell([]) → cell([], { type: "array", items: false })
 //   cell({}) → cell({}, { type: "object", properties: {} })
 export default pattern(() => {
     // Empty array
-    const _emptyArray = Writable.of<string[]>([], {
+    const _emptyArray = new Writable<string[]>([], {
         type: "array",
         items: {
             type: "string"
         }
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_emptyArray", true);
     // Empty object
-    const _emptyObject = Writable.of({}, {
+    const _emptyObject = new Writable({}, {
         type: "object",
         properties: {}
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema).for("_emptyObject", true);
     return {
-        emptyArray: _emptyArray,
-        emptyObject: _emptyObject,
+        emptyArray: _emptyArray.for(["__patternResult", "emptyArray"], true),
+        emptyObject: _emptyObject.for(["__patternResult", "emptyObject"], true)
     };
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         emptyArray: {
@@ -29,17 +40,16 @@ export default pattern(() => {
             items: {
                 type: "string"
             },
-            asCell: true
+            asCell: ["cell"]
         },
         emptyObject: {
             type: "object",
             properties: {},
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["emptyArray", "emptyObject"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);

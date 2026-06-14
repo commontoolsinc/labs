@@ -291,7 +291,7 @@ This branch adds automatic schema injection for:
 - [ ] generateObject() + cell(): Both transformed
 - [ ] All four functions in one file
 
-#### B. Nested in CommonTools Functions
+#### B. Nested in Common Fabric Functions
 
 **Contexts:**
 
@@ -331,7 +331,7 @@ This branch adds automatic schema injection for:
 - [ ] `wish({ query: "query" }, schema)` → leave unchanged
 - [ ] `generateObject({ schema })` → leave unchanged
 
-#### C. Non-CommonTools Functions
+#### C. Non-Common Fabric Functions
 
 **Should ignore:**
 
@@ -383,7 +383,7 @@ This branch adds automatic schema injection for:
 - [ ] Objects have `properties` and `required`
 - [ ] Arrays have `items`
 - [ ] Unions use `anyOf` or appropriate construct
-- [ ] All schemas have `as const satisfies __ctHelpers.JSONSchema`
+- [ ] All schemas have `as const satisfies __cfHelpers.JSONSchema`
 
 #### B. Complex Schema Structures
 

@@ -251,7 +251,7 @@ export function createParameterFromBindings(
 
 /**
  * Generate both property name and param name for an expression,
- * following the standard pattern used across derive/opaque-ref bindings.
+ * following the standard pattern used across lift-applied/opaque-ref bindings.
  *
  * @param expressionText - Base text from the expression (typically from getExpressionText)
  * @param isIdentifier - Whether the expression is a simple identifier
@@ -323,4 +323,27 @@ export function normalizeBindingName(
   }
 
   return name;
+}
+
+export function extractBindingNames(binding: ts.BindingName): string[] {
+  if (ts.isIdentifier(binding)) {
+    return [binding.text];
+  }
+
+  const names: string[] = [];
+
+  if (ts.isObjectBindingPattern(binding)) {
+    for (const element of binding.elements) {
+      names.push(...extractBindingNames(element.name));
+    }
+  } else if (ts.isArrayBindingPattern(binding)) {
+    for (const element of binding.elements) {
+      if (ts.isOmittedExpression(element)) {
+        continue;
+      }
+      names.push(...extractBindingNames(element.name));
+    }
+  }
+
+  return names;
 }

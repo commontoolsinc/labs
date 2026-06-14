@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { cell, pattern, UI } from "commontools";
+import { cell, pattern, UI } from "commonfabric";
 
 interface State {
   items: Array<{ name: string }>;

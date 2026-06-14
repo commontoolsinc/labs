@@ -15,7 +15,7 @@ overly restrictive schemas:
 { "type": "number", "enum": [5] }
 ```
 
-This is technically correct but semantically wrong for CommonTools. A cell or
+This is technically correct but semantically wrong for Common Fabric. A cell or
 derive input initialized with `5` should accept any number, not just `5`.
 
 ## Current State

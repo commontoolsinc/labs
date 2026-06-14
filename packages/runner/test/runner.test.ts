@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import "@commontools/utils/equal-ignoring-symbols";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { NAME, type Pattern } from "../src/builder/types.ts";
+import "@commonfabric/utils/equal-ignoring-symbols";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { type Module, NAME, type Pattern } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { extractDefaultValues, mergeObjects } from "../src/runner.ts";
 import {
@@ -13,9 +13,47 @@ import {
   type MediaType,
   type URI,
 } from "../src/storage/interface.ts";
+import { trustExecutable } from "./support/trusted-builder.ts";
+import {
+  areNormalizedLinksSame,
+  getDerivedInternalCell,
+  getMetaLink,
+  isWriteRedirectLink,
+  parseLink,
+} from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+function runTrusted(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction | undefined,
+  executable: Pattern | Module,
+  argument: unknown,
+  resultCell: unknown,
+) {
+  return runtime.run(
+    tx,
+    trustExecutable(runtime, executable),
+    argument as never,
+    resultCell as never,
+  );
+}
+
+function setupTrusted(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction | undefined,
+  executable: Pattern | Module | undefined,
+  argument: unknown,
+  resultCell: unknown,
+) {
+  return runtime.setup(
+    tx,
+    trustExecutable(runtime, executable),
+    argument as never,
+    resultCell as never,
+  );
+}
 
 describe("runPattern", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -48,14 +86,16 @@ describe("runPattern", () => {
         description: "passthrough",
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
       nodes: [
         {
           module: {
             type: "passthrough",
           },
-          inputs: { value: { $alias: { path: ["argument", "input"] } } },
-          outputs: { value: { $alias: { path: ["internal", "output"] } } },
+          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: {
+            value: { $alias: { partialCause: "output", path: [] } },
+          },
         },
       ],
     } as Pattern;
@@ -64,29 +104,184 @@ describe("runPattern", () => {
       space,
       "should work with passthrough",
     );
-    const result = runtime.run(
+    const result = runTrusted(
+      runtime,
       undefined,
       pattern,
       { input: 1 },
       resultCell,
     );
 
-    const sourceCell = result.getSourceCell();
-    const sourceCellValue = await sourceCell!.pull();
-    expect(sourceCellValue).toMatchObject({
-      argument: { input: 1 },
-      internal: { output: 1 },
+    await resultCell.pull();
+    const argumentCellValue = resultCell.getArgumentCell()?.get();
+    expect(argumentCellValue).toEqual({ input: 1 });
+    const outputCell = getDerivedInternalCell(resultCell, {
+      partialCause: "output",
     });
-    expect(result.getRaw()).toEqual({
-      output: {
-        $alias: {
-          path: ["internal", "output"],
-          cell: result.getSourceCell()?.entityId,
-        },
-      },
-    });
+    const outputLink = outputCell.getAsNormalizedFullLink();
+    // getDerivedInternalCell doesn't generate a redirect link,
+    // but that's what we want to match, so add that property.
+    expect(
+      areNormalizedLinksSame(
+        parseLink((result.getRaw() as { output: unknown }).output, result)!,
+        { ...outputLink, overwrite: "redirect" },
+      ),
+    ).toBe(true);
     const resultValue = await result.pull();
     expect(resultValue).toEqual({ output: 1 });
+  });
+
+  it("writes internal aliases through derived internal cell manifest links", async () => {
+    const pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          input: { type: "number" },
+        },
+      },
+      resultSchema: {},
+      derivedInternalCells: [{
+        partialCause: "output",
+        schema: { type: "number", default: 0 },
+        scope: "space",
+      }],
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
+      nodes: [
+        {
+          module: {
+            type: "passthrough",
+          },
+          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: {
+            value: { $alias: { partialCause: "output", path: [] } },
+          },
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "derived internal passthrough",
+    );
+    const result = runTrusted(
+      runtime,
+      undefined,
+      pattern,
+      { input: 5 },
+      resultCell,
+    );
+
+    await resultCell.pull();
+    const internalManifest = resultCell.getMetaRaw("internal");
+    expect(internalManifest).toBeDefined();
+    const rawLink = Array.isArray(internalManifest)
+      ? internalManifest.find((entry) => entry?.partialCause === "output").link
+      : undefined;
+    expect(isWriteRedirectLink(rawLink)).toBe(true);
+
+    const derivedLink = parseLink(rawLink, resultCell);
+    expect(derivedLink).toBeDefined();
+    expect(derivedLink!.id).not.toBe(resultCell.getAsNormalizedFullLink().id);
+    expect(derivedLink!.path).toEqual([]);
+    expect(derivedLink!.schema).toEqual({ type: "number", default: 0 });
+
+    const derivedCell = runtime.getCellFromLink(derivedLink!);
+    expect(await derivedCell.get()).toBe(5);
+    expect(await result.pull()).toEqual({ output: 5 });
+  });
+
+  it("sets scoped write-redirect metadata links for argument and internal cells", async () => {
+    const argumentSchema = {
+      type: "object",
+      properties: {
+        input: { type: "number" },
+      },
+      required: ["input"],
+    } as const;
+    const resultSchema = {
+      type: "object",
+      scope: "user",
+      properties: {
+        output: { type: "number" },
+      },
+      required: ["output"],
+    } as const;
+    const pattern = {
+      argumentSchema,
+      resultSchema,
+      derivedInternalCells: [
+        {
+          partialCause: "output",
+          schema: { type: "number" },
+        },
+      ],
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
+      nodes: [
+        {
+          module: {
+            type: "passthrough",
+          },
+          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: {
+            value: { $alias: { partialCause: "output", path: [] } },
+          },
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "sets scoped write-redirect metadata links",
+      resultSchema,
+      undefined,
+      "user",
+    );
+    const result = runTrusted(
+      runtime,
+      undefined,
+      pattern,
+      { input: 7 },
+      resultCell,
+    );
+
+    await resultCell.pull();
+
+    const resultCellLink = resultCell.getAsNormalizedFullLink();
+    const argumentLink = getMetaLink(resultCell, "argument");
+
+    expect(resultCellLink.scope).toBe("user");
+    expect(resultCell.getMetaRaw("schema")).toEqual(resultSchema);
+    expect(argumentLink).toBeDefined();
+    expect(argumentLink!.path).toEqual([]);
+    expect(argumentLink!.space).toBe(space);
+    expect(argumentLink!.scope).toBe("user");
+    expect(argumentLink!.schema).toEqual(argumentSchema);
+    expect(argumentLink!.overwrite).toBe("redirect");
+
+    const argumentCell = runtime.getCellFromLink(argumentLink!);
+    expect(argumentCell.get()).toEqual({ input: 7 });
+    const outputCell = getDerivedInternalCell(resultCell, {
+      partialCause: "output",
+      schema: pattern.derivedInternalCells![0].schema,
+    });
+    const outputLink = outputCell.getAsNormalizedFullLink();
+    expect(outputLink.path).toEqual([]);
+    expect(outputLink.space).toBe(space);
+    expect(outputLink.scope).toBe("user");
+    expect(outputLink.schema).toEqual({ type: "number" });
+    expect(getMetaLink(argumentCell, "result")).toEqual({
+      ...resultCellLink,
+      schema: resultSchema,
+      overwrite: "redirect",
+    });
+    // getDerivedInternalCell doesn't generate a redirect link,
+    // but that's what we want to match, so add that property.
+    expect(
+      areNormalizedLinksSame(
+        parseLink((result.getRaw() as { output: unknown }).output, result)!,
+        { ...outputLink, overwrite: "redirect" },
+      ),
+    ).toBe(true);
   });
 
   it("should work with nested patterns", async () => {
@@ -99,17 +294,21 @@ describe("runPattern", () => {
         },
       },
       resultSchema: {},
-      result: { $alias: { cell: 1, path: ["internal", "output"] } },
+      result: { $alias: { partialCause: "output", path: [], defer: 1 } },
       nodes: [
         {
           module: {
             type: "passthrough",
           },
           inputs: {
-            value: { $alias: { cell: 1, path: ["argument", "input"] } },
+            value: {
+              $alias: { cell: "argument", path: ["input"], defer: 1 },
+            },
           },
           outputs: {
-            value: { $alias: { cell: 1, path: ["internal", "output"] } },
+            value: {
+              $alias: { partialCause: "output", path: [], defer: 1 },
+            },
           },
         },
       ],
@@ -124,12 +323,12 @@ describe("runPattern", () => {
         },
       },
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "output"] } } },
+      result: { result: { $alias: { partialCause: "output", path: [] } } },
       nodes: [
         {
           module: { type: "pattern", implementation: innerPattern },
-          inputs: { input: { $alias: { path: ["argument", "value"] } } },
-          outputs: { $alias: { path: ["internal", "output"] } },
+          inputs: { input: { $alias: { cell: "argument", path: ["value"] } } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
         },
       ],
     } as Pattern;
@@ -138,7 +337,8 @@ describe("runPattern", () => {
       space,
       "should work with nested patterns",
     );
-    const result = runtime.run(
+    const result = runTrusted(
+      runtime,
       undefined,
       outerPattern,
       { value: 5 },
@@ -153,15 +353,15 @@ describe("runPattern", () => {
     const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "result"] } } },
+      result: { result: { $alias: { partialCause: "result", path: [] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["argument", "value"] } },
-          outputs: { $alias: { path: ["internal", "result"] } },
+          inputs: { $alias: { cell: "argument", path: ["value"] } },
+          outputs: { $alias: { partialCause: "result", path: [] } },
         },
       ],
     };
@@ -173,7 +373,8 @@ describe("runPattern", () => {
       undefined,
       tx,
     );
-    const result = runtime.run(
+    const result = runTrusted(
+      runtime,
       tx,
       mockPattern,
       { value: 1 },
@@ -193,7 +394,7 @@ describe("runPattern", () => {
     const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "result"] } } },
+      result: { result: { $alias: { partialCause: "result", path: [] } } },
       nodes: [
         {
           module: {
@@ -202,7 +403,7 @@ describe("runPattern", () => {
               ran = true;
             },
           },
-          inputs: { $alias: { path: ["argument", "value"] } },
+          inputs: { $alias: { cell: "argument", path: ["value"] } },
           outputs: {},
         },
       ],
@@ -212,9 +413,13 @@ describe("runPattern", () => {
       space,
       "should run a simple module with no outputs",
     );
-    const result = await runtime.runSynced(resultCell, mockPattern, {
-      value: 1,
-    });
+    const result = await runtime.runSynced(
+      resultCell,
+      trustExecutable(runtime, mockPattern),
+      {
+        value: 1,
+      },
+    );
     const resultValue = await result.pull();
     expect(resultValue).toEqual({ result: undefined });
     expect(ran).toBe(true);
@@ -226,7 +431,7 @@ describe("runPattern", () => {
     const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "result"] } } },
+      result: { result: { $alias: { partialCause: "result", path: [] } } },
       nodes: [
         {
           module: {
@@ -235,7 +440,7 @@ describe("runPattern", () => {
               ran = true;
             },
           },
-          inputs: { $alias: { path: ["argument", "other"] } },
+          inputs: { $alias: { cell: "argument", path: ["other"] } },
           outputs: {},
         },
       ],
@@ -245,9 +450,13 @@ describe("runPattern", () => {
       space,
       "should handle incorrect inputs gracefully",
     );
-    const result = await runtime.runSynced(resultCell, mockPattern, {
-      value: 1,
-    });
+    const result = await runtime.runSynced(
+      resultCell,
+      trustExecutable(runtime, mockPattern),
+      {
+        value: 1,
+      },
+    );
     const resultValue2 = await result.pull();
     expect(resultValue2).toEqual({ result: undefined });
     // We don't run the action if the arguments fail to validate
@@ -258,15 +467,19 @@ describe("runPattern", () => {
     const nestedPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { $alias: { cell: 1, path: ["internal", "result"] } },
+      result: { $alias: { partialCause: "result", path: [], defer: 1 } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { cell: 1, path: ["argument", "input"] } },
-          outputs: { $alias: { cell: 1, path: ["internal", "result"] } },
+          inputs: {
+            $alias: { cell: "argument", path: ["input"], defer: 1 },
+          },
+          outputs: {
+            $alias: { partialCause: "result", path: [], defer: 1 },
+          },
         },
       ],
     };
@@ -274,12 +487,12 @@ describe("runPattern", () => {
     const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "result"] } } },
+      result: { result: { $alias: { partialCause: "result", path: [] } } },
       nodes: [
         {
           module: { type: "pattern", implementation: nestedPattern },
-          inputs: { input: { $alias: { path: ["argument", "value"] } } },
-          outputs: { $alias: { path: ["internal", "result"] } },
+          inputs: { input: { $alias: { cell: "argument", path: ["value"] } } },
+          outputs: { $alias: { partialCause: "result", path: [] } },
         },
       ],
     };
@@ -288,7 +501,8 @@ describe("runPattern", () => {
       space,
       "should handle nested patterns",
     );
-    const result = runtime.run(
+    const result = runTrusted(
+      runtime,
       undefined,
       mockPattern,
       { value: 1 },
@@ -302,15 +516,15 @@ describe("runPattern", () => {
     const pattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { output: { $alias: { path: ["argument", "output"] } } },
+      result: { output: { $alias: { cell: "argument", path: ["output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["argument", "input"] } },
-          outputs: { $alias: { path: ["argument", "output"] } },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { cell: "argument", path: ["output"] } },
         },
       ],
     };
@@ -330,7 +544,8 @@ describe("runPattern", () => {
       "should allow passing a cell as a binding",
     );
 
-    const result = runtime.run(
+    const result = runTrusted(
+      runtime,
       undefined,
       pattern,
       inputCell,
@@ -358,15 +573,15 @@ describe("runPattern", () => {
     const pattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { output: { $alias: { path: ["argument", "output"] } } },
+      result: { output: { $alias: { cell: "argument", path: ["output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["argument", "input"] } },
-          outputs: { $alias: { path: ["argument", "output"] } },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { cell: "argument", path: ["output"] } },
         },
       ],
     };
@@ -389,7 +604,8 @@ describe("runPattern", () => {
     // Commit the initial values before running the pattern
     await tx.commit();
 
-    const result = runtime.run(
+    const result = runTrusted(
+      runtime,
       undefined,
       pattern,
       inputCell,
@@ -417,12 +633,7 @@ describe("runPattern", () => {
     expect(inputCellValue).toMatchObject({ input: 40, output: 40 });
 
     // Restart the pattern
-    runtime.run(
-      undefined,
-      pattern,
-      undefined,
-      result,
-    );
+    runTrusted(runtime, undefined, pattern, undefined, result);
 
     inputCellValue = await inputCell.pull();
     expect(inputCellValue).toMatchObject({ input: 40, output: 80 });
@@ -439,7 +650,7 @@ describe("runPattern", () => {
         required: ["input"],
       },
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "result"] } } },
+      result: { result: { $alias: { partialCause: "result", path: [] } } },
       nodes: [
         {
           module: {
@@ -447,8 +658,8 @@ describe("runPattern", () => {
             implementation: (args: { input: number; multiplier: number }) =>
               args.input * args.multiplier,
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "result"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { partialCause: "result", path: [] } },
         },
       ],
     };
@@ -459,12 +670,9 @@ describe("runPattern", () => {
       "default values test - partial",
     );
 
-    const resultWithPartial = runtime.run(
-      undefined,
-      pattern,
-      { input: 10 },
-      resultWithPartialCell,
-    );
+    const resultWithPartial = runTrusted(runtime, undefined, pattern, {
+      input: 10,
+    }, resultWithPartialCell);
     const partialValue = await resultWithPartial.pull();
     expect(partialValue).toEqual({ result: 20 });
 
@@ -474,7 +682,8 @@ describe("runPattern", () => {
       "default values test - all defaults",
     );
 
-    const resultWithDefaults = runtime.run(
+    const resultWithDefaults = runTrusted(
+      runtime,
       undefined,
       pattern,
       {},
@@ -504,7 +713,7 @@ describe("runPattern", () => {
         required: ["config"],
       },
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "result"] } } },
+      result: { result: { $alias: { partialCause: "result", path: [] } } },
       nodes: [
         {
           module: {
@@ -527,8 +736,8 @@ describe("runPattern", () => {
               }
             },
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "result"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { partialCause: "result", path: [] } },
         },
       ],
     };
@@ -537,22 +746,16 @@ describe("runPattern", () => {
       space,
       "complex schema test",
     );
-    const result = runtime.run(
-      undefined,
-      pattern,
-      { config: { values: [10, 20, 30, 40], operation: "avg" } },
-      resultCell,
-    );
+    const result = runTrusted(runtime, undefined, pattern, {
+      config: { values: [10, 20, 30, 40], operation: "avg" },
+    }, resultCell);
     const resultValue = await result.pull();
     expect(resultValue).toEqual({ result: 25 });
 
     // Test with a different operation
-    const result2 = runtime.run(
-      undefined,
-      pattern,
-      { config: { values: [10, 20, 30, 40], operation: "max" } },
-      resultCell,
-    );
+    const result2 = runTrusted(runtime, undefined, pattern, {
+      config: { values: [10, 20, 30, 40], operation: "max" },
+    }, resultCell);
     const result2Value = await result2.pull();
     expect(result2Value).toEqual({ result: 40 });
   });
@@ -575,8 +778,8 @@ describe("runPattern", () => {
       },
       resultSchema: {},
       result: {
-        result: { $alias: { path: ["internal", "result"] } },
-        options: { $alias: { path: ["argument", "options"] } },
+        result: { $alias: { partialCause: "result", path: [] } },
+        options: { $alias: { cell: "argument", path: ["options"] } },
       },
       nodes: [
         {
@@ -586,8 +789,8 @@ describe("runPattern", () => {
               return args.options.enabled ? args.input * args.options.value : 0;
             },
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "result"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { partialCause: "result", path: [] } },
         },
       ],
     };
@@ -597,12 +800,10 @@ describe("runPattern", () => {
       space,
       "merge defaults test",
     );
-    const result = runtime.run(
-      undefined,
-      pattern,
-      { options: { value: 10 }, input: 5 },
-      resultCell,
-    );
+    const result = runTrusted(runtime, undefined, pattern, {
+      options: { value: 10 },
+      input: 5,
+    }, resultCell);
 
     const resultValue = await result.pull() as any;
     expect(resultValue.options).toEqual({
@@ -617,10 +818,13 @@ describe("runPattern", () => {
     const pattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      initial: { internal: { counter: 0 } },
+      derivedInternalCells: [{
+        partialCause: "counter",
+        schema: { default: 0 },
+      }],
       result: {
         [NAME]: "counter",
-        counter: { $alias: { path: ["internal", "counter"] } },
+        counter: { $alias: { partialCause: "counter", path: [] } },
       },
       nodes: [
         {
@@ -630,8 +834,8 @@ describe("runPattern", () => {
               return input.value;
             },
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "counter"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { partialCause: "counter", path: [] } },
         },
       ],
     };
@@ -642,12 +846,7 @@ describe("runPattern", () => {
     );
 
     // First run
-    runtime.run(
-      undefined,
-      pattern,
-      { value: 1 },
-      resultCell,
-    );
+    runTrusted(runtime, undefined, pattern, { value: 1 }, resultCell);
     let cellValue = await resultCell.pull();
     expect(cellValue?.[NAME]).toEqual("counter");
     expect(cellValue?.counter).toEqual(1);
@@ -658,18 +857,69 @@ describe("runPattern", () => {
     await tx.commit();
 
     // Second run with same pattern but different argument
-    runtime.run(
-      undefined,
-      pattern,
-      { value: 2 },
-      resultCell,
-    );
+    runTrusted(runtime, undefined, pattern, { value: 2 }, resultCell);
     cellValue = await resultCell.pull();
     expect(cellValue?.[NAME]).toEqual("my counter");
     expect(cellValue?.counter).toEqual(2);
   });
 
-  it("should create separate copies of initial values for each pattern instance", async () => {
+  it("should refresh NAME when the pattern changes", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {},
+      resultSchema: {},
+      derivedInternalCells: [{
+        partialCause: "counter",
+        schema: { default: 0 },
+      }],
+      result: {
+        [NAME]: "counter",
+        counter: { $alias: { partialCause: "counter", path: [] } },
+      },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (input: any) => input.value,
+          },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { partialCause: "counter", path: [] } },
+        },
+      ],
+    };
+
+    const renamedPattern: Pattern = {
+      ...pattern,
+      result: {
+        [NAME]: "renamed counter",
+        counter: { $alias: { partialCause: "counter", path: [] } },
+      },
+    };
+
+    const resultCell = runtime.getCell<any>(
+      space,
+      "state preservation across pattern changes test",
+    );
+
+    runTrusted(runtime, undefined, pattern, { value: 1 }, resultCell);
+    let cellValue = await resultCell.pull();
+    expect(cellValue?.[NAME]).toEqual("counter");
+    expect(cellValue?.counter).toEqual(1);
+
+    runTrusted(runtime, undefined, renamedPattern, { value: 2 }, resultCell);
+    cellValue = await resultCell.pull();
+    expect(cellValue?.[NAME]).toEqual("renamed counter");
+    expect(cellValue?.counter).toEqual(2);
+  });
+
+  it("should create separate copies of initial values (frozen)", async () => {
+    // `getRaw()` returns frozen objects; verify independence via
+    // `getRawUntyped({ frozen: false })` for mutable access.
+    const sm = StorageManager.emulate({ as: signer });
+    const localRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+    });
+
     const pattern: Pattern = {
       argumentSchema: {
         type: "object",
@@ -677,16 +927,22 @@ describe("runPattern", () => {
           input: { type: "number" },
         },
       },
-      initial: {
-        internal: {
-          counter: 10,
-          nested: { value: "initial" },
+      derivedInternalCells: [
+        {
+          partialCause: "nested",
+          scope: "space",
+          schema: { default: { value: "initial" } },
         },
-      },
+        {
+          partialCause: "counter",
+          scope: "space",
+          schema: { default: 10 },
+        },
+      ],
       resultSchema: {},
       result: {
-        counter: { $alias: { path: ["internal", "counter"] } },
-        nested: { $alias: { path: ["internal", "nested"] } },
+        counter: { $alias: { partialCause: "counter", path: [] } },
+        nested: { $alias: { partialCause: "nested", path: [] } },
       },
       nodes: [
         {
@@ -698,18 +954,19 @@ describe("runPattern", () => {
               };
             },
           },
-          inputs: { $alias: { path: ["argument", "input"] } },
-          outputs: { $alias: { path: ["internal", "counter"] } },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { partialCause: "counter", path: [] } },
         },
       ],
     };
 
     // Create first instance
-    const result1Cell = runtime.getCell(
+    const result1Cell = localRuntime.getCell(
       space,
-      "should create separate copies of initial values 1",
+      "separate copies modern 1",
     );
-    const result1 = runtime.run(
+    const result1 = runTrusted(
+      localRuntime,
       undefined,
       pattern,
       { input: 5 },
@@ -718,11 +975,12 @@ describe("runPattern", () => {
     await result1.pull();
 
     // Create second instance
-    const result2Cell = runtime.getCell(
+    const result2Cell = localRuntime.getCell(
       space,
-      "should create separate copies of initial values 2",
+      "separate copies modern 2",
     );
-    const result2 = runtime.run(
+    const result2 = runTrusted(
+      localRuntime,
       undefined,
       pattern,
       { input: 10 },
@@ -730,22 +988,73 @@ describe("runPattern", () => {
     );
     await result2.pull();
 
-    // Get the internal state objects
-    // We cast away our Immutable, so we can do this test
-    const internal1 = (result1.getSourceCell()?.getRaw() as any).internal;
-    const internal2 = (result2.getSourceCell()?.getRaw() as any).internal;
+    // Use getRawUntyped({ frozen: false }) for mutable copies
+    const internalCell1 = getDerivedInternalCell(result1, {
+      partialCause: "nested",
+    });
+    const internalCell2 = getDerivedInternalCell(result2, {
+      partialCause: "nested",
+    });
+    const nested1 = internalCell1.getRawUntyped({ frozen: false }) as any;
+    const nested2 = internalCell2.getRawUntyped({ frozen: false }) as any;
 
     // Verify they are different objects
-    expect(internal1).not.toBe(internal2);
-    expect(internal1.nested).not.toBe(internal2.nested);
+    expect(nested1).not.toBe(nested2);
 
-    // Modify nested object in first instance
-    internal1.nested.value = "modified";
+    // Modify nested object in first instance's mutable copy
+    nested1.value = "modified";
 
     // Verify second instance is unaffected
-    expect(internal2.nested.value).toBe("initial");
-    const result2Value = await result2.pull() as any;
-    expect(result2Value.nested.value).toBe("initial");
+    expect(nested2.value).toBe("initial");
+
+    await localRuntime.storageManager.synced();
+    await localRuntime.dispose();
+    await sm.close();
+  });
+
+  it("materializes derived internal defaults from descriptor schemas", async () => {
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      derivedInternalCells: [
+        {
+          partialCause: "history",
+          schema: { type: "array", default: [] },
+        },
+        {
+          partialCause: "count",
+          schema: { type: "number", default: 0 },
+        },
+      ],
+      resultSchema: {
+        type: "object",
+        properties: {
+          history: { type: "array" },
+          count: { type: "number" },
+        },
+      },
+      result: {
+        history: { $alias: { partialCause: "history", path: [] } },
+        count: { $alias: { partialCause: "count", path: [] } },
+      },
+      nodes: [],
+    };
+
+    const result = runTrusted(
+      runtime,
+      undefined,
+      pattern,
+      {},
+      runtime.getCell(space, "schema default derived internals"),
+    );
+
+    expect(await result.key("history").pull()).toEqual([]);
+    expect(await result.key("count").pull()).toBe(0);
+    expect(
+      getDerivedInternalCell(result, {
+        partialCause: "history",
+        schema: { type: "array", default: [] },
+      }).getRawUntyped(),
+    ).toEqual([]);
   });
 });
 
@@ -773,7 +1082,7 @@ describe("storage subscription", () => {
     };
 
     const uri = "pattern-cache-test" as URI;
-    const key = `${space}/${uri}`;
+    const key = `${space}/space/${uri}`;
     internals.resultPatternCache.set(key, "cached-pattern");
 
     const notification = {
@@ -824,12 +1133,14 @@ describe("setup/start", () => {
         properties: { input: { type: "number" }, output: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
       nodes: [
         {
           module: { type: "passthrough" },
-          inputs: { value: { $alias: { path: ["argument", "input"] } } },
-          outputs: { value: { $alias: { path: ["internal", "output"] } } },
+          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: {
+            value: { $alias: { partialCause: "output", path: [] } },
+          },
         },
       ],
     };
@@ -837,7 +1148,7 @@ describe("setup/start", () => {
     const resultCell = runtime.getCell(space, "setup does not schedule");
 
     // Only setup – should not run the node yet
-    runtime.setup(undefined, pattern, { input: 1 }, resultCell);
+    setupTrusted(runtime, undefined, pattern, { input: 1 }, resultCell);
 
     // Output hasn't been computed yet
     let cellValue = await resultCell.pull();
@@ -849,6 +1160,67 @@ describe("setup/start", () => {
     expect(cellValue).toEqual({ output: 1 });
   });
 
+  it("setup ignores exhausted retry errors and still resolves", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+      },
+      resultSchema: {},
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
+      nodes: [],
+    };
+
+    const resultCell = runtime.getCell(space, "setup ignores retry errors");
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    runtime.editWithRetry = (() =>
+      Promise.resolve({
+        error: {
+          name: "StorageTransactionAborted" as const,
+          message: "always-fail",
+          reason: "always-fail",
+        },
+      })) as typeof runtime.editWithRetry;
+
+    try {
+      await expect(runtime.setup(undefined, pattern, { input: 1 }, resultCell))
+        .resolves.toBe(resultCell);
+    } finally {
+      runtime.editWithRetry = originalEditWithRetry;
+    }
+  });
+
+  it("setup rethrows callback failures from editWithRetry", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+      },
+      resultSchema: {},
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
+      nodes: [],
+    };
+
+    const resultCell = runtime.getCell(space, "setup rethrows callback errors");
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    const thrown = new Error("boom");
+    runtime.editWithRetry = (() =>
+      Promise.resolve({
+        error: {
+          name: "StorageTransactionAborted" as const,
+          message: `editWithRetry action threw: ${thrown}`,
+          reason: thrown,
+        },
+      })) as typeof runtime.editWithRetry;
+
+    try {
+      await expect(runtime.setup(undefined, pattern, { input: 1 }, resultCell))
+        .rejects.toThrow("boom");
+    } finally {
+      runtime.editWithRetry = originalEditWithRetry;
+    }
+  });
+
   it("setup with same pattern updates argument without restart", async () => {
     const pattern: Pattern = {
       argumentSchema: {
@@ -856,24 +1228,26 @@ describe("setup/start", () => {
         properties: { input: { type: "number" }, output: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
       nodes: [
         {
           module: { type: "passthrough" },
-          inputs: { value: { $alias: { path: ["argument", "input"] } } },
-          outputs: { value: { $alias: { path: ["internal", "output"] } } },
+          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: {
+            value: { $alias: { partialCause: "output", path: [] } },
+          },
         },
       ],
     };
 
     const resultCell = runtime.getCell(space, "setup updates argument");
-    runtime.setup(undefined, pattern, { input: 1 }, resultCell);
+    setupTrusted(runtime, undefined, pattern, { input: 1 }, resultCell);
     runtime.start(resultCell);
     let cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 1 });
 
     // Update only via setup; scheduler should react to argument change
-    runtime.setup(undefined, pattern, { input: 2 }, resultCell);
+    setupTrusted(runtime, undefined, pattern, { input: 2 }, resultCell);
     cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 2 });
   });
@@ -885,21 +1259,21 @@ describe("setup/start", () => {
         properties: { input: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (v: { input: number }) => v.input,
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "output"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
         },
       ],
     };
 
     const resultCell = runtime.getCell(space, "start idempotent");
-    runtime.setup(undefined, pattern, { input: 7 }, resultCell);
+    setupTrusted(runtime, undefined, pattern, { input: 7 }, resultCell);
     runtime.start(resultCell);
     runtime.start(resultCell);
 
@@ -907,7 +1281,7 @@ describe("setup/start", () => {
     expect(cellValue).toEqual({ output: 7 });
 
     // Change input and ensure only a single recomputation occurs in effect
-    runtime.setup(undefined, pattern, { input: 9 }, resultCell);
+    setupTrusted(runtime, undefined, pattern, { input: 9 }, resultCell);
     cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 9 });
   });
@@ -919,21 +1293,21 @@ describe("setup/start", () => {
         properties: { input: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (v: { input: number }) => v.input,
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "output"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
         },
       ],
     };
 
     const resultCell = runtime.getCell(space, "stop and restart");
-    runtime.setup(undefined, pattern, { input: 1 }, resultCell);
+    setupTrusted(runtime, undefined, pattern, { input: 1 }, resultCell);
     runtime.start(resultCell);
     let cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 1 });
@@ -942,7 +1316,7 @@ describe("setup/start", () => {
     runtime.runner.stop(resultCell);
 
     // Change argument via setup; without start nothing should recompute yet
-    runtime.setup(undefined, pattern, { input: 5 }, resultCell);
+    setupTrusted(runtime, undefined, pattern, { input: 5 }, resultCell);
     cellValue = await resultCell.pull();
     // Still the old output
     expect(cellValue).toEqual({ output: 1 });
@@ -960,11 +1334,17 @@ describe("setup/start", () => {
     };
 
     const resultCell = runtime.getCell(space, "setup with module");
-    runtime.setup(undefined, mod as any, { input: 2 } as any, resultCell);
+    setupTrusted(
+      runtime,
+      undefined,
+      mod as any,
+      { input: 2 } as any,
+      resultCell,
+    );
 
     // Not started yet; no output
     let cellValue = await resultCell.pull();
-    expect(cellValue).toEqual({ output: undefined });
+    expect(cellValue).toEqual(undefined);
 
     runtime.start(resultCell);
     cellValue = await resultCell.pull();
@@ -978,25 +1358,28 @@ describe("setup/start", () => {
         properties: { input: { type: "number" }, output: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
       nodes: [
         {
           module: { type: "passthrough" },
-          inputs: { value: { $alias: { path: ["argument", "input"] } } },
-          outputs: { value: { $alias: { path: ["internal", "output"] } } },
+          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: {
+            value: { $alias: { partialCause: "output", path: [] } },
+          },
         },
       ],
     };
 
     const resultCell = runtime.getCell(space, "setup reuse previous pattern");
-    runtime.setup(undefined, pattern, { input: 5 }, resultCell);
+    setupTrusted(runtime, undefined, pattern, { input: 5 }, resultCell);
     runtime.start(resultCell);
     const cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 5 });
 
     // Stop and setup without specifying pattern; should reuse stored one
     runtime.runner.stop(resultCell);
-    runtime.setup(
+    setupTrusted(
+      runtime,
       undefined,
       undefined as any,
       { input: 10 } as any,
@@ -1005,17 +1388,19 @@ describe("setup/start", () => {
     // Not started yet; result still aliases internal and shows previous value
     const rawValue = resultCell.get();
     expect(rawValue).toMatchObjectIgnoringSymbols({
-      output: { $alias: { path: ["internal", "output"] } },
+      output: { $alias: { partialCause: "output", path: [] } },
     });
 
-    // Verify a pattern id is present after setup without passing pattern
-    const source = resultCell.getSourceCell()!;
-    const typeValue = source.key("$TYPE").get();
-    expect(typeof typeValue).toEqual("string");
+    // Verify a pattern link is present after setup without passing the pattern
+    const patternValue = resultCell.getMetaRaw("pattern");
+    expect(patternValue).toBeDefined();
 
-    // Also verify the argument was updated in the process cell
-    const sourceValue = await source.pull();
-    expect((sourceValue as any).argument.input).toEqual(10);
+    // Also verify the argument metadata cell was updated
+    await resultCell.pull();
+    const argumentValue = runtime.getCellFromLink<{ input: number }>(
+      getMetaLink(resultCell, "argument")!,
+    ).get();
+    expect(argumentValue.input).toEqual(10);
 
     // Start again (scheduling) just to ensure no errors
     runtime.start(resultCell);
@@ -1029,15 +1414,15 @@ describe("setup/start", () => {
         properties: { input: { type: "number" }, output: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["argument", "output"] } } },
+      result: { output: { $alias: { cell: "argument", path: ["output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["argument", "input"] } },
-          outputs: { $alias: { path: ["argument", "output"] } },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { cell: "argument", path: ["output"] } },
         },
       ],
     };
@@ -1053,7 +1438,7 @@ describe("setup/start", () => {
     await tx.commit();
 
     const resultCell = runtime.getCell(space, "setup with cell arg");
-    runtime.setup(undefined, pattern, inputCell, resultCell);
+    setupTrusted(runtime, undefined, pattern, inputCell, resultCell);
     runtime.start(resultCell);
     let cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 6 });
@@ -1180,23 +1565,24 @@ describe("runner utils", () => {
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { path: ["internal", "output"] } } },
+        result: { output: { $alias: { partialCause: "output", path: [] } } },
         nodes: [
           {
             module: {
               type: "javascript",
               implementation: (v: { input: number }) => v.input * 2,
             },
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal", "output"] } },
+            inputs: { $alias: { cell: "argument", path: [] } },
+            outputs: { $alias: { partialCause: "output", path: [] } },
           },
         ],
       };
 
       const resultCell = runtime.getCell(space, "start returns promise");
-      runtime.setup(undefined, pattern, { input: 5 }, resultCell);
+      setupTrusted(runtime, undefined, pattern, { input: 5 }, resultCell);
       const result = await runtime.start(resultCell);
       expect(result).toBe(true);
+      await resultCell.pull();
       await runtime.idle();
       expect(resultCell.getAsQueryResult()).toEqual({ output: 10 });
     });
@@ -1208,27 +1594,145 @@ describe("runner utils", () => {
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { path: ["internal", "output"] } } },
+        result: { output: { $alias: { partialCause: "output", path: [] } } },
         nodes: [
           {
             module: {
               type: "javascript",
               implementation: (v: { input: number }) => v.input,
             },
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal", "output"] } },
+            inputs: { $alias: { cell: "argument", path: [] } },
+            outputs: { $alias: { partialCause: "output", path: [] } },
           },
         ],
       };
 
       const resultCell = runtime.getCell(space, "start idempotent");
-      runtime.setup(undefined, pattern, { input: 1 }, resultCell);
+      setupTrusted(runtime, undefined, pattern, { input: 1 }, resultCell);
       await runtime.start(resultCell);
       await runtime.idle();
 
       // Second call should return true immediately
       const result = await runtime.start(resultCell);
       expect(result).toBe(true);
+    });
+
+    it("does not register duplicate handlers while resumed dependencies sync", async () => {
+      const valueAlias = {
+        $alias: {
+          cell: "argument",
+          path: ["value"],
+          scope: "space",
+          schema: { type: "number", default: 0 },
+        },
+      };
+      const streamAlias = {
+        $alias: {
+          partialCause: { stream: "increment" },
+          path: [],
+          scope: "space",
+          schema: true,
+        },
+      };
+      const pattern: Pattern = {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            value: {
+              type: "number",
+              default: 0,
+              asCell: ["cell"],
+            },
+          },
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            value: { type: "number" },
+            increment: { asCell: ["stream", "opaque"] },
+          },
+        },
+        derivedInternalCells: [
+          {
+            partialCause: { stream: "increment" },
+            schema: { default: { $stream: true } },
+            scope: "space",
+          },
+        ],
+        result: {
+          value: valueAlias,
+          increment: streamAlias,
+        },
+        nodes: [
+          {
+            module: {
+              type: "javascript",
+              wrapper: "handler",
+              argumentSchema: {
+                type: "object",
+                properties: {
+                  $event: false,
+                  $ctx: {
+                    type: "object",
+                    properties: {
+                      value: {
+                        type: "number",
+                        asCell: ["cell"],
+                      },
+                    },
+                    required: ["value"],
+                  },
+                },
+                required: ["$ctx"],
+              },
+              implementation: (_event: unknown, { value }: any) => {
+                value.set(value.get() + 1);
+              },
+            },
+            inputs: {
+              $ctx: { value: valueAlias },
+              $event: streamAlias,
+            },
+            outputs: {},
+          },
+        ],
+      };
+
+      const resultCell = runtime.getCell<any>(
+        space,
+        "concurrent start dedupe",
+      );
+      await setupTrusted(runtime, undefined, pattern, { value: 0 }, resultCell);
+
+      // Simulate a persisted piece being resumed. In that path start() syncs
+      // dependencies before registering handlers, which is where this race
+      // used to allow duplicate starts for the same result cell.
+      (runtime.runner as any).locallyPreparedResults.clear();
+      (resultCell as any).synced = true;
+
+      const runner = runtime.runner as any;
+      const originalSync = runner.syncCellsForRunningPattern.bind(runner);
+      runner.syncCellsForRunningPattern = async (...args: any[]) => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return originalSync(...args);
+      };
+
+      try {
+        const [first, second] = await Promise.all([
+          runtime.start(resultCell),
+          runtime.start(resultCell),
+        ]);
+        expect(first).toBe(true);
+        expect(second).toBe(true);
+
+        resultCell.key("increment").send();
+        await runtime.idle();
+        await resultCell.pull();
+
+        expect(resultCell.key("value").get()).toBe(1);
+      } finally {
+        runner.syncCellsForRunningPattern = originalSync;
+      }
     });
 
     it("start() runs synchronously when data is available", async () => {
@@ -1238,30 +1742,32 @@ describe("runner utils", () => {
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { path: ["internal", "output"] } } },
+        result: { output: { $alias: { partialCause: "output", path: [] } } },
         nodes: [
           {
             module: {
               type: "javascript",
               implementation: (v: { input: number }) => v.input * 3,
             },
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal", "output"] } },
+            inputs: { $alias: { cell: "argument", path: [] } },
+            outputs: { $alias: { partialCause: "output", path: [] } },
           },
         ],
       };
 
       const resultCell = runtime.getCell(space, "start sync behavior");
-      runtime.setup(undefined, pattern, { input: 4 }, resultCell);
+      setupTrusted(runtime, undefined, pattern, { input: 4 }, resultCell);
 
       // start() should execute synchronously when data is available
       // The piece should be registered in cancels map immediately
-      runtime.start(resultCell);
+      const started = runtime.start(resultCell);
       // Should be running now (check via runner.cancels having the key)
       expect(
         runtime.runner["cancels"].has(runtime.runner["getDocKey"](resultCell)),
       ).toBe(true);
 
+      expect(await started).toBe(true);
+      await resultCell.pull();
       await runtime.idle();
       expect(resultCell.getAsQueryResult()).toEqual({ output: 12 });
     });
@@ -1275,7 +1781,7 @@ describe("runner utils", () => {
         resultSchema: {},
         result: {
           nested: {
-            value: { $alias: { path: ["internal", "output"] } },
+            value: { $alias: { partialCause: "output", path: [] } },
           },
         },
         nodes: [
@@ -1284,14 +1790,14 @@ describe("runner utils", () => {
               type: "javascript",
               implementation: (v: { input: number }) => v.input * 2,
             },
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal", "output"] } },
+            inputs: { $alias: { cell: "argument", path: [] } },
+            outputs: { $alias: { partialCause: "output", path: [] } },
           },
         ],
       };
 
       const resultCell = runtime.getCell(space, "start subpath cell");
-      runtime.setup(undefined, pattern, { input: 5 }, resultCell);
+      setupTrusted(runtime, undefined, pattern, { input: 5 }, resultCell);
 
       // Get a subpath cell
       const subpathCell = resultCell.key("nested").key("value");
@@ -1300,6 +1806,7 @@ describe("runner utils", () => {
       const result = await runtime.start(subpathCell);
       expect(result).toBe(true);
 
+      await subpathCell.pull();
       await runtime.idle();
       expect(resultCell.getAsQueryResult()).toEqual({ nested: { value: 10 } });
 
@@ -1309,22 +1816,22 @@ describe("runner utils", () => {
       ).toBe(true);
     });
 
-    it("restarts with new pattern when $TYPE changes via setup()", async () => {
+    it("restarts with new pattern when the pattern changes via setup()", async () => {
       const pattern1: Pattern = {
         argumentSchema: {
           type: "object",
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { path: ["internal", "output"] } } },
+        result: { output: { $alias: { partialCause: "output", path: [] } } },
         nodes: [
           {
             module: {
               type: "javascript",
               implementation: (v: { input: number }) => v.input * 2,
             },
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal", "output"] } },
+            inputs: { $alias: { cell: "argument", path: [] } },
+            outputs: { $alias: { partialCause: "output", path: [] } },
           },
         ],
       };
@@ -1335,15 +1842,15 @@ describe("runner utils", () => {
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { path: ["internal", "output"] } } },
+        result: { output: { $alias: { partialCause: "output", path: [] } } },
         nodes: [
           {
             module: {
               type: "javascript",
               implementation: (v: { input: number }) => v.input * 10,
             },
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal", "output"] } },
+            inputs: { $alias: { cell: "argument", path: [] } },
+            outputs: { $alias: { partialCause: "output", path: [] } },
           },
         ],
       };
@@ -1351,15 +1858,19 @@ describe("runner utils", () => {
       const resultCell = runtime.getCell(space, "pattern change restart");
 
       // Run with first pattern
-      runtime.run(undefined, pattern1, { input: 5 }, resultCell);
-      await runtime.idle();
-      expect(resultCell.getAsQueryResult()).toEqual({ output: 10 }); // 5 * 2
+      runTrusted(runtime, undefined, pattern1, { input: 5 }, resultCell);
+      expect(await resultCell.pull()).toEqual({ output: 10 }); // 5 * 2
 
       // Change pattern via setup (not run or start)
-      // The $TYPE sink should detect the change and restart
-      await runtime.setup(undefined, pattern2, { input: 5 }, resultCell);
-      await runtime.idle();
-      expect(resultCell.getAsQueryResult()).toEqual({ output: 50 }); // 5 * 10
+      // The pattern sink should detect the change and restart once the result is pulled.
+      await setupTrusted(
+        runtime,
+        undefined,
+        pattern2,
+        { input: 5 },
+        resultCell,
+      );
+      expect(await resultCell.pull()).toEqual({ output: 50 }); // 5 * 10
     });
   });
 });

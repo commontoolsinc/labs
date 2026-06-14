@@ -1,5 +1,5 @@
 /**
- * Modal manager context and types for ct-modal system
+ * Modal manager context and types for cf-modal system
  *
  * Follows the KeyboardRouter pattern for cross-cutting UI coordination.
  * The ModalManager tracks open modals in a stack, allocates z-indices,
@@ -61,13 +61,13 @@ export interface ModalManager {
 }
 
 /**
- * Context for sharing ModalManager across CT components
+ * Context for sharing ModalManager across Common Fabric components
  */
 export const modalContext = createContext<ModalManager | undefined>(
-  Symbol("ct.modal-manager"),
+  Symbol("cf.modal-manager"),
 );
 
-/** Base z-index for modals (above ct-fab's 999) */
+/** Base z-index for modals (above cf-fab's 999) */
 export const MODAL_BASE_Z_INDEX = 1000;
 
 /** Z-index increment per stacked modal */

@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   BuiltInLLMMessage,
   computed,
@@ -14,7 +13,7 @@ import {
   VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { type MentionablePiece } from "./system/backlinks-index.tsx";
 
 const sendMessage = handler<
@@ -63,7 +62,7 @@ const clearChat = handler(
 );
 
 type ChatInput = {
-  messages?: Writable<Default<Array<BuiltInLLMMessage>, []>>;
+  messages?: Writable<Array<BuiltInLLMMessage> | Default<[]>>;
   tools?: any;
   theme?: any;
   system?: string;
@@ -91,7 +90,7 @@ const handlePinToChat = handler<
   pinCell.send({ path: event.path, name: event.name });
 });
 
-type ChatOutput = {
+export type ChatOutput = {
   messages: Array<BuiltInLLMMessage>;
   pending: boolean | undefined;
   addMessage: Stream<BuiltInLLMMessage>;
@@ -150,14 +149,14 @@ export const TitleGenerator = pattern<
 
 export default pattern<ChatInput, ChatOutput>(
   ({ messages, tools, theme, system }) => {
-    const model = Writable.of<string>("anthropic:claude-sonnet-4-5");
+    const model = new Writable<string>("anthropic:claude-sonnet-4-5");
     const mentionable =
       wish<MentionablePiece[]>({ query: "#mentionable" }).result;
     const recentPieces =
       wish<{ [NAME]: string }[]>({ query: "#recent" }).result;
 
-    const latest = computed(() => recentPieces[0]);
-    const latestName = computed(() => recentPieces[0]?.[NAME] ?? "latest");
+    const latest = computed(() => recentPieces![0]);
+    const latestName = computed(() => recentPieces![0]?.[NAME] ?? "latest");
 
     const {
       addMessage,
@@ -177,7 +176,7 @@ export default pattern<ChatInput, ChatOutput>(
         model,
         context: computed(() => ({
           [latestName]: latest,
-        })),
+        })) as any,
       },
     );
 
@@ -198,41 +197,41 @@ export default pattern<ChatInput, ChatOutput>(
     const title = TitleGenerator({ model, messages });
 
     const promptInput = (
-      <ct-prompt-input
+      <cf-prompt-input
         slot="footer"
         placeholder="Ask the LLM a question..."
         pending={pending}
         $mentionable={mentionable}
         modelItems={items}
         $model={model}
-        onct-send={sendMessage({ addMessage })}
-        onct-stop={cancelGeneration}
+        oncf-send={sendMessage({ addMessage })}
+        oncf-stop={cancelGeneration}
       />
     );
 
     const chatLog = (
-      <ct-vscroll
+      <cf-vscroll
         style="padding: 1rem;"
         flex
         showScrollbar
         fadeEdges
         snapToBottom
       >
-        <ct-chat
+        <cf-chat
           theme={theme}
           $messages={messages}
           pending={pending}
         />
-      </ct-vscroll>
+      </cf-vscroll>
     );
 
     const attachmentsAndTools = (
-      <ct-hstack align="center" gap="1">
-        <ct-cell-context $cell={pinnedCells}>
-          <ct-attachments-bar pinnedCells={pinnedCells} />
-        </ct-cell-context>
-        <ct-tools-chip $tools={flattenedTools} />
-        <ct-button
+      <cf-hstack align="center" gap="1">
+        <cf-cell-context $cell={pinnedCells}>
+          <cf-attachments-bar pinnedCells={pinnedCells} />
+        </cf-cell-context>
+        <cf-tools-chip $tools={flattenedTools} />
+        <cf-button
           variant="pill"
           type="button"
           title="Clear chat"
@@ -242,23 +241,23 @@ export default pattern<ChatInput, ChatOutput>(
           })}
         >
           Clear
-        </ct-button>
-      </ct-hstack>
+        </cf-button>
+      </cf-hstack>
     );
 
     return {
       [NAME]: title,
       [UI]: (
-        <ct-screen>
-          <ct-vstack slot="header">
-            <ct-heading level={4}>{title}</ct-heading>
+        <cf-screen>
+          <cf-vstack slot="header">
+            <cf-heading level={4}>{title}</cf-heading>
             {attachmentsAndTools}
-          </ct-vstack>
+          </cf-vstack>
 
           {chatLog}
 
           {promptInput}
-        </ct-screen>
+        </cf-screen>
       ),
       messages,
       pending,

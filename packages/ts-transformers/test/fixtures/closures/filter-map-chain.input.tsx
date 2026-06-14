@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { pattern, UI } from "commontools";
+import { pattern, UI } from "commonfabric";
 
 interface Item {
   id: number;
@@ -17,8 +16,8 @@ interface State {
 //   .filter(fn) → .filterWithPattern(pattern(...), {})  — no captures
 //   .map(fn)    → .mapWithPattern(pattern(...), { state: { taxRate } })
 // Context: The map callback captures state.taxRate from outer scope, so it
-//   appears in the params object and the map body uses derive() for the
-//   reactive computation. The filter has no captures (only element properties).
+//   appears in the params object and the map body uses a lift-applied
+//   computation for the reactive computation. The filter has no captures (only element properties).
 export default pattern<State>((state) => {
   return {
     [UI]: (

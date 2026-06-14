@@ -1,4 +1,4 @@
-import { decode } from "@commontools/utils/encoding";
+import { decode } from "@commonfabric/utils/encoding";
 import { assert } from "@std/assert";
 import { TestStaticCache } from "../utils.ts";
 

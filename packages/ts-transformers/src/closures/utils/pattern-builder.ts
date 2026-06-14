@@ -4,6 +4,7 @@ import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
   createBindingElementsFromNames,
   createParameterFromBindings,
+  extractBindingNames,
   normalizeBindingName,
   reserveIdentifier,
 } from "../../utils/identifiers.ts";
@@ -74,7 +75,7 @@ export class PatternBuilder {
    * @param originalCallback The original callback function (to preserve modifiers/types)
    * @param body The transformed body of the function
    * @param paramsPropertyName The name of the property containing captures (default: "params").
-   *                           If null, captures are merged into the top-level object (for derive).
+   *                           If null, captures are merged into the top-level object (for lift-applied).
    */
   buildCallback(
     originalCallback: ts.ArrowFunction | ts.FunctionExpression,
@@ -86,9 +87,11 @@ export class PatternBuilder {
 
     // 1. Add explicitly registered parameters
     for (const param of this.parameters) {
+      const bindingName = param.bindingName ||
+        this.factory.createIdentifier(param.name);
       const propertyName = param.propertyName
         ? this.factory.createIdentifier(param.propertyName)
-        : (param.name !== (param.bindingName as any)?.text
+        : (param.name !== (bindingName as any)?.text
           ? this.factory.createIdentifier(param.name)
           : undefined);
 
@@ -96,10 +99,13 @@ export class PatternBuilder {
         this.factory.createBindingElement(
           undefined,
           propertyName,
-          param.bindingName || this.factory.createIdentifier(param.name),
+          bindingName,
           param.initializer,
         ),
       );
+      for (const name of extractBindingNames(bindingName)) {
+        this.usedBindingNames.add(name);
+      }
     }
 
     // 2. Add captures
@@ -142,7 +148,7 @@ export class PatternBuilder {
         ),
       );
     } else {
-      // Merge captures into top-level object (for derive)
+      // Merge captures into top-level object (for lift-applied)
       bindingElements.push(...captureBindings);
     }
 

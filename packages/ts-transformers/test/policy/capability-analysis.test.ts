@@ -1,6 +1,7 @@
 import ts from "typescript";
 import { assert, assertEquals } from "@std/assert";
 import { analyzeFunctionCapabilities } from "../../src/policy/mod.ts";
+import { COMMONFABRIC_TYPES } from "../commonfabric-test-types.ts";
 
 function parseFirstCallback(
   source: string,
@@ -35,7 +36,18 @@ function createProgramWithSource(source: string): {
   program: ts.Program;
   sourceFile: ts.SourceFile;
 } {
-  const fileName = "/test.ts";
+  return createProgramWithFiles({
+    "/test.ts": source,
+  });
+}
+
+function createProgramWithFiles(
+  files: Record<string, string>,
+  entryFileName = "/test.ts",
+): {
+  program: ts.Program;
+  sourceFile: ts.SourceFile;
+} {
   const options: ts.CompilerOptions = {
     target: ts.ScriptTarget.ESNext,
     module: ts.ModuleKind.ESNext,
@@ -44,8 +56,8 @@ function createProgramWithSource(source: string): {
   };
 
   const host: ts.CompilerHost = {
-    fileExists: (name) => name === fileName,
-    readFile: (name) => (name === fileName ? source : undefined),
+    fileExists: (name) => files[name] !== undefined,
+    readFile: (name) => files[name],
     directoryExists: () => true,
     getDirectories: () => [],
     getCanonicalFileName: (name) => name,
@@ -55,19 +67,34 @@ function createProgramWithSource(source: string): {
     useCaseSensitiveFileNames: () => true,
     writeFile: () => {},
     getSourceFile: (name, languageVersion) =>
-      name === fileName
+      files[name] !== undefined
         ? ts.createSourceFile(
-          fileName,
-          source,
+          name,
+          files[name]!,
           languageVersion,
           true,
-          ts.ScriptKind.TS,
+          name.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
         )
         : undefined,
+    resolveModuleNames: (moduleNames) =>
+      moduleNames.map((name) => {
+        const directMatch = Object.keys(files).find((fileName) =>
+          fileName === `/${name}.d.ts` ||
+          fileName.endsWith(`/${name}.d.ts`)
+        );
+        if (!directMatch) {
+          return undefined;
+        }
+        return {
+          resolvedFileName: directMatch,
+          extension: ts.Extension.Dts,
+          isExternalLibraryImport: false,
+        };
+      }),
   };
 
-  const program = ts.createProgram([fileName], options, host);
-  const sourceFile = program.getSourceFile(fileName);
+  const program = ts.createProgram([entryFileName], options, host);
+  const sourceFile = program.getSourceFile(entryFileName);
   if (!sourceFile) {
     throw new Error("Expected source file in program.");
   }
@@ -107,9 +134,14 @@ function getPaths(
 ): {
   capability: string;
   readPaths: string[];
+  fullShapePaths: string[];
   writePaths: string[];
   wildcard: boolean;
   passthrough: boolean;
+  identityOnly: boolean;
+  identityPaths: string[];
+  identityCellPaths: string[];
+  opaquePaths: string[];
 } {
   const param = summary.params.find((entry) => entry.name === name);
   if (!param) {
@@ -118,9 +150,16 @@ function getPaths(
   return {
     capability: param.capability,
     readPaths: param.readPaths.map((path) => path.join(".")),
+    fullShapePaths: (param.fullShapePaths ?? []).map((path) => path.join(".")),
     writePaths: param.writePaths.map((path) => path.join(".")),
     wildcard: param.wildcard,
     passthrough: param.passthrough,
+    identityOnly: !!param.identityOnly,
+    identityPaths: (param.identityPaths ?? []).map((path) => path.join(".")),
+    identityCellPaths: (param.identityCellPaths ?? []).map((path) =>
+      path.join(".")
+    ),
+    opaquePaths: (param.opaquePaths ?? []).map((path) => path.join(".")),
   };
 }
 
@@ -140,6 +179,49 @@ Deno.test("Capability analysis tracks alias assignment chains", () => {
   assert(input.readPaths.includes("user.name"));
 });
 
+Deno.test("TypeScript exposes accessor fields as property declarations", () => {
+  const file = ts.createSourceFile(
+    "/test.ts",
+    `
+function tracked(
+  _value: undefined,
+  _context: ClassAccessorDecoratorContext<Example, number>,
+) {}
+
+class Example {
+  @tracked accessor count = 1;
+}
+`,
+    ts.ScriptTarget.ESNext,
+    true,
+    ts.ScriptKind.TS,
+  );
+
+  let property: ts.PropertyDeclaration | undefined;
+  const visit = (node: ts.Node): void => {
+    if (property) return;
+    if (ts.isPropertyDeclaration(node)) {
+      property = node;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+
+  assert(property);
+  assertEquals(property.name.getText(file), "count");
+  assert(
+    property.modifiers?.some((modifier) =>
+      modifier.kind === ts.SyntaxKind.AccessorKeyword
+    ),
+  );
+  assert(
+    property.modifiers?.some((modifier) =>
+      modifier.kind === ts.SyntaxKind.Decorator
+    ),
+  );
+});
+
 Deno.test("Capability analysis tracks object destructure aliases", () => {
   const fn = parseFirstCallback(
     `const fn = (input) => {
@@ -155,6 +237,132 @@ Deno.test("Capability analysis tracks object destructure aliases", () => {
   assert(input.readPaths.includes("bar"));
   assert(input.readPaths.includes("user.name"));
 });
+
+Deno.test("Capability analysis does not descend into nested callbacks", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      const local = () => input.hidden;
+      return input.visible;
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "readonly");
+  assert(input.readPaths.includes("visible"));
+  assert(!input.readPaths.includes("hidden"));
+});
+
+Deno.test(
+  "Capability analysis counts outer captures used inside inline array callbacks",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        filter(predicate: (value: T) => boolean): Array<T>;
+        map<U>(mapper: (value: T) => U): Array<U>;
+      }
+
+      const fn = (input: {
+        items: number[];
+        threshold: number;
+        factor: number;
+      }) => input.items
+        .filter((value) => value > input.threshold)
+        .map((value) => value * input.factor);
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "readonly");
+    assert(input.readPaths.includes("items"));
+    assert(input.readPaths.includes("threshold"));
+    assert(input.readPaths.includes("factor"));
+  },
+);
+
+Deno.test(
+  "Capability analysis counts outer captures used inside other eager array callbacks",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        find(
+          predicate: (value: T) => boolean,
+        ): T | undefined;
+        findIndex(
+          predicate: (value: T) => boolean,
+        ): number;
+        reduce<U>(
+          reducer: (accumulator: U, value: T) => U,
+          initialValue: U,
+        ): U;
+      }
+
+      const fn = (input: {
+        names: string[];
+        searchTerm: string;
+        prices: number[];
+        discount: number;
+        items: { id: string }[];
+        selectedId: string;
+      }) => ({
+        match: input.names.find((name) => name.includes(input.searchTerm)),
+        total: input.prices.reduce(
+          (sum, price) => sum + price * (1 - input.discount),
+          0,
+        ),
+        index: input.items.findIndex((item) => item.id === input.selectedId),
+      });
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "readonly");
+    assert(input.readPaths.includes("names"));
+    assert(input.readPaths.includes("searchTerm"));
+    assert(input.readPaths.includes("prices"));
+    assert(input.readPaths.includes("discount"));
+    assert(input.readPaths.includes("items"));
+    assert(input.readPaths.includes("selectedId"));
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps opaque helper callbacks out of outer summaries",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare function later(callback: () => void): void;
+
+      const fn = (input: {
+        visible: number;
+        hidden: number;
+      }) => {
+        later(() => input.hidden);
+        return input.visible;
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "readonly");
+    assert(input.readPaths.includes("visible"));
+    assert(!input.readPaths.includes("hidden"));
+  },
+);
 
 Deno.test(
   "Capability analysis keeps dotted literal keys distinct from nested member paths",
@@ -214,8 +422,10 @@ Deno.test("Capability analysis does not record method names as read paths", () =
   const summary = analyzeFunctionCapabilities(fn);
   const input = getPaths(summary, "input");
 
-  assert(input.readPaths.includes(""));
+  // .get() is transparent — input.get().foo resolves to path ["foo"]
+  assert(input.readPaths.includes("foo"));
   assert(!input.readPaths.includes("get"));
+  assert(!input.readPaths.includes(""));
 });
 
 Deno.test("Capability analysis tracks destructured parameter paths", () => {
@@ -259,6 +469,123 @@ Deno.test("Capability analysis classifies read+write usage as writable", () => {
   assert(input.writePaths.includes("count"));
 });
 
+Deno.test("Capability analysis classifies update-only usage as writeonly", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      input.key("profile").update({ name: "Ada" });
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "writeonly");
+  assert(input.writePaths.includes("profile"));
+  assertEquals(input.readPaths.length, 0);
+});
+
+Deno.test("Capability analysis classifies push-only usage as writeonly", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      input.key("items").push({ id: "1" });
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "writeonly");
+  assert(input.writePaths.includes("items"));
+  assertEquals(input.readPaths.length, 0);
+});
+
+Deno.test("Capability analysis classifies removeAll-only usage as writeonly", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input, item) => {
+      input.key("items").removeAll(item);
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "writeonly");
+  assert(input.writePaths.includes("items"));
+  assertEquals(input.readPaths.length, 0);
+});
+
+Deno.test("Capability analysis keeps opaque derivation methods opaque", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input, mapper) => {
+      input.map(mapper);
+      input.flatMap(mapper);
+      input.filter(mapper);
+      input.mapWithPattern(mapper, {});
+      input.flatMapWithPattern(mapper, {});
+      input.filterWithPattern(mapper, {});
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "opaque");
+  assertEquals(input.readPaths.length, 0);
+  assertEquals(input.writePaths.length, 0);
+  assertEquals(input.wildcard, false);
+});
+
+Deno.test(
+  "Capability analysis records nested opaque derivation methods without reads",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
+        return input.items.map((item) => item.name);
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "opaque");
+    assertEquals(input.readPaths.length, 0);
+    assertEquals(input.writePaths.length, 0);
+    assert(input.opaquePaths.includes("items"));
+    assertEquals(input.wildcard, false);
+  },
+);
+
+Deno.test(
+  "Capability analysis treats dynamic opaque derivation receivers as wildcard",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input, key) => {
+        return input.collections[key].map((item) => item.name);
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "opaque");
+    assertEquals(input.wildcard, true);
+    assertEquals(input.opaquePaths.length, 0);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps root derivation plus equality usage opaque",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input, mapper, other) => {
+        input.map(mapper);
+        return input.equals(other);
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "opaque");
+    assertEquals(input.readPaths.length, 0);
+    assertEquals(input.writePaths.length, 0);
+    assertEquals(input.wildcard, false);
+  },
+);
+
 Deno.test("Capability analysis classifies pure passthrough as opaque", () => {
   const fn = parseFirstCallback(
     `const fn = (input) => {
@@ -273,6 +600,7 @@ Deno.test("Capability analysis classifies pure passthrough as opaque", () => {
   assertEquals(input.readPaths.length, 0);
   assertEquals(input.writePaths.length, 0);
   assertEquals(input.passthrough, true);
+  assertEquals(input.identityOnly, false);
 });
 
 Deno.test("Capability analysis marks root call arguments as wildcard", () => {
@@ -332,6 +660,36 @@ const fn = (input) => helper(input);`;
 );
 
 Deno.test(
+  "Capability analysis interprocedural propagation tracks root opaque use",
+  () => {
+    const source = `import { type Cell } from "commonfabric";
+const helper = (value: Cell<string[]>, mapper: (value: string) => string) => value.map(mapper);
+const fn = (input: Cell<string[]>, other: Cell<string[]>, mapper: (value: string) => string) => {
+  helper(input, mapper);
+  return input.equals(other);
+};`;
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": source,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const checker = program.getTypeChecker();
+    const fn = findArrowByVariableName(sourceFile, "fn");
+
+    const summary = analyzeFunctionCapabilities(fn, {
+      checker,
+      interprocedural: true,
+    });
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "opaque");
+    assertEquals(input.readPaths.length, 0);
+    assertEquals(input.writePaths.length, 0);
+    assertEquals(input.wildcard, false);
+    assertEquals(input.identityOnly, false);
+  },
+);
+
+Deno.test(
   "Capability analysis without interprocedural propagation keeps conservative wildcard",
   () => {
     const source = `const helper = (value) => value.foo;
@@ -363,34 +721,1217 @@ Deno.test("Capability analysis marks for...in over tracked source as wildcard", 
   assertEquals(input.wildcard, true);
 });
 
-Deno.test("Capability analysis marks for...of over tracked source as wildcard", () => {
-  const fn = parseFirstCallback(
-    `const fn = (input) => {
+Deno.test(
+  "Capability analysis keeps bare for...of element uses path-specific",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
       for (const item of input) {
         console.log(item);
       }
     };`,
-  );
-  const summary = analyzeFunctionCapabilities(fn);
-  const input = getPaths(summary, "input");
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
 
-  assertEquals(input.wildcard, true);
-});
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("0"));
+  },
+);
 
-Deno.test("Capability analysis marks for...of over tracked sub-path as wildcard", () => {
-  const fn = parseFirstCallback(
-    `const fn = (input) => {
+Deno.test(
+  "Capability analysis keeps ?? fallback aliases path-specific through for...of item reads",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
+        const items = input.items ?? [];
+        for (const item of items) {
+          item.notes?.length;
+        }
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("items"));
+    assert(input.readPaths.includes("items.0.notes.length"));
+  },
+);
+
+Deno.test(
+  "Capability analysis follows right-hand ?? fallback aliases through for...of item reads",
+  () => {
+    const fn = parseFirstCallback(
+      `const cached = undefined;
+      const fn = (input) => {
+        const items = cached ?? input.notes;
+        for (const item of items) {
+          item.title;
+        }
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("notes"));
+    assert(input.readPaths.includes("notes.0.title"));
+  },
+);
+
+Deno.test(
+  "Capability analysis binds plain array callback items back to source element paths",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        map<U>(mapper: (value: T) => U): Array<U>;
+      }
+
+      type Route = { id: string; label: string; capacity: number; unused: string };
+
+      const fn = (input: { routes: Route[] }) =>
+        input.routes.map((route) => ({
+          route: route.id,
+          label: route.label,
+          capacity: route.capacity,
+        }));
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("routes"));
+    assert(input.readPaths.includes("routes.0.id"));
+    assert(input.readPaths.includes("routes.0.label"));
+    assert(input.readPaths.includes("routes.0.capacity"));
+    assertEquals(input.readPaths.includes("routes.0.unused"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis follows tracked values through local Map set/get",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        forEach(callback: (value: T) => void): void;
+      }
+
+      type Component = { id: string; name: string; props: string[]; unused: string };
+
+      const fn = (input: { components: Component[]; ids: string[] }) => {
+        const componentMap = new Map<string, Component>();
+        input.components.forEach((component) => componentMap.set(component.id, component));
+        return input.ids.map((id) => componentMap.get(id)?.name ?? id);
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("components"));
+    assert(input.readPaths.includes("components.0.id"));
+    assert(input.readPaths.includes("components.0.name"));
+    assert(input.readPaths.includes("ids"));
+    assert(input.readPaths.includes("ids.0"));
+    assertEquals(input.readPaths.includes("components.0.unused"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis follows tracked values stored in local arrays through sort callbacks",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        push(...items: T[]): number;
+        sort(compareFn?: (a: T, b: T) => number): T[];
+      }
+
+      type Candidate = { id: string; age: number; site: string; unused: string };
+      type Result = { candidate: Candidate; eligible: boolean };
+
+      const fn = (input: { candidates: Candidate[] }) => {
+        const results: Result[] = [];
+        for (const candidate of input.candidates) {
+          results.push({ candidate, eligible: candidate.age >= 18 });
+        }
+        results.sort((left, right) =>
+          left.candidate.id.localeCompare(right.candidate.id)
+        );
+        return results.length;
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("candidates"));
+    assert(input.readPaths.includes("candidates.0.age"));
+    assert(input.readPaths.includes("candidates.0.id"));
+    assertEquals(input.readPaths.includes("candidates.0.unused"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis does not treat non-cell set calls as identity array sinks",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      class Map<K, V> {
+        set(key: K, value: V): this;
+      }
+
+      type Piece = { title: string; unused: string };
+
+      const fn = (input: { piece: Piece }) => {
+        const piece = input.piece;
+        const updated = [piece];
+        const cache = new Map<string, Piece[]>();
+        cache.set("items", updated);
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.identityPaths.includes("piece"), false);
+    assert(input.readPaths.includes("piece"));
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps array locals structural when methods inspect items before set",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const state: {
+        items: {
+          set(value: unknown): void;
+        };
+      };
+
+      type Piece = { title: string; unused: string };
+
+      const fn = (input: { piece: Piece }) => {
+        const updated = [input.piece];
+        if (updated.length > 0) {
+          state.items.set(updated);
+        }
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.identityPaths.includes("piece"), false);
+    assert(input.readPaths.includes("piece"));
+    assertEquals(input.readPaths.includes("piece.unused"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps array-literal map chains structural before set",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const CELL_BRAND: unique symbol;
+
+      type Cell<T> = {
+        readonly [CELL_BRAND]: "cell";
+        set(value: T): void;
+      };
+
+      interface Array<T> {
+        map<U>(mapper: (value: T) => U): U[];
+      }
+
+      declare const state: { items: Cell<{ title: string }[]> };
+
+      type Piece = { title: string; unused: string };
+
+      const fn = (input: { piece?: Piece }) => {
+        const piece = input?.piece;
+        if (!piece) return;
+        const updated = [piece].map((p) => ({ title: p.title }));
+        state.items.set(updated);
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.identityPaths.includes("piece"), false);
+    assert(
+      input.readPaths.includes("piece") ||
+        input.readPaths.includes("piece.title"),
+    );
+  },
+);
+
+Deno.test(
+  "Capability analysis treats direct local array set payloads as identity-only",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const CELL_BRAND: unique symbol;
+
+      type Cell<T> = {
+        readonly [CELL_BRAND]: "cell";
+        set(value: T): void;
+      };
+
+      declare const state: { items: Cell<Piece[]> };
+
+      type Piece = { title: string; unused: string };
+
+      const fn = (input: { piece?: Piece }) => {
+        const piece = input?.piece;
+        if (!piece) return;
+        const updated = [piece];
+        state.items.set(updated);
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assert(input.identityPaths.includes("piece"));
+    assert(input.identityCellPaths.includes("piece"));
+    assertEquals(input.readPaths.includes("piece"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis treats local array push, unshift, and splice payloads as identity-only",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const CELL_BRAND: unique symbol;
+
+      type Cell<T> = {
+        readonly [CELL_BRAND]: "cell";
+        set(value: T): void;
+      };
+
+      interface Array<T> {
+        push(...items: T[]): number;
+        unshift(...items: T[]): number;
+        splice(start: number, deleteCount: number, ...items: T[]): T[];
+      }
+
+      declare const state: { items: Cell<Piece[]> };
+
+      type Piece = { title: string; unused: string };
+
+      const fn = (input: { first?: Piece; second?: Piece; third?: Piece }) => {
+        const first = input?.first;
+        const second = input?.second;
+        const third = input?.third;
+        if (!first) return;
+        if (!second) return;
+        if (!third) return;
+        const updated: Piece[] = [];
+        updated.push(first);
+        updated.unshift(second);
+        updated.splice(1, 0, third);
+        state.items.set(updated);
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assert(input.identityPaths.includes("first"));
+    assert(input.identityPaths.includes("second"));
+    assert(input.identityPaths.includes("third"));
+    assert(input.identityCellPaths.includes("first"));
+    assert(input.identityCellPaths.includes("second"));
+    assert(input.identityCellPaths.includes("third"));
+    assertEquals(input.readPaths.includes("first"), false);
+    assertEquals(input.readPaths.includes("second"), false);
+    assertEquals(input.readPaths.includes("third"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps splice control arguments structural",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const CELL_BRAND: unique symbol;
+
+      type Cell<T> = {
+        readonly [CELL_BRAND]: "cell";
+        set(value: T): void;
+      };
+
+      interface Array<T> {
+        splice(start: number, deleteCount: number, ...items: T[]): T[];
+      }
+
+      declare const state: { items: Cell<Piece[]> };
+
+      type Piece = { title: string; unused: string };
+
+      const fn = (
+        input: { piece?: Piece; index: number; deleteCount: number },
+      ) => {
+        const piece = input?.piece;
+        if (!piece) return;
+        const updated: Piece[] = [];
+        updated.splice(input.index, input.deleteCount, piece);
+        state.items.set(updated);
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assert(input.identityPaths.includes("piece"));
+    assert(input.identityCellPaths.includes("piece"));
+    assert(input.readPaths.includes("index"));
+    assert(input.readPaths.includes("deleteCount"));
+    assertEquals(input.readPaths.includes("piece"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps primitive local array writer payloads structural",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const CELL_BRAND: unique symbol;
+
+      type Cell<T> = {
+        readonly [CELL_BRAND]: "cell";
+        set(value: T): void;
+      };
+
+      interface Array<T> {
+        push(...items: T[]): number;
+      }
+
+      declare const state: { items: Cell<string[]> };
+
+      type Piece = { title: string; unused: string };
+
+      const fn = (input: { piece: Piece }) => {
+        const updated: string[] = [];
+        updated.push(input.piece.title);
+        state.items.set(updated);
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.identityPaths.includes("piece.title"), false);
+    assert(input.readPaths.includes("piece.title"));
+    assertEquals(input.readPaths.includes("piece.unused"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis restores local array bindings after nested callbacks",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        push(...items: T[]): number;
+        sort(compareFn?: (a: T, b: T) => number): T[];
+        map<U>(mapper: (value: T) => U): U[];
+      }
+
+      type Candidate = { id: string; name: string; unused: string };
+
+      const fn = (input: { candidates: Candidate[]; other: Candidate[] }) => {
+        const results: Candidate[] = [];
+        for (const candidate of input.candidates) {
+          results.push(candidate);
+        }
+        input.other.map((candidate) => {
+          const results: Candidate[] = [];
+          results.push(candidate);
+          return candidate.id;
+        });
+        results.sort((left, right) => left.name.localeCompare(right.name));
+        return results.length;
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("candidates"));
+    assert(input.readPaths.includes("candidates.0"));
+    assert(input.readPaths.includes("candidates.0.name"));
+    assert(input.readPaths.includes("other"));
+    assert(input.readPaths.includes("other.0.id"));
+    assertEquals(input.readPaths.includes("other.0.name"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis restores local array bindings after block shadowing",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        push(...items: T[]): number;
+        sort(compareFn?: (a: T, b: T) => number): T[];
+      }
+
+      type Candidate = { id: string; name: string; unused: string };
+
+      const fn = (input: { candidates: Candidate[]; other: Candidate[] }) => {
+        const results: Candidate[] = [];
+        for (const candidate of input.candidates) {
+          results.push(candidate);
+        }
+        if (input.other.length > 0) {
+          const results: Candidate[] = [];
+          for (const candidate of input.other) {
+            results.push(candidate);
+          }
+        }
+        results.sort((left, right) => left.name.localeCompare(right.name));
+        return results.length;
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("candidates"));
+    assert(input.readPaths.includes("candidates.0"));
+    assert(input.readPaths.includes("candidates.0.name"));
+    assert(input.readPaths.includes("other"));
+    assert(input.readPaths.includes("other.length"));
+    assert(input.readPaths.includes("other.0"));
+    assertEquals(input.readPaths.includes("other.0.name"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis restores local map bindings after block shadowing",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      type Candidate = { id: string; name: string; unused: string };
+
+      const fn = (input: { candidates: Candidate[]; other: Candidate[] }) => {
+        const lookup = new Map<string, Candidate>();
+        for (const candidate of input.candidates) {
+          lookup.set("outer", candidate);
+        }
+        if (input.other.length > 0) {
+          const lookup = new Map<string, Candidate>();
+          for (const candidate of input.other) {
+            lookup.set("inner", candidate);
+          }
+        }
+        return lookup.get("outer")?.name;
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("candidates"));
+    assert(input.readPaths.includes("candidates.0"));
+    assert(input.readPaths.includes("candidates.0.name"));
+    assert(input.readPaths.includes("other"));
+    assert(input.readPaths.includes("other.length"));
+    assert(input.readPaths.includes("other.0"));
+    assertEquals(input.readPaths.includes("other.0.name"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps element bindings through filter-to-map chains",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        filter(predicate: (value: T) => boolean): Array<T>;
+        map<U>(mapper: (value: T) => U): Array<U>;
+      }
+
+      type ScreeningResult = {
+        candidate: { id: string; site: string; unused: string };
+        eligible: boolean;
+      };
+
+      const fn = (input: { report: ScreeningResult[] }) =>
+        input.report
+          .filter((entry) => entry.eligible)
+          .map((entry) => entry.candidate.id);
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("report"));
+    assert(input.readPaths.includes("report.0.eligible"));
+    assert(input.readPaths.includes("report.0.candidate.id"));
+    assertEquals(input.readPaths.includes("report.0.candidate.unused"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis tracks properties read from find() result aliases",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        find(predicate: (value: T) => boolean): T | undefined;
+      }
+
+      type IncidentStep = {
+        id: string;
+        title: string;
+        owner: string;
+        status: "pending" | "in_progress";
+        expectedMinutes: number;
+        elapsedMinutes: number;
+      };
+
+      const fn = (input: { list: IncidentStep[]; active: string | null }) => {
+        const target = input.list.find((step) => step.id === input.active);
+        return target ? target.title : "idle";
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("list"));
+    assert(input.readPaths.includes("list.0.id"));
+    assert(input.readPaths.includes("list.0.title"));
+    assert(input.readPaths.includes("active"));
+  },
+);
+
+Deno.test(
+  "Capability analysis tracks direct properties read from find() results",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        find(predicate: (value: T) => boolean): T | undefined;
+      }
+
+      type ParkingPerson = {
+        name: string;
+        priorityRank: number;
+        defaultSpot: string;
+      };
+
+      const fn = (input: { people: ParkingPerson[] }) =>
+        input.people.find((person) => person.name === "Alice")?.priorityRank === 1;
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("people"));
+    assert(input.readPaths.includes("people.0.name"));
+    assert(input.readPaths.includes("people.0.priorityRank"));
+    assertEquals(input.readPaths.includes("people.0.defaultSpot"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis conservatively widens chained unknown array methods",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        filter(predicate: (value: T) => boolean): T[];
+        slice(start?: number): T[];
+        find(predicate: (value: T) => boolean): T | undefined;
+      }
+
+      type ParkingPerson = {
+        name: string;
+        priorityRank: number;
+        defaultSpot: string;
+        active: boolean;
+      };
+
+      const fn = (input: { people: ParkingPerson[] }) =>
+        input.people.filter((person) => person.active).slice(0).find((person) => person.name === "Alice")?.priorityRank === 1;
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("people"));
+    assert(input.readPaths.includes("people.0.active"));
+  },
+);
+
+Deno.test(
+  "Capability analysis tracks chained || fallback reads on both branches",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      const fn = (state: { name: string; firstItem: string | undefined }) =>
+        state.name || state.firstItem || "default";
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "state");
+
+    assertEquals(state.wildcard, false);
+    assert(state.readPaths.includes("name"));
+    assert(state.readPaths.includes("firstItem"));
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps array item properties named key",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        filter(predicate: (value: T) => boolean): Array<T>;
+        map<U>(mapper: (value: T) => U): Array<U>;
+      }
+
+      type ColumnSummary = {
+        key: "backlog" | "inProgress" | "review" | "done";
+        overloaded: boolean;
+        title: string;
+      };
+
+      const fn = (summaries: ColumnSummary[]) =>
+        summaries
+          .filter((summary) => summary.overloaded)
+          .map((summary) => summary.key);
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const summaries = getPaths(summary, "summaries");
+
+    assertEquals(summaries.wildcard, false);
+    assert(summaries.readPaths.includes("0.overloaded"));
+    assert(summaries.readPaths.includes("0.key"));
+  },
+);
+
+Deno.test(
+  "Capability analysis treats equals() arguments as identity-only",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input, other) => {
+        return equals(input, other);
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+    const other = getPaths(summary, "other");
+
+    assertEquals(input.capability, "comparable");
+    assertEquals(input.passthrough, true);
+    assertEquals(input.wildcard, false);
+    assertEquals(input.identityOnly, true);
+    assertEquals(input.readPaths.length, 0);
+
+    assertEquals(other.capability, "comparable");
+    assertEquals(other.passthrough, true);
+    assertEquals(other.wildcard, false);
+    assertEquals(other.identityOnly, true);
+    assertEquals(other.readPaths.length, 0);
+  },
+);
+
+Deno.test(
+  "Capability analysis treats .equals() receiver and argument as identity-only",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input, other) => {
+        return input.equals(other);
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+    const other = getPaths(summary, "other");
+
+    assertEquals(input.capability, "comparable");
+    assertEquals(input.passthrough, true);
+    assertEquals(input.wildcard, false);
+    assertEquals(input.identityOnly, true);
+    assertEquals(input.readPaths.length, 0);
+
+    assertEquals(other.capability, "comparable");
+    assertEquals(other.passthrough, true);
+    assertEquals(other.wildcard, false);
+    assertEquals(other.identityOnly, true);
+    assertEquals(other.readPaths.length, 0);
+  },
+);
+
+Deno.test(
+  "Capability analysis treats .equalLinks() receiver and argument as comparable",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input, other) => {
+        return input.equalLinks(other);
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+    const other = getPaths(summary, "other");
+
+    assertEquals(input.capability, "comparable");
+    assertEquals(input.passthrough, true);
+    assertEquals(input.wildcard, false);
+    assertEquals(input.identityOnly, true);
+    assertEquals(input.readPaths.length, 0);
+
+    assertEquals(other.capability, "comparable");
+    assertEquals(other.passthrough, true);
+    assertEquals(other.wildcard, false);
+    assertEquals(other.identityOnly, true);
+    assertEquals(other.readPaths.length, 0);
+  },
+);
+
+Deno.test(
+  "Capability analysis marks destructured cell equals paths as identity-cell paths",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const CELL_BRAND: unique symbol;
+
+      type Writable<T> = {
+        readonly [CELL_BRAND]: "cell";
+        equals(other: Writable<T>): boolean;
+      };
+
+      const fn = ({ left, right }: {
+        left: Writable<{ name: string }>;
+        right: Writable<{ name: string }>;
+      }) => left.equals(right);
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "__param0");
+
+    assertEquals(input.identityOnly, false);
+    assert(input.identityPaths.includes("left"));
+    assert(input.identityPaths.includes("right"));
+    assert(input.identityCellPaths.includes("left"));
+    assert(input.identityCellPaths.includes("right"));
+  },
+);
+
+Deno.test(
+  "Capability analysis marks inferred lift cell equals paths as identity-cell paths",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": `
+        import { lift, type Writable } from "commonfabric";
+
+        type Piece = Writable<{ name: string }>;
+        const left = {} as Piece;
+        const right = {} as Piece;
+        const same = lift(({ left, right }: { left: Piece; right: Piece }) =>
+          left.equals(right)
+        )({ left, right });
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const checker = program.getTypeChecker();
+    const callback = (() => {
+      let found: ts.ArrowFunction | undefined;
+      const visit = (node: ts.Node): void => {
+        if (found) return;
+        if (ts.isArrowFunction(node) && node.parameters.length === 1) {
+          found = node;
+          return;
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sourceFile);
+      if (!found) {
+        throw new Error("Expected lift callback.");
+      }
+      return found;
+    })();
+    const summary = analyzeFunctionCapabilities(callback, { checker });
+    const input = getPaths(summary, "__param0");
+
+    assert(input.identityPaths.includes("left"));
+    assert(input.identityPaths.includes("right"));
+    assert(input.identityCellPaths.includes("left"));
+    assert(input.identityCellPaths.includes("right"));
+  },
+);
+
+Deno.test(
+  "Capability analysis drops identity-only paths that overlap full-shape reads",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": `
+        import { equals } from "commonfabric";
+
+        type ParkingPerson = {
+          active: boolean;
+          name: string;
+          priorityRank: number;
+          defaultSpot: string;
+        };
+
+        const fn = (input: { people: ParkingPerson[] }) =>
+          equals(
+            input.people,
+            input.people.filter((person) => person.active).slice(0),
+          );
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assert(input.fullShapePaths.includes("people"));
+    assertEquals(input.identityPaths.includes("people"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis tracks known fixed-symbol element access without wildcard",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const NAME: unique symbol;
+      declare const UI: unique symbol;
+      declare const SELF: unique symbol;
+
+      const fn = (input: {
+        [NAME]?: string;
+        [UI]?: { node: string };
+        [SELF]?: { id: string };
+        extra: number;
+      }) => [input[NAME], input[UI], input[SELF]];
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("$NAME"));
+    assert(input.readPaths.includes("$UI"));
+    assert(input.readPaths.includes("$SELF"));
+    assertEquals(input.readPaths.includes("extra"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis resolves shadowed fixed-key identifiers to local const strings",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      const UI = "title" as const;
+
+      const fn = (input: {
+        title: string;
+        extra: number;
+      }) => input[UI];
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("title"));
+    assertEquals(input.readPaths.includes("$UI"), false);
+    assertEquals(input.readPaths.includes("extra"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis tracks known fixed-symbol destructuring without wildcard",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const SELF: unique symbol;
+
+      const fn = (
+        { [SELF]: self, value }: { [SELF]?: { id: string }; value: string },
+      ) => self?.id ?? value;
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "__param0");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("$SELF.id"));
+    assert(input.readPaths.includes("value"));
+  },
+);
+
+Deno.test(
+  "Capability analysis tracks aliased fixed-symbol destructuring without wildcard",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": `
+      import { SELF as CF_SELF } from "commonfabric";
+
+      const fn = (
+        { [CF_SELF]: self, value }: { [CF_SELF]?: { id: string }; value: string },
+      ) => self?.id ?? value;
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "__param0");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("$SELF.id"));
+    assert(input.readPaths.includes("value"));
+  },
+);
+
+Deno.test(
+  "Capability analysis does not treat arbitrary .equals() methods as identity-only",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      type Person = {
+        name: string;
+        active: boolean;
+        equals(other: string): boolean;
+      };
+
+      const fn = (input: { person: Person }) => input.person.equals("Alice");
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.identityOnly, false);
+    assertEquals(input.passthrough, false);
+    assertEquals(input.identityPaths.length, 0);
+    assert(input.readPaths.includes("person"));
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps dynamic element access after .get() reading both captures",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const CELL_BRAND: unique symbol;
+
+      type Writable<T> = {
+        readonly [CELL_BRAND]: "cell";
+        get(): T;
+      };
+
+      const fn = ({ items, index }: {
+        items: Writable<string[]>;
+        index: Writable<number>;
+      }) => items.get()[index.get()];
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "__param0");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("items"));
+    assert(input.readPaths.includes("index"));
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps for...of over tracked sub-path path-specific",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
       for (const item of input.items) {
-        console.log(item);
+        item.name;
       }
     };`,
-  );
-  const summary = analyzeFunctionCapabilities(fn);
-  const input = getPaths(summary, "input");
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
 
-  assertEquals(input.wildcard, true);
-  assert(input.readPaths.includes("items"));
-});
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("items"));
+    assert(input.readPaths.includes("items.0.name"));
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps direct array parameters path-specific in for...of loops",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface AssetRecord {
+        id: string;
+        stage: string;
+        owner: string;
+        unused: { nested: string };
+      }
+
+      const fn = (entries: AssetRecord[]) => {
+        const buckets: { id: string; stage: string; owner: string }[] = [];
+        for (const entry of entries) {
+          buckets.push({
+            id: entry.id,
+            stage: entry.stage,
+            owner: entry.owner,
+          });
+        }
+        return buckets;
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "entries");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("0.id"));
+    assert(input.readPaths.includes("0.stage"));
+    assert(input.readPaths.includes("0.owner"));
+    assertEquals(input.readPaths.includes("0.unused"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis visits chained array callbacks inside for...of iterable expressions",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        filter(predicate: (value: T) => boolean): Array<T>;
+      }
+
+      interface Section {
+        active: boolean;
+        title: string;
+        unused: string;
+      }
+
+      const fn = (input: { sections: Section[] }) => {
+        for (const section of input.sections.filter((entry) => entry.active)) {
+          section.title;
+        }
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("sections"));
+    assert(input.readPaths.includes("sections.0.active"));
+    assert(input.readPaths.includes("sections.0.title"));
+    assertEquals(input.readPaths.includes("sections.0.unused"), false);
+  },
+);
 
 Deno.test(
   "Capability analysis handles deeply nested mutual recursion without hanging",
@@ -436,5 +1977,28 @@ const caller = (input) => callee(input);`;
     assertEquals(input.capability, "readonly");
     assert(input.readPaths.includes("foo"));
     assertEquals(input.wildcard, false);
+  },
+);
+
+Deno.test(
+  "Capability analysis interprocedural propagation stays conservative across source-file boundaries",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/helper.ts": `const helper = (value) => value.foo;`,
+      "/test.ts": `const fn = (input) => helper(input);`,
+    });
+    const checker = program.getTypeChecker();
+    const fn = findArrowByVariableName(sourceFile, "fn");
+
+    const summary = analyzeFunctionCapabilities(fn, {
+      checker,
+      interprocedural: true,
+    });
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "opaque");
+    assertEquals(input.passthrough, true);
+    assertEquals(input.wildcard, true);
+    assertEquals(input.readPaths.length, 0);
   },
 );

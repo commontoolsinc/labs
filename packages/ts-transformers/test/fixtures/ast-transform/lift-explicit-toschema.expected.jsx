@@ -1,12 +1,26 @@
-import * as __ctHelpers from "commontools";
-import { lift, Cell, toSchema } from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { lift, Cell, toSchema } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface CharmEntry {
     id: string;
     name: string;
 }
-// Test: Explicit toSchema with undefined result schema
-// This overload pattern: lift(toSchema<T>(), undefined, fn)
-const logCharmsList = lift({
+// Test: Explicit toSchema, function-first order.
+// This overload pattern: lift(fn, toSchema<T>())  (result schema omitted)
+const logCharmsList = lift(({ charmsList }) => {
+    console.log("logCharmsList: ", charmsList.get());
+    return charmsList;
+}, {
     type: "object",
     properties: {
         charmsList: {
@@ -14,7 +28,7 @@ const logCharmsList = lift({
             items: {
                 $ref: "#/$defs/CharmEntry"
             },
-            asCell: true
+            asCell: ["cell"]
         }
     },
     required: ["charmsList"],
@@ -32,16 +46,32 @@ const logCharmsList = lift({
             required: ["id", "name"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, undefined, ({ charmsList }) => {
-    console.log("logCharmsList: ", charmsList.get());
-    return charmsList;
-});
+} as const satisfies __cfHelpers.JSONSchema);
+const getStatus = lift(({ status }) => status, {
+    type: "object",
+    properties: {
+        status: {
+            "enum": ["open", "closed"]
+        },
+        ignored: {
+            type: "string",
+            "enum": ["draft"]
+        }
+    },
+    required: ["status", "ignored"],
+    description: "Status input"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: lift-explicit-toschema
 // Verifies: lift() with explicit toSchema<T>() is replaced by the generated JSON schema
-//   lift(toSchema<{ charmsList: Cell<CharmEntry[]> }>(), undefined, fn) → lift(generatedSchema, undefined, fn)
+//   lift(fn, toSchema<{ charmsList: Cell<CharmEntry[]> }>()) → lift(fn, generatedSchema)
 // Context: The toSchema() call is compiled away and replaced with the actual JSON schema object
-export default logCharmsList;
+export default __cfHelpers.__cf_data({ logCharmsList, getStatus });
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    logCharmsList,
+    getStatus
+});

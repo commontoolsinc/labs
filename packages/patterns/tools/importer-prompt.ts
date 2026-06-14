@@ -56,18 +56,18 @@ export interface PromptContext {
 // ---------------------------------------------------------------------------
 
 // Read from: packages/patterns/airtable/core/airtable-auth.tsx
-const AIRTABLE_AUTH_SOURCE = `/// <cts-enable />
-import {
+const AIRTABLE_AUTH_SOURCE = `import {
   computed,
   Default,
   handler,
   ifElse,
   NAME,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Secret<T> = T;
 
@@ -122,10 +122,10 @@ export function createPreviewUI(
   const name = auth?.user?.name;
   const isAuthenticated = !!email;
 
-  // Date.now() capture is intentional — createPreviewUI produces a static
+  // safeDateNow() capture is intentional — createPreviewUI produces a static
   // snapshot for picker display, not a live-updating component. The main
   // pattern UI uses a reactive clock (startReactiveClock) separately.
-  const now = Date.now();
+  const now = safeDateNow();
   const expiresAt = auth?.expiresAt || 0;
   const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
   const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
@@ -220,32 +220,32 @@ export function createPreviewUI(
  * Use direct property access: \`airtableAuthPiece.auth\`
  */
 export type AirtableAuth = {
-  accessToken: Default<Secret<string>, "">;
-  tokenType: Default<string, "">;
-  scope: Default<string[], []>;
-  expiresIn: Default<number, 0>;
-  expiresAt: Default<number, 0>;
-  refreshToken: Default<Secret<string>, "">;
-  user: Default<{
+  accessToken: Secret<string> | Default<"">;
+  tokenType: string | Default<"">;
+  scope: string[] | Default<[]>;
+  expiresIn: number | Default<0>;
+  expiresAt: number | Default<0>;
+  refreshToken: Secret<string> | Default<"">;
+  user: {
     email: string;
     name: string;
     picture: string;
-  }, { email: ""; name: ""; picture: "" }>;
+  } | Default<{ email: ""; name: ""; picture: "" }>;
 };
 
 // Selected scopes configuration
 export type SelectedScopes = {
-  "data.records:read": Default<boolean, true>;
-  "data.records:write": Default<boolean, false>;
-  "data.recordComments:read": Default<boolean, false>;
-  "data.recordComments:write": Default<boolean, false>;
-  "schema.bases:read": Default<boolean, true>;
-  "schema.bases:write": Default<boolean, false>;
-  "webhook:manage": Default<boolean, false>;
+  "data.records:read": boolean | Default<true>;
+  "data.records:write": boolean | Default<false>;
+  "data.recordComments:read": boolean | Default<false>;
+  "data.recordComments:write": boolean | Default<false>;
+  "schema.bases:read": boolean | Default<true>;
+  "schema.bases:write": boolean | Default<false>;
+  "webhook:manage": boolean | Default<false>;
 };
 
 interface Input {
-  selectedScopes: Default<SelectedScopes, {
+  selectedScopes: SelectedScopes | Default<{
     "data.records:read": true;
     "data.records:write": false;
     "data.recordComments:read": false;
@@ -254,7 +254,7 @@ interface Input {
     "schema.bases:write": false;
     "webhook:manage": false;
   }>;
-  auth: Default<AirtableAuth, {
+  auth: AirtableAuth | Default<{
     accessToken: "";
     tokenType: "";
     scope: [];
@@ -332,7 +332,7 @@ const bgRefreshHandler = handler<
     const expiresAt = currentAuth.expiresAt ?? 0;
     if (expiresAt <= 0) return;
 
-    const timeRemaining = expiresAt - Date.now();
+    const timeRemaining = expiresAt - safeDateNow();
     if (timeRemaining > REFRESH_THRESHOLD_MS) return;
 
     console.log(
@@ -399,7 +399,7 @@ export default pattern<Input, Output>(
       return false;
     });
 
-    const now = Writable.of(Date.now());
+    const now = new Writable(safeDateNow());
     startReactiveClock(now);
 
     const isTokenExpired = computed(() => {
@@ -413,8 +413,8 @@ export default pattern<Input, Output>(
 
     const checkboxesDisabled = computed(() => !!auth?.accessToken);
 
-    const refreshing = Writable.of(false);
-    const refreshFailed = Writable.of(false);
+    const refreshing = new Writable(false);
+    const refreshFailed = new Writable(false);
 
     const scopesDisplay = computed(() => scopes.join(", "));
 
@@ -426,7 +426,7 @@ export default pattern<Input, Output>(
       const email = auth?.user?.email || "";
       const name = auth?.user?.name || "";
       const isAuthenticated = !!email;
-      const now = Date.now();
+      const now = safeDateNow();
       const expiresAt = auth?.expiresAt || 0;
       const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
       const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
@@ -568,12 +568,12 @@ export default pattern<Input, Output>(
                     color: loggedIn ? "#9ca3af" : "inherit",
                   }}
                 >
-                  <ct-checkbox
+                  <cf-checkbox
                     $checked={selectedScopes[key as keyof SelectedScopes]}
                     disabled={checkboxesDisabled}
                   >
                     {description}
-                  </ct-checkbox>
+                  </cf-checkbox>
                 </label>
               ))}
             </div>
@@ -693,7 +693,7 @@ export default pattern<Input, Output>(
             null,
           )}
 
-          <ct-oauth
+          <cf-oauth
             $auth={auth}
             scopes={scopes}
             provider="airtable"
@@ -932,8 +932,7 @@ export default pattern<Input, Output>(
 `;
 
 // Read from: packages/patterns/airtable/core/util/airtable-auth-manager.tsx
-const AIRTABLE_AUTH_MANAGER_SOURCE = `/// <cts-enable />
-/**
+const AIRTABLE_AUTH_MANAGER_SOURCE = `/**
  * Airtable Auth Manager - Unified auth management utility
  *
  * Encapsulates Airtable Auth best practices:
@@ -955,7 +954,8 @@ const AIRTABLE_AUTH_MANAGER_SOURCE = `/// <cts-enable />
  * \`\`\`
  */
 
-import { createAuthManager } from "../../../auth/create-auth-manager.tsx";
+import { action, navigateTo, pattern, Writable } from "commonfabric";
+import { AuthManagerBase } from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
 import AirtableAuth from "../airtable-auth.tsx";
 
@@ -982,7 +982,7 @@ export type ScopeKey =
   | "webhook:manage";
 
 /** Human-readable scope descriptions */
-export const SCOPE_DESCRIPTIONS: Record<ScopeKey, string> = {
+const AIRTABLE_SCOPE_DESCRIPTIONS = {
   "data.records:read": "Read records",
   "data.records:write": "Write records",
   "data.recordComments:read": "Read record comments",
@@ -990,9 +990,11 @@ export const SCOPE_DESCRIPTIONS: Record<ScopeKey, string> = {
   "schema.bases:read": "Read base schemas",
   "schema.bases:write": "Write base schemas",
   "webhook:manage": "Manage webhooks",
-};
+} as const;
+export const SCOPE_DESCRIPTIONS: Record<ScopeKey, string> =
+  AIRTABLE_SCOPE_DESCRIPTIONS;
 
-/** Unified scope registry for the auth manager factory */
+/** Unified scope registry for the auth manager base */
 const SCOPES: AuthManagerDescriptor["scopes"] = Object.fromEntries(
   Object.entries(SCOPE_DESCRIPTIONS).map(([key, desc]) => [
     key,
@@ -1010,10 +1012,60 @@ const AirtableAuthManagerDescriptor: AuthManagerDescriptor = {
   hasAvatarSupport: false,
 };
 
-export const AirtableAuthManager = createAuthManager(
-  AirtableAuthManagerDescriptor,
-  AirtableAuth,
-);
+export const AirtableAuthManager = pattern<
+  import("../../../auth/create-auth-manager.tsx").AuthManagerInput,
+  import("../../../auth/create-auth-manager.tsx").AuthManagerOutput
+>(({ requiredScopes, accountType, debugMode }) => {
+  const createAuth = action(() => {
+    const required = Array.isArray(requiredScopes) ? requiredScopes : [];
+    const emptyAuth: Record<string, unknown> = {
+      tokenType: "",
+      scope: [],
+      expiresIn: 0,
+      expiresAt: 0,
+      refreshToken: "",
+      user: { email: "", name: "", picture: "" },
+      accessToken: "",
+    };
+
+    return navigateTo(
+      AirtableAuth(
+        {
+          selectedScopes: {
+            "data.records:read": new Writable(
+              required.includes("data.records:read"),
+            ),
+            "data.records:write": new Writable(
+              required.includes("data.records:write"),
+            ),
+            "data.recordComments:read": new Writable(
+              required.includes("data.recordComments:read"),
+            ),
+            "data.recordComments:write": new Writable(
+              required.includes("data.recordComments:write"),
+            ),
+            "schema.bases:read": new Writable(
+              required.includes("schema.bases:read"),
+            ),
+            "schema.bases:write": new Writable(
+              required.includes("schema.bases:write"),
+            ),
+            "webhook:manage": new Writable(required.includes("webhook:manage")),
+          },
+          auth: emptyAuth,
+        } as Parameters<typeof AirtableAuth>[0],
+      ),
+    );
+  });
+
+  return AuthManagerBase({
+    requiredScopes,
+    accountType,
+    debugMode,
+    descriptor: AirtableAuthManagerDescriptor,
+    createAuth,
+  });
+});
 
 export default AirtableAuthManager;
 `;
@@ -1032,7 +1084,7 @@ const AIRTABLE_CLIENT_SOURCE = `/**
  * const records = await client.listRecords(baseId, tableId);
  * \\\`\\\`\\\`
  */
-import { getPatternEnvironment, Writable } from "commontools";
+import { getPatternEnvironment, Writable } from "commonfabric";
 
 const env = getPatternEnvironment();
 
@@ -1350,8 +1402,7 @@ export class AirtableClient {
 }`;
 
 // Read from: packages/patterns/airtable/airtable-importer.tsx
-const AIRTABLE_IMPORTER_SOURCE = `/// <cts-enable />
-import {
+const AIRTABLE_IMPORTER_SOURCE = `import {
   computed,
   Default,
   handler,
@@ -1360,7 +1411,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import {
   AirtableAuthManager,
@@ -1384,8 +1435,8 @@ type BaseInfo = { id: string; name: string };
 type TableInfo = { id: string; name: string };
 
 interface Input {
-  selectedBaseId: Default<string, "">;
-  selectedTableId: Default<string, "">;
+  selectedBaseId: string | Default<"">;
+  selectedTableId: string | Default<"">;
 }
 
 /** Import records from an Airtable base. #airtableImporter */
@@ -1540,11 +1591,11 @@ export default pattern<Input, Output>(
     const auth = authResult as any;
 
     // State
-    const bases = Writable.of<BaseInfo[]>([]);
-    const tables = Writable.of<TableInfo[]>([]);
-    const records = Writable.of<AirtableRecordData[]>([]);
-    const loading = Writable.of(false);
-    const error = Writable.of("");
+    const bases = new Writable<BaseInfo[]>([]);
+    const tables = new Writable<TableInfo[]>([]);
+    const records = new Writable<AirtableRecordData[]>([]);
+    const loading = new Writable(false);
+    const error = new Writable("");
 
     const hasBases = computed(() => bases.get().length > 0);
     const hasTables = computed(() => tables.get().length > 0);
@@ -2036,11 +2087,11 @@ export function generateImporterPrompt(ctx: PromptContext): string {
   // SECTION 1: System context — Pattern framework overview
   // =========================================================================
   sections.push(`<system>
-You are generating Common Tools pattern files for the "${providerLabel}" API integration.
+You are generating Common Fabric pattern files for the "${providerLabel}" API integration.
 
-## Common Tools Pattern Framework
+## Common Fabric Pattern Framework
 
-Common Tools patterns are reactive programs (similar to Solid.js components)
+Common Fabric patterns are reactive programs (similar to Solid.js components)
 that define a reactive graph once upfront. They are NOT re-invoked like React
 components.
 
@@ -2048,11 +2099,11 @@ components.
 
 All patterns start with:
 \`\`\`tsx
-/// <cts-enable />
 import {
   computed, Default, handler, ifElse, NAME, pattern,
   Stream, UI, Writable, getPatternEnvironment, wish, action, navigateTo,
-} from "commontools";
+  safeDateNow, nonPrivateRandom,
+} from "commonfabric";
 
 // Local no-op type alias for marking sensitive fields
 type Secret<T> = T;
@@ -2066,7 +2117,7 @@ Import only what you need from the above list. Define \`type Secret<T> = T;\` lo
   and returns an object with output cells.
 - **\`computed(() => expr)\`** — Derived reactive value. Re-evaluates when
   dependencies change. NEVER access \`wishResult[UI]\` inside a computed.
-- **\`Writable.of(initialValue)\`** — Mutable reactive cell. Use \`.get()\` to read,
+- **\`new Writable(initialValue)\`** — Mutable reactive cell. Use \`.get()\` to read,
   \`.set(value)\` to write, \`.update(partial)\` for partial updates.
 - **\`handler<EventType, ContextType>(async (event, context) => { ... })\`** —
   Async event handler. Declare at module scope, bind inside the pattern by
@@ -2083,35 +2134,37 @@ Import only what you need from the above list. Define \`type Secret<T> = T;\` lo
 - **\`navigateTo(piece)\`** — Navigate to another piece.
 - **\`[NAME]\`** — Special symbol for the piece's display name.
 - **\`[UI]\`** — Special symbol for the piece's rendered UI.
-- **\`Default<T, D>\`** — Type with a default value. For mutable arrays in schemas,
-  the standard pattern is \`Writable<Default<T[], []>>\`.
+- **\`T | Default<D>\`** — Type with a default value. For mutable arrays in schemas,
+  the standard pattern is \`Writable<T[] | Default<[]>>\`.
+- **\`T | DeepDefault<D>\`** — Object type with a partial recursive default.
+  Use this when the default lists only some nested object properties.
 - **\`Secret<T>\`** — Local no-op type alias (\`type Secret<T> = T;\`) for marking sensitive fields.
 - **\`Stream<T>\`** — Stateless channel. Written via \`.send()\`. Used for handlers
   that can be called from other pieces.
 
 ### UI Components
 
-Use \`ct-*\` custom elements:
+Use \`cf-*\` custom elements:
 
-- \`<ct-oauth $auth={auth} scopes={scopes} provider="..." providerLabel="..." brandColor="..." loginEndpoint="..." tokenField="...">\` — OAuth flow component
-- \`<ct-checkbox $checked={cell}>Label</ct-checkbox>\` — Checkbox with bidirectional binding
-- \`<ct-input $value={cell} placeholder="..." />\` — Text input with bidirectional binding
-- \`<ct-select $value={cell} items={[{label, value}]} />\` — Select dropdown
-- \`<ct-button onClick={handler}>Label</ct-button>\` — Button
-- \`<ct-card>...</ct-card>\` — Styled card container
-- \`<ct-vstack gap={N}>...</ct-vstack>\` — Vertical stack layout
-- \`<ct-render $cell={patternInstance} />\` — Render a sub-pattern
+- \`<cf-oauth $auth={auth} scopes={scopes} provider="..." providerLabel="..." brandColor="..." loginEndpoint="..." tokenField="...">\` — OAuth flow component
+- \`<cf-checkbox $checked={cell}>Label</cf-checkbox>\` — Checkbox with bidirectional binding
+- \`<cf-input $value={cell} placeholder="..." />\` — Text input with bidirectional binding
+- \`<cf-select $value={cell} items={[{label, value}]} />\` — Select dropdown
+- \`<cf-button onClick={handler}>Label</cf-button>\` — Button
+- \`<cf-card>...</cf-card>\` — Styled card container
+- \`<cf-vstack gap={N}>...</cf-vstack>\` — Vertical stack layout
+- \`<cf-render $cell={patternInstance} />\` — Render a sub-pattern
 
 Native HTML elements (\`<div>\`, \`<table>\`, \`<button>\`) work with object-style
-\`style={{ camelCase: "value" }}\`. Custom \`ct-*\` elements use string-style
+\`style={{ camelCase: "value" }}\`. Custom \`cf-*\` elements use string-style
 \`style="kebab-case: value;"\`.
 
 ### Anti-Patterns to Avoid
 
-1. **NEVER** access \`wishResult[UI]\` inside a \`computed()\` — crashes silently
+1. **NEVER** access \`wishResult[UI]\` inside a \`computed()\` — it can throw and surface a scheduler error
 2. **NEVER** use React patterns (useState, useEffect, etc.)
 3. **NEVER** re-invoke the pattern function — it runs exactly once
-4. \`computed()\` failures propagate silently — downstream values become undefined
+4. \`computed()\` failures surface through scheduler error reporting — downstream values become undefined
 5. Always use \`handler()\` for async operations (API calls), not inline async
 6. Use module-scope \`handler()\` definitions, bind inside the pattern
 7. **NEVER** wrap JSX in \`computed()\` — the transformer automatically handles reactivity in JSX expressions
@@ -2123,7 +2176,7 @@ For a provider named "acme":
 packages/patterns/acme/
   acme-importer.tsx          # Main importer pattern
   core/
-    acme-auth.tsx            # Auth pattern (thin, uses ct-oauth)
+    acme-auth.tsx            # Auth pattern (thin, uses cf-oauth)
     util/
       acme-auth-manager.tsx  # Auth manager (token lifecycle, wish-based discovery)
       acme-client.ts         # Typed API client with pagination + retry
@@ -2272,23 +2325,23 @@ file in a fenced code block with the file path as a comment on the first line.
 
 ## File 1: \`packages/patterns/${providerName}/core/${providerName}-auth.tsx\`
 
-A thin auth pattern that wraps the \`<ct-oauth>\` component. Follow the Airtable
+A thin auth pattern that wraps the \`<cf-oauth>\` component. Follow the Airtable
 auth reference exactly, adapting for ${providerLabel}. Uses shared utilities
 from \`../../auth/\` (auth-refresh, auth-reactive, auth-types, auth-ui-helpers):
 
-- First line: \`/// <cts-enable />\`
+- CTS transforms are enabled by default; do not add \`/// <cf-disable-transform />\`
 - Export a type \`${pascalName}Auth\` with fields:
-  - \`accessToken: Default<Secret<string>, "">\`  (or \`token\` if the provider uses that convention)
-  - \`tokenType: Default<string, "">\`
-  - \`scope: Default<string[], []>\`
-  - \`expiresIn: Default<number, 0>\`
-  - \`expiresAt: Default<number, 0>\`
-  - \`refreshToken: Default<Secret<string>, "">\`
-  - \`user: Default<{ email: string; name: string; picture: string }, { email: ""; name: ""; picture: "" }>\`
+  - \`accessToken: Secret<string> | Default<"">\`  (or \`token\` if the provider uses that convention)
+  - \`tokenType: string | Default<"">\`
+  - \`scope: string[] | Default<[]>\`
+  - \`expiresIn: number | Default<0>\`
+  - \`expiresAt: number | Default<0>\`
+  - \`refreshToken: Secret<string> | Default<"">\`
+  - \`user: { email: string; name: string; picture: string } | Default<{ email: ""; name: ""; picture: "" }>\`
 - Use the \`#${
     hashTag.slice(1)
   }\` tag in the Output interface JSDoc comment for wish() discovery
-- Use \`<ct-oauth>\` with:
+- Use \`<cf-oauth>\` with:
   - \`provider="${providerName}"\`
   - \`providerLabel="${providerLabel}"\`
   - \`brandColor="${brandColor}"\`
@@ -2305,23 +2358,27 @@ ${
 
 ## File 2: \`packages/patterns/${providerName}/core/util/${providerName}-auth-manager.tsx\`
 
-Auth manager utility pattern. Uses the shared \`createAuthManager()\` factory — follow the Airtable auth manager reference exactly:
+Auth manager utility pattern. Wraps the shared \`AuthManagerBase\` pattern — follow the Airtable auth manager reference exactly:
 
-- First line: \`/// <cts-enable />\`
-- Import \`createAuthManager\` from \`"../../../auth/create-auth-manager.tsx"\`
+- CTS transforms are enabled by default; do not add \`/// <cf-disable-transform />\`
+- Import \`action\`, \`navigateTo\`, \`pattern\`, and \`Writable\` from \`"commonfabric"\`
+- Import \`AuthManagerBase\` from \`"../../../auth/create-auth-manager.tsx"\`
 - Import \`AuthManagerDescriptor\` type from \`"../../../auth/auth-manager-descriptor.ts"\`
 - Import the auth pattern: \`import ${pascalName}Auth from "../${providerName}-auth.tsx";\`
 - Re-export shared types: \`AuthInfo\`, \`AuthState\`, \`TokenExpiryWarning\`, \`AuthManagerInput\`, \`AuthManagerOutput\`
 - Re-export the auth type from the auth pattern
-- Define a descriptor object with: name, displayName, brandColor (\`${brandColor}\`), wishTag (\`"${hashTag}"\`), tokenField, refreshEndpoint, scopeDescriptions, scopeKeysAreLiteral (true for Airtable-style, where scope keys ARE scope strings), hasAvatarSupport
-- Call \`createAuthManager(descriptor, ${pascalName}Auth)\` and export result as both named and default
-- This file should be ~50-70 lines total
+- Define a descriptor object with: name, displayName, brandColor (\`${brandColor}\`), wishTag (\`"${hashTag}"\`), tokenField, scopes, hasAvatarSupport
+- Define \`${pascalName}AuthManager\` as a module-scope \`pattern(...)\`
+- Inside that pattern, define \`createAuth = action(() => navigateTo(${pascalName}Auth(...)))\`; do not put pattern construction inside a standalone factory function
+- Build \`selectedScopes\` explicitly with one \`new Writable(required.includes("<scope>"))\` property per provider scope
+- Call \`AuthManagerBase({ requiredScopes, accountType, debugMode, descriptor, createAuth })\` and export the wrapper pattern as both named and default
+- This file should be ~90-130 lines total
 
 ## File 3: \`packages/patterns/${providerName}/core/util/${providerName}-client.ts\`
 
 Typed API client class. Follow the Airtable client reference:
 
-- Import \`getPatternEnvironment\` and \`Writable\` from "commontools"
+- Import \`getPatternEnvironment\` and \`Writable\` from "commonfabric"
 - Import auth type from the auth pattern
 - Base URL: \`${api.baseUrl}\`
 - Implement:
@@ -2349,8 +2406,8 @@ ${
 
 Main importer pattern. Follow the Airtable importer reference:
 
-- First line: \`/// <cts-enable />\`
-- Import from \`"commontools"\`: computed, Default, handler, ifElse, NAME, pattern, UI, Writable
+- CTS transforms are enabled by default; do not add \`/// <cf-disable-transform />\`
+- Import from \`"commonfabric"\`: computed, Default, handler, ifElse, NAME, pattern, UI, Writable, safeDateNow, nonPrivateRandom (only when needed)
 - Import the auth manager and client
 - Define module-scope \`handler()\` functions for each API call:
   - Each handler takes \`auth\`, relevant state cells (\`loading\`, \`error\`, result cells)
@@ -2378,13 +2435,13 @@ Main importer pattern. Follow the Airtable importer reference:
 1. **wish() for auth discovery** — Always use \`wish({ query: "${hashTag}", scope: [".", "~"] })\`
 2. **handler() for async ops** — Define at module scope, bind inside pattern
 3. **ifElse() for conditional rendering** — condition must be computed/cell, not raw boolean
-4. **Writable.of() for mutable state** — Use \`.get()\` in handlers, \`.set()\` to update
+4. **new Writable() for mutable state** — Use \`.get()\` in handlers, \`.set()\` to update
 5. **computed() for derived values** — Pure computations only, no side effects
 6. **Token refresh on 401** — Client auto-refreshes via server endpoint
 7. **No React patterns** — No useState, useEffect, hooks, or re-rendering
 8. **Data in <table>** — Use standard HTML table with inline styles for data display
-9. **First line: \`/// <cts-enable />\`** — Required for all .tsx pattern files
-10. **Import from "commontools"** — Not from individual packages
+9. **CTS transforms are enabled by default** — Do not add \`/// <cf-disable-transform />\` unless you are intentionally opting out
+10. **Import from "commonfabric"** — Not from individual packages
 </instructions>`);
 
   return sections.join("\n\n");

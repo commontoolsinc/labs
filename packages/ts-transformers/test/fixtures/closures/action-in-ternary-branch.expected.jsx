@@ -1,13 +1,23 @@
-import * as __ctHelpers from "commontools";
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
 /**
  * Regression test: action() result used in same ternary branch as computed()
  *
  * When a ternary branch contains both a computed() value and an action() reference,
- * the action must be captured in the derive wrapper along with the computed value.
- * Previously, action() results were incorrectly classified as "function declarations"
- * and skipped by CaptureCollector.
+ * the nested computed expression should still lower locally in JSX without forcing
+ * the whole JSX branch through an extra lift-applied wrapper.
  */
-import { action, Cell, computed, pattern, UI } from "commontools";
+import { action, Cell, computed, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
 interface Card {
     title: string;
     description: string;
@@ -15,153 +25,103 @@ interface Card {
 interface Input {
     card: Card;
 }
-// FIXTURE: action-in-ternary-branch
-// Verifies: action() result used in a ternary branch alongside computed() is captured in the derive wrapper
-//   action(() => ...) → handler(eventSchema, captureSchema, (_, { isEditing }) => ...)({ isEditing })
-//   ternary with computed → ifElse(...) with inner derive() capturing { card, hasDescription, startEditing }
-// Context: Regression -- action results were previously skipped by CaptureCollector as "function declarations"
-export default pattern((__ct_pattern_input) => {
-    const card = __ct_pattern_input.key("card");
-    const isEditing = Cell.of(false, {
-        type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema);
-    const startEditing = __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            isEditing: {
-                type: "boolean",
-                asCell: true
-            }
-        },
-        required: ["isEditing"]
-    } as const satisfies __ctHelpers.JSONSchema, (_, { isEditing }) => {
-        isEditing.set(true);
-    })({
-        isEditing: isEditing
-    });
-    const hasDescription = __ctHelpers.derive({
-        type: "object",
-        properties: {
-            card: {
-                type: "object",
-                properties: {
-                    description: {
-                        type: "string",
-                        asOpaque: true
-                    }
-                },
-                required: ["description"]
-            }
-        },
-        required: ["card"]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, { card: {
-            description: card.key("description")
-        } }, ({ card }) => {
-        const desc = card.description;
-        return desc && desc.length > 0;
-    });
-    return {
-        [UI]: (<ct-card>
-        {__ctHelpers.ifElse({
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        isEditing: {
             type: "boolean",
-            asCell: true
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{}, {
-                    type: "object",
-                    properties: {}
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{}, {
-                    type: "object",
-                    properties: {}
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{}, {
-                    type: "object",
-                    properties: {}
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, isEditing, <div>Editing</div>, __ctHelpers.derive({
+            asCell: ["writeonly"]
+        }
+    },
+    required: ["isEditing"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { isEditing }) => {
+    isEditing.set(true);
+});
+const __cfLift_1 = __cfHelpers.lift<{
+    card: {
+        description: string;
+    };
+}, boolean | "">(({ card }) => {
+    const desc = card.description;
+    return desc && desc.length > 0;
+}, {
+    type: "object",
+    properties: {
+        card: {
             type: "object",
             properties: {
-                card: {
-                    type: "object",
-                    properties: {
-                        title: {
-                            type: "string",
-                            asOpaque: true
-                        },
-                        description: {
-                            type: "string",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["title", "description"]
-                },
-                hasDescription: {
-                    type: "boolean",
-                    asOpaque: true
-                },
-                startEditing: {
-                    asStream: true
+                description: {
+                    type: "string"
                 }
             },
-            required: ["card", "hasDescription", "startEditing"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            card: {
-                title: card.key("title"),
-                description: card.key("description")
-            },
-            hasDescription: hasDescription,
-            startEditing: startEditing
-        }, ({ card, hasDescription, startEditing }) => (<div>
-            <span>{card.title}</span>
-            {/* Nested ternary with computed - triggers derive wrapper */}
-            {__ctHelpers.ifElse({
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+            required: ["description"]
+        }
+    },
+    required: ["card"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    "enum": [false, true, ""]
+} as const satisfies __cfHelpers.JSONSchema);
+// FIXTURE: action-in-ternary-branch
+// Verifies: action() result used in a ternary branch alongside computed() keeps
+//   local JSX rewrites instead of forcing a whole-branch lift-applied computation
+//   action(() => ...) → handler(eventSchema, captureSchema, (_, { isEditing }) => ...)({ isEditing })
+//   nested hasDescription ternary → local ifElse(...) inside the JSX branch
+// Context: Regression coverage for JSX-local rewriting with action references in the same branch
+export default pattern((__cf_pattern_input) => {
+    const card = __cf_pattern_input.key("card");
+    const isEditing = new Cell(false, {
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema).for("isEditing", true);
+    const startEditing = __cfHandler_1({
+        isEditing: isEditing
+    }).for({ stream: "startEditing" }, true);
+    const hasDescription = __cfLift_1({ card: {
+            description: card.key("description")
+        } }).for("hasDescription", true);
+    return {
+        [UI]: (<cf-card>
+        {__cfHelpers.ifElse({
+            type: "boolean",
+            asCell: ["cell"]
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "null"
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "null"
-                }, {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
+        } as const satisfies __cfHelpers.JSONSchema, {
+            anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, hasDescription, <span>{card.description}</span>, null)}
-            {/* Action in SAME branch - must be captured by the derive! */}
-            <ct-button onClick={startEditing}>Edit</ct-button>
-          </div>)))}
-      </ct-card>),
+        } as const satisfies __cfHelpers.JSONSchema, {
+            anyOf: [{}, {
+                    type: "object",
+                    properties: {}
+                }]
+        } as const satisfies __cfHelpers.JSONSchema, isEditing, <div>Editing</div>, <div>
+            <span>{card.key("title")}</span>
+            {/* Nested ternary with computed - lowers locally inside JSX */}
+            {__cfHelpers.ifElse({
+            "enum": [false, true, ""]
+        } as const satisfies __cfHelpers.JSONSchema, {
+            anyOf: [{}, {
+                    type: "object",
+                    properties: {}
+                }]
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "null"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            anyOf: [{
+                    type: "null"
+                }, {}, {
+                    type: "object",
+                    properties: {}
+                }]
+        } as const satisfies __cfHelpers.JSONSchema, hasDescription, <span>{card.key("description")}</span>, null)}
+            {/* Action in SAME branch stays direct while JSX-local rewrites handle the computed value */}
+            <cf-button onClick={startEditing}>Edit</cf-button>
+          </div>)}
+      </cf-card>),
         card,
     };
 }, {
@@ -186,15 +146,14 @@ export default pattern((__ct_pattern_input) => {
             required: ["title", "description"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
             $ref: "#/$defs/JSXElement"
         },
         card: {
-            $ref: "#/$defs/Card",
-            asOpaque: true
+            $ref: "#/$defs/Card"
         }
     },
     required: ["$UI", "card"],
@@ -215,11 +174,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
@@ -232,8 +190,11 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfHandler_1,
+    __cfLift_1
+});

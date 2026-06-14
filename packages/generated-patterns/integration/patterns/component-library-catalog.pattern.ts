@@ -1,14 +1,12 @@
-/// <cts-enable />
 import {
   type Cell,
   cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface ComponentLibraryCatalogArgs {
   components: Default<ComponentSeed[], typeof defaultComponentSeeds>;
@@ -19,7 +17,7 @@ interface ComponentSeed {
   name?: string;
   category?: string;
   description?: string;
-  props?: unknown;
+  props?: string[];
 }
 
 interface ComponentDefinition {
@@ -40,7 +38,7 @@ interface RecipeRegistrationEntry {
 interface RecipeRegistrationEvent {
   component?: string;
   pattern?: string;
-  props?: unknown;
+  props?: string[];
 }
 
 interface ComponentCoverageView {
@@ -649,19 +647,13 @@ export const componentLibraryCatalog = pattern<ComponentLibraryCatalogArgs>(
       props: propCoverage,
     });
 
-    const componentCount = derive(coverageTotals, (stats) => stats.components);
-    const fullyCovered = derive(coverageTotals, (stats) => stats.fullyCovered);
-    const partiallyCovered = derive(
-      coverageTotals,
-      (stats) => stats.partiallyCovered,
-    );
-    const uncovered = derive(coverageTotals, (stats) => stats.uncovered);
-    const averageCoverage = derive(
-      coverageTotals,
-      (stats) => stats.averageCoverage,
-    );
-    const propCount = derive(coverageTotals, (stats) => stats.props);
-    const propsCovered = derive(coverageTotals, (stats) => stats.propsCovered);
+    const componentCount = coverageTotals.components;
+    const fullyCovered = coverageTotals.fullyCovered;
+    const partiallyCovered = coverageTotals.partiallyCovered;
+    const uncovered = coverageTotals.uncovered;
+    const averageCoverage = coverageTotals.averageCoverage;
+    const propCount = coverageTotals.props;
+    const propsCovered = coverageTotals.propsCovered;
 
     const coverageSummary =
       str`${fullyCovered}/${componentCount} covered | props ${propsCovered}/${propCount}`;

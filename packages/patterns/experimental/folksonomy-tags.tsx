@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Folksonomy Tags - Community-Enabled Tag List Sub-Pattern
  *
@@ -13,8 +12,8 @@
  *
  * USAGE:
  * ```tsx
- * const tags = Writable.of<string[]>([]);
- * <ct-render $cell={FolksonomyTags({
+ * const tags = new Writable<string[]>([]);
+ * <cf-render $cell={FolksonomyTags({
  *   scope: "https://github.com/example/recipe-tracker",
  *   tags,
  * })} />
@@ -26,21 +25,22 @@
  * Without the aggregator, falls back to local-only mode.
  *
  * NOTE: Due to a runtime bug where CustomEvent details aren't passed through
- * ct-render boundaries, we use $value binding instead of onct-select handlers.
+ * cf-render boundaries, we use $value binding instead of oncf-select handlers.
  */
 import {
+  computed,
   type Default,
-  derive,
   handler,
   lift,
   NAME,
   pattern,
+  safeDateNow,
   type Stream,
   UI,
   type VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 /**
  * Tag event sent to the aggregator.
@@ -72,14 +72,14 @@ interface AggregatorCharm {
 
 interface FolksonomyTagsInput {
   /** Namespace key (e.g., GitHub URL of the pattern using it) */
-  scope: Writable<Default<string, "">>;
+  scope: Writable<string | Default<"">>;
   /** User's tags for this scope - bidirectional binding */
-  tags: Writable<Default<string[], []>>;
+  tags: Writable<string[] | Default<[]>>;
   /** Optional: Direct reference to aggregator (bypasses wish() discovery) */
   aggregator?: AggregatorCharm;
 }
 
-interface FolksonomyTagsOutput {
+export interface FolksonomyTagsOutput {
   [NAME]: string;
   [UI]: VNode;
   tags: string[];
@@ -88,7 +88,7 @@ interface FolksonomyTagsOutput {
 }
 
 /**
- * Autocomplete item structure for ct-autocomplete.
+ * Autocomplete item structure for cf-autocomplete.
  */
 interface AutocompleteItem {
   value: string;
@@ -137,10 +137,10 @@ const _postTelemetryEvent = handler<
     scope,
     tag: event.tag,
     action: event.action,
-    timestamp: Date.now(),
+    timestamp: safeDateNow(),
   };
 
-  // Stream from derive() is a Cell containing the stream - call .send() directly
+  // Stream projected from the aggregator is a Cell containing the stream - call .send() directly
   try {
     aggregatorStream.send(tagEvent);
   } catch (e) {
@@ -170,7 +170,7 @@ const onRemoveTag = handler<
         scope,
         tag: removedTag,
         action: "remove",
-        timestamp: Date.now(),
+        timestamp: safeDateNow(),
       });
     } catch (e) {
       console.warn("[folksonomy-tags] Failed to post remove event:", e);
@@ -213,7 +213,7 @@ const onTagsChanged = handler<
           scope,
           tag,
           action: "add",
-          timestamp: Date.now(),
+          timestamp: safeDateNow(),
         });
       }
     } catch (e) {
@@ -290,54 +290,37 @@ export const FolksonomyTags = pattern<
     });
 
     // Use injected aggregator if available, otherwise use wish result
-    const aggregator = derive(
-      [injectedAggregator, aggregatorWish.result],
-      (
-        [injected, wished]: [
-          AggregatorCharm | undefined,
-          AggregatorCharm | null,
-        ],
-      ) => injected ?? wished ?? null,
-    );
+    const aggregator = injectedAggregator ?? aggregatorWish.result ?? null;
 
     // Get the aggregator's postEvent stream for telemetry
-    const aggregatorStream = derive(
-      aggregator,
-      (agg: AggregatorCharm | null) =>
-        (agg?.postEvent as Stream<TagEvent>) ?? null,
-    );
+    const aggregatorStream = (aggregator?.postEvent as Stream<TagEvent>) ??
+      null;
 
     // Track previous tags for change detection
-    const previousTags = Writable.of<string[]>([]).for("previousTags");
+    const previousTags = new Writable<string[]>([]).for("previousTags");
 
     // Get community suggestions for this scope
-    const communitySuggestions = derive(
-      [aggregator, scope],
-      ([agg, scopeValue]: [AggregatorCharm | null, string]) => {
-        if (!agg || !scopeValue) return [];
-        const suggs = agg.suggestions || {};
-        return suggs[scopeValue] || [];
-      },
-    );
+    const communitySuggestions = computed(() => {
+      const scopeValue = scope.get();
+      if (!aggregator || !scopeValue) return [];
+      const suggs = aggregator.suggestions || {};
+      return suggs[scopeValue] || [];
+    });
 
-    // For now, local tags are just the current tags (same scope within same charm)
-    const localTags = derive(tags, (t: string[]) => t || []);
-
-    // Build autocomplete items combining local and community
+    // Build autocomplete items combining local and community.
+    // Local tags are just the current tags (same scope within same charm).
     const autocompleteItems = buildAutocompleteItems({
-      localTags,
+      localTags: tags,
       communitySuggestions,
       currentTags: tags,
     });
 
     // Check if aggregator is connected
-    const hasAggregator = derive(
-      aggregator,
-      (agg: AggregatorCharm | null) => agg != null,
-    );
+    const hasAggregator = aggregator != null;
 
     // Computed name for display
-    const displayName = derive(tags, (tagList: string[]) => {
+    const displayName = computed(() => {
+      const tagList = tags.get();
       if (!tagList || tagList.length === 0) return "🏷️ Tags";
       return `🏷️ Tags (${tagList.length})`;
     });
@@ -345,24 +328,24 @@ export const FolksonomyTags = pattern<
     return {
       [NAME]: displayName,
       [UI]: (
-        <ct-vstack gap="3" style={{ padding: "8px 0" }}>
+        <cf-vstack gap="3" style={{ padding: "8px 0" }}>
           {/* Hidden render to force aggregator to execute */}
           <div style={{ display: "none" }}>
-            <ct-render $cell={aggregator} />
+            <cf-render $cell={aggregator} />
           </div>
 
           {
             /* Autocomplete input - use $value binding with multiple mode
-              instead of onct-select (runtime bug: CustomEvent.detail not passed through ct-render)
-              onct-change triggers telemetry posting for additions */
+              instead of oncf-select (runtime bug: CustomEvent.detail not passed through cf-render)
+              oncf-change triggers telemetry posting for additions */
           }
-          <ct-autocomplete
+          <cf-autocomplete
             items={autocompleteItems}
             placeholder="Add a tag..."
             allowCustom
             multiple
             $value={tags}
-            onct-change={onTagsChanged({
+            oncf-change={onTagsChanged({
               tags,
               previousTags,
               aggregatorStream,
@@ -373,7 +356,7 @@ export const FolksonomyTags = pattern<
           {/* Current tags */}
           {hasTags(tags)
             ? (
-              <ct-hstack gap="2" wrap>
+              <cf-hstack gap="2" wrap>
                 {tags.map((tag: string, index: number) => (
                   <span
                     key={index}
@@ -411,7 +394,7 @@ export const FolksonomyTags = pattern<
                     </button>
                   </span>
                 ))}
-              </ct-hstack>
+              </cf-hstack>
             )
             : (
               <span style={{ color: "#9ca3af", fontSize: "13px" }}>
@@ -420,7 +403,7 @@ export const FolksonomyTags = pattern<
             )}
 
           {/* Aggregator status indicator */}
-          <ct-hstack
+          <cf-hstack
             gap="1"
             align="center"
             style={{ fontSize: "11px", color: "#9ca3af" }}
@@ -438,8 +421,8 @@ export const FolksonomyTags = pattern<
                 ? "Connected to community aggregator"
                 : "Local mode (favorite folksonomy-aggregator for community)"}
             </span>
-          </ct-hstack>
-        </ct-vstack>
+          </cf-hstack>
+        </cf-vstack>
       ),
       tags,
       addTag: addTagHandler({ tags }),

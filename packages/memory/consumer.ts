@@ -41,14 +41,16 @@ import type {
   Selection,
   Selector,
   Signer,
-  StorableDatum,
   Transaction,
   TransactionResult,
   UCAN,
   URI,
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
-import { type ContentId, contentIdFromJSON, refer } from "./reference.ts";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import * as Socket from "./socket.ts";
 import {
   getSelectorRevision,
@@ -62,10 +64,10 @@ import * as Subscription from "./subscription.ts";
 import { toStringStream } from "./ucan.ts";
 import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
-import { storableFromNativeValue } from "./storable-value.ts";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 export * from "./interface.ts";
 import { toRevision } from "./commit.ts";
-import { getLogger } from "@commontools/utils/logger";
+import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("memory-consumer", {
   enabled: true,
@@ -114,10 +116,7 @@ export const open = ({
   const consumer = create({ as, clock, ttl });
   // The pipeTo() promise is captured as `consumer.closed` so that callers
   // (specifically StorageManagerEmulator.close()) can await full pipeline
-  // shutdown before resetting ambient state like the canonical hash config.
-  // Without this, Runtime.dispose() could reset the hash config while
-  // in-flight messages were still being delivered from consumer to provider,
-  // causing hash format mismatches in Access.claim().
+  // shutdown before tearing down ambient state.
   //
   // pipeTo() rejects when the TransformStream is terminated during teardown
   // (consumer.close() calls cancel() then controller.terminate()). That
@@ -153,7 +152,7 @@ class MemoryConsumerSession<
     >
     | undefined;
   invocations: Map<
-    InvocationURL<ContentId<Invocation>>,
+    InvocationURL<FabricHash>,
     Job<Abilities<MemoryProtocol>, MemoryProtocol>
   > = new Map();
 
@@ -199,7 +198,7 @@ class MemoryConsumerSession<
           );
           logger.error(
             "stream-error",
-            () => ["Failed command:", JSON.stringify(command)],
+            () => ["Failed command:", toCompactDebugString(command)],
           );
           throw error;
         }
@@ -384,7 +383,7 @@ class MemoryConsumerSession<
 
   private executeAuthorized<
     Ability extends string,
-    Access extends ContentId[],
+    Access extends FabricHash[],
   >(
     authorizationResult: Result<Authorization<Access[number]>, Error>,
     invocation: ConsumerInvocation<Ability, MemoryProtocol>,
@@ -590,7 +589,7 @@ class ConsumerInvocation<Ability extends string, Protocol extends Proto> {
 
   source: ConsumerInvocationFor<Ability, Protocol>;
 
-  #reference: ContentId<Invocation>;
+  #reference: FabricHash;
 
   static create<Ability extends string, Protocol extends Proto>(
     as: DID,
@@ -612,10 +611,10 @@ class ConsumerInvocation<Ability extends string, Protocol extends Proto> {
 
   constructor(source: ConsumerInvocationFor<Ability, Protocol>) {
     // Deep-clone the source to ensure consistent serialization.
-    this.source = storableFromNativeValue(
+    this.source = fabricFromNativeValue(
       source,
     ) as ConsumerInvocationFor<Ability, Protocol>;
-    this.#reference = refer(this.source);
+    this.#reference = hashOf(this.source);
     let receive;
     this.promise = new Promise<ConsumerResultFor<Ability, Protocol>>(
       (resolve) => (receive = resolve),
@@ -826,7 +825,7 @@ class QuerySubscriptionInvocation<
   override perform(commit: EnhancedCommit<Space>) {
     const selection = this.selection[this.space];
     // Here we will collect subset of changes that match the query.
-    const differential: OfTheCause<{ is?: StorableDatum; since: number }> = {};
+    const differential: OfTheCause<{ is?: FabricValue; since: number }> = {};
 
     // A revision-only commit (empty commit payload) carries deferred schema
     // traversal results. Skip commit parsing — just deliver revisions.
@@ -895,10 +894,11 @@ class QuerySubscriptionInvocation<
       }
     }
     this.integrate(commit);
-    // This is a bit strange, but the revisions in here aren't proper
-    // They've lost their Reference methods, so recreate them
+    // The revisions in here aren't proper: they've lost their identity as
+    // `FabricHash`, so recreate them from the string form.
     commit.revisions.forEach((item) => {
-      item.cause = contentIdFromJSON(JSON.parse(JSON.stringify(item.cause)));
+      const stringValue = (item.cause as unknown as { "/": string })["/"];
+      item.cause = FabricHash.fromString(stringValue);
     });
 
     return { ok: {} };

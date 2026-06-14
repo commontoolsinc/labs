@@ -7,9 +7,10 @@ import {
   Proof,
   Signer,
 } from "./interface.ts";
-import { type ContentId, refer } from "./reference.ts";
+import type { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { unauthorized } from "./error.ts";
-import { type DID } from "@commontools/identity";
+import { type DID } from "@commonfabric/identity";
 import { fromDID } from "./util.ts";
 import { checkACL } from "./acl.ts";
 
@@ -28,7 +29,7 @@ export const claim = async <Access extends Invocation>(
   serviceDid: DID,
   acl?: ACL,
 ): AsyncResult<Access, AuthorizationError> => {
-  const claim = refer(access).toString();
+  const claim = hashOf(access).toString();
   if (authorization.access[claim]) {
     const { ok: issuer, error } = await fromDID(access.iss);
     if (error) {
@@ -37,7 +38,7 @@ export const claim = async <Access extends Invocation>(
       };
     }
     const result = await issuer.verify({
-      payload: refer(authorization.access).bytes,
+      payload: hashOf(authorization.access).bytes,
       signature: authorization.signature,
     });
 
@@ -85,17 +86,15 @@ export const claim = async <Access extends Invocation>(
         availableKeys.length > 0 ? availableKeys.join(", ") : "(none)"
       }`,
     ];
-    // Detect legacy-vs-canonical hash format mismatch
-    const claimIsCanonical = claim.includes(":");
-    const keysAreCanonical = availableKeys.some((k) => k.includes(":"));
-    if (claimIsCanonical !== keysAreCanonical && availableKeys.length > 0) {
+    // Detect legacy-vs-modern hash format mismatch
+    const claimIsModern = claim.includes(":");
+    const keysAreModern = availableKeys.some((k) => k.includes(":"));
+    if (claimIsModern !== keysAreModern && availableKeys.length > 0) {
       details.push(
         `  ⚠ Hash format mismatch: server computed ${
-          claimIsCanonical ? "canonical" : "legacy"
-        } hash but client sent ${
-          keysAreCanonical ? "canonical" : "legacy"
-        } hashes.`,
-        `  This usually means the client and server have different EXPERIMENTAL_CANONICAL_HASHING settings.`,
+          claimIsModern ? "modern" : "legacy"
+        } hash but client sent ${keysAreModern ? "modern" : "legacy"} hashes.`,
+        `  This usually means the client and server have different hash algorithms settings.`,
       );
     }
     console.error(`[access] ${details.join("\n")}`);
@@ -108,7 +107,7 @@ export const claim = async <Access extends Invocation>(
 /**
  * Issues verifiable authorization signed by the given signer.
  */
-export const authorize = async <Access extends ContentId[]>(
+export const authorize = async <Access extends FabricHash[]>(
   access: Access,
   as: Signer,
 ): AsyncResult<Authorization<Access[number]>, Error> => {
@@ -118,7 +117,7 @@ export const authorize = async <Access extends ContentId[]>(
   }
 
   const { ok: signature, error } = await as.sign<Access[number]>(
-    refer(proof).bytes,
+    hashOf(proof).bytes,
   );
   if (error) {
     return { error };

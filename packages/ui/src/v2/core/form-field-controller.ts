@@ -2,7 +2,7 @@
  * FormFieldController - Reactive controller for form field buffering
  *
  * This controller implements the "write gate" pattern where form fields
- * buffer writes locally when inside a ct-form, and flush atomically on submit.
+ * buffer writes locally when inside a cf-form, and flush atomically on submit.
  *
  * When NOT in a form context, getValue/setValue delegate directly to the
  * cell controller for immediate writes (existing behavior).
@@ -114,7 +114,7 @@ export class FormFieldController<T> implements ReactiveController {
     this._cellController = options.cellController;
     this._validate = options.validate ?? (() => ({ valid: true }));
 
-    // Set up context consumer to access FormContext from ancestor ct-form
+    // Set up context consumer to access FormContext from ancestor cf-form
     this._formContextConsumer = new ContextConsumer(host, {
       context: formContext,
       subscribe: false, // Don't need updates, just initial value
@@ -124,7 +124,7 @@ export class FormFieldController<T> implements ReactiveController {
   }
 
   /**
-   * Get the form context (if we're inside a ct-form)
+   * Get the form context (if we're inside a cf-form)
    */
   private get _formContext(): FormContext | undefined {
     return this._formContextConsumer.value;

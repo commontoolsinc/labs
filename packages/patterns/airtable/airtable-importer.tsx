@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   computed,
   Default,
@@ -8,7 +7,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import {
   AirtableAuthManager,
@@ -32,12 +31,12 @@ type BaseInfo = { id: string; name: string };
 type TableInfo = { id: string; name: string };
 
 interface Input {
-  selectedBaseId: Default<string, "">;
-  selectedTableId: Default<string, "">;
+  selectedBaseId: string | Default<"">;
+  selectedTableId: string | Default<"">;
 }
 
 /** Import records from an Airtable base. #airtableImporter */
-interface Output {
+export interface Output {
   records: readonly AirtableRecordData[];
   bases: readonly BaseInfo[];
   tables: readonly TableInfo[];
@@ -187,11 +186,11 @@ export default pattern<Input, Output>(
     const auth = authResult as any;
 
     // State
-    const bases = Writable.of<BaseInfo[]>([]);
-    const tables = Writable.of<TableInfo[]>([]);
-    const records = Writable.of<AirtableRecordData[]>([]);
-    const loading = Writable.of(false);
-    const error = Writable.of("");
+    const bases = new Writable<BaseInfo[]>([]);
+    const tables = new Writable<TableInfo[]>([]);
+    const records = new Writable<AirtableRecordData[]>([]);
+    const loading = new Writable(false);
+    const error = new Writable("");
 
     const hasBases = computed(() => bases.get().length > 0);
     const hasTables = computed(() => tables.get().length > 0);
@@ -350,7 +349,7 @@ export default pattern<Input, Output>(
                       fontSize: "14px",
                     }}
                   >
-                    {ifElse(loading, "Loading...", "Load Bases")}
+                    {loading ? "Loading..." : "Load Bases"}
                   </button>
                 </div>
 
@@ -437,7 +436,7 @@ export default pattern<Input, Output>(
                         fontSize: "14px",
                       }}
                     >
-                      {ifElse(loading, "Loading...", "Load Tables")}
+                      {loading ? "Loading..." : "Load Tables"}
                     </button>
                   </div>
 
@@ -526,7 +525,7 @@ export default pattern<Input, Output>(
                         fontSize: "14px",
                       }}
                     >
-                      {ifElse(loading, "Fetching...", "Fetch Records")}
+                      {loading ? "Fetching..." : "Fetch Records"}
                     </button>
                   </div>
 
@@ -663,6 +662,7 @@ function formatCellValue(value: unknown): string {
     return value.map((v) => formatCellValue(v)).join(", ");
   }
   if (typeof value === "object") {
+    // Plain JSON: this fallback feeds user-visible UI cell content, not debug output
     return JSON.stringify(value);
   }
   return String(value);

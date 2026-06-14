@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { EntityId } from "@commontools/runner";
-import { isObject, isRecord } from "@commontools/utils/types";
+import { EntityId } from "@commonfabric/runner";
+import { isRecord } from "@commonfabric/utils/types";
 
 type MockDoc = {
   get: () => unknown;
@@ -221,47 +221,47 @@ describe("Piece reference detection", () => {
   });
 
   // Test for n-depth reference detection
-  it("should follow sourceCell chains to find deeply nested references", () => {
+  it("should follow result metadata chains to find deeply nested references", () => {
     // Mock test data
     const mockPiece1Id = { "/": "piece-1-source" };
     const mockPiece2Id = { "/": "piece-2-intermediate" };
     const mockPiece3Id = { "/": "piece-3-target" };
 
     // Create a chain of references where:
-    // - piece1 references piece2 via a sourceCell
-    // - piece2 references piece3 via resultRef
-    const piece2WithResultRef = {
+    // - piece1 references piece2 via result metadata
+    // - piece2 references piece3 via result metadata
+    const piece2WithResultMeta = {
       // This is the intermediate piece data
-      resultRef: {
+      result: {
         cell: mockPiece3Id,
         path: [],
       },
     };
 
-    // Mock sourceCell with get and getEntityId methods
-    const mockSourceCell = {
-      get: () => piece2WithResultRef,
+    // Mock linked metadata cell with get and getEntityId methods
+    const mockMetadataCell = {
+      get: () => piece2WithResultMeta,
       getEntityId: () => mockPiece2Id,
     };
 
-    const piece1WithSourceCell = {
-      // This is the source piece with a sourceCell reference
-      sourceCell: mockSourceCell,
+    const piece1WithMetadataCell = {
+      // This is the source piece with a result metadata reference
+      resultCell: mockMetadataCell,
     };
 
     // Create mock doc with get and getEntityId methods
     const mockDoc = {
-      get: () => piece1WithSourceCell,
+      get: () => piece1WithMetadataCell,
       getEntityId: () => mockPiece1Id,
     };
 
     // Test our ability to follow this chain
     console.log(
-      "Testing n-depth reference detection with sourceCell and resultRef chain...",
+      "Testing n-depth reference detection with result metadata chain...",
     );
 
-    // Simulate the followSourceToResultRef function from the implementation
-    const followSourceToResultRef = (
+    // Simulate following metadata links to the owning result.
+    const followMetadataToResult = (
       doc: unknown,
       visited = new Set<string>(),
       depth = 0,
@@ -271,7 +271,7 @@ describe("Piece reference detection", () => {
       // Get the doc ID
       // FIXME: types
       const docId = (doc as MockDoc).getEntityId?.();
-      if (!isObject(docId) || !("/" in docId)) return undefined;
+      if (!isRecord(docId) || !("/" in docId)) return undefined;
 
       // If we've already seen this doc, stop to prevent cycles
       const docIdStr = typeof docId["/"] === "string"
@@ -285,22 +285,22 @@ describe("Piece reference detection", () => {
       // FIXME: types
       const value = (doc as MockDoc).get?.();
 
-      // If document has a sourceCell, follow it
-      if (isRecord(value) && value.sourceCell) {
-        return followSourceToResultRef(value.sourceCell, visited, depth + 1);
+      // If document has a metadata-linked result cell, follow it
+      if (isRecord(value) && value.resultCell) {
+        return followMetadataToResult(value.resultCell, visited, depth + 1);
       }
 
-      // If we've reached the end and have a resultRef, return it
-      if (isRecord(value) && isRecord(value.resultRef)) {
-        return value.resultRef.cell;
+      // If we've reached the end and have result metadata, return it
+      if (isRecord(value) && isRecord(value.result)) {
+        return value.result.cell;
       }
 
       // Return the document's ID if no further references
       return docId;
     };
 
-    // Follow the sourceCell chain to find the ultimate reference
-    const ultimateRef = followSourceToResultRef(mockDoc) as Record<
+    // Follow the metadata chain to find the ultimate reference
+    const ultimateRef = followMetadataToResult(mockDoc) as Record<
       string,
       unknown
     >;
@@ -309,7 +309,7 @@ describe("Piece reference detection", () => {
     assertEquals(
       ultimateRef["/"],
       mockPiece3Id["/"],
-      "Should find the final reference through the sourceCell -> resultRef chain",
+      "Should find the final reference through the result metadata chain",
     );
   });
 });

@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: ifElse Evaluates BOTH Branches
  *
@@ -33,14 +32,14 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface Input {
-  condition: Default<boolean, true>;
-  toggleCount: Default<number, 0>;
+  condition: boolean | Default<true>;
+  toggleCount: number | Default<0>;
 }
 
-interface Output {
+export interface Output {
   condition: boolean;
   trueBranchEvalCount: number;
   falseBranchEvalCount: number;
@@ -57,8 +56,8 @@ const toggle = handler<
 
 export default pattern<Input, Output>(({ condition, toggleCount }) => {
   // Internal cells for tracking eval counts - NOT pattern inputs
-  const trueBranchEvalCount = Writable.of(0);
-  const falseBranchEvalCount = Writable.of(0);
+  const trueBranchEvalCount = new Writable(0);
+  const falseBranchEvalCount = new Writable(0);
 
   // TRUE BRANCH: Increment internal counter each time this computed runs
   // Close over condition to create reactive dependency
@@ -130,9 +129,9 @@ export default pattern<Input, Output>(({ condition, toggleCount }) => {
           <p>
             <strong>Toggle Count:</strong> {toggleCount}
           </p>
-          <ct-button onClick={toggle({ condition, toggleCount })}>
+          <cf-button onClick={toggle({ condition, toggleCount })}>
             Toggle Condition
-          </ct-button>
+          </cf-button>
         </div>
 
         {/* The ifElse - if BOTH branches are evaluated, both counters increment */}

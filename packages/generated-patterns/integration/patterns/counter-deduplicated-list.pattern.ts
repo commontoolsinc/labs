@@ -1,14 +1,12 @@
-/// <cts-enable />
 import {
   type Cell,
   cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface DeduplicatedListArgs {
   value: Default<number, 0>;
@@ -117,7 +115,7 @@ export const counterWithDeduplicatedList = pattern<DeduplicatedListArgs>(
     const audit = cell<DedupAudit>({ added: 0, skipped: 0 });
 
     const uniqueValuesView = liftUniqueInOrder(uniqueValues);
-    const sortedUnique = derive(uniqueValuesView, sortAscending);
+    const sortedUnique = sortAscending(uniqueValuesView);
     const sortedLabel = liftSortedLabel(sortedUnique);
     const currentValue = liftToInteger(value);
     const additionsView = liftNonNegativeInteger(additions);

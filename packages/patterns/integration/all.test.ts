@@ -1,12 +1,12 @@
-import { env } from "@commontools/integration";
-import { PiecesController } from "@commontools/piece/ops";
+import { env } from "@commonfabric/integration";
+import { PiecesController } from "@commonfabric/piece/ops";
 import { describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert } from "@std/assert";
-import { Identity } from "@commontools/identity";
-import { FileSystemProgramResolver } from "@commontools/js-compiler";
+import { Identity } from "@commonfabric/identity";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 
-const { API_URL, SPACE_NAME } = env;
+const { API_URL } = env;
 
 describe("Compile all patterns", () => {
   const skippedPatterns = [
@@ -28,16 +28,17 @@ describe("Compile all patterns", () => {
       // fresh Runtime (via PiecesController) each time to avoid OOM in CI
       const identity = await Identity.generate();
       const cc = await PiecesController.initialize({
-        spaceName: SPACE_NAME,
+        spaceName: `${name}-${crypto.randomUUID()}`,
         apiUrl: new URL(API_URL),
         identity: identity,
       });
 
       try {
         const sourcePath = join(import.meta.dirname!, "..", name);
+        const rootPath = join(import.meta.dirname!, "..");
         const program = await cc.manager().runtime.harness
           .resolve(
-            new FileSystemProgramResolver(sourcePath),
+            new FileSystemProgramResolver(sourcePath, rootPath),
           );
         const piece = await cc!.create(program, { start: false });
         assert(piece.id, `Received piece ID ${piece.id} for ${name}.`);

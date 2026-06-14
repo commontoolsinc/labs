@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test pattern to validate generateObject error handling snippet for LLM.md
  *
@@ -22,13 +21,13 @@
  */
 import {
   Default,
-  derive,
   generateObject,
   ifElse,
   NAME,
   pattern,
+  toIndentedDebugString,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 interface ProductIdea {
   name: string;
@@ -36,8 +35,8 @@ interface ProductIdea {
   price: number;
 }
 
-interface Input {
-  userInput: Default<string, "a self-watering plant pot">;
+export interface Input {
+  userInput: string | Default<"a self-watering plant pot">;
 }
 
 export default pattern<Input, Input>(({ userInput }) => {
@@ -48,14 +47,12 @@ export default pattern<Input, Input>(({ userInput }) => {
     model: "anthropic:claude-sonnet-4-5",
   });
 
-  // Derive error message as string for display
-  const errorMessage = derive(
-    idea.error,
-    (err) =>
-      err
-        ? (typeof err === "string" ? err : JSON.stringify(err, null, 2))
-        : null,
-  );
+  // Error message as string for display
+  const errorMessage = idea.error
+    ? (typeof idea.error === "string"
+      ? idea.error
+      : toIndentedDebugString(idea.error))
+    : null;
 
   return {
     [NAME]: "GenerateObject Error Handling Test",
@@ -68,7 +65,7 @@ export default pattern<Input, Input>(({ userInput }) => {
 
         <div style={{ marginBottom: "1rem" }}>
           <label>Product idea prompt:</label>
-          <ct-input $value={userInput} placeholder="Enter a product idea..." />
+          <cf-input $value={userInput} placeholder="Enter a product idea..." />
         </div>
 
         <h3>Result (with proper error handling):</h3>
@@ -84,7 +81,7 @@ export default pattern<Input, Input>(({ userInput }) => {
           {ifElse(
             idea.pending,
             <span>
-              <ct-loader size="sm" /> Generating...
+              <cf-loader size="sm" /> Generating...
             </span>,
             ifElse(
               idea.error,

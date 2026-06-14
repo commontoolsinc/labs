@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { pattern, UI } from "commontools";
+import { pattern, UI } from "commonfabric";
 
 interface State {
   items: string[];
@@ -10,10 +9,10 @@ interface State {
 }
 
 // FIXTURE: element-access-simple
-// Verifies: dynamic element access on reactive arrays is wrapped in derive()
-//   state.items[state.index]            → derive({items, index}, ({state}) => state.items[state.index])
-//   state.items[state.items.length - 1] → derive({items}, ...)
-//   state.matrix[state.row]![state.col] → derive({matrix, row, col}, ...)
+// Verifies: dynamic element access on reactive arrays is wrapped in a lift-applied computation
+//   state.items[state.index]            → lift(({state}) => state.items[state.index])({ items, index })
+//   state.items[state.items.length - 1] → lift(...)({ items })
+//   state.matrix[state.row]![state.col] → lift(...)({ matrix, row, col })
 export default pattern<State>((state) => {
   return {
     [UI]: (

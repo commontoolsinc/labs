@@ -1,4 +1,4 @@
-import { Identity } from "@commontools/identity";
+import { Identity } from "@commonfabric/identity";
 import env from "@/env.ts";
 
 const ROOT = "implicit trust";

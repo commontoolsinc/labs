@@ -35,9 +35,12 @@ The system supports two fundamental patterns of data flow:
 
 This is **pull-based / demand-driven** reactivity:
 - Pattern declares dependencies on input cells
-- When any input changes, the pattern re-executes
+- When any input changes, dependent computations are marked dirty/stale
+- Dirty computations re-execute when an effect, handler preflight, or explicit
+  `pull()` needs their output
 - Result cell receives the new computed value
-- Like a spreadsheet: change a cell, dependent formulas update
+- Like a lazy spreadsheet: change a cell, and dependent formulas update when
+  their values are observed
 
 The scheduler tracks dependencies and ensures consistent propagation.
 
@@ -75,8 +78,8 @@ The reactive dependency graph is **reconstructed at runtime**, not stored
 directly. What is persisted:
 
 - Cell values (including stream markers)
-- Process cell metadata (`TYPE`, `resultRef`)
-- Ownership links (`sourceCell` chain)
+- Result-cell metadata (`pattern`, `argument`, and the `internal` manifest)
+- Ownership links from generated cells back to their result cell
 
 From this persistent data, the system can reconstruct the dataflow graph by
 loading patterns and registering handlers.
@@ -128,30 +131,55 @@ When `stream.send(event)` is called:
 
 When an event arrives but no handler is registered:
 
-1. Traverse `sourceCell` chain to find the process cell
-2. Load the pattern and start the piece
-3. Re-queue the event
+1. Start from the event cell's document root
+2. Follow `result` metadata to the owning result cell
+3. Read the result cell's `pattern` metadata
+4. Load the pattern, start the piece, and re-queue the event
 
 This enables pieces to start on-demand when events arrive.
 
-### The Source Cell Chain
+### The Ownership Metadata Chain
 
-Cells are linked in an ownership hierarchy:
+The current runtime treats the result cell as the root of a piece. The result
+cell stores metadata links to the pattern and argument cell. Its `internal`
+metadata is not a direct link; it is a manifest of derived internal cells:
 
 ```
-resultCell ───source───> processCell
-     ^                        │
-     │                        ├─ TYPE (pattern ID)
-     └────── resultRef ───────┘
+                 meta:pattern
+              ┌───────────────> pattern document
+              │
+result cell ──┼─ meta:argument ─> argument cell
+              │
+              └─ meta:internal ─> [
+                                    { partialCause, link: internal cell },
+                                    ...
+                                  ]
 ```
 
-The `source` property on a result cell points to its process cell. The process
-cell's `resultRef` property points back to the result cell.
+Cells created as implementation details of the piece store metadata pointing
+back to that result cell. In code this is the `result` metadata link, set by
+`setResultCell(...)` and read through `getMetaLink(cell, "result")`:
+
+```
+argument cell ── meta:result ──┐
+derived internal cell ─────────┼──> result cell
+child result ─── meta:result ──┘
+```
+
+The important property is the direction of discovery: from an arbitrary owned
+cell, follow `result` metadata until reaching the owning result cell; from that
+result cell, read `pattern` metadata to determine which pattern governs the
+piece.
+
+This metadata is not a reactive dependency edge. Runtime code generally reads it
+with scheduling ignored, because it is ownership/control-plane information used
+to find and start the responsible piece.
 
 This chain enables:
 - Finding which pattern governs a cell
 - Lazy piece loading (traverse to find owner)
-- Schema resolution (inherit from source)
+- Schema-aware traversal of argument metadata, internal manifest links, and
+  result metadata
 
 ### Handler Registration
 

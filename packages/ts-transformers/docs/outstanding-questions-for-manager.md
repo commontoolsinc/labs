@@ -101,8 +101,11 @@ call-site transformation?
 - Risk: Users may not realize schemas aren't being generated
 - Workaround: Users can avoid generic helpers, or add explicit type annotations
 
-**Documentation:** See `packages/ts-transformers/type-parameter-schema-issue.md`
-for full analysis
+**Documentation:** See:
+
+- `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md` sections
+  10.3-10.5 and 13
+- `docs/specs/ts-transformer/ts_transformers_review_guide.md`
 
 ---
 

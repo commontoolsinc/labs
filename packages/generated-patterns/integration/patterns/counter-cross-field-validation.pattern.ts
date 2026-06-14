@@ -1,14 +1,12 @@
-/// <cts-enable />
 import {
   type Cell,
   cell,
   computed,
   Default,
-  derive,
   handler,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface CrossFieldValidationArgs {
   value: Default<number, 0>;
@@ -147,26 +145,15 @@ export const counterWithCrossFieldValidation = pattern<
     const sanitizedLimit = computed(() => liftToIntegerTen(limit));
     const sanitizedStep = computed(() => liftToPositiveStepOne(step));
 
-    const validationView = computed(() =>
-      liftBuildValidationSnapshot({
-        value: sanitizedValue,
-        limit: sanitizedLimit,
-      })
-    );
+    const validationView = liftBuildValidationSnapshot({
+      value: sanitizedValue,
+      limit: sanitizedLimit,
+    });
 
-    const currentValueView = derive(
-      validationView,
-      (snapshot) => snapshot.value,
-    );
-    const limitValueView = derive(
-      validationView,
-      (snapshot) => snapshot.limit,
-    );
-    const differenceView = derive(
-      validationView,
-      (snapshot) => snapshot.difference,
-    );
-    const hasError = derive(validationView, (snapshot) => snapshot.hasError);
+    const currentValueView = validationView.value;
+    const limitValueView = validationView.limit;
+    const differenceView = validationView.difference;
+    const hasError = validationView.hasError;
     const summary =
       str`Value ${currentValueView} / Limit ${limitValueView} (Δ ${differenceView})`;
 

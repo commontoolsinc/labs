@@ -1,6 +1,6 @@
 import { CommonIframeSandboxElement } from "../src/common-iframe-sandbox.ts";
 import { setIframeContextHandler } from "../src/index.ts";
-import { sleep } from "@commontools/utils/sleep";
+import { sleep } from "@commonfabric/utils/sleep";
 
 type Callback = (key: string, value: unknown) => void;
 interface Context {
@@ -93,6 +93,12 @@ export function assertEquals(a: unknown, b: unknown) {
 }
 
 const FIXTURE_ID = "common-iframe-csp-fixture-container";
+export function cleanupFixtures() {
+  for (const fixture of document.querySelectorAll(`[id^="${FIXTURE_ID}-"]`)) {
+    fixture.remove();
+  }
+}
+
 export function render(
   src: string,
   context = {},

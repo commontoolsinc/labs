@@ -58,17 +58,21 @@ RootView (authentication wrapper)
    - State propagated via Lit Context API (`@lit/context`)
 
 2. **Authentication**:
-   - Identity management via `@commontools/identity`
+   - Identity management via `@commonfabric/identity`
    - Root keys stored in browser KeyStore
    - Session state managed in AppState
 
 3. **Piece Integration**:
    - Runtime integration via `src/lib/runtime.ts` manages lifecycle
-   - Runtime provided by `@commontools/runner`
+   - Runtime provided by `@commonfabric/runner`
    - Storage via StorageManager for persistent data
 
 4. **Routing**:
-   - URL pattern: `/{spaceName}/{pieceId}`
+   - URL patterns: `/{spaceNameOrDid}`, `/{spaceNameOrDid}/{pieceIdOrSlug}`, and
+     `/.embed/{spaceNameOrDid}/{pieceIdOrSlug}`
+   - Embed mode strips shell-owned chrome for iframe/web-view embedding
+   - Navigation preserves embed mode, including `navigateTo(...)` calls from
+     rendered patterns
    - History API integration with back/forward support
    - Default space: "common-knowledge"
 
@@ -91,7 +95,7 @@ RootView (authentication wrapper)
 
 ### Build Configuration
 
-The project uses `@commontools/felt` (custom build tool) configured in
+The project uses `@commonfabric/felt` (custom build tool) configured in
 `felt.config.ts`:
 
 - Entry: `src/index.ts`

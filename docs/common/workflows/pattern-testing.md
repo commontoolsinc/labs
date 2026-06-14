@@ -32,13 +32,12 @@ Test patterns are patterns that test other patterns. They:
 - Define assertions using `computed(() => boolean)`
 - Return a `tests` array that the runner executes sequentially
 
-Test files end in `.test.tsx` and are run with `deno task ct test`.
+Test files end in `.test.tsx` and are run with `deno task cf test`.
 
 ## Quick Example
 
 ```tsx
-/// <cts-enable />
-import { action, computed, pattern } from "commontools";
+import { action, computed, pattern } from "commonfabric";
 import Counter from "./counter.tsx";
 
 export default pattern(() => {
@@ -65,19 +64,19 @@ export default pattern(() => {
 });
 ```
 
-**Note:** Pass plain values when instantiating patterns in tests. The runtime creates independent writable cells automatically. Use `Writable.of()` only when you need to test shared state behavior. See [Writable](../concepts/types-and-schemas/writable.md#passing-values-to-pattern-inputs) for details.
+**Note:** Pass plain values when instantiating patterns in tests. The runtime creates independent writable cells automatically. Use `new Writable()` only when you need to test shared state behavior. See [Writable](../concepts/types-and-schemas/writable.md#passing-values-to-pattern-inputs) for details.
 
 ## Running Tests
 
 ```bash
 # Run a specific test
-deno task ct test packages/patterns/my-pattern/main.test.tsx
+deno task cf test packages/patterns/my-pattern/main.test.tsx
 
 # Run with verbose output
-deno task ct test packages/patterns/my-pattern/main.test.tsx --verbose
+deno task cf test packages/patterns/my-pattern/main.test.tsx --verbose
 
 # Run all tests in a directory
-deno task ct test packages/patterns/my-pattern/
+deno task cf test packages/patterns/my-pattern/
 ```
 
 ## Test Step Format
@@ -136,6 +135,11 @@ const assert_game_ready = computed(() => {
 });
 ```
 
+Keep assertions deterministic. Do not call `safeDateNow()`,
+`nonPrivateRandom()`, `Date.now()`, or `Math.random()` inside the assertion
+itself. If the pattern stamps a timestamp or random ID, assert that the value
+exists or changed in the expected place.
+
 ## Test Organization
 
 ### Naming Conventions
@@ -184,7 +188,7 @@ When a test fails, use the CLI to inspect pattern state:
 ### 1. Run with Verbose Mode
 
 ```bash
-deno task ct test ./main.test.tsx --verbose
+deno task cf test ./main.test.tsx --verbose
 ```
 
 This shows which action ran before each assertion failure.
@@ -195,18 +199,18 @@ Deploy the test pattern and use CLI commands to inspect state:
 
 ```bash
 # Deploy the test pattern
-deno task ct piece new ./main.test.tsx
+deno task cf piece new ./main.test.tsx
 
 # Get the piece ID from the output, then inspect
-deno task ct piece inspect --piece <PIECE_ID>
+deno task cf piece inspect --piece <PIECE_ID>
 
 # Get specific values
-deno task ct piece get subject/items --piece <PIECE_ID>
+deno task cf piece get subject/items --piece <PIECE_ID>
 
 # Step through manually
-deno task ct piece call tests/0/action --piece <PIECE_ID>
-deno task ct piece step --piece <PIECE_ID>
-deno task ct piece get tests/1/assertion --piece <PIECE_ID>
+deno task cf piece call tests/0/action --piece <PIECE_ID>
+deno task cf piece step --piece <PIECE_ID>
+deno task cf piece get tests/1/assertion --piece <PIECE_ID>
 ```
 
 ### 3. Expose Debug Data

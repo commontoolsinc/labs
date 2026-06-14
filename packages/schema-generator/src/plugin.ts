@@ -15,6 +15,7 @@ export function createSchemaTransformerV2() {
       typeArg?: ts.TypeNode,
       options?: { widenLiterals?: boolean },
       schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
+      sourceFile?: ts.SourceFile,
     ) {
       return generator.generateSchema(
         type,
@@ -22,6 +23,7 @@ export function createSchemaTransformerV2() {
         typeArg,
         options,
         schemaHints,
+        sourceFile,
       );
     },
 
@@ -30,12 +32,14 @@ export function createSchemaTransformerV2() {
       checker: ts.TypeChecker,
       typeRegistry?: WeakMap<ts.Node, ts.Type>,
       schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
+      sourceFile?: ts.SourceFile,
     ) {
       return generator.generateSchemaFromSyntheticTypeNode(
         typeNode,
         checker,
         typeRegistry,
         schemaHints,
+        sourceFile,
       );
     },
   };
@@ -45,8 +49,5 @@ export function createSchemaTransformerV2() {
  * Alternative export for direct usage
  */
 export { SchemaGenerator };
-export type {
-  GenerationContext,
-  SchemaDefinition,
-  TypeFormatter,
-} from "./interface.ts";
+export type { GenerationContext, TypeFormatter } from "./interface.ts";
+export type { JSONSchemaObjMutable } from "@commonfabric/api";

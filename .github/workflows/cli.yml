@@ -37,9 +37,13 @@ jobs:
         run: |
           deno task build-binaries --cli-only
 
+      - name: 🔎 Smoke CLI
+        run: |
+          ./dist/cf --help
+
       - name: 📤 Upload CLI
         uses: actions/upload-artifact@v4
         with:
           name: macos-cli
           path: |
-            ./dist/ct
+            ./dist/cf

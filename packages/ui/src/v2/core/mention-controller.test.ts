@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { ReactiveControllerHost } from "lit";
-import { NAME } from "@commontools/runner/shared";
+import { NAME } from "@commonfabric/runner/shared";
 import { createMockCellHandle } from "../test-utils/mock-cell-handle.ts";
 import { MentionController } from "./mention-controller.ts";
 import type { MentionableArray } from "./mentionable.ts";

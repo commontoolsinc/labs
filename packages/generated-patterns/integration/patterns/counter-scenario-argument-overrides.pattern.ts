@@ -1,4 +1,3 @@
-/// <cts-enable />
 import {
   type Cell,
   cell,
@@ -7,7 +6,7 @@ import {
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface ScenarioArgumentOverrideArgs {
   value: Default<number, 0>;
@@ -15,15 +14,15 @@ interface ScenarioArgumentOverrideArgs {
 }
 
 interface IncrementEvent {
-  amount?: unknown;
+  amount?: number;
 }
 
 interface StepChangeEvent {
-  step?: unknown;
+  step?: number;
 }
 
 interface ApplyOverrideEvent {
-  note?: unknown;
+  note?: string;
 }
 
 interface SanitizedArguments {
@@ -172,8 +171,8 @@ export const counterWithScenarioArgumentOverrides = pattern<
   ({ value, step }) => {
     const sanitizedArguments = liftSanitizedArguments({ value, step });
 
-    const sanitizedValue = sanitizedArguments.key("value");
-    const sanitizedStep = sanitizedArguments.key("step");
+    const sanitizedValue = sanitizedArguments.value;
+    const sanitizedStep = sanitizedArguments.step;
 
     const runtimeValue = cell(0);
     const runtimeStep = cell(1);

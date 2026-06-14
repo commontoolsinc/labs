@@ -1,7 +1,7 @@
-/// <cts-enable />
 import {
   computed,
   generateText,
+  handler,
   ifElse,
   ImageData,
   NAME,
@@ -9,7 +9,7 @@ import {
   UI,
   VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 /**
  * Image Chat - Simple image upload with LLM analysis
@@ -20,7 +20,7 @@ type ImageChatInput = {
   model?: string;
 };
 
-type ImageChatOutput = {
+export type ImageChatOutput = {
   images: Writable<ImageData[]>;
   prompt: Writable<string>;
   response: string | undefined;
@@ -28,10 +28,28 @@ type ImageChatOutput = {
   ui: VNode;
 };
 
+type ImageUploadEvent = {
+  detail?: {
+    images?: ImageData[];
+    allImages?: ImageData[];
+    files?: ImageData[];
+    allFiles?: ImageData[];
+  };
+};
+
+const syncUploadedImages = handler<
+  ImageUploadEvent,
+  { images: Writable<ImageData[]> }
+>(({ detail }, { images }) => {
+  const uploaded = detail?.allImages ?? detail?.allFiles ?? detail?.images ??
+    detail?.files ?? [];
+  images.set(uploaded);
+});
+
 export default pattern<ImageChatInput, ImageChatOutput>(
-  ({ systemPrompt, model }) => {
-    const images = Writable.of<ImageData[]>([]);
-    const prompt = Writable.of<string>("");
+  ({ systemPrompt }) => {
+    const images = new Writable<ImageData[]>([]);
+    const prompt = new Writable<string>("");
 
     // Build content parts array with text and images
     const contentParts = computed(() => {
@@ -44,7 +62,10 @@ export default pattern<ImageChatInput, ImageChatOutput>(
       }
 
       for (const img of images.get() || []) {
-        parts.push({ type: "image", image: img.data });
+        const image = img.data || img.url;
+        if (image) {
+          parts.push({ type: "image", image });
+        }
       }
 
       return parts;
@@ -57,67 +78,68 @@ export default pattern<ImageChatInput, ImageChatOutput>(
         "You are a helpful assistant that can analyze images. Describe what you see."
       ),
       prompt: contentParts,
-      model: computed(() => model || "anthropic:claude-sonnet-4-5"),
     });
 
     const ui = (
-      <ct-screen>
-        <ct-vstack slot="header" gap="2">
-          <ct-heading level={4}>Image Chat</ct-heading>
-        </ct-vstack>
+      <cf-screen>
+        <cf-vstack slot="header" gap="2">
+          <cf-heading level={4}>Image Chat</cf-heading>
+        </cf-vstack>
 
-        <ct-vscroll flex showScrollbar fadeEdges>
-          <ct-vstack gap="3" style="padding: 1rem;">
+        <cf-vscroll flex showScrollbar fadeEdges>
+          <cf-vstack gap="3" style="padding: 1rem;">
             {/* Image Upload */}
-            <ct-cell-context $cell={images} label="Uploaded Images">
-              <ct-card>
-                <ct-vstack gap="2">
-                  <ct-heading level={5}>Upload Images</ct-heading>
-                  <ct-image-input
+            <cf-cell-context $cell={images} label="Uploaded Images">
+              <cf-card>
+                <cf-vstack gap="2">
+                  <cf-heading level={5}>Upload Images</cf-heading>
+                  <cf-image-input
                     multiple
                     maxImages={5}
+                    includeData
                     showPreview
                     previewSize="md"
                     removable
-                    $images={images}
+                    oncf-change={syncUploadedImages({ images })}
+                    oncf-remove={syncUploadedImages({ images })}
                   />
-                </ct-vstack>
-              </ct-card>
-            </ct-cell-context>
+                </cf-vstack>
+              </cf-card>
+            </cf-cell-context>
 
             {/* Prompt Input */}
-            <ct-cell-context $cell={prompt} label="Image Prompt">
-              <ct-card>
-                <ct-vstack gap="2">
-                  <ct-heading level={5}>Your Question</ct-heading>
-                  <ct-input
+            <cf-cell-context $cell={prompt} label="Image Prompt">
+              <cf-card>
+                <cf-vstack gap="2">
+                  <cf-heading level={5}>Your Question</cf-heading>
+                  <cf-input
                     $value={prompt}
                     placeholder="Ask about the images..."
                   />
-                </ct-vstack>
-              </ct-card>
-            </ct-cell-context>
+                </cf-vstack>
+              </cf-card>
+            </cf-cell-context>
 
             {/* Response */}
             {ifElse(
               pending,
-              <ct-card>
+              <cf-card>
                 <div>Analyzing...</div>
-              </ct-card>,
+              </cf-card>,
               ifElse(
                 result,
-                <ct-card>
-                  <ct-vstack gap="2">
-                    <ct-heading level={5}>Response</ct-heading>
+                <cf-card>
+                  <cf-vstack gap="2">
+                    <cf-heading level={5}>Response</cf-heading>
                     <div style="white-space: pre-wrap;">{result}</div>
-                  </ct-vstack>
-                </ct-card>,
+                  </cf-vstack>
+                </cf-card>,
                 null,
               ),
             )}
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     );
 
     return {

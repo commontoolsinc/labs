@@ -1,58 +1,86 @@
-import * as __ctHelpers from "commontools";
-import { cell, derive, pattern, patternTool, type PatternToolResult } from "commontools";
-const multiplier = cell(2, {
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { cell, computed, pattern, patternTool, type PatternToolResult } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
+const multiplier = __cfHelpers.__cf_data(cell(2, {
     type: "number"
-} as const satisfies __ctHelpers.JSONSchema);
-const offset = cell(10, {
+} as const satisfies __cfHelpers.JSONSchema).for("multiplier", true));
+const offset = __cfHelpers.__cf_data(cell(10, {
     type: "number"
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema).for("offset", true));
 type Output = {
     tool: PatternToolResult<{
         offset: number;
     }>;
 };
-// Test: patternTool with an existing extraParam, and a new capture
-// The function has { value: number, offset: number } as input type
-// We provide offset via extraParams, and the transformer should capture multiplier
-// FIXTURE: patternTool-with-existing-params
-// Verifies: patternTool merges auto-captured vars into pre-existing extraParams
-//   patternTool(fn, { offset }) → patternTool(fn, { multiplier, offset })
-//   callback signature gains captured param: ({ value, offset }) → ({ value, offset, multiplier })
-// Context: `offset` is already provided as an explicit extraParam. The transformer
-//   detects that `multiplier` (module-scoped cell) is also captured and merges it
-//   into the existing extraParams without duplicating `offset`.
-export default pattern(() => {
-    const tool = patternTool(({ value, offset, multiplier }: {
-        value: number;
-        offset: number;
-        multiplier: unknown;
-    }) => {
-        return derive({
-            type: "object",
-            properties: {
-                value: {
-                    type: "number"
-                },
-                offset: {
-                    type: "number"
-                }
-            },
-            required: ["value", "offset"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+const __cfLift_1 = __cfHelpers.lift<{
+    value: number;
+    offset: number;
+}, number>(({ value, offset }) => {
+    return value * multiplier.get() + offset;
+}, {
+    type: "object",
+    properties: {
+        value: {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { value, offset }, ({ value, offset }) => {
-            return value * multiplier.get() + offset;
-        });
-    }, {
-        multiplier: multiplier,
-        offset
-    });
+        },
+        offset: {
+            type: "number"
+        }
+    },
+    required: ["value", "offset"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfPattern_1 = pattern((__cf_pattern_input: {
+    value: number;
+    offset: number;
+}) => {
+    const value = __cf_pattern_input.key("value");
+    const offset = __cf_pattern_input.key("offset");
+    return __cfLift_1({
+        value: value,
+        offset: offset
+    }).for("__patternResult", true);
+}, {
+    type: "object",
+    properties: {
+        value: {
+            type: "number"
+        },
+        offset: {
+            type: "number"
+        }
+    },
+    required: ["value", "offset"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+// FIXTURE: patternTool-with-existing-params
+// Verifies: patternTool's first arg is an explicit pattern() (CT-1655). The
+//   author supplies `offset` via extraParams (a genuine per-call input); the
+//   free module-scoped capture `multiplier` (read via .get()) is absorbed by the
+//   pattern into a module-scope lift closure rather than injected into
+//   extraParams — auto-capture-into-extraParams was removed when patternTool
+//   began requiring an explicit pattern.
+//   patternTool(pattern(({ value, offset }) => …multiplier.get()…), { offset })
+export default pattern(() => {
+    const tool = patternTool(__cfPattern_1, { offset: offset.for(["tool", 1, "offset"], true) });
     return { tool };
 }, {
     type: "object",
     properties: {},
     additionalProperties: false
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         tool: {
@@ -69,6 +97,9 @@ export default pattern(() => {
                         }
                     },
                     required: ["offset"]
+                },
+                useResultSchemaForObservation: {
+                    type: "boolean"
                 }
             },
             required: ["pattern", "extraParams"]
@@ -80,13 +111,22 @@ export default pattern(() => {
             type: "object",
             properties: {
                 argumentSchema: true,
-                resultSchema: true
+                resultSchema: true,
+                defaultScope: {
+                    $ref: "#/$defs/CellScope"
+                }
             },
             required: ["argumentSchema", "resultSchema"]
+        },
+        CellScope: {
+            "enum": ["space", "user", "session"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfPattern_1
+});

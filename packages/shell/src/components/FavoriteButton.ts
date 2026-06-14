@@ -1,8 +1,9 @@
 import { css, html, LitElement, PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import { RuntimeInternals } from "../lib/runtime.ts";
-import type { CellHandle } from "@commontools/runtime-client";
-import type { FavoriteEntry } from "@commontools/home-schemas";
+import type { CellHandle } from "@commonfabric/runtime-client";
+import type { DID } from "@commonfabric/identity";
+import type { FavoriteEntry } from "@commonfabric/home-schemas";
 
 /**
  * Favorite button component.
@@ -37,22 +38,30 @@ export class XFavoriteButtonElement extends LitElement {
   `;
 
   @property()
-  rt?: RuntimeInternals;
+  accessor rt: RuntimeInternals | undefined = undefined;
 
   @property({ attribute: false })
-  pieceId?: string;
+  accessor pieceId: string | undefined = undefined;
+
+  /** The space the piece lives in — part of its address. */
+  @property({ attribute: false })
+  accessor space: DID | undefined = undefined;
+
+  /** Human-readable name of that space, recorded with the favorite. */
+  @property({ attribute: false })
+  accessor spaceName: string | undefined = undefined;
 
   // Server favorites from subscription
   @state()
-  private _serverFavorites: readonly FavoriteEntry[] = [];
+  private accessor _serverFavorites: readonly FavoriteEntry[] = [];
 
   // Local state for favoriting, used for optimistic updates
   // between user click and server sync
   @state()
-  private _localIsFavorite: boolean | undefined = undefined;
+  private accessor _localIsFavorite: boolean | undefined = undefined;
 
   @state()
-  private _isLoading = false;
+  private accessor _isLoading = false;
 
   // Subscription cleanup function
   private _unsubscribe: (() => void) | undefined;
@@ -68,8 +77,8 @@ export class XFavoriteButtonElement extends LitElement {
   }
 
   protected override willUpdate(changedProperties: PropertyValues): void {
-    // Reset local state when pieceId changes
-    if (changedProperties.has("pieceId")) {
+    // Reset local state when the piece's address changes — either part.
+    if (changedProperties.has("pieceId") || changedProperties.has("space")) {
       this._localIsFavorite = undefined;
     }
 
@@ -117,20 +126,21 @@ export class XFavoriteButtonElement extends LitElement {
     e.preventDefault();
     e.stopPropagation();
 
-    if (!this.rt || !this.pieceId || this._isLoading) return;
+    if (!this.rt || !this.space || !this.pieceId || this._isLoading) return;
 
     const currentlyFavorite = this._deriveIsFavorite();
 
     this._isLoading = true;
     try {
       if (currentlyFavorite) {
-        await this.rt.favorites().removeFavorite(this.pieceId);
+        await this.rt.favorites().removeFavorite(this.space, this.pieceId);
         this._localIsFavorite = false;
       } else {
         await this.rt.favorites().addFavorite(
+          this.space,
           this.pieceId,
           undefined,
-          this.rt.spaceName(),
+          this.spaceName,
         );
         this._localIsFavorite = true;
       }

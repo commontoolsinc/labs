@@ -10,10 +10,11 @@ import {
   PageEventMap,
   ScreenshotOptions,
   SelectorOptions,
+  WaitForOptions,
   WaitForSelectorOptions,
 } from "@astral/astral";
-import { sleep } from "@commontools/utils/sleep";
-import { Mutable } from "@commontools/utils/types";
+import { sleep } from "@commonfabric/utils/sleep";
+import { Mutable } from "@commonfabric/utils/types";
 import * as path from "@std/path";
 import { ensureDirSync } from "@std/fs";
 import { ConsoleMethod } from "./console.ts";
@@ -197,6 +198,12 @@ export class Page extends EventTarget {
   async goto(url: string, options?: GoToOptions): Promise<void> {
     this.checkIsOk();
     await this.page!.goto(url, options);
+  }
+
+  // Passthru of `@astral/astral`'s `Page#reload`
+  async reload(options?: WaitForOptions): Promise<void> {
+    this.checkIsOk();
+    await this.page!.reload(options);
   }
 
   // Passthru of `@astral/astral`'s `Page#waitForSelector`

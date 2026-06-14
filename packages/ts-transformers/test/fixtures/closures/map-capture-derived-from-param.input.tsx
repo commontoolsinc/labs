@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { pattern, UI } from "commontools";
+import { pattern, UI } from "commonfabric";
 
 interface State {
   items: number[];
@@ -9,7 +8,7 @@ interface State {
 // FIXTURE: map-capture-derived-from-param
 // Verifies: variable derived from state (const settings = state.settings) is captured correctly
 //   .map(fn) → .mapWithPattern(pattern(...), { settings: { multiplier: settings.key("multiplier") } })
-//   item * settings.multiplier → derive() with both element and captured param inputs
+//   item * settings.multiplier → derive() keeps item as an explicit input and closes over the callback-owned settings param
 export default pattern<State>((state) => {
   const settings = state.settings;
   return {

@@ -1,7 +1,7 @@
 # TS Transformers Design Deltas
 
 **Status:** Partially implemented (status snapshot)\
-**Date:** March 4, 2026\
+**Date:** March 17, 2026\
 **Companion:**
 `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`
 
@@ -15,34 +15,76 @@ behavior and open follow-up work.
 
 ## Delta Backlog
 
-## Implementation Snapshot (March 4, 2026)
+## Implementation Snapshot (March 17, 2026)
 
 - Landed:
-  - capability-first transform pipeline (legacy `useLegacyOpaqueRefSemantics`
+  - single transform pipeline (legacy `useLegacyOpaqueRefSemantics`
     flag removed)
   - unified context classifier (`pattern` / `compute` / `neutral`)
+  - provenance-first Common Fabric call detection with shadowed-helper rejection
+    and narrow synthetic/ambient fallback paths
   - deterministic JSX logical lowering policy (`&&` / `||`) by context
+  - helper-owned ternary / conditional branches re-analyzed under synthetic
+    compute ownership
   - `.map` rewrite matrix by `{context, receiverKind}`
+  - local reactive rewrap aliases in compute callbacks can re-enter collection
+    rewrite eligibility
   - pattern callback canonicalization and `key(...)` lowering
+  - local opaque-root rewriting inside lift-applied callbacks
   - capability analysis with path/capability shrinking at schema boundaries
   - additive wrapper support for `ReadonlyCell` / `WriteonlyCell` / `OpaqueCell`
+  - structural reactive-origin detection for `.get()` validation and opaque-root
+    classification even when `OpaqueRef<T>` is an identity alias
   - static destructuring default initializer lowering to schema defaults
   - array destructuring lowering in pattern/map callbacks
   - wildcard classification includes `for...of` over tracked sources
   - empty-array cell-factory validation (`cell-factory:empty-array`)
+  - schema-generator distinguishes `unknown` from `any`, preserves synthetic
+    `unknown` union members, and no longer emits `asOpaque`
   - schema-generator synthetic union parity for `undefined` members
   - map capture classification hardened for reactive vs non-reactive captures
   - pattern-boundary schema continuity alignment (defaults-only application
     mode)
   - schema shrink coverage validation (`schema:unknown-type-access`,
     `schema:path-not-in-type`)
+  - schema shrink validation for declared `unknown`-typed properties
+  - array item shrinking to `unknown` when only non-item properties (for
+    example `.length`) are observed
+  - projected-result / object-literal schema recovery for lift result
+    inference
+  - compute-context local reactive alias diagnostics
 - Partially landed:
   - diagnostics migration (some legacy validation remains)
   - compute-context interprocedural capability summaries (MVP scope)
 - Open:
-  - standalone-function `.map` policy finalization
-  - collection-method generalization beyond `.map` (`.filter`, etc.)
+  - collection-method generalization beyond current `.map` / `.filter` /
+    `.flatMap` coverage (`.find`, `.some`, `.every`, etc.)
   - full diagnostics convergence onto lowerability-only checks
+
+### Addendum (landed since the March 17 snapshot)
+
+The `derive→lift→selfcontained` arc and content-addressed builder identity
+landed after the snapshot above:
+
+- Landed:
+  - `derive`/`computed` → lift-applied lowering (Phase 1, CT-1615)
+  - whole-builder-call hoisting to module scope for `lift` (CT-1644), then
+    `handler`, `pattern`, and `patternTool` (CT-1655), via the single
+    `BuilderCallHoistingTransformer` (current-behavior spec §11). The former
+    lift-only `LiftHoistingTransformer` and the callback-only
+    `BuilderCallbackHoistingTransformer` are both gone (the latter deleted in
+    #3864).
+  - content-addressed builder artifacts: a single trailing `__cfReg({ … })`
+    registration per module (CT-1623), consumed by the runner's module-record
+    compiler and `PatternManager` reverse index. Shipped and exercised across
+    the builder-bearing fixture corpus.
+- Open (forward-looking, NOT on `main`):
+  - Phase 3 `selfcontained(...)` wrapping (CT-1654): wrap each hoisted builder
+    const with `__cfHelpers.selfcontained(...)`. Blocked on a `selfcontained`
+    runtime helper / `__cfHelpers` export that does not yet exist. Today
+    `selfcontained` appears only in design comments in `ast/call-kind.ts` and
+    `builder-call-hoisting.ts`; no transformer emits it and no fixture expects
+    it. See `packages/ts-transformers/docs/derive-to-lift-design.md`.
 
 ## D-001 Rename Context Terms (`safe` -> `compute` / `pattern`)
 
@@ -50,7 +92,7 @@ behavior and open follow-up work.
 **Proposed terms:**
 
 - `compute context` for callbacks where values are being computed in a wrapped
-  compute form (`computed`, `derive`, `action`, `lift`, `handler`, etc.)
+  compute form (`computed`, `action`, `lift`, `handler`, etc.)
 - `pattern context` for top-level pattern/render-style author code where
   parameters are opaque by default and direct computation should trigger
   guidance/rewrite
@@ -93,7 +135,9 @@ behavior and open follow-up work.
 3. Behavior is test-covered for nested/mixed logical expressions and ternary
    adjacency.
 
-## D-003 Context-Driven Collection Operator Policy (`.map` first, then analogs)
+## D-003 Context-Driven Collection Operator Policy (`.map` / `.filter` / `.flatMap` first, then analogs)
+
+**Status:** Mostly landed
 
 **Policy target:**
 
@@ -101,15 +145,19 @@ behavior and open follow-up work.
   reactive forms.
 - In **compute context**: rewrite only when receiver type is in the
   non-auto-unwrapped cell-like set (`Cell`, `Writable`, `Stream`, etc.).
+- In **compute context**, local aliases created inside the same callback may
+  become reactive again when they re-wrap a reactive collection via
+  `computed(...)`, `lift(...)`, `action(...)`, `handler(...)`,
+  `wish(...)`, or an already-lowered reactive collection call.
 - Never rewrite plain JS array operators.
 - The callback parameter of `.map` is treated as a **pattern callback
   parameter** only in cases where the call is actually rewritten to
   `mapWithPattern`. If a `.map` is not rewritten, its callback parameter keeps
   ordinary compute/plain semantics.
 
-**Initial operator in scope:** `.map`\
-**Future analogous operators:** `.filter`, `.find`, `.some`, `.every` (subject
-to runtime contract support).
+**Currently landed operators:** `.map`, `.filter`, `.flatMap`\
+**Future analogous operators:** `.find`, `.some`, `.every` (subject to runtime
+contract support).
 
 **Rationale:**
 
@@ -130,13 +178,20 @@ to runtime contract support).
    rewritten `.map` -> pattern callback semantics; non-rewritten `.map` ->
    regular callback semantics.
 6. Test matrix exists and is extensible to future operators.
+7. Synthetic compute-owned branches/calls must not retain stale pattern
+   ownership after earlier rewrites.
 
 ## D-004 Replace OpaqueRef-Heuristic Typing With Capability Dataflow + Type Shrinking
+
+**Status:** Mostly landed
 
 **Policy target:**
 
 - Move away from relying on complex proxy-heavy `OpaqueRef<T>` surface types as
   the primary decision source for transform policy.
+- `OpaqueRef<T>` surface typing can simplify toward ordinary `T` so long as
+  reactive-origin detection remains available structurally to validation and
+  lowering passes.
 - Build a flow-aware capability model from normal parameters/locals and
   propagated origins.
 - Treat pattern inputs and outputs of `lift(...)` / `pattern(...)` inside
@@ -156,7 +211,7 @@ to runtime contract support).
   read/written, with conservative fallback to broader shape on unknown-dynamic
   operations.
 - Preserve broad pattern boundary shapes (including schema defaults) so links to
-  downstream `compute`/`handler`/`derive` code do not lose fields that are not
+  downstream `compute`/`handler` code do not lose fields that are not
   directly read in the outer pattern callback.
 - In pattern-style contexts, treat "lowerable to opaque/key semantics" as the
   primary legality criterion. Uses that cannot be lowered should produce
@@ -188,7 +243,7 @@ to runtime contract support).
 
 1. Rewrite decisions for collection and conditional operators can be explained
    from `{context, receiver capability summary}`, not `OpaqueRef` heuristics.
-2. Boundary schemas/types for compute-oriented boundaries (`derive`, `lift`,
+2. Boundary schemas/types for compute-oriented boundaries (`lift`,
    `handler`, compute-like callbacks) can be shrunk to used paths when no
    wildcard operations are present.
 3. Wildcard/dynamic operations (`...obj`, `Object.keys`, `for..in`, `for..of`,
@@ -201,8 +256,8 @@ to runtime contract support).
 6. Optional-call forms (for example `foo?.bar()`) are explicitly out of scope
    for key-lowering until modeled separately.
 7. ~~A feature gate exists for rollout and A/B fixture validation.~~
-   (Completed: `useLegacyOpaqueRefSemantics` gate has been removed; capability-first
-   is the only path.)
+   (Completed: `useLegacyOpaqueRefSemantics` gate has been removed; the single
+   transform pipeline is the only path.)
 8. Destructured callback parameters in pattern-style contexts are lowered to
    non-destructured receiver parameters with explicit `key(...)` bindings.
 9. Alias/nested destructuring (for example `{ bar: b }`, `{ user: { name } }`)
@@ -223,6 +278,8 @@ to runtime contract support).
     reads/writes when interprocedural summaries are enabled.
 15. Schema shrink validation: unresolvable property paths produce hard errors
     rather than silently falling back to broader schemas (see D-005).
+16. `.get()` validation and opaque-root discovery continue to work when
+    `OpaqueRef<T>` is no longer represented by a dedicated schema marker.
 
 ## D-005 Validate Schema Shrink Coverage
 
@@ -233,8 +290,10 @@ to runtime contract support).
 - When capability analysis detects property reads/writes and schema shrinking
   narrows the declared type, validate that all accessed top-level property
   heads are actually present in the result.
-- If the declared type is `unknown`/`any`, every property access is
-  unresolvable → hard error.
+- If the declared type is `unknown`, every property access is unresolvable →
+  hard error.
+- If the declared type is `any`, path validation is skipped because runtime
+  fetch is already full-shape.
 - If the declared type is concrete but missing accessed properties → hard error
   naming the missing paths.
 
@@ -251,6 +310,9 @@ to runtime contract support).
 - Wildcard parameters typed `unknown` now produce `schema:unknown-type-access`
   because the generated schema cannot express what to fetch. `any`-typed and
   concrete-typed wildcard parameters are not affected.
+- Declared interface/type members whose resolved property type is `unknown`
+  also produce `schema:unknown-type-access` when accessed. `any`-typed members
+  do not.
 - `buildShrunkTypeNodeFromTypeNode` resolves non-Cell TypeReferences (type
   aliases, interfaces) to their declaration members via
   `resolveTypeReferenceMembers`, then shrinks those members directly using
@@ -272,8 +334,8 @@ to runtime contract support).
 
 **Diagnostic codes:**
 
-- `schema:unknown-type-access` — parameter typed `unknown`/`any` with property
-  accesses
+- `schema:unknown-type-access` — parameter typed `unknown` with property
+  accesses, or concrete parameter with accessed `unknown`-typed property heads
 - `schema:path-not-in-type` — concrete type missing accessed properties
 
 **Test coverage:** `test/schema-shrink-validation.test.ts` with 14 cases:
@@ -332,7 +394,7 @@ Lowering is acceptable only when semantic equivalence is exact.
 ## P-005 Make Reactive Boundaries Explicit Where Opaque Values Dominate
 
 In pattern context, emitted forms should make reactive/opaque boundaries
-explicit (`when`, `unless`, `ifElse`, `derive`, schema boundaries), to reduce
+explicit (`when`, `unless`, `ifElse`, schema boundaries), to reduce
 implicit behavior and runtime ambiguity.
 
 ## P-006 Minimize Rewrite Surface In Compute Context
@@ -385,9 +447,9 @@ fields/defaults unless an explicit author opt-in narrowing model is introduced.
 - `packages/ts-transformers/src/ast/reactive-context.ts`
 - `packages/ts-transformers/src/ast/type-inference.ts`
   (`isReactiveArrayMapCall`)
-- `packages/ts-transformers/src/transformers/opaque-ref-jsx.ts`
-- `packages/ts-transformers/src/transformers/opaque-ref/emitters/binary-expression.ts`
-- `packages/ts-transformers/src/transformers/opaque-ref/emitters/conditional-expression.ts`
+- `packages/ts-transformers/src/transformers/jsx-expression-site-router.ts`
+- `packages/ts-transformers/src/transformers/expression-rewrite/emitters/binary-expression.ts`
+- `packages/ts-transformers/src/transformers/expression-rewrite/emitters/conditional-expression.ts`
 - `packages/ts-transformers/src/closures/strategies/map-strategy.ts`
 - `packages/ts-transformers/src/ast/call-kind.ts`
 - `packages/ts-transformers/src/ast/dataflow.ts` (or successor capability graph)
@@ -395,7 +457,7 @@ fields/defaults unless an explicit author opt-in narrowing model is introduced.
 - `packages/ts-transformers/src/ast/type-building.ts`
 - validation messaging in
   `packages/ts-transformers/src/transformers/pattern-context-validation.ts`
-- replacement/merge path for that validation in capability-lowering diagnostics
+- replacement/merge path for that validation in pattern-callback-lowering diagnostics
 - schema emission in
   `packages/ts-transformers/src/transformers/schema-injection.ts`
 - schema generation coupling in
@@ -426,7 +488,7 @@ interface ReactiveContextInfo {
     | "render"
     | "array-map"
     | "computed"
-    | "derive"
+    | "lift-applied"
     | "action"
     | "lift"
     | "handler"
@@ -444,7 +506,7 @@ passes as authoritative context boundaries. Example target behavior:
 <div>{[0, 1].forEach(() => list.map(...))}</div>
 ```
 
-If JSX rewriting first introduces a compute wrapper (`computed`/`derive`) around
+If JSX rewriting first introduces a compute wrapper (`computed`) around
 this expression, the nested `list.map(...)` is in compute context for subsequent
 collection rewrite policy.
 
@@ -467,7 +529,7 @@ Emitters/strategies call policy functions instead of embedding local logic.
 **Current complexity:** `emitBinaryExpression` mixes:
 
 1. logical lowering (`&&`/`||`)
-2. derive/computed wrapping fallback
+2. computed wrapping fallback
 3. expensive-RHS heuristics
 
 **Recommendation:** structure as:
@@ -677,7 +739,7 @@ logic.
 **Status:** Landed (intraprocedural)
 
 1. Tag analysis origins from:
-   - pattern/lift/derive/handler/action callback parameters
+   - pattern/lift/handler/action callback parameters
    - results of `lift(...)` and `pattern(...)` invoked within pattern code
    - `.map` callback parameters only when that call site is selected for
      `mapWithPattern` rewrite
@@ -736,10 +798,21 @@ produce hard errors rather than silently degrading.
 
 1. Replace map/logical receiver classification inputs with capability summaries.
 2. Remove remaining `OpaqueRef`-specific heuristic branches where superseded.
-3. Start routing pattern-context validation diagnostics through lowering
-   eligibility checks.
+3. ~~Start routing pattern-context validation diagnostics through lowering
+   eligibility checks.~~ Done for restricted-reactive computation diagnostics:
+   validation now consults shared expression-site lowerability before
+   reporting `pattern-context:computation`.
 
-**Exit criteria:** operator rewrite matrix decisions are capability-backed.
+Remaining work:
+
+1. Keep shrinking residual heuristic branches where no capability-backed
+   replacement exists yet.
+2. Expand matrix-style policy coverage if we want a permanent gate on
+   expression-site / operator behavior.
+
+**Exit criteria:** operator rewrite matrix decisions are capability-backed and
+validation-side computation diagnostics no longer rediscover lowerability
+independently.
 
 ## Phase D6: Opaque Path Navigation Lowering
 
@@ -762,16 +835,20 @@ unsupported optional-call cases.
 Implemented in current MVP:
 
 1. Compute-context capability analysis reuses callee summaries through resolved
-   function signatures with concrete function bodies.
+   function signatures with concrete function bodies in the same source file.
 2. Transitive read/write paths from helper callees propagate to caller compute
    boundaries.
-3. Pattern-context legality summaries remain direct/local (no helper-driven
+3. Cross-file or otherwise unsupported helper calls fall back to the existing
+   conservative wildcard path rather than taking partial transitive precision.
+4. Pattern-context legality summaries remain direct/local (no helper-driven
    widening).
+5. Recursion still bails out conservatively via the existing `recursive`
+   summary path.
 
 Remaining work:
 
-1. Expand/clarify interprocedural scope boundaries (for example unsupported
-   declaration forms and cross-module behavior expectations).
+1. Decide whether to widen beyond same-source-file concrete helper bodies (for
+   example broader declaration forms or cross-module calls).
 2. Add dedicated fixture matrix for interprocedural edge cases and recursion
    boundaries.
 
@@ -784,7 +861,7 @@ without major compile-time regression.
 **Status:** Landed
 
 1. ~~Flip `capabilityDataflowV1` to default after stabilization window.~~
-   Done — capability-first is the only path.
+   Done — the single transform pipeline is the only path.
 2. ~~Remove legacy branches tied to old `OpaqueRef` heuristics.~~
    Done — `useLegacyOpaqueRefSemantics` flag and all legacy branches removed.
 3. ~~Update behavior spec to reflect new default behavior.~~
@@ -794,14 +871,18 @@ without major compile-time regression.
 
 **Exit criteria:** new path is default, old path removed or hard-deprecated.
 
-## Open Questions
+## Remaining Hardening Follow-Ups
 
-1. Should ternary in compute context JSX also be preserved (no `ifElse`
-   lowering), mirroring the proposed `&&`/`||` rule?
-2. Do we want a strict “context policy matrix” test suite that all operator
-   rewrites must satisfy before merge?
-3. For path shrinking, which operations should immediately force wildcard shape
-   fallback vs allow partial precision?
-4. For compute context, what interprocedural scope is required in MVP
-   (same-module direct calls only vs broader), given pattern-context signatures
-   are intentionally direct/local?
+Normative language decisions now live in the target-language spec and lowering
+contract. The items below are rollout/hardening follow-ups, not unresolved
+source-language policy.
+
+1. Decide and pin whether compute-context JSX ternary should preserve authored
+   ternary (no `ifElse` lowering), mirroring the current `&&`/`||` direction.
+2. Add a strict context-policy matrix test suite if we want a permanent gate on
+   operator rewrite behavior.
+3. Tighten wildcard-fallback rules for path shrinking so partial precision vs
+   full-shape fallback is consistently classified.
+4. Tighten the compute-context interprocedural MVP scope (for example
+   same-module direct calls vs broader) while keeping pattern-context legality
+   intentionally direct/local.

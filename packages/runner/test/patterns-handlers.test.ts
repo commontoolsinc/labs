@@ -5,14 +5,15 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { spy } from "@std/testing/mock";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Cell } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
-import { isPrimitiveCellLink, parseLink } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { getMetaLink } from "@commonfabric/runner";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -21,10 +22,10 @@ describe("Pattern Runner - Handlers", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
-  let handler: ReturnType<typeof createBuilder>["commontools"]["handler"];
-  let TYPE: ReturnType<typeof createBuilder>["commontools"]["TYPE"];
+  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+  let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
+  let Writable: ReturnType<typeof createBuilder>["commonfabric"]["Writable"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -35,13 +36,13 @@ describe("Pattern Runner - Handlers", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({
       lift,
       pattern,
       handler,
-      TYPE,
-    } = commontools);
+      Writable,
+    } = commonfabric);
   });
 
   afterEach(async () => {
@@ -84,6 +85,45 @@ describe("Pattern Runner - Handlers", () => {
     result.key("stream").send({ amount: 2 });
     value = await result.pull();
     expect(value).toMatchObject({ counter: { value: 3 } });
+  });
+
+  it("defers handler registration for retryable setup transactions until commit", async () => {
+    const addEventHandlerSpy = spy(runtime.scheduler, "addEventHandler");
+
+    const incHandler = handler<
+      { amount: number },
+      { counter: { value: number } }
+    >(
+      ({ amount }, { counter }) => {
+        counter.value += amount;
+      },
+      { proxy: true },
+    );
+
+    const incPattern = pattern<{ counter: { value: number } }>(
+      ({ counter }) => {
+        return { counter, stream: incHandler({ counter }) };
+      },
+    );
+
+    const result = await runtime.editWithRetry((retryTx) => {
+      const resultCell = runtime.getCell<
+        { counter: { value: number }; stream: any }
+      >(space, "defer retryable handler start", undefined, retryTx);
+      const cell = runtime.run(retryTx, incPattern, {
+        counter: { value: 0 },
+      }, resultCell);
+
+      expect(addEventHandlerSpy.calls.length).toBe(0);
+      return cell;
+    });
+    if (result.error) throw new Error(result.error.message);
+
+    await result.ok.pull();
+
+    expect(addEventHandlerSpy.calls.length).toBe(1);
+
+    addEventHandlerSpy.restore();
   });
 
   it("should propagate handler source location to scheduler via .name", async () => {
@@ -129,17 +169,55 @@ describe("Pattern Runner - Handlers", () => {
     addEventHandlerSpy.restore();
   });
 
-  it("should execute patterns returned by handlers", async () => {
+  it("should annotate event handlers with write targets", async () => {
+    const addEventHandlerSpy = spy(runtime.scheduler, "addEventHandler");
+
+    const incHandler = handler<
+      { amount: number },
+      { counter: { value: number } }
+    >(
+      ({ amount }, { counter }) => {
+        counter.value += amount;
+      },
+      { proxy: true },
+    );
+
+    const incPattern = pattern<{ counter: { value: number } }>(
+      ({ counter }) => {
+        return { counter, stream: incHandler({ counter }) };
+      },
+    );
+
+    const resultCell = runtime.getCell<
+      { counter: { value: number }; stream: any }
+    >(space, "handler write target annotation test", undefined, tx);
+    const result = runtime.run(tx, incPattern, {
+      counter: { value: 0 },
+    }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    expect(addEventHandlerSpy.calls.length).toBeGreaterThan(0);
+    const registeredHandler = addEventHandlerSpy.calls[0].args[0] as {
+      writes?: unknown[];
+    };
+    expect(registeredHandler.writes).toBeDefined();
+
+    addEventHandlerSpy.restore();
+  });
+  it("should demand handler-written pattern results when pulled", async () => {
     const counter = runtime.getCell<{ value: number }>(
       space,
-      "should execute patterns returned by handlers 1",
+      "should demand handler-written pattern results when pulled 1",
       undefined,
       tx,
     );
     counter.set({ value: 0 });
     const nested = runtime.getCell<{ a: { b: { c: number } } }>(
       space,
-      "should execute patterns returned by handlers 2",
+      "should demand handler-written pattern results when pulled 2",
       undefined,
       tx,
     );
@@ -162,11 +240,19 @@ describe("Pattern Runner - Handlers", () => {
 
     const incHandler = handler<
       { amount: number },
-      { counter: { value: number }; nested: { a: { b: { c: number } } } }
+      {
+        counter: { value: number };
+        nested: { a: { b: { c: number } } };
+        latest?: number[];
+      }
     >(
-      (event, { counter, nested }) => {
-        counter.value += event.amount;
-        return incLogger({ counter, amount: event.amount, nested: nested.a.b });
+      (event, state) => {
+        state.counter.value += event.amount;
+        state.latest = incLogger({
+          counter: state.counter,
+          amount: event.amount,
+          nested: state.nested.a.b,
+        });
       },
       { proxy: true },
     );
@@ -175,13 +261,17 @@ describe("Pattern Runner - Handlers", () => {
       counter: { value: number };
       nested: { a: { b: { c: number } } };
     }>(({ counter, nested }) => {
-      const stream = incHandler({ counter, nested });
-      return { stream };
+      const latest = Writable.of<number[] | undefined>(undefined);
+      const stream = incHandler({ counter, nested, latest });
+      return { stream, latest };
     });
 
-    const resultCell = runtime.getCell<{ stream: any }>(
+    const resultCell = runtime.getCell<{
+      stream: any;
+      latest?: number[];
+    }>(
       space,
-      "should execute patterns returned by handlers",
+      "should demand handler-written pattern results when pulled",
       undefined,
       tx,
     );
@@ -195,18 +285,25 @@ describe("Pattern Runner - Handlers", () => {
 
     result.key("stream").send({ amount: 1 });
     await runtime.idle();
+    expect(values).toEqual([]);
+    expect(await result.key("latest").pull()).toEqual([1, 1, 0]);
     expect(values).toEqual([[1, 1, 0]]);
 
     result.key("stream").send({ amount: 2 });
     await runtime.idle();
 
     expect(values).toContainEqual([1, 1, 0]);
-
-    // Next is the first logger called again when counter changes, since this
-    // is now a long running piecelet:
-    expect(values).toContainEqual([3, 1, 0]);
-
+    expect(await result.key("latest").pull()).toEqual([3, 2, 0]);
     expect(values).toContainEqual([3, 2, 0]);
+    expect(values.some((tuple) => tuple.join(",") === "3,1,0")).toBe(false);
+
+    const graph = runtime.scheduler.getGraphSnapshot();
+    expect(
+      graph.nodes.some((node) => node.id.startsWith("readResult:")),
+    ).toBe(false);
+    expect(
+      graph.nodes.some((node) => node.id.startsWith("handlerResult:")),
+    ).toBe(false);
   });
 
   it("should execute handlers with schemas", async () => {
@@ -217,7 +314,7 @@ describe("Pattern Runner - Handlers", () => {
         properties: {
           counter: {
             type: "number",
-            asCell: true,
+            asCell: ["cell"],
           },
         },
       },
@@ -306,15 +403,9 @@ describe("Pattern Runner - Handlers", () => {
     expect(value).toMatchObject({ result: 5 });
 
     // Cast to any to avoid type checking
-    const sourceCellValue = piece.getSourceCell()?.getRaw() as any;
-    const patternId = sourceCellValue?.[TYPE];
+    const patternId = getMetaLink(piece, "pattern")?.id;
     expect(patternId).toBeDefined();
     expect(lastError?.patternId).toBe(patternId);
-    expect(isPrimitiveCellLink(sourceCellValue?.["spell"])).toBe(true);
-    const spellLink = parseLink(sourceCellValue["spell"]);
-    const spellId = spellLink?.id;
-    expect(spellId).toBeDefined();
-    expect(lastError?.spellId).toBe(spellId);
     expect(lastError?.space).toBe(space);
     expect(lastError?.pieceId).toBe(
       JSON.parse(JSON.stringify(piece.entityId))["/"],

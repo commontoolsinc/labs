@@ -4,14 +4,41 @@ import {
   addMockObjectResponse,
   addMockResponse,
   clearMockResponses,
+  type ConversationFixture,
   disableMockMode,
   enableMockMode,
   LLMClient,
+  LLMStreamError,
+  loadConversationFixture,
+  normalizeLLMResponse,
   resetMockMode,
 } from "./client.ts";
+import { GOOGLE_SEARCH_NATIVE_MODEL_TOOL } from "./types.ts";
 
 const GUARD_MESSAGE =
   "LLMClient: live LLM calls are blocked in test environments.";
+
+function streamFromChunks(chunks: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
+    },
+  });
+}
+
+function runClientStream(client: LLMClient, chunks: string[]) {
+  return (client as unknown as {
+    stream(
+      body: ReadableStream<Uint8Array>,
+      id: string,
+      callback?: (text: string) => void,
+    ): Promise<unknown>;
+  }).stream(streamFromChunks(chunks), "trace-1", () => {});
+}
 
 describe("LLMClient test-environment guard", () => {
   const client = new LLMClient();
@@ -55,6 +82,29 @@ describe("LLMClient test-environment guard", () => {
 
     expect(result.content).toBe("mocked!");
     resetMockMode();
+  });
+
+  it("normalizes JSON responses without dropping native model tool metadata", () => {
+    const nativeModelToolResults = [{
+      type: "cf-harness.native-model-tool-result" as const,
+      toolId: GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
+      provider: "google",
+      providerMetadata: { query: "example" },
+      sources: [{ url: "https://example.com" }],
+    }];
+
+    const result = normalizeLLMResponse({
+      role: "assistant",
+      content: "searched",
+      nativeModelToolResults,
+    }, "trace-json");
+
+    expect(result).toEqual({
+      role: "assistant",
+      content: "searched",
+      id: "trace-json",
+      nativeModelToolResults,
+    });
   });
 
   it("generateObject with mock mode bypasses guard", async () => {
@@ -130,6 +180,170 @@ describe("LLMClient test-environment guard", () => {
     resetMockMode();
   });
 
+  it("conversation fixture queues sequential responses", async () => {
+    resetMockMode();
+
+    const fixture: ConversationFixture = {
+      description: "test fixture",
+      responses: [
+        {
+          type: "sendRequest",
+          response: { role: "assistant", content: "first", id: "fix-1" },
+        },
+        {
+          type: "sendRequest",
+          response: { role: "assistant", content: "second", id: "fix-2" },
+        },
+        {
+          type: "generateObject",
+          response: { object: { name: "Alice" }, id: "fix-3" },
+        },
+      ],
+    };
+
+    loadConversationFixture(fixture);
+
+    const r1 = await client.sendRequest({
+      messages: [{ role: "user", content: "one" }],
+      model: "test",
+      stream: false,
+    });
+    expect(r1.content).toBe("first");
+
+    const r2 = await client.sendRequest({
+      messages: [{ role: "user", content: "two" }],
+      model: "test",
+      stream: false,
+    });
+    expect(r2.content).toBe("second");
+
+    const r3 = await client.generateObject({
+      messages: [{ role: "user", content: "three" }],
+      schema: { type: "object", properties: { name: { type: "string" } } },
+    });
+    expect(r3.object).toEqual({ name: "Alice" });
+
+    resetMockMode();
+  });
+
+  it("conversation fixture assertions pass on correct request", async () => {
+    resetMockMode();
+
+    loadConversationFixture({
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            messageCount: 1,
+            messagesContain: ["hello"],
+            lastMessageContains: "hello",
+          },
+          response: { role: "assistant", content: "ok", id: "assert-1" },
+        },
+      ],
+    });
+
+    const result = await client.sendRequest({
+      messages: [{ role: "user", content: "hello world" }],
+      model: "test",
+      stream: false,
+    });
+    expect(result.content).toBe("ok");
+
+    resetMockMode();
+  });
+
+  it("conversation fixture assertions throw on mismatch with description", async () => {
+    resetMockMode();
+
+    loadConversationFixture({
+      description: "my test conversation",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            messagesContain: ["expected-keyword"],
+          },
+          response: { role: "assistant", content: "ok", id: "assert-2" },
+        },
+      ],
+    });
+
+    await expect(
+      client.sendRequest({
+        messages: [{ role: "user", content: "something else" }],
+        model: "test",
+        stream: false,
+      }),
+    ).rejects.toThrow(
+      'Fixture "my test conversation" entry 0: expected some message to contain "expected-keyword"',
+    );
+
+    resetMockMode();
+  });
+
+  it("conversation fixture hasTools assertion works", async () => {
+    resetMockMode();
+
+    loadConversationFixture({
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            hasTools: ["search", "calculate"],
+          },
+          response: { role: "assistant", content: "ok", id: "tools-1" },
+        },
+      ],
+    });
+
+    // Should pass with matching tools
+    const result = await client.sendRequest({
+      messages: [{ role: "user", content: "hi" }],
+      model: "test",
+      stream: false,
+      tools: {
+        search: {
+          description: "Search",
+          inputSchema: { type: "object" },
+        },
+        calculate: {
+          description: "Calculate",
+          inputSchema: { type: "object" },
+        },
+      },
+    });
+    expect(result.content).toBe("ok");
+
+    resetMockMode();
+  });
+
+  it("conversation fixture systemContains assertion works", async () => {
+    resetMockMode();
+
+    loadConversationFixture({
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            systemContains: "helpful assistant",
+          },
+          response: { role: "assistant", content: "ok", id: "sys-1" },
+        },
+      ],
+    });
+
+    const result = await client.sendRequest({
+      messages: [{ role: "user", content: "hi" }],
+      model: "test",
+      system: "You are a helpful assistant.",
+      stream: false,
+    });
+    expect(result.content).toBe("ok");
+
+    resetMockMode();
+  });
+
   it("sendRequest stream validation errors still work", async () => {
     disableMockMode();
 
@@ -153,5 +367,84 @@ describe("LLMClient test-environment guard", () => {
         () => {},
       ),
     ).rejects.toThrow("not configured as a stream");
+  });
+
+  it("throws LLMStreamError for streamed error events mid-stream", async () => {
+    for (
+      const chunks of [
+        [
+          JSON.stringify({ type: "text-delta", textDelta: "hello" }) + "\n",
+          JSON.stringify({ type: "error", error: "boom" }) + "\n",
+        ],
+        [
+          JSON.stringify({ type: "text-delta", textDelta: "hello" }) + "\n",
+          JSON.stringify({ type: "error", error: "boom" }),
+        ],
+      ]
+    ) {
+      try {
+        await runClientStream(client, chunks);
+      } catch (error) {
+        expect(error).toBeInstanceOf(LLMStreamError);
+        expect((error as Error).message).toBe("boom");
+        continue;
+      }
+
+      throw new Error("Expected LLMStreamError");
+    }
+  });
+
+  it("preserves native model tool metadata from stream finish events", async () => {
+    const nativeModelToolResults = [{
+      type: "cf-harness.native-model-tool-result" as const,
+      toolId: GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
+      provider: "google",
+      providerMetadata: { query: "example" },
+      sources: [{ url: "https://example.com" }],
+    }];
+
+    const result = await runClientStream(client, [
+      JSON.stringify({ type: "text-delta", textDelta: "searched" }) + "\n",
+      JSON.stringify({
+        type: "finish",
+        nativeModelToolResults,
+      }) + "\n",
+    ]);
+
+    expect(result).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "searched" }],
+      id: "trace-1",
+      nativeModelToolResults,
+    });
+  });
+
+  it("logs and ignores garbage lines mid-stream", async () => {
+    const originalConsoleError = console.error;
+    const loggedErrors: unknown[][] = [];
+    console.error = (...args: unknown[]) => {
+      loggedErrors.push(args);
+    };
+
+    try {
+      const result = await runClientStream(client, [
+        JSON.stringify("hello") + "\n",
+        "not json\n",
+        "not final json",
+      ]);
+
+      expect(result).toEqual({
+        role: "assistant",
+        content: [{ type: "text", text: "hello" }],
+        id: "trace-1",
+      });
+      expect(loggedErrors.length).toBe(2);
+      expect(loggedErrors[0][0]).toBe("Failed to parse JSON line:");
+      expect(loggedErrors[0][1]).toBe("not json");
+      expect(loggedErrors[1][0]).toBe("Failed to parse final JSON line:");
+      expect(loggedErrors[1][1]).toBe("not final json");
+    } finally {
+      console.error = originalConsoleError;
+    }
   });
 });

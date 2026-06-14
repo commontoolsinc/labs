@@ -1,5 +1,4 @@
-/// <cts-enable />
-import { Cell, Default, handler, lift, pattern, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commonfabric";
 
 type ReleaseTaskStatus = "pending" | "in_progress" | "blocked" | "done";
 

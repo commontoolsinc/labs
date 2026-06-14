@@ -1,29 +1,49 @@
 import ts from "typescript";
 import { assertEquals } from "@std/assert";
 import {
-  shouldLowerLogicalInJsx,
+  shouldLowerLogicalExpression,
   shouldRewriteCollectionMethod,
 } from "../../src/policy/mod.ts";
 
 Deno.test("Rewrite policy: JSX logical lowering matrix", () => {
   assertEquals(
-    shouldLowerLogicalInJsx("pattern", ts.SyntaxKind.AmpersandAmpersandToken),
+    shouldLowerLogicalExpression(
+      "pattern",
+      "jsx-expression",
+      ts.SyntaxKind.AmpersandAmpersandToken,
+    ),
     true,
   );
   assertEquals(
-    shouldLowerLogicalInJsx("pattern", ts.SyntaxKind.BarBarToken),
+    shouldLowerLogicalExpression(
+      "pattern",
+      "call-argument",
+      ts.SyntaxKind.BarBarToken,
+    ),
     true,
   );
   assertEquals(
-    shouldLowerLogicalInJsx("compute", ts.SyntaxKind.AmpersandAmpersandToken),
+    shouldLowerLogicalExpression(
+      "compute",
+      "jsx-expression",
+      ts.SyntaxKind.AmpersandAmpersandToken,
+    ),
     false,
   );
   assertEquals(
-    shouldLowerLogicalInJsx("compute", ts.SyntaxKind.BarBarToken),
+    shouldLowerLogicalExpression(
+      "compute",
+      "object-property",
+      ts.SyntaxKind.BarBarToken,
+    ),
     false,
   );
   assertEquals(
-    shouldLowerLogicalInJsx("neutral", ts.SyntaxKind.AmpersandAmpersandToken),
+    shouldLowerLogicalExpression(
+      "neutral",
+      "jsx-expression",
+      ts.SyntaxKind.AmpersandAmpersandToken,
+    ),
     false,
   );
 });

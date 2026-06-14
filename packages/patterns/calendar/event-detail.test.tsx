@@ -1,4 +1,3 @@
-/// <cts-enable />
 /**
  * Test Pattern: Event Detail
  *
@@ -6,9 +5,9 @@
  * - Initial state with provided values
  * - Edit title/date/time/notes via stream actions, verify updates
  *
- * Run: deno task ct test packages/patterns/calendar/event-detail.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/calendar/event-detail.test.tsx --verbose
  */
-import { action, computed, NAME, pattern } from "commontools";
+import { action, computed, NAME, pattern } from "commonfabric";
 import EventDetail from "./event-detail.tsx";
 
 export default pattern(() => {

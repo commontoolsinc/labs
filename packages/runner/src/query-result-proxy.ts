@@ -1,5 +1,5 @@
-import { refer } from "@commontools/memory/reference";
-import { isRecord } from "@commontools/utils/types";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { isRecord } from "@commonfabric/utils/types";
 import { getTopFrame } from "./builder/pattern.ts";
 import { isStreamValue } from "./builder/types.ts";
 import { toCell } from "./back-to-cell.ts";
@@ -10,17 +10,62 @@ import { type Cell, createCell, recursivelyAddIDIfNeeded } from "./cell.ts";
 import { type Runtime } from "./runtime.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { toURI } from "./uri-utils.ts";
+import {
+  type CfcLabelView,
+  cfcLabelViewForDereferenceTraces,
+  cloneCfcLabelView,
+  mergeCfcLabelViews,
+  rebaseCfcLabelView,
+} from "./cfc/label-view-state.ts";
 
 // Maximum recursion depth to prevent infinite loops
 const MAX_RECURSION_DEPTH = 100;
 
 // Cache of target objects to their proxies, scoped by ReactivityLog
+type ProxyCache = {
+  byLink: Map<string, any>;
+  byValue: WeakMap<object, any>;
+};
+
 const proxyCacheByTx = new WeakMap<
   IExtendedStorageTransaction,
-  WeakMap<object, any>
+  ProxyCache
 >();
 // Default key if no tx is provided
 const defaultTx = {} as IExtendedStorageTransaction;
+
+const getProxyCache = (
+  tx: IExtendedStorageTransaction | undefined,
+): ProxyCache => {
+  const cacheIndex = tx ?? defaultTx;
+  let txCache = proxyCacheByTx.get(cacheIndex);
+  if (!txCache) {
+    txCache = {
+      byLink: new Map<string, any>(),
+      byValue: new WeakMap<object, any>(),
+    };
+    proxyCacheByTx.set(cacheIndex, txCache);
+  }
+  return txCache;
+};
+
+const proxyCacheKey = (
+  link: NormalizedFullLink,
+  writable: boolean,
+  cfcLabelView: CfcLabelView | undefined,
+): string =>
+  JSON.stringify([
+    writable,
+    link.space,
+    link.id,
+    link.path,
+    cfcLabelView ?? null,
+  ]);
+
+const childLabelView = (
+  cfcLabelView: CfcLabelView | undefined,
+  segment: string,
+): CfcLabelView | undefined => rebaseCfcLabelView(cfcLabelView, [segment]);
 
 // Array.prototype's entries, and whether they modify the array
 enum ArrayMethodType {
@@ -75,12 +120,24 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
   toLocaleString: ArrayMethodType.ReadOnly,
 };
 
+/**
+ * Builds a JS proxy view over a stored cell. Read traps resolve links
+ * and wrap nested values; write-side array mutators (`push`, `splice`,
+ * `unshift`, etc.) route through the same write-boundary normalization
+ * as `Cell.set()` / `Cell.push()`.
+ *
+ * **Frozenness contract:** Values handed to the write-side array mutators flow
+ * through `recursivelyAddIDIfNeeded()` and so plain unfrozen Object/Array
+ * inputs get shallowly frozen at each visited level; already-deep- frozen valid
+ * `FabricValue` inputs are accepted identity-preservingly.
+ */
 export function createQueryResultProxy<T>(
   runtime: Runtime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   depth: number = 0,
   writable: boolean = false,
+  cfcLabelView?: CfcLabelView,
 ): T {
   // Check recursion depth
   if (depth > MAX_RECURSION_DEPTH) {
@@ -90,35 +147,34 @@ export function createQueryResultProxy<T>(
   }
 
   // Resolve path and follow links to actual value.
-  const txStatus = tx?.status();
-  const readTx = (txStatus?.status === "ready" && tx) ? tx : runtime.edit();
+  const readTx = tx === undefined ? runtime.edit() : runtime.readTx(tx);
+  const proxyTx = tx ?? readTx;
+  const traceStart = readTx.getCfcState().dereferenceTraces.length;
   link = resolveLink(runtime, readTx, link);
+  cfcLabelView = mergeCfcLabelViews([
+    cloneCfcLabelView(cfcLabelView),
+    cfcLabelViewForDereferenceTraces(
+      readTx,
+      readTx.getCfcState().dereferenceTraces.slice(traceStart),
+    ),
+  ]);
   const value = readTx.readValueOrThrow(link) as any;
 
   // If the value is a stream marker ({ $stream: true }), return a Cell with
   // stream kind so that .send() is available. This handles the case where a
   // pattern's Output type wasn't explicitly specified, causing the capture
-  // schema to lose the asStream information.
+  // schema to lose the asCell stream information.
   if (isStreamValue(value)) {
-    return createCell(runtime, link, tx, false, "stream") as T;
+    return createCell(runtime, link, tx, false, "stream", cfcLabelView) as T;
   }
 
   if (!isRecord(value)) return value;
 
-  // When richStorableValues is OFF, frozen objects are terminal values that
-  // don't need proxy wrapping (the legacy assumption: "frozen = terminal").
-  // When richStorableValues is ON, frozen objects may contain link structures
-  // that need resolution, so we fall through to proxy-wrap them below.
-  if (Object.isFrozen(value) && !runtime.experimental.richStorableValues) {
-    return value as T;
-  }
-
-  // When richStorableValues is enabled, stored objects are deep-frozen during
-  // storage normalization (storableFromNativeValueRich). A frozen proxy target
-  // would force every property access through the invariant guard (ECMAScript
-  // 10.5.8: a [[Get]] trap on a non-configurable, non-writable data property
-  // must return the target's own value), bypassing the get trap's link
-  // resolution entirely.
+  // Stored objects are deep-frozen during storage normalization
+  // (fabricFromNativeValueModern). A frozen proxy target would force every
+  // property access through the invariant guard (ECMAScript 10.5.8: a [[Get]]
+  // trap on a non-configurable, non-writable data property must return the
+  // target's own value), bypassing the get trap's link resolution entirely.
   //
   // Fix: use an unfrozen empty stub as the proxy target. The stub's contents
   // are irrelevant -- the get trap always reads live data from the transaction,
@@ -138,21 +194,24 @@ export function createQueryResultProxy<T>(
     : value;
 
   // Get the appropriate cache index by log
-  const cacheIndex = tx ?? defaultTx;
-  let txCache = proxyCacheByTx.get(cacheIndex);
-  if (!txCache) {
-    txCache = new WeakMap<object, any>();
-    proxyCacheByTx.set(cacheIndex, txCache);
-  }
+  const txCache = getProxyCache(tx);
+  const cacheKey = proxyCacheKey(link, writable, cfcLabelView);
 
   // Check if we already have a proxy for this target in the cache.
   // The cache key is the original `value` (not the stub), ensuring that
   // the same frozen object always maps to the same proxy instance.
-  const existingProxy = txCache?.get(value);
+  const existingProxy = txCache.byLink.get(cacheKey) ??
+    (cfcLabelView === undefined ? txCache.byValue.get(value) : undefined);
   if (existingProxy) return existingProxy;
 
   const proxy = new Proxy(proxyTarget as object, {
     get: (target, prop, receiver) => {
+      if (Array.isArray(value) && prop === "length") {
+        const readTx = runtime.readTx(tx);
+        const current = readTx.readValueOrThrow(link) as typeof value;
+        return Array.isArray(current) ? current.length : 0;
+      }
+
       // When encountering a frozen property, we just return the value to
       // maintain proxy invariants.
       const descriptor = Object.getOwnPropertyDescriptor(target, prop);
@@ -162,15 +221,14 @@ export function createQueryResultProxy<T>(
 
       if (typeof prop === "symbol") {
         if (prop === toCell) {
-          return () => createCell(runtime, link, tx);
+          return () =>
+            createCell(runtime, link, tx, false, undefined, cfcLabelView);
         } else if (prop === Symbol.iterator && Array.isArray(value)) {
           return function () {
             let index = 0;
             return {
               next() {
-                const readTx = (tx?.status().status === "ready")
-                  ? tx
-                  : runtime.edit();
+                const readTx = runtime.readTx(tx);
                 const length = readTx.readValueOrThrow({
                   ...link,
                   path: [...link.path, "length"],
@@ -179,13 +237,14 @@ export function createQueryResultProxy<T>(
                   const result = {
                     value: createQueryResultProxy(
                       runtime,
-                      tx,
+                      proxyTx,
                       {
                         ...link,
                         path: [...link.path, String(index)],
                       },
                       depth + 1,
                       writable,
+                      childLabelView(cfcLabelView, String(index)),
                     ),
                     done: false,
                   };
@@ -198,7 +257,7 @@ export function createQueryResultProxy<T>(
           };
         }
 
-        const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+        const readTx = runtime.readTx(tx);
         const current = readTx.readValueOrThrow(link) as typeof value;
 
         const returnValue = Reflect.get(current, prop, current);
@@ -219,9 +278,7 @@ export function createQueryResultProxy<T>(
             // This will also mark each element read in the log. Almost all
             // methods implicitly read all elements. TODO: Deal with
             // exceptions like at().
-            const readTx = (tx?.status().status === "ready")
-              ? tx
-              : runtime.edit();
+            const readTx = runtime.readTx(tx);
             const length = readTx.readValueOrThrow({
               ...link,
               path: [...link.path, "length"],
@@ -233,14 +290,19 @@ export function createQueryResultProxy<T>(
               );
             }
 
+            const current = readTx.readValueOrThrow(link) as typeof value;
             const copy = new Array(length);
             for (let i = 0; i < length; i++) {
+              if (!(i in current)) {
+                continue;
+              }
               copy[i] = createQueryResultProxy(
                 runtime,
-                tx,
+                proxyTx,
                 { ...link, path: [...link.path, String(i)] },
                 depth + 1,
                 writable,
+                childLabelView(cfcLabelView, String(i)),
               );
             }
 
@@ -269,19 +331,18 @@ export function createQueryResultProxy<T>(
               // CT-1173: Read fresh value from transaction, not stale proxy target.
               // The proxy target (value) is captured at proxy creation time and
               // becomes stale after writes. We must read current state from tx.
-              const readTx = (tx?.status().status === "ready")
-                ? tx
-                : runtime.edit();
+              const readTx = runtime.readTx(tx);
               const currentValue = readTx.readValueOrThrow(link) as any[];
               copy = [...currentValue];
             } else {
               copy = value.map((_, index) =>
                 createProxyForArrayValue(
                   runtime,
-                  tx,
+                  proxyTx,
                   index,
                   { ...link, path: [...link.path, String(index)] },
                   writable,
+                  childLabelView(cfcLabelView, String(index)),
                 )
               );
             }
@@ -338,17 +399,17 @@ export function createQueryResultProxy<T>(
               };
 
               const resultLink: NormalizedFullLink = {
-                id: toURI(refer(cause)),
+                id: toURI(hashOf(cause)),
                 space: link.space,
+                scope: link.scope,
                 path: [],
-                type: "application/json",
               };
 
               diffAndUpdate(runtime, tx, resultLink, result, cause);
 
               result = createQueryResultProxy(
                 runtime,
-                tx,
+                proxyTx,
                 resultLink,
                 0,
                 writable,
@@ -361,10 +422,11 @@ export function createQueryResultProxy<T>(
 
       return createQueryResultProxy(
         runtime,
-        tx,
+        proxyTx,
         { ...link, path: [...link.path, prop] },
         depth + 1,
         writable,
+        childLabelView(cfcLabelView, String(prop)),
       );
     },
     set: (_, prop, value) => {
@@ -395,14 +457,25 @@ export function createQueryResultProxy<T>(
       return true;
     },
     ownKeys: () => {
-      const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+      const readTx = runtime.readTx(tx);
       const current = readTx.readValueOrThrow(link);
-      if (isRecord(current)) {
+      if (isRecord(current) || Array.isArray(current)) {
         return Reflect.ownKeys(current);
       }
       return Reflect.ownKeys(value);
     },
     getOwnPropertyDescriptor: (target, prop) => {
+      if (Array.isArray(target) && prop === "length") {
+        const readTx = runtime.readTx(tx);
+        const current = readTx.readValueOrThrow(link);
+        return {
+          configurable: false,
+          enumerable: false,
+          writable: true,
+          value: Array.isArray(current) ? current.length : 0,
+        };
+      }
+
       // For properties that exist on the original target (e.g. array `length`),
       // delegate to the target to satisfy proxy invariants for non-configurable
       // properties.
@@ -413,19 +486,20 @@ export function createQueryResultProxy<T>(
       if (typeof prop === "symbol") {
         return Object.getOwnPropertyDescriptor(value, prop);
       }
-      const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+      const readTx = runtime.readTx(tx);
       const current = readTx.readValueOrThrow(link) as typeof value;
-      if (isRecord(current) && prop in current) {
+      if ((isRecord(current) || Array.isArray(current)) && prop in current) {
         return {
           configurable: true,
           enumerable: true,
           writable: writable,
           value: createQueryResultProxy(
             runtime,
-            tx,
+            proxyTx,
             { ...link, path: [...link.path, prop as string] },
             depth + 1,
             writable,
+            childLabelView(cfcLabelView, String(prop)),
           ),
         };
       }
@@ -435,9 +509,9 @@ export function createQueryResultProxy<T>(
       if (typeof prop === "symbol") {
         return prop in value;
       }
-      const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+      const readTx = runtime.readTx(tx);
       const current = readTx.readValueOrThrow(link);
-      if (isRecord(current)) {
+      if (isRecord(current) || Array.isArray(current)) {
         return prop in current;
       }
       return prop in value;
@@ -445,7 +519,10 @@ export function createQueryResultProxy<T>(
   }) as T;
 
   // Cache the proxy in the appropriate cache before returning
-  txCache.set(value, proxy);
+  txCache.byLink.set(cacheKey, proxy);
+  if (cfcLabelView === undefined) {
+    txCache.byValue.set(value, proxy);
+  }
   return proxy;
 }
 
@@ -464,13 +541,23 @@ const createProxyForArrayValue = (
   source: number,
   link: NormalizedFullLink,
   writable: boolean = false,
+  cfcLabelView?: CfcLabelView,
 ): { [originalIndex]: number } => {
   const target = {
     valueOf: function () {
-      return createQueryResultProxy(runtime, tx, link, 0, writable);
+      return createQueryResultProxy(
+        runtime,
+        tx,
+        link,
+        0,
+        writable,
+        cfcLabelView,
+      );
     },
     toString: function () {
-      return String(createQueryResultProxy(runtime, tx, link, 0, writable));
+      return String(
+        createQueryResultProxy(runtime, tx, link, 0, writable, cfcLabelView),
+      );
     },
     [originalIndex]: source,
   };

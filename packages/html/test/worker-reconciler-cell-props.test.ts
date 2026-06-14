@@ -3,9 +3,11 @@ import { WorkerReconciler } from "../src/worker/reconciler.ts";
 import type { WorkerVNode } from "../src/worker/types.ts";
 
 import type { VDomOp } from "../src/vdom-ops.ts";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Runtime } from "@commontools/runner";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Runtime } from "@commonfabric/runner";
+import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
+import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
 
 /**
  * Helper to collect ops emitted by the reconciler.
@@ -30,478 +32,278 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
   const runtime = new Runtime({
     storageManager,
     apiUrl: new URL("http://localhost"),
+    cfcEnforcementMode: "observe",
   });
 
-  // Get CellImpl constructor
-  const dummyTx = runtime.edit();
-  const dummyCell = runtime.getCell(signer.did(), "dummy", undefined, dummyTx);
-  const CellImplConstructor = dummyCell.constructor;
-
-  // MockCell extending CellImpl for basic Cell behavior
-  class MockCell extends (CellImplConstructor as any) {
-    private subscribers = new Set<(value: any) => void>();
-
-    constructor(public value: any) {
-      super(runtime, undefined, undefined, false, undefined, "cell");
-      this.value = value;
-    }
-
-    sink(callback: (value: any) => void) {
-      this.subscribers.add(callback);
-      callback(this.value);
-      return () => {
-        this.subscribers.delete(callback);
-      };
-    }
-
-    set(newValue: any) {
-      this.value = newValue;
-      for (const sub of this.subscribers) {
-        sub(newValue);
-      }
-    }
-
-    isStream() {
-      return false;
-    }
-  }
-
-  /**
-   * MockPropsCell: simulates Cell<Props> with key(), resolveAsCell() support.
-   * When sunk, emits the props object. key() returns a MockPropCell for that key.
-   */
-  class MockPropsCell extends MockCell {
-    private propCells = new Map<string, MockPropCell>();
-
-    key(propName: string) {
-      if (!this.propCells.has(propName)) {
-        this.propCells.set(
-          propName,
-          new MockPropCell(this.value?.[propName], this, propName),
-        );
-      }
-      return this.propCells.get(propName)!;
-    }
-
-    override set(newValue: any) {
-      super.set(newValue);
-      // Propagate updates to existing child prop cells
-      for (const [k, propCell] of this.propCells) {
-        propCell.set(newValue?.[k]);
-      }
-    }
-  }
-
-  /**
-   * MockPropCell: represents a single prop's Cell.
-   * Supports asSchema(), resolveAsCell(), getAsNormalizedFullLink().
-   */
-  class MockPropCell extends MockCell {
-    private parentCell?: MockPropsCell;
-    private propKey?: string;
-
-    constructor(value: any, parentCell?: MockPropsCell, propKey?: string) {
-      super(value);
-      this.parentCell = parentCell;
-      this.propKey = propKey;
-    }
-
-    asSchema(_schema: any) {
-      return this;
-    }
-
-    resolveAsCell() {
-      // Read live value from parent (matches real Cell.key().resolveAsCell()
-      // which navigates the live data, not a stale cache)
-      const liveValue = this.parentCell
-        ? this.parentCell.value?.[this.propKey!]
-        : this.value;
-      if (
-        liveValue && typeof liveValue === "object" && "sink" in liveValue
-      ) {
-        return liveValue;
-      }
-      return this;
-    }
-
-    getAsNormalizedFullLink() {
-      return { space: "test-space", id: "test-id", path: [] };
-    }
-  }
-
-  /**
-   * MockStream: a Cell-like object that isStream() returns true for.
-   */
-  class MockStream extends MockCell {
-    public sent: unknown[] = [];
-
-    constructor() {
-      super(undefined);
-    }
-
-    override isStream() {
-      return true;
-    }
-
-    send(event: unknown) {
-      this.sent.push(event);
-    }
-  }
-
-  // --- Test cases ---
-
-  await t.step("Cell<Props> renders primitive props", async () => {
-    const collector = createOpsCollector();
-    const reconciler = new WorkerReconciler({
-      onOps: collector.onOps,
-    });
-
-    const propsCell = new MockPropsCell({
-      className: "foo",
-      title: "bar",
-    });
-
-    const rootCell = new MockCell({
-      type: "vnode",
-      name: "div",
-      props: propsCell,
-      children: [],
-    });
-
-    reconciler.mount(rootCell as any);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    const setPropOps = collector.getOpsOfType("set-prop");
-    const classOp = setPropOps.find((op: any) => op.key === "className");
-    const titleOp = setPropOps.find((op: any) => op.key === "title");
-
-    assertEquals(
-      classOp !== undefined,
-      true,
-      "Should emit set-prop for className",
-    );
-    assertEquals((classOp as any)?.value, "foo");
-    assertEquals(
-      titleOp !== undefined,
-      true,
-      "Should emit set-prop for title",
-    );
-    assertEquals((titleOp as any)?.value, "bar");
-  });
-
-  await t.step("Cell<Props> primitive prop updates", async () => {
-    const collector = createOpsCollector();
-    const reconciler = new WorkerReconciler({
-      onOps: collector.onOps,
-    });
-
-    const propsCell = new MockPropsCell({ className: "foo" });
-    const rootCell = new MockCell({
-      type: "vnode",
-      name: "div",
-      props: propsCell,
-      children: [],
-    });
-
-    reconciler.mount(rootCell as any);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    collector.clear();
-
-    // Update primitive prop
-    propsCell.set({ className: "bar" });
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    const setPropOps = collector.getOpsOfType("set-prop");
-    const classOp = setPropOps.find((op: any) => op.key === "className");
-    assertEquals(
-      classOp !== undefined,
-      true,
-      "Should emit set-prop for updated className",
-    );
-    assertEquals((classOp as any)?.value, "bar");
-  });
-
-  await t.step("Cell<Props> prop addition", async () => {
-    const collector = createOpsCollector();
-    const reconciler = new WorkerReconciler({
-      onOps: collector.onOps,
-    });
-
-    const propsCell = new MockPropsCell({ className: "foo" });
-    const rootCell = new MockCell({
-      type: "vnode",
-      name: "div",
-      props: propsCell,
-      children: [],
-    });
-
-    reconciler.mount(rootCell as any);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    collector.clear();
-
-    // Add a new prop
-    propsCell.set({ className: "foo", title: "new" });
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    const setPropOps = collector.getOpsOfType("set-prop");
-    const titleOp = setPropOps.find((op: any) => op.key === "title");
-    assertEquals(
-      titleOp !== undefined,
-      true,
-      "Should emit set-prop for new title",
-    );
-    assertEquals((titleOp as any)?.value, "new");
-  });
-
-  await t.step("Cell<Props> prop removal", async () => {
-    const collector = createOpsCollector();
-    const reconciler = new WorkerReconciler({
-      onOps: collector.onOps,
-    });
-
-    const propsCell = new MockPropsCell({
-      className: "foo",
-      title: "bar",
-    });
-    const rootCell = new MockCell({
-      type: "vnode",
-      name: "div",
-      props: propsCell,
-      children: [],
-    });
-
-    reconciler.mount(rootCell as any);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    collector.clear();
-
-    // Remove title prop
-    propsCell.set({ className: "foo" });
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    const removePropOps = collector.getOpsOfType("remove-prop");
-    const titleRemoved = removePropOps.some((op: any) => op.key === "title");
-    assertEquals(titleRemoved, true, "Should emit remove-prop for title");
-  });
-
-  await t.step("Cell<Props> object prop (style)", async () => {
-    const collector = createOpsCollector();
-    const reconciler = new WorkerReconciler({
-      onOps: collector.onOps,
-    });
-
-    const propsCell = new MockPropsCell({
-      style: { color: "red" },
-    });
-    const rootCell = new MockCell({
-      type: "vnode",
-      name: "div",
-      props: propsCell,
-      children: [],
-    });
-
-    reconciler.mount(rootCell as any);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    const setPropOps = collector.getOpsOfType("set-prop");
-    const styleOp = setPropOps.find((op: any) => op.key === "style");
-    assertEquals(
-      styleOp !== undefined,
-      true,
-      "Should emit set-prop for style (via per-prop sink)",
-    );
-    // Style objects get transformed to CSS strings by transformPropValue
-    // The per-prop sink delivers the full object; transformPropValue converts it
-  });
-
-  await t.step("Cell<Props> array prop", async () => {
-    const collector = createOpsCollector();
-    const reconciler = new WorkerReconciler({
-      onOps: collector.onOps,
-    });
-
-    const propsCell = new MockPropsCell({
-      items: [1, 2, 3],
-    });
-    const rootCell = new MockCell({
-      type: "vnode",
-      name: "div",
-      props: propsCell,
-      children: [],
-    });
-
-    reconciler.mount(rootCell as any);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    const setPropOps = collector.getOpsOfType("set-prop");
-    const itemsOp = setPropOps.find((op: any) => op.key === "items");
-    assertEquals(
-      itemsOp !== undefined,
-      true,
-      "Should emit set-prop for array items (via per-prop sink)",
-    );
-  });
-
-  await t.step("Cell<Props> event handler (stream)", async () => {
-    const collector = createOpsCollector();
-    const reconciler = new WorkerReconciler({
-      onOps: collector.onOps,
-    });
-
-    const mockStream = new MockStream();
-    const propsCell = new MockPropsCell({
-      onclick: mockStream,
-    });
-    const rootCell = new MockCell({
-      type: "vnode",
-      name: "button",
-      props: propsCell,
-      children: ["Click"],
-    });
-
-    reconciler.mount(rootCell as any);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    const setEventOps = collector.getOpsOfType("set-event");
-    assertEquals(setEventOps.length >= 1, true, "Should emit set-event");
-    assertEquals((setEventOps[0] as any).eventType, "click");
-  });
-
-  await t.step("Cell<Props> binding prop", async () => {
-    const collector = createOpsCollector();
-    const reconciler = new WorkerReconciler({
-      onOps: collector.onOps,
-    });
-
-    const bindingCell = runtime.getCell(
+  try {
+    // Get CellImpl constructor
+    const dummyTx = runtime.edit();
+    const dummyCell = runtime.getCell(
       signer.did(),
-      "binding-test-cell",
+      "dummy",
       undefined,
       dummyTx,
     );
-    bindingCell.set("hello");
+    const CellImplConstructor = dummyCell.constructor;
 
-    const propsCell = new MockPropsCell({
-      $value: bindingCell,
+    // MockCell extending CellImpl for basic Cell behavior
+    class MockCell extends (CellImplConstructor as any) {
+      private subscribers = new Set<(value: any) => void>();
+
+      constructor(public value: any) {
+        super(runtime, undefined, undefined, false, undefined, "cell");
+        this.value = value;
+      }
+
+      sink(callback: (value: any) => void) {
+        this.subscribers.add(callback);
+        callback(this.value);
+        return () => {
+          this.subscribers.delete(callback);
+        };
+      }
+
+      set(newValue: any) {
+        this.value = newValue;
+        for (const sub of this.subscribers) {
+          sub(newValue);
+        }
+      }
+
+      isStream() {
+        return false;
+      }
+    }
+
+    /**
+     * MockPropsCell: simulates Cell<Props> with key(), resolveAsCell() support.
+     * When sunk, emits the props object. key() returns a MockPropCell for that key.
+     */
+    class MockPropsCell extends MockCell {
+      private propCells = new Map<string, MockPropCell>();
+      private rawValue: any;
+
+      constructor(value: any, rawValue: any = value) {
+        super(value);
+        this.rawValue = rawValue;
+      }
+
+      key(propName: string) {
+        if (!this.propCells.has(propName)) {
+          this.propCells.set(
+            propName,
+            new MockPropCell(this.value?.[propName], this, propName),
+          );
+        }
+        return this.propCells.get(propName)!;
+      }
+
+      getRawUntyped() {
+        return this.rawValue;
+      }
+
+      override set(newValue: any) {
+        super.set(newValue);
+        this.rawValue = newValue;
+        // Propagate updates to existing child prop cells
+        for (const [k, propCell] of this.propCells) {
+          propCell.set(newValue?.[k]);
+        }
+      }
+    }
+
+    /**
+     * MockPropCell: represents a single prop's Cell.
+     * Supports asSchema(), resolveAsCell(), getAsNormalizedFullLink().
+     */
+    class MockPropCell extends MockCell {
+      private parentCell?: MockPropsCell;
+      private propKey?: string;
+
+      constructor(value: any, parentCell?: MockPropsCell, propKey?: string) {
+        super(value);
+        this.parentCell = parentCell;
+        this.propKey = propKey;
+      }
+
+      asSchema(_schema: any) {
+        return this;
+      }
+
+      resolveAsCell() {
+        // Read live value from parent (matches real Cell.key().resolveAsCell()
+        // which navigates the live data, not a stale cache)
+        const liveValue = this.parentCell
+          ? this.parentCell.value?.[this.propKey!]
+          : this.value;
+        if (
+          liveValue && typeof liveValue === "object" && "sink" in liveValue
+        ) {
+          return liveValue;
+        }
+        return this;
+      }
+
+      getAsNormalizedFullLink() {
+        return { space: "test-space", id: "test-id", path: [] };
+      }
+
+      getRawUntyped() {
+        return this.parentCell
+          ? this.parentCell.value?.[this.propKey!]
+          : this.value;
+      }
+    }
+
+    /**
+     * MockStream: a Cell-like object that isStream() returns true for.
+     */
+    class MockStream extends MockCell {
+      public sent: unknown[] = [];
+
+      constructor() {
+        super(undefined);
+      }
+
+      override isStream() {
+        return true;
+      }
+
+      withTx(tx?: unknown) {
+        this.usedTx = tx;
+        return this;
+      }
+
+      send(event: unknown) {
+        this.sent.push(event);
+      }
+
+      public usedTx: unknown;
+    }
+
+    const mountReconciler = (
+      reconciler: WorkerReconciler,
+      rootCell: MockCell,
+    ): () => void => reconciler.mount(rootCell as any);
+
+    // --- Test cases ---
+
+    await t.step("Cell<Props> renders primitive props", async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const propsCell = new MockPropsCell({
+        className: "foo",
+        title: "bar",
+      });
+
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: propsCell,
+        children: [],
+      });
+
+      const cancel = mountReconciler(reconciler, rootCell);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        const setPropOps = collector.getOpsOfType("set-prop");
+        const classOp = setPropOps.find((op: any) => op.key === "className");
+        const titleOp = setPropOps.find((op: any) => op.key === "title");
+
+        assertEquals(
+          classOp !== undefined,
+          true,
+          "Should emit set-prop for className",
+        );
+        assertEquals((classOp as any)?.value, "foo");
+        assertEquals(
+          titleOp !== undefined,
+          true,
+          "Should emit set-prop for title",
+        );
+        assertEquals((titleOp as any)?.value, "bar");
+      } finally {
+        cancel();
+      }
     });
-    const rootCell = new MockCell({
-      type: "vnode",
-      name: "ct-input",
-      props: propsCell,
-      children: [],
-    });
 
-    reconciler.mount(rootCell as any);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    const setBindingOps = collector.getOpsOfType("set-binding");
-    assertEquals(setBindingOps.length >= 1, true, "Should emit set-binding");
-    assertEquals((setBindingOps[0] as any).propName, "value");
-  });
-
-  await t.step(
-    "Cell<Props> same cell on update → no re-bind",
-    async () => {
+    await t.step("Cell<Props> primitive prop updates", async () => {
       const collector = createOpsCollector();
       const reconciler = new WorkerReconciler({
         onOps: collector.onOps,
       });
 
       const propsCell = new MockPropsCell({ className: "foo" });
-      const rootVNode: WorkerVNode = {
+      const rootCell = new MockCell({
         type: "vnode",
         name: "div",
-        props: propsCell as any,
-        children: [],
-      };
-      const rootCell = new MockCell(rootVNode);
-
-      reconciler.mount(rootCell as any);
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      collector.clear();
-
-      // Update root but keep same propsCell reference
-      rootCell.set({
-        type: "vnode",
-        name: "div",
-        props: propsCell as any,
+        props: propsCell,
         children: [],
       });
-      await new Promise((resolve) => setTimeout(resolve, 10));
 
-      // Same Cell<Props> → updatePropsInPlace should detect same cell and skip
-      const setPropOps = collector.getOpsOfType("set-prop");
-      assertEquals(
-        setPropOps.length,
-        0,
-        "Should emit NO set-prop ops when same Cell<Props> is re-used",
-      );
-    },
-  );
+      const cancel = mountReconciler(reconciler, rootCell);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        collector.clear();
 
-  await t.step(
-    "Cell<Props> props cleared then re-emitted re-registers handlers",
-    async () => {
+        // Update primitive prop
+        propsCell.set({ className: "bar" });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        const setPropOps = collector.getOpsOfType("set-prop");
+        const classOp = setPropOps.find((op: any) => op.key === "className");
+        assertEquals(
+          classOp !== undefined,
+          true,
+          "Should emit set-prop for updated className",
+        );
+        assertEquals((classOp as any)?.value, "bar");
+      } finally {
+        cancel();
+      }
+    });
+
+    await t.step("Cell<Props> prop addition", async () => {
       const collector = createOpsCollector();
       const reconciler = new WorkerReconciler({
         onOps: collector.onOps,
       });
 
-      const mockStream = new MockStream();
-      const propsCell = new MockPropsCell({
-        className: "foo",
-        onclick: mockStream,
-      });
+      const propsCell = new MockPropsCell({ className: "foo" });
       const rootCell = new MockCell({
         type: "vnode",
-        name: "button",
+        name: "div",
         props: propsCell,
-        children: ["Click"],
+        children: [],
       });
 
-      reconciler.mount(rootCell as any);
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      const cancel = mountReconciler(reconciler, rootCell);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        collector.clear();
 
-      const initialEvents = collector.getOpsOfType("set-event");
-      assertEquals(initialEvents.length >= 1, true, "Initial set-event");
-      const initialProps = collector.getOpsOfType("set-prop");
-      assertEquals(
-        initialProps.some((op: any) => op.key === "className"),
-        true,
-        "Initial className",
-      );
-      collector.clear();
+        // Add a new prop
+        propsCell.set({ className: "foo", title: "new" });
+        await new Promise((resolve) => setTimeout(resolve, 10));
 
-      // Clear all props
-      propsCell.set(null);
-      await new Promise((resolve) => setTimeout(resolve, 10));
+        const setPropOps = collector.getOpsOfType("set-prop");
+        const titleOp = setPropOps.find((op: any) => op.key === "title");
+        assertEquals(
+          titleOp !== undefined,
+          true,
+          "Should emit set-prop for new title",
+        );
+        assertEquals((titleOp as any)?.value, "new");
+      } finally {
+        cancel();
+      }
+    });
 
-      const removeOps = collector.getOps();
-      assertEquals(removeOps.length > 0, true, "Should emit removal ops");
-      collector.clear();
-
-      // Re-emit the same props — handlers must be re-registered
-      propsCell.set({ className: "foo", onclick: mockStream });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      const reEvents = collector.getOpsOfType("set-event");
-      assertEquals(
-        reEvents.length >= 1,
-        true,
-        "Must re-register event handler after props were cleared",
-      );
-
-      const reProps = collector.getOpsOfType("set-prop");
-      assertEquals(
-        reProps.some((op: any) => op.key === "className"),
-        true,
-        "Must re-set className after props were cleared",
-      );
-    },
-  );
-
-  await t.step(
-    "Cell<Props> unchanged primitive props are not re-emitted",
-    async () => {
+    await t.step("Cell<Props> prop removal", async () => {
       const collector = createOpsCollector();
       const reconciler = new WorkerReconciler({
         onOps: collector.onOps,
@@ -518,89 +320,948 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         children: [],
       });
 
-      reconciler.mount(rootCell as any);
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      collector.clear();
+      const cancel = mountReconciler(reconciler, rootCell);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        collector.clear();
 
-      // Re-emit identical values
-      propsCell.set({ className: "foo", title: "bar" });
-      await new Promise((resolve) => setTimeout(resolve, 10));
+        // Remove title prop
+        propsCell.set({ className: "foo" });
+        await new Promise((resolve) => setTimeout(resolve, 10));
 
-      const setPropOps = collector.getOpsOfType("set-prop");
-      assertEquals(
-        setPropOps.length,
-        0,
-        "Should emit NO set-prop ops when primitive values are unchanged",
-      );
-
-      collector.clear();
-
-      // Change only one value
-      propsCell.set({ className: "foo", title: "baz" });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      const updatedOps = collector.getOpsOfType("set-prop");
-      assertEquals(
-        updatedOps.length,
-        1,
-        "Should emit exactly one set-prop for the changed value",
-      );
-      assertEquals(
-        (updatedOps[0] as any).key,
-        "title",
-        "Changed prop should be title",
-      );
-      assertEquals((updatedOps[0] as any).value, "baz");
-    },
-  );
-
-  await t.step("Cell<Props> mixed prop types", async () => {
-    const collector = createOpsCollector();
-    const reconciler = new WorkerReconciler({
-      onOps: collector.onOps,
+        const removePropOps = collector.getOpsOfType("remove-prop");
+        const titleRemoved = removePropOps.some((op: any) =>
+          op.key === "title"
+        );
+        assertEquals(titleRemoved, true, "Should emit remove-prop for title");
+      } finally {
+        cancel();
+      }
     });
 
-    const mockStream = new MockStream();
-    const bindingCell = runtime.getCell(
-      signer.did(),
-      "binding-mixed-cell",
-      undefined,
-      dummyTx,
+    await t.step("Cell<Props> object prop (style)", async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const propsCell = new MockPropsCell({
+        style: { color: "red" },
+      });
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: propsCell,
+        children: [],
+      });
+
+      const cancel = mountReconciler(reconciler, rootCell);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        const setPropOps = collector.getOpsOfType("set-prop");
+        const styleOp = setPropOps.find((op: any) => op.key === "style");
+        assertEquals(
+          styleOp !== undefined,
+          true,
+          "Should emit set-prop for style (via per-prop sink)",
+        );
+        // Style objects get transformed to CSS strings by transformPropValue
+        // The per-prop sink delivers the full object; transformPropValue converts it
+      } finally {
+        cancel();
+      }
+    });
+
+    await t.step(
+      "Cell<Props> object prop transitioning to undefined is emitted",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const propsCell = new MockPropsCell({
+          style: { color: "blue" },
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "div",
+          props: propsCell,
+          children: [],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          collector.clear();
+
+          propsCell.set({ style: undefined });
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setPropOps = collector.getOpsOfType("set-prop");
+          assertEquals(
+            setPropOps.some((op: any) =>
+              op.key === "style" && op.value === undefined
+            ),
+            true,
+            "Should emit set-prop when an object-backed prop becomes undefined",
+          );
+        } finally {
+          cancel();
+        }
+      },
     );
-    bindingCell.set("test");
 
-    const propsCell = new MockPropsCell({
-      className: "container",
-      style: { color: "blue" },
-      onclick: mockStream,
-      $value: bindingCell,
+    await t.step("Cell<Props> array prop", async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const propsCell = new MockPropsCell({
+        items: [1, 2, 3],
+      });
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: propsCell,
+        children: [],
+      });
+
+      const cancel = mountReconciler(reconciler, rootCell);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        const setPropOps = collector.getOpsOfType("set-prop");
+        const itemsOp = setPropOps.find((op: any) => op.key === "items");
+        assertEquals(
+          itemsOp !== undefined,
+          true,
+          "Should emit set-prop for array items (via per-prop sink)",
+        );
+      } finally {
+        cancel();
+      }
     });
-    const rootCell = new MockCell({
-      type: "vnode",
-      name: "ct-input",
-      props: propsCell,
-      children: [],
+
+    await t.step("Cell<Props> event handler (stream)", async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const mockStream = new MockStream();
+      const propsCell = new MockPropsCell({
+        onclick: mockStream,
+      });
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "button",
+        props: propsCell,
+        children: ["Click"],
+      });
+
+      const cancel = mountReconciler(reconciler, rootCell);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        const setEventOps = collector.getOpsOfType("set-event");
+        assertEquals(setEventOps.length >= 1, true, "Should emit set-event");
+        assertEquals((setEventOps[0] as any).eventType, "click");
+      } finally {
+        cancel();
+      }
     });
 
-    reconciler.mount(rootCell as any);
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await t.step(
+      "Cell<Props> stream event dispatch avoids render transaction reuse",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
 
-    // Verify primitive prop
-    const setPropOps = collector.getOpsOfType("set-prop");
-    const classOp = setPropOps.find((op: any) => op.key === "className");
-    assertEquals(classOp !== undefined, true, "Should have className set-prop");
+        const mockStream = new MockStream();
+        const propsCell = new MockPropsCell({
+          onclick: mockStream,
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "button",
+          props: propsCell,
+          children: ["Click"],
+        });
 
-    // Verify style (object → per-prop sink)
-    const styleOp = setPropOps.find((op: any) => op.key === "style");
-    assertEquals(styleOp !== undefined, true, "Should have style set-prop");
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
 
-    // Verify event handler
-    const setEventOps = collector.getOpsOfType("set-event");
-    assertEquals(setEventOps.length >= 1, true, "Should have set-event");
+          const setEventOps = collector.getOpsOfType("set-event");
+          const eventOp = setEventOps[0] as Extract<
+            VDomOp,
+            { op: "set-event" }
+          >;
+          reconciler.dispatchEvent(
+            eventOp.handlerId,
+            { type: "click" },
+          );
 
-    // Verify binding
-    const setBindingOps = collector.getOpsOfType("set-binding");
-    assertEquals(setBindingOps.length >= 1, true, "Should have set-binding");
-    assertEquals((setBindingOps[0] as any).propName, "value");
-  });
+          assertEquals(mockStream.usedTx, undefined);
+          assertEquals(mockStream.sent, [{ type: "click" }]);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step("Cell<Props> binding prop", async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const bindingCell = runtime.getCell(
+        signer.did(),
+        "binding-test-cell",
+        undefined,
+        dummyTx,
+      );
+      bindingCell.set("hello");
+
+      const propsCell = new MockPropsCell({
+        $value: bindingCell,
+      });
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "cf-input",
+        props: propsCell,
+        children: [],
+      });
+
+      const cancel = mountReconciler(reconciler, rootCell);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        const setBindingOps = collector.getOpsOfType("set-binding");
+        assertEquals(
+          setBindingOps.length >= 1,
+          true,
+          "Should emit set-binding",
+        );
+        assertEquals((setBindingOps[0] as any).propName, "value");
+      } finally {
+        cancel();
+      }
+    });
+
+    await t.step(
+      "Cell<Props> binding prop preserves linked cell identity",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const bindingCell = runtime.getCell(
+          signer.did(),
+          "linked-binding-test-cell",
+          undefined,
+          dummyTx,
+        );
+        bindingCell.set("linked content");
+
+        const propsCell = new MockPropsCell({
+          $value: "linked content",
+        }, {
+          $value: bindingCell.getAsLink({ keepAsCell: true }),
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "cf-cfc-label",
+          props: propsCell,
+          children: [],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setBindingOps = collector.getOpsOfType("set-binding");
+          assertEquals(
+            setBindingOps.length >= 1,
+            true,
+            "Should emit set-binding",
+          );
+          const bindingOp = setBindingOps[0] as Extract<
+            VDomOp,
+            { op: "set-binding" }
+          >;
+          assertEquals(bindingOp.propName, "value");
+          assertEquals(
+            bindingOp.cellRef.id,
+            bindingCell.getAsNormalizedFullLink().id,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "Cell<Props> binding prop preserves CellResult proxy identity",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const bindingCell = runtime.getCell(
+          signer.did(),
+          "cell-result-binding-test-cell",
+          undefined,
+          dummyTx,
+        );
+        bindingCell.set({
+          senderId: "alice",
+          body: "linked content",
+        });
+
+        const cellResult = bindingCell.getAsQueryResult();
+        const propsCell = new MockPropsCell({
+          $value: cellResult,
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: propsCell,
+          children: [],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setBindingOps = collector.getOpsOfType("set-binding");
+          assertEquals(
+            setBindingOps.length >= 1,
+            true,
+            "Should emit set-binding",
+          );
+          const bindingOp = setBindingOps[0] as Extract<
+            VDomOp,
+            { op: "set-binding" }
+          >;
+          assertEquals(bindingOp.propName, "value");
+          assertEquals(
+            bindingOp.cellRef.id,
+            bindingCell.getAsNormalizedFullLink().id,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "renderer VDOM schema preserves linked binding prop identity",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const tx = runtime.edit();
+        const bindingSchema = {
+          type: "string",
+          ifc: {
+            integrity: [{
+              kind: "authored-by",
+              subject: "alice",
+            }],
+          },
+        } as const;
+        const bindingCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-binding-target",
+          bindingSchema,
+          tx,
+        );
+        bindingCell.set("renderer schema linked content");
+        const rootCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-binding-root",
+          undefined,
+          tx,
+        );
+        rootCell.setRawUntyped({
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            $value: bindingCell.getAsLink({
+              includeSchema: true,
+              keepAsCell: true,
+            }),
+            author: "alice",
+          },
+          children: [],
+        });
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const rootVDOMCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-binding-root",
+        ).asSchema(rendererVDOMSchema);
+        const cancel = reconciler.mount(rootVDOMCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setBindingOps = collector.getOpsOfType("set-binding");
+          assertEquals(
+            setBindingOps.length >= 1,
+            true,
+            "Should emit set-binding",
+          );
+          const bindingOp = setBindingOps[0] as Extract<
+            VDomOp,
+            { op: "set-binding" }
+          >;
+          assertEquals(bindingOp.propName, "value");
+          assertEquals(
+            bindingOp.cellRef.id,
+            bindingCell.getAsNormalizedFullLink().id,
+          );
+          assertEquals(
+            cfcLabelViewForCell(runtime.getCellFromLink(bindingOp.cellRef)),
+            {
+              version: 1,
+              entries: [{
+                path: [],
+                label: {
+                  integrity: [{
+                    kind: "authored-by",
+                    subject: "alice",
+                  }],
+                },
+              }],
+            },
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "renderer VDOM schema preserves linked child render nodes",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const tx = runtime.edit();
+        const linkedChild = runtime.getCell(
+          signer.did(),
+          "renderer-schema-linked-child",
+          undefined,
+          tx,
+        );
+        linkedChild.setRawUntyped({
+          type: "vnode",
+          name: "cf-card",
+          props: { id: "linked-child-card" },
+          children: ["Linked child"],
+        });
+        const rootCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-linked-child-root",
+          undefined,
+          tx,
+        );
+        rootCell.setRawUntyped({
+          type: "vnode",
+          name: "cf-vstack",
+          props: {},
+          children: [linkedChild.getAsLink({ keepAsCell: true })],
+        });
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const rootVDOMCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-linked-child-root",
+        ).asSchema(rendererVDOMSchema);
+        const cancel = reconciler.mount(rootVDOMCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const createdTags = collector.getOpsOfType("create-element").map(
+            (op) => (op as Extract<VDomOp, { op: "create-element" }>).tagName,
+          );
+          assertEquals(createdTags.includes("cf-vstack"), true);
+          assertEquals(createdTags.includes("cf-card"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "renderer VDOM schema preserves legacy alias child render nodes",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const tx = runtime.edit();
+        const linkedChild = runtime.getCell(
+          signer.did(),
+          "renderer-schema-legacy-alias-child",
+          undefined,
+          tx,
+        );
+        linkedChild.setRawUntyped({
+          type: "vnode",
+          name: "cf-card",
+          props: { id: "legacy-alias-child-card" },
+          children: ["Legacy alias child"],
+        });
+        const rootCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-legacy-alias-child-root",
+          undefined,
+          tx,
+        );
+        rootCell.setRawUntyped({
+          type: "vnode",
+          name: "cf-vstack",
+          props: {},
+          children: [{
+            $alias: {
+              cell: {
+                "/": linkedChild.getAsNormalizedFullLink().id.replace(
+                  /^of:/,
+                  "",
+                ),
+              },
+              path: [],
+            },
+          }],
+        });
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const rootVDOMCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-legacy-alias-child-root",
+        ).asSchema(rendererVDOMSchema);
+        const cancel = reconciler.mount(rootVDOMCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const createdTags = collector.getOpsOfType("create-element").map(
+            (op) => (op as Extract<VDomOp, { op: "create-element" }>).tagName,
+          );
+          assertEquals(createdTags.includes("cf-vstack"), true);
+          assertEquals(createdTags.includes("cf-card"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "renderer VDOM schema preserves nested render node children",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const tx = runtime.edit();
+        const linkedChild = runtime.getCell(
+          signer.did(),
+          "renderer-schema-nested-linked-child",
+          undefined,
+          tx,
+        );
+        linkedChild.setRawUntyped({
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: { author: "alice" },
+          children: ["Nested linked child"],
+        });
+        const rootCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-nested-linked-child-root",
+          undefined,
+          tx,
+        );
+        rootCell.setRawUntyped({
+          type: "vnode",
+          name: "cf-screen",
+          props: { title: "Nested children" },
+          children: [{
+            type: "vnode",
+            name: "cf-vstack",
+            props: {},
+            children: [
+              {
+                type: "vnode",
+                name: "cf-card",
+                props: { id: "nested-inline-card" },
+                children: ["Nested inline child"],
+              },
+              {
+                $alias: {
+                  cell: {
+                    "/": linkedChild.getAsNormalizedFullLink().id.replace(
+                      /^of:/,
+                      "",
+                    ),
+                  },
+                  path: [],
+                },
+              },
+            ],
+          }],
+        });
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const rootVDOMCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-nested-linked-child-root",
+        ).asSchema(rendererVDOMSchema);
+        const cancel = reconciler.mount(rootVDOMCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const createdTags = collector.getOpsOfType("create-element").map(
+            (op) => (op as Extract<VDomOp, { op: "create-element" }>).tagName,
+          );
+          assertEquals(createdTags.includes("cf-screen"), true);
+          assertEquals(createdTags.includes("cf-vstack"), true);
+          assertEquals(createdTags.includes("cf-card"), true);
+          assertEquals(createdTags.includes("cf-cfc-authorship"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "Cell<Props> same cell on update → no re-bind",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const propsCell = new MockPropsCell({ className: "foo" });
+        const rootVNode: WorkerVNode = {
+          type: "vnode",
+          name: "div",
+          props: propsCell as any,
+          children: [],
+        };
+        const rootCell = new MockCell(rootVNode);
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          collector.clear();
+
+          // Update root but keep same propsCell reference
+          rootCell.set({
+            type: "vnode",
+            name: "div",
+            props: propsCell as any,
+            children: [],
+          });
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          // Same Cell<Props> → updatePropsInPlace should detect same cell and skip
+          const setPropOps = collector.getOpsOfType("set-prop");
+          assertEquals(
+            setPropOps.length,
+            0,
+            "Should emit NO set-prop ops when same Cell<Props> is re-used",
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "Cell<Props> props cleared then re-emitted re-registers handlers",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const mockStream = new MockStream();
+        const propsCell = new MockPropsCell({
+          className: "foo",
+          onclick: mockStream,
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "button",
+          props: propsCell,
+          children: ["Click"],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const initialEvents = collector.getOpsOfType("set-event");
+          assertEquals(initialEvents.length >= 1, true, "Initial set-event");
+          const initialProps = collector.getOpsOfType("set-prop");
+          assertEquals(
+            initialProps.some((op: any) => op.key === "className"),
+            true,
+            "Initial className",
+          );
+          collector.clear();
+
+          // Clear all props
+          propsCell.set(null);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const removeOps = collector.getOps();
+          assertEquals(removeOps.length > 0, true, "Should emit removal ops");
+          collector.clear();
+
+          // Re-emit the same props — handlers must be re-registered
+          propsCell.set({ className: "foo", onclick: mockStream });
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const reEvents = collector.getOpsOfType("set-event");
+          assertEquals(
+            reEvents.length >= 1,
+            true,
+            "Must re-register event handler after props were cleared",
+          );
+
+          const reProps = collector.getOpsOfType("set-prop");
+          assertEquals(
+            reProps.some((op: any) => op.key === "className"),
+            true,
+            "Must re-set className after props were cleared",
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "Cell<Props> unchanged primitive props are not re-emitted",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const propsCell = new MockPropsCell({
+          className: "foo",
+          title: "bar",
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "div",
+          props: propsCell,
+          children: [],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          collector.clear();
+
+          // Re-emit identical values
+          propsCell.set({ className: "foo", title: "bar" });
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setPropOps = collector.getOpsOfType("set-prop");
+          assertEquals(
+            setPropOps.length,
+            0,
+            "Should emit NO set-prop ops when primitive values are unchanged",
+          );
+
+          collector.clear();
+
+          // Change only one value
+          propsCell.set({ className: "foo", title: "baz" });
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const updatedOps = collector.getOpsOfType("set-prop");
+          assertEquals(
+            updatedOps.length,
+            1,
+            "Should emit exactly one set-prop for the changed value",
+          );
+          assertEquals(
+            (updatedOps[0] as any).key,
+            "title",
+            "Changed prop should be title",
+          );
+          assertEquals((updatedOps[0] as any).value, "baz");
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step("Cell<Props> mixed prop types", async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const mockStream = new MockStream();
+      const bindingCell = runtime.getCell(
+        signer.did(),
+        "binding-mixed-cell",
+        undefined,
+        dummyTx,
+      );
+      bindingCell.set("test");
+
+      const propsCell = new MockPropsCell({
+        className: "container",
+        style: { color: "blue" },
+        onclick: mockStream,
+        $value: bindingCell,
+      });
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "cf-input",
+        props: propsCell,
+        children: [],
+      });
+
+      const cancel = mountReconciler(reconciler, rootCell);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        // Verify primitive prop
+        const setPropOps = collector.getOpsOfType("set-prop");
+        const classOp = setPropOps.find((op: any) => op.key === "className");
+        assertEquals(
+          classOp !== undefined,
+          true,
+          "Should have className set-prop",
+        );
+
+        // Verify style (object → per-prop sink)
+        const styleOp = setPropOps.find((op: any) => op.key === "style");
+        assertEquals(styleOp !== undefined, true, "Should have style set-prop");
+
+        // Verify event handler
+        const setEventOps = collector.getOpsOfType("set-event");
+        assertEquals(setEventOps.length >= 1, true, "Should have set-event");
+
+        // Verify binding
+        const setBindingOps = collector.getOpsOfType("set-binding");
+        assertEquals(
+          setBindingOps.length >= 1,
+          true,
+          "Should have set-binding",
+        );
+        assertEquals((setBindingOps[0] as any).propName, "value");
+      } finally {
+        cancel();
+      }
+    });
+  } finally {
+    await runtime.dispose();
+  }
 });
+
+Deno.test(
+  "worker reconciler - static Cell event prop sends to resolved stream target",
+  async () => {
+    const signer = await Identity.fromPassphrase("test static cell event prop");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      storageManager,
+      apiUrl: new URL("http://localhost"),
+      cfcEnforcementMode: "observe",
+    });
+    let tx = runtime.edit();
+
+    try {
+      const streamCell = runtime.getCell<unknown>(
+        signer.did(),
+        "static-event-stream",
+        undefined,
+        tx,
+      );
+      streamCell.setRaw({ $stream: true });
+
+      const eventTargetCell = runtime.getCell<unknown>(
+        signer.did(),
+        "static-event-target",
+        undefined,
+        tx,
+      );
+      eventTargetCell.set(streamCell as never);
+
+      await tx.commit();
+      tx = runtime.edit();
+
+      let eventSeen: unknown;
+      runtime.scheduler.addEventHandler(
+        (_handlerTx, event) => {
+          eventSeen = event;
+        },
+        streamCell.getAsNormalizedFullLink(),
+      );
+
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+      const vnode: WorkerVNode = {
+        type: "vnode",
+        name: "button",
+        props: {
+          onClick: eventTargetCell,
+        },
+        children: ["Send"],
+      };
+
+      const cancel = reconciler.mount(vnode);
+      try {
+        await runtime.idle();
+
+        const setEventOp = collector.getOpsOfType("set-event")[0] as
+          | { handlerId: number }
+          | undefined;
+        assertEquals(setEventOp !== undefined, true);
+
+        reconciler.dispatchEvent(
+          setEventOp!.handlerId,
+          { type: "click" },
+        );
+
+        await runtime.idle();
+        assertEquals(eventSeen, { type: "click" });
+      } finally {
+        cancel();
+      }
+    } finally {
+      tx.abort("test cleanup");
+      await runtime.dispose();
+    }
+  },
+);

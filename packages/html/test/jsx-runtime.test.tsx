@@ -1,7 +1,7 @@
 /**
  * Tests for the JSX automatic runtime
  *
- * These tests verify that @commontools/html can be used as a JSX runtime
+ * These tests verify that @commonfabric/html can be used as a JSX runtime
  * compatible with TypeScript's "jsx": "react-jsx" configuration.
  */
 
@@ -9,11 +9,12 @@ import { describe, it } from "@std/testing/bdd";
 import * as assert from "./assert.ts";
 
 // Note: To properly test the automatic JSX runtime, this file should be
-// compiled with jsxImportSource set to "@commontools/html"
+// compiled with jsxImportSource set to "@commonfabric/html"
 // However, for this test to work with the current deno.jsonc configuration,
 // we'll import the functions directly and verify they work correctly.
 
 import { Fragment, jsx, jsxs } from "../src/jsx-runtime.ts";
+import { UiAction, UiDisclosure, UiPromptSlot } from "../src/h.ts";
 
 describe("JSX automatic runtime", () => {
   it("jsx() creates a simple element", () => {
@@ -118,7 +119,7 @@ describe("JSX automatic runtime", () => {
     });
   });
 
-  it("Fragment creates a ct-fragment element", () => {
+  it("Fragment creates a cf-fragment element", () => {
     const fragment = Fragment({
       children: [
         jsx("p", { children: "Paragraph 1" }),
@@ -128,7 +129,7 @@ describe("JSX automatic runtime", () => {
 
     assert.matchObject(fragment, {
       type: "vnode",
-      name: "ct-fragment",
+      name: "cf-fragment",
       children: [
         {
           type: "vnode",
@@ -192,5 +193,50 @@ describe("JSX automatic runtime", () => {
         },
       ],
     });
+  });
+
+  it("UI helper functions emit the same intrinsic runtime node shape as transformed JSX", () => {
+    assert.matchObject(
+      UiAction({ action: "SubmitDirectCommand", children: "Go" }),
+      {
+        type: "vnode",
+        name: "ct-button",
+        props: {
+          "data-ui-action": "SubmitDirectCommand",
+        },
+        children: ["Go"],
+      },
+    );
+
+    assert.matchObject(
+      UiPromptSlot({
+        surface: "PromptPane",
+        role: "assistant",
+      }),
+      {
+        type: "vnode",
+        name: "ct-textarea",
+        props: {
+          "data-ui-surface": "PromptPane",
+          "data-ui-role": "assistant",
+        },
+        children: [],
+      },
+    );
+
+    assert.matchObject(
+      UiDisclosure({
+        kind: "warning",
+        children: "Heads up",
+      }),
+      {
+        type: "vnode",
+        name: "ct-card",
+        props: {
+          "data-ui-disclosure-kind": "warning",
+        },
+        children: ["Heads up"],
+      },
+    );
   });
 });

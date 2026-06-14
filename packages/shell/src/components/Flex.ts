@@ -30,10 +30,10 @@ export class XFlexElement extends LitElement {
   `;
 
   @property()
-  center = false;
+  accessor center = false;
 
   @property()
-  direction: FlexDirection = "horizontal";
+  accessor direction: FlexDirection = "horizontal";
 
   override render() {
     return html`
@@ -45,7 +45,7 @@ export class XFlexElement extends LitElement {
 
 export class HBoxElement extends LitElement {
   @property()
-  center = false;
+  accessor center = false;
 
   direction = "horizontal";
 

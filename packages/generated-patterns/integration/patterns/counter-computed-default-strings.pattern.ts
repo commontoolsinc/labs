@@ -1,14 +1,12 @@
-/// <cts-enable />
 import {
   Cell,
   cell,
   computed,
   Default,
-  derive,
   handler,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface ComputedDefaultStringsArgs {
   value: Default<number, 0>;
@@ -44,10 +42,7 @@ export const counterWithComputedDefaultStrings = pattern<
 >(
   ({ value, prefix }) => {
     const override = cell<string | null>(null);
-    const normalizedValue = derive(
-      value,
-      (count) => (typeof count === "number" ? count : 0),
-    );
+    const normalizedValue = typeof value === "number" ? value : 0;
 
     const fallbackLabel = computed(() => {
       const prefixValue = typeof prefix === "string" && prefix.length > 0
