@@ -261,12 +261,18 @@ const computeAvailability = (
   const loansByItem = new Map<string, LoanRecord[]>();
   for (const loan of loans) {
     const bucket = loansByItem.get(loan.itemId) ?? [];
+    // FIXME(@ubik2) - workaround for transformer removing unused memberId
+    // from bucket contents, which makes the result invalid.
+    const _memberId = loan.memberId;
     bucket.push(loan);
     loansByItem.set(loan.itemId, bucket);
   }
   const holdsByItem = new Map<string, HoldRecord[]>();
   for (const hold of holds) {
     const bucket = holdsByItem.get(hold.itemId) ?? [];
+    // FIXME(@ubik2) - workaround for transformer removing unused memberId
+    // from bucket contents, which makes the result invalid.
+    const _memberId = hold.memberId;
     bucket.push(hold);
     holdsByItem.set(hold.itemId, bucket);
   }

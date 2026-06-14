@@ -17,15 +17,10 @@ export function setValueAtPath(
 
   if (deepEqual(parent[path[path.length - 1]], value)) return false;
 
-  if (value === undefined) {
-    delete parent[path[path.length - 1]];
-    // Truncate array from the end for undefined values
-    if (Array.isArray(parent)) {
-      while (parent.length > 0 && parent[parent.length - 1] === undefined) {
-        parent.pop();
-      }
-    }
-  } else parent[path[path.length - 1]] = value;
+  // We just set the values here. If you need to delete elements from an
+  // array or object, set it to another array or object without those elements.
+  // We can set value to undefined here without issue
+  parent[path[path.length - 1]] = value;
 
   return true;
 }
@@ -47,7 +42,7 @@ export function hasValueAtPath(obj: any, path: PropertyKey[]): boolean {
     }
     current = current[key];
   }
-  return current !== undefined;
+  return true;
 }
 
 export function arrayEqual(

@@ -466,9 +466,25 @@ export interface IResetNotification {
 export interface IMergedChanges extends Iterable<IMemoryChange> {
 }
 
+/**
+ * Options accepted by transaction write operations.
+ */
+export interface IWriteOptions {
+  /**
+   * When true, the write removes the slot at the address path — deleting an
+   * object key or punching an array hole — instead of storing a value.
+   * `value` must be `undefined`. Without this flag, writing `undefined`
+   * stores `undefined` as a real value: present-but-undefined is distinct
+   * from absent. A root-path delete retracts the document.
+   */
+  delete?: boolean;
+}
+
 export interface ITransactionWriteRequest {
   address: IMemorySpaceAddress;
   value: FabricValue;
+  /** See {@link IWriteOptions.delete}. */
+  delete?: boolean;
 }
 
 export interface IMemoryChange {
@@ -685,11 +701,13 @@ export interface IStorageTransaction {
    *
    * @param address - Memory address to write to.
    * @param value - Value to write.
+   * @param options - Optional write options (e.g. explicit delete intent).
    * @returns Result containing the written value or an error.
    */
   write(
     address: IMemorySpaceAddress,
     value?: FabricValue,
+    options?: IWriteOptions,
   ): Result<IAttestation, WriterError | WriteError>;
 
   /**
@@ -950,10 +968,12 @@ export interface IExtendedStorageTransaction
    *
    * @param address - Memory address to write to.
    * @param value - Value to write.
+   * @param options - Optional write options (e.g. explicit delete intent).
    */
   writeOrThrow(
     address: IMemorySpaceAddress,
     value: FabricValue,
+    options?: IWriteOptions,
   ): void;
 
   /**
@@ -970,10 +990,12 @@ export interface IExtendedStorageTransaction
    *
    * @param address - Memory address to write to.
    * @param value - Value to write.
+   * @param options - Optional write options (e.g. explicit delete intent).
    */
   writeValueOrThrow(
     address: NormalizedFullLink,
     value: FabricValue,
+    options?: IWriteOptions,
   ): void;
 
   /**
@@ -981,7 +1003,9 @@ export interface IExtendedStorageTransaction
    * `["value", ...path]` helper semantics on top of `writeBatch`.
    */
   writeValuesOrThrow?(
-    writes: Iterable<{ address: NormalizedFullLink; value: FabricValue }>,
+    writes: Iterable<
+      { address: NormalizedFullLink; value: FabricValue; delete?: boolean }
+    >,
   ): void;
 
   /**
@@ -1066,6 +1090,7 @@ export interface ITransactionWriter extends ITransactionReader {
   write(
     address: IMemoryAddress,
     value?: FabricValue,
+    options?: IWriteOptions,
   ): Result<IAttestation, WriteError>;
 }
 

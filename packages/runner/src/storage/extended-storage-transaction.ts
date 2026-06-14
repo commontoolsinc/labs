@@ -19,6 +19,7 @@ import type {
   IReadOptions,
   IStorageTransaction,
   ITransactionJournal,
+  IWriteOptions,
   MemorySpace,
   Metadata,
   ReadError,
@@ -713,6 +714,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   write(
     address: IMemorySpaceAddress,
     value: FabricValue,
+    options?: IWriteOptions,
   ): Result<IAttestation, WriteError | WriterError> {
     this.assertWritable("write()");
     this.noteSystemWrite(address);
@@ -721,12 +723,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.invalidateCfc("write-after-prepare");
     }
     this.invalidateReadResultCache();
-    return this.tx.write(address, value);
+    return this.tx.write(address, value, options);
   }
 
   writeOrThrow(
     address: IMemorySpaceAddress,
     value: FabricValue,
+    options?: IWriteOptions,
   ): void {
     this.assertWritable("writeOrThrow()");
     this.noteSystemWrite(address);
@@ -735,11 +738,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.invalidateCfc("write-after-prepare");
     }
     this.invalidateReadResultCache();
-    const writeResult = this.tx.write(address, value);
+    const writeResult = this.tx.write(address, value, options);
     if (
       writeResult.error &&
       (writeResult.error.name === "NotFoundError")
     ) {
+      if (options?.delete) {
+        // Deleting a slot whose path doesn't exist is a no-op; don't
+        // materialize intermediates just to remove nothing.
+        return;
+      }
       // Create parent entries if needed.
       // errorPath includes the missing key (consistent with read errors).
       // lastExistingPath is one level up - the actual last existing parent.
@@ -806,13 +814,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   writeValueOrThrow(
     address: NormalizedFullLink,
     value: FabricValue,
+    options?: IWriteOptions,
   ): void {
     this.assertWritable("writeValueOrThrow()");
-    this.writeOrThrow(toMemorySpaceAddress(address), value);
+    this.writeOrThrow(toMemorySpaceAddress(address), value, options);
   }
 
   writeValuesOrThrow(
-    writes: Iterable<{ address: NormalizedFullLink; value: FabricValue }>,
+    writes: Iterable<
+      { address: NormalizedFullLink; value: FabricValue; delete?: boolean }
+    >,
   ): void {
     this.assertWritable("writeValuesOrThrow()");
     this.invalidateReadResultCache();
@@ -833,7 +844,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             const address = toMemorySpaceAddress(write.address);
             noteSystemWrite(address);
             noteWriteIdentity();
-            yield { address, value: write.value };
+            yield { address, value: write.value, delete: write.delete };
           }
         })(),
       );
@@ -844,7 +855,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
 
     for (const write of writes) {
-      this.writeValueOrThrow(write.address, write.value);
+      this.writeValueOrThrow(
+        write.address,
+        write.value,
+        write.delete ? { delete: true } : undefined,
+      );
     }
   }
 
@@ -1282,32 +1297,41 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   write(
     address: IMemorySpaceAddress,
     value: FabricValue,
+    options?: IWriteOptions,
   ): Result<IAttestation, WriteError | WriterError> {
-    return this.wrapped.write(address, value);
+    return this.wrapped.write(address, value, options);
   }
 
   writeOrThrow(
     address: IMemorySpaceAddress,
     value: FabricValue,
+    options?: IWriteOptions,
   ): void {
-    return this.wrapped.writeOrThrow(address, value);
+    return this.wrapped.writeOrThrow(address, value, options);
   }
 
   writeValueOrThrow(
     address: NormalizedFullLink,
     value: FabricValue,
+    options?: IWriteOptions,
   ): void {
-    return this.wrapped.writeValueOrThrow(address, value);
+    return this.wrapped.writeValueOrThrow(address, value, options);
   }
 
   writeValuesOrThrow(
-    writes: Iterable<{ address: NormalizedFullLink; value: FabricValue }>,
+    writes: Iterable<
+      { address: NormalizedFullLink; value: FabricValue; delete?: boolean }
+    >,
   ): void {
     if (this.wrapped.writeValuesOrThrow) {
       return this.wrapped.writeValuesOrThrow(writes);
     }
     for (const write of writes) {
-      this.wrapped.writeValueOrThrow(write.address, write.value);
+      this.wrapped.writeValueOrThrow(
+        write.address,
+        write.value,
+        write.delete ? { delete: true } : undefined,
+      );
     }
   }
 

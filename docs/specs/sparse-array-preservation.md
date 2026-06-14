@@ -126,10 +126,14 @@ so holes survive.
 
 The leaf write itself is one of:
 
-- `parent[slot] = value` for array indices -- the rest of the array
-  (including holes elsewhere) is untouched, so sparseness is preserved.
-- `delete parent[slot]` for array index deletes -- creates a true hole
-  (`i in arr` returns `false` afterwards).
+- `parent[slot] = value` for array index value writes -- the rest of the
+  array (including holes elsewhere) is untouched, so sparseness is
+  preserved. Writing `undefined` stores `undefined` at the slot
+  (present-but-undefined, `i in arr` returns `true`); it does NOT create
+  a hole.
+- `delete parent[slot]` for explicit array index deletes (requested via
+  the write's `delete` option) -- creates a true hole (`i in arr`
+  returns `false` afterwards).
 - `parent.length = effective` for `.length` writes (see
   `applyArrayLengthWrite`) -- JS `length=` truncates the tail, leaving
   holes within the new bound intact.
@@ -176,9 +180,12 @@ for each index:
 | `i in new` | `i in current` | Action |
 |-----------|----------------|--------|
 | No | No | Skip — hole unchanged |
-| No | Yes | Emit delete (attestation interprets `value: undefined` as "create hole") |
-| Yes | No | Diff as new value |
+| No | Yes | Emit explicit delete (`delete: true` on the change; the write layer creates a hole) |
+| Yes | No | Diff as new value (an explicit `undefined` emits a value write, making the slot present-but-undefined) |
 | Yes | Yes | Diff normally |
+
+Note: a change whose `value` is `undefined` WITHOUT the `delete` flag is a
+value write that stores `undefined`; only `delete: true` creates a hole.
 
 The `hasPath` function uses `index in value` (not `value[index] !== undefined`)
 to correctly report that a path through a hole does not exist.
