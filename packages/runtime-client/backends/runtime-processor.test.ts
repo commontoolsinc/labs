@@ -1566,8 +1566,19 @@ describe("RuntimeProcessor CFC commit preparation", () => {
         expect(value).toBe("new value");
       },
     };
+    let sent = false;
+    cellWithTx.send = (value: unknown) => {
+      expect(value).toBe("new value");
+      sent = true;
+    };
     return {
       processor: {
+        isDisposed: () => false,
+        cellSetLatest: new Map<
+          string,
+          { seq: number; value: unknown; retriesLeft: number }
+        >(),
+        pendingCellWrites: new Set<Promise<unknown>>(),
         runtime: {
           edit: () => tx,
           prepareTxForCommit: (candidate: unknown) => {
@@ -1585,27 +1596,35 @@ describe("RuntimeProcessor CFC commit preparation", () => {
           },
         },
       } as unknown as RuntimeProcessor,
+      wasSent: () => sent,
     };
+  };
+
+  const flushTicks = async (n = 10) => {
+    for (let i = 0; i < n; i++) await Promise.resolve();
   };
 
   it("prepares cell set transactions before committing", async () => {
     const { processor } = createProcessor();
 
-    await RuntimeProcessor.prototype.handleCellSet.call(processor, {
+    RuntimeProcessor.prototype.handleCellSet.call(processor, {
       type: RequestType.CellSet,
       cell: ref,
       value: "new value",
     });
+    await flushTicks();
   });
 
   it("prepares cell send transactions before committing", async () => {
-    const { processor } = createProcessor();
+    const { processor, wasSent } = createProcessor();
 
-    await RuntimeProcessor.prototype.handleCellSend.call(processor, {
+    RuntimeProcessor.prototype.handleCellSend.call(processor, {
       type: RequestType.CellSend,
       cell: ref,
       event: "new value",
     });
+    expect(wasSent()).toBe(true);
+    await flushTicks();
   });
 });
 
@@ -1971,5 +1990,146 @@ describe("RuntimeProcessor vdom mount render policy", () => {
   it("keeps mounts unbounded when no ceiling is configured", async () => {
     const policy = await mountAndGetRootPolicy(undefined);
     expect(policy.maxConfidentiality).toBeUndefined();
+  });
+});
+
+describe("RuntimeProcessor cell set IPC", () => {
+  const cellRef: CellRef = {
+    id: "of:cell-set-retry" as CellRef["id"],
+    space: "did:key:test-space" as CellRef["space"],
+    scope: "space",
+    path: ["nameDraft"],
+  };
+
+  type Deferred = {
+    resolve: (r: { error?: { message: string } }) => void;
+    promise: Promise<{ error?: { message: string } }>;
+  };
+
+  function makeProcessor() {
+    const setValues: unknown[] = [];
+    const commits: Deferred[] = [];
+    const processor = {
+      isDisposed: () => false,
+      cellSetLatest: new Map<
+        string,
+        { seq: number; value: unknown; retriesLeft: number }
+      >(),
+      pendingCellWrites: new Set<Promise<unknown>>(),
+      // deno-lint-ignore no-explicit-any
+      awaitPendingCellWrites: (RuntimeProcessor.prototype as any)
+        .awaitPendingCellWrites,
+      runtime: {
+        edit: () => ({
+          commit: () => {
+            let resolve!: Deferred["resolve"];
+            const promise = new Promise<{ error?: { message: string } }>(
+              (res) => {
+                resolve = res;
+              },
+            );
+            commits.push({ resolve, promise });
+            return promise;
+          },
+        }),
+        getCellFromLink: () => ({
+          withTx: () => ({
+            set: (value: unknown) => {
+              setValues.push(value);
+            },
+          }),
+        }),
+        prepareTxForCommit: () => {},
+      },
+    } as unknown as RuntimeProcessor;
+    const set = (value: string) =>
+      RuntimeProcessor.prototype.handleCellSet.call(processor, {
+        type: RequestType.CellSet,
+        cell: cellRef,
+        value,
+      });
+    return { processor, setValues, commits, set };
+  }
+
+  const flushAsync = async () => {
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+  };
+  const REJECTED = { error: { message: "stale confirmed read: of:test" } };
+
+  it("reapplies the latest value until a rejected commit lands", async () => {
+    const { setValues, commits, set } = makeProcessor();
+    set("Bob");
+    commits[0].resolve(REJECTED);
+    await flushAsync();
+    commits[1].resolve(REJECTED);
+    await flushAsync();
+    commits[2].resolve({});
+    await flushAsync();
+    // Initial apply + two reapplies, each on a fresh tx.
+    expect(setValues).toEqual(["Bob", "Bob", "Bob"]);
+    expect(commits.length).toBe(3);
+  });
+
+  it("gives up after exhausting the bounded per-cell budget", async () => {
+    const { setValues, commits, set } = makeProcessor();
+    set("Bob");
+    for (let i = 0; i < 10 && i < commits.length; i++) {
+      commits[i].resolve(REJECTED);
+      await flushAsync();
+    }
+    // 1 initial + CELL_SET_COMMIT_RETRIES reapplies.
+    expect(setValues.length).toBe(6);
+  });
+
+  it("repairs a rollback that erased a newer confirmed write (out-of-order rejection)", async () => {
+    // The observed CI wedge: input emits two writes; the SECOND confirms
+    // first; the FIRST is then rejected and its rollback locally erases the
+    // confirmed second value. The repair must reapply the latest value.
+    const { setValues, commits, set } = makeProcessor();
+    set("B"); // older keystroke
+    set("Bob"); // final value
+    commits[1].resolve({}); // newer write confirms first
+    await flushAsync();
+    commits[0].resolve(REJECTED); // older write rejected afterwards
+    await flushAsync();
+    // The rejection triggers a reapply of the LATEST value ("Bob"), never
+    // the rejected old one.
+    expect(setValues).toEqual(["B", "Bob", "Bob"]);
+    commits[2].resolve({});
+    await flushAsync();
+    expect(commits.length).toBe(3);
+  });
+
+  it("a newer set refreshes the retry budget and wins over in-flight retries", async () => {
+    const { setValues, commits, set } = makeProcessor();
+    set("old");
+    commits[0].resolve(REJECTED);
+    await flushAsync();
+    // The reapply of "old" is in flight (commits[1]); a newer set arrives.
+    set("new");
+    commits[1].resolve(REJECTED); // the old reapply also fails
+    await flushAsync();
+    // The next reapply must write "new", not "old".
+    expect(setValues).toEqual(["old", "old", "new", "new"]);
+  });
+
+  it("holds the client write barrier until rejected writes finish repairing", async () => {
+    const { processor, setValues, commits, set } = makeProcessor();
+    set("Bob");
+    let released = false;
+    // deno-lint-ignore no-explicit-any
+    const barrier = (RuntimeProcessor.prototype as any).awaitPendingCellWrites
+      .call(processor)
+      .then(() => {
+        released = true;
+      });
+    commits[0].resolve(REJECTED);
+    await flushAsync();
+    expect(released).toBe(false); // reapply still in flight
+    commits[1].resolve({});
+    await flushAsync();
+    await barrier;
+    expect(released).toBe(true);
+    expect(setValues).toEqual(["Bob", "Bob"]);
   });
 });
