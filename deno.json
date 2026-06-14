@@ -44,7 +44,7 @@
     "test-all": "echo \"Use 'deno task test' instead.\" && exit 1",
     "build-binaries": "./tasks/build-binaries.ts",
     "install-hooks": "./scripts/install-git-hooks.sh",
-    "initialize-db": "./tasks/initialize-db.sh",
+    "initialize-db": "deno run --allow-env --allow-read --allow-write --allow-ffi --allow-net=github.com,release-assets.githubusercontent.com,jsr.io packages/memory/scripts/initialize-db.ts",
     "integration": "./tasks/integration.ts",
     "profile": "./scripts/restart-local-dev.sh --inspect-brk",
     "cf-profile": "ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && deno run -A \"$ROOT/scripts/cf-profile.ts\"",
