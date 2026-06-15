@@ -154,31 +154,15 @@ function internSet(
 }
 
 /**
- * Memo-key fragment for a schema: `hashSchema()` for objects, small
- * constants for value-like schemas. The memo gates only admit interned or
- * deep-frozen schemas, whose structural hash is computed once and
- * WeakMap-cached by value-hash — so this is an O(1) lookup after first
- * touch, with no separate token bookkeeping. Structural keying also lets
- * distinct-but-equal frozen schemas share memo entries, which identity
- * tokens could not.
- */
-function schemaKeyPart(schema: JSONSchema | undefined): string {
-  if (schema === undefined) return "u";
-  if (typeof schema === "boolean") return schema ? "t" : "f";
-  return hashSchema(schema);
-}
-
-/**
- * True when a schema input can safely feed an identity-keyed memo:
- * value-like (`undefined`/boolean), interned, or deep-frozen. Frozen
+ * True when a schema input can safely feed an identity-keyed memo: interned
+ * (which covers `undefined` and boolean schemas) or deep-frozen. Frozen
  * suffices — the identity cannot go stale through later mutation. The
  * distinction matters on the server: doc values arrive deep-frozen from the
  * wire-decode boundary, so their embedded link schemas are frozen but never
  * interned, and an interned-only gate would bypass every seam memo there.
  */
 function isMemoizableSchemaInput(schema: JSONSchema | undefined): boolean {
-  return schema === undefined || typeof schema === "boolean" ||
-    isInternedSchema(schema) || isDeepFrozen(schema);
+  return isInternedSchema(schema) || isDeepFrozen(schema);
 }
 
 /**
@@ -206,7 +190,7 @@ function pathKey(path: readonly string[]): string {
  * (interning only substitutes the canonical instance of an equal schema).
  *
  * Keyed on content (injective `pathKey()` encodings) plus cached schema
- * hashes (`schemaKeyPart()`), in one module-level capped `Map`: callers
+ * hashes (`hashSchema()`), in one module-level capped `Map`: callers
  * like `traversePointerWithSchema` mint a fresh selector object per call
  * (only its `schema` is identity-stable), so a cache rooted on selector
  * identity would never hit, and every miss would mint yet another distinct
@@ -231,8 +215,8 @@ function narrowAndCombineSelectorForLink(
   const key = isMemoizableSchemaInput(selector.schema) &&
       isMemoizableSchemaInput(linkSchema)
     ? `${pathKey(selector.path)}|${pathKey(docPath)}|${pathKey(targetPath)}|${
-      schemaKeyPart(selector.schema)
-    }|${schemaKeyPart(linkSchema)}`
+      hashSchema(selector.schema)
+    }|${hashSchema(linkSchema)}`
     : undefined;
   if (key !== undefined) {
     const cached = _linkHopSelectorCache.get(key);
