@@ -237,13 +237,6 @@ describe("schema-hash", () => {
       return result;
     };
 
-    const expectSame = (
-      got: SchemaAndHash | undefined,
-      expectedSah: SchemaAndHash,
-    ) => {
-      expect(got).toBe(expectedSah);
-    };
-
     it("finds a previously interned schema by FabricHash", () => {
       const sah = internSchema(
         { type: "array", items: { type: "string" } },
