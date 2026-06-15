@@ -384,13 +384,10 @@ export const registerProfile = (
   profile: ProfileCell,
 ): void => {
   const currentProfiles = profilesValue(profiles);
-  const nextProfiles =
-    currentProfiles.some((knownProfile) => equals(knownProfile, profile))
-      ? currentProfiles
-      : [...currentProfiles, profile];
-  profiles.set(
-    nextProfiles.map((profile) => ({ profile })) as SharedProfilesValue,
-  );
+  if (currentProfiles.some((knownProfile) => equals(knownProfile, profile))) {
+    return;
+  }
+  profiles.push({ profile } as SharedProfileEntry);
 };
 
 export const applyTrustedProfileSave = (
