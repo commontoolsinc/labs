@@ -421,7 +421,8 @@ export function internPathSelector(
     : canonicalSelectorsByPrimitiveSchema;
   let byPath = topMap.get(interned);
   if (byPath === undefined) {
-    topMap.set(interned, byPath = new Map());
+    byPath = new Map();
+    topMap.set(interned, byPath);
   }
 
   const pathK = selectorPathKey(path);
