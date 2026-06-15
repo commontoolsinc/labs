@@ -1,10 +1,9 @@
 import {
   Cell,
   type CellPath,
-  getMetaLink,
+  getPatternIdentityRef,
   NAME,
   type Pattern,
-  type PatternMeta,
   resolveCellPath,
   type RuntimeProgram,
 } from "@commonfabric/runner";
@@ -107,24 +106,57 @@ export class PieceController<T = unknown> {
   }
 
   async getPattern(): Promise<Pattern> {
-    const patternId = getMetaLink(this.#cell, "pattern", {})?.id;
-    if (!patternId) throw new Error("piece missing pattern ID");
+    const ref = getPatternIdentityRef(this.#cell);
+    if (!ref) throw new Error("piece missing pattern identity");
     const runtime = this.#manager.runtime;
-    const pattern = await runtime.patternManager.loadPattern(
-      patternId,
+    const pattern = await runtime.patternManager.loadPatternByIdentity(
+      ref.identity,
+      ref.symbol,
       this.#manager.getSpace(),
     );
+    if (!pattern) {
+      throw new Error(
+        `could not load pattern ${ref.identity}#${ref.symbol}`,
+      );
+    }
     return pattern;
   }
 
-  getPatternMeta(): Promise<PatternMeta> {
-    const patternId = getMetaLink(this.#cell, "pattern", {})?.id;
-    if (!patternId) throw new Error("piece missing pattern ID");
-    const space = this.#manager.getSpace();
-    return this.#manager.runtime.patternManager.loadPatternMeta(
-      patternId,
-      space,
-    );
+  /**
+   * The pattern's authored source program (`{ main, mainExport?, files }`),
+   * recovered from the content-addressed `pattern:<identity>` source-doc closure
+   * in the piece's space. Replaces the deleted meta cell's `program`. `main` is
+   * the entry filename; `mainExport` is the pattern pointer's export symbol.
+   * Returns undefined when no verified source closure exists (the source docs
+   * are written by every cold compile).
+   */
+  async getPatternSourceProgram(): Promise<
+    | {
+      main: string;
+      mainExport?: string;
+      files: { name: string; contents: string }[];
+    }
+    | undefined
+  > {
+    const ref = getPatternIdentityRef(this.#cell);
+    if (!ref) throw new Error("piece missing pattern identity");
+    const program = await this.#manager.runtime.patternManager
+      .getPatternSourceProgramByIdentity(
+        ref.identity,
+        this.#manager.getSpace(),
+      );
+    if (!program) return undefined;
+    return { ...program, mainExport: ref.symbol };
+  }
+
+  /**
+   * The pattern's authored source files (see {@link getPatternSourceProgram}).
+   * Returns undefined when no verified source closure exists.
+   */
+  async getPatternSourceFiles(): Promise<
+    { name: string; contents: string }[] | undefined
+  > {
+    return (await this.getPatternSourceProgram())?.files;
   }
 
   async setPattern(program: RuntimeProgram): Promise<void> {

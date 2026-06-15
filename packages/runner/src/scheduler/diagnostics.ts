@@ -17,7 +17,7 @@ import type {
   TriggerTraceEntry,
   TriggerTraceValueSummary,
 } from "./types.ts";
-import { getMetaLink, type NormalizedFullLink } from "../link-utils.ts";
+import { type NormalizedFullLink } from "../link-utils.ts";
 import {
   isErrorStackMapped,
   markErrorStackMapped,
@@ -169,10 +169,21 @@ export function getPieceMetadataFromFrame(frame?: Frame): {
   }
   const result: ReturnType<typeof getPieceMetadataFromFrame> = {};
   const resultCell = getCellOrThrow(resultAsProxy);
-  result.patternId = getMetaLink(resultCell, "pattern")?.id ??
-    (frame?.unsafe_binding?.pattern
-      ? frame.runtime?.patternManager.getPatternId(frame.unsafe_binding.pattern)
-      : undefined);
+  // Diagnostic context only: the content identity of the running pattern. The
+  // `pattern` meta link and patternId are retired; `patternIdentity` is the
+  // single pointer. Read it inline (no import from runner.ts, to avoid a module
+  // cycle) and fall back to the in-hand pattern's entry ref when the cell has no
+  // stored pointer (a keyless run()).
+  const storedIdentity = resultCell.getMetaRaw("patternIdentity");
+  result.patternId =
+    (isRecord(storedIdentity) && typeof storedIdentity.identity === "string"
+      ? storedIdentity.identity
+      : undefined) ??
+      (frame?.unsafe_binding?.pattern
+        ? frame.runtime?.patternManager.getArtifactEntryRef(
+          frame.unsafe_binding.pattern,
+        )?.identity
+        : undefined);
   result.space = resultCell.space;
   // TODO(@ubik2): This should really just be sourceURI, but I'd need
   // to update all the consumers. For now, strip the 'of:'

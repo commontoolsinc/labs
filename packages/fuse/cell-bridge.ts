@@ -4,7 +4,7 @@
 // Supports multiple spaces with on-demand connection.
 // Subscribes to cell changes and rebuilds subtrees on updates.
 
-import type { Cell, PatternMeta } from "@commonfabric/runner";
+import type { Cell } from "@commonfabric/runner";
 import { schemaToTypeString } from "@commonfabric/runner";
 import { nameSchema } from "@commonfabric/runner/schemas";
 import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
@@ -3187,8 +3187,10 @@ export class CellBridge {
   }
 
   /**
-   * Build the .src/ subtree for a piece, containing all source files from
-   * PatternMeta.program.files[]. Skips system pieces that have no program.
+   * Build the .src/ subtree for a piece, containing all of the pattern's
+   * authored source files (recovered from the content-addressed
+   * `pattern:<identity>` source-doc closure). Skips system pieces that have no
+   * recoverable source.
    */
   private async buildSourceTree(
     pieceIno: bigint,
@@ -3196,22 +3198,18 @@ export class CellBridge {
     state: SpaceState,
     pieceName: string,
   ): Promise<void> {
-    let meta: PatternMeta | undefined;
+    let sourceFiles: { name: string; contents: string }[] | undefined;
     try {
-      meta = await piece.getPatternMeta();
+      sourceFiles = await piece.getPatternSourceFiles();
     } catch {
-      // Pattern meta not always available
+      // Pattern source not always available
     }
 
-    // Normalise to a files array: multi-file programs use program.files,
-    // single-file programs use the top-level src string (exposed as main.tsx).
-    let files: { name: string; contents: string }[];
-    if (meta?.program?.files?.length) {
-      files = meta.program.files;
-    } else {
+    if (!sourceFiles?.length) {
       // System piece or no source — skip .src/
       return;
     }
+    const files = sourceFiles;
 
     const annotator = this.makeCfcAnnotator({
       spaceName: this.spaceNameForState(state) ?? state.did,

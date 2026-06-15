@@ -267,7 +267,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       await runtime.setup(undefined, pattern, {}, resultCell);
 
-      expect(parseLink(resultCell.getMetaRaw("pattern"), resultCell))
+      expect(resultCell.getMetaRaw("patternIdentity"))
         .toBeDefined();
       expect(parseLink(resultCell.getMetaRaw("argument"), resultCell))
         .toBeDefined();
@@ -356,7 +356,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       await runtime.setup(undefined, pattern, {}, resultCell);
 
       expect(getMetaLink(resultCell, "result")).toBeUndefined();
-      expect(parseLink(resultCell.getMetaRaw("pattern"), resultCell))
+      expect(resultCell.getMetaRaw("patternIdentity"))
         .toBeDefined();
       expect(parseLink(resultCell.getMetaRaw("argument"), resultCell))
         .toBeDefined();

@@ -487,8 +487,8 @@ export function patternToJSON(pattern: Pattern) {
   // on reload. {main, mainExport} are deterministic strings, so they reload
   // stably; they are kept because consumers read them (e.g. the CLI
   // `dev --pattern-json` output asserts `program.mainExport`). The full
-  // program-with-files is still recovered from the pattern-meta cell
-  // (savePattern -> `rawMeta.program`) and the `pattern:<identity>` source docs;
+  // program-with-files is recovered from the `pattern:<identity>` source docs
+  // (the single durable source — written by every cold compile);
   // sub-patterns are referenced by {identity, symbol} on the ESM path.
   const program = getPatternProgram(pattern);
   const programIdentity = program

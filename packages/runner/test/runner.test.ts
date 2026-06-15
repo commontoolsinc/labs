@@ -1391,8 +1391,9 @@ describe("setup/start", () => {
       output: { $alias: { partialCause: "output", path: [] } },
     });
 
-    // Verify a pattern link is present after setup without passing the pattern
-    const patternValue = resultCell.getMetaRaw("pattern");
+    // Verify the pattern identity pointer is present after setup without
+    // passing the pattern (it was reused from the stored pointer).
+    const patternValue = resultCell.getMetaRaw("patternIdentity");
     expect(patternValue).toBeDefined();
 
     // Also verify the argument metadata cell was updated

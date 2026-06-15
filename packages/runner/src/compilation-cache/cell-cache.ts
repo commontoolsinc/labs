@@ -1,4 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import { isRecord } from "@commonfabric/utils/types";
 import { CFC_COMPILED_BY_ATOM } from "@commonfabric/api/cfc";
 import { computeModuleHashes } from "../harness/module-identity.ts";
 import type { CacheableModule } from "../harness/types.ts";
@@ -54,6 +55,15 @@ interface ModuleDocBase {
 /** A source-set document (`pattern:<identity>`). */
 export interface SourceDoc extends ModuleDocBase {
   readonly kind: "source";
+  /**
+   * Optional, NON-NORMATIVE product annotations (a name doc, a spec doc,
+   * lineage — typically sigil links). The runtime NEVER reads these for
+   * execution and {@link verifySourceDocs} EXCLUDES them from the content hash:
+   * the document identity is a Merkle hash of `(source, import identities)`
+   * only, so an annotated and an unannotated doc verify identically. Present
+   * only on the entry document, written by `PatternManager.annotatePattern`.
+   */
+  readonly annotations?: Record<string, unknown>;
 }
 
 /** A compiled-set document (`compileCache:<runtimeVersion>/<identity>`). */
@@ -279,6 +289,9 @@ interface StoredSourceDoc {
   code: string;
   filename: string;
   imports: { specifier: string; link: unknown }[];
+  // Optional product annotations — see {@link SourceDoc.annotations}. Stored
+  // verbatim; never part of the content identity.
+  annotations?: Record<string, unknown>;
 }
 
 /**
@@ -307,6 +320,8 @@ export const SOURCE_DOC_SCHEMA = {
             },
           },
         },
+        // Optional, non-normative product annotations (see SourceDoc).
+        annotations: { type: "object" },
       },
     },
   },
@@ -337,6 +352,11 @@ export function writeSourceDocs(
       undefined,
       tx,
     );
+    // Preserve any product annotations already on this entry doc — a recompile
+    // of identical source (idempotent, content-addressed) must not clobber them.
+    // Annotations are not part of the content identity, so they ride along
+    // verbatim and never perturb verification.
+    const existingAnnotations = cell.get()?.annotations;
     cell.set({
       kind: "source",
       identity,
@@ -347,6 +367,9 @@ export function writeSourceDocs(
         link: runtime.getCell(space, sourceDocKey(imp.identity), undefined, tx)
           .getAsLink(),
       })),
+      ...(isRecord(existingAnnotations)
+        ? { annotations: existingAnnotations }
+        : {}),
     } as StoredSourceDoc);
   }
 }
@@ -401,6 +424,7 @@ export async function loadSourceClosure(
       code: doc.code,
       filename: doc.filename,
       imports,
+      ...(isRecord(doc.annotations) ? { annotations: doc.annotations } : {}),
     });
     for (const child of childDocs) {
       if (!out.has(child.identity)) queue.push(child);

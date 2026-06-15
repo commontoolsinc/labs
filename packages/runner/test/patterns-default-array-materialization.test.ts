@@ -84,18 +84,9 @@ describe("Pattern Runner - Default<[]> array field materializes as array", () =>
       ],
     };
 
-    const compiled = await runtime.patternManager.compilePattern(program);
-    const patternId = runtime.patternManager.registerPattern(
-      compiled,
-      program,
-    );
-    await runtime.patternManager.saveAndSyncPattern({ patternId, space });
-
-    const loaded = await runtime.patternManager.loadPattern(
-      patternId,
+    const loaded = await runtime.patternManager.compilePattern(program, {
       space,
-      tx,
-    );
+    });
     const resultCell = runtime.getCell<{ roomSummaryText: string }>(
       space,
       "ct1562-default-anyof-merge",

@@ -526,10 +526,10 @@ export async function savePiecePattern(
     undefined,
     resolvedConfig.pieceScope,
   );
-  const meta = await piece.getPatternMeta();
+  const files = await piece.getPatternSourceFiles();
 
-  if (meta.program) {
-    for (const { name, contents } of meta.program.files) {
+  if (files) {
+    for (const { name, contents } of files) {
       if (name[0] !== "/") {
         throw new Error("Ungrounded file in pattern.");
       }

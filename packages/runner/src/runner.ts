@@ -73,7 +73,6 @@ import { isCellScope, narrowestScope } from "./scope.ts";
 import {
   describePatternOrModule,
   extractDefaultValues,
-  getSigilLink,
   mergeObjects,
   sanitizeDebugLabel,
   setRunnableName,
@@ -660,34 +659,56 @@ export class Runner {
 
   private resolveSetupPattern(
     patternOrModule: Pattern | Module | undefined,
-    previousPatternId: URI | undefined,
+    previousIdentityRef: { identity: string; symbol: string } | undefined,
   ):
     | {
       pattern: Pattern;
-      patternId: URI;
+      entryRef: { identity: string; symbol: string };
       resolvedPatternOrModule: Pattern | Module;
     }
     | undefined {
     let resolvedPatternOrModule = patternOrModule;
-    let patternId = patternOrModule ? undefined : previousPatternId;
 
-    if (!resolvedPatternOrModule && patternId) {
-      resolvedPatternOrModule = this.runtime.patternManager.patternById(
-        patternId,
-      );
-      if (!resolvedPatternOrModule) {
-        throw new Error(`Unknown pattern: ${patternId}`);
+    // No pattern in hand: resolve the previously-stored `{ identity, symbol }`
+    // pointer synchronously from the in-session artifact index (the module is
+    // live this session — the reload path loaded it before reaching here).
+    if (!resolvedPatternOrModule) {
+      if (!previousIdentityRef) return undefined;
+      const resolved = this.runtime.patternManager.artifactFromIdentitySync(
+        previousIdentityRef.identity,
+        previousIdentityRef.symbol,
+      ) as Pattern | undefined;
+      if (!resolved) {
+        throw new Error(
+          `Unknown pattern: ${previousIdentityRef.identity}#${previousIdentityRef.symbol}`,
+        );
       }
-    } else if (!resolvedPatternOrModule) {
-      return undefined;
+      resolvedPatternOrModule = resolved;
     }
 
     const pattern = isModule(resolvedPatternOrModule)
       ? this.moduleToPattern(resolvedPatternOrModule)
       : resolvedPatternOrModule;
-    patternId ??= this.runtime.patternManager.registerPattern(pattern);
+    const entryRef = this.entryRefForPattern(pattern);
 
-    return { pattern, patternId, resolvedPatternOrModule };
+    return { pattern, entryRef, resolvedPatternOrModule };
+  }
+
+  /**
+   * The pattern pointer to record for `pattern`: its real content-addressed
+   * entry ref when it has one (a compiled pattern), else a stable
+   * session-synthetic ref minted for the keyless pattern object (so a separate
+   * start() / setup-without-pattern can resolve it in-session). See
+   * `syntheticPatternIdentity`.
+   */
+  private entryRefForPattern(
+    pattern: Pattern,
+  ): { identity: string; symbol: string } {
+    const real = this.runtime.patternManager.getArtifactEntryRef(pattern);
+    if (real) return real;
+    // Keyless: a content-hash session pointer (structurally-identical patterns
+    // share it — no churn). See PatternManager.ensureKeylessPatternIdentity.
+    return this.runtime.patternManager.ensureKeylessPatternIdentity(pattern);
   }
 
   private updateArgument<T>(
@@ -738,17 +759,16 @@ export class Runner {
     resultCell: Cell<R>,
     argument: T,
     pattern: Pattern,
-    patternId: string,
-    previousPatternId: string | undefined,
+    samePattern: boolean,
   ): SetupResult<R> | undefined {
     const key = this.getDocKey(resultCell);
     if (!this.cancels.has(key)) return undefined;
 
-    if (argument === undefined && patternId === previousPatternId) {
+    if (argument === undefined && samePattern) {
       return { resultCell, needsStart: false };
     }
 
-    if (previousPatternId === patternId) {
+    if (samePattern) {
       const argumentLink = getMetaLink(resultCell, "argument")!;
       this.updateArgument(
         tx,
@@ -892,8 +912,8 @@ export class Runner {
   private applySetupState<T, R>(
     tx: IExtendedStorageTransaction,
     pattern: Pattern,
-    patternId: URI,
-    previousPatternId: string | undefined,
+    entryRef: { identity: string; symbol: string } | undefined,
+    samePattern: boolean,
     argument: T,
     resultCell: Cell<R>,
   ): void {
@@ -945,19 +965,17 @@ export class Runner {
       );
     }
 
-    // Set the pattern in the resultCell as well
-    resultCell.withTx(tx).setMetaRaw("pattern", getSigilLink(patternId));
-
-    // Also record the content-addressed {identity, symbol} reference when the
-    // pattern's entry identity is known (ESM cache path). On reload this lets
-    // the runtime load straight from the compiled cache by identity — no TS
-    // source pulled, no meta-cell roundtrip — falling back to the patternId
-    // load when the by-identity load is unavailable. See loadPatternByIdentity.
-    // The ref carries the authoritative export symbol (recorded at compile/load
-    // time); we never recompute it from `pattern`'s program here, since a
-    // source-free reloaded pattern only has a stub program (mainExport
-    // "default"), which would clobber a non-"default" export name.
-    const entryRef = this.runtime.patternManager.getArtifactEntryRef(pattern);
+    // Record the content-addressed {identity, symbol} reference — the ONLY
+    // pattern pointer — when the pattern's entry identity is known (every
+    // space-compiled pattern post-E4). On reload this loads the pattern straight
+    // from the compiled cache by identity (or, on a version bump, recompiles
+    // from the source-doc closure). A KEYLESS hand-built pattern has no entry
+    // ref and so gets no durable pointer: it is session-only (run()-only), the
+    // sanctioned "keyless → session-only" behavior. The ref carries the
+    // authoritative export symbol (recorded at compile/load time); we never
+    // recompute it from `pattern`'s program here, since a source-free reloaded
+    // pattern only has a stub program (mainExport "default"), which would
+    // clobber a non-"default" export name.
     if (entryRef) {
       resultCell.withTx(tx).setMetaRaw("patternIdentity", {
         identity: entryRef.identity,
@@ -966,7 +984,7 @@ export class Runner {
     }
 
     this.updateResultProjection(tx, pattern, resultCell.withTx(tx), {
-      preserveName: previousPatternId === patternId,
+      preserveName: samePattern,
     });
   }
 
@@ -985,10 +1003,10 @@ export class Runner {
       `resultCell: ${resultCell.getAsNormalizedFullLink().id}`,
     ]);
 
-    const previousPatternId = getPatternId(resultCell.withTx(tx));
+    const previousIdentityRef = getPatternIdentityRef(resultCell.withTx(tx));
     const resolvedPattern = this.resolveSetupPattern(
       patternOrModule,
-      previousPatternId,
+      previousIdentityRef,
     );
 
     if (!resolvedPattern) {
@@ -999,20 +1017,24 @@ export class Runner {
       return { resultCell, needsStart: false };
     }
 
-    const { pattern, patternId, resolvedPatternOrModule } = resolvedPattern;
+    const { pattern, entryRef, resolvedPatternOrModule } = resolvedPattern;
+    // "Same pattern between runs" — drives name preservation and
+    // reuse-running-setup. Compare the new pattern pointer against the stored
+    // one. A keyless pattern carries a stable session-synthetic ref (minted per
+    // pattern object), so re-setting up the same object compares equal too.
+    const samePattern = previousIdentityRef !== undefined &&
+      entryRef.identity === previousIdentityRef.identity &&
+      entryRef.symbol === previousIdentityRef.symbol;
     const sourceKey = getTxDebugActionId(tx) ?? "none";
     triggerFlowLogger.debug(`setup-internal/${sourceKey}`, () => [
       `[SETUP] source=${sourceKey}`,
       `result=${resultCell.getAsNormalizedFullLink().id}`,
       `pattern=${describePatternOrModule(resolvedPatternOrModule)}`,
-      `previousPatternId=${previousPatternId ?? "none"}`,
-      `nextPatternId=${patternId}`,
+      `previousPatternIdentity=${
+        previousIdentityRef ? previousIdentityRef.identity : "none"
+      }`,
+      `nextPatternIdentity=${entryRef ? entryRef.identity : "keyless"}`,
     ]);
-
-    this.runtime.patternManager.savePattern({
-      patternId,
-      space: resultCell.space,
-    }, tx);
 
     if (isCellLink(argument)) {
       argument = createSigilLinkFromParsedLink(
@@ -1032,8 +1054,7 @@ export class Runner {
       resultCell,
       argument,
       pattern,
-      patternId,
-      previousPatternId,
+      samePattern,
     );
     if (runningSetup) {
       return runningSetup;
@@ -1042,8 +1063,8 @@ export class Runner {
     this.applySetupState(
       tx,
       pattern,
-      patternId,
-      previousPatternId,
+      entryRef,
+      samePattern,
       argument,
       resultCell,
     );
@@ -1136,8 +1157,12 @@ export class Runner {
       cancel();
     };
 
-    // Track pattern ID and node cancellation
-    let currentPatternId: URI | undefined;
+    // Track the current pattern's identity key and node cancellation. The key
+    // is `patternIdentityKey({identity, symbol})` for a keyed pattern, or a
+    // keyless sentinel for a hand-built pattern with no stored pointer (whose
+    // pattern can only change via a fresh run(), not via the meta watcher).
+    const KEYLESS = "\0keyless";
+    let currentPatternKey: string | undefined;
     let cancelNodes: Cancel | undefined;
 
     // Helper to instantiate nodes for a pattern
@@ -1182,78 +1207,68 @@ export class Runner {
       }
     };
 
-    // Helper to set up the pattern watcher
+    // Helper to set up the pattern watcher. Sinks on the `patternIdentity` meta
+    // (the only pattern pointer); a keyless pattern writes none, so its watcher
+    // is inert by design (keyless patterns change only via a fresh run()).
     const setupPatternWatcher = () => {
       addCancel(
-        resultCell.sinkMeta("pattern", (newPatternValue) => {
-          const newPatternLink = parseLink(newPatternValue, resultCell);
-          const newPatternId = newPatternLink?.id;
-          if (newPatternId === currentPatternId) return; // No change
-          if (!newPatternId) return;
+        resultCell.sinkMeta("patternIdentity", (newValue) => {
+          const newRef = asPatternIdentityRef(newValue);
+          if (!newRef) return;
+          const newKey = patternIdentityKey(newRef);
+          if (newKey === currentPatternKey) return; // No change
+          currentPatternKey = newKey;
 
-          // Pattern changed
-          const previousPatternId = currentPatternId;
-          currentPatternId = newPatternId;
-
-          const resolved = this.runtime.patternManager.patternById(
-            newPatternId,
-          );
-          if (!resolved) {
-            // Async load for pattern change after initial start.
-            // Errors are logged here since there's no caller to propagate to.
-            this.runtime.patternManager
-              .loadPattern(newPatternId, resultCell.space)
-              .then((loaded) => {
-                if (currentPatternId !== newPatternId) return;
-
-                logger.info("pattern changed", {
-                  from: {
-                    id: previousPatternId,
-                    pattern: this.runtime.patternManager.patternById(
-                      previousPatternId!,
-                    ),
-                  },
-                  to: { id: newPatternId, pattern: loaded },
-                });
-
-                // Cancel previous nodes (after we're sure it's a valid one)
-                cancelNodes?.();
-
-                instantiatePattern(loaded);
-              })
-              .catch((err) => {
+          // In-memory fast path: the module is usually live this session.
+          const live = this.runtime.patternManager.artifactFromIdentitySync(
+            newRef.identity,
+            newRef.symbol,
+          ) as Pattern | undefined;
+          if (live) {
+            cancelNodes?.();
+            instantiatePattern(this.resolveToPattern(live));
+            return;
+          }
+          // Async load for a pattern change after initial start. Errors are
+          // logged here since there's no caller to propagate to.
+          this.runtime.patternManager
+            .loadPatternByIdentity(
+              newRef.identity,
+              newRef.symbol,
+              resultCell.space,
+            )
+            .then((loaded) => {
+              if (currentPatternKey !== newKey) return;
+              if (!loaded) {
                 logger.error(
                   "pattern-load-error",
-                  `Failed to load pattern ${newPatternId}`,
-                  err,
+                  `Failed to load pattern ${newRef.identity}#${newRef.symbol}`,
                 );
+                return;
+              }
+              logger.info("pattern changed", {
+                to: { ref: newRef, pattern: loaded },
               });
-          } else {
-            cancelNodes?.();
-            instantiatePattern(resolved);
-          }
+              cancelNodes?.();
+              instantiatePattern(this.resolveToPattern(loaded));
+            })
+            .catch((err) => {
+              logger.error(
+                "pattern-load-error",
+                `Failed to load pattern ${newRef.identity}#${newRef.symbol}`,
+                err,
+              );
+            });
         }),
       );
     };
 
     const resultCellForRead = tx ? resultCell.withTx(tx) : resultCell;
-    const initialPatternId = getPatternId(resultCellForRead);
-
-    if (!initialPatternId) {
-      cleanup();
-      throw new Error("Cannot start: no pattern ID (pattern)");
-    }
+    const initialRef = getPatternIdentityRef(resultCellForRead);
 
     // Determine initial pattern
     if (givenPattern) {
-      currentPatternId = initialPatternId;
-      if (
-        this.runtime.patternManager.registerPattern(givenPattern) !==
-          currentPatternId
-      ) {
-        cleanup();
-        throw new Error("Pattern ID mismatch");
-      }
+      currentPatternKey = initialRef ? patternIdentityKey(initialRef) : KEYLESS;
       instantiatePattern(givenPattern, tx);
       if (!doNotUpdateOnPatternChange) {
         setupPatternWatcher();
@@ -1261,17 +1276,26 @@ export class Runner {
       return;
     }
 
-    // Try sync lookup
-    const initialResolved = this.runtime.patternManager.patternById(
-      initialPatternId,
-    );
+    if (!initialRef) {
+      cleanup();
+      throw new Error("Cannot start: no pattern identity");
+    }
+
+    // Sync lookup by identity (the module is live this session).
+    const initialResolved = this.runtime.patternManager
+      .artifactFromIdentitySync(
+        initialRef.identity,
+        initialRef.symbol,
+      ) as Pattern | undefined;
     if (!initialResolved) {
       cleanup();
-      throw new Error(`Unknown pattern: ${initialPatternId}`);
+      throw new Error(
+        `Unknown pattern: ${initialRef.identity}#${initialRef.symbol}`,
+      );
     }
 
     // Sync path - instantiate immediately
-    currentPatternId = initialPatternId;
+    currentPatternKey = patternIdentityKey(initialRef);
     instantiatePattern(this.resolveToPattern(initialResolved), tx);
     if (!doNotUpdateOnPatternChange) {
       setupPatternWatcher();
@@ -1321,8 +1345,8 @@ export class Runner {
     }
 
     // Step 4: Check whether the pattern is available, otherwise load it
-    const patternId = getPatternId(rootCell);
-    if (!patternId) {
+    const identityRef = getPatternIdentityRef(rootCell);
+    if (!identityRef) {
       // We may have a slug instead of a resultCell, so try the link.
       const maybeLink = parseLink(rootCell.getRaw(), rootCell);
       if (maybeLink) {
@@ -1335,12 +1359,12 @@ export class Runner {
       }
 
       return Promise.reject(
-        new Error(`Cannot start: no pattern ID (pattern)`),
+        new Error(`Cannot start: no pattern identity`),
       );
     }
     return this.startAvailablePattern(
       rootCell,
-      patternId,
+      identityRef,
       wasSyncedAtEntry,
       wasPreparedLocally,
       wasStoppedLocally,
@@ -1350,35 +1374,37 @@ export class Runner {
 
   private startAvailablePattern<T = any>(
     rootCell: Cell<T>,
-    patternId: URI,
+    identityRef: { identity: string; symbol: string },
     wasSyncedAtEntry: boolean,
     wasPreparedLocally: boolean,
     wasStoppedLocally: boolean,
     seenCells: Set<Cell>,
   ): Promise<boolean> {
-    const pattern = this.runtime.patternManager.patternById(patternId);
+    const pm = this.runtime.patternManager;
+    const pattern = pm.artifactFromIdentitySync(
+      identityRef.identity,
+      identityRef.symbol,
+    ) as Pattern | undefined;
     if (!pattern) {
-      // Prefer the content-addressed {identity, symbol} reference when present:
-      // it loads straight from the compiled cache (no TS source, no meta-cell
-      // roundtrip). Fall back to the patternId load (which handles cold
-      // recovery from the stored source) when by-identity is unavailable.
-      const identityRef = getPatternIdentityRef(rootCell);
-      const pm = this.runtime.patternManager;
-      const loadPromise = identityRef
-        ? pm.loadPatternByIdentityAs(
-          patternId,
+      // Load by content identity: in-memory live module → compiled closure →
+      // cold recompile from the verified source-doc closure (a version bump).
+      // No patternId, no meta cell — the source docs are the single durable
+      // source. A piece carrying only a legacy `pattern` link is unrecoverable
+      // (the sanctioned data-wipe outcome).
+      return pm
+        .loadPatternByIdentity(
           identityRef.identity,
           identityRef.symbol,
           rootCell.space,
-        ).then((byId) => byId ?? pm.loadPattern(patternId, rootCell.space))
-        : pm.loadPattern(patternId, rootCell.space);
-      return loadPromise
+        )
         .then((loaded) => {
           if (loaded) {
             return this.doStart(rootCell, seenCells);
           } else {
             return Promise.reject(
-              new Error(`Could not load pattern ${patternId}`),
+              new Error(
+                `Could not load pattern ${identityRef.identity}#${identityRef.symbol}`,
+              ),
             );
           }
         });
@@ -4093,20 +4119,11 @@ function getTxDebugActionId(
 }
 
 /**
- * Extract the pattern id from the result cell's link to the pattern.
- *
- * @param resultCell
- * @returns pattern id
- */
-export function getPatternId(resultCell: Cell<unknown>): URI | undefined {
-  return getMetaLink(resultCell, "pattern")?.id;
-}
-
-/**
- * Read the content-addressed {identity, symbol} pattern reference from a result
- * cell, if one was recorded at setup (ESM cache path). Lets the reload path
- * load the pattern straight from the compiled cache by identity. Returns
- * undefined for legacy result cells that only carry the patternId link.
+ * Read the content-addressed `{ identity, symbol }` pattern reference — the ONLY
+ * pattern pointer — from a result cell's `patternIdentity` meta. Returns
+ * undefined for a cell that carries no such pointer (a keyless hand-built
+ * pattern run in-session, or a legacy result cell predating the migration; the
+ * latter is unrecoverable by the sanctioned data-wipe decision).
  */
 export function getPatternIdentityRef(
   resultCell: Cell<unknown>,
@@ -4114,6 +4131,13 @@ export function getPatternIdentityRef(
   const raw = resultCell.getMetaRaw("patternIdentity", {
     meta: ignoreReadForScheduling,
   });
+  return asPatternIdentityRef(raw);
+}
+
+/** Narrow a raw meta value to a `{ identity, symbol }` pattern ref, or undefined. */
+export function asPatternIdentityRef(
+  raw: unknown,
+): { identity: string; symbol: string } | undefined {
   if (
     isRecord(raw) && typeof raw.identity === "string" &&
     typeof raw.symbol === "string"
@@ -4121,4 +4145,14 @@ export function getPatternIdentityRef(
     return { identity: raw.identity, symbol: raw.symbol };
   }
   return undefined;
+}
+
+/**
+ * A stable string key for a `{ identity, symbol }` pattern ref, for "same
+ * pattern between runs" comparisons (name preservation, reuse-running-setup).
+ */
+export function patternIdentityKey(
+  ref: { identity: string; symbol: string },
+): string {
+  return `${ref.identity}\0${ref.symbol}`;
 }

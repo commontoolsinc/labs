@@ -2087,15 +2087,9 @@ describe("wish built-in", () => {
         ],
       };
 
-      const compiled = await runtime.patternManager.compilePattern(program);
-      const patternId = runtime.patternManager.registerPattern(
-        compiled,
+      const loadedPattern = await runtime.patternManager.compilePattern(
         program,
-      );
-      const loadedPattern = await runtime.patternManager.loadPattern(
-        patternId,
-        space,
-        tx,
+        { space },
       );
 
       const resultCell = runtime.getCell<{
@@ -2142,15 +2136,9 @@ describe("wish built-in", () => {
         ],
       };
 
-      const compiled = await runtime.patternManager.compilePattern(program);
-      const patternId = runtime.patternManager.registerPattern(
-        compiled,
+      const loadedPattern = await runtime.patternManager.compilePattern(
         program,
-      );
-      const loadedPattern = await runtime.patternManager.loadPattern(
-        patternId,
-        space,
-        tx,
+        { space },
       );
 
       const resultCell = runtime.getCell<{

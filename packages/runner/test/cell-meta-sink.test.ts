@@ -4,9 +4,6 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Runtime } from "../src/runtime.ts";
-import { parseLink } from "../src/link-utils.ts";
-import { getSigilLink } from "../src/runner-utils.ts";
-import type { Pattern } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
 import type { Cancel } from "../src/cancel.ts";
 
@@ -37,47 +34,34 @@ describe("Cell meta subscriptions", () => {
     await storageManager?.close();
   });
 
-  it("re-runs when the pattern meta field changes", async () => {
-    const pattern1: Pattern = {
-      argumentSchema: {},
-      resultSchema: {},
-      result: { value: 1 },
-      nodes: [],
-    };
-    const pattern2: Pattern = {
-      argumentSchema: {},
-      resultSchema: {},
-      result: { value: 2 },
-      nodes: [],
-    };
+  it("re-runs when the patternIdentity meta field changes", async () => {
+    const ref1 = { identity: "pattern-identity-1", symbol: "default" };
+    const ref2 = { identity: "pattern-identity-2", symbol: "default" };
 
-    const patternId1 = runtime.patternManager.registerPattern(pattern1);
-    const patternId2 = runtime.patternManager.registerPattern(pattern2);
     const resultCell = runtime.getCell(
       space,
       "pattern-meta-subscription",
     ) as MetaSinkCell;
 
     const initialTx = runtime.edit();
-    resultCell.withTx(initialTx).setMetaRaw(
-      "pattern",
-      getSigilLink(patternId1),
-    );
+    resultCell.withTx(initialTx).setMetaRaw("patternIdentity", ref1);
     await initialTx.commit();
 
-    const seenPatternIds: Array<string | undefined> = [];
-    const cancel = resultCell.sinkMeta("pattern", (value) => {
-      seenPatternIds.push(parseLink(value, resultCell)?.id);
+    const seenIdentities: Array<string | undefined> = [];
+    const cancel = resultCell.sinkMeta("patternIdentity", (value) => {
+      seenIdentities.push(
+        (value as { identity?: string } | undefined)?.identity,
+      );
     });
 
-    expect(seenPatternIds).toEqual([patternId1]);
+    expect(seenIdentities).toEqual([ref1.identity]);
 
     const updateTx = runtime.edit();
-    resultCell.withTx(updateTx).setMetaRaw("pattern", getSigilLink(patternId2));
+    resultCell.withTx(updateTx).setMetaRaw("patternIdentity", ref2);
     await updateTx.commit();
     await runtime.idle();
 
-    expect(seenPatternIds).toEqual([patternId1, patternId2]);
+    expect(seenIdentities).toEqual([ref1.identity, ref2.identity]);
     cancel();
   });
 });

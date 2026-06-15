@@ -5,19 +5,13 @@ import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { parseFabricRef } from "../src/sandbox/fabric-import-specifier.ts";
 import { resolveFabricRefToIdentity } from "../src/fabric-ref-resolution.ts";
-import { createRef } from "../src/create-ref.ts";
-import { fromURI, toURI } from "../src/uri-utils.ts";
-import { type PatternMeta, patternMetaSchema } from "../src/pattern-manager.ts";
 import { slugIdForSpace } from "../src/slugs.ts";
 import type { Cell } from "../src/cell.ts";
-import type { URI } from "../src/sigil-types.ts";
-import { getSigilLink } from "../src/runner-utils.ts";
 
 const signer = await Identity.fromPassphrase("fabric ref resolution test");
 const space = signer.did();
 
 const ENTRY_A = "Avcny13Rj8q-2ClANy_-k0ikWWQcXx7QTdsiqGfrC1c";
-const ENTRY_B = "Bvcny13Rj8q-2ClANy_-k0ikWWQcXx7QTdsiqGfrC1c";
 
 describe("fabric ref resolution", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -40,34 +34,6 @@ describe("fabric ref resolution", () => {
     const ref = parseFabricRef(specifier);
     if (ref === undefined) throw new Error(`not a fabric ref: ${specifier}`);
     return ref;
-  }
-
-  function newPatternId(label: string): URI {
-    return toURI(createRef({ pattern: label }, "fabric ref resolution"));
-  }
-
-  function hashFromPatternId(patternId: URI): string {
-    return fromURI(patternId).replace(/^fid1:/, "");
-  }
-
-  function patternMetaCell(patternId: URI): Cell<PatternMeta> {
-    return runtime.getCellFromEntityId(
-      space,
-      { "/": fromURI(patternId) },
-      [],
-      patternMetaSchema,
-    );
-  }
-
-  async function writePatternMeta(
-    patternId: URI,
-    meta: Partial<PatternMeta>,
-  ): Promise<Cell<PatternMeta>> {
-    const cell = patternMetaCell(patternId);
-    await runtime.editWithRetry((tx) => {
-      cell.withTx(tx).set({ ...meta } as PatternMeta);
-    });
-    return cell;
   }
 
   function pieceCell(label: string): Cell<unknown> {
@@ -111,12 +77,10 @@ describe("fabric ref resolution", () => {
   });
 
   it("resolves slug to piece patternIdentity metadata", async () => {
-    const patternId = newPatternId("identity-piece");
     const piece = pieceCell("identity");
     await runtime.editWithRetry((tx) => {
       const pieceWithTx = piece.withTx(tx);
       pieceWithTx.set({ name: "piece" });
-      pieceWithTx.setMetaRaw("pattern", getSigilLink(patternId));
       pieceWithTx.setMetaRaw("patternIdentity", {
         identity: ENTRY_A,
         symbol: "default",
@@ -135,25 +99,6 @@ describe("fabric ref resolution", () => {
       "slug:dep",
       `piece:${piece.getAsNormalizedFullLink().id}`,
       `patternIdentity:${ENTRY_A}`,
-      `entryIdentity:${ENTRY_A}`,
-    ]);
-  });
-
-  it("resolves slug directly to a pattern meta cell", async () => {
-    const patternId = newPatternId("direct-meta");
-    const meta = await writePatternMeta(patternId, { entryIdentity: ENTRY_A });
-    await writeSlug("direct-meta", meta);
-
-    const result = await resolveFabricRefToIdentity(
-      runtime,
-      space,
-      parse("cf:direct-meta"),
-    );
-
-    expect(result.entryIdentity).toBe(ENTRY_A);
-    expect(result.chain).toEqual([
-      "slug:direct-meta",
-      `patternMeta:${patternId}`,
       `entryIdentity:${ENTRY_A}`,
     ]);
   });
@@ -178,72 +123,17 @@ describe("fabric ref resolution", () => {
     ).rejects.toThrow(`Slug "missing" not found. (chain: slug:missing)`);
   });
 
-  it("resolves of: refs directly to pattern meta cells", async () => {
-    const patternId = newPatternId("of-meta");
-    await writePatternMeta(patternId, { entryIdentity: ENTRY_A });
-
-    const result = await resolveFabricRefToIdentity(
-      runtime,
-      space,
-      parse(`cf:of:fid1:${hashFromPatternId(patternId)}`),
-    );
-
-    expect(result.entryIdentity).toBe(ENTRY_A);
-    expect(result.chain).toEqual([
-      `of:${patternId}`,
-      `patternMeta:${patternId}`,
-      `entryIdentity:${ENTRY_A}`,
-    ]);
-  });
-
-  it("resolves pieces with legacy patternId metadata through pattern meta", async () => {
-    const patternId = newPatternId("legacy-pattern-id");
-    await writePatternMeta(patternId, { entryIdentity: ENTRY_B });
+  it("reports a piece without a pattern identity with the chain", async () => {
+    // A piece cell carrying only a legacy `pattern` link (no `patternIdentity`)
+    // is unrecoverable post-retirement (the sanctioned data-wipe outcome).
     const piece = pieceCell("legacy");
     await runtime.editWithRetry((tx) => {
-      const pieceWithTx = piece.withTx(tx);
-      pieceWithTx.set({ name: "legacy" });
-      pieceWithTx.setMetaRaw("pattern", getSigilLink(patternId));
+      piece.withTx(tx).set({ name: "legacy" });
     });
     await writeSlug("legacy", piece);
 
-    const result = await resolveFabricRefToIdentity(
-      runtime,
-      space,
-      parse("cf:legacy"),
-    );
-
-    expect(result.entryIdentity).toBe(ENTRY_B);
-    expect(result.chain).toEqual([
-      "slug:legacy",
-      `piece:${piece.getAsNormalizedFullLink().id}`,
-      `patternMeta:${patternId}`,
-      `entryIdentity:${ENTRY_B}`,
-    ]);
-  });
-
-  it("reports legacy pattern meta without entryIdentity", async () => {
-    const patternId = newPatternId("missing-entry-identity");
-    // A legacy meta cell carries a stored program but predates entryIdentity;
-    // the program is what marks the cell as pattern meta (the `spec` marker
-    // was retired in the pattern-id retirement W1).
-    await writePatternMeta(patternId, {
-      program: {
-        main: "/main.tsx",
-        files: [{ name: "/main.tsx", contents: "export default 1;" }],
-      },
-    } as Partial<PatternMeta>);
-
     await expect(
-      resolveFabricRefToIdentity(
-        runtime,
-        space,
-        parse(`cf:of:fid1:${hashFromPatternId(patternId)}`),
-      ),
-    ).rejects.toThrow(
-      `pattern meta for cf:of:fid1:${
-        hashFromPatternId(patternId)
-      } has no entryIdentity (legacy pattern; re-deploy it)`,
-    );
+      resolveFabricRefToIdentity(runtime, space, parse("cf:legacy")),
+    ).rejects.toThrow("does not resolve to a pattern");
   });
 });

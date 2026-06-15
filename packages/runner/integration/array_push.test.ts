@@ -85,15 +85,9 @@ async function runTest(base: URL) {
     const patternSource = await Deno.readTextFile(
       new URL("./array_push.test.tsx", import.meta.url),
     );
-    const pattern = await runtime.patternManager.compilePattern(patternSource);
-    const patternId = runtime.patternManager.registerPattern(
-      pattern,
-      {
-        main: "/main.tsx",
-        files: [{ name: "/main.tsx", contents: patternSource }],
-      },
-    );
-    await runtime.patternManager.saveAndSyncPattern({ patternId, space });
+    const pattern = await runtime.patternManager.compilePattern(patternSource, {
+      space,
+    });
 
     const resultCell = runtime.getCell(
       space,

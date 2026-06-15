@@ -254,6 +254,31 @@ describe("cell-cache: verifySourceDocs (Merkle self-verification)", () => {
     const viaUtil = computeModuleHashes(utilEntry).get("/util.ts")!;
     expect(viaUtil).toBe(viaMain);
   });
+
+  it("ignores non-normative annotations (W4): annotated and unannotated docs verify identically", () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const plain = buildSourceDocs(modules, entryIdentity);
+    const plainResult = verifySourceDocs(entryIdentity, plain);
+    expect(plainResult.ok).toBe(true);
+
+    // Attach product annotations to the entry doc only — verification must hash
+    // ONLY code/filename/imports, so the result is byte-for-byte identical.
+    const annotated = new Map(plain);
+    const entry = annotated.get(entryIdentity)!;
+    annotated.set(entryIdentity, {
+      ...entry,
+      annotations: {
+        name: { "/": "name-doc-link" },
+        spec: { "/": "spec-doc-link" },
+      },
+    });
+    const annotatedResult = verifySourceDocs(entryIdentity, annotated);
+
+    expect(annotatedResult).toEqual(plainResult);
+    expect(annotatedResult.ok).toBe(true);
+    // The annotated entry's recomputed identity still equals its key.
+    expect(annotatedResult.mismatches).toEqual([]);
+  });
 });
 
 describe("cell-cache: source-set store (per space, link-following)", () => {
@@ -289,6 +314,55 @@ describe("cell-cache: source-set store (per space, link-following)", () => {
     );
     // Loaded closure self-verifies (recomputed identities match the keys).
     expect(verifySourceDocs(entryIdentity, loaded).ok).toBe(true);
+  });
+
+  it("annotatePattern is non-normative (W4): the closure still verifies and the identity is unchanged", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    let tx = runtime.edit();
+    writeSourceDocs(runtime, spaceA, modules, entryIdentity, tx);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+
+    // Attach a product annotation to the entry source doc.
+    await runtime.patternManager.annotatePattern(
+      entryIdentity,
+      spaceA,
+      "name",
+      { "/": "name-doc-link" },
+    );
+
+    tx = runtime.edit();
+    // The verified closure is unaffected — annotations are excluded from the
+    // content hash, so the entry's recomputed identity still equals its key.
+    const verified = await loadVerifiedSourceClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      tx,
+    );
+    expect(verified?.size).toBe(3);
+    expect(verifySourceDocs(entryIdentity, verified!).ok).toBe(true);
+    // The annotation rode along on the entry doc.
+    expect(verified?.get(entryIdentity)?.annotations).toEqual({
+      name: { "/": "name-doc-link" },
+    });
+
+    // A re-write of the identical source (idempotent recompile) preserves the
+    // annotation rather than clobbering it.
+    const rewriteTx = runtime.edit();
+    writeSourceDocs(runtime, spaceA, modules, entryIdentity, rewriteTx);
+    runtime.prepareTxForCommit(rewriteTx);
+    await rewriteTx.commit();
+    const afterRewriteTx = runtime.edit();
+    const afterRewrite = await loadVerifiedSourceClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      afterRewriteTx,
+    );
+    expect(afterRewrite?.get(entryIdentity)?.annotations).toEqual({
+      name: { "/": "name-doc-link" },
+    });
   });
 
   it("is empty for an entry that was never written", async () => {
