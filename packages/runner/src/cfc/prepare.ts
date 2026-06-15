@@ -2001,6 +2001,11 @@ const schemaTypeMatchesValue = (
 const policySchemaMatchesValue = (
   schema: JSONSchema,
   value: unknown,
+  // Schema document whose `$defs` resolves `$ref`s below the root node
+  // (generated schemas put named types there, e.g. an array's items
+  // `#/$defs/<name>` ref). Threaded through recursion so only a ref that is
+  // unresolvable against its own document fails closed.
+  root: JSONSchema = schema,
 ): boolean => {
   // Keep this narrow matcher aligned with resolveSchemaForValue() in
   // schema.ts. This copy is intentionally local because CFC policy checks must
@@ -2008,13 +2013,17 @@ const policySchemaMatchesValue = (
   if (typeof schema === "boolean") {
     return schema;
   }
+  const schemaRoot = schema.$defs !== undefined ? schema : root;
   if (typeof schema.$ref === "string") {
-    const resolved = ContextualFlowControl.resolveSchemaRefs(schema, schema);
+    const resolved = ContextualFlowControl.resolveSchemaRefs(
+      schema,
+      schemaRoot,
+    );
     if (resolved === undefined) {
       return false;
     }
     return resolved !== schema
-      ? policySchemaMatchesValue(resolved, value)
+      ? policySchemaMatchesValue(resolved, value, schemaRoot)
       : false;
   }
   if (schema.const !== undefined && !deepEqual(schema.const, value)) {
@@ -2033,23 +2042,23 @@ const policySchemaMatchesValue = (
   }
   if (Array.isArray(schema.anyOf)) {
     return schema.anyOf.some((branch) =>
-      policySchemaMatchesValue(branch, value)
+      policySchemaMatchesValue(branch, value, schemaRoot)
     );
   }
   if (Array.isArray(schema.oneOf)) {
     return schema.oneOf.filter((branch) =>
-      policySchemaMatchesValue(branch, value)
+      policySchemaMatchesValue(branch, value, schemaRoot)
     ).length === 1;
   }
   if (Array.isArray(schema.allOf)) {
     return schema.allOf.every((branch) =>
-      policySchemaMatchesValue(branch, value)
+      policySchemaMatchesValue(branch, value, schemaRoot)
     );
   }
   if (isRecord(value) && isRecord(schema.properties)) {
     return Object.entries(schema.properties).every(([key, childSchema]) =>
       value[key] === undefined ||
-      policySchemaMatchesValue(childSchema, value[key])
+      policySchemaMatchesValue(childSchema, value[key], schemaRoot)
     );
   }
   if (
@@ -2057,7 +2066,9 @@ const policySchemaMatchesValue = (
     schema.items !== null
   ) {
     const itemSchema = schema.items;
-    return value.every((item) => policySchemaMatchesValue(itemSchema, item));
+    return value.every((item) =>
+      policySchemaMatchesValue(itemSchema, item, schemaRoot)
+    );
   }
   return true;
 };
@@ -2317,6 +2328,11 @@ const verifyInputRequirements = (
     ),
   })).filter((read) =>
     read.label !== undefined &&
+    // A present-but-empty label ({} — no atoms) is the same trust level as an
+    // absent one (excluded above); whether metadata materialized an empty
+    // entry is a persistence/sync artifact and must not decide gate
+    // membership.
+    hasLabelValues(read.label) &&
     // Provenance-only reads (link/origin/current-principal, no confidentiality)
     // are structural plumbing, not endorsable inputs — excluding them stops the
     // transaction-global quantification from false-rejecting unrelated
