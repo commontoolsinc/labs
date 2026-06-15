@@ -13,8 +13,9 @@ import type { Runtime } from "../runtime.ts";
  * entry ref is known. Because it is plain data (no symbol keys), it survives the
  * `getImmutableCell` JSON round-trip that strips the in-memory
  * derivation backref — so the builtin reads it back intact and
- * resolves the live canonical pattern without deserializing a graph or mapping
- * functions back by `implementationRef`.
+ * resolves the live canonical pattern directly by its `{ identity, symbol }`
+ * entry ref, without deserializing a graph or remapping functions through a
+ * serialized reference.
  *
  * The sentinel carries NO embedded fallback graph (identity E4): the artifact
  * index is session-lifetime, and the sentinel is stamped from the op's live

@@ -667,9 +667,10 @@ export class Engine extends EventTarget implements Harness {
     // `cf:module/<identity>` the cache + source-free reload use), NOT by
     // re-hashing the raw `files` — those disagree (the resolved set folds the
     // injected modules into each module's Merkle hash), which would make a
-    // function's `fn.src` (hence its implementationRef) differ between this
-    // source-based compile and a source-free by-identity reload, breaking
-    // `getExecutableFunction` for resumed callables (CT-1623).
+    // function's `fn.src` (hence its content-addressed identity) differ between
+    // this source-based compile and a source-free by-identity reload, breaking
+    // by-identity resolution (`getVerifiedImplementation`) for resumed
+    // callables (CT-1623).
     this.registerModuleHashesFromGraph(id, graph);
 
     return this.evaluateGraph(graph, mainSpecifier, {
@@ -1070,8 +1071,8 @@ export class Engine extends EventTarget implements Harness {
    * resolved identity (which folds the injected/resolved modules into each
    * module's Merkle hash). Re-hashing the raw `program.files` here would yield a
    * DIFFERENT hash for the same module, so a function's `fn.src` — and thus its
-   * minted `implementationRef` — would differ between this source-based compile
-   * and a source-free reload, and `getExecutableFunction` would miss when a
+   * content-addressed identity — would differ between this source-based compile
+   * and a source-free reload, and `getVerifiedImplementation` would miss when a
    * resumed piece invokes a callable (CT-1623). Keying matches the source map's
    * bundle paths (`/<id>/<authoredPath>`, plus injected modules under their own
    * specifier path), and the canonical value matches the source-free form.
