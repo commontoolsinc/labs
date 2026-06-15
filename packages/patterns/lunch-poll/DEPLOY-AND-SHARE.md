@@ -2,13 +2,14 @@
 
 How to deploy the lunch poll, update it in place without losing data, share it,
 verify it actually worked, and recover it when it breaks. Written for someone
-(human or agent) operating the poll for the first time — read top to bottom once.
+(human or agent) operating the poll for the first time — read top to bottom
+once.
 
 > **Status (2026-06-15): live-deployable.** The visit history + per-visit vote
 > snapshots live in the **SQLite builtin** (`sqliteDatabase`). The old
 > "`db.exec` throws 'invalid database handle' on a deployed piece" bug is
-> **resolved** by runtime PR #3967 (merged to main) — no pattern-side
-> workaround needed. Full root-cause writeup is in `SQLITE-DEPLOY-BUG.md`.
+> **resolved** by runtime PR #3967 (merged to main) — no pattern-side workaround
+> needed. Full root-cause writeup is in `SQLITE-DEPLOY-BUG.md`.
 
 ## Where the data lives (mental model)
 
@@ -17,15 +18,15 @@ addressed by `(space, causal-cell-id)` — not to "the pattern" in the abstract.
 So "share the state" = "everyone points at the same piece"; "copy the state" =
 "move that piece's values into a new piece." There are **two** stores:
 
-1. **`PerSpace` input cells** — shared by everyone in the space:
-   `question`, `city`, `options`, `votes`, `users`, `adminName`, `webSearchUrl`,
+1. **`PerSpace` input cells** — shared by everyone in the space: `question`,
+   `city`, `options`, `votes`, `users`, `adminName`, `webSearchUrl`,
    `sqliteRev`. Plus **`myName`** which is **`PerUser`** (keyed by your DID).
 2. **A pattern-owned SQLite database** (`sqliteDatabase(...)`) holding the
    `visits` and `vote_history` tables — i.e. the "Recently eaten" log and the
    "Lunch stats". This is **not** a `PerSpace` input; it's a cell-derived db
    tied to the piece's result cell. (There is no `history` input cell anymore —
-   if you find older docs/scripts referencing `history`, they predate the
-   SQLite migration.)
+   if you find older docs/scripts referencing `history`, they predate the SQLite
+   migration.)
 
 Both stores survive an in-place `setsrc` (see Option A). Only the `PerSpace`
 cells can be copied to another piece via the CLI (see Option B's caveat).
@@ -119,10 +120,10 @@ deno task cf piece step --piece "$MINE" -s "$SPACE"
 deno task cf piece inspect --piece "$MINE" -s "$SPACE" --summary
 ```
 
-This is a **one-time snapshot copy**, not a live link — the pieces diverge after.
-**The SQLite history does NOT copy this way** — `visits`/`vote_history` live in a
-per-piece, cell-derived SQLite db, not in `PerSpace` inputs, so the loop above
-leaves your copy's "Recently eaten" / "Lunch stats" empty.
+This is a **one-time snapshot copy**, not a live link — the pieces diverge
+after. **The SQLite history does NOT copy this way** — `visits`/`vote_history`
+live in a per-piece, cell-derived SQLite db, not in `PerSpace` inputs, so the
+loop above leaves your copy's "Recently eaten" / "Lunch stats" empty.
 
 ### Migrating the SQLite history to another piece (the current gap)
 
@@ -130,15 +131,15 @@ There is **no in-builtin way to share or repoint a writable history db** between
 pieces today (sqlite-builtin spec §03 "Database sources"):
 
 - **Cell-derived** (what this poll uses) is keyed to the piece's own handle-cell
-  entity id — *"no way to point the database at an arbitrary cell"* (deliberate,
+  entity id — _"no way to point the database at an arbitrary cell"_ (deliberate,
   to avoid ambient authority). Two pieces can't share it, and a fresh piece
   can't adopt an old one's db.
-- The **on-disk injected** source (`cf piece link sqlite:…`) *can* be shared
+- The **on-disk injected** source (`cf piece link sqlite:…`) _can_ be shared
   across pieces (same path → same handle), but is **read-only in v1** — writes
   are rejected, so it's no good for a live, mutated history.
 - The **VM-file** source is stubbed (not implemented).
 
-So moving history to a *different* piece needs an explicit mechanism. Options,
+So moving history to a _different_ piece needs an explicit mechanism. Options,
 none built yet:
 
 1. **App-level export → import (portable).** Add a full-dump query output
@@ -149,28 +150,28 @@ none built yet:
 2. **Local filesystem dump (hack).**
    `sqlite3 A-cell.sqlite ".dump visits vote_history" | sqlite3 B-cell.sqlite`.
    Local only (needs the files), you must map each piece → its
-   `cell-<hash>.sqlite`, and it must run while the piece is **idle** (the file is
-   ATTACHed during transactions). No `cf` surface for this yet.
+   `cell-<hash>.sqlite`, and it must run while the piece is **idle** (the file
+   is ATTACHed during transactions). No `cf` surface for this yet.
 3. **Avoid the need:** keep iterating on the same piece (`setsrc`, Option A — no
    migration), or re-log visits via `logVisit`.
 
-Honest trade-off: the pre-SQLite **array** history *was* copyable as a `PerSpace`
-cell; the SQLite migration made it more durable-per-piece but no longer
-CLI-portable. Whether to invest in a portable/shared-history mechanism is an open
-design question — discuss before building.
+Honest trade-off: the pre-SQLite **array** history _was_ copyable as a
+`PerSpace` cell; the SQLite migration made it more durable-per-piece but no
+longer CLI-portable. Whether to invest in a portable/shared-history mechanism is
+an open design question — discuss before building.
 
 ## Verifying a deploy actually worked
 
 This pattern's reads behave in a way that trips people up over the CLI:
 
-- **Reactive queries only resolve under a *subscribed* runtime (a browser).**
-  `recentVisits`, `placeStats`, `historyCount`, `mostRecentTitle` are
-  `db.query` results that re-run on the `sqliteRev` counter. A `cf piece get`
-  does **not** subscribe, so right after a write these read as
-  `{ pending: true }` / `0` over the CLI — even though the write landed. A
-  freshly `new`-ed piece also isn't registered with the background-charm-service
-  (`monitoring 0 spaces`), so nothing pumps the re-query headlessly. **Open the
-  piece in a browser** and the live subscription resolves them.
+- **Reactive queries only resolve under a _subscribed_ runtime (a browser).**
+  `recentVisits`, `placeStats`, `historyCount`, `mostRecentTitle` are `db.query`
+  results that re-run on the `sqliteRev` counter. A `cf piece get` does **not**
+  subscribe, so right after a write these read as `{ pending: true }` / `0` over
+  the CLI — even though the write landed. A freshly `new`-ed piece also isn't
+  registered with the background-charm-service (`monitoring 0 spaces`), so
+  nothing pumps the re-query headlessly. **Open the piece in a browser** and the
+  live subscription resolves them.
 
 - **To verify a write landed without a browser, read the SQLite file directly.**
   `db.exec` writes (`logVisit`, `clearHistory`, `removeHistoryEntry`) persist
@@ -187,6 +188,7 @@ This pattern's reads behave in a way that trips people up over the CLI:
   (On prod the db lives server-side — confirm via the browser instead.)
 
 **Smoke test after deploy** (host-gated handlers need a join first):
+
 ```bash
 deno task cf piece call --piece "$PIECE" -s "$SPACE" joinAs '{"name":"Host"}'
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
@@ -197,7 +199,8 @@ deno task cf piece step --piece "$PIECE" -s "$SPACE"
 # No "invalid database handle" error => db.exec works (i.e. the runtime has #3967).
 # Then confirm the row via the sqlite recipe above, or in the browser.
 ```
-If `db.exec` *does* throw "invalid database handle" on a deployed piece, the
+
+If `db.exec` _does_ throw "invalid database handle" on a deployed piece, the
 server is running a runtime from **before #3967** — not a pattern bug.
 
 ## Identity & joining
@@ -223,9 +226,9 @@ the `users` directory are `PerSpace`. Consequences that bite:
 3. **Names are unique.** `joinAs` rejects a name already in `users`. If a
    test/seed claimed your name, pick another or clear the stale entry.
 
-4. **Host role is claimable.** Any joined participant can take the host seat with
-   **Become host** (`claimHost`). A squatted/stale host seat doesn't need an
-   operator reset — just join and click Become host. (You can also reset
+4. **Host role is claimable.** Any joined participant can take the host seat
+   with **Become host** (`claimHost`). A squatted/stale host seat doesn't need
+   an operator reset — just join and click Become host. (You can also reset
    `adminName` to `""` directly when no one is joined.)
 
 ## Resetting / re-seeding state (host or operator)
@@ -234,8 +237,9 @@ the `users` directory are `PerSpace`. Consequences that bite:
 everyone sees, and direct `set` races anyone's live browser session.**
 
 - **Votes:** use the in-app `resetVotes` (host) — or call it via CLI.
-- **History (SQLite):** there is no `history` input cell. Use the **`clearHistory`
-  handler** (host-gated) — it clears both `visits` and `vote_history`:
+- **History (SQLite):** there is no `history` input cell. Use the
+  **`clearHistory` handler** (host-gated) — it clears both `visits` and
+  `vote_history`:
   ```bash
   deno task cf piece call --piece "$PIECE" -s "$SPACE" clearHistory '{}'
   deno task cf piece step --piece "$PIECE" -s "$SPACE"
@@ -259,6 +263,7 @@ everyone sees, and direct `set` races anyone's live browser session.**
 deno task cf piece new packages/patterns/lunch-poll/main.tsx -s "$SPACE"
 # → prints a new fid1:… — update the "canonical piece" block above.
 ```
+
 You need `WRITE`/`OWNER` on the space (ACL-gated); a denied write changes
 nothing.
 
@@ -285,11 +290,13 @@ NEW=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
 ### Home space won't load (profile setup, `main`-style builds)
 
 Unrelated to the poll itself, but bites colleagues setting up a profile: if a
-home space fails to load with `Handler used as lift, because $stream: true was
-overwritten`, the space's **stored** root pattern is a stale compiled artifact.
-Fix: open the header menu → **Toggle debug mode** (🐛) → click the red
-**Recreate Root Pattern** button in the debugger drawer, then reload. (Console
-fallback: `localStorage.setItem("showDebuggerView","true")` then reload.) The
+home space fails to load with
+`Handler used as lift, because $stream: true was
+overwritten`, the space's
+**stored** root pattern is a stale compiled artifact. Fix: open the header menu
+→ **Toggle debug mode** (🐛) → click the red **Recreate Root Pattern** button in
+the debugger drawer, then reload. (Console fallback:
+`localStorage.setItem("showDebuggerView","true")` then reload.) The
 free-text-join build of this poll sidesteps the profile requirement entirely.
 
 ## Performance notes
@@ -299,7 +306,8 @@ graph/runtime cost (instantiation measures ~linear, ~12ms/option), it's the
 **per-option AI work done host-side on load**: each option triggers an image
 generation, a web search, and a `generateText` homepage-verification call,
 serialized behind a 30s mutex. Results are cached (`option.imageUrl` etc.), so
-warm loads are cheaper; the pain is the first host load of un-cached options. See
-willkelly's perf investigation in
-[labs#4141](https://github.com/commontoolsinc/labs/pull/4141) (keyed-collection /
-runtime-aggregate direction) for the deeper aggregate + write-conflict findings.
+warm loads are cheaper; the pain is the first host load of un-cached options.
+See willkelly's perf investigation in
+[labs#4141](https://github.com/commontoolsinc/labs/pull/4141) (keyed-collection
+/ runtime-aggregate direction) for the deeper aggregate + write-conflict
+findings.
