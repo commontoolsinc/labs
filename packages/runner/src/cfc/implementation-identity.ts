@@ -47,14 +47,12 @@ export const resolveBuiltinImplementationIdentity = (
  * provenance. Returns undefined when the function has no provenance —
  * fail-closed: no identity, no authorized write.
  *
- * `bundleId` rides on the provenance (stamped at evaluation time) so stored
- * legacy bundleId-only `writeAuthorizedBy` claims keep verifying; it retires
- * together with the bundleId verification arm in prepare.ts. (Claims stamped
- * with a RAW `verifiedLoadId` — the historical miss corner when no bundle id
- * was registered at stamp time — are not served anymore: a load id embeds a
- * session counter, so such a claim could never verify across sessions anyway,
- * and same-session claims written since #4009 carry `moduleIdentity`, which
- * wins arm selection.)
+ * The provenance yields the content-addressed `moduleIdentity` — the sole
+ * `writeAuthorizedBy` verification arm (prepare.ts). The legacy bundleId arm,
+ * and the raw `verifiedLoadId` arm before it, retired with the legacy read
+ * path (identity E5): a load id embedded a session counter, so such claims
+ * could never verify across sessions anyway, and claims written since #4009
+ * carry `moduleIdentity`.
  */
 const resolveProvenanceImplementationIdentity = (
   implementation: HarnessedFunction | undefined,

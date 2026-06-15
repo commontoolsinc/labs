@@ -169,14 +169,16 @@ describe("mergeCfcSchemaEnvelopes", () => {
     expect((merged as JSONSchemaObj).ifc?.confidentiality).toEqual(["secret"]);
   });
 
-  it("merges writeAuthorizedBy claims that differ only by bundle stamp", () => {
+  it("merges writeAuthorizedBy claims that differ only by the identity stamp", () => {
     // Within one transaction the same protected field can be written through
     // two schema inputs: one recorded under a verified identity (its claim is
-    // rebound with the identity's bundleId) and one under no identity (claim
-    // stays unstamped). The binding (file + path) is identical; only the
+    // rebound with the identity's `moduleIdentity`) and one under no identity
+    // (claim stays unstamped). The binding (file + path) is identical; only the
     // provenance stamp differs. The merge must keep the stamped claim rather
     // than reject the commit — the same tolerance prepare's
-    // schemasEqualIgnoringWriterBundleIds applies elsewhere.
+    // schemasEqualIgnoringWriterStamp applies elsewhere (regression:
+    // "writeAuthorizedBy must remain stable at /elements" on every profile
+    // element write, CT-1698).
     const unstamped = {
       __ctWriterIdentityOf: {
         file: "/system/profile-home.tsx",
@@ -187,57 +189,6 @@ describe("mergeCfcSchemaEnvelopes", () => {
       __ctWriterIdentityOf: {
         file: "/system/profile-home.tsx",
         path: ["addElement"],
-        bundleId: "fid1:bundle",
-      },
-    };
-
-    for (
-      const [left, right] of [[stamped, unstamped], [unstamped, stamped]]
-    ) {
-      const merged = mergeCfcSchemaEnvelopes({
-        type: "object",
-        properties: {
-          elements: {
-            type: "array",
-            ifc: { writeAuthorizedBy: left },
-          },
-        },
-      }, {
-        type: "object",
-        properties: {
-          elements: {
-            type: "array",
-            ifc: { writeAuthorizedBy: right },
-          },
-        },
-      });
-
-      expect(
-        (
-          (merged as JSONSchemaObj).properties?.elements as JSONSchemaObj
-        ).ifc?.writeAuthorizedBy,
-      ).toEqual(stamped);
-    }
-  });
-
-  it("merges writeAuthorizedBy claims stamped with bundleId AND moduleIdentity", () => {
-    // New claims carry BOTH provenance fields (implementation-identity.ts):
-    // the stamped side has bundleId + moduleIdentity, the authored side has
-    // neither. The binding (file + path) is identical — the merge must strip
-    // the WHOLE provenance stamp before comparing, not just bundleId
-    // (regression: "writeAuthorizedBy must remain stable at /elements" on
-    // every profile element write, CT-1698).
-    const unstamped = {
-      __ctWriterIdentityOf: {
-        file: "/system/profile-home.tsx",
-        path: ["mutateElements"],
-      },
-    };
-    const stamped = {
-      __ctWriterIdentityOf: {
-        file: "/system/profile-home.tsx",
-        path: ["mutateElements"],
-        bundleId: "fid1:bundle",
         moduleIdentity: "module-identity-hash",
       },
     };
@@ -271,12 +222,12 @@ describe("mergeCfcSchemaEnvelopes", () => {
     }
   });
 
-  it("rejects writeAuthorizedBy claims with conflicting bundle stamps", () => {
-    const claimFor = (bundleId: string) => ({
+  it("rejects writeAuthorizedBy claims with conflicting identity stamps", () => {
+    const claimFor = (moduleIdentity: string) => ({
       __ctWriterIdentityOf: {
         file: "/system/profile-home.tsx",
         path: ["addElement"],
-        bundleId,
+        moduleIdentity,
       },
     });
     expect(() =>

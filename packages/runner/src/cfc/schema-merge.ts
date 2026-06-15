@@ -64,12 +64,13 @@ type WriterIdentityClaim = {
 const isWriterIdentityClaim = (value: unknown): value is WriterIdentityClaim =>
   isRecord(value) && isRecord(value.__ctWriterIdentityOf);
 
-// The per-input provenance fields a verified write stamps onto a
-// writer-identity claim (new claims carry BOTH — see
-// implementation-identity.ts `resolveProvenanceImplementationIdentity`). The
-// BINDING (file + path) is what the claim means; these fields only record
-// which verified load produced the input.
-const WRITER_CLAIM_STAMP_KEYS = ["bundleId", "moduleIdentity"] as const;
+// The per-input provenance field a verified write stamps onto a
+// writer-identity claim — the content-addressed `moduleIdentity` (stamped at
+// evaluation time by prepare's rebind; see implementation-identity.ts
+// `resolveProvenanceImplementationIdentity`). The BINDING (file + path) is
+// what the claim means; this field only records which verified module
+// produced the input.
+const WRITER_CLAIM_STAMP_KEYS = ["moduleIdentity"] as const;
 
 const writerClaimIsStamped = (identity: Record<string, unknown>): boolean =>
   WRITER_CLAIM_STAMP_KEYS.some((key) => identity[key] !== undefined);
@@ -84,10 +85,10 @@ const writerClaimWithoutStamp = (
 
 /**
  * Reconcile two `writeAuthorizedBy` writer-identity claims that differ only
- * by the presence of the provenance stamp (`bundleId`/`moduleIdentity` — one
- * side recorded under a verified identity, the other without one). Returns
- * the stamped claim, or `undefined` when the claims genuinely conflict
- * (different bindings, or two different stamps).
+ * by the presence of the provenance stamp (`moduleIdentity` — one side
+ * recorded under a verified identity, the other without one). Returns the
+ * stamped claim, or `undefined` when the claims genuinely conflict (different
+ * bindings, or two different stamps).
  */
 const reconcileWriterClaimStamp = (
   existing: unknown,

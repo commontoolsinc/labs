@@ -693,7 +693,7 @@ const candidateSchemasByTarget = (
       key,
       existing === undefined
         ? internSchema(candidate)
-        : schemasEqualIgnoringWriterBundleIds(existing, candidate)
+        : schemasEqualIgnoringWriterStamp(existing, candidate)
         ? existing
         : mergeCfcSchemaEnvelopes(existing, candidate), // Guaranteed interned.
     );
@@ -854,9 +854,13 @@ const linkWritesCoverCfcAffectedPaths = (
     })
   );
 
-const stripWriterIdentityBundleIds = (value: unknown): unknown => {
+// Strip the writer-identity provenance stamp (the content-addressed
+// `moduleIdentity`, stamped onto a binding's `{ file, path }` at evaluation
+// time) so schemas compare by BINDING, ignoring which verified module
+// produced the input.
+const stripWriterIdentityStamp = (value: unknown): unknown => {
   if (Array.isArray(value)) {
-    return value.map(stripWriterIdentityBundleIds);
+    return value.map(stripWriterIdentityStamp);
   }
   if (!isRecord(value)) {
     return value;
@@ -864,24 +868,21 @@ const stripWriterIdentityBundleIds = (value: unknown): unknown => {
 
   const next: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
-    if (
-      (key === "bundleId" || key === "moduleIdentity") &&
-      typeof value.file === "string"
-    ) {
+    if (key === "moduleIdentity" && typeof value.file === "string") {
       continue;
     }
-    next[key] = stripWriterIdentityBundleIds(entry);
+    next[key] = stripWriterIdentityStamp(entry);
   }
   return next;
 };
 
-const schemasEqualIgnoringWriterBundleIds = (
+const schemasEqualIgnoringWriterStamp = (
   left: JSONSchema,
   right: JSONSchema,
 ): boolean =>
   deepEqual(
-    stripWriterIdentityBundleIds(left),
-    stripWriterIdentityBundleIds(right),
+    stripWriterIdentityStamp(left),
+    stripWriterIdentityStamp(right),
   );
 
 const storedSchemaCoversCandidateEnvelope = (
@@ -891,7 +892,7 @@ const storedSchemaCoversCandidateEnvelope = (
   if (stored === undefined || candidate === undefined) {
     return false;
   }
-  if (schemasEqualIgnoringWriterBundleIds(stored, candidate)) {
+  if (schemasEqualIgnoringWriterStamp(stored, candidate)) {
     return true;
   }
   if (!isRecord(stored) || !isRecord(candidate)) {
@@ -3192,11 +3193,10 @@ export const prepareBoundaryCommit = (
     } else if (existing !== undefined) {
       try {
         storedSchema = loadSchemaDocument(tx, space, existing.schemaHash);
-        mergedSchema =
-          schemasEqualIgnoringWriterBundleIds(storedSchema, schema) ||
+        mergedSchema = schemasEqualIgnoringWriterStamp(storedSchema, schema) ||
             storedSchemaCoversCandidateEnvelope(storedSchema, schema)
-            ? storedSchema
-            : mergeCfcSchemaEnvelopes(storedSchema, schema);
+          ? storedSchema
+          : mergeCfcSchemaEnvelopes(storedSchema, schema);
       } catch (error) {
         reasons.push(
           error instanceof Error
