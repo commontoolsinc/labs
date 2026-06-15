@@ -718,13 +718,13 @@ describe("default-app flow test", () => {
 
       try {
         await waitFor(async () => {
-          await waitForRuntimeIdle(page);
           const state = await collectNotebookSourceState(page);
           return state.argumentNotesLength === noteCreates &&
             state.noteCount === noteCreates &&
             state.showNewNotePrompt === false &&
             state.usedCreateAnotherNote === false;
         });
+        await waitFor(async () => await waitForRuntimeSynced(page));
       } catch (_) {
         // Keep the final assertions below so failures include diagnostics.
       }
@@ -1539,6 +1539,15 @@ async function waitForRuntimeIdle(page: Page): Promise<boolean> {
   });
 }
 
+async function waitForRuntimeSynced(page: Page): Promise<boolean> {
+  return await page.evaluate(async () => {
+    const rt = globalThis.commonfabric?.rt;
+    if (!rt?.allSynced) return false;
+    await rt.allSynced();
+    return true;
+  });
+}
+
 async function disposeBrowserRuntime(page: Page): Promise<void> {
   await page.evaluate(async () => {
     try {
@@ -1595,14 +1604,12 @@ async function collectNotebookSourceState(page: Page): Promise<{
 }> {
   return await page.evaluate(async () => {
     const api = globalThis.commonfabric as {
-      rt?: { idle?: () => Promise<void> };
       readCell?: (options: {
         id: string;
         path?: string[];
         meta?: "argument" | "internal";
       }) => Promise<unknown>;
     } | undefined;
-    await api?.rt?.idle?.();
 
     const appState = globalThis.app?.serialize?.();
     const view = appState?.view;
