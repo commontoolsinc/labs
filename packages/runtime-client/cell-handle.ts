@@ -41,6 +41,9 @@ export class CellHandle<T = unknown> {
   #conn: InitializedRuntimeConnection;
   #ref: CellRef;
   #value: T | undefined;
+  // PROTOTYPE: highest doc confirmed seq this handle has applied, so a stale
+  // push (seq <= #lastSeq) can be dropped instead of clobbering a newer value.
+  #lastSeq: number | undefined;
   #callbacks = new Map<number, (value: Readonly<T>) => void>();
   #nextCallbackId = 0;
   #schemaWarned = false;
@@ -228,7 +231,15 @@ export class CellHandle<T = unknown> {
       cell: this.ref(),
     });
 
-    this.#value = CellHandle.deserialize<T>(this, response.value) as T;
+    const synced = CellHandle.deserialize<T>(this, response.value) as T;
+    const seq = response.seq;
+    // PROTOTYPE: don't let an older snapshot clobber a newer pushed value.
+    if (
+      seq === undefined || this.#lastSeq === undefined || seq >= this.#lastSeq
+    ) {
+      this.#value = synced;
+      if (seq !== undefined) this.#lastSeq = seq;
+    }
     return this.#value;
   }
 
@@ -312,12 +323,22 @@ export class CellHandle<T = unknown> {
 
   // Called when cell has been updated from the backend with
   // a raw value that may contain CellRefs.
-  [$onCellUpdate](value: unknown): void {
+  [$onCellUpdate](value: unknown, seq?: number): void {
+    // PROTOTYPE: drop a push older than what this handle already holds. This
+    // prevents an in-flight stale push from clobbering a newer (e.g.
+    // optimistic) value when there is no ordering token.
+    if (
+      seq !== undefined && this.#lastSeq !== undefined && seq <= this.#lastSeq
+    ) {
+      return;
+    }
+
     const applied = applyValue(
       value,
       this.#value,
       this as CellHandle<unknown>,
     ) as T;
+    if (seq !== undefined) this.#lastSeq = seq;
     if (valuesEqual(applied, this.#value)) {
       return;
     }
