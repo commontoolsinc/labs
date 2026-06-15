@@ -449,6 +449,48 @@ export async function clickCfButton(
   }
 }
 
+export async function clickCfButtonAndWaitForText(
+  page: Page,
+  buttonSelector: string,
+  textSelector: string,
+  text: string,
+  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
+) {
+  let textProbe: TextProbe | undefined;
+  try {
+    await waitFor(async () => {
+      if (await textIsPresent(page, textSelector, text)) {
+        return true;
+      }
+      try {
+        await clickCfButton(page, buttonSelector, { timeout: 2_000 });
+      } catch {
+        textProbe = await readTextProbe(page, textSelector).catch(() =>
+          undefined
+        );
+        return false;
+      }
+      const updated = await textIsPresent(page, textSelector, text);
+      if (!updated) {
+        textProbe = await readTextProbe(page, textSelector).catch(() =>
+          undefined
+        );
+      }
+      return updated;
+    }, { timeout, delay: 1_000 });
+  } catch (cause) {
+    textProbe ??= await readTextProbe(page, textSelector).catch(() =>
+      undefined
+    );
+    throw new Error(
+      `Timed out clicking "${buttonSelector}" until "${textSelector}" contained "${text}". Last probe: ${
+        toIndentedDebugString(textProbe)
+      }`,
+      { cause },
+    );
+  }
+}
+
 export async function waitForRuntimeSynced(
   page: Page,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},

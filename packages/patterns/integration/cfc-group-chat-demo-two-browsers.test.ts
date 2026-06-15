@@ -118,6 +118,13 @@ describe("cfc group chat demo with two concurrent browser profiles", () => {
     await waitForRuntimeIdle(bob);
     await waitForText(bob, "#trusted-profile-status", "Name not set");
     await waitForText(bob, "#group-chat-manager-chip", "No profile");
+    await waitForText(
+      bob,
+      "#trusted-admin-user-list",
+      "Alice",
+      { timeout: PROPAGATION_TIMEOUT },
+    );
+    await waitForRuntimeIdle(bob);
 
     // Bob saves his own profile. Alice's view must show Bob by his actual
     // name (not an unnamed placeholder), and her own profile must survive.
@@ -136,12 +143,6 @@ describe("cfc group chat demo with two concurrent browser profiles", () => {
       { timeout: PROPAGATION_TIMEOUT },
     );
     await waitForText(alice, "#trusted-profile-status", "Alice");
-    await waitForText(
-      bob,
-      "#trusted-admin-user-list",
-      "Alice",
-      { timeout: PROPAGATION_TIMEOUT },
-    );
 
     // Shared transcript propagates live in both directions, with snapshot
     // author names intact.
