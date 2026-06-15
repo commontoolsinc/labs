@@ -1527,9 +1527,7 @@ export abstract class BaseObjectTraverser {
     selector: SchemaPathSelector,
   ): SchemaPathSelector {
     const schema = selector.schema ?? false;
-    const schemaKey = typeof schema === "boolean"
-      ? String(schema)
-      : hashSchema(schema);
+    const schemaKey = hashSchema(schema);
     const cacheKey = `${selector.path.join("\0")}\0${schemaKey}`;
     const cached = _coverageSelectorCache.get(cacheKey);
     if (cached !== undefined) {
