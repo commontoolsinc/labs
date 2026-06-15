@@ -171,37 +171,19 @@ export function internSchema<T extends JSONSchema>(
 /**
  * Looks up a previously interned schema by its hash. Accepts a
  * `FabricHash` or a plain string. Returns `undefined` if the schema
- * has not been interned or has been garbage-collected. If found, returns either
- * the `schema` or full `SchemaAndHash` depending on the `wantSchemaAndHash`
- * argument.
+ * has not been interned or has been garbage-collected. If found, returns the
+ * corresponding full `SchemaAndHash`.
  */
 export function findInternedSchema(
   hash: FabricHash | string,
-  wantSchemaAndHash?: false,
-): JSONSchema | undefined;
-export function findInternedSchema(
-  hash: FabricHash | string,
-  wantSchemaAndHash: true,
-): SchemaAndHash | undefined;
-export function findInternedSchema(
-  hash: FabricHash | string,
-  wantSchemaAndHash?: boolean,
-): JSONSchema | SchemaAndHash | undefined;
-export function findInternedSchema(
-  hash: FabricHash | string,
-  wantSchemaAndHash: boolean = false,
-): JSONSchema | SchemaAndHash | undefined {
+): SchemaAndHash | undefined {
   const hashStr = typeof hash === "string" ? hash : hash.toString();
 
   const refOrBoolean = hashToRef.get(hashStr);
 
   switch (typeof refOrBoolean) {
     case "boolean": {
-      if (wantSchemaAndHash) {
-        return refOrBoolean ? booleanInterns.true : booleanInterns.false;
-      } else {
-        return refOrBoolean;
-      }
+      return refOrBoolean ? booleanInterns.true : booleanInterns.false;
     }
 
     case "undefined": {
@@ -222,8 +204,10 @@ export function findInternedSchema(
         return undefined;
       }
 
-      const resultSah = schemaToSah.get(schema)!;
-      return wantSchemaAndHash ? resultSah : resultSah.schema;
+      // The `!` below is valid because we know that `schemaToSah` definitely
+      // has a mapping for `schema`. Otherwise, we wouldn't have found a
+      // `refOrBoolean` to look up.
+      return schemaToSah.get(schema)!;
     }
 
     default: {

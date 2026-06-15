@@ -218,75 +218,59 @@ describe("schema-hash dispatch", () => {
   });
 
   describe("findInternedSchema()", () => {
-    it("defaults to `wantSchemaAndHash = false`", () => {
-      const hash = internSchema({}, true).hash;
+    const callFind = (hash: FabricHash | string) => {
       const result = findInternedSchema(hash);
-      expect(result).not.toBe(undefined);
-      expect(result).not.toBeInstanceOf(SchemaAndHash);
+
+      if (result !== undefined) {
+        expect(result).toBeInstanceOf(SchemaAndHash);
+        expect(result.hash).toBeInstanceOf(FabricHash);
+      }
+
+      return result;
+    };
+
+    const expectSame = (
+      got: SchemaAndHash | undefined,
+      expectedSah: SchemaAndHash,
+    ) => {
+      expect(got).toBe(expectedSah);
+    };
+
+    it("finds a previously interned schema by FabricHash", () => {
+      const sah = internSchema(
+        { type: "array", items: { type: "string" } },
+        true,
+      );
+      const found = callFind(sah.hash);
+      expect(found).toBe(sah);
     });
 
-    for (const wantSah of [false, true]) {
-      const callFind = (hash: FabricHash | string) => {
-        const result = findInternedSchema(hash, wantSah);
+    it("finds a previously interned schema by hash string", () => {
+      const sah = internSchema(
+        {
+          type: "object",
+          properties: { z: { type: "boolean" } },
+        },
+        true,
+      );
+      const found = callFind(sah.taggedHashString);
+      expect(found).toBe(sah);
+    });
 
-        if (wantSah && (result !== undefined)) {
-          const resultSah = result as SchemaAndHash;
-          expect(resultSah).toBeInstanceOf(SchemaAndHash);
-          expect(resultSah.hash).toBeInstanceOf(FabricHash);
-        }
+    it("returns `undefined` for unknown hash", () => {
+      const unknown = new FabricHash(new Uint8Array(32), "fid1");
+      const found = callFind(unknown);
+      expect(found).toBe(undefined);
+    });
 
-        return result;
-      };
-
-      const expectSame = (
-        got: JSONSchema | SchemaAndHash | undefined,
-        expectedSah: SchemaAndHash,
-      ) => {
-        if (wantSah) {
-          expect(got).toBe(expectedSah);
-        } else {
-          expect(got).toBe(expectedSah.schema);
-        }
-      };
-
-      describe(`with \`wantSchemaAndHash = ${wantSah}\``, () => {
-        it("finds a previously interned schema by FabricHash", () => {
-          const sah = internSchema(
-            { type: "array", items: { type: "string" } },
-            true,
-          );
-          const found = callFind(sah.hash);
-          expectSame(found, sah);
-        });
-
-        it("finds a previously interned schema by hash string", () => {
-          const sah = internSchema(
-            {
-              type: "object",
-              properties: { z: { type: "boolean" } },
-            },
-            true,
-          );
-          const found = callFind(sah.taggedHashString);
-          expectSame(found, sah);
-        });
-
-        it("returns `undefined` for unknown hash", () => {
-          const unknown = new FabricHash(new Uint8Array(32), "fid1");
-          const found = callFind(unknown);
-          expect(found).toBe(undefined);
-        });
-
-        it("finds interned boolean schemas", () => {
-          const sahTrue = internSchema(true, true);
-          const sahFalse = internSchema(false, true);
-          const foundTrue = callFind(sahTrue.hash);
-          const foundFalse = callFind(sahFalse.hash);
-          expectSame(foundTrue, sahTrue);
-          expectSame(foundFalse, sahFalse);
-        });
-      });
-    }
+    it("finds interned boolean schemas", () => {
+      const sahTrue = internSchema(true, true);
+      const sahFalse = internSchema(false, true);
+      const foundTrue = callFind(sahTrue.hash);
+      const foundFalse = callFind(sahFalse.hash);
+      expect(foundTrue).toBe(sahTrue);
+      expect(foundFalse).toBe(sahFalse);
+    });
   });
 
   describe("internSchemaAsTaggedHashString()", () => {
