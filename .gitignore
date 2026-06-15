@@ -21,6 +21,7 @@ dist/
 .cf-harness-artifacts/
 claude-research.key
 *.key
+*.pem
 .passphrase
 *passphrase*
 .page-agent-config.json
