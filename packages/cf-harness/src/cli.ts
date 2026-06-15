@@ -122,6 +122,7 @@ const CLI_STRING_FLAGS = [
   "cfc-result-dir",
   "cfc-invocation-context-dir",
   "sandbox-image",
+  "sandbox-docker-runtime",
   "max-model-turns",
   "fabric-mount",
   "host-mount",
@@ -185,6 +186,7 @@ export interface CfHarnessCliConfig {
   apiKey?: string;
   apiKeySource?: "CF_HARNESS_API_KEY" | "OPENAI_API_KEY";
   sandboxImage?: string;
+  sandboxDockerRuntime?: string;
   fabricMount?: string;
   hostMounts: readonly CfHarnessHostMountConfig[];
 }
@@ -359,6 +361,7 @@ Options:
   --cfc-result-dir <path>       Host dir where runsc writes the CFC result sidecar (required for enforce-* modes)
   --cfc-invocation-context-dir <path> Host dir where the harness writes the CFC invocation-context sidecar (required for enforce-* modes)
   --sandbox-image <image>       Docker image for the runsc-cfc sandbox (default: ${DEFAULT_DOCKER_RUNSC_IMAGE})
+  --sandbox-docker-runtime <n>  Docker runtime for the sandbox (default: runsc-cfc)
   --fabric-mount <path>         Host path for a Fabric FUSE mount (mounted at /fabric in the sandbox)
   --host-mount <spec>           Extra host bind mount (repeatable: name=<id>,source=<host>,target=<sandbox>,mode=readonly|writable)
   --max-model-turns <n>         Maximum model turns before aborting
@@ -369,8 +372,12 @@ Options:
 Environment:
   CF_HARNESS_API_KEY            Preferred API key for the OpenAI-compatible gateway
   OPENAI_API_KEY                Fallback API key if CF_HARNESS_API_KEY is unset
+  CF_HARNESS_GATEWAY_BASE_URL   Default value for --gateway-base-url
+  CF_HARNESS_GATEWAY_AUTH_MODE  Default value for --gateway-auth-mode
+  CF_HARNESS_MODEL              Default value for --model (ignored on --resume-run)
   CF_HARNESS_DOCKER_NETWORK_MODE none | bridge | host (default: bridge)
   CF_HARNESS_SANDBOX_IMAGE      Default value for --sandbox-image
+  CF_HARNESS_SANDBOX_DOCKER_RUNTIME Default value for --sandbox-docker-runtime
   ${CFC_RESULT_DIR_ENV} Fallback for --cfc-result-dir
   ${CFC_INVOCATION_CONTEXT_DIR_ENV} Fallback for --cfc-invocation-context-dir
 `;
@@ -1172,18 +1179,39 @@ export const parseCfHarnessCliArgs = async (
   const runManifestPath = typeof args["run-manifest"] === "string"
     ? resolve(cwd, args["run-manifest"])
     : undefined;
+  const env = deps.env ??
+    {
+      CF_HARNESS_API_KEY: Deno.env.get("CF_HARNESS_API_KEY"),
+      OPENAI_API_KEY: Deno.env.get("OPENAI_API_KEY"),
+      CF_HARNESS_GATEWAY_BASE_URL: Deno.env.get("CF_HARNESS_GATEWAY_BASE_URL"),
+      CF_HARNESS_GATEWAY_AUTH_MODE: Deno.env.get(
+        "CF_HARNESS_GATEWAY_AUTH_MODE",
+      ),
+      CF_HARNESS_MODEL: Deno.env.get("CF_HARNESS_MODEL"),
+      CF_HARNESS_CFC_ENFORCEMENT_MODE: Deno.env.get(
+        "CF_HARNESS_CFC_ENFORCEMENT_MODE",
+      ),
+      CF_CFC_MODE: Deno.env.get("CF_CFC_MODE"),
+      CF_HARNESS_SANDBOX_IMAGE: Deno.env.get("CF_HARNESS_SANDBOX_IMAGE"),
+      CF_HARNESS_SANDBOX_DOCKER_RUNTIME: Deno.env.get(
+        "CF_HARNESS_SANDBOX_DOCKER_RUNTIME",
+      ),
+      [CFC_RESULT_DIR_ENV]: Deno.env.get(CFC_RESULT_DIR_ENV),
+      [CFC_INVOCATION_CONTEXT_DIR_ENV]: Deno.env.get(
+        CFC_INVOCATION_CONTEXT_DIR_ENV,
+      ),
+    };
   const gatewayBaseUrl = typeof args["gateway-base-url"] === "string"
     ? args["gateway-base-url"]
-    : DEFAULT_GATEWAY_BASE_URL;
+    : nonEmptyEnvValue(env.CF_HARNESS_GATEWAY_BASE_URL) ??
+      DEFAULT_GATEWAY_BASE_URL;
+  const rawGatewayAuthMode = typeof args["gateway-auth-mode"] === "string"
+    ? args["gateway-auth-mode"]
+    : nonEmptyEnvValue(env.CF_HARNESS_GATEWAY_AUTH_MODE);
   const parsedGatewayAuthMode = parseHarnessGatewayAuthMode(
-    typeof args["gateway-auth-mode"] === "string"
-      ? args["gateway-auth-mode"]
-      : undefined,
+    rawGatewayAuthMode,
   );
-  if (
-    args["gateway-auth-mode"] !== undefined &&
-    parsedGatewayAuthMode === undefined
-  ) {
+  if (rawGatewayAuthMode !== undefined && parsedGatewayAuthMode === undefined) {
     throw new Error("gateway auth mode must be one of bearer, none");
   }
   const gatewayAuthMode = parsedGatewayAuthMode ?? "bearer";
@@ -1210,20 +1238,6 @@ export const parseCfHarnessCliArgs = async (
       });
     }),
   );
-  const env = deps.env ??
-    {
-      CF_HARNESS_API_KEY: Deno.env.get("CF_HARNESS_API_KEY"),
-      OPENAI_API_KEY: Deno.env.get("OPENAI_API_KEY"),
-      CF_HARNESS_CFC_ENFORCEMENT_MODE: Deno.env.get(
-        "CF_HARNESS_CFC_ENFORCEMENT_MODE",
-      ),
-      CF_CFC_MODE: Deno.env.get("CF_CFC_MODE"),
-      CF_HARNESS_SANDBOX_IMAGE: Deno.env.get("CF_HARNESS_SANDBOX_IMAGE"),
-      [CFC_RESULT_DIR_ENV]: Deno.env.get(CFC_RESULT_DIR_ENV),
-      [CFC_INVOCATION_CONTEXT_DIR_ENV]: Deno.env.get(
-        CFC_INVOCATION_CONTEXT_DIR_ENV,
-      ),
-    };
   const rawSandboxImage = typeof args["sandbox-image"] === "string"
     ? args["sandbox-image"].trim()
     : undefined;
@@ -1232,6 +1246,17 @@ export const parseCfHarnessCliArgs = async (
   }
   const sandboxImage = rawSandboxImage ??
     nonEmptyEnvValue(env.CF_HARNESS_SANDBOX_IMAGE);
+  const rawSandboxDockerRuntime =
+    typeof args["sandbox-docker-runtime"] === "string"
+      ? args["sandbox-docker-runtime"].trim()
+      : undefined;
+  if (rawSandboxDockerRuntime !== undefined && rawSandboxDockerRuntime === "") {
+    throw new Error(
+      "--sandbox-docker-runtime requires a non-empty runtime name",
+    );
+  }
+  const sandboxDockerRuntime = rawSandboxDockerRuntime ??
+    nonEmptyEnvValue(env.CF_HARNESS_SANDBOX_DOCKER_RUNTIME);
   const explicitCfcMode = typeof args["cfc-enforcement-mode"] === "string"
     ? args["cfc-enforcement-mode"]
     : undefined;
@@ -1299,7 +1324,7 @@ export const parseCfHarnessCliArgs = async (
     ...(typeof args.model === "string"
       ? { model: args.model }
       : resumeRun === undefined
-      ? { model: DEFAULT_MODEL }
+      ? { model: nonEmptyEnvValue(env.CF_HARNESS_MODEL) ?? DEFAULT_MODEL }
       : {}),
     gatewayBaseUrl,
     gatewayAuthMode,
@@ -1325,6 +1350,7 @@ export const parseCfHarnessCliArgs = async (
     ...(apiKey !== undefined ? { apiKey } : {}),
     ...(apiKeySource !== undefined ? { apiKeySource } : {}),
     ...(sandboxImage !== undefined ? { sandboxImage } : {}),
+    ...(sandboxDockerRuntime !== undefined ? { sandboxDockerRuntime } : {}),
     ...(fabricMount !== undefined ? { fabricMount } : {}),
     hostMounts,
   };
@@ -1930,6 +1956,9 @@ export const runCfHarnessCli = async (
         ...(parsed.sandboxImage !== undefined
           ? { sandboxImage: parsed.sandboxImage }
           : {}),
+        ...(parsed.sandboxDockerRuntime !== undefined
+          ? { sandboxDockerRuntime: parsed.sandboxDockerRuntime }
+          : {}),
         ...(parsed.cfcResultDir !== undefined
           ? { cfcResultDir: parsed.cfcResultDir }
           : {}),
@@ -2008,6 +2037,9 @@ export const runCfHarnessCli = async (
         artifactRoot: parsed.artifactRoot,
         ...(parsed.sandboxImage !== undefined
           ? { sandboxImage: parsed.sandboxImage }
+          : {}),
+        ...(parsed.sandboxDockerRuntime !== undefined
+          ? { sandboxDockerRuntime: parsed.sandboxDockerRuntime }
           : {}),
         ...(parsed.cfcResultDir !== undefined
           ? { cfcResultDir: parsed.cfcResultDir }
