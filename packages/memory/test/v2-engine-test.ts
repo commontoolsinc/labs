@@ -57,8 +57,9 @@ const authorization = {
   access: { "proof:1": {} },
 };
 
-const decodeStored = <Value extends FabricValue>(source: string | null | undefined): Value =>
-  decodeMemoryBoundary<Value>(source ?? "null");
+const decodeStored = <Value extends FabricValue>(
+  source: string | null | undefined,
+): Value => decodeMemoryBoundary<Value>(source ?? "null");
 
 const toSourceLink = (id: string) => ({ "/": id } as const);
 
