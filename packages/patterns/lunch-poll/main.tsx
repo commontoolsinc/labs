@@ -434,28 +434,38 @@ const joinAs = handler<JoinEvent, {
   users: UsersCell;
   myName: NameCell;
   adminName: NameCell;
+  joinName: NameCell;
   profileName: string;
   profileAvatar: string;
-}>(({ name }, { users, myName, adminName, profileName, profileAvatar }) => {
-  const override = trimmedName(name);
-  const trimmed = override || trimmedName(profileName);
-  if (!trimmed) return;
-  const current = trimmedName(myName.get());
-  if (current) return;
-  const existing = users.get();
-  if (existing.some((u) => u.name === trimmed)) return;
-  const user: User = {
-    name: trimmed,
-    avatar: override ? "" : (profileAvatar ?? "").trim(),
-    color: colorForIndex(existing.length),
-    joinedAt: safeDateNow(),
-  };
-  users.push(user);
-  myName.set(trimmed);
-  if (trimmedName(adminName.get()) === "") {
-    adminName.set(trimmed);
-  }
-});
+}>(
+  (
+    { name },
+    { users, myName, adminName, joinName, profileName, profileAvatar },
+  ) => {
+    // Name priority: an explicit event `name` (tests/headless) wins, then the
+    // free-text join field, then the viewer's shared profile name as a graceful
+    // fallback for anyone who already made a profile and didn't type anything.
+    const override = trimmedName(name) || trimmedName(joinName.get());
+    const trimmed = override || trimmedName(profileName);
+    if (!trimmed) return;
+    const current = trimmedName(myName.get());
+    if (current) return;
+    const existing = users.get();
+    if (existing.some((u) => u.name === trimmed)) return;
+    const user: User = {
+      name: trimmed,
+      avatar: override ? "" : (profileAvatar ?? "").trim(),
+      color: colorForIndex(existing.length),
+      joinedAt: safeDateNow(),
+    };
+    users.push(user);
+    myName.set(trimmed);
+    if (trimmedName(adminName.get()) === "") {
+      adminName.set(trimmed);
+    }
+    joinName.set("");
+  },
+);
 
 // Open host takeover: any joined participant can claim the host role, which
 // transfers it away from the current host (isAdmin is derived from this). This
@@ -948,6 +958,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // not exposed as pattern inputs. Uses the scoped-constructor idiom
     // introduced by parking-coordinator (PR #3610).
     const optionDraft = Writable.perSession.of<string>("");
+    // Free-text join name draft (this variant joins by typing a name instead of
+    // going through the shared-profile wish flow).
+    const joinName = Writable.perSession.of<string>("");
     // Host's draft for the poll's city (scopes the menu web search).
     const cityDraft = Writable.perSession.of<string>("");
     // Which option's homepage link is being edited (null = none), plus the
@@ -969,29 +982,21 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // Shared marker that retriggers the host's reactive homepage lookup nodes.
     // Missing homepage links are also looked up on first host load.
     const homePageRefresh = Writable.perSpace.of<number>(0);
-    // Resolve THIS viewer's shared profile. The `#profile` wish's built-in UI
-    // covers the whole lifecycle: a create surface when the viewer has no
-    // profile, a link when they have one, and a picker (with inline create)
-    // when they have several. The field targets give the snapshot strings.
-    const profileWish = wish<{ name?: string; avatar?: string }>({
-      query: "#profile",
-    });
+    // This variant joins via a free-text name field (below), so the profile
+    // wish is no longer the join gate. We still resolve the viewer's shared
+    // profile name/avatar as a graceful fallback: anyone who already created a
+    // profile can join with one click (no typing) and keep their avatar.
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
 
     const profileName = computed(() => profileNameWish.result ?? "");
     const profileAvatar = computed(() => profileAvatarWish.result ?? "");
-    const hasProfile = computed(() =>
-      (profileNameWish.result ?? "").trim() !== ""
-    );
-    const joinLabel = computed(() =>
-      hasProfile ? `Join as ${profileName}` : "Create a profile to join"
-    );
 
     const boundJoin = joinAs({
       users,
       myName,
       adminName,
+      joinName,
       profileName,
       profileAvatar,
     });
@@ -1320,21 +1325,23 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     <div
                       style={{
                         display: "flex",
-                        flexDirection: "column",
                         gap: "8px",
+                        alignItems: "center",
                       }}
                     >
                       {
-                        /* Built-in profile UI: create a profile when there is
-                          none, pick between existing profiles otherwise. */
+                        /* Free-text join: type a name and join. No profile
+                          required — anyone with a shared profile can still join
+                          by leaving this blank (joinAs falls back to it). */
                       }
-                      <div>{profileWish[UI]}</div>
-                      <cf-button
-                        onClick={boundJoin}
-                        disabled={computed(() => !hasProfile)}
-                      >
-                        {joinLabel}
-                      </cf-button>
+                      <cf-input
+                        $value={joinName}
+                        placeholder="Your name…"
+                        aria-label="Your name"
+                        timing-strategy="immediate"
+                        style="flex:1"
+                      />
+                      <cf-button onClick={boundJoin}>Join</cf-button>
                     </div>
                   </div>
                 )}
