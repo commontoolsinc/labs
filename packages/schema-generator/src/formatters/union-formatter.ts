@@ -276,6 +276,13 @@ export class UnionFormatter implements TypeFormatter {
     // split the real array's schema into anyOf branches, dropping
     // per-element capabilities like asCell:["comparable"] from the
     // consumer's view. Collapse them into the real member.
+    //
+    // Safety: dropping the `[]`/`never[]` arm never narrows the accepted set
+    // because ArrayFormatter emits array/tuple schemas with no length bound
+    // (no minItems/prefixItems) — so `[]` is always a valid instance of the
+    // surviving real member, and a recovered `default: []` validates against
+    // it. If array length constraints are ever emitted, gate this pruning to
+    // the expanded-empty-default shape before relying on it.
     const hasRealArray = rest.some((m) =>
       (checker.isArrayType(m) || checker.isTupleType(m)) &&
       !this.isEmptyArrayType(m, checker)
