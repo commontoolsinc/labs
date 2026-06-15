@@ -17,7 +17,12 @@ import type { CFTabPanel } from "../cf-tab-panel/cf-tab-panel.ts";
  *
  * @slot - Default slot for cf-tab-list and cf-tab-panel elements
  *
- * @fires cf-change - Fired when selected tab changes with detail: { value, oldValue }
+ * @fires cf-change - Fired ONLY for user-initiated tab changes (click or
+ *   keyboard navigation), with detail: { value, oldValue }. It is intentionally
+ *   NOT fired for programmatic / cell-driven changes to the bound value — a
+ *   bound $value cell updated elsewhere syncs the selection visually without
+ *   re-emitting cf-change. This lets a consumer write the bound cell from an
+ *   oncf-change handler without forming a feedback loop.
  *
  * @example Plain string value
  * <cf-tabs value="tab1">
@@ -105,15 +110,22 @@ export class CFTabs extends BaseElement {
   /* ---------- Cell controller for value binding ---------- */
   private _cellController = createStringCellController(this, {
     timing: { strategy: "immediate" }, // Tab changes should be immediate
-    onChange: (newValue: string, oldValue: string) => {
-      // Track this internal change so render() doesn't double-update
+    onChange: (newValue: string, _oldValue: string) => {
+      // This callback fires for BOTH user-initiated writes (via setValue from a
+      // tab click / keyboard nav) and cell-driven/programmatic changes (the
+      // CellHandle subscription firing when the bound cell changes elsewhere).
+      //
+      // We must NOT emit "cf-change" here. Emitting on every cell change makes
+      // cf-change indistinguishable from a user gesture, so any oncf-change
+      // handler that writes the bound cell forms an unbreakable feedback loop
+      // (cell write -> onChange -> cf-change -> handler -> cell write -> ...),
+      // which the scheduler aborts as "Too many iterations" (CT-1745, CT-1746).
+      //
+      // "cf-change" is emitted only from the user-gesture paths
+      // (handleTabClick / handleKeydown via emitUserChange). Here we just keep
+      // the visual selection in sync with the cell.
       this._lastKnownValue = newValue;
-
-      // Update tab/panel selection when cell value changes
       this.updateTabSelection();
-
-      // Emit change event
-      this.emit("cf-change", { value: newValue, oldValue });
     },
   });
 
@@ -310,12 +322,29 @@ export class CFTabs extends BaseElement {
       const currentValue = this._cellController.getValue();
 
       if (currentValue !== tab.value) {
-        // Use cell controller to set value - this handles both Cell and plain values
-        // and triggers onChange callback which emits cf-change event
-        this._cellController.setValue(tab.value);
+        // User-initiated change: write the value through to the bound cell
+        // (this propagates to a pattern Writable on the $value binding) and
+        // emit cf-change. Emitting here — only on the user-gesture path —
+        // rather than from the controller's onChange is what prevents the
+        // cell-echo feedback loop (see _cellController.onChange above).
+        this.emitUserChange(tab.value, currentValue);
       }
     }
   };
+
+  /**
+   * Apply a user-initiated tab selection: write the value to the bound cell
+   * and emit exactly one cf-change event. This is the ONLY place cf-change is
+   * emitted, so cf-change always corresponds to a genuine user gesture and
+   * never to a cell-driven/programmatic update.
+   */
+  private emitUserChange(newValue: string, oldValue: string): void {
+    // Write through to the bound cell/pattern Writable. This is the load-bearing
+    // propagation that lets a consumer bind $value alone (no oncf-change) and
+    // still have the selection switch on click.
+    this._cellController.setValue(newValue);
+    this.emit("cf-change", { value: newValue, oldValue });
+  }
 
   private handleKeydown = (event: KeyboardEvent): void => {
     // Only handle keyboard navigation when focus is on a tab
