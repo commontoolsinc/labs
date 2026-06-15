@@ -17,14 +17,22 @@ import { hashStringOf } from "@/value-hash.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { toDeepFrozenSchema } from "@/schema-utils.ts";
 
-describe("schema-hash dispatch", () => {
+describe("schema-hash", () => {
   describe("hashSchema()", () => {
     it("returns a string", () => {
       const result = hashSchema({ type: "number" });
       expect(typeof result).toBe("string");
     });
 
-    it("agrees with general `hashStringOf()`", () => {
+    it("agrees with `hashStringOf()` on primitives", () => {
+      for (const v of [false, true, undefined]) {
+        const result1 = hashSchema(v);
+        const result2 = hashStringOf(v);
+        expect(result1).toBe(result2);
+      }
+    });
+
+    it("agrees with `hashStringOf()` on plain objects", () => {
       const result1 = hashSchema({ type: "number", title: "Yes!" });
       const result2 = hashStringOf({ type: "number", title: "Yes!" });
       expect(result1).toBe(result2);
