@@ -5,15 +5,13 @@
  * ```typescript
  * import { AirtableClient } from "./util/airtable-client.ts";
  *
- * const client = new AirtableClient(authCell, { debugMode: true });
+ * const client = AirtableClient(authCell, { debugMode: true });
  * const bases = await client.listBases();
  * const tables = await client.listTables(baseId);
  * const records = await client.listRecords(baseId, tableId);
  * ```
  */
 import { getPatternEnvironment, Writable } from "commonfabric";
-
-const env = getPatternEnvironment();
 
 import type { AirtableAuth as AirtableAuthType } from "../airtable-auth.tsx";
 
@@ -83,40 +81,41 @@ function debugLog(debugMode: boolean, ...args: unknown[]) {
 const AIRTABLE_API_BASE = "https://api.airtable.com/v0";
 const AIRTABLE_META_BASE = "https://api.airtable.com/v0/meta";
 
-export class AirtableClient {
-  private authCell: Writable<AirtableAuthType>;
-  private retries: number;
-  private delay: number;
-  private debugMode: boolean;
-  private onRefresh?: () => Promise<void>;
+export interface AirtableClient {
+  listBases(): Promise<AirtableBase[]>;
+  listTables(baseId: string): Promise<AirtableTable[]>;
+  listRecords(
+    baseId: string,
+    tableIdOrName: string,
+    options?: ListRecordsOptions,
+  ): Promise<AirtableRecord[]>;
+}
 
-  constructor(
-    authCell: Writable<AirtableAuthType>,
-    config: AirtableClientConfig = {},
-  ) {
-    this.authCell = authCell;
-    this.retries = config.retries ?? 2;
-    this.delay = config.delay ?? 1000;
-    this.debugMode = config.debugMode ?? false;
-    this.onRefresh = config.onRefresh;
-  }
+export function AirtableClient(
+  authCell: Writable<AirtableAuthType>,
+  config: AirtableClientConfig = {},
+): AirtableClient {
+  const retries = config.retries ?? 2;
+  const delay = config.delay ?? 1000;
+  const debugMode = config.debugMode ?? false;
+  const onRefresh = config.onRefresh;
 
-  private getToken(): string {
-    const auth = this.authCell.get();
+  function getToken(): string {
+    const auth = authCell.get();
     return auth?.accessToken || "";
   }
 
   /**
    * Make an authenticated API request with retry and token refresh.
    */
-  private async request<T>(
+  async function request<T>(
     url: string,
     options: RequestInit = {},
   ): Promise<T> {
     let lastError: Error | null = null;
 
-    for (let attempt = 0; attempt <= this.retries; attempt++) {
-      const token = this.getToken();
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const token = getToken();
       if (!token) {
         throw new Error("No access token available");
       }
@@ -132,19 +131,17 @@ export class AirtableClient {
         });
 
         if (response.status === 401) {
-          debugLog(this.debugMode, "Got 401, attempting token refresh...");
-          await this.refreshToken();
+          debugLog(debugMode, "Got 401, attempting token refresh...");
+          await refreshToken();
           continue;
         }
 
         if (response.status === 429) {
           const retryAfter = response.headers.get("Retry-After");
           const parsed = retryAfter ? parseInt(retryAfter, 10) : NaN;
-          const waitMs = !isNaN(parsed)
-            ? parsed * 1000
-            : this.delay * (attempt + 1);
+          const waitMs = !isNaN(parsed) ? parsed * 1000 : delay * (attempt + 1);
           debugLog(
-            this.debugMode,
+            debugMode,
             `Rate limited, waiting ${waitMs}ms...`,
           );
           await sleep(waitMs);
@@ -161,13 +158,13 @@ export class AirtableClient {
         return (await response.json()) as T;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        if (attempt < this.retries) {
+        if (attempt < retries) {
           debugLog(
-            this.debugMode,
-            `Request failed (attempt ${attempt + 1}/${this.retries + 1}):`,
+            debugMode,
+            `Request failed (attempt ${attempt + 1}/${retries + 1}):`,
             lastError.message,
           );
-          await sleep(this.delay);
+          await sleep(delay);
         }
       }
     }
@@ -178,18 +175,19 @@ export class AirtableClient {
   /**
    * Refresh the access token via the server endpoint.
    */
-  private async refreshToken(): Promise<void> {
-    if (this.onRefresh) {
-      await this.onRefresh();
+  async function refreshToken(): Promise<void> {
+    if (onRefresh) {
+      await onRefresh();
       return;
     }
 
-    const auth = this.authCell.get();
+    const auth = authCell.get();
     const refreshToken = auth?.refreshToken;
     if (!refreshToken) {
       throw new Error("No refresh token available");
     }
 
+    const env = getPatternEnvironment();
     const res = await fetch(
       new URL("/api/integrations/airtable-oauth/refresh", env.apiUrl),
       {
@@ -208,12 +206,12 @@ export class AirtableClient {
       throw new Error("Invalid refresh response");
     }
 
-    this.authCell.update({
+    authCell.update({
       ...json.tokenInfo,
       user: auth.user,
     });
 
-    debugLog(this.debugMode, "Token refreshed successfully");
+    debugLog(debugMode, "Token refreshed successfully");
   }
 
   // ==========================================================================
@@ -223,8 +221,8 @@ export class AirtableClient {
   /**
    * List all accessible bases.
    */
-  async listBases(): Promise<AirtableBase[]> {
-    debugLog(this.debugMode, "Listing bases...");
+  async function listBases(): Promise<AirtableBase[]> {
+    debugLog(debugMode, "Listing bases...");
 
     const bases: AirtableBase[] = [];
     let offset: string | undefined;
@@ -233,7 +231,7 @@ export class AirtableClient {
       const url = new URL(`${AIRTABLE_META_BASE}/bases`);
       if (offset) url.searchParams.set("offset", offset);
 
-      const response = await this.request<{
+      const response = await request<{
         bases: AirtableBase[];
         offset?: string;
       }>(url.toString());
@@ -242,34 +240,36 @@ export class AirtableClient {
       offset = response.offset;
     } while (offset);
 
-    debugLog(this.debugMode, `Found ${bases.length} bases`);
+    debugLog(debugMode, `Found ${bases.length} bases`);
     return bases;
   }
 
   /**
    * List all tables in a base.
    */
-  async listTables(baseId: string): Promise<AirtableTable[]> {
-    debugLog(this.debugMode, `Listing tables for base ${baseId}...`);
+  async function listTables(
+    baseId: string,
+  ): Promise<AirtableTable[]> {
+    debugLog(debugMode, `Listing tables for base ${baseId}...`);
 
-    const response = await this.request<{ tables: AirtableTable[] }>(
+    const response = await request<{ tables: AirtableTable[] }>(
       `${AIRTABLE_META_BASE}/bases/${baseId}/tables`,
     );
 
-    debugLog(this.debugMode, `Found ${response.tables.length} tables`);
+    debugLog(debugMode, `Found ${response.tables.length} tables`);
     return response.tables;
   }
 
   /**
    * List records from a table with pagination.
    */
-  async listRecords(
+  async function listRecords(
     baseId: string,
     tableIdOrName: string,
     options: ListRecordsOptions = {},
   ): Promise<AirtableRecord[]> {
     debugLog(
-      this.debugMode,
+      debugMode,
       `Listing records from ${baseId}/${tableIdOrName}...`,
     );
 
@@ -310,7 +310,7 @@ export class AirtableClient {
         }
       }
 
-      const response = await this.request<{
+      const response = await request<{
         records: AirtableRecord[];
         offset?: string;
       }>(url.toString());
@@ -324,7 +324,9 @@ export class AirtableClient {
     } while (offset);
 
     const result = records.slice(0, maxRecords);
-    debugLog(this.debugMode, `Fetched ${result.length} records`);
+    debugLog(debugMode, `Fetched ${result.length} records`);
     return result;
   }
+
+  return { listBases, listTables, listRecords };
 }

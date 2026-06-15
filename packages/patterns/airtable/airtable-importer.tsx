@@ -72,7 +72,7 @@ const fetchBases = handler<
   loading.set(true);
   error.set("");
   try {
-    const client = new AirtableClient(auth);
+    const client = AirtableClient(auth);
     const result = await client.listBases();
     bases.set(result.map((b) => ({ id: b.id, name: b.name })));
   } catch (e) {
@@ -96,7 +96,7 @@ const fetchTables = handler<
   loading.set(true);
   error.set("");
   try {
-    const client = new AirtableClient(auth);
+    const client = AirtableClient(auth);
     const result = await client.listTables(baseId);
     tables.set(result.map((t) => ({ id: t.id, name: t.name })));
   } catch (e) {
@@ -121,7 +121,7 @@ const fetchRecords = handler<
   loading.set(true);
   error.set("");
   try {
-    const client = new AirtableClient(auth);
+    const client = AirtableClient(auth);
     const result = await client.listRecords(baseId, tableId, {
       maxRecords: 500,
     });
