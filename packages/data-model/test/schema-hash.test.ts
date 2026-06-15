@@ -68,7 +68,10 @@ describe("schema-hash", () => {
     });
 
     for (const wantSah of [false, true]) {
-      const callIntern = (schema: JSONSchema | undefined, fullResult = false) => {
+      const callIntern = (
+        schema: JSONSchema | undefined,
+        fullResult = false,
+      ) => {
         const result = internSchema(schema, wantSah);
 
         if (wantSah) {
