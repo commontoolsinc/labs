@@ -1,4 +1,4 @@
-import { isDeno } from "@commonfabric/utils/env";
+import { createAsyncLocalStore } from "@commonfabric/utils/async-local-store";
 import { getTopFrame } from "./pattern.ts";
 
 /**
@@ -25,43 +25,7 @@ import { getTopFrame } from "./pattern.ts";
  * mints — including under the non-Deno fallback store, whose window
  * conservatively spans the whole pending action promise.
  */
-interface ActionWindowStore {
-  getStore(): true | undefined;
-  run<R>(value: true, fn: () => R): R;
-}
-
-class FallbackActionWindowStore implements ActionWindowStore {
-  #store: true | undefined;
-
-  getStore(): true | undefined {
-    return this.#store;
-  }
-
-  run<R>(value: true, fn: () => R): R {
-    const previous = this.#store;
-    this.#store = value;
-    try {
-      const result = fn();
-      if (result instanceof Promise) {
-        return result.finally(() => {
-          this.#store = previous;
-        }) as R;
-      }
-      this.#store = previous;
-      return result;
-    } catch (error) {
-      this.#store = previous;
-      throw error;
-    }
-  }
-}
-
-const ActionWindowStorage = isDeno()
-  ? (await import("node:async_hooks"))
-    .AsyncLocalStorage as new () => ActionWindowStore
-  : FallbackActionWindowStore;
-
-const actionWindow = new ActionWindowStorage();
+const actionWindow = createAsyncLocalStore<true>();
 
 /**
  * Run an action's user code inside the no-minting window. Async results keep
