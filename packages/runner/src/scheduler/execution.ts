@@ -478,14 +478,18 @@ function isBudgetBackoffCandidate(
   if (!state.isLiveAction(record.action) && !state.pending.has(record.action)) {
     return false;
   }
-  // Time-gated backoff is reserved for run-budget (cycle) evidence. A tight
-  // cycle trips the budget mid-pass and is handled there; reaching the
-  // iteration cap with sub-budget passRuns means a deep/slow but forward-
-  // progressing chain (one hop per iteration), which must re-pass
-  // immediately rather than pause for BACKOFF_BASE_MS. The explicit
-  // `requirePassRunBudget: false` (the in-loop pass-budget break, fired only
-  // once the budget is already hit) opts out of this gate.
+  // NOTE(scheduler-v2): the iteration-cap backoff is NOT merely a perf pause
+  // for deep chains — it is the escape valve that lets idle() resolve when a
+  // live subgraph has not settled within MAX_ITERS. `backoffUntil` feeds
+  // getNextEligibleRunTime, which defers the action out of hasDirtyPullWork
+  // (idle resolves) and schedules a retry wake. Gating iteration-cap backoff
+  // on cycle evidence (as Codex P2 #4103 suggested) removes that valve for
+  // any sub-budget chain that repeatedly hits the cap under load — idle then
+  // never resolves (observed: rapid-notebook-create + reload integration
+  // tests timed out on `runtime:idle`). Kept as-is; the pass-budget gate only
+  // applies to the pass-budget reason.
   if (
+    state.reason === "pass-budget" &&
     state.requirePassRunBudget !== false &&
     record.passRuns < PASS_RUN_BUDGET
   ) {

@@ -24,7 +24,6 @@ import {
   registerDependentEdge,
   unregisterDependentEdge,
 } from "../src/scheduler/dependency-graph.ts";
-import { planBudgetBackoff } from "../src/scheduler/execution.ts";
 import { SchedulerDelays } from "../src/scheduler/delays.ts";
 import {
   getNextDebounceRunTime,
@@ -1175,36 +1174,5 @@ describe("scheduler v2 cutover fixtures", () => {
     } finally {
       for (const cancel of cancels) cancel();
     }
-  });
-
-  it("reserves iteration-cap backoff for cycle evidence", () => {
-    // At the iteration cap, a healthy action that made forward progress
-    // (passRuns below the per-pass budget) must NOT be time-gated — it is a
-    // deep/slow chain that should re-pass immediately. Only an action with
-    // budget-level run evidence (a genuine cycle) is backed off.
-    const registry = new NodeRegistry();
-    const healthy: Action = function healthyDeepChainLink() {};
-    const cycling: Action = function cyclingLink() {};
-    registry.register(healthy, "computation");
-    registry.register(cycling, "computation");
-    const healthyRecord = registry.get(healthy)!;
-    const cyclingRecord = registry.get(cycling)!;
-    healthyRecord.status = "invalid";
-    cyclingRecord.status = "invalid";
-    healthyRecord.passRuns = PASS_RUN_BUDGET - 1;
-    cyclingRecord.passRuns = PASS_RUN_BUDGET;
-
-    const plan = planBudgetBackoff({
-      workSet: new Set([healthy, cycling]),
-      nodes: registry,
-      pending: new Set<Action>(),
-      isLiveAction: () => true,
-      getNextEligibleRunTime: () => undefined,
-      isDebouncedComputationWaiting: () => false,
-      reason: "iteration-cap",
-      now: 1000,
-    });
-
-    expect(plan.actions).toEqual([cycling]);
   });
 });

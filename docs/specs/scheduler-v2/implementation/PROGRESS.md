@@ -4437,3 +4437,39 @@ $ rg -n "runsThisExecute|loopCounter|executeStartTime|CYCLE_DEBOUNCE|MAX_ITERATI
     unscheduled is correct pull semantics; demand arrival
     (`notifyNodeLivenessChange`/edge registration) queues it.
 - Deviations: none.
+
+## REVIEWER RESOLUTION — PR #4103 iteration-cap backoff: REVERTED (supersedes above)
+
+The iteration-cap backoff cycle-evidence gate (committed earlier this PR)
+was REVERTED after it broke the `should persist and reload every rapidly
+created notebook note` and the notebook reload integration tests with
+`RuntimeClient request timed out: runtime:idle` (consistent on CI,
+load-sensitive — green 3/3 locally).
+
+Root cause (verified in code): the iteration-cap backoff is NOT merely a
+perf pause for deep chains — it is the escape valve that lets `idle()`
+resolve when a live subgraph has not settled within MAX_ITERS.
+`planBudgetBackoff` sets `record.backoffUntil`, which `getNextEligibleRunTime`
+returns via `maxFutureTime(...)`; `noteFutureEligibility` then defers the
+action out of `hasDirtyPullWork` (so `applyQuiescentContinuation` resolves
+the idle promises) and schedules a retry wake. Gating iteration-cap backoff
+on cycle evidence removed that valve for any sub-budget chain that
+repeatedly hits the cap under load: such a chain stays in `hasDirtyPullWork`
+forever, idle keeps re-ticking and never resolves. Rapid notebook-note
+creation under CI load is exactly such a workload.
+
+Codex P2 #4103 ("reserve backoff for cycle evidence, or re-queue
+immediately") is therefore DECLINED: both suggested forms remove the
+idle-resolution escape valve without a convergence oracle to distinguish a
+deep-but-converging chain from a non-converging one. The ~250ms pacing on
+a chain deeper than MAX_ITERS is the cost of guaranteeing idle resolution;
+it is a minor perf nit, not a correctness bug. Reverted to the original 3c
+behavior (full backoff at iteration cap for all sub-budget chains). The
+`reserves iteration-cap backoff for cycle evidence` red-green test was
+removed with the revert; the `settles a deep acyclic chain ...` guard stays
+(static chains settle within MAX_ITERS regardless).
+
+The OTHER #4103 changes stand: the rebase-interaction idle-wait fix
+(`futureRunWaitsForIdle` for first-run demanded debounced computations,
+machine-independent, restores main's behavior) and the scheduledEffects
+cross-package consumer cleanup.
