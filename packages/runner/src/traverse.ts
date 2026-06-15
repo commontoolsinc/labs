@@ -517,7 +517,9 @@ function resolveSchemaRefsCanonical(
   let cached = _resolvedRefCache.get(schema);
   if (cached === undefined) {
     const resolved = ContextualFlowControl.resolveSchemaRefs(schema);
-    cached = resolved === undefined ? null : internSchema(resolved);
+    // `null` (not `undefined`) is the cache's "resolved to nothing" sentinel,
+    // so it stays distinct from "absent" on `Map.get()`.
+    cached = internSchema(resolved) ?? null;
     _resolvedRefCache.set(schema, cached);
   }
   return cached === null ? undefined : cached;

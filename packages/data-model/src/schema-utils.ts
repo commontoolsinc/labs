@@ -415,7 +415,7 @@ export function internPathSelector(
 ): SchemaPathSelector {
   const { path, schema } = selector;
 
-  const interned = schema === undefined ? undefined : internSchema(schema);
+  const interned = internSchema(schema);
   const topMap: CanonicalSelectorMap = (typeof interned === "object")
     ? canonicalSelectorsByObjectSchema
     : canonicalSelectorsByPrimitiveSchema;
