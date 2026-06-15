@@ -43,6 +43,9 @@ jobs:
       - name: 🔎 Type check codebase
         run: deno task check
 
+      - name: 🔎 Check Common Fabric patterns
+        run: deno task cfcheck
+
       - name: 🧭 Check cf-review skill facts
         run: deno task check-skill-facts
 
