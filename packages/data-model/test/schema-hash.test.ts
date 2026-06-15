@@ -13,18 +13,26 @@ import {
 } from "@/schema-hash.ts";
 import { SchemaAndHash } from "@/SchemaAndHash.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
-import { hashStringOf } from "@/value-hash.ts";
+import { hashStringOf, taggedHashStringOf } from "@/value-hash.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { toDeepFrozenSchema } from "@/schema-utils.ts";
 
-describe("schema-hash dispatch", () => {
+describe("schema-hash", () => {
   describe("hashSchema()", () => {
     it("returns a string", () => {
       const result = hashSchema({ type: "number" });
       expect(typeof result).toBe("string");
     });
 
-    it("agrees with general `hashStringOf()`", () => {
+    it("agrees with `hashStringOf()` on primitives", () => {
+      for (const v of [false, true, undefined]) {
+        const result1 = hashSchema(v);
+        const result2 = hashStringOf(v);
+        expect(result1).toBe(result2);
+      }
+    });
+
+    it("agrees with `hashStringOf()` on plain objects", () => {
       const result1 = hashSchema({ type: "number", title: "Yes!" });
       const result2 = hashStringOf({ type: "number", title: "Yes!" });
       expect(result1).toBe(result2);
@@ -60,13 +68,16 @@ describe("schema-hash dispatch", () => {
     });
 
     for (const wantSah of [false, true]) {
-      const callIntern = (schema: JSONSchema, fullResult = false) => {
+      const callIntern = (
+        schema: JSONSchema | undefined,
+        fullResult = false,
+      ) => {
         const result = internSchema(schema, wantSah);
 
         if (wantSah) {
           assert(result instanceof SchemaAndHash);
           assert(result.hash instanceof FabricHash);
-          return fullResult ? result : result.schema;
+          return fullResult ? result : result.schemaOrUndefined;
         } else {
           return result;
         }
@@ -127,6 +138,11 @@ describe("schema-hash dispatch", () => {
         it("handles boolean schema `false`", () => {
           const result = callIntern(false);
           expect(result).toBe(false);
+        });
+
+        it("handles schema `undefined`", () => {
+          const result = callIntern(undefined);
+          expect(result).toBe(undefined);
         });
 
         it("handles empty object schema", () => {
@@ -200,6 +216,10 @@ describe("schema-hash dispatch", () => {
       expect(isInternedSchema(false)).toBe(true);
     });
 
+    it("returns `true` for `undefined`", () => {
+      expect(isInternedSchema(undefined)).toBe(true);
+    });
+
     it("returns `true` for a freshly interned schema", () => {
       const schema = internSchema({ type: "string" });
       expect(isInternedSchema(schema)).toBe(true);
@@ -218,75 +238,59 @@ describe("schema-hash dispatch", () => {
   });
 
   describe("findInternedSchema()", () => {
-    it("defaults to `wantSchemaAndHash = false`", () => {
-      const hash = internSchema({}, true).hash;
+    const callFind = (hash: FabricHash | string) => {
       const result = findInternedSchema(hash);
-      expect(result).not.toBe(undefined);
-      expect(result).not.toBeInstanceOf(SchemaAndHash);
+
+      if (result !== undefined) {
+        expect(result).toBeInstanceOf(SchemaAndHash);
+        expect(result.hash).toBeInstanceOf(FabricHash);
+      }
+
+      return result;
+    };
+
+    it("finds a previously interned schema by FabricHash", () => {
+      const sah = internSchema(
+        { type: "array", items: { type: "string" } },
+        true,
+      );
+      const found = callFind(sah.hash);
+      expect(found).toBe(sah);
     });
 
-    for (const wantSah of [false, true]) {
-      const callFind = (hash: FabricHash | string) => {
-        const result = findInternedSchema(hash, wantSah);
+    it("finds a previously interned schema by hash string", () => {
+      const sah = internSchema(
+        {
+          type: "object",
+          properties: { z: { type: "boolean" } },
+        },
+        true,
+      );
+      const found = callFind(sah.taggedHashString);
+      expect(found).toBe(sah);
+    });
 
-        if (wantSah && (result !== undefined)) {
-          const resultSah = result as SchemaAndHash;
-          expect(resultSah).toBeInstanceOf(SchemaAndHash);
-          expect(resultSah.hash).toBeInstanceOf(FabricHash);
-        }
+    it("returns `undefined` for unknown hash", () => {
+      const unknown = new FabricHash(new Uint8Array(32), "fid1");
+      const found = callFind(unknown);
+      expect(found).toBe(undefined);
+    });
 
-        return result;
-      };
+    it("finds interned boolean schemas", () => {
+      const sahTrue = internSchema(true, true);
+      const sahFalse = internSchema(false, true);
+      const foundTrue = callFind(sahTrue.hash);
+      const foundFalse = callFind(sahFalse.hash);
+      expect(foundTrue).toBe(sahTrue);
+      expect(foundFalse).toBe(sahFalse);
+    });
 
-      const expectSame = (
-        got: JSONSchema | SchemaAndHash | undefined,
-        expectedSah: SchemaAndHash,
-      ) => {
-        if (wantSah) {
-          expect(got).toBe(expectedSah);
-        } else {
-          expect(got).toBe(expectedSah.schema);
-        }
-      };
-
-      describe(`with \`wantSchemaAndHash = ${wantSah}\``, () => {
-        it("finds a previously interned schema by FabricHash", () => {
-          const sah = internSchema(
-            { type: "array", items: { type: "string" } },
-            true,
-          );
-          const found = callFind(sah.hash);
-          expectSame(found, sah);
-        });
-
-        it("finds a previously interned schema by hash string", () => {
-          const sah = internSchema(
-            {
-              type: "object",
-              properties: { z: { type: "boolean" } },
-            },
-            true,
-          );
-          const found = callFind(sah.taggedHashString);
-          expectSame(found, sah);
-        });
-
-        it("returns `undefined` for unknown hash", () => {
-          const unknown = new FabricHash(new Uint8Array(32), "fid1");
-          const found = callFind(unknown);
-          expect(found).toBe(undefined);
-        });
-
-        it("finds interned boolean schemas", () => {
-          const sahTrue = internSchema(true, true);
-          const sahFalse = internSchema(false, true);
-          const foundTrue = callFind(sahTrue.hash);
-          const foundFalse = callFind(sahFalse.hash);
-          expectSame(foundTrue, sahTrue);
-          expectSame(foundFalse, sahFalse);
-        });
-      });
-    }
+    it("finds `undefined`", () => {
+      const undefinedHash = taggedHashStringOf(undefined);
+      const found = callFind(undefinedHash);
+      expect(found).not.toBe(undefined);
+      expect(found!.schemaOrUndefined).toBe(undefined);
+    });
   });
 
   describe("internSchemaAsTaggedHashString()", () => {
@@ -296,14 +300,19 @@ describe("schema-hash dispatch", () => {
       expect(internSchemaAsTaggedHashString(schema)).toBe(sah.taggedHashString);
     });
 
-    it("returns the boolean schema's prefab `.taggedHashString` for `true`", () => {
+    it("returns the prefab `.taggedHashString` for `true`", () => {
       const expected = internSchema(true, true).taggedHashString;
       expect(internSchemaAsTaggedHashString(true)).toBe(expected);
     });
 
-    it("returns the boolean schema's prefab `.taggedHashString` for `false`", () => {
+    it("returns the prefab `.taggedHashString` for `false`", () => {
       const expected = internSchema(false, true).taggedHashString;
       expect(internSchemaAsTaggedHashString(false)).toBe(expected);
+    });
+
+    it("returns the prefab `.taggedHashString` for `undefined`", () => {
+      const expected = internSchema(undefined, true).taggedHashString;
+      expect(internSchemaAsTaggedHashString(undefined)).toBe(expected);
     });
 
     it("produces matching strings for structurally-equal objects", () => {

@@ -11,9 +11,16 @@ import type { FabricHash } from "@/fabric-primitives/FabricHash.ts";
  * To create instances, use `internSchema()` from `schema-hash.ts` —
  * it handles freezing, hashing, and caching. The constructor is public
  * for direct use when both the frozen schema and hash are already in hand.
+ *
+ * This class accepts `undefined` as its "schema" upon construction as a
+ * concession to making the schema intern mechanism work straightforwardly with
+ * `undefined`. However, in nearly every client use having `undefined` be a
+ * possible value for `.schema` is undesirable, so that accessor `throw`s
+ * instead of returning `undefined`. For the few cases where `undefined` is
+ * acceptable, there is `.schemaOrUndefined`.
  */
 export class SchemaAndHash {
-  readonly #schema: JSONSchema;
+  readonly #schema: JSONSchema | undefined;
   readonly #hash: FabricHash;
 
   /**
@@ -22,7 +29,7 @@ export class SchemaAndHash {
    * Prefer `internSchema()` from `schema-hash.ts` for the friendly entry
    * point that handles freezing, hashing, and interning.
    */
-  constructor(schema: JSONSchema, hash: FabricHash) {
+  constructor(schema: JSONSchema | undefined, hash: FabricHash) {
     if (!isDeepFrozen(schema)) {
       throw new Error("SchemaAndHash: schema must be deep-frozen");
     }
@@ -31,8 +38,20 @@ export class SchemaAndHash {
     Object.freeze(this);
   }
 
-  /** The deep-frozen schema. */
+  /** The schema. */
   get schema(): JSONSchema {
+    if (typeof this.#schema === "undefined") {
+      throw new Error("`schema` is `undefined`.");
+    }
+
+    return this.#schema;
+  }
+
+  /**
+   * The schema per se, or `undefined` if this instance was constructed with
+   * `schema === undefined`.
+   */
+  get schemaOrUndefined(): JSONSchema | undefined {
     return this.#schema;
   }
 
