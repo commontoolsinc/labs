@@ -2083,8 +2083,9 @@ describe("RuntimeProcessor cell set IPC", () => {
 
   it("repairs a rollback that erased a newer confirmed write (out-of-order rejection)", async () => {
     // The observed CI wedge: input emits two writes; the SECOND confirms
-    // first; the FIRST is then rejected and its rollback locally erases the
-    // confirmed second value. The repair must reapply the latest value.
+    // first; the FIRST is then rejected and its rollback reverts the local doc
+    // past the confirmed second value. The repair must reapply the latest
+    // value (mechanism not pinned to the storage layer — see handleCellSet).
     const { setValues, commits, set } = makeProcessor();
     set("B"); // older keystroke
     set("Bob"); // final value
@@ -2131,5 +2132,31 @@ describe("RuntimeProcessor cell set IPC", () => {
     await barrier;
     expect(released).toBe(true);
     expect(setValues).toEqual(["Bob", "Bob"]);
+  });
+
+  it("barrier holds until the final budgeted reapply settles (no off-by-one)", async () => {
+    const { processor, commits, set } = makeProcessor();
+    set("Bob");
+    let released = false;
+    // deno-lint-ignore no-explicit-any
+    const barrier = (RuntimeProcessor.prototype as any).awaitPendingCellWrites
+      .call(processor)
+      .then(() => {
+        released = true;
+      });
+    // Exhaust the budget: 1 initial + CELL_SET_COMMIT_RETRIES (5) reapplies =
+    // 6 attempts. Reject the first 5; the barrier must stay held while the
+    // final reapply is still in flight. The off-by-one bug released it one
+    // generation early, before that last commit settled.
+    for (let i = 0; i < 5; i++) {
+      commits[i].resolve(REJECTED);
+      await flushAsync();
+      expect(released).toBe(false);
+    }
+    expect(commits.length).toBe(6); // final reapply queued, not yet settled
+    commits[5].resolve({});
+    await flushAsync();
+    await barrier;
+    expect(released).toBe(true);
   });
 });

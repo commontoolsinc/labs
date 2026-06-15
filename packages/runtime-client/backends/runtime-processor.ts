@@ -315,8 +315,16 @@ export class RuntimeProcessor {
 
   private async awaitPendingCellWrites(): Promise<void> {
     // Re-check after each settle: a rejected write registers its rebase
-    // commit while we wait. Bounded to avoid live-lock under write storms.
-    for (let i = 0; i < 5 && this.pendingCellWrites.size > 0; i++) {
+    // commit while we wait, so each iteration drains one reapply generation.
+    // A write that exhausts its budget produces 1 initial commit +
+    // CELL_SET_COMMIT_RETRIES reapplies, so we need that many iterations + 1
+    // to settle the final attempt. Still bounded, to avoid live-lock under
+    // write storms.
+    for (
+      let i = 0;
+      i <= CELL_SET_COMMIT_RETRIES && this.pendingCellWrites.size > 0;
+      i++
+    ) {
       await Promise.allSettled([...this.pendingCellWrites]);
     }
   }
@@ -692,14 +700,17 @@ export class RuntimeProcessor {
   handleCellSet(request: CellSetRequest): void {
     const key = cellRefToKey(request.cell);
     const value = mapCellRefsToSigilLinks(request.value);
-    // Track the latest value per cell. A rejected commit's rollback can
-    // locally erase even *confirmed* later writes to the same doc (observed:
-    // input emits two sets; the second confirms first; the first's later
-    // rejection rolls the doc back, eating the confirmed value while the
-    // server keeps it — local cache ends up staler than the server with no
-    // resync). So on ANY rejection for this cell, reapply the LATEST value
-    // on fresh state. Reapplying is idempotent when local state already
-    // matches. Budget refreshes on each new user write.
+    // Track the latest value per cell. We observed (two-browser repro) the
+    // local optimistic value end up staler than the latest confirmed write
+    // after an out-of-order rejection: input emits two sets; the second
+    // confirms; the first is rejected afterwards and its rollback reverts the
+    // local doc past the confirmed value. Reapplying the LATEST value on a
+    // fresh tx on ANY rejection repairs this regardless of where the staleness
+    // originates, and is idempotent when local state already matches. (We have
+    // not pinned this to the runtime/storage layer — instrumentation of the
+    // runtime rollback there shows it preserving confirmed writes, so the
+    // mechanism is most likely in the client's optimistic mirror.) Budget
+    // refreshes on each new user write.
     const prev = this.cellSetLatest.get(key);
     const entry = {
       seq: (prev?.seq ?? 0) + 1,
@@ -768,6 +779,13 @@ export class RuntimeProcessor {
           result.error,
         );
       }
+    }).catch((error) => {
+      // A rejected commit promise (transport/storage throw) must not become an
+      // unhandled rejection — mirror handleCellSet's confirmation.catch.
+      console.error(
+        "[RuntimeProcessor] cell send commit rejected",
+        error,
+      );
     });
   }
 
