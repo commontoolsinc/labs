@@ -65,11 +65,7 @@ describe("fabric ref resolution", () => {
   ): Promise<Cell<PatternMeta>> {
     const cell = patternMetaCell(patternId);
     await runtime.editWithRetry((tx) => {
-      cell.withTx(tx).set({
-        spec: "pattern",
-        patternName: `pattern-${hashFromPatternId(patternId).slice(0, 6)}`,
-        ...meta,
-      } as PatternMeta);
+      cell.withTx(tx).set({ ...meta } as PatternMeta);
     });
     return cell;
   }
@@ -228,7 +224,15 @@ describe("fabric ref resolution", () => {
 
   it("reports legacy pattern meta without entryIdentity", async () => {
     const patternId = newPatternId("missing-entry-identity");
-    await writePatternMeta(patternId, {});
+    // A legacy meta cell carries a stored program but predates entryIdentity;
+    // the program is what marks the cell as pattern meta (the `spec` marker
+    // was retired in the pattern-id retirement W1).
+    await writePatternMeta(patternId, {
+      program: {
+        main: "/main.tsx",
+        files: [{ name: "/main.tsx", contents: "export default 1;" }],
+      },
+    } as Partial<PatternMeta>);
 
     await expect(
       resolveFabricRefToIdentity(

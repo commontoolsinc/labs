@@ -30,7 +30,6 @@ export interface MountedPieceMeta {
   id: string;
   entityId?: string;
   name?: string;
-  patternName?: string;
 }
 
 export interface ResolvedMountedCallableFile {
@@ -112,9 +111,6 @@ async function readMountedPieceMeta(
     id: meta.id,
     entityId: typeof meta.entityId === "string" ? meta.entityId : undefined,
     name: typeof meta.name === "string" ? meta.name : undefined,
-    patternName: typeof meta.patternName === "string"
-      ? meta.patternName
-      : undefined,
   };
 }
 

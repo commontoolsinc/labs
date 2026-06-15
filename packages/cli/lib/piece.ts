@@ -305,7 +305,7 @@ async function getPinnedProgramFromFile(
 export async function listPieces(
   config: SpaceConfig,
 ): Promise<
-  { id: string; name?: string; patternName?: string; error?: string }[]
+  { id: string; name?: string; error?: string }[]
 > {
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
@@ -317,11 +317,9 @@ export async function listPieces(
         const name = (await (
           livePiece.getCell().key(NAME) as Cell<unknown>
         ).pull()) as string | undefined;
-        const patternMeta = await livePiece.getPatternMeta();
         return {
           id: piece.id,
           name,
-          patternName: patternMeta.patternName,
         };
       } catch (err) {
         return {
@@ -1136,7 +1134,6 @@ export async function generateSpaceMap(
 export async function inspectPiece(config: PieceConfig): Promise<{
   id: string;
   name?: string;
-  patternName?: string;
   source?: Readonly<unknown>;
   result: Readonly<unknown>;
   readingFrom: Array<{ id: string; name?: string }>;
@@ -1165,7 +1162,6 @@ export async function inspectPiece(config: PieceConfig): Promise<{
 
   const id = piece.id;
   const name = piece.name();
-  const patternName = (await piece.getPatternMeta()).patternName;
   const source = (await piece.input.get()) as Readonly<unknown>;
   const result = (await piece.result.get()) as Readonly<unknown>;
   const readingFrom = (await piece.readingFrom()).map((piece) => ({
@@ -1180,7 +1176,6 @@ export async function inspectPiece(config: PieceConfig): Promise<{
   return {
     id,
     name,
-    patternName,
     source,
     result,
     readingFrom,
@@ -1194,7 +1189,6 @@ async function inspectSlugTargetCell(
 ): Promise<{
   id: string;
   name?: string;
-  patternName?: string;
   source?: Readonly<unknown>;
   result: Readonly<unknown>;
   readingFrom: Array<{ id: string; name?: string }>;
@@ -1210,7 +1204,6 @@ async function inspectSlugTargetCell(
   return {
     id: slug,
     name,
-    patternName: "slug target cell",
     result,
     readingFrom: [],
     readBy: [],

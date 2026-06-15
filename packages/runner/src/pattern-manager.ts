@@ -112,9 +112,6 @@ export const patternMetaSchema = internSchema(
   {
     type: "object",
     properties: {
-      spec: { type: "string" },
-      parents: { type: "array", items: { type: "string" } },
-      patternName: { type: "string" },
       // Content identity of the entry module (the prefix-free `cf:module/<hash>`
       // minus the scheme), learned on the first cold ESM compile. Persisting it
       // here is what makes the resolve-free by-identity fast path fire on every

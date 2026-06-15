@@ -821,7 +821,6 @@ describe("mounted callable resolution and execution", () => {
         id: "of:piece-123",
         entityId: "of:piece-123",
         name: "Fixture Piece",
-        patternName: "fixture",
       }),
     );
     const harness = createExecHarness({
@@ -857,7 +856,6 @@ describe("mounted callable resolution and execution", () => {
         id: "of:piece-123",
         entityId: "of:piece-123",
         name: "Fixture Piece",
-        patternName: "fixture",
       }),
     );
     const harness = createExecHarness({
@@ -1029,7 +1027,6 @@ describe("mounted callable resolution and execution", () => {
         id: "of:piece-123",
         entityId: "of:piece-123",
         name: "Fixture Piece",
-        patternName: "fixture",
       }),
     );
     const harness = createExecHarness({
@@ -1146,7 +1143,6 @@ describe("mounted callable resolution and execution", () => {
         id: "of:fake-piece",
         entityId: "of:fake-piece",
         name: "Fake Piece",
-        patternName: "fake",
       }),
     );
     const harness = createExecHarness({
@@ -2098,7 +2094,6 @@ async function createMountedFile(
       id: options.pieceId,
       entityId: options.pieceId,
       name: "Fixture Piece",
-      patternName: "fixture",
     }),
   );
 

@@ -3,8 +3,6 @@ import type { MemorySpace } from "./storage/interface.ts";
 import type { JSONSchema, Pattern } from "./builder/types.ts";
 import type { Runtime } from "./runtime.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
-import type { PatternMeta } from "./pattern-manager.ts";
-import type { Mutable } from "@commonfabric/utils/types";
 
 export type CellPath = (string | number)[];
 
@@ -90,8 +88,6 @@ export async function compileAndSavePattern(
   patternSrc: string | RuntimeProgram,
   options: {
     space: MemorySpace;
-    spec?: string;
-    parents?: string[];
   },
 ): Promise<Pattern> {
   if (typeof patternSrc === "string") {
@@ -110,10 +106,6 @@ export async function compileAndSavePattern(
   }
 
   const patternId = runtime.patternManager.registerPattern(pattern, patternSrc);
-  await runtime.patternManager.setPatternMetaFields(patternId, {
-    spec: options.spec,
-    parents: options.parents?.map((id) => id.toString()),
-  } as Partial<Mutable<PatternMeta>>);
   await runtime.patternManager.saveAndSyncPattern({
     patternId,
     space: options.space,

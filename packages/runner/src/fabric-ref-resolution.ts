@@ -129,7 +129,7 @@ function patternMetaFromCell(cell: Cell<unknown>): PatternMeta | undefined {
   const raw = cell.get();
   if (
     isRecord(raw) &&
-    (raw.spec === "pattern" || "program" in raw || "entryIdentity" in raw)
+    ("program" in raw || "entryIdentity" in raw)
   ) {
     return raw as PatternMeta;
   }

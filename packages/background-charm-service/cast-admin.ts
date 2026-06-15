@@ -98,7 +98,7 @@ async function castPattern() {
     const pattern = await compileAndSavePattern(
       runtime,
       patternSrc,
-      { spec: "pattern", space: spaceId },
+      { space: spaceId },
     );
     console.log("Pattern compiled successfully");
 
