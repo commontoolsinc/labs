@@ -327,3 +327,103 @@ describe("CFTabs cf-change emission contract (CT-1746)", () => {
     expect(cell.get()).toBe("active");
   });
 });
+
+/**
+ * Pure-on-mount contract (makes cf-tabs safe to instantiate inside a render
+ * `computed()`).
+ *
+ * A component bound with `$value` is only safe to re-create inside a computed
+ * that reads the same cell if it NEVER writes that cell as a side effect of
+ * mount/selection-sync — only on a genuine user gesture. (cf-input already
+ * honors this; it writes only on input/change events, never on bind.) If
+ * cf-tabs writes the cell during `updateTabSelection()` — e.g. defaulting an
+ * empty/unmatched cell to the first tab via `selectFirst()` → `setValue()` —
+ * then each recompute re-mounts it, re-writes the cell, and re-triggers the
+ * computed: a "Too many iterations" CPU-spin (the CT-1677 settle class).
+ *
+ * These tests pin the contract: mount and cell-driven sync produce ZERO cell
+ * writes, while the no-match fallback still selects the first tab VISUALLY.
+ */
+describe("CFTabs pure-on-mount contract (safe inside computed)", () => {
+  // Count writes to the bound cell by wrapping `.set` before binding.
+  function countingCell(initial: string) {
+    const cell = createMockCellHandle<string>(initial);
+    let writes = 0;
+    const origSet = cell.set.bind(cell);
+    (cell as unknown as { set: (v: string) => unknown }).set = (v: string) => {
+      writes++;
+      return origSet(v);
+    };
+    return { cell, writes: () => writes };
+  }
+
+  it("does NOT write the bound cell on mount when the value matches no tab", () => {
+    // Empty cell matches none of the tabs — the no-match path.
+    const { cell, writes } = countingCell("");
+
+    // makeTabs() binds the controller and runs updateTabSelection() — i.e. the
+    // mount/selection-sync that must not write.
+    const h = makeTabs(cell, ["active", "progress", "pending"]);
+
+    expect(writes()).toBe(0); // FAILS pre-fix: selectFirst() writes "active"
+    expect(cell.get()).toBe(""); // cell stays untouched until a real gesture
+    // ...but the first tab is still selected VISUALLY (the fallback survives).
+    expect(h.selectedTab()).toBe("active");
+    expect(h.visiblePanel()).toBe("active");
+  });
+
+  it("a re-mount (recompute) over an unmatched cell stays write-free and idempotent", () => {
+    const { cell, writes } = countingCell("");
+    const h = makeTabs(cell, ["active", "progress", "pending"]);
+
+    // Simulate the computed re-running: re-bind + re-sync several times.
+    const reSync = (h.tabs as unknown as {
+      updateTabSelection: () => void;
+    }).updateTabSelection.bind(h.tabs);
+    reSync();
+    reSync();
+    reSync();
+
+    expect(writes()).toBe(0);
+    expect(cell.get()).toBe("");
+    expect(h.selectedTab()).toBe("active"); // still visually defaulted
+  });
+
+  it("a cell-driven change to an unmatched value does not write back", () => {
+    const { cell, writes } = countingCell("active");
+    const h = makeTabs(cell, ["active", "progress"]);
+    // Programmatic/backend push to a value no tab matches.
+    pushUpdate(cell, "archived");
+
+    expect(writes()).toBe(0); // sync must not echo a write
+    expect(cell.get()).toBe("archived");
+    expect(h.selectedTab()).toBe("active"); // visual fallback to first tab
+  });
+
+  it("still writes the cell on a real user gesture (gesture path is unaffected)", () => {
+    const { cell, writes } = countingCell("");
+    const h = makeTabs(cell, ["active", "progress"]);
+    expect(writes()).toBe(0); // mount wrote nothing
+
+    h.clickTab("progress"); // genuine gesture
+
+    expect(writes()).toBe(1); // exactly one write, from the gesture
+    expect(cell.get()).toBe("progress");
+  });
+
+  it("all tabs disabled: no write and nothing selected (the firstEnabled-undefined branch)", () => {
+    // Exercises the new fallback's `if (firstEnabled)` guard when there is no
+    // enabled tab to fall back to: effectiveValue stays the (unmatched) cell
+    // value, so no tab is selected — and crucially still no cell write.
+    const { cell, writes } = countingCell("");
+    const h = makeTabs(cell, ["active", "progress"]);
+    h.fakeTabs.forEach((t) => (t.disabled = true));
+
+    // Re-sync (as a recompute / prop update would) now that all are disabled.
+    (h.tabs as unknown as { updateTabSelection: () => void })
+      .updateTabSelection();
+
+    expect(writes()).toBe(0);
+    expect(h.selectedTab()).toBe(undefined); // no enabled tab to default to
+  });
+});
