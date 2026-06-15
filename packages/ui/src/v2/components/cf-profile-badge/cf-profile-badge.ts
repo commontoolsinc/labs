@@ -1,4 +1,4 @@
-import { css, html, type PropertyValues } from "lit";
+import { css, html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
@@ -10,6 +10,12 @@ import {
   type RuntimeClient,
 } from "@commonfabric/runtime-client";
 import type { DID } from "@commonfabric/identity";
+import {
+  appViewToUrlPath,
+  navigate,
+  preserveAppViewMode,
+  urlToAppView,
+} from "@commonfabric/shell/shared";
 import { runtimeContext, spaceContext } from "../../runtime-context.ts";
 import {
   ownerPrincipalFromLabel,
@@ -104,6 +110,16 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         background: var(--cf-theme-color-surface, hsl(0, 0%, 99%));
         color: var(--cf-theme-color-text, hsl(0, 0%, 9%));
         line-height: 1;
+      }
+
+      /* CT-1750: navigable badges (bound to a real profile cell) act as links. */
+      .badge[data-navigable] {
+        cursor: pointer;
+      }
+
+      .badge[data-navigable]:focus-visible {
+        outline: 2px solid var(--cf-theme-color-primary, hsl(212, 100%, 47%));
+        outline-offset: 2px;
       }
 
       .name {
@@ -303,6 +319,16 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
   @state()
   private accessor _seal: IdentitySeal | undefined = undefined;
 
+  // CT-1750: navigation. `_resolvedCell` is the resolved profile cell;
+  // `_navigable` is true only when it's a root cell (a real profile piece). A
+  // badge bound to a real profile (rosters/lists) navigates to that profile's
+  // page on click; one bound to a derived/sub-path cell (e.g. a self-view
+  // `{name, avatar}` cell on the profile page itself) is non-navigable and the
+  // click is a no-op.
+  private _resolvedCell: CellHandle | undefined = undefined;
+  @state()
+  private accessor _navigable = false;
+
   private _unsubscribe?: () => void;
   private _resolveGeneration = 0;
 
@@ -423,6 +449,10 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     // re-resolve + attestation gap. `_refreshVerification` re-derives it below.
     this._state = "presented";
     this._seal = undefined;
+    // Drop navigation state until the (new) cell resolves — a stale link must
+    // not survive a re-bind.
+    this._resolvedCell = undefined;
+    this._navigable = false;
 
     const cell = this.profile;
     if (!cell) {
@@ -437,6 +467,12 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
       // already covers detachment; isConnected is kept as a belt-and-braces
       // check so we never subscribe / write state on a detached instance).
       if (generation !== this._resolveGeneration || !this.isConnected) return;
+
+      // CT-1750: remember the resolved cell and whether it's a navigable root
+      // piece (only root cells map to a profile page; sub-path/derived cells
+      // don't).
+      this._resolvedCell = resolved;
+      this._navigable = resolved.ref().path.length === 0;
 
       // Subscribe with a minimal schema so the runtime only resolves the fields
       // we render, rather than walking the whole profile output graph (mirrors
@@ -457,7 +493,45 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     } catch (e) {
       if (generation !== this._resolveGeneration || !this.isConnected) return;
       console.error("cf-profile-badge: failed to resolve profile cell", e);
+      this._resolvedCell = undefined;
+      this._navigable = false;
       this._applyValue(undefined);
+    }
+  }
+
+  /**
+   * Navigate to the bound profile's page (CT-1750). No-op unless the resolved
+   * cell is a navigable root piece. Mirrors cf-cell-link's navigation; Cmd/Ctrl
+   * opens in a new tab.
+   */
+  private _navigateToProfile(openInNewTab: boolean): void {
+    const cell = this._resolvedCell;
+    if (!cell || cell.ref().path.length > 0) return;
+    const view = { spaceDid: cell.space(), pieceId: cell.id() };
+    if (openInNewTab) {
+      const url = appViewToUrlPath(
+        preserveAppViewMode(
+          urlToAppView(new URL(globalThis.location.href)),
+          view,
+        ),
+      );
+      globalThis.open(url, "_blank");
+    } else {
+      navigate(view);
+    }
+  }
+
+  private _handleClick(e: MouseEvent): void {
+    if (!this._navigable) return;
+    e.stopPropagation();
+    this._navigateToProfile(e.metaKey || e.ctrlKey);
+  }
+
+  private _handleKeydown(e: KeyboardEvent): void {
+    if (!this._navigable) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      this._navigateToProfile(e.metaKey || e.ctrlKey);
     }
   }
 
@@ -532,6 +606,11 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         part="root"
         data-cf-profile-badge
         data-state="${this._state}"
+        ?data-navigable="${this._navigable}"
+        role="${this._navigable ? "link" : nothing}"
+        tabindex="${this._navigable ? "0" : nothing}"
+        @click="${this._handleClick}"
+        @keydown="${this._handleKeydown}"
       >
         <span class="aura" part="aura" style="${auraStyle}">
           ${verified

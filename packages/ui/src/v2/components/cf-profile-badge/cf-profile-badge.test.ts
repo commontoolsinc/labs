@@ -38,6 +38,33 @@ function markConnected(element: CFProfileBadge, isConnected = true): void {
   });
 }
 
+/**
+ * A resolved-cell stub for the navigation tests: a root cell (empty `path`) is a
+ * navigable profile piece; a sub-path cell is not. The minimal `asSchema` /
+ * `getCfcLabel` surface keeps `_resolve` + `_refreshVerification` happy.
+ */
+function navResolvedCell(
+  opts: { path: PropertyKey[]; space?: string; id?: string },
+) {
+  return {
+    ref: () => ({ path: opts.path }),
+    space: () => opts.space ?? "did:key:zSpace",
+    id: () => opts.id ?? "fid1:piece",
+    asSchema: () => ({
+      subscribe: (cb: (val: unknown) => void) => {
+        cb({ name: "Ada" });
+        return () => {};
+      },
+    }),
+    getCfcLabel: () => Promise.resolve(undefined),
+  };
+}
+
+// deno-lint-ignore no-explicit-any
+function fakeClick(): any {
+  return { stopPropagation() {}, metaKey: false, ctrlKey: false };
+}
+
 describe("CFProfileBadge", () => {
   it("registers the custom element", () => {
     expect(customElements.get("cf-profile-badge")).toBe(CFProfileBadge);
@@ -53,6 +80,7 @@ describe("CFProfileBadge", () => {
       const slowResolution = deferred<any>();
       let subscribeCount = 0;
       const resolvedCell = {
+        ref: () => ({ path: [] }),
         asSchema: () => ({
           subscribe: () => {
             subscribeCount++;
@@ -89,6 +117,7 @@ describe("CFProfileBadge", () => {
       let subscribeCount = 0;
       let unsubscribeCount = 0;
       const resolvedCell = {
+        ref: () => ({ path: [] }),
         asSchema: () => ({
           subscribe: (cb: (val: unknown) => void) => {
             subscribeCount++;
@@ -210,6 +239,61 @@ describe("CFProfileBadge", () => {
       expect(logged).toBe(1);
       expect(el._state).toBe("presented");
       expect(el._seal).toBeUndefined();
+    });
+  });
+
+  describe("navigation (CT-1750)", () => {
+    it("navigates to the profile page when bound to a root profile cell", async () => {
+      const resolved = navResolvedCell({
+        path: [],
+        space: "did:key:zSpaceX",
+        id: "fid1:profileX",
+      });
+      const el = new CFProfileBadge() as any;
+      markConnected(el, true);
+      el.profile = { resolveAsCell: () => Promise.resolve(resolved) };
+      await el._resolve();
+
+      expect(el._navigable).toBe(true);
+
+      let captured: unknown;
+      const onNav = (e: Event) => {
+        captured = (e as CustomEvent).detail;
+      };
+      globalThis.addEventListener("cf-navigate", onNav);
+      try {
+        el._handleClick(fakeClick());
+      } finally {
+        globalThis.removeEventListener("cf-navigate", onNav);
+      }
+
+      expect(captured).toEqual({
+        spaceDid: "did:key:zSpaceX",
+        pieceId: "fid1:profileX",
+      });
+    });
+
+    it("does not navigate when bound to a non-root (derived/sub-path) cell", async () => {
+      const resolved = navResolvedCell({ path: ["name"] });
+      const el = new CFProfileBadge() as any;
+      markConnected(el, true);
+      el.profile = { resolveAsCell: () => Promise.resolve(resolved) };
+      await el._resolve();
+
+      expect(el._navigable).toBe(false);
+
+      let navigated = false;
+      const onNav = () => {
+        navigated = true;
+      };
+      globalThis.addEventListener("cf-navigate", onNav);
+      try {
+        el._handleClick(fakeClick());
+      } finally {
+        globalThis.removeEventListener("cf-navigate", onNav);
+      }
+
+      expect(navigated).toBe(false);
     });
   });
 
