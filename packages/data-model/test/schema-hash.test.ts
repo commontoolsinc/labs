@@ -68,13 +68,13 @@ describe("schema-hash", () => {
     });
 
     for (const wantSah of [false, true]) {
-      const callIntern = (schema: JSONSchema, fullResult = false) => {
+      const callIntern = (schema: JSONSchema | undefined, fullResult = false) => {
         const result = internSchema(schema, wantSah);
 
         if (wantSah) {
           assert(result instanceof SchemaAndHash);
           assert(result.hash instanceof FabricHash);
-          return fullResult ? result : result.schema;
+          return fullResult ? result : result.schemaOrUndefined;
         } else {
           return result;
         }
@@ -135,6 +135,11 @@ describe("schema-hash", () => {
         it("handles boolean schema `false`", () => {
           const result = callIntern(false);
           expect(result).toBe(false);
+        });
+
+        it("handles schema `undefined`", () => {
+          const result = callIntern(undefined);
+          expect(result).toBe(undefined);
         });
 
         it("handles empty object schema", () => {
@@ -292,14 +297,19 @@ describe("schema-hash", () => {
       expect(internSchemaAsTaggedHashString(schema)).toBe(sah.taggedHashString);
     });
 
-    it("returns the boolean schema's prefab `.taggedHashString` for `true`", () => {
+    it("returns the prefab `.taggedHashString` for `true`", () => {
       const expected = internSchema(true, true).taggedHashString;
       expect(internSchemaAsTaggedHashString(true)).toBe(expected);
     });
 
-    it("returns the boolean schema's prefab `.taggedHashString` for `false`", () => {
+    it("returns the prefab `.taggedHashString` for `false`", () => {
       const expected = internSchema(false, true).taggedHashString;
       expect(internSchemaAsTaggedHashString(false)).toBe(expected);
+    });
+
+    it("returns the prefab `.taggedHashString` for `undefined`", () => {
+      const expected = internSchema(undefined, true).taggedHashString;
+      expect(internSchemaAsTaggedHashString(undefined)).toBe(expected);
     });
 
     it("produces matching strings for structurally-equal objects", () => {

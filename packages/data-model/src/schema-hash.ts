@@ -53,7 +53,10 @@ export function hashSchema(schema: JSONSchema | undefined): string {
  *   schemas are primitives and can't be `WeakMap`/`WeakRef` targets).
  */
 const schemaToSah = new WeakMap<JSONSchemaObj, SchemaAndHash>();
-const hashToRef = new Map<string, WeakRef<JSONSchemaObj> | boolean | undefined>();
+const hashToRef = new Map<
+  string,
+  WeakRef<JSONSchemaObj> | boolean | undefined
+>();
 
 /**
  * Prefab instances of `SchemaAndHash` for all possible primitive-value schemas
@@ -80,7 +83,9 @@ hashToRef.set(primInterns.undefined.taggedHashString, undefined);
 /**
  * Helper for `internSchema()`, which always returns a `SchemaAndHash`.
  */
-function internSchemaReturningSchemaAndHash(schema: JSONSchema | undefined): SchemaAndHash {
+function internSchemaReturningSchemaAndHash(
+  schema: JSONSchema | undefined,
+): SchemaAndHash {
   // Return prefab instances for primitives.
   switch (schema) {
     case true: {
@@ -165,24 +170,24 @@ function internSchemaReturningSchemaAndHash(schema: JSONSchema | undefined): Sch
  * shallow-cloned as mutable, for the express purpose of tactical modification
  * and then immediately treated once again as deep-immutable.
  */
-export function internSchema<T extends JSONSchema>(
+export function internSchema<T extends JSONSchema | undefined>(
   schema: T,
   wantSchemaAndHash?: false,
 ): T;
-export function internSchema<T extends JSONSchema>(
+export function internSchema<T extends JSONSchema | undefined>(
   schema: T,
   wantSchemaAndHash: true,
 ): SchemaAndHash;
-export function internSchema<T extends JSONSchema>(
+export function internSchema<T extends JSONSchema | undefined>(
   schema: T,
   wantSchemaAndHash?: boolean,
-): JSONSchema | SchemaAndHash;
-export function internSchema<T extends JSONSchema>(
+): JSONSchema | undefined | SchemaAndHash;
+export function internSchema<T extends JSONSchema | undefined>(
   schema: T,
   wantSchemaAndHash: boolean = false,
-): JSONSchema | SchemaAndHash {
+): JSONSchema | undefined | SchemaAndHash {
   const sahResult = internSchemaReturningSchemaAndHash(schema);
-  return wantSchemaAndHash ? sahResult : sahResult.schema;
+  return wantSchemaAndHash ? sahResult : sahResult.schemaOrUndefined;
 }
 
 /**
@@ -272,6 +277,8 @@ export function isInternedSchema(schema: JSONSchema | undefined): boolean {
  * names the operation and avoids the non-obvious `true` (`wantSchemaAndHash`)
  * argument at call sites.
  */
-export function internSchemaAsTaggedHashString(schema: JSONSchema): string {
+export function internSchemaAsTaggedHashString(
+  schema: JSONSchema | undefined,
+): string {
   return internSchema(schema, true).taggedHashString;
 }
