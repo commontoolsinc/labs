@@ -120,10 +120,44 @@ deno task cf piece inspect --piece "$MINE" -s "$SPACE" --summary
 ```
 
 This is a **one-time snapshot copy**, not a live link — the pieces diverge after.
-**The SQLite history does NOT copy this way** — `visits`/`vote_history` are not
-`PerSpace` inputs, so the loop above leaves your copy's "Recently eaten" / "Lunch
-stats" empty. If you need the history too, either keep iterating on the same
-piece (Option A), or re-log the visits via the `logVisit` handler.
+**The SQLite history does NOT copy this way** — `visits`/`vote_history` live in a
+per-piece, cell-derived SQLite db, not in `PerSpace` inputs, so the loop above
+leaves your copy's "Recently eaten" / "Lunch stats" empty.
+
+### Migrating the SQLite history to another piece (the current gap)
+
+There is **no in-builtin way to share or repoint a writable history db** between
+pieces today (sqlite-builtin spec §03 "Database sources"):
+
+- **Cell-derived** (what this poll uses) is keyed to the piece's own handle-cell
+  entity id — *"no way to point the database at an arbitrary cell"* (deliberate,
+  to avoid ambient authority). Two pieces can't share it, and a fresh piece
+  can't adopt an old one's db.
+- The **on-disk injected** source (`cf piece link sqlite:…`) *can* be shared
+  across pieces (same path → same handle), but is **read-only in v1** — writes
+  are rejected, so it's no good for a live, mutated history.
+- The **VM-file** source is stubbed (not implemented).
+
+So moving history to a *different* piece needs an explicit mechanism. Options,
+none built yet:
+
+1. **App-level export → import (portable).** Add a full-dump query output
+   (`SELECT * FROM visits` / `vote_history`) plus an `importHistory(rows)`
+   handler that `db.exec`-inserts them, then script export-from-A → import-to-B.
+   Caveat: reading the export over the CLI hits the subscriber gotcha above —
+   resolve it in a browser, or (locally) read the `cell-*.sqlite` file directly.
+2. **Local filesystem dump (hack).**
+   `sqlite3 A-cell.sqlite ".dump visits vote_history" | sqlite3 B-cell.sqlite`.
+   Local only (needs the files), you must map each piece → its
+   `cell-<hash>.sqlite`, and it must run while the piece is **idle** (the file is
+   ATTACHed during transactions). No `cf` surface for this yet.
+3. **Avoid the need:** keep iterating on the same piece (`setsrc`, Option A — no
+   migration), or re-log visits via `logVisit`.
+
+Honest trade-off: the pre-SQLite **array** history *was* copyable as a `PerSpace`
+cell; the SQLite migration made it more durable-per-piece but no longer
+CLI-portable. Whether to invest in a portable/shared-history mechanism is an open
+design question — discuss before building.
 
 ## Verifying a deploy actually worked
 
