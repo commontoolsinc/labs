@@ -1089,8 +1089,11 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       recentVisits.result?.[0]?.title ?? ""
     );
     // 📊 Lunch stats: per-place visit count + green/red tallies across the
-    // whole durable record, joining visits to their vote snapshots. Read-only
-    // (no handlers), so it's free of the lift hazard above.
+    // whole durable record. The join is restricted to vote snapshots cast FOR
+    // the visited place (`vh.option_title = v.title`) — each visit snapshots
+    // every option's votes, so without that filter the tallies would sum the
+    // whole board, not the place we went to. Read-only (no handlers), so it's
+    // free of the lift hazard above.
     const placeStats = db.query<
       { title: string; visits: number; greens: number; reds: number }
     >(
@@ -1099,7 +1102,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
               sum(CASE WHEN vh.vote_color = 'green' THEN 1 ELSE 0 END) AS greens,
               sum(CASE WHEN vh.vote_color = 'red' THEN 1 ELSE 0 END) AS reds
        FROM visits v
-       LEFT JOIN vote_history vh ON vh.visit_id = v.id
+       LEFT JOIN vote_history vh
+              ON vh.visit_id = v.id AND vh.option_title = v.title
        GROUP BY v.title
        ORDER BY visits DESC, greens DESC
        LIMIT 5`,
