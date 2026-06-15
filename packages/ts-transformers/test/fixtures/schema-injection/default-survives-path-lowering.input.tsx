@@ -12,6 +12,10 @@ import { computed, type Default, pattern } from "commonfabric";
 interface Settings {
   note: Default<string, "n/a">;
   count: Default<number, 3>;
+  // Union-VALUED default: `boolean` distributes the brand across true|false,
+  // so the expanded type carries two branded members both paying `true`.
+  // The payload recovery must agree across them (regression: dropped before).
+  enabled: Default<boolean, true>;
 }
 
 interface Input {
@@ -21,5 +25,6 @@ interface Input {
 export default pattern<Input>(({ settings }) => {
   const noteIsUnset = computed(() => settings.note === "n/a");
   const countTimesTwo = computed(() => settings.count * 2);
-  return { noteIsUnset, countTimesTwo };
+  const isEnabled = computed(() => settings.enabled === true);
+  return { noteIsUnset, countTimesTwo, isEnabled };
 });

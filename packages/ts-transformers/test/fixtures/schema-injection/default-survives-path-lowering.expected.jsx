@@ -23,6 +23,10 @@ const __cfAmdHooks = undefined;
 interface Settings {
     note: Default<string, "n/a">;
     count: Default<number, 3>;
+    // Union-VALUED default: `boolean` distributes the brand across true|false,
+    // so the expanded type carries two branded members both paying `true`.
+    // The payload recovery must agree across them (regression: dropped before).
+    enabled: Default<boolean, true>;
 }
 interface Input {
     settings: Settings;
@@ -71,6 +75,28 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_3 = __cfHelpers.lift<{
+    settings: {
+        enabled: boolean | (false & { readonly [DEFAULT_MARKER]: true; }) | (true & { readonly [DEFAULT_MARKER]: true; });
+    };
+}, boolean>(({ settings }) => settings.enabled === true, {
+    type: "object",
+    properties: {
+        settings: {
+            type: "object",
+            properties: {
+                enabled: {
+                    type: "boolean",
+                    "default": true
+                }
+            },
+            required: ["enabled"]
+        }
+    },
+    required: ["settings"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
 export default pattern((__cf_pattern_input) => {
     const settings = __cf_pattern_input.key("settings");
     const noteIsUnset = __cfLift_1({ settings: {
@@ -79,7 +105,10 @@ export default pattern((__cf_pattern_input) => {
     const countTimesTwo = __cfLift_2({ settings: {
             count: settings.key("count")
         } }).for("countTimesTwo", true);
-    return { noteIsUnset, countTimesTwo };
+    const isEnabled = __cfLift_3({ settings: {
+            enabled: settings.key("enabled")
+        } }).for("isEnabled", true);
+    return { noteIsUnset, countTimesTwo, isEnabled };
 }, {
     type: "object",
     properties: {
@@ -99,9 +128,13 @@ export default pattern((__cf_pattern_input) => {
                 count: {
                     type: "number",
                     "default": 3
+                },
+                enabled: {
+                    type: "boolean",
+                    "default": true
                 }
             },
-            required: ["note", "count"]
+            required: ["note", "count", "enabled"]
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, {
@@ -112,14 +145,18 @@ export default pattern((__cf_pattern_input) => {
         },
         countTimesTwo: {
             type: "number"
+        },
+        isEnabled: {
+            type: "boolean"
         }
     },
-    required: ["noteIsUnset", "countTimesTwo"]
+    required: ["noteIsUnset", "countTimesTwo", "isEnabled"]
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
 __cfReg({
     __cfLift_1,
-    __cfLift_2
+    __cfLift_2,
+    __cfLift_3
 });

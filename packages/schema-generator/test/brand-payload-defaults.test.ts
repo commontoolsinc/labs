@@ -105,3 +105,90 @@ describe("brand-payload default recovery (expanded Default<T, V>)", () => {
     expect(schema.properties?.note).toEqual({ type: "string" });
   });
 });
+
+// The tests above generate from the INTERFACE, so each property carries its
+// authored typeNode and flows through the node-based formatter. The cases
+// below generate from the property TYPE with no node — forcing the expanded
+// brand-payload path that capture shrinking / path lowering / projection put
+// the generator in. A union-VALUED default (`boolean`, a literal union, a
+// nullable) distributes the brand across several members; the path must agree
+// the payload across all of them. Uses a faithful Default replica incl. the
+// nullish arm.
+const FAITHFUL_PRELUDE = `
+  declare const DEFAULT_MARKER: unique symbol;
+  type DefaultMarker<T> = { readonly [DEFAULT_MARKER]: T };
+  type IsEmptyTuple<T> = T extends readonly unknown[]
+    ? number extends T["length"] ? false
+    : T["length"] extends 0 ? true
+    : false
+    : false;
+  type Default<T, V extends T = T> = IsEmptyTuple<T> extends true
+    ? T & DefaultMarker<V>
+    : ([T] extends [null | undefined] ? DefaultMarker<V> : T & DefaultMarker<V>) | T;
+`;
+
+describe("brand-payload recovery on the expanded path (no typeNode)", () => {
+  const transformer = createSchemaTransformerV2();
+
+  async function schemaOfPropertyType(
+    body: string,
+  ): Promise<Record<string, unknown>> {
+    const { type, checker } = await getTypeFromCode(
+      `${FAITHFUL_PRELUDE}\n${body}`,
+      "S",
+    );
+    const propType = checker.getTypeOfSymbol(type.getProperty("x")!);
+    return transformer.generateSchema(propType, checker) as Record<
+      string,
+      unknown
+    >;
+  }
+
+  it("recovers a boolean default whose brand distributes across true|false", async () => {
+    // `Default<boolean, true>` expands to two branded members
+    // (`true & marker<true>`, `false & marker<true>`); both pay `true`.
+    // Regression: the single-branded guard dropped this entirely.
+    const schema = await schemaOfPropertyType(
+      `interface S { x: Default<boolean, true>; }`,
+    );
+    expect(schema).toEqual({ type: "boolean", default: true });
+  });
+
+  it("recovers a default whose value type is a literal union", async () => {
+    const schema = await schemaOfPropertyType(
+      `interface S { x: Default<"a" | "b", "a">; }`,
+    );
+    expect(schema.default).toBe("a");
+    expect(schema.enum).toEqual(["a", "b"]);
+  });
+
+  it("recovers a null default on a nullable value type", async () => {
+    const schema = await schemaOfPropertyType(
+      `interface S { x: Default<string | null, null>; }`,
+    );
+    expect(schema.default).toBe(null);
+  });
+
+  it("recovers a non-null default on a nullable value type", async () => {
+    const schema = await schemaOfPropertyType(
+      `interface S { x: Default<string | null, "y">; }`,
+    );
+    expect(schema.default).toBe("y");
+  });
+
+  it("recovers the default when combined with another union member", async () => {
+    const schema = await schemaOfPropertyType(
+      `interface S { x: Default<string, "a"> | number; }`,
+    );
+    expect(schema.default).toBe("a");
+  });
+
+  it("bails (no default) when two distinct defaults disagree in one union", async () => {
+    // `Default<"a">` and `Default<"b">` each contribute a branded member with
+    // a DIFFERENT payload — ambiguous, must never resolve to a guess.
+    const schema = await schemaOfPropertyType(
+      `interface S { x: Default<"a"> | Default<"b">; }`,
+    );
+    expect(schema.default).toBeUndefined();
+  });
+});

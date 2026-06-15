@@ -983,24 +983,25 @@ export function isBrandOnlyMarkerType(
  * literal-shaped. The payload is the only place V survives once the checker
  * resolves the alias away — see Default<> in packages/api/index.ts.
  */
-export function extractDefaultBrandPayloadValue(
-  type: ts.Type,
+export function isDefaultBrandedMember(
+  member: ts.Type,
+  typeChecker: ts.TypeChecker,
+): boolean {
+  if (isBrandOnlyMarkerType(member, typeChecker)) return true;
+  if ((member.flags & ts.TypeFlags.Intersection) === 0) return false;
+  const parts = (member as ts.IntersectionType).types ?? [];
+  return parts.some((part) => isBrandOnlyMarkerType(part, typeChecker));
+}
+
+function extractPayloadFromBrandedMember(
+  member: ts.Type,
   typeChecker: ts.TypeChecker,
 ): { value: unknown } | undefined {
-  const members = type.isUnion() ? type.types : [type];
-  const branded = members.filter((member) => {
-    if (isBrandOnlyMarkerType(member, typeChecker)) return true;
-    if ((member.flags & ts.TypeFlags.Intersection) === 0) return false;
-    const parts = (member as ts.IntersectionType).types ?? [];
-    return parts.some((part) => isBrandOnlyMarkerType(part, typeChecker));
-  });
-  if (branded.length !== 1) return undefined;
-
-  const brandParts = (branded[0]!.flags & ts.TypeFlags.Intersection) !== 0
-    ? ((branded[0] as ts.IntersectionType).types ?? []).filter((part) =>
+  const brandParts = (member.flags & ts.TypeFlags.Intersection) !== 0
+    ? ((member as ts.IntersectionType).types ?? []).filter((part) =>
       isBrandOnlyMarkerType(part, typeChecker)
     )
-    : [branded[0]!];
+    : [member];
   const markerProp = brandParts
     .flatMap((part) => typeChecker.getPropertiesOfType(part))
     .find((prop) =>
@@ -1011,4 +1012,46 @@ export function extractDefaultBrandPayloadValue(
   const extracted = extractValueFromLiteralType(payload, typeChecker);
   if (!extracted || extracted.value === undefined) return undefined;
   return extracted;
+}
+
+/**
+ * Extract the agreed default value from one or more branded members.
+ *
+ * A union-valued default distributes the brand across several members that
+ * all carry the SAME payload — `Default<boolean, true>` expands to
+ * `true & DefaultMarker<true> | false & DefaultMarker<true> | boolean`, two
+ * branded members both paying `true`; likewise `Default<"a" | "b", "a">`.
+ * Require every branded member to yield the same literal value and return it;
+ * bail (undefined) on genuine disagreement — two distinct defaults in one
+ * union is ambiguous and must never resolve to a guess.
+ */
+export function extractDefaultValueFromBrandedMembers(
+  branded: readonly ts.Type[],
+  typeChecker: ts.TypeChecker,
+): { value: unknown } | undefined {
+  if (branded.length === 0) return undefined;
+  let agreed: { value: unknown } | undefined;
+  for (const member of branded) {
+    const extracted = extractPayloadFromBrandedMember(member, typeChecker);
+    if (!extracted) return undefined;
+    if (agreed === undefined) {
+      agreed = extracted;
+    } else if (
+      JSON.stringify(agreed.value) !== JSON.stringify(extracted.value)
+    ) {
+      return undefined;
+    }
+  }
+  return agreed;
+}
+
+export function extractDefaultBrandPayloadValue(
+  type: ts.Type,
+  typeChecker: ts.TypeChecker,
+): { value: unknown } | undefined {
+  const members = type.isUnion() ? type.types : [type];
+  const branded = members.filter((member) =>
+    isDefaultBrandedMember(member, typeChecker)
+  );
+  return extractDefaultValueFromBrandedMembers(branded, typeChecker);
 }

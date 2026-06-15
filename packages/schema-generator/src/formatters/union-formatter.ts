@@ -8,9 +8,10 @@ import type { SchemaGenerator } from "../schema-generator.ts";
 import {
   cloneSchemaDefinition,
   detectWrapperViaNode,
-  extractDefaultBrandPayloadValue,
+  extractDefaultValueFromBrandedMembers,
   getNativeTypeSchema,
   getPropertyNameText,
+  isDefaultBrandedMember,
   resolveWrapperNode,
   TypeWithInternals,
 } from "../type-utils.ts";
@@ -274,17 +275,17 @@ export class UnionFormatter implements TypeFormatter {
     context: GenerationContext,
   ): JSONSchemaMutable | undefined {
     const checker = context.typeChecker;
-    const branded = members.filter(
-      (m) =>
-        this.hasDefaultBrand(m, checker) ||
-        this.isBrandOnlyMarker(m, checker),
-    );
-    if (branded.length !== 1) return undefined;
+    const branded = members.filter((m) => isDefaultBrandedMember(m, checker));
+    if (branded.length === 0) return undefined;
 
-    const extracted = extractDefaultBrandPayloadValue(branded[0]!, checker);
+    // A union-valued default (`Default<boolean, true>`,
+    // `Default<"a" | "b", "a">`) distributes the brand across SEVERAL members,
+    // all carrying the same payload — extract the agreed value across all of
+    // them, and exclude all of them from the formatted remainder.
+    const extracted = extractDefaultValueFromBrandedMembers(branded, checker);
     if (!extracted) return undefined;
 
-    const rest = members.filter((m) => m !== branded[0]);
+    const rest = members.filter((m) => !isDefaultBrandedMember(m, checker));
     if (rest.length === 0) return undefined;
     const schemas = rest.map((m) => {
       const memberNode = orderedMemberNodes?.[members.indexOf(m)];
