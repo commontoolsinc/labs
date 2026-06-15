@@ -835,9 +835,9 @@ export class CycleTracker<K> {
  * canonical hash string without invoking `hashStringOf()` on
  * already-interned inputs.
  *
- * An `undefined` `extraKey` is normalized to `true` (JSON Schema's
- * "accept everything", which is exactly what `undefined` means at
- * every current call site), so the intern call can always be made.
+ * By contract, an `undefined` `extraKey` is equivalent to `true` (JSON
+ * Schema's "accept everything"): both are normalized to `true`, so they share
+ * one cache entry.
  *
  * This will not work correctly if the key is modified after being
  * added.
