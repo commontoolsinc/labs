@@ -186,9 +186,9 @@ export function internSchema<T extends JSONSchema>(
 }
 
 /**
- * Looks up a previously interned schema by its hash. Accepts a
- * `FabricHash` or a plain string. Returns `undefined` if the schema
- * has not been interned or has been garbage-collected. If found, returns the
+ * Looks up a previously interned schema by its hash. Accepts a `FabricHash` or
+ * a plain string of the _tagged_ hash. Returns `undefined` if the schema has
+ * not been interned or has been garbage-collected. If found, returns the
  * corresponding full `SchemaAndHash`.
  *
  * This function _will_ find the `SchemaAndHash` corresponding to the "schema"

@@ -13,7 +13,7 @@ import {
 } from "@/schema-hash.ts";
 import { SchemaAndHash } from "@/SchemaAndHash.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
-import { hashStringOf } from "@/value-hash.ts";
+import { hashStringOf, taggedHashStringOf } from "@/value-hash.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { toDeepFrozenSchema } from "@/schema-utils.ts";
 
@@ -208,6 +208,10 @@ describe("schema-hash", () => {
       expect(isInternedSchema(false)).toBe(true);
     });
 
+    it("returns `true` for `undefined`", () => {
+      expect(isInternedSchema(undefined)).toBe(true);
+    });
+
     it("returns `true` for a freshly interned schema", () => {
       const schema = internSchema({ type: "string" });
       expect(isInternedSchema(schema)).toBe(true);
@@ -271,6 +275,13 @@ describe("schema-hash", () => {
       const foundFalse = callFind(sahFalse.hash);
       expect(foundTrue).toBe(sahTrue);
       expect(foundFalse).toBe(sahFalse);
+    });
+
+    it("finds `undefined`", () => {
+      const undefinedHash = taggedHashStringOf(undefined);
+      const found = callFind(undefinedHash);
+      expect(found).not.toBe(undefined);
+      expect(found!.schemaOrUndefined).toBe(undefined);
     });
   });
 
