@@ -90,7 +90,15 @@ export default pattern(() => {
     if (first) poll.removeOption.send({ optionId: first.id });
   });
 
-  // Log a specific place by title (defaults wentAt to today).
+  // Cast a green vote on the surviving option (Thai) so that the next
+  // logVisit captures a non-empty vote snapshot into vote_history.
+  const action_vote_green_thai = action(() => {
+    const first = poll.options[0]; // Thai Kitchen (the only survivor)
+    if (first) poll.castVote.send({ optionId: first.id, voteType: "green" });
+  });
+
+  // Log a specific place by title (defaults wentAt to today). With a live
+  // green vote on Thai, this also writes one vote_history row.
   const action_log_thai = action(() => {
     poll.logVisit.send({ title: "Thai Kitchen" });
   });
@@ -101,8 +109,10 @@ export default pattern(() => {
     poll.logVisit.send({ title: "Chipotle", wentAt: PAST_VISIT + 1000 });
   });
 
+  // Most-recent visit is recentVisits[0] (ORDER BY went_at DESC). Thai is
+  // logged "today" so it sorts ahead of the backdated Chipotle.
   const action_remove_first_history = action(() => {
-    const first = poll.history[0];
+    const first = poll.recentVisits.result?.[0];
     if (first) poll.removeHistoryEntry.send({ id: first.id });
   });
 
@@ -186,31 +196,54 @@ export default pattern(() => {
     poll.adminName === "Alex" && poll.isAdmin === true
   );
 
-  // Winner logged via logVisit({}) — the only remaining option (Thai Kitchen)
-  // has the sole vote, so it's the top choice. Attributed to the host. If the
-  // pre-join attempt ("Sneaky") had not been gated, history[0] would be
-  // "Sneaky" — so this implicitly verifies the host gate too.
-  const assert_thai_logged = computed(() =>
-    poll.history.length === 1 &&
-    poll.history[0]?.title === "Thai Kitchen" &&
-    poll.history[0]?.loggedByName === "Alex"
-  );
+  // History now lives in a SQLite `visits` table; we assert on the
+  // `recentVisits` query result (ORDER BY went_at DESC). The `historyCount` /
+  // `mostRecentTitle` scalars are exposed as a belt-and-suspenders signal — the
+  // most reliable values out of the emulated test runner.
 
-  // Second entry is the backdated Chipotle log, with the exact wentAt we
-  // passed (proves backdating).
-  const assert_two_history = computed(() =>
-    poll.history.length === 2 &&
-    poll.history[1]?.title === "Chipotle" &&
-    poll.history[1]?.wentAt === PAST_VISIT + 1000
-  );
+  // Logged the surviving option (Thai Kitchen) by title → one row, attributed
+  // to the host (the frozen `logged_by` name snapshot). If the pre-join attempt
+  // ("Sneaky") had not been gated, a row would exist before this — so this
+  // implicitly verifies the host gate too.
+  const assert_thai_logged = computed(() => {
+    const rows = poll.recentVisits.result ?? [];
+    return rows.length === 1 &&
+      rows[0]?.title === "Thai Kitchen" &&
+      rows[0]?.logged_by === "Alex" &&
+      poll.historyCount === 1 &&
+      poll.mostRecentTitle === "Thai Kitchen";
+  });
 
-  // After deleting history[0] (Thai), only the Chipotle entry remains.
-  const assert_one_history_after_remove = computed(() =>
-    poll.history.length === 1 &&
-    poll.history[0]?.title === "Chipotle"
-  );
+  // The live green vote on Thai was snapshotted into vote_history when Thai was
+  // logged → exactly one snapshot row.
+  const assert_vote_snapshot = computed(() => poll.voteHistoryCount === 1);
 
-  const assert_history_cleared = computed(() => poll.history.length === 0);
+  // Second row is the backdated Chipotle log; under went_at DESC it sorts after
+  // today's Thai, so it's rows[1]. went_at is stored as zero-padded TEXT (the
+  // @db/sqlite integer-truncation workaround), so we compare via Number(...) —
+  // proving the backdated value round-trips exactly.
+  const assert_two_history = computed(() => {
+    const rows = poll.recentVisits.result ?? [];
+    return rows.length === 2 &&
+      rows[1]?.title === "Chipotle" &&
+      Number(rows[1]?.went_at) === PAST_VISIT + 1000 &&
+      poll.historyCount === 2;
+  });
+
+  // After deleting rows[0] (Thai, the most recent), only Chipotle remains.
+  const assert_one_history_after_remove = computed(() => {
+    const rows = poll.recentVisits.result ?? [];
+    return rows.length === 1 &&
+      rows[0]?.title === "Chipotle" &&
+      poll.historyCount === 1;
+  });
+
+  // Clearing visits also clears the vote_history snapshots.
+  const assert_history_cleared = computed(() =>
+    (poll.recentVisits.result ?? []).length === 0 &&
+    poll.historyCount === 0 &&
+    poll.voteHistoryCount === 0
+  );
 
   return {
     tests: [
@@ -273,16 +306,21 @@ export default pattern(() => {
 
       // "We went here" history. The pre-join attempt above ("Sneaky") must
       // have left no trace.
-      // Log the surviving option by title → one entry, attributed to host.
+      // Cast a live green vote on the surviving option (Thai) so the next
+      // logVisit snapshots it into vote_history.
+      { action: action_vote_green_thai },
+      // Log the surviving option by title → one visit row, attributed to host,
+      // plus one vote_history snapshot row for the green vote.
       { action: action_log_thai },
       { assertion: assert_thai_logged },
+      { assertion: assert_vote_snapshot },
       // A second, backdated, explicit log → two entries (proves backdating).
       { action: action_log_visit_chipotle_backdated },
       { assertion: assert_two_history },
       // Delete a single entry (host) → the other remains.
       { action: action_remove_first_history },
       { assertion: assert_one_history_after_remove },
-      // Clear all → empty.
+      // Clear all → empty (visits AND vote_history).
       { action: action_clear_history },
       { assertion: assert_history_cleared },
     ],
