@@ -1,6 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import app from "../../../app.ts";
 import { memoryServer } from "../memory.ts";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
@@ -56,7 +57,7 @@ const createSessionOpenAuth = async (
   };
 };
 
-const readJsonMessage = async <Message>(
+const readJsonMessage = async <Message extends FabricValue>(
   socket: WebSocket,
 ): Promise<Message> => {
   const payload = await new Promise<string>((resolve, reject) => {

@@ -3047,7 +3047,7 @@ function encodeSchedulerPath(path: readonly string[]): string {
 }
 
 function decodeSchedulerPath(payload: string): string[] {
-  const path = decodeMemoryBoundary<unknown>(payload);
+  const path = decodeMemoryBoundary(payload);
   if (!Array.isArray(path)) {
     throw new Error("scheduler paths must be arrays");
   }
@@ -4247,7 +4247,7 @@ const ensureActiveBranch = (engine: Engine, branch: BranchName): void => {
 const emptyEntityDocument = (): EntityDocument => ({});
 
 const decodeStoredDocument = (data: string | null): EntityDocument => {
-  const parsed = decodeMemoryBoundary<unknown>(data ?? "null");
+  const parsed = decodeMemoryBoundary(data ?? "null");
   if (!isEntityDocument(parsed)) {
     throw new Error("memory v2 stored documents must be plain object roots");
   }
@@ -4255,7 +4255,7 @@ const decodeStoredDocument = (data: string | null): EntityDocument => {
 };
 
 const decodeStoredPatchList = (data: string | null): PatchOp[] => {
-  const parsed = decodeMemoryBoundary<unknown>(data ?? "[]");
+  const parsed = decodeMemoryBoundary(data ?? "[]");
   if (!Array.isArray(parsed)) {
     throw new Error("memory v2 stored patches must be arrays");
   }

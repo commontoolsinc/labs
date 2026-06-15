@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { Identity } from "@commonfabric/identity";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { URI } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
@@ -119,7 +120,7 @@ class CountingWatchSetTransport implements MemoryV2Client.Transport {
     return Promise.resolve();
   }
 
-  #respond(message: unknown): void {
+  #respond(message: FabricValue): void {
     this.#receiver(encodeMemoryBoundary(message));
   }
 }
@@ -222,7 +223,7 @@ class DelayedWatchAddTransport implements MemoryV2Client.Transport {
     return Promise.resolve();
   }
 
-  #respond(message: unknown): void {
+  #respond(message: FabricValue): void {
     this.#receiver(encodeMemoryBoundary(message));
   }
 }
@@ -314,7 +315,7 @@ class IncrementalEffectTransport implements MemoryV2Client.Transport {
     });
   }
 
-  #respond(message: unknown): void {
+  #respond(message: FabricValue): void {
     this.#receiver(encodeMemoryBoundary(message));
   }
 }

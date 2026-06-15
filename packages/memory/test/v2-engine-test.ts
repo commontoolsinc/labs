@@ -1,4 +1,5 @@
 import { assertEquals, assertExists, assertThrows } from "@std/assert";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
 import {
@@ -56,8 +57,9 @@ const authorization = {
   access: { "proof:1": {} },
 };
 
-const decodeStored = <Value>(source: string | null | undefined): Value =>
-  decodeMemoryBoundary<Value>(source ?? "null");
+const decodeStored = <Value extends FabricValue>(
+  source: string | null | undefined,
+): Value => decodeMemoryBoundary<Value>(source ?? "null");
 
 const toSourceLink = (id: string) => ({ "/": id } as const);
 
