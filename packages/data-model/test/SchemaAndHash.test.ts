@@ -30,9 +30,23 @@ describe("SchemaAndHash", () => {
       expect(sah.hash).toBe(HASH_A);
     });
 
-    it("accepts a boolean schema (primitives are inherently frozen)", () => {
-      const sah = new SchemaAndHash(true, HASH_A);
-      expect(sah.schema).toBe(true);
+    it("rejects a non-deep-frozen schema", () => {
+      expect(() => new SchemaAndHash({ type: "number" }, HASH_A)).toThrow(
+        /deep-frozen/,
+      );
+    });
+
+    it("accepts both boolean schemas", () => {
+      const sahTrue = new SchemaAndHash(true, HASH_A);
+      expect(sahTrue.schema).toBe(true);
+
+      const sahFalse = new SchemaAndHash(false, HASH_A);
+      expect(sahFalse.schema).toBe(false);
+    });
+
+    it("accepts `schema === undefined`", () => {
+      const sah = new SchemaAndHash(undefined, HASH_A);
+      expect(sah.schemaOrUndefined).toBe(undefined);
     });
 
     it("produces a frozen instance", () => {
@@ -49,6 +63,43 @@ describe("SchemaAndHash", () => {
           (sah as unknown as Record<string, unknown>).schema = false;
         }).toThrow();
       });
+
+      it("is the schema that the instance was constructed with", () => {
+        const schema1 = true;
+        const schema2 = toDeepFrozenSchema({ type: "number", title: "yes!" });
+        const sah1 = new SchemaAndHash(schema1, HASH_A);
+        const sah2 = new SchemaAndHash(schema2, HASH_A);
+        expect(sah1.schema).toBe(schema1);
+        expect(sah2.schema).toBe(schema2);
+      });
+
+      it("throws when `schema === undefined`", () => {
+        const sah = new SchemaAndHash(undefined, HASH_A);
+        expect(() => sah.schema).toThrow(/undefined/);
+      });
+    });
+
+    describe(".schemaOrUndefined", () => {
+      it("is not writable", () => {
+        const sah = new SchemaAndHash(true, HASH_A);
+        expect(() => {
+          (sah as unknown as Record<string, unknown>).schema = false;
+        }).toThrow();
+      });
+
+      it("is the schema that the instance was constructed with", () => {
+        const schema1 = false;
+        const schema2 = toDeepFrozenSchema({ type: "string", title: "yes!" });
+        const sah1 = new SchemaAndHash(schema1, HASH_A);
+        const sah2 = new SchemaAndHash(schema2, HASH_A);
+        expect(sah1.schema).toBe(schema1);
+        expect(sah2.schema).toBe(schema2);
+      });
+
+      it("returns `undefined` when `schema === undefined`", () => {
+        const sah = new SchemaAndHash(undefined, HASH_A);
+        expect(sah.schemaOrUndefined).toBe(undefined);
+      });
     });
 
     describe(".hash", () => {
@@ -57,6 +108,13 @@ describe("SchemaAndHash", () => {
         expect(() => {
           (sah as unknown as Record<string, unknown>).hash = "tampered";
         }).toThrow();
+      });
+
+      it("is the hash that the instance was constructed with", () => {
+        const sah1 = new SchemaAndHash(true, HASH_A);
+        const sah2 = new SchemaAndHash(false, HASH_B);
+        expect(sah1.hash).toBe(HASH_A);
+        expect(sah2.hash).toBe(HASH_B);
       });
     });
 
