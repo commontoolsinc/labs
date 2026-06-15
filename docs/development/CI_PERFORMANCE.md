@@ -50,3 +50,30 @@ failure by itself.
 
 Good CI optimization PRs should reduce critical-path wall time without making
 the workflow harder to reason about.
+
+## Coverage Debt Baselines
+
+Performance Check also tracks coverage debt as uncovered source lines. Coverage
+debt uses a strict latest-main ratchet: any increase fails unless the PR
+explicitly accepts it.
+
+Use the narrow per-metric form when a PR intentionally increases one coverage
+debt metric:
+
+```text
+NEW_PERF_BASELINE: coverage-debt: packages/runner uncovered lines = 123 lines
+```
+
+Use the broad reset marker only to bootstrap coverage data for the first time,
+or when the upstream coverage baseline is known to be bogus and should be
+re-seeded for one cycle:
+
+```text
+NEW_COVERAGE_BASELINE
+```
+
+When that PR merges, the main run's coverage metrics become the new ratchet
+baseline for later PRs. Performance Check still requires the full expected
+coverage artifact set during that reset cycle. Jobs with no reportable covered
+files upload an empty LCOV report so missing artifacts mean the report upload
+itself failed.
