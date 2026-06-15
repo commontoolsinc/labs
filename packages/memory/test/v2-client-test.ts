@@ -1,5 +1,6 @@
 import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Server, SessionRegistry } from "../v2/server.ts";
 import {
   decodeMemoryBoundary,
@@ -538,7 +539,7 @@ class ReconnectableLoopbackTransport implements Transport {
   private connection(): ReturnType<Server["connect"]> {
     if (this.#connection === null) {
       this.connectionCount++;
-      this.#connection = this.server.connect((message) => {
+      this.#connection = this.server.connect((message: FabricValue) => {
         this.#receiver(encodeMemoryBoundary(message));
       });
     }
@@ -640,7 +641,7 @@ class ScriptedReconnectTransport implements Transport {
     return Promise.resolve();
   }
 
-  #respond(message: unknown): void {
+  #respond(message: FabricValue): void {
     this.#receiver(encodeMemoryBoundary(message));
   }
 }
@@ -724,7 +725,7 @@ class DelayedTransactTransport implements Transport {
     return Promise.resolve();
   }
 
-  #respond(message: unknown): void {
+  #respond(message: FabricValue): void {
     this.#receiver(encodeMemoryBoundary(message));
   }
 }
@@ -800,7 +801,7 @@ class AckCountingTransport implements Transport {
     return Promise.resolve();
   }
 
-  #respond(message: unknown): void {
+  #respond(message: FabricValue): void {
     this.#receiver(encodeMemoryBoundary(message));
   }
 }
@@ -869,7 +870,7 @@ class HangingAckTransport implements Transport {
     return Promise.resolve();
   }
 
-  #respond(message: unknown): void {
+  #respond(message: FabricValue): void {
     this.#receiver(encodeMemoryBoundary(message));
   }
 }
@@ -1781,7 +1782,7 @@ class DisconnectableAckTransport implements Transport {
     return Promise.resolve();
   }
 
-  #respond(message: unknown): void {
+  #respond(message: FabricValue): void {
     this.#receiver(encodeMemoryBoundary(message));
   }
 }

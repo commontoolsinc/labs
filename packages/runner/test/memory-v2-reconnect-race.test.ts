@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { MIME, URI } from "@commonfabric/memory/interface";
 import {
   decodeMemoryBoundary,
@@ -220,7 +221,7 @@ class RejectThenSucceedTransport implements MemoryV2Client.Transport {
     return Promise.resolve();
   }
 
-  #respond(message: unknown): void {
+  #respond(message: FabricValue): void {
     this.#receiver(encodeMemoryBoundary(message));
   }
 }

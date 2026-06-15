@@ -660,8 +660,8 @@ export const wireMemoryProtocolFlags = (
   commitPreconditions: flags.commitPreconditions,
 });
 
-export const encodeMemoryBoundary = (value: unknown): string =>
-  jsonFromValue(value as FabricValue);
+export const encodeMemoryBoundary = (value: FabricValue): string =>
+  jsonFromValue(value);
 
 export const decodeMemoryBoundary = <Value = FabricValue>(
   source: string,
