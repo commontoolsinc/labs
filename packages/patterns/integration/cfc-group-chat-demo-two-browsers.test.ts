@@ -23,6 +23,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import {
   clickCfButton,
+  clickTrustedActionAndWaitForText,
   fillCfInput,
   readCfInputValue,
   waitForDisabled,
@@ -32,6 +33,7 @@ import {
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 const PROPAGATION_TIMEOUT = 60_000;
+const SAVE_PROFILE_ACTION = "TrustedGroupChatSaveProfile";
 
 describe("cfc group chat demo with two concurrent browser profiles", () => {
   const aliceShell = new ShellIntegration();
@@ -106,8 +108,12 @@ describe("cfc group chat demo with two concurrent browser profiles", () => {
     // Alice saves her profile. Her status updates; Bob's profile must stay
     // unset (not clobbered to Alice's).
     await waitForDisabled(alice, "#trusted-profile-save", false);
-    await clickCfButton(alice, "#trusted-profile-save");
-    await waitForText(alice, "#trusted-profile-status", "Alice");
+    await clickTrustedActionAndWaitForText(
+      alice,
+      SAVE_PROFILE_ACTION,
+      "#trusted-profile-status",
+      "Alice",
+    );
     await waitForRuntimeIdle(alice);
     await waitForRuntimeIdle(bob);
     await waitForText(bob, "#trusted-profile-status", "Name not set");
@@ -117,8 +123,12 @@ describe("cfc group chat demo with two concurrent browser profiles", () => {
     // name (not an unnamed placeholder), and her own profile must survive.
     await fillCfInput(bob, "#trusted-profile-name", "Bob");
     await waitForDisabled(bob, "#trusted-profile-save", false);
-    await clickCfButton(bob, "#trusted-profile-save");
-    await waitForText(bob, "#trusted-profile-status", "Bob");
+    await clickTrustedActionAndWaitForText(
+      bob,
+      SAVE_PROFILE_ACTION,
+      "#trusted-profile-status",
+      "Bob",
+    );
     await waitForText(
       alice,
       "#trusted-admin-user-list",

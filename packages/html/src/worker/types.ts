@@ -221,9 +221,6 @@ export interface ReconcileContext {
     handler: (event: unknown) => void,
   ) => number;
 
-  /** Unregister an event handler by ID */
-  unregisterHandler: (handlerId: number) => void;
-
   /** Get handler by ID for event dispatch */
   getHandler: (
     handlerId: number,
@@ -318,7 +315,7 @@ export interface WorkerReconcilerOptions {
   /** Callback when operations are ready to send to main thread */
   onOps: (
     ops: import("../vdom-ops.ts").VDomOp[],
-  ) => void;
+  ) => number | void;
 
   /** Optional: callback when an error occurs */
   onError?: (error: Error) => void;

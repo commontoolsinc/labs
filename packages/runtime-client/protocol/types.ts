@@ -88,6 +88,7 @@ export enum RequestType {
   VDomEvent = "vdom:event",
   VDomMount = "vdom:mount",
   VDomUnmount = "vdom:unmount",
+  VDomBatchApplied = "vdom:batch-applied",
 }
 
 export enum NotificationType {
@@ -623,6 +624,17 @@ export interface VDomUnmountRequest extends BaseRequest {
 }
 
 /**
+ * Request sent after the main thread applies a VDOM batch.
+ */
+export interface VDomBatchAppliedRequest extends BaseRequest {
+  type: RequestType.VDomBatchApplied;
+  /** The mount ID that received the batch */
+  mountId: number;
+  /** The applied batch ID */
+  batchId: number;
+}
+
+/**
  * Response to VDomMount with the root node ID.
  */
 export interface VDomMountResponse {
@@ -675,6 +687,7 @@ export type IPCClientRequest =
   | VDomEventRequest
   | VDomMountRequest
   | VDomUnmountRequest
+  | VDomBatchAppliedRequest
   | DetectNonIdempotentRequest
   | GetPatternSourcesRequest
   | SetBreakpointsRequest
@@ -1018,6 +1031,10 @@ export type Commands = {
   };
   [RequestType.VDomUnmount]: {
     request: VDomUnmountRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.VDomBatchApplied]: {
+    request: VDomBatchAppliedRequest;
     response: EmptyResponse;
   };
 };

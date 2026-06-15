@@ -383,6 +383,24 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
   }
 
   /**
+   * Notify the worker that a VDOM batch has been applied on the main thread.
+   */
+  ackVDomBatch(mountId: number, batchId: number): void {
+    if (this.#disposed) return;
+    this.request<RequestType.VDomBatchApplied>({
+      type: RequestType.VDomBatchApplied,
+      mountId,
+      batchId,
+    }).catch((error) => {
+      console.error(
+        "[RuntimeClient] VDom batch acknowledgement failed:",
+        error instanceof Error ? error.message : String(error),
+        error,
+      );
+    });
+  }
+
+  /**
    * Request the worker to start VDOM rendering for a cell.
    */
   async mountVDom(
