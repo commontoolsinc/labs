@@ -1,18 +1,31 @@
 import { assertEquals } from "@std/assert";
+import { join } from "@std/path";
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
+
+const ROOT = join(import.meta.dirname!, "..", "..", "..");
 
 Deno.test("scoped group chat pattern schema generates scoped input cells", async () => {
-  const command = new Deno.Command(Deno.execPath(), {
-    args: [
-      "task",
-      "cf",
+  const output = await runDenoCommandWithTemporaryLock({
+    root: ROOT,
+    cwd: ROOT,
+    args: (lockPath) => [
+      "run",
+      "--config",
+      join(ROOT, "deno.json"),
+      "--lock",
+      lockPath,
+      "--allow-net",
+      "--allow-ffi",
+      "--allow-read",
+      "--allow-write",
+      "--allow-env",
+      "--allow-run",
+      join(ROOT, "packages/cli/mod.ts"),
       "check",
       "packages/patterns/scoped-group-chat/main-with-writable-inputs.tsx",
       "--pattern-json",
     ],
-    stdout: "piped",
-    stderr: "piped",
   });
-  const output = await command.output();
   assertEquals(output.code, 0);
 
   const stdout = new TextDecoder().decode(output.stdout);
