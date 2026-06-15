@@ -12,6 +12,7 @@ import {
 } from "./scheduler-test-utils.ts";
 import type {
   Action,
+  Cell,
   IExtendedStorageTransaction,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
@@ -23,6 +24,7 @@ import {
   registerDependentEdge,
   unregisterDependentEdge,
 } from "../src/scheduler/dependency-graph.ts";
+import { planBudgetBackoff } from "../src/scheduler/execution.ts";
 import { SchedulerDelays } from "../src/scheduler/delays.ts";
 import {
   getNextDebounceRunTime,
@@ -1083,7 +1085,7 @@ describe("scheduler v2 cutover fixtures", () => {
       delays,
       computations: new Set([action]),
       effects: new Set<Action>(),
-      dirty: new Set([action]),
+      isInvalid: () => true,
       pending: new Set<Action>(),
       queueExecution: () => {},
       logDebounce: () => {},
@@ -1096,5 +1098,113 @@ describe("scheduler v2 cutover fixtures", () => {
     } finally {
       delays.clearActiveDebounceTimers();
     }
+  });
+
+  it("settles a deep acyclic chain without iteration-cap backoff", async () => {
+    // A chain deeper than MAX_ITERS (10) advances one hop per settle
+    // iteration as each commit invalidates the next reader. It hits the
+    // iteration cap while making healthy forward progress (no action runs
+    // anywhere near the per-pass run budget), so it must re-queue another
+    // pass immediately, not pause for BACKOFF_BASE_MS (250ms).
+    const DEPTH = 12;
+    const cells: Cell<number>[] = [];
+    for (let i = 0; i <= DEPTH; i++) {
+      const cell = runtime.getCell<number>(
+        space,
+        `v2-cutover-deep-chain-${i}`,
+        undefined,
+        tx,
+      );
+      cell.set(0);
+      cells.push(cell);
+    }
+    await tx.commit();
+    tx = runtime.edit();
+
+    const cancels: Array<() => void> = [];
+    let maxRunsForAnyLink = 0;
+    try {
+      // Chain: cell[i+1] = cell[i] + 1 for each hop.
+      for (let i = 0; i < DEPTH; i++) {
+        const src = cells[i];
+        const dst = cells[i + 1];
+        let runs = 0;
+        const link = Object.assign(
+          ((actionTx: IExtendedStorageTransaction) => {
+            runs++;
+            maxRunsForAnyLink = Math.max(maxRunsForAnyLink, runs);
+            dst.withTx(actionTx).send(src.withTx(actionTx).get() + 1);
+          }) as Action,
+          { writes: [dst.getAsNormalizedFullLink()] },
+        );
+        cancels.push(
+          runtime.scheduler.subscribe(link, {
+            reads: [toMemorySpaceAddress(src.getAsNormalizedFullLink())],
+            shallowReads: [],
+            writes: [toMemorySpaceAddress(dst.getAsNormalizedFullLink())],
+          }),
+        );
+      }
+
+      // A live effect at the tail makes the whole chain demanded.
+      const tailReads: number[] = [];
+      const tailEffect: Action = (actionTx) => {
+        tailReads.push(cells[DEPTH].withTx(actionTx).get());
+      };
+      cancels.push(
+        runtime.scheduler.subscribe(tailEffect, {
+          reads: [toMemorySpaceAddress(cells[DEPTH].getAsNormalizedFullLink())],
+          shallowReads: [],
+          writes: [],
+        }, { isEffect: true }),
+      );
+
+      const start = performance.now();
+      cells[0].withTx(tx).send(5);
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.scheduler.idle();
+      const elapsed = performance.now() - start;
+
+      // Full propagation: tail sees source + DEPTH hops.
+      expect(cells[DEPTH].get()).toBe(5 + DEPTH);
+      // Healthy progress, not a cycle: no link approached the run budget.
+      expect(maxRunsForAnyLink).toBeLessThan(5);
+      // No time-gated backoff pause (250ms). Generous bound for CI noise.
+      expect(elapsed).toBeLessThan(200);
+    } finally {
+      for (const cancel of cancels) cancel();
+    }
+  });
+
+  it("reserves iteration-cap backoff for cycle evidence", () => {
+    // At the iteration cap, a healthy action that made forward progress
+    // (passRuns below the per-pass budget) must NOT be time-gated — it is a
+    // deep/slow chain that should re-pass immediately. Only an action with
+    // budget-level run evidence (a genuine cycle) is backed off.
+    const registry = new NodeRegistry();
+    const healthy: Action = function healthyDeepChainLink() {};
+    const cycling: Action = function cyclingLink() {};
+    registry.register(healthy, "computation");
+    registry.register(cycling, "computation");
+    const healthyRecord = registry.get(healthy)!;
+    const cyclingRecord = registry.get(cycling)!;
+    healthyRecord.status = "invalid";
+    cyclingRecord.status = "invalid";
+    healthyRecord.passRuns = PASS_RUN_BUDGET - 1;
+    cyclingRecord.passRuns = PASS_RUN_BUDGET;
+
+    const plan = planBudgetBackoff({
+      workSet: new Set([healthy, cycling]),
+      nodes: registry,
+      pending: new Set<Action>(),
+      isLiveAction: () => true,
+      getNextEligibleRunTime: () => undefined,
+      isDebouncedComputationWaiting: () => false,
+      reason: "iteration-cap",
+      now: 1000,
+    });
+
+    expect(plan.actions).toEqual([cycling]);
   });
 });

@@ -4386,3 +4386,54 @@ $ rg -n "runsThisExecute|loopCounter|executeStartTime|CYCLE_DEBOUNCE|MAX_ITERATI
   - Expected noisy passing logs remain: deliberate scheduler errors in
     convergence/core/stack-trace tests, reload-rehydration's expected
     `TypeError`, and existing write-surface/wish warnings.
+
+## REVIEWER RESOLUTION — PR #4103 review findings + rebase interaction
+
+- [x] pending — iteration-cap backoff cycle-evidence gate + idle-wait for a
+  rebase-exposed first-run demanded debounce.
+- Findings addressed:
+  1. (Codex P2) Iteration-cap backoff time-gated healthy deep chains.
+     `passRuns` resets per execute-pass and a tight cycle trips the per-pass
+     run budget MID-loop (breaking with `pass-budget` backoff), so reaching
+     the iteration cap means forward progress, not a cycle.
+     `isBudgetBackoffCandidate` now applies the `passRuns >= PASS_RUN_BUDGET`
+     gate for the `iteration-cap` reason too (the in-loop `pass-budget`
+     break still opts out via `requirePassRunBudget: false`), so a
+     sub-budget chain re-passes immediately instead of pausing for
+     `BACKOFF_BASE_MS`. Red-green: cutover fixture "reserves iteration-cap
+     backoff for cycle evidence" (+ "settles a deep acyclic chain ..." and
+     the existing "bounds a cycling subgraph ..." as guards).
+- Rebase interaction (NOT a review finding — surfaced by my #4102 fix
+  landing on main): 3c's continuation refactor removed deferred actions
+  from `hasPendingPullWork` and tracks their future run via
+  `nextDirtyPullRunWaitsForIdle`, which only covered effects/materializers.
+  Original 3c masked the gap because the planning-path
+  `getNextDebounceRunTime` returned undefined for first-run debounced
+  computations (so they stayed in pending-work). My #4102 consistency fix
+  makes it return a value, so a never-ran demanded debounced computation
+  (e.g. a debounced child under a live parent's provisional demand) got
+  deferred out of pending-work without keeping idle() alive — idle returned
+  before its 200ms gate opened. `noteFutureEligibility` now also waits for
+  idle on `shouldRunFirstPullComputationInDemandContext` (never-ran +
+  provisional demand), restoring main's effective behavior. Limited to the
+  FIRST run so idle never blocks through a throttle window / trailing
+  flush of an already-run action (caught by the throttle suite when an
+  over-broad `isDemandedPullComputation` was tried first). Guard:
+  cutover fixture "keeps provisional demand for a debounced child until the
+  gate opens" (216ms) — was green on original 3c, regressed on rebase, now
+  green again.
+- Declined (cubic P2s, reasoning recorded):
+  - resubscribe clean-up guard (`!existingRecord && never-ran`): correct
+    as-is. It prevents a FIRST registration via resubscribe from being
+    wired as invalid mid-function; an EXISTING never-ran record should stay
+    runnable. Rehydration's clean path force-sets `status = clean`
+    independently, so rehydrated actions do not re-run (rehydration suite
+    green).
+  - continuation re-tick for non-runnable invalid nodes: `hasDirtyPullWork`
+    already filters invalid nodes that are not effect/demanded/materializer,
+    and `noteFutureEligibility` filters debounce/throttle-deferred ones — a
+    surviving node is genuinely runnable next tick.
+  - initial-run fallback queueExecution: undemanded failed work staying
+    unscheduled is correct pull semantics; demand arrival
+    (`notifyNodeLivenessChange`/edge registration) queues it.
+- Deviations: none.

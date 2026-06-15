@@ -478,8 +478,14 @@ function isBudgetBackoffCandidate(
   if (!state.isLiveAction(record.action) && !state.pending.has(record.action)) {
     return false;
   }
+  // Time-gated backoff is reserved for run-budget (cycle) evidence. A tight
+  // cycle trips the budget mid-pass and is handled there; reaching the
+  // iteration cap with sub-budget passRuns means a deep/slow but forward-
+  // progressing chain (one hop per iteration), which must re-pass
+  // immediately rather than pause for BACKOFF_BASE_MS. The explicit
+  // `requirePassRunBudget: false` (the in-loop pass-budget break, fired only
+  // once the budget is already hit) opts out of this gate.
   if (
-    state.reason === "pass-budget" &&
     state.requirePassRunBudget !== false &&
     record.passRuns < PASS_RUN_BUDGET
   ) {
@@ -572,6 +578,19 @@ export function planPullExecuteContinuation(state: {
   const now = state.now ?? performance.now();
   let nextDirtyPullRunAt: number | undefined;
   let nextDirtyPullRunWaitsForIdle = false;
+  // A deferred run keeps idle() blocked when its eventual run is something an
+  // idle waiter expects to observe: effects and materializers (side effects),
+  // and a never-ran demanded computation whose FIRST run is still awaited
+  // (e.g. a debounced child created under a live parent's provisional demand).
+  // Deferring such an action removes it from hasPendingPullWork, so its future
+  // run must be tracked here or idle() returns before the gate opens. Limited
+  // to the first run: once the computation has produced output, subsequent
+  // debounce/throttle-deferred reruns are not awaited (idle must not block
+  // through a throttle window and re-run a recently-run action).
+  const futureRunWaitsForIdle = (action: Action): boolean =>
+    state.effects.has(action) ||
+    state.materializerIndex.isMaterializer(action) ||
+    state.shouldRunFirstPullComputationInDemandContext(action);
   const noteFutureEligibility = (action: Action) => {
     if (state.isDebouncedComputationWaiting(action)) {
       const nextDebounceAt = state.getNextDebounceRunTime(action);
@@ -580,8 +599,7 @@ export function planPullExecuteContinuation(state: {
           nextDirtyPullRunAt,
           nextDebounceAt,
         );
-        nextDirtyPullRunWaitsForIdle ||= state.effects.has(action) ||
-          state.materializerIndex.isMaterializer(action);
+        nextDirtyPullRunWaitsForIdle ||= futureRunWaitsForIdle(action);
         return true;
       }
     }
@@ -589,8 +607,7 @@ export function planPullExecuteContinuation(state: {
     const nextEligibleAt = state.getNextEligibleRunTime(action);
     if (nextEligibleAt !== undefined && nextEligibleAt > now) {
       nextDirtyPullRunAt = minDefined(nextDirtyPullRunAt, nextEligibleAt);
-      nextDirtyPullRunWaitsForIdle ||= state.effects.has(action) ||
-        state.materializerIndex.isMaterializer(action);
+      nextDirtyPullRunWaitsForIdle ||= futureRunWaitsForIdle(action);
       return true;
     }
 
