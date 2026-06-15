@@ -109,6 +109,9 @@ INSPECT_PORT=${INSPECT_PORT:-$((BASE_INSPECTOR_PORT + PORT_OFFSET))}
 export SHELL_PORT
 export TOOLSHED_PORT
 
+TOOLSHED_API_URL=${API_URL:-"http://localhost:$TOOLSHED_PORT"}
+TOOLSHED_MEMORY_URL=${MEMORY_URL:-"$TOOLSHED_API_URL"}
+
 require_command "deno" \
     "Run 'mise install' from the repo root or install Deno before starting local dev."
 require_command "curl" \
@@ -301,6 +304,8 @@ if [[ "$INSPECT" == "true" ]]; then
     fi
 fi
 SHELL_URL="http://localhost:$SHELL_PORT" \
+    API_URL="$TOOLSHED_API_URL" \
+    MEMORY_URL="$TOOLSHED_MEMORY_URL" \
     deno run --unstable-otel -A $INSPECT_FLAG $WATCH_FLAG \
         --env-file=.env index.ts --port="$TOOLSHED_PORT" \
         > "$TOOLSHED_LOG" 2>&1 &
