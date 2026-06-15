@@ -200,6 +200,19 @@ export interface VoteHistoryRow {
 }
 
 /**
+ * A "Lunch stats" row — the `placeStats` aggregate. Per visited place: how many
+ * times we went, and the green/yellow/red tallies of the votes cast FOR that
+ * place (across all its visits' snapshots).
+ */
+export interface PlaceStat {
+  title: string;
+  visits: number;
+  greens: number;
+  yellows: number;
+  reds: number;
+}
+
+/**
  * Log a visit — by existing option id, or a free-typed place title.
  * `wentAt` backdates the entry (ms epoch); omitted → the host's date draft,
  * which itself defaults to today.
@@ -882,6 +895,9 @@ export interface CozyPollOutput {
   mostRecentTitle: string;
   // Count of rows in the vote_history snapshot table.
   voteHistoryCount: number;
+  // The "Lunch stats" aggregate (per-place visit + green/yellow/red tallies of
+  // votes cast for that place). Exposed so tests/consumers can read it.
+  placeStats: readonly PlaceStat[];
   isJoined: boolean;
   isAdmin: boolean;
   homePageLookupUrls: readonly string[];
@@ -1094,12 +1110,11 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // every option's votes, so without that filter the tallies would sum the
     // whole board, not the place we went to. Read-only (no handlers), so it's
     // free of the lift hazard above.
-    const placeStats = db.query<
-      { title: string; visits: number; greens: number; reds: number }
-    >(
+    const placeStats = db.query<PlaceStat>(
       `SELECT v.title AS title,
               count(DISTINCT v.id) AS visits,
               sum(CASE WHEN vh.vote_color = 'green' THEN 1 ELSE 0 END) AS greens,
+              sum(CASE WHEN vh.vote_color = 'yellow' THEN 1 ELSE 0 END) AS yellows,
               sum(CASE WHEN vh.vote_color = 'red' THEN 1 ELSE 0 END) AS reds
        FROM visits v
        LEFT JOIN vote_history vh
@@ -2336,6 +2351,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                             <span style={{ color: "#2f8a64" }}>
                               🟢 {stat.greens}
                             </span>
+                            <span style={{ color: "#b27722" }}>
+                              🟡 {stat.yellows}
+                            </span>
                             <span style={{ color: "#a33b35" }}>
                               🔴 {stat.reds}
                             </span>
@@ -2493,6 +2511,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       recentVisits,
       mostRecentTitle,
       voteHistoryCount,
+      placeStats: placeStatsRows,
       isJoined,
       isAdmin,
       homePageLookupUrls,
