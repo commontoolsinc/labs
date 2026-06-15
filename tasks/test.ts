@@ -16,6 +16,22 @@ export function parseDisabledPackageList(raw: string | undefined): string[] {
   return (raw ?? "").split(/[,\s]+/).filter((name) => name.length > 0);
 }
 
+export async function initializeDb(): Promise<void> {
+  console.log("Initializing database dependencies...");
+  const result = await new Deno.Command(Deno.execPath(), {
+    args: ["task", "initialize-db"],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+
+  if (!result.success) {
+    console.error("Failed to initialize database dependencies.");
+    console.log(decode(result.stdout));
+    console.error(decode(result.stderr));
+    Deno.exit(result.code);
+  }
+}
+
 export async function testPackage(
   memberPath: string,
   packageName: string,
@@ -113,6 +129,7 @@ export async function runTests(disabledPackages: string[]): Promise<boolean> {
 
 // Only run if this is the main module
 if (import.meta.main) {
+  await initializeDb();
   await runTests([
     ...ALL_DISABLED,
     ...parseDisabledPackageList(Deno.env.get("TEST_DISABLED_PACKAGES")),
