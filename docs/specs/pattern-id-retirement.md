@@ -17,8 +17,17 @@ contradicts a stated fact.
 
 ## Status
 
-In progress. **W0 and W1 are implemented, green, and committed** (branch
-`patternid-retirement`):
+**Complete.** W0–W4 are implemented, green, and committed (branch
+`patternid-retirement`). `{ identity, symbol }` is the only pattern pointer; the
+patternId-keyed pattern meta cell and all patternId machinery are deleted; cold
+recovery recompiles from the `pattern:<identity>` source-doc closure; the entry
+source doc carries optional, non-normative `annotations` excluded from
+verification. Keyless (hand-built) patterns get a content-hash SESSION pointer
+(`ensureKeylessPatternIdentity`) so in-session setup()/start()/reuse and NAME
+preservation keep working — session-only by construction (no closure behind a
+hand-built structure hash).
+
+Implementation history below preserved for the record. W0 and W1 landed first: 
 
 - **W0** — debug surfaces (scheduler snapshot, `getPatternSources`, shell
   scheduler views) speak `{ identity, symbol }`; `getPatternSources` no
