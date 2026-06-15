@@ -3,6 +3,7 @@ import {
   computed,
   equals,
   handler,
+  ifElse,
   lift,
   NAME,
   pattern,
@@ -100,6 +101,11 @@ export type ProfileHomeOutput = {
   // `RemoveProfileElementEvent` remain the documented per-stream subsets.
   addElement: Stream<MutateProfileElementsEvent>;
   removeElement: Stream<MutateProfileElementsEvent>;
+  // Flips the rendered profile view (CT-1748) between the read-only
+  // presentation and the edit form. UI state — not owner-protected.
+  toggleEditing: Stream<unknown>;
+  // Current view mode: false = read-only presentation, true = edit form.
+  isEditing: boolean;
   initialNameApplied: string;
 };
 
@@ -266,6 +272,16 @@ const setAvatar = handler<SetProfileAvatarEvent, { avatar: Writable<string> }>(
   },
 );
 
+// View/edit toggle for the rendered profile view (CT-1748). Plain (un-protected)
+// UI state: visiting a profile shows the read-only presentation; this flips to
+// the edit form. The flag itself is not owner-protected — anyone can flip their
+// own view — but CFC still gates the actual field writes behind the form.
+const toggleProfileEditing = handler<unknown, { editing: Writable<boolean> }>(
+  (_event, state) => {
+    state.editing.set(!state.editing.get());
+  },
+);
+
 const applyInitialName = lift<
   { initialName?: string; name: Writable<string> },
   string
@@ -289,6 +305,20 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
     const elementTitle = new Writable("").for("elementTitle");
     const elementTag = new Writable("").for("elementTag");
     const userTagsText = new Writable("").for("userTagsText");
+    // Rendered profile view (CT-1748): the cell view shows a read-only
+    // presentation by default; the owner flips this to reveal the edit form.
+    const editing = new Writable<boolean>(false).for("editing");
+    const isEditing = computed(() => editing.get() === true);
+    // Self-view cell for <cf-profile-badge>: the badge resolves name/avatar from
+    // a bound profile cell. Bound to this derived self-cell it renders in the
+    // "presented" state. TODO(CT-1748 follow-up): bind the actual profile result
+    // cell so the runtime-attested represents-principal label drives the
+    // verified identity seal (needs owner-protection restored + CT-1740).
+    const selfProfile = computed(() => ({
+      [NAME]: name.get(),
+      name: name.get(),
+      avatar: avatar.get(),
+    }));
 
     const parsedUserTags = computed(() =>
       userTagsText.get().split(",").map((tag) => tag.trim()).filter((tag) =>
@@ -317,6 +347,8 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       // pinned to their declared purpose via the bound mode.
       addElement: mutateElements({ elements, mode: "add" }),
       removeElement: mutateElements({ elements, mode: "remove" }),
+      toggleEditing: toggleProfileEditing({ editing }),
+      isEditing,
       initialNameApplied,
       [UI]: (
         <cf-screen
@@ -330,93 +362,169 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
           </cf-toolbar>
 
           <cf-vstack gap="4" style={{ padding: "16px", maxWidth: "720px" }}>
-            <cf-vstack gap="2">
-              <label>Name</label>
-              <strong>{name}</strong>
-              <cf-message-input
-                data-ui-action={TRUSTED_PROFILE_EDIT_ACTION}
-                placeholder="Your name"
-                appearance="rounded"
-                oncf-send={setName({ name })}
-              />
-            </cf-vstack>
+            {
+              /* CT-1748: read-only presentation — what you see when you visit a
+                profile cell. The edit form is gated behind the toggle below. */
+            }
+            {ifElse(
+              isEditing,
+              null,
+              <cf-vstack gap="4" data-ui-region="profile-presentation">
+                <cf-profile-badge
+                  id="profile-badge"
+                  $profile={selfProfile}
+                  size="xl"
+                />
 
-            <cf-vstack gap="2">
-              <label>Avatar</label>
-              <span>{avatar}</span>
-              <cf-message-input
-                data-ui-action={TRUSTED_PROFILE_EDIT_ACTION}
-                placeholder="Avatar URL or text"
-                appearance="rounded"
-                oncf-send={setAvatar({ avatar })}
-              />
-            </cf-vstack>
+                <cf-vstack gap="2">
+                  {elements.map((element) => (
+                    <div
+                      style={{
+                        border:
+                          "0.5px solid var(--cf-theme-color-border, #e5e5e7)",
+                        borderRadius: "12px",
+                        padding: "12px 14px",
+                      }}
+                    >
+                      <cf-hstack justify="between" align="center" gap="2">
+                        <cf-vstack gap="1">
+                          <strong>{element.title ?? element.tag}</strong>
+                          <div
+                            style={{
+                              color: "var(--cf-theme-color-text-secondary)",
+                              fontSize: "13px",
+                            }}
+                          >
+                            {element.userTags.map((tag) => `#${tag}`).join(" ")}
+                          </div>
+                        </cf-vstack>
+                        <cf-cell-link $cell={element.cell}>Open</cf-cell-link>
+                      </cf-hstack>
+                    </div>
+                  ))}
+                </cf-vstack>
 
-            <cf-vstack gap="2">
-              <label>Tags</label>
-              <cf-input $value={userTagsText} placeholder="person, work" />
-            </cf-vstack>
-
-            <cf-hstack gap="2">
-              <cf-button
-                onClick={mutateElements({
-                  elements,
-                  mode: "addCard",
-                  userTags: parsedUserTags,
-                })}
-              >
-                Add profile card
-              </cf-button>
-            </cf-hstack>
-
-            <cf-vstack gap="2">
-              <label>Link URL</label>
-              <cf-input $value={patternUrl} placeholder="/api/patterns/..." />
-              <cf-input $value={elementTitle} placeholder="Title" />
-              <cf-input $value={elementTag} placeholder="Tag" />
-              <cf-button
-                onClick={mutateElements({
-                  elements,
-                  mode: "addLink",
-                  patternUrl,
-                  title: elementTitle,
-                  tag: elementTag,
-                  userTags: parsedUserTags,
-                })}
-              >
-                Add link
-              </cf-button>
-              <span style={{ color: "var(--cf-color-text-secondary)" }}>
-                Links are saved as reference cards. They are not deployed or
-                run.
-              </span>
-            </cf-vstack>
-
-            <cf-vstack gap="2">
-              {elements.map((element) => (
-                <cf-hstack gap="2" align="center">
-                  <cf-cell-link $cell={element.cell}>
-                    {element.title ?? element.tag}
-                  </cf-cell-link>
-                  <span
-                    style={{ color: "var(--cf-theme-color-text-secondary)" }}
-                  >
-                    {element.userTags.map((tag) => `#${tag}`).join(" ")}
-                  </span>
+                <cf-hstack>
                   <cf-button
-                    size="sm"
                     variant="ghost"
-                    onClick={mutateElements({
-                      elements,
-                      mode: "remove",
-                      cell: element.cell,
-                    })}
+                    size="sm"
+                    onClick={toggleProfileEditing({ editing })}
                   >
-                    Remove
+                    Edit profile
                   </cf-button>
                 </cf-hstack>
-              ))}
-            </cf-vstack>
+              </cf-vstack>,
+            )}
+
+            {/* The existing edit form, now revealed only in edit mode. */}
+            {ifElse(
+              isEditing,
+              <cf-vstack gap="4" data-ui-region="profile-edit">
+                <cf-vstack gap="2">
+                  <label>Name</label>
+                  <strong>{name}</strong>
+                  <cf-message-input
+                    data-ui-action={TRUSTED_PROFILE_EDIT_ACTION}
+                    placeholder="Your name"
+                    appearance="rounded"
+                    oncf-send={setName({ name })}
+                  />
+                </cf-vstack>
+
+                <cf-vstack gap="2">
+                  <label>Avatar</label>
+                  <span>{avatar}</span>
+                  <cf-message-input
+                    data-ui-action={TRUSTED_PROFILE_EDIT_ACTION}
+                    placeholder="Avatar URL or text"
+                    appearance="rounded"
+                    oncf-send={setAvatar({ avatar })}
+                  />
+                </cf-vstack>
+
+                <cf-vstack gap="2">
+                  <label>Tags</label>
+                  <cf-input $value={userTagsText} placeholder="person, work" />
+                </cf-vstack>
+
+                <cf-hstack gap="2">
+                  <cf-button
+                    onClick={mutateElements({
+                      elements,
+                      mode: "addCard",
+                      userTags: parsedUserTags,
+                    })}
+                  >
+                    Add profile card
+                  </cf-button>
+                </cf-hstack>
+
+                <cf-vstack gap="2">
+                  <label>Link URL</label>
+                  <cf-input
+                    $value={patternUrl}
+                    placeholder="/api/patterns/..."
+                  />
+                  <cf-input $value={elementTitle} placeholder="Title" />
+                  <cf-input $value={elementTag} placeholder="Tag" />
+                  <cf-button
+                    onClick={mutateElements({
+                      elements,
+                      mode: "addLink",
+                      patternUrl,
+                      title: elementTitle,
+                      tag: elementTag,
+                      userTags: parsedUserTags,
+                    })}
+                  >
+                    Add link
+                  </cf-button>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
+                    Links are saved as reference cards. They are not deployed or
+                    run.
+                  </span>
+                </cf-vstack>
+
+                <cf-vstack gap="2">
+                  {elements.map((element) => (
+                    <cf-hstack gap="2" align="center">
+                      <cf-cell-link $cell={element.cell}>
+                        {element.title ?? element.tag}
+                      </cf-cell-link>
+                      <span
+                        style={{
+                          color: "var(--cf-theme-color-text-secondary)",
+                        }}
+                      >
+                        {element.userTags.map((tag) => `#${tag}`).join(" ")}
+                      </span>
+                      <cf-button
+                        size="sm"
+                        variant="ghost"
+                        onClick={mutateElements({
+                          elements,
+                          mode: "remove",
+                          cell: element.cell,
+                        })}
+                      >
+                        Remove
+                      </cf-button>
+                    </cf-hstack>
+                  ))}
+                </cf-vstack>
+
+                <cf-hstack>
+                  <cf-button
+                    variant="ghost"
+                    size="sm"
+                    onClick={toggleProfileEditing({ editing })}
+                  >
+                    Done
+                  </cf-button>
+                </cf-hstack>
+              </cf-vstack>,
+              null,
+            )}
           </cf-vstack>
         </cf-screen>
       ),
