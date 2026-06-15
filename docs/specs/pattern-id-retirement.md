@@ -208,14 +208,13 @@ locally; piece suite green; grep `setMetaRaw("pattern"` → zero;
    identity-keyed half) generalized to also fire for same-space runs when
    the entry ref is known. `replicatePatternToSpace` loses its meta half.
    (`runner.ts:1015` becomes the call site.)
-3. **Source-doc recovery arm** (the one genuinely new mechanism):
-   `loadPatternByIdentity` grows a third arm — in-memory miss → compiled
-   closure miss/version-stale → `loadVerifiedSourceClosure(identity)` →
-   recompile → (awaited, E4-style) compiled write-back → evaluate. Red test:
-   compile+persist in session 1; in session 2 bump
-   `COMPILE_CACHE_RUNTIME_VERSION` (instance-field override for tests, like
-   `maxEvaluatedModuleCacheSize`); load by identity must succeed via sources
-   and re-persist the new-version compiled set.
+3. **Source-doc recovery arm — ALREADY EXISTS** (correction, 2026-06-13):
+   `loadPatternByIdentity` already has the in-memory → compiled-closure →
+   `tryColdLoadByIdentity` (`loadVerifiedSourceClosure` → recompile → awaited
+   write-back) chain. So this is NOT new work — the meta cell's `program` is
+   pure duplication of the `pattern:<identity>` source docs every cold compile
+   already writes (awaited). W3 just deletes the duplicate. (A
+   version-bump recovery test is still worth adding if absent.)
 4. Dissolve `registerPattern`/`patternIdMap`/`patternToIdMap`/`patternById`/
    `getPatternId`: the session caches are `addressableByIdentity` +
    `modulesByIdentity`; the only non-cache job `registerPattern` had —
@@ -232,6 +231,61 @@ Exit: grep `patternId` in `packages/runner/src` + `packages/piece/src` →
 zero (tests may keep historical comments); full suites + reload integration
 + `stored-pattern-rehydration` + `resume-by-identity` green; the
 version-bump recovery test green.
+
+### Implementation notes from the W2+W3 attempt (2026-06-13)
+
+Proven by an attempted implementation (reverted to keep the tree green —
+these are facts, not speculation):
+
+- **No green intermediate exists.** "Stop writing the `pattern` link" (W2) and
+  "delete the meta cell" (W3) are inseparable: the link's id IS the meta
+  cell's lookup key. And a "prefer identity, keep the link" intermediate
+  collapses to ≈main, because keyless patterns (below) force a patternId
+  fallback on every read path anyway. Treat W2+W3 as ONE all-or-nothing
+  change.
+- **Keyless (hand-built) patterns become `run()`-only.** A pattern with no
+  module-scope entry ref (inline `pattern({...})` objects, common in runner
+  unit tests) has no `{identity, symbol}` — so it has no durable pointer.
+  Same-session `run()` still works (the pattern is passed in-hand to
+  `startCore`), but `setup()`+`start()` (separate) and `setup()`-without-a-
+  pattern do NOT (they read the stored pointer, which is now absent). The
+  runner tests doing separate setup/start on inline patterns (~6 sites) must
+  migrate to `run()` or to a compiled (keyed) pattern. This is the design's
+  sanctioned "keyless → session-only," made concrete.
+- **The runner re-key is mechanical and known** (was implemented before the
+  revert): `setupInternal`/`resolveSetupPattern`/`maybeReuseRunningSetup`/
+  `applySetupState` thread `{identity,symbol}` + a same-pattern boolean
+  instead of patternId; `startCore` (initial + watcher) and
+  `doStart`/`startAvailablePattern` resolve via `getPatternIdentityRef` +
+  `artifactFromIdentitySync`/`loadPatternByIdentity`; the watcher sinks on
+  the `patternIdentity` meta. Helpers `asPatternIdentityRef` /
+  `patternIdentityKey` belong next to `getPatternIdentityRef`.
+- **Test-migration inventory (~24 files), the bulk of the work:**
+  - `registerPattern(...)` + `saveAndSyncPattern({patternId, space})` →
+    `compilePattern(program, {space})` (compiles AND persists source docs;
+    the pattern then carries an entry ref). ~14 files, mostly
+    `packages/runner/integration/*` (sqlite-cfc-*, array_push,
+    pattern-and-data-persistence) + `cast-admin.ts`.
+  - `patternMetaSchema` / `getPatternMeta` / `loadPatternMeta` direct asserts
+    → delete or convert to source-doc / `patternIdentity` assertions. ~7
+    files (`pattern-manager.test`, `fabric-imports-*`, `cli/fabric-deps`,
+    `fabric-ref-resolution`). Delete `load-by-identity-meta-bridge.test.ts`
+    (it pins the deleted entryIdentity bridge).
+  - separate `setup()`+`start()` on inline patterns → `run()` / keyed
+    pattern. ~6 sites (`runner.test` setup/start suite).
+- **Src consumers to re-key (5):** `fabric-ref-resolution.ts` (drop the
+  `getPatternId`/`loadPatternMeta`/`patternMetaToIdentity`/`patternMetaFromCell`
+  arms — the `getPatternIdentityRef` arm already covers it),
+  `piece/src/ops/piece-controller.ts` (`getPattern`/`getPatternMeta` →
+  identity), `piece/src/manager.ts` (`getPatternId`, `loadPattern`,
+  `syncPattern`), `runner/src/ensure-piece-running.ts` (link →
+  `patternIdentity`, `loadPattern` → `loadPatternByIdentity`),
+  `piece-helpers.ts` (`compileAndSavePattern` → just `compilePattern`).
+- **Orchestration suggestion:** define the final PatternManager API (delete
+  dead methods) first, then fan the test migration out to parallel subagents
+  by group; verify whole-workspace `deno task check` + runner suite +
+  `patterns-reload`/`inspace-child`/`resume-by-identity` integration at the
+  end. There is no per-file green until the whole change lands.
 
 ### W4 — optional, non-normative annotations
 
