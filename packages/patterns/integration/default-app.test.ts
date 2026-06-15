@@ -1257,7 +1257,6 @@ async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
       writerActionId?: string;
       change: string;
       decision: string;
-      scheduledEffects: string[];
     };
 
     const counts = new Map<string, number>();
@@ -1303,18 +1302,7 @@ async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
           writerActionId: entry.writerActionId,
           change,
           decision: action.decision,
-          scheduledEffects: action.scheduledEffects.map((effect: {
-            actionId: string;
-          }) => effect.actionId),
         });
-        for (const effect of action.scheduledEffects) {
-          pushSample(effect.actionId, {
-            writerActionId: entry.writerActionId,
-            change,
-            decision: `scheduled-by:${action.actionId}`,
-            scheduledEffects: [],
-          });
-        }
       }
     }
 
