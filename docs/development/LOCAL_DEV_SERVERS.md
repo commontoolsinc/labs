@@ -126,6 +126,10 @@ This checks both process presence and HTTP health, exiting non-zero if
 anything is wrong. It supports the same `--port-offset`, `--shell-port`, and
 `--toolshed-port` flags as the other scripts.
 
+When `--port-offset` changes the toolshed port, `start-local-dev.sh` also sets
+toolshed's internal `API_URL` and `MEMORY_URL` to the offset toolshed URL unless
+those variables are already exported in the shell environment.
+
 ### Common Issues
 
 | Symptom | Cause | Fix |
