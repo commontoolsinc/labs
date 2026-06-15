@@ -53,11 +53,16 @@ export function hashSchema(schema: JSONSchema | undefined): string {
  *   schemas are primitives and can't be `WeakMap`/`WeakRef` targets).
  */
 const schemaToSah = new WeakMap<JSONSchemaObj, SchemaAndHash>();
-const hashToRef = new Map<string, WeakRef<JSONSchemaObj> | boolean>();
+const hashToRef = new Map<string, WeakRef<JSONSchemaObj> | boolean | undefined>();
 
-const booleanInterns = {
-  true: new SchemaAndHash(true, hashOf(true)),
+/**
+ * Prefab instances of `SchemaAndHash` for all possible primitive-value schemas
+ * (including `undefined`).
+ */
+const primInterns = {
   false: new SchemaAndHash(false, hashOf(false)),
+  true: new SchemaAndHash(true, hashOf(true)),
+  undefined: new SchemaAndHash(undefined, hashOf(undefined)),
 };
 
 const schemaFinalizer = new FinalizationRegistry<string>((hashStr) => {
@@ -67,17 +72,28 @@ const schemaFinalizer = new FinalizationRegistry<string>((hashStr) => {
   }
 });
 
-// Seeds `hashToRef` with intern records for `boolean` schemas.
-hashToRef.set(booleanInterns.true.taggedHashString, true);
-hashToRef.set(booleanInterns.false.taggedHashString, false);
+// Seeds `hashToRef` with intern records for the primitive-value schemas.
+hashToRef.set(primInterns.false.taggedHashString, false);
+hashToRef.set(primInterns.true.taggedHashString, true);
+hashToRef.set(primInterns.undefined.taggedHashString, undefined);
 
 /**
  * Helper for `internSchema()`, which always returns a `SchemaAndHash`.
  */
-function internSchemaReturningSchemaAndHash(schema: JSONSchema): SchemaAndHash {
-  // Boolean schemas are primitives — return prefab instances.
-  if (typeof schema === "boolean") {
-    return schema ? booleanInterns.true : booleanInterns.false;
+function internSchemaReturningSchemaAndHash(schema: JSONSchema | undefined): SchemaAndHash {
+  // Return prefab instances for primitives.
+  switch (schema) {
+    case true: {
+      return primInterns.true;
+    }
+
+    case false: {
+      return primInterns.false;
+    }
+
+    case undefined: {
+      return primInterns.undefined;
+    }
   }
 
   // At this point `schema` is a `JSONSchemaObj`.
@@ -91,7 +107,7 @@ function internSchemaReturningSchemaAndHash(schema: JSONSchema): SchemaAndHash {
 
   // Check the hash-keyed reverse map (structurally-equal but different object).
   const hash = hashOf(frozen);
-  const hashStr = hash.toString();
+  const hashStr = hash.taggedHashString;
 
   const maybeRef = hashToRef.get(hashStr);
 
@@ -174,30 +190,39 @@ export function internSchema<T extends JSONSchema>(
  * `FabricHash` or a plain string. Returns `undefined` if the schema
  * has not been interned or has been garbage-collected. If found, returns the
  * corresponding full `SchemaAndHash`.
+ *
+ * This function _will_ find the `SchemaAndHash` corresponding to the "schema"
+ * `undefined`.
  */
 export function findInternedSchema(
   hash: FabricHash | string,
 ): SchemaAndHash | undefined {
-  const hashStr = typeof hash === "string" ? hash : hash.toString();
+  const hashStr = typeof hash === "string" ? hash : hash.taggedHashString;
 
-  const refOrBoolean = hashToRef.get(hashStr);
+  const refOrPrim = hashToRef.get(hashStr);
 
-  switch (typeof refOrBoolean) {
+  switch (typeof refOrPrim) {
     case "boolean": {
-      return refOrBoolean ? booleanInterns.true : booleanInterns.false;
+      return refOrPrim ? primInterns.true : primInterns.false;
     }
 
     case "undefined": {
-      return undefined;
+      // We have to disambiguate "the caller passed the hash of `undefined`"
+      // from "the caller passed in a hash that does not correspond to an
+      // interned schema."
+      const undefinedSah = primInterns.undefined;
+      return (hashStr === undefinedSah.taggedHashString)
+        ? undefinedSah
+        : undefined;
     }
 
     case "object": {
-      if (refOrBoolean === null) {
+      if (refOrPrim === null) {
         // Shouldn't happen!
         throw new Error("Unexpected `null` reference in schema intern table.");
       }
 
-      const schema = refOrBoolean.deref();
+      const schema = refOrPrim.deref();
 
       if (schema === undefined) {
         // The `WeakRef`'s referent got collected. Clean up.
@@ -214,7 +239,7 @@ export function findInternedSchema(
     default: {
       // Shouldn't happen!
       throw new Error(
-        `Unexpected type in schema intern table: ${typeof refOrBoolean}`,
+        `Unexpected type in schema intern table: ${typeof refOrPrim}`,
       );
     }
   }
@@ -225,13 +250,20 @@ export function findInternedSchema(
  * `false` even if there is already a schema in the intern cache that is
  * equivalent to the given one, unless `schema` is in fact the one that is in
  * the cache.
+ *
+ * This returns `true` for the primitive-value schemas and `undefined`.
  */
-export function isInternedSchema(schema: JSONSchema): boolean {
-  if (typeof schema === "boolean") {
-    return true;
-  }
+export function isInternedSchema(schema: JSONSchema | undefined): boolean {
+  switch (typeof schema) {
+    case "boolean":
+    case "undefined": {
+      return true;
+    }
 
-  return schemaToSah.has(schema);
+    default: {
+      return schemaToSah.has(schema);
+    }
+  }
 }
 
 /**
