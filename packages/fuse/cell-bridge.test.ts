@@ -1697,15 +1697,10 @@ Deno.test("CellBridge.buildSourceTree encodes source path segments and decodes w
   const pieceIno = tree.addDir(state.piecesIno, "notes");
   const piece = {
     id: "of:source-piece",
-    getPatternMeta: () =>
-      Promise.resolve({
-        program: {
-          main: "/src/has:colon.tsx",
-          files: [
-            { name: "/src/has:colon.tsx", contents: "export default 1;" },
-          ],
-        },
-      }),
+    getPatternSourceFiles: () =>
+      Promise.resolve([
+        { name: "/src/has:colon.tsx", contents: "export default 1;" },
+      ]),
   };
   state.pieceControllers.set("notes", piece as never);
   state.srcInos.set("notes", pieceIno);
@@ -1750,13 +1745,10 @@ Deno.test("CellBridge decodes encoded space directory names for source write pat
   const pieceIno = tree.addDir(state.piecesIno, "notes");
   const piece = {
     id: "of:encoded-source-piece",
-    getPatternMeta: () =>
-      Promise.resolve({
-        program: {
-          main: "/src/main.ts",
-          files: [{ name: "/src/main.ts", contents: "export default 1;" }],
-        },
-      }),
+    getPatternSourceFiles: () =>
+      Promise.resolve([
+        { name: "/src/main.ts", contents: "export default 1;" },
+      ]),
   };
   state.pieceControllers.set("notes", piece as never);
   state.srcInos.set("notes", pieceIno);
