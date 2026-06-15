@@ -294,15 +294,6 @@ export async function executeResolvedCallable(
   if (resolved.callableKind === "handler") {
     const send = resolved.callableCell.send;
     if (typeof send === "function") {
-      // Drain in-flight storage syncs BEFORE dispatching the event: piece
-      // load issues watch batches that may still be in flight, and a handler
-      // reads its asCell inputs (e.g. a SqliteDb handle) synchronously from
-      // the local replica — dispatching early races the doc-carrying response
-      // and the handler sees an empty doc ("invalid database handle" on
-      // db.exec). The awaits AFTER send cover the handler's own writes, not
-      // its inputs.
-      await resolved.manager.runtime.idle();
-      await resolved.manager.synced();
       const runtimeErrors = runtimeErrorLog(resolved.manager.runtime);
       const errorCountBefore = runtimeErrors.length;
       const tx = await new Promise<CallableTransactionLike>(
@@ -331,10 +322,6 @@ export async function executeResolvedCallable(
       return {};
     }
 
-    // Same pre-send drain as above: don't trigger the handler while piece
-    // load syncs are still in flight.
-    await resolved.manager.runtime.idle();
-    await resolved.manager.synced();
     await resolved.piece[resolved.cellProp].set(input, [resolved.cellKey]);
     await resolved.manager.runtime.idle();
     await resolved.manager.synced();
