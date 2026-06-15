@@ -237,7 +237,7 @@ export function findInternedSchema(
 
       // The `!` below is valid because we know that `schemaToSah` definitely
       // has a mapping for `schema`. Otherwise, we wouldn't have found a
-      // `refOrBoolean` to look up.
+      // `refOrPrim` to look up.
       return schemaToSah.get(schema)!;
     }
 

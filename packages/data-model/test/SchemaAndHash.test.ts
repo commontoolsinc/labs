@@ -83,7 +83,7 @@ describe("SchemaAndHash", () => {
       it("is not writable", () => {
         const sah = new SchemaAndHash(true, HASH_A);
         expect(() => {
-          (sah as unknown as Record<string, unknown>).schema = false;
+          (sah as unknown as Record<string, unknown>).schemaOrUndefined = false;
         }).toThrow();
       });
 
@@ -92,8 +92,8 @@ describe("SchemaAndHash", () => {
         const schema2 = toDeepFrozenSchema({ type: "string", title: "yes!" });
         const sah1 = new SchemaAndHash(schema1, HASH_A);
         const sah2 = new SchemaAndHash(schema2, HASH_A);
-        expect(sah1.schema).toBe(schema1);
-        expect(sah2.schema).toBe(schema2);
+        expect(sah1.schemaOrUndefined).toBe(schema1);
+        expect(sah2.schemaOrUndefined).toBe(schema2);
       });
 
       it("returns `undefined` when `schema === undefined`", () => {
