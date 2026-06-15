@@ -8,7 +8,9 @@ import {
   resetModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import {
+  getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
+  resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
 
@@ -22,6 +24,7 @@ const signer = await Identity.fromPassphrase("test experimental");
 describe("ExperimentalOptions", () => {
   afterEach(() => {
     resetModernCellRepConfig();
+    resetCommitPreconditionsConfig();
     resetPersistentSchedulerStateConfig();
   });
 
@@ -38,7 +41,7 @@ describe("ExperimentalOptions", () => {
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
         persistentSchedulerState: false,
-        schedulerHistoricalMightWrite: undefined,
+        commitPreconditions: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -56,7 +59,7 @@ describe("ExperimentalOptions", () => {
       expect(runtime.experimental).toEqual({
         modernCellRep: true,
         persistentSchedulerState: false,
-        schedulerHistoricalMightWrite: undefined,
+        commitPreconditions: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -72,22 +75,8 @@ describe("ExperimentalOptions", () => {
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
         persistentSchedulerState: false,
-        schedulerHistoricalMightWrite: undefined,
+        commitPreconditions: false,
       });
-      await runtime.dispose();
-      await sm.close();
-    });
-
-    it("preserves the schedulerHistoricalMightWrite flag", async () => {
-      const sm = StorageManager.emulate({ as: signer });
-      const runtime = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager: sm,
-        experimental: {
-          schedulerHistoricalMightWrite: true,
-        },
-      });
-      expect(runtime.experimental.schedulerHistoricalMightWrite).toBe(true);
       await runtime.dispose();
       await sm.close();
     });
@@ -121,6 +110,22 @@ describe("ExperimentalOptions", () => {
       });
 
       expect(getPersistentSchedulerStateConfig()).toBe(true);
+
+      await runtime.dispose();
+      await sm.close();
+    });
+
+    it("constructing Runtime with commitPreconditions sets global config", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          commitPreconditions: true,
+        },
+      });
+
+      expect(getCommitPreconditionsConfig()).toBe(true);
 
       await runtime.dispose();
       await sm.close();
@@ -172,6 +177,7 @@ describe("ExperimentalOptions", () => {
 
       expect(getModernCellRepConfig()).toBe(initial);
       expect(getPersistentSchedulerStateConfig()).toBe(false);
+      expect(getCommitPreconditionsConfig()).toBe(false);
     });
   });
 });

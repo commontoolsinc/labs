@@ -56,6 +56,8 @@ import type {
 } from "./contracts/transcript.ts";
 import { CfHarnessEngine } from "./engine.ts";
 import {
+  CFC_INVOCATION_CONTEXT_DIR_ENV,
+  CFC_RESULT_DIR_ENV,
   DEFAULT_DOCKER_RUNSC_IMAGE,
   DEFAULT_FABRIC_MOUNT_PATH,
 } from "./sandbox/docker-runsc.ts";
@@ -117,6 +119,8 @@ const CLI_STRING_FLAGS = [
   "structured-result-schema-file",
   "run-manifest",
   "cfc-enforcement-mode",
+  "cfc-result-dir",
+  "cfc-invocation-context-dir",
   "sandbox-image",
   "max-model-turns",
   "fabric-mount",
@@ -173,6 +177,8 @@ export interface CfHarnessCliConfig {
   structuredResult?: CfHarnessStructuredResultConfig;
   runManifestPath?: string;
   cfcEnforcementModeOverride?: CfcEnforcementMode;
+  cfcResultDir?: string;
+  cfcInvocationContextDir?: string;
   browserAccess?: HarnessBrowserAccessLease;
   maxModelTurns: number;
   printTranscript: boolean;
@@ -350,6 +356,8 @@ Options:
   --browser-access-profile-mode <mode> persistent | transient
   --browser-access-account-access <access> available | none
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
+  --cfc-result-dir <path>       Host dir where runsc writes the CFC result sidecar (required for enforce-* modes)
+  --cfc-invocation-context-dir <path> Host dir where the harness writes the CFC invocation-context sidecar (required for enforce-* modes)
   --sandbox-image <image>       Docker image for the runsc-cfc sandbox (default: ${DEFAULT_DOCKER_RUNSC_IMAGE})
   --fabric-mount <path>         Host path for a Fabric FUSE mount (mounted at /fabric in the sandbox)
   --host-mount <spec>           Extra host bind mount (repeatable: name=<id>,source=<host>,target=<sandbox>,mode=readonly|writable)
@@ -363,7 +371,28 @@ Environment:
   OPENAI_API_KEY                Fallback API key if CF_HARNESS_API_KEY is unset
   CF_HARNESS_DOCKER_NETWORK_MODE none | bridge | host (default: bridge)
   CF_HARNESS_SANDBOX_IMAGE      Default value for --sandbox-image
+  ${CFC_RESULT_DIR_ENV} Fallback for --cfc-result-dir
+  ${CFC_INVOCATION_CONTEXT_DIR_ENV} Fallback for --cfc-invocation-context-dir
 `;
+
+// CFC sidecar transport dirs may be supplied by flag (resolved against cwd so
+// relative paths work) or env-var fallback (already an absolute host path by
+// convention). The docker-runsc layer re-validates that the result is absolute.
+const resolveOptionalCfcDir = (
+  flagValue: unknown,
+  envValue: string | undefined,
+  cwd: string,
+  flagName: string,
+): string | undefined => {
+  if (typeof flagValue === "string") {
+    const trimmed = flagValue.trim();
+    if (trimmed === "") {
+      throw new Error(`${flagName} requires a non-empty path`);
+    }
+    return resolve(cwd, trimmed);
+  }
+  return envValue;
+};
 
 const parsePositiveInteger = (
   input: string | undefined,
@@ -1190,6 +1219,10 @@ export const parseCfHarnessCliArgs = async (
       ),
       CF_CFC_MODE: Deno.env.get("CF_CFC_MODE"),
       CF_HARNESS_SANDBOX_IMAGE: Deno.env.get("CF_HARNESS_SANDBOX_IMAGE"),
+      [CFC_RESULT_DIR_ENV]: Deno.env.get(CFC_RESULT_DIR_ENV),
+      [CFC_INVOCATION_CONTEXT_DIR_ENV]: Deno.env.get(
+        CFC_INVOCATION_CONTEXT_DIR_ENV,
+      ),
     };
   const rawSandboxImage = typeof args["sandbox-image"] === "string"
     ? args["sandbox-image"].trim()
@@ -1215,6 +1248,18 @@ export const parseCfHarnessCliArgs = async (
       "cfc enforcement mode must be one of disabled, observe, enforce-explicit, enforce-strict",
     );
   }
+  const cfcResultDir = resolveOptionalCfcDir(
+    args["cfc-result-dir"],
+    nonEmptyEnvValue(env[CFC_RESULT_DIR_ENV]),
+    cwd,
+    "--cfc-result-dir",
+  );
+  const cfcInvocationContextDir = resolveOptionalCfcDir(
+    args["cfc-invocation-context-dir"],
+    nonEmptyEnvValue(env[CFC_INVOCATION_CONTEXT_DIR_ENV]),
+    cwd,
+    "--cfc-invocation-context-dir",
+  );
   const rawFabricMount = typeof args["fabric-mount"] === "string"
     ? args["fabric-mount"].trim()
     : undefined;
@@ -1264,6 +1309,10 @@ export const parseCfHarnessCliArgs = async (
     ...(runManifestPath !== undefined ? { runManifestPath } : {}),
     ...(cfcEnforcementModeOverride !== undefined
       ? { cfcEnforcementModeOverride }
+      : {}),
+    ...(cfcResultDir !== undefined ? { cfcResultDir } : {}),
+    ...(cfcInvocationContextDir !== undefined
+      ? { cfcInvocationContextDir }
       : {}),
     ...(browserAccess !== undefined ? { browserAccess } : {}),
     maxModelTurns: parsePositiveInteger(
@@ -1881,6 +1930,12 @@ export const runCfHarnessCli = async (
         ...(parsed.sandboxImage !== undefined
           ? { sandboxImage: parsed.sandboxImage }
           : {}),
+        ...(parsed.cfcResultDir !== undefined
+          ? { cfcResultDir: parsed.cfcResultDir }
+          : {}),
+        ...(parsed.cfcInvocationContextDir !== undefined
+          ? { cfcInvocationContextDir: parsed.cfcInvocationContextDir }
+          : {}),
         model: parsed.model ?? artifacts.runState.model,
         gatewayBaseUrl: parsed.gatewayBaseUrl,
         gatewayAuthMode: parsed.gatewayAuthMode,
@@ -1953,6 +2008,12 @@ export const runCfHarnessCli = async (
         artifactRoot: parsed.artifactRoot,
         ...(parsed.sandboxImage !== undefined
           ? { sandboxImage: parsed.sandboxImage }
+          : {}),
+        ...(parsed.cfcResultDir !== undefined
+          ? { cfcResultDir: parsed.cfcResultDir }
+          : {}),
+        ...(parsed.cfcInvocationContextDir !== undefined
+          ? { cfcInvocationContextDir: parsed.cfcInvocationContextDir }
           : {}),
         model: parsed.model,
         gatewayBaseUrl: parsed.gatewayBaseUrl,

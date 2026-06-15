@@ -1506,6 +1506,7 @@ export class Runner {
     pattern: Pattern,
     inputs: FabricValue,
     pullOnceAfterStart = false,
+    markCreateOnlyResult = false,
   ): void {
     const resultLink = resultCell.getAsNormalizedFullLink();
     tx.addCommitCallback((_committedTx, result) => {
@@ -1519,6 +1520,11 @@ export class Runner {
       );
       try {
         this.run(startTx, pattern, inputs, committedResultCell);
+        if (markCreateOnlyResult) {
+          startTx.markCreateOnly?.(
+            committedResultCell.getAsNormalizedFullLink(),
+          );
+        }
         this.runtime.prepareTxForCommit(startTx);
         startTx.commit().then(({ error }) => {
           if (error) {
@@ -2517,10 +2523,25 @@ export class Runner {
     addCancel: AddCancel,
     cause: Record<string, any>,
   ): any {
+    let receiptCell = this.runtime.getCell(
+      processCell.space,
+      { resultFor: cause },
+      undefined,
+      tx,
+    );
+    const receiptsEnabled =
+      this.runtime.experimental.commitPreconditions === true;
     if (
       !validateAndCheckOpaqueRefs(result, name) &&
       frame.opaqueRefs.size === 0
     ) {
+      if (receiptsEnabled) {
+        // Receipt-only handling (spec scheduler-v2 §7.6): nothing was
+        // launched, but the result cell is still created — its create is the
+        // exactly-once witness for this event id.
+        receiptCell.withTx(tx).setRaw({});
+        tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
+      }
       return result;
     }
 
@@ -2539,6 +2560,14 @@ export class Runner {
       resultPattern,
     );
     const crossSpace = resultSpace !== processCell.space;
+    if (crossSpace) {
+      receiptCell = this.runtime.getCell(
+        resultSpace,
+        { resultFor: cause },
+        undefined,
+        tx,
+      );
+    }
 
     // CT-1687: a handler that materializes a child piece in another space
     // (`Factory.inSpace(...)`) leaves a piece that a fresh runtime must load
@@ -2563,20 +2592,17 @@ export class Runner {
     }
 
     if (deferForNavigate && result === undefined) {
-      const resultCell = this.runtime.getCell(
-        resultSpace,
-        { resultFor: cause },
-        undefined,
-        tx,
-      );
+      // navigateTo results are commit-gated (startAfterSuccessfulCommit);
+      // the receipt precondition rides the deferred start's own create.
       this.runPatternAfterSuccessfulCommit(
         tx,
-        resultCell,
+        receiptCell,
         resultPattern,
         undefined,
         true,
+        true,
       );
-      addCancel(() => this.stop(resultCell));
+      addCancel(() => this.stop(receiptCell));
       return result;
     }
 
@@ -2592,20 +2618,25 @@ export class Runner {
         resultPattern,
         resultSpace,
         cause,
+        true,
       )
-      : this.run(
-        tx,
-        resultPattern,
-        undefined,
-        this.runtime.getCell(
-          resultSpace,
-          { resultFor: cause },
-          undefined,
-          tx,
-        ),
-      );
+      : this.run(tx, resultPattern, undefined, receiptCell);
+
+    if (!deferForNavigate) {
+      tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
+    }
 
     addCancel(() => this.stop(resultCell));
+
+    if (!deferForNavigate) {
+      // Spec scheduler-v2 §7.6 rule 2: the launch is speculative; if this
+      // handler's transaction ultimately fails, stop the piece (data writes
+      // roll back with the transaction; registrations do not).
+      this.runtime.scheduler.lineage.recordPieceStop(
+        tx,
+        () => this.stop(resultCell),
+      );
+    }
 
     return result;
   }
@@ -2656,6 +2687,7 @@ export class Runner {
     resultPattern: Pattern,
     resultSpace: MemorySpace,
     cause: Record<string, any>,
+    markCreateOnlyResult = false,
   ): Cell<any> {
     const resultCell = this.runtime.getCell(
       resultSpace,
@@ -2669,6 +2701,14 @@ export class Runner {
       undefined,
       resultCell,
     );
+    // The receipt mark must ride the transaction that creates the result
+    // cell's head — setupInternal just wrote it into the handler tx. Marking
+    // the deferred start tx instead would see the already-committed head and
+    // reject the FIRST delivery as receipt-exists, while redeliveries (whose
+    // own handler tx re-creates the cell) would go unguarded.
+    if (markCreateOnlyResult) {
+      tx.markCreateOnly?.(resultCell.getAsNormalizedFullLink());
+    }
     if (resultSetup.needsStart) {
       this.startAfterSuccessfulCommit(
         tx,
@@ -2856,9 +2896,14 @@ export class Runner {
         ...(inputs as Record<string, any>),
         $event: event,
       };
+      // Spec scheduler-v2 §7.6 / decision 13: the handler's result cell — and
+      // every id minted in this frame — derives from the durable event id, so
+      // retries of the same event reuse the same ids and duplicate handlings
+      // collide on the receipt. The fallback covers non-dispatch invocations
+      // (tests calling the handler directly).
       const cause = {
         ...(inputs as Record<string, any>),
-        $event: crypto.randomUUID(),
+        $event: tx.dispatchedEventId ?? crypto.randomUUID(),
       };
       const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
         module,

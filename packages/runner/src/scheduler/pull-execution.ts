@@ -257,7 +257,7 @@ function orderPullWorkSet(
     workSet,
     state.dependencies,
     state.getSchedulingWritesMap(),
-    state.actionParent,
+    state.nodes,
     state.dependents,
     (action) => state.materializerIndex.getMaterializerWriteEnvelopes(action),
   );
@@ -327,18 +327,7 @@ async function runPullSettleAction(
   state.filterStats.executed++;
   if (!recordSettleActionRun(state, fn)) return 1;
 
-  const activePullDemand = state.computations.has(fn) ||
-    state.isPullDemandRootEffect(fn);
-  if (activePullDemand) {
-    state.activePullDemandActions.add(fn);
-  }
-  try {
-    await state.runAction(fn);
-  } finally {
-    if (activePullDemand) {
-      state.activePullDemandActions.delete(fn);
-    }
-  }
+  await state.runAction(fn);
   return 1;
 }
 

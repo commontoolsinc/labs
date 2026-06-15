@@ -8,11 +8,20 @@ import {
 } from "../link-utils.ts";
 import type { Runtime } from "../runtime.ts";
 import type {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+  IPreconditionFailedError,
+  MemorySpace,
+} from "../storage/interface.ts";
+import { isPermanentRejection } from "../storage/rejection.ts";
+import type {
   SchedulerActionInfo,
   SchedulerEventPreflightStats,
 } from "../telemetry.ts";
 import { createDirtyDependencyTraceContext } from "./diagnostics.ts";
+import { mintEventId } from "./event-identity.ts";
 import { planEventDirtyDependencyScheduling } from "./execution.ts";
+import type { OriginStatus } from "./lineage.ts";
 import { RetryImmediately } from "./retry-immediately.ts";
 import {
   hasAnnotatedWrites,
@@ -27,7 +36,6 @@ import type {
   QueuedEvent,
   ReactivityLog,
 } from "./types.ts";
-import type { IMemorySpaceAddress } from "../storage/interface.ts";
 
 const logger = getLogger("scheduler", {
   enabled: true,
@@ -113,6 +121,11 @@ export interface SchedulerEventQueueState {
     retries: number,
     onCommit: QueuedEvent["onCommit"] | undefined,
     doNotLoadPieceIfNotRunning: boolean,
+    opts?: { eventId?: string; originTx?: IExtendedStorageTransaction },
+  ) => void;
+  readonly recordLineageEvent: (
+    originTx: IExtendedStorageTransaction,
+    event: QueuedEvent,
   ) => void;
 }
 
@@ -122,21 +135,32 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly retries: number;
   readonly onCommit?: QueuedEvent["onCommit"];
   readonly doNotLoadPieceIfNotRunning: boolean;
+  readonly eventId?: string;
+  readonly originTx?: IExtendedStorageTransaction;
 }): void {
+  const id = args.eventId ?? mintEventId(args.eventLink, args.originTx);
   let handlerFound = false;
 
   for (const [link, handler] of state.eventHandlers) {
     if (areNormalizedLinksSame(link, args.eventLink)) {
       handlerFound = true;
       state.queueExecution();
-      state.eventQueue.push({
+      const queuedEvent: QueuedEvent = {
+        id,
+        originTx: args.originTx,
         eventLink: args.eventLink,
         action: (tx) => handler(tx, args.event),
         handler,
         event: args.event,
         retriesLeft: args.retries,
         onCommit: args.onCommit,
-      });
+      };
+      state.eventQueue.push(queuedEvent);
+      if (args.originTx !== undefined) {
+        state.recordLineageEvent(args.originTx, queuedEvent);
+      }
+      // Exactly one handler per event (spec scheduler-v2 decision 12).
+      break;
     }
   }
 
@@ -154,6 +178,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           args.retries,
           args.onCommit,
           true,
+          { eventId: id, originTx: args.originTx },
         );
       }
     })();
@@ -176,6 +201,16 @@ export function addSchedulerEventHandler(state: {
 }): Cancel {
   if (args.populateDependencies) {
     args.handler.populateDependencies = args.populateDependencies;
+  }
+  const existingIndex = state.eventHandlers.findIndex(([existing]) =>
+    areNormalizedLinksSame(existing, args.ref)
+  );
+  if (existingIndex !== -1) {
+    state.eventHandlers.splice(existingIndex, 1);
+    logger.warn("event-handler-replaced", () => [
+      "Replacing existing event handler for link",
+      { linkId: args.ref.id },
+    ]);
   }
   state.eventHandlers.push([args.ref, args.handler]);
   return () => {
@@ -214,6 +249,21 @@ export interface SchedulerEventExecutionState {
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
   readonly scheduleEventQueueWake: (notBefore: number) => void;
+  readonly lineageStatus: (
+    originTx: IExtendedStorageTransaction,
+  ) => OriginStatus;
+  readonly releaseLineageEvent: (
+    originTx: IExtendedStorageTransaction,
+    event: QueuedEvent,
+  ) => void;
+  readonly recordLineageEvent: (
+    originTx: IExtendedStorageTransaction,
+    event: QueuedEvent,
+  ) => void;
+  readonly getOriginLocalSeq: (
+    originTx: IExtendedStorageTransaction,
+    space: MemorySpace,
+  ) => number | undefined;
   readonly snapshotDirtyDependencyTraceContext: (
     trace: DirtyDependencyTraceContext,
   ) => SchedulerEventPreflightStats;
@@ -410,6 +460,21 @@ export async function dispatchQueuedEvent(state: {
   ) => SchedulerActionInfo | undefined;
   readonly handleError: (error: Error, action: Action) => void;
   readonly queueExecution: () => void;
+  readonly lineageStatus: (
+    originTx: IExtendedStorageTransaction,
+  ) => OriginStatus;
+  readonly releaseLineageEvent: (
+    originTx: IExtendedStorageTransaction,
+    event: QueuedEvent,
+  ) => void;
+  readonly recordLineageEvent: (
+    originTx: IExtendedStorageTransaction,
+    event: QueuedEvent,
+  ) => void;
+  readonly getOriginLocalSeq: (
+    originTx: IExtendedStorageTransaction,
+    space: MemorySpace,
+  ) => number | undefined;
   readonly onEventCommitWrites?: (
     sourceAction: Action,
     writes: readonly IMemorySpaceAddress[],
@@ -442,8 +507,51 @@ export async function dispatchQueuedEvent(state: {
   }
 
   const tx = state.runtime.edit();
+  tx.dispatchedEventId = queuedEvent.id;
   tx.tx.immediate = true;
+  tx.tx.sourceAction = action;
+  if (queuedEvent.originTx !== undefined) {
+    const originLocalSeq = state.getOriginLocalSeq(
+      queuedEvent.originTx,
+      queuedEvent.eventLink.space,
+    );
+    if (
+      originLocalSeq !== undefined &&
+      state.lineageStatus(queuedEvent.originTx) === "pending" &&
+      state.runtime.experimental.commitPreconditions === true
+    ) {
+      tx.addCommitPrecondition?.(queuedEvent.eventLink.space, {
+        kind: "origin-committed",
+        originLocalSeq,
+      });
+    }
+    state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
+  }
   const actionId = state.getActionId(action);
+
+  // Requeue a retry of this event. Dispatch released the lineage
+  // registration above, so the fresh QueuedEvent object must be re-recorded:
+  // otherwise an origin that fails while the retry is queued cannot remove
+  // it, and the post-settlement originStatus() fallback ("confirmed") would
+  // let a descendant of a failed origin run.
+  const requeueForRetry = () => {
+    const retry: QueuedEvent = {
+      id: queuedEvent.id,
+      originTx: queuedEvent.originTx,
+      action,
+      eventLink: queuedEvent.eventLink,
+      handler,
+      event: eventValue,
+      retriesLeft: retriesLeft - 1,
+      onCommit,
+    };
+    state.eventQueue.unshift(retry);
+    if (retry.originTx !== undefined) {
+      state.recordLineageEvent(retry.originTx, retry);
+    }
+    state.queueExecution();
+  };
+
   const runFinalCommitCallback = () => {
     if (!onCommit) {
       return;
@@ -469,15 +577,7 @@ export async function dispatchQueuedEvent(state: {
         tx.abort(error);
       }
       if (retriesLeft > 0) {
-        state.eventQueue.unshift({
-          action,
-          eventLink: queuedEvent.eventLink,
-          handler,
-          event: eventValue,
-          retriesLeft: retriesLeft - 1,
-          onCommit,
-        });
-        state.queueExecution();
+        requeueForRetry();
       } else {
         logger.error(
           "scheduler",
@@ -514,6 +614,10 @@ export async function dispatchQueuedEvent(state: {
     // the commit, dependent speculative transactions are rejected as well and
     // the normal retry path reruns the event.
     tx.commit().then((result) => {
+      const permanentRejection =
+        result.error && isPermanentRejection(result.error)
+          ? (result.error as IPreconditionFailedError).precondition
+          : undefined;
       if (!result.error && changedWrites.length > 0) {
         state.onEventCommitWrites?.(action, changedWrites);
       }
@@ -529,30 +633,39 @@ export async function dispatchQueuedEvent(state: {
           ? { writesTruncated: true }
           : {}),
         ...(result.error ? { error: result.error.message } : {}),
+        ...(permanentRejection !== undefined ? { permanentRejection } : {}),
       });
-      if (result.error && retriesLeft > 0) {
+      if (
+        result.error && retriesLeft > 0 &&
+        !isPermanentRejection(result.error)
+      ) {
         logger.warn(
           "scheduler",
           `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
           { error: result.error, handlerId },
         );
-        state.eventQueue.unshift({
-          action,
-          eventLink: queuedEvent.eventLink,
-          handler,
-          event: eventValue,
-          retriesLeft: retriesLeft - 1,
-          onCommit,
-        });
-        state.queueExecution();
+        requeueForRetry();
         return;
       }
       runFinalCommitCallback();
       if (result.error) {
+        if (permanentRejection === "receipt-exists") {
+          logger.warn(
+            "event-lost-race",
+            () => [
+              "Event handling lost the receipt race",
+              { eventId: queuedEvent.id, handlerId },
+            ],
+          );
+        }
         logger.error(
           "schedule-error",
           "Event handler transaction failed after exhausting all retries",
-          { error: result.error, handlerId },
+          {
+            error: result.error,
+            handlerId,
+            permanent: isPermanentRejection(result.error),
+          },
         );
       }
     }).catch((error) => {

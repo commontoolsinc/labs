@@ -12,6 +12,7 @@ import type {
   ITransactionJournal,
   ITransactionReader,
   ITransactionWriter,
+  IWriteOptions,
   JournalArchive,
   MemorySpace,
   ReadError,
@@ -155,12 +156,13 @@ export const write = (
   space: MemorySpace,
   address: IMemoryAddress,
   value?: FabricValue,
+  options?: IWriteOptions,
 ): Result<IAttestation, WriteError> => {
   const { ok: branch, error } = checkout(journal, space);
   if (error) {
     return { error };
   } else {
-    const result = branch.write(address, value);
+    const result = branch.write(address, value, options);
     if (result.error) {
       return { error: result.error.from(space) };
     } else {
@@ -366,8 +368,9 @@ export class TransactionWriter implements ITransactionWriter {
   write(
     address: IMemoryAddress,
     value?: FabricValue,
+    options?: IWriteOptions,
   ) {
-    return write(this.#journal, this.#space, address, value);
+    return write(this.#journal, this.#space, address, value, options);
   }
 }
 

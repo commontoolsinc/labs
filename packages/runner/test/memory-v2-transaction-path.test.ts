@@ -179,7 +179,7 @@ describe("memory v2 transaction path semantics", () => {
     await tx.commit();
   });
 
-  it("delete-of-nonexistent: writing undefined at a missing path is a no-op (does not create intermediates)", () => {
+  it("delete-of-nonexistent: an explicit delete at a missing path is a no-op (does not create intermediates)", () => {
     const tx = runtime.edit();
     tx.writeValueOrThrow({
       space,
@@ -190,14 +190,18 @@ describe("memory v2 transaction path semantics", () => {
       kept: "intact",
     });
 
-    // Attempt to "delete" a slot that doesn't exist. Should leave the doc
-    // unchanged -- no `details` container materialized, `kept` preserved.
-    tx.writeValueOrThrow({
-      space,
-      scope: "space",
-      id: "of:path-delete-nonexistent",
-      path: ["details", "profile", "name"],
-    }, undefined);
+    // Delete a slot that doesn't exist. Should leave the doc unchanged --
+    // no `details` container materialized, `kept` preserved.
+    tx.writeValueOrThrow(
+      {
+        space,
+        scope: "space",
+        id: "of:path-delete-nonexistent",
+        path: ["details", "profile", "name"],
+      },
+      undefined,
+      { delete: true },
+    );
 
     expect(
       tx.readValueOrThrow({
@@ -216,6 +220,39 @@ describe("memory v2 transaction path semantics", () => {
         path: ["details"],
       }).ok?.value,
     ).toBeUndefined();
+
+    tx.abort();
+  });
+
+  it("writing undefined at a missing path materializes intermediates and stores undefined", () => {
+    const tx = runtime.edit();
+    tx.writeValueOrThrow({
+      space,
+      scope: "space",
+      id: "of:path-set-undefined-nonexistent",
+      path: [],
+    }, {
+      kept: "intact",
+    });
+
+    // A plain write of `undefined` is a value write: intermediates are
+    // created and the leaf slot becomes present-but-undefined.
+    tx.writeValueOrThrow({
+      space,
+      scope: "space",
+      id: "of:path-set-undefined-nonexistent",
+      path: ["details", "profile", "name"],
+    }, undefined);
+
+    const root = tx.readValueOrThrow({
+      space,
+      scope: "space",
+      id: "of:path-set-undefined-nonexistent",
+      path: [],
+    }) as { kept: string; details: { profile: Record<string, unknown> } };
+    expect(root.kept).toBe("intact");
+    expect("name" in root.details.profile).toBe(true);
+    expect(root.details.profile.name).toBeUndefined();
 
     tx.abort();
   });

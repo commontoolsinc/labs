@@ -19,6 +19,7 @@ import type {
   IReadOptions,
   IStorageTransaction,
   ITransactionJournal,
+  IWriteOptions,
   MemorySpace,
   Metadata,
   ReadError,
@@ -32,7 +33,10 @@ import type {
   WriterError,
 } from "./interface.ts";
 import { createReadOnlyTransactionError, toThrowable } from "./interface.ts";
-import type { SqliteOperation } from "@commonfabric/memory/v2";
+import type {
+  CommitPrecondition,
+  SqliteOperation,
+} from "@commonfabric/memory/v2";
 import {
   getDirectTransactionReactivityLog,
   getTransactionReadActivities,
@@ -80,6 +84,11 @@ const logger = getLogger("extended-storage-transaction", {
   level: "error",
 });
 
+const createOnlyMarkKey = (
+  link: { id: string; scope?: unknown },
+): string =>
+  `${normalizeCellScope(link.scope as CellScope | undefined)}\0${link.id}`;
+
 type CfcInstrumentationHooks = {
   onRelevantTx?(): void;
   onPreparedTx?(): void;
@@ -101,6 +110,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   >();
   private statusOverride?: StorageTransactionStatus;
   private commitCallbacksDispatched = false;
+  private commitPreconditions = new Map<MemorySpace, CommitPrecondition[]>();
+  private createOnlyMarks = new Map<MemorySpace, Set<string>>();
   private outboxIdempotencyKeys = new Set<string>();
   private readOnlySource?: string;
   private narrowestReadScope: CellScope = "space";
@@ -587,6 +598,47 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.tx.getSchedulerObservation?.();
   }
 
+  addCommitPrecondition(
+    space: MemorySpace,
+    precondition: CommitPrecondition,
+  ): void {
+    this.assertWritable("addCommitPrecondition");
+    // Fail closed: a precondition is a commit gate, so silently ignoring it
+    // on storage that cannot enforce it would let the gated commit through.
+    if (!this.tx.addCommitPrecondition) {
+      throw new Error(
+        "storage transaction does not support addCommitPrecondition()",
+      );
+    }
+    const preconditions = this.commitPreconditions.get(space);
+    if (preconditions) {
+      preconditions.push(precondition);
+    } else {
+      this.commitPreconditions.set(space, [precondition]);
+    }
+    this.tx.addCommitPrecondition(space, precondition);
+  }
+
+  getCommitPreconditions(
+    space: MemorySpace,
+  ): readonly CommitPrecondition[] | undefined {
+    return this.tx.getCommitPreconditions?.(space) ??
+      this.commitPreconditions.get(space);
+  }
+
+  markCreateOnly(
+    link: { space: MemorySpace; id: string; scope?: unknown },
+  ): void {
+    this.assertWritable("markCreateOnly");
+    let marks = this.createOnlyMarks.get(link.space);
+    if (!marks) {
+      marks = new Set();
+      this.createOnlyMarks.set(link.space, marks);
+    }
+    marks.add(createOnlyMarkKey(link));
+    this.tx.markCreateOnly?.(link);
+  }
+
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
     // A folded SQLite write is a write — honor the wrapper's read-only mode the
     // same way cell writes do, instead of silently recording it.
@@ -662,6 +714,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   write(
     address: IMemorySpaceAddress,
     value: FabricValue,
+    options?: IWriteOptions,
   ): Result<IAttestation, WriteError | WriterError> {
     this.assertWritable("write()");
     this.noteSystemWrite(address);
@@ -670,12 +723,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.invalidateCfc("write-after-prepare");
     }
     this.invalidateReadResultCache();
-    return this.tx.write(address, value);
+    return this.tx.write(address, value, options);
   }
 
   writeOrThrow(
     address: IMemorySpaceAddress,
     value: FabricValue,
+    options?: IWriteOptions,
   ): void {
     this.assertWritable("writeOrThrow()");
     this.noteSystemWrite(address);
@@ -684,11 +738,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.invalidateCfc("write-after-prepare");
     }
     this.invalidateReadResultCache();
-    const writeResult = this.tx.write(address, value);
+    const writeResult = this.tx.write(address, value, options);
     if (
       writeResult.error &&
       (writeResult.error.name === "NotFoundError")
     ) {
+      if (options?.delete) {
+        // Deleting a slot whose path doesn't exist is a no-op; don't
+        // materialize intermediates just to remove nothing.
+        return;
+      }
       // Create parent entries if needed.
       // errorPath includes the missing key (consistent with read errors).
       // lastExistingPath is one level up - the actual last existing parent.
@@ -755,13 +814,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   writeValueOrThrow(
     address: NormalizedFullLink,
     value: FabricValue,
+    options?: IWriteOptions,
   ): void {
     this.assertWritable("writeValueOrThrow()");
-    this.writeOrThrow(toMemorySpaceAddress(address), value);
+    this.writeOrThrow(toMemorySpaceAddress(address), value, options);
   }
 
   writeValuesOrThrow(
-    writes: Iterable<{ address: NormalizedFullLink; value: FabricValue }>,
+    writes: Iterable<
+      { address: NormalizedFullLink; value: FabricValue; delete?: boolean }
+    >,
   ): void {
     this.assertWritable("writeValuesOrThrow()");
     this.invalidateReadResultCache();
@@ -782,7 +844,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             const address = toMemorySpaceAddress(write.address);
             noteSystemWrite(address);
             noteWriteIdentity();
-            yield { address, value: write.value };
+            yield { address, value: write.value, delete: write.delete };
           }
         })(),
       );
@@ -793,7 +855,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
 
     for (const write of writes) {
-      this.writeValueOrThrow(write.address, write.value);
+      this.writeValueOrThrow(
+        write.address,
+        write.value,
+        write.delete ? { delete: true } : undefined,
+      );
     }
   }
 
@@ -1140,6 +1206,32 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.wrapped.getSchedulerObservation?.();
   }
 
+  addCommitPrecondition(
+    space: MemorySpace,
+    precondition: CommitPrecondition,
+  ): void {
+    // Fail closed, like ExtendedStorageTransaction: a precondition is a
+    // commit gate and must not be silently dropped.
+    if (!this.wrapped.addCommitPrecondition) {
+      throw new Error(
+        "storage transaction does not support addCommitPrecondition()",
+      );
+    }
+    this.wrapped.addCommitPrecondition(space, precondition);
+  }
+
+  getCommitPreconditions(
+    space: MemorySpace,
+  ): readonly CommitPrecondition[] | undefined {
+    return this.wrapped.getCommitPreconditions?.(space);
+  }
+
+  markCreateOnly(
+    link: { space: MemorySpace; id: string; scope?: unknown },
+  ): void {
+    this.wrapped.markCreateOnly?.(link);
+  }
+
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
     if (!this.wrapped.recordSqliteWrite) {
       throw new Error(
@@ -1205,32 +1297,41 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   write(
     address: IMemorySpaceAddress,
     value: FabricValue,
+    options?: IWriteOptions,
   ): Result<IAttestation, WriteError | WriterError> {
-    return this.wrapped.write(address, value);
+    return this.wrapped.write(address, value, options);
   }
 
   writeOrThrow(
     address: IMemorySpaceAddress,
     value: FabricValue,
+    options?: IWriteOptions,
   ): void {
-    return this.wrapped.writeOrThrow(address, value);
+    return this.wrapped.writeOrThrow(address, value, options);
   }
 
   writeValueOrThrow(
     address: NormalizedFullLink,
     value: FabricValue,
+    options?: IWriteOptions,
   ): void {
-    return this.wrapped.writeValueOrThrow(address, value);
+    return this.wrapped.writeValueOrThrow(address, value, options);
   }
 
   writeValuesOrThrow(
-    writes: Iterable<{ address: NormalizedFullLink; value: FabricValue }>,
+    writes: Iterable<
+      { address: NormalizedFullLink; value: FabricValue; delete?: boolean }
+    >,
   ): void {
     if (this.wrapped.writeValuesOrThrow) {
       return this.wrapped.writeValuesOrThrow(writes);
     }
     for (const write of writes) {
-      this.wrapped.writeValueOrThrow(write.address, write.value);
+      this.wrapped.writeValueOrThrow(
+        write.address,
+        write.value,
+        write.delete ? { delete: true } : undefined,
+      );
     }
   }
 

@@ -77,6 +77,7 @@ import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
 import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
 import type { CfcLabelView } from "@commonfabric/runner/cfc";
 import {
+  assertDockerRunscCfcTransportForMode,
   DockerRunscSandboxRuntime,
   resolveDockerRunscSandboxConfig,
 } from "./sandbox/docker-runsc.ts";
@@ -93,6 +94,7 @@ import {
 } from "./sandbox/process-runner.ts";
 import type {
   DockerRunscAdditionalMountConfig,
+  DockerRunscSandboxConfig,
   HarnessSandboxConfig,
   SandboxRuntime,
 } from "./sandbox/types.ts";
@@ -168,6 +170,8 @@ export interface CreateHarnessEngineOptions
   workspaceHostPath?: string;
   sandboxImage?: string;
   additionalMounts?: readonly DockerRunscAdditionalMountConfig[];
+  cfcResultDir?: string;
+  cfcInvocationContextDir?: string;
   sandboxRuntime?: SandboxRuntime;
   artifactStore?: HarnessArtifactStore;
   processRunner?: ProcessRunner;
@@ -188,25 +192,40 @@ const isToolOutputWithId = (value: unknown): value is ToolOutputWithId =>
   "outputId" in value &&
   typeof value.outputId === "string";
 
+interface ResolveSandboxConfigOptions {
+  workspaceHostPath?: string;
+  sandboxImage?: string;
+  additionalMounts?: readonly DockerRunscAdditionalMountConfig[];
+  cfcResultDir?: string;
+  cfcInvocationContextDir?: string;
+}
+
 const resolveSandboxConfig = (
   config: HarnessConfig,
-  workspaceHostPath?: string,
-  sandboxImage?: string,
-  additionalMounts?: readonly DockerRunscAdditionalMountConfig[],
+  options: ResolveSandboxConfigOptions,
 ): HarnessSandboxConfig => {
   if (config.sandbox !== undefined) {
     return config.sandbox;
   }
-  if (workspaceHostPath === undefined) {
+  if (options.workspaceHostPath === undefined) {
     throw new Error(
       "sandbox config is required when no workspaceHostPath default is provided",
     );
   }
   return resolveDockerRunscSandboxConfig({
-    workspaceHostPath,
-    ...(sandboxImage !== undefined ? { image: sandboxImage } : {}),
-    ...(additionalMounts !== undefined && additionalMounts.length > 0
-      ? { additionalMounts }
+    workspaceHostPath: options.workspaceHostPath,
+    ...(options.sandboxImage !== undefined
+      ? { image: options.sandboxImage }
+      : {}),
+    ...(options.additionalMounts !== undefined &&
+        options.additionalMounts.length > 0
+      ? { additionalMounts: options.additionalMounts }
+      : {}),
+    ...(options.cfcResultDir !== undefined
+      ? { cfcResultDir: options.cfcResultDir }
+      : {}),
+    ...(options.cfcInvocationContextDir !== undefined
+      ? { cfcInvocationContextDir: options.cfcInvocationContextDir }
       : {}),
   });
 };
@@ -283,6 +302,8 @@ export class CfHarnessEngine {
   #outputSequence: number;
   readonly #now: () => string;
   readonly #hostMounts: readonly HostSandboxMount[];
+  readonly #ownedRunscConfig?: DockerRunscSandboxConfig;
+  #cfcTransportChecked = false;
 
   constructor(options: CreateHarnessEngineOptions = {}) {
     this.#now = options.now ?? (() => new Date().toISOString());
@@ -290,13 +311,26 @@ export class CfHarnessEngine {
     const runId = options.runState?.runId ?? options.runId ??
       crypto.randomUUID();
     const sandboxConfig = options.sandboxRuntime === undefined
-      ? resolveSandboxConfig(
-        this.config,
-        options.workspaceHostPath,
-        options.sandboxImage,
-        options.additionalMounts,
-      )
+      ? resolveSandboxConfig(this.config, {
+        workspaceHostPath: options.workspaceHostPath,
+        sandboxImage: options.sandboxImage,
+        additionalMounts: options.additionalMounts,
+        cfcResultDir: options.cfcResultDir,
+        cfcInvocationContextDir: options.cfcInvocationContextDir,
+      })
       : this.config.sandbox;
+    // Capture the engine-owned docker-runsc config so we can refuse to *run*
+    // enforce-mode sandbox work — capability probes or tools — whose sandbox
+    // lacks the CFC sidecar transports (the check fires at run start, not
+    // construction — see #assertCfcTransportReady).
+    // Only when the engine constructs the runtime itself: an injected
+    // sandboxRuntime is the thing that actually executes and carries its own
+    // enforcement guarantees, while `sandboxConfig` in that branch is the
+    // unused resolved config and may describe a different sandbox entirely.
+    this.#ownedRunscConfig = options.sandboxRuntime === undefined &&
+        sandboxConfig?.kind === "docker-runsc-cfc"
+      ? sandboxConfig
+      : undefined;
     this.hostProcessRunner = options.processRunner ?? new DenoProcessRunner();
     this.sandbox = options.sandboxRuntime ??
       createSandboxRuntime(sandboxConfig!, options.processRunner);
@@ -696,7 +730,28 @@ export class CfHarnessEngine {
     return policyTracePath;
   }
 
+  // Fail fast before any sandbox execution under enforcement on a sandbox that
+  // lacks the CFC sidecar transports — capability probes included, since they
+  // run scripts inside the same sandbox (not just builtin tools). Checked at
+  // run start rather than construction so an engine can be built and inspected
+  // (config threading, --describe-capabilities) without a live CFC wiring.
+  // Idempotent so the cost is paid once per run.
+  #assertCfcTransportReady(): void {
+    if (this.#cfcTransportChecked || this.#ownedRunscConfig === undefined) {
+      return;
+    }
+    assertDockerRunscCfcTransportForMode(
+      this.#runState.cfcEnforcementMode,
+      this.#ownedRunscConfig,
+    );
+    this.#cfcTransportChecked = true;
+  }
+
   async ensureDiagnosticsInitialized(): Promise<HarnessRunState> {
+    // The capability probes below execute scripts inside the sandbox, so the
+    // enforce-mode transport floor applies here too — and must throw before
+    // the try block below, which records probe errors instead of propagating.
+    this.#assertCfcTransportReady();
     if (this.#runState.capabilitySnapshot !== undefined) {
       return this.getRunState();
     }
@@ -755,6 +810,7 @@ export class CfHarnessEngine {
     if (tool === undefined) {
       throw new Error(`unknown builtin tool: ${toolId}`);
     }
+    this.#assertCfcTransportReady();
     await this.ensureDiagnosticsInitialized();
     this.#runState = setHarnessRunStatus(
       this.#runState,

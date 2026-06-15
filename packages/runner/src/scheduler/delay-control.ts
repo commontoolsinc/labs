@@ -7,9 +7,9 @@ export interface SchedulerDelayControlState {
   readonly effects: ReadonlySet<Action>;
   readonly dirty: ReadonlySet<Action>;
   readonly pending: Set<Action>;
-  readonly isPullDemandRootEffect: (action: Action) => boolean;
   readonly queueExecution: () => void;
   readonly logDebounce: (message: string) => void;
+  readonly shouldDebounceFirstRun?: (action: Action) => boolean;
 }
 
 export function canAutomaticallyDebounce(
@@ -18,7 +18,6 @@ export function canAutomaticallyDebounce(
 ): boolean {
   return state.delays.canAutomaticallyDebounce(action, {
     effects: state.effects,
-    isPullDemandRootEffect: state.isPullDemandRootEffect,
   });
 }
 
@@ -26,13 +25,12 @@ export function getNextDebounceRunTime(
   state: SchedulerDelayControlState,
   action: Action,
 ): number | undefined {
+  // Same context as the waiting/schedule paths — the planner must agree
+  // with them on the first-run debounce gate, or a scheduled debounce has
+  // no wake time.
   return state.delays.getNextDebounceRunTime(
     action,
-    {
-      computations: state.computations,
-      effects: state.effects,
-      dirty: state.dirty,
-    },
+    debouncedComputationContext(state),
   );
 }
 
@@ -95,5 +93,6 @@ function debouncedComputationContext(state: SchedulerDelayControlState) {
     pending: state.pending,
     queueExecution: state.queueExecution,
     logDebounce: state.logDebounce,
+    shouldDebounceFirstRun: state.shouldDebounceFirstRun,
   };
 }

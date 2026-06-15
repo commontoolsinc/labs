@@ -35,30 +35,64 @@ Before AST transforms, `transformCfDirective()`:
 
 1. Scans the first non-empty source line for transform directives.
 2. Unless that line is `/// <cf-disable-transform />`, injects:
-   - `import * as __cfHelpers from "commonfabric";`
-   - helper `h(...)` forwarding to `__cfHelpers.h`.
+   - `import { __cfHelpers } from "commonfabric";` (a named import of the
+     internal helper binding, not a namespace import)
+   - a forwarding `h(...)` helper delegating to `__cfHelpers.h` (so authors
+     need not import the JSX factory manually, and so the helper module is not
+     tree-shaken before binding).
 3. Rejects sources that contain identifier `__cfHelpers` anywhere in the AST.
 4. Strips opt-out `/// <cf-disable-transform />` from the source before later
    stages.
+
+These string-level steps run in `transformCfDirective()`
+(`src/core/cf-helpers.ts`) before any AST transformer, because symbol binding
+happens before the transformer pipeline runs.
 
 Opt-out note:
 
 - `/// <cf-disable-transform />` is the explicit opt-out.
 
-### 2.2 Pipeline object
+### 2.2 Pipeline object and cross-stage state
 
-`CommonFabricTransformerPipeline` constructs one ordered pipeline with shared
-mutable registries:
+`CommonFabricTransformerPipeline` (`src/cf-pipeline.ts`) constructs one ordered
+pipeline from `CFC_TRANSFORMER_STAGE_SPECS`. Every stage shares:
 
-- `typeRegistry: WeakMap<ts.Node, ts.Type>`
-- `mapCallbackRegistry: WeakSet<ts.Node>`
-- `schemaHints: WeakMap<ts.Node, SchemaHint>`
-- `capabilitySummaryRegistry: WeakMap<ts.Node, FunctionCapabilitySummary>`
-- `diagnosticsCollector: TransformationDiagnostic[]`
+- a single `diagnosticsCollector: TransformationDiagnostic[]`
+- a single `CrossStageState` instance (`src/core/cross-stage-state.ts`), which
+  is the sole owner of cross-transformer communication. It replaced the
+  formerly-separate registry fields on `TransformationOptions`.
+
+`CrossStageState` organizes its registries into three deliberate families
+(mirroring the TypeScript compiler's `NodeLinks` pattern):
+
+1. **Bare cross-package maps** — the published boundary contract, read directly
+   as plain `WeakMap`s by the separate schema-generator package, which must not
+   depend on `CrossStageState`:
+   - `typeRegistry: WeakMap<ts.Node, ts.Type>`
+   - `schemaHints: WeakMap<ts.Node, SchemaHint>`
+2. **`nodeLinks` side table** — a `WeakMap<ts.Node, NodeTypeLinks>` for
+   transformer-internal, non-cache-invalidating per-node channels, reached only
+   through record/lookup/mark/is accessors:
+   - `capabilitySummary` (formerly the separate `capabilitySummaryRegistry`)
+   - `schemaInjected` — a presence flag marking builder call/`new` nodes that
+     SchemaInjection has finalized, replacing the scattered arg-count
+     idempotency guards. It uses a plain presence check with **no**
+     `getOriginalNode` fallback (it tags synthetic nodes whose original is the
+     pre-injection user call).
+3. **Marker family** — node/symbol-keyed `WeakSet`s whose membership checks fall
+   back through `getOriginalNode`, and whose mutators are coupled to the
+   context's reactive-analysis cache invalidation (invalidation is a
+   `TransformationContext` concern; `CrossStageState` stays a pure data holder):
+   - `mapCallbackRegistry` (transformed array-method callbacks)
+   - `syntheticComputeCallbackRegistry`
+   - `syntheticComputeOwnedNodeRegistry`
+   - `syntheticReactiveCollectionRegistry` (keyed by `ts.Symbol`)
 
 ## 3. Pipeline Order (Normative)
 
-Transformers always run in this order:
+The authoritative ordering lives in `CFC_TRANSFORMER_STAGE_SPECS` /
+`CFC_TRANSFORMER_STAGE_NAMES` in `src/cf-pipeline.ts`. Transformers always run
+in this order (18 stages):
 
 1. `CastValidationTransformer`
 2. `EmptyArrayOfValidationTransformer`
@@ -71,19 +105,27 @@ Transformers always run in this order:
 9. `HelperOwnedExpressionSiteLoweringTransformer`
 10. `WriteAuthorizedByValidationTransformer`
 11. `PatternCallbackLoweringTransformer`
-12. `BuilderCallbackHoistingTransformer`
-13. `SchemaInjectionTransformer`
-14. `LiftHoistingTransformer`
-15. `SchemaGeneratorTransformer`
-16. `ReactiveVariableForTransformer`
-17. `ModuleScopeShadowingTransformer`
-18. `ModuleScopeCfDataTransformer`
-19. `ModuleScopeFunctionHardeningTransformer`
+12. `SchemaInjectionTransformer`
+13. `BuilderCallHoistingTransformer`
+14. `SchemaGeneratorTransformer`
+15. `ReactiveVariableForTransformer`
+16. `ModuleScopeShadowingTransformer`
+17. `ModuleScopeCfDataTransformer`
+18. `ModuleScopeFunctionHardeningTransformer`
 
-The order is behaviorally significant. (`LiftHoistingTransformer`, stage 14,
-runs **after** `SchemaInjectionTransformer` so the lift call it relocates to
-module scope already carries its injected schemas — see CT-1644 and
-`packages/ts-transformers/docs/derive-to-lift-design.md`.)
+The order is behaviorally significant (invariant C-002). Two ordering facts
+worth calling out:
+
+- `BuilderCallHoistingTransformer` (stage 13) runs **after**
+  `SchemaInjectionTransformer` (stage 12) so each builder call it relocates to
+  module scope already carries its injected schemas — see CT-1644 and
+  `packages/ts-transformers/docs/derive-to-lift-design.md`. This stage hoists
+  `lift`, `handler`, and `pattern` builder calls. It absorbed and replaced the
+  former separate `LiftHoistingTransformer` (which hoisted only `lift`); the
+  even-older `BuilderCallbackHoistingTransformer` was deleted (#3864). Earlier
+  spec revisions listing those two as distinct stages are obsolete.
+- The four module-scope stages (15–18) run last so they operate on fully lowered
+  and schema-injected output.
 
 ## 4. Global Modes
 
@@ -101,18 +143,32 @@ Current mode-sensitive behavior:
 
 ## 5. Call Kind Detection Contract
 
-`detectCallKind()` drives multiple transformers. It recognizes:
+`detectCallKind()` drives multiple transformers. The set of recognized Common
+Fabric runtime exports — and, for each, its call category and whether it is a
+**reactive origin** — is defined in one place:
+`COMMONFABRIC_RUNTIME_EXPORT_REGISTRY`
+(`src/core/commonfabric-runtime-registry.ts`). A guard test
+(`test/core/commonfabric-runtime-registry.test.ts`) asserts the registry covers
+every callable the runner's builder factory injects, so the registry — not this
+list — is the authoritative source. As of this writing it recognizes:
 
-- builders: `pattern`, `handler`, `action`, `lift`, `computed`, `render`
-- `ifElse`, `when`, `unless`
+- builders (all reactive-origin): `pattern`, `handler`, `action`, `lift`,
+  `computed`, `render`. (`byRef` is a registered-but-`ignored` export.)
+- conditional-helper calls: `ifElse`, `when`, `unless`
 - reactive array calls (`map`, `mapWithPattern`, `filter`, `filterWithPattern`,
   `flatMap`, `flatMapWithPattern`)
 - cell factories (`cell`, `new Cell`, `new OpaqueCell`, `new Stream`, etc.),
   with legacy `.of(...)` still accepted
 - `Cell.for`-style calls
 - `wish`
-- `generateObject`
-- `patternTool`
+- `generateObject` and `generateText`
+- the `runtime-call` family — tagged-call / function runtime origins: `str`,
+  `llm`, `llmDialog`, `fetchData`, `fetchProgram`, `streamData`,
+  `compileAndRun`, `navigateTo`, and the SQLite builtins `sqliteDatabase` /
+  `sqliteQuery` (`sqliteQuery<Row>` additionally gets dedicated type-argument
+  schema injection)
+- `patternTool` — recognized, but explicitly **not** a reactive origin
+  (`reactiveOrigin: false`)
 
 Detection is provenance-first:
 
@@ -172,19 +228,29 @@ No error when:
 On call `receiver.get()` (no args):
 
 - if receiver cell kind resolves to `"cell"` or `"stream"`:
-  - no diagnostic
+  - no diagnostic (these types legitimately have `.get()`)
 - otherwise if receiver either:
-  - resolves to opaque cell kind via `getCellKind()`, or
-  - structurally traces back to a reactive-origin call result/alias/binding
-    initialized from one of:
-    - builders (`pattern`, `computed`, `lift`, `handler`, `action`, `render`)
-    - `ifElse`, `when`, `unless`
-    - cell factories / `Cell.for`
-    - `wish`
-    - `generateObject`
+  - resolves to opaque cell kind (`"opaque"`) via `getCellKind()`, or
+  - is structurally reactive — `isReactiveExpression` walks the receiver and
+    treats it as reactive when it is (or its property/element-access root is):
+    - a **`pattern` / `render` callback parameter** (including via destructured
+      binding elements), or
+    - a local variable whose initializer is a **reactive-origin call** (after
+      stripping non-null/parenthesized/cast wrappers and property/element-access
+      tails), as defined by `isReactiveOriginCall` / the runtime registry (§5):
+      reactive-origin builders (`pattern`, `computed`, `lift`, `handler`,
+      `action`, `render`), the lift-applied shape, `ifElse` / `when` / `unless`,
+      cell factories / `Cell.for`, `wish`, `generateObject`, `generateText`, and
+      the `runtime-call` family (`str`, `llm`, …)
   - **Error** `opaque-get:invalid-call`
   - message instructs direct access, clarifies only `Writable<T>`/`Cell<T>`
     reads require `.get()`.
+
+Deliberate non-coverage of the structural fallback: `lift` / `handler` /
+`action` callback **parameters** are not inferred as opaque from structure
+alone — they keep their declared cell semantics. The structural inference exists
+only for the `OpaqueRef<T> = T` identity-alias case where the cell brand is
+gone.
 
 Same-named local helpers are not treated as reactive origins unless the call
 itself resolves through the Common Fabric provenance rules in §5.
@@ -194,17 +260,21 @@ itself resolves through the Common Fabric provenance rules in §5.
 Validates that property paths detected by capability analysis can actually
 resolve against the declared parameter type during schema shrinking.
 
-Detection occurs in `applyShrinkAndWrap` (schema-injection.ts) and in the
-`defaults_only` branch of `applyCapabilitySummaryToArgument`. After shrinking
-completes, `validateShrinkCoverage` compares requested top-level path heads
-against what was materialized in the shrunk result.
+Detection occurs in `applyShrinkAndWrap` and `validateShrinkCoverage` (both in
+`type-shrinking.ts`; `schema-injection.ts` and `lift-applied-strategy.ts` call
+into them), including the `defaults_only` branch of
+`applyCapabilitySummaryToArgument`. After shrinking completes,
+`validateShrinkCoverage` compares requested top-level path heads against what
+was materialized in the shrunk result.
 
-Path extraction (`extractAccessPath` in capability-analysis.ts) sees through
-type assertions (`as any`, `as T`, angle-bracket casts) at every level of
-property/element access chains. For example `(state as any).foo` resolves to a
-read of `state.foo` because `unwrapExpression` is applied after each step up the
-access chain. This means `as any` single casts do not hide property accesses
-from capability analysis.
+Path extraction (`extractAccessPath` in capability-analysis.ts) sees through the
+non-semantic wrappers `unwrapExpression` strips — parenthesization, `as`
+assertions, angle-bracket type assertions, `satisfies`, and non-null (`!`) — at
+every level of property/element access chains. `unwrapExpression` is applied to
+the receiver after each property/element step, so for example `(state as any)
+.foo` resolves to a read of `state.foo`. This means single casts (or
+`satisfies`/`!` wrappers) do not hide property accesses from capability
+analysis.
 
 When interprocedural analysis is enabled (compute-context builders like `lift`,
 `handler`), read paths discovered in helper function bodies propagate
@@ -236,15 +306,24 @@ Guards that skip validation:
 - synthetic parameters injected by the pipeline (`__ct_pattern_input`,
   `__param0`, etc. — names starting with `__`)
 - `never`-typed parameters (bottom type, vacuously valid)
+- `any`-typed parameters (top type; the runtime fetches everything, so every key
+  is reachable — this is what distinguishes `any` from `unknown`)
 - paths whose head is `"key"` (reactive proxy accessor injected by
   `PatternCallbackLoweringTransformer`)
 
 Diagnostics:
 
 - **Error** `schema:unknown-type-access`
-  - parameter is typed as `unknown` and the code accesses properties, OR one or
-    more accessed property heads resolve to `unknown`-typed members on an
-    otherwise concrete type
+  - fires in any of these cases:
+    - parameter base type is `unknown` and the code accesses properties
+    - parameter base type is an **uninstantiated generic type parameter** and
+      the code accesses properties (the `isUnknownBase` check treats
+      `TypeFlags.TypeParameter` like `Unknown` — an unresolved `<T>` base cannot
+      express a fetch shape any more than `unknown` can)
+    - one or more accessed property heads resolve to `unknown`-typed **members**
+      on an otherwise concrete type (e.g. `{ data?: unknown }`)
+    - a **wildcard** parameter (passed to an opaque/unanalyzable function) whose
+      base type is `unknown` (see the wildcard note above)
   - message lists the accessed property heads and instructs the author to
     replace `unknown` with a concrete type
 - **Error** `schema:path-not-in-type`
@@ -283,6 +362,14 @@ Compute wrappers override restrictions:
 - inline JSX `on*` handlers
 - standalone function definitions
 - JSX expressions (handled by opaque-ref JSX transformer)
+- the SQLite `table(columns, (row) => ({...}))` row-label rule callback —
+  classified as the supported `sqlite-row-label-rule` compute boundary
+  (`callback-boundary.ts`). `table()` is recognized by name **plus** the
+  `SqliteTableFunction` type alias from Common Fabric's own typings (so an
+  unrelated user function named `table` does not match). The rule callback is
+  evaluated eagerly at pattern build into a serialized JSON AST, so it is
+  compute-owned and is deliberately exempt from SES self-containment validation
+  (see the `ses-callback:callable-capture` exclusion below).
 
 Diagnostics emitted in all modes:
 
@@ -316,11 +403,51 @@ Diagnostics emitted in all modes:
 - **Error** `pattern-context:computation`
   - binary/unary/conditional computations using opaque dependencies outside
     wrappers
+  - also the catch-all for other non-lowerable reactive reads at a top-level
+    pattern site — notably **bare dynamic key (element) access** like
+    `scopes[key]` directly in a pattern-body value position (the target-language
+    spec's "bare dynamic key access in top-level pattern-facing code" =
+    Unsupported). The same access is fine inside JSX, a computation callback, a
+    collection callback, or a structural binding form.
   - validation first checks the shared lowerable-expression-site policy; only
-    non-lowerable computation sites still report this error
-- **Error** `pattern-context:map-on-fallback`
-  - `(opaqueExpr ?? fallback).map(...)` or `(opaqueExpr || fallback).map(...)`
-    where left is reactive and right is not
+    non-lowerable computation sites still report this error (so `items[0].name`,
+    `name.toUpperCase()` at lowerable top-level sites, and dynamic keys inside
+    supported contexts validate clean)
+- **Error** `pattern-context:callback-container`
+  - a callback passed to an **unsupported container** in pattern-facing JSX
+    (the callback-boundary decision is `unsupported` with
+    `boundaryDiagnostic === "callback-container"`) — e.g. a foreign imperative
+    container root like `[0, 1].forEach(() => list.map(...))`. This is the
+    diagnostic counterpart of the target-language spec's "foreign callback /
+    imperative container roots" unsupported bucket. Guidance: use a supported
+    array-method/value call, an event handler, or move the work into
+    `computed(() => ...)`, module-scope `lift()`, or a helper.
+- **Error** `pattern-context:patterntool-requires-pattern`
+  - `patternTool(fn, ...)` where the first argument is a bare callback (arrow /
+    function expression) rather than a `pattern(...)`. The runtime/transformer
+    auto-wrapping (`pattern(fn)`) and auto-capture were removed in CT-1655;
+    authors now wrap explicitly: `patternTool(pattern(fn), extraParams?)`. The
+    diagnostic is reported on the bare-callback argument.
+- **Error** `ses-callback:callable-capture`
+  - a callback at an SES-self-contained boundary captures a **callable**
+    declared in an enclosing function scope. The boundary kinds that require
+    self-containment are `SES_SELF_CONTAINED_CALLBACK_BOUNDARIES`:
+    `event-handler`, `reactive-array-method`, `pattern-tool`, `pattern-builder`,
+    `render-builder`, `lift-applied`, `computed-builder`, `action-builder`,
+    `lift-builder`, `handler-builder`. (`sqlite-row-label-rule` is deliberately
+    excluded — `table()` evaluates its rule callback eagerly at pattern build
+    into a serialized AST, so capture is harmless there.) SES callback
+    implementations must be self-contained. Guidance: move callable helpers to
+    module scope, or pass serializable data through explicit inputs/state.
+    Capturing non-callable reactive data is still allowed.
+
+Removed diagnostic (behavior change, PR #3154 pattern-language-boundary): the
+former `pattern-context:map-on-fallback` error no longer exists.
+Fallback-guarded reactive collection forms such as `(items ?? []).map(...)`,
+`(items || []).filter(...)`, and `(items ?? []).flatMap(...)` — including
+cast-/`satisfies`-wrapped reactive left sides — are now **supported** and emit no
+fallback-specific diagnostic. `test/validation.test.ts` retains these as
+regression guards asserting the forms validate clean.
 
 ### 6.6 Pattern Result Schema Inference
 
@@ -341,10 +468,13 @@ This inference runs through `collectFunctionSchemaTypeNodes` via
 
 ### 6.7 Lowerable Expression-Site Categories
 
-The shared expression-site policy recognizes six authored container kinds via
-`getExpressionContainerKind`:
+The shared expression-site policy recognizes seven authored container kinds via
+`getExpressionContainerKind` (the `ExpressionContainerKind` union in
+`expression-site-types.ts`):
 
 - `jsx-expression`
+- `template-span` (an interpolated `${…}` span inside a tagged template, e.g.
+  a `str`-tagged template)
 - `return-expression`
 - `variable-initializer`
 - `call-argument`
@@ -376,6 +506,37 @@ recursive lowering. That boundary does not disappear just because the callback
 returns JSX: ternaries and logical control flow inside the compute callback
 body stay authored JavaScript rather than recursively lowered helper control
 flow.
+
+### 6.8 WriteAuthorizedBy validation (CFC, validation-only)
+
+`WriteAuthorizedByValidationTransformer` (pipeline stage 10) is the one piece of
+the CFC authoring contract that has landed on `main`, and it is **validation
+only** — there is no CFC schema lowering yet (no `ifc.integrity` / `ifc.opaque` /
+`ifc.collection` emission anywhere in `src/`; the draft lowering rules in
+`cfc_authoring_contract.md` remain unimplemented — see §14).
+
+It scans `toSchema<T>()` (one type arg) and `pattern<I, R>()` (the result type
+arg) for `WriteAuthorizedBy<T, typeof binding>` references, resolving through
+local type aliases and type-parameter substitution
+(`findWriteAuthorizedByReferences`). For each reference it emits
+**`cfc-write-authorized-by`** when usage is malformed:
+
+- the second type argument is not a `typeof` binding (`TypeQueryNode`)
+- the `typeof` target is not a simple identifier
+- the bound name is not a supported origin — a local `handler()` / `module()` /
+  `requireEventIntegrity()` initializer, or a local function declaration
+
+Well-formed `WriteAuthorizedBy` usage passes validation; the base schema still
+lowers as `T` (the `WriteAuthorizedBy` wrapper contributes no schema metadata on
+current `main`). This stage is exercised by `test/cfc-authoring.test.ts`,
+`test/cfc-transformer-coverage.test.ts`, and pipeline regressions.
+
+`ts-transformers` also re-exports the canonical CFC alias-name set
+(`CFC_CANONICAL_ALIAS_NAMES`, from `@commonfabric/api/cfc`) via
+`src/cfc-authoring.ts` — `Cfc`, `Confidential`, `Integrity`, `OpaqueInput`,
+`WriteAuthorizedBy`, the `TrustedAction*` family, the projection aliases, etc.
+These names are recognized as CFC vocabulary but, apart from `WriteAuthorizedBy`
+validation above, are not yet lowered.
 
 ## 7. JSX Expression Site Routing And Early Rewriting
 
@@ -440,22 +601,34 @@ canonical lift-applied form:
 - `computed(fn)` -> `__cfHelpers.lift(fn)({})` before schema injection
 - no-input computed-origin calls are schema-injected as
   `__cfHelpers.lift(false, fn)()`
-- preserves call type arguments
+- **does not** forward `computed`'s type argument to `lift`: `computed<R>` has a
+  single result type param, while `lift<T, R>` takes input `T` first, so
+  forwarding `[R]` would place `R` in `lift`'s input slot. Type args are
+  recomputed downstream (LiftAppliedStrategy / SchemaInjection) from the
+  callback's parameter and return types.
 - does not additionally validate callback shape in this pass
-- preserves type information through `typeRegistry`
+- preserves type information through `typeRegistry` (the original call's type is
+  re-registered on the lowered lift-applied node)
 
 It runs only when source text contains `computed` or AST scan finds computed
 calls.
 
 ## 9. Closure Transformation
 
-`ClosureTransformer` runs only when helper import is present. Strategy order:
+`ClosureTransformer` runs only when helper import is present. It applies the
+first matching strategy (the strategies array in `closures/transformer.ts`), in
+order:
 
 1. handler JSX attribute strategy
 2. action strategy
 3. array-method strategy
-4. patternTool strategy
-5. lift-applied strategy
+4. lift-applied strategy
+
+There is no longer a separate patternTool closure strategy (CT-1655, #3862):
+`patternTool` now requires an explicit `pattern(...)` first argument (see
+§6.5 `pattern-context:patterntool-requires-pattern`), so the captures live on
+that authored pattern and the call is hoisted by `BuilderCallHoisting` (§11)
+rather than capture-rewritten here.
 
 ### 9.1 Capture model
 
@@ -537,17 +710,21 @@ Behavior:
 
 If no captures are found, the lift-applied call is left unchanged.
 
-### 9.6 patternTool strategy
+### 9.6 patternTool (no closure strategy)
 
-Transforms `patternTool(fn[, extraParams])` to capture module-scoped reactive
-values:
+There is no patternTool closure strategy in the current pipeline. The former
+strategy auto-wrapped a bare callback as `pattern(fn)` and auto-captured
+module-scoped reactive values into the call; both were removed in CT-1655
+(#3862) in favor of an explicit, addressable pattern.
 
-- collects module-scoped cell-like captures (including nested callback usage)
-- merges captures into `extraParams` (captures win on key conflicts)
-- extends callback object binding/type literal with capture properties (added
-  types default to `unknown` when synthesized)
+Current behavior:
 
-If no qualifying captures exist, call is unchanged.
+- `patternTool(...)`'s first argument **must** be an explicit `pattern(...)`; a
+  bare callback reports `pattern-context:patterntool-requires-pattern` (§6.5).
+- the captures live on the authored `pattern(...)` (module-scoped reads are
+  absorbed by the pattern; per-instance values go in `extraParams`).
+- the bare `pattern(...)` inside `patternTool(...)` is hoisted to module scope
+  by `BuilderCallHoisting` (§11, argument-position pattern case).
 
 ### 9.7 Pattern callback lowering
 
@@ -694,6 +871,16 @@ Injected behaviors:
   - ensure options object has `schema` property (merge/spread as needed)
   - explicit or contextual unresolved generic result types degrade to
     `{ type: "unknown" }`
+- `sqliteQuery<Row>(...)`:
+  - the **typed** form lowers the `Row` type argument to an injected `rowSchema`
+    property on the options object (parallel to `generateObject`'s `schema`);
+    the runtime builtin composes `result.items = rowSchema`. Two call shapes
+    inject it: the free function `sqliteQuery<Row>({ db, sql, ... })` (options at
+    arg 0) and a method form. Idempotent (skips when `rowSchema` already
+    present).
+  - untyped `sqliteQuery(...)` is not injected. Other SQLite builtins
+    (`sqliteDatabase`, etc.) are recognized reactive-origin `runtime-call`s (§5)
+    but receive no dedicated schema injection.
 
 ### 10.6 Conditional helpers
 
@@ -737,7 +924,109 @@ adjustments:
 - after shrinking, `validateShrinkCoverage` checks that all requested property
   paths were materialized (see §6.4); unresolvable paths produce hard errors
 
-## 11. Schema Generation
+## 11. Builder Call Hoisting And `__cfReg` Registration
+
+`BuilderCallHoistingTransformer` (stage 13, **after** SchemaInjection) hoists
+every reactive *builder call* to module scope and emits a single trailing
+content-addressing registration. It is the sole module-scope hoisting phase; it
+absorbed the former `LiftHoistingTransformer` (lift-only) and replaced the
+deleted `BuilderCallbackHoistingTransformer` (which hoisted builder callbacks
+and caused TDZ double-hoist bugs — #3864). Tickets: CT-1644 (lift), CT-1655
+(handler, pattern, patternTool), CT-1623 (`__cfReg` content addressing).
+
+### 11.1 What gets hoisted
+
+After SchemaInjection, each reactive builder computation appears in a schema-
+injected applied or argument-position shape. This stage relocates the inner
+builder call to a named module-scope `const` and rewrites the original site to
+reference that name. Three builder shapes are registered in
+`HOISTABLE_BUILDERS`:
+
+- **Applied builders** (`lift`, `handler`): the site is `builder(...)(captures)`
+  — the callee is itself the inner `builder(...)` call. Hoist the inner call,
+  leave `__cfLift_N(captures)` / `__cfHandler_N(captures)` at the site (any
+  trailing `.for(...)` member chain stays anchored on the outer call):
+
+  ```ts
+  // module scope:
+  const __cfLift_1 = __cfHelpers.lift(argSchema, resSchema, callback);
+  // original site:
+  __cfLift_1(captures).for("result", true)
+  ```
+
+- **Argument-position builder** (`pattern`): the bare `pattern(...)` call sits
+  in argument 0 of an enclosing `*WithPattern` call (`mapWithPattern`, etc.) or
+  `patternTool(...)`. Hoist argument 0 to `__cfPattern_N` and rewrite only that
+  argument, keeping the enclosing callee and remaining arguments intact. The
+  top-level `export default pattern(...)` is a direct call, not an argument, so
+  it is naturally excluded.
+
+Detection is provenance-driven via `detectCallKind` / `isHandlerAppliedCall` /
+`getWithPatternHoistablePatternCall` / `getPatternToolHoistablePatternCall`.
+
+### 11.2 Why this runs after SchemaInjection
+
+SchemaInjection derives a lift's argument schema from the adjacent applied
+captures object. Hoisting the call to a bare `const = lift(callback)` *before*
+injection would separate the captures object and silently drop capture
+properties in nested/multi-capture callbacks. Running after injection means the
+schema is already baked into the inner call before relocation, so the hoist is
+schema-transparent (C-002; verified regression).
+
+### 11.3 Hoist placement and TDZ ordering
+
+Hoisted consts are flushed immediately **before** their owning top-level
+statement, not pooled into a single after-imports block. This keeps each hoisted
+const after every module binding declared in an earlier statement. The ordering
+is behaviorally load-bearing for `pattern`: unlike `lift`/`handler` (callbacks
+stored and run lazily), `pattern(...)` invokes its callback **eagerly at
+construction**, so a hoisted `const __cfPattern_N = pattern(cb)` whose `cb`
+reads a later module-scoped binding would throw a module-load TDZ
+`ReferenceError` under after-imports placement.
+
+Hoisted identifiers use explicit per-prefix counters with literal numeric
+suffixes (`__cfLift_1`, `__cfPattern_1`, …), **not** `factory.createUniqueName`
+— whose `.text` carries only the bare prefix and defers suffixing to emit, which
+would make every hoisted identifier share the same `.text` and break the
+identity-by-text lookups later stages rely on.
+
+### 11.4 `__cfReg` content-addressed registration
+
+After visiting the whole file, the stage appends **one** trailing call:
+
+```ts
+__cfReg({ __cfLift_1, __cfPattern_1, __cfHandler_1, /* … */ });
+```
+
+using shorthand properties so each value is the module-level `const` binding
+itself. It is emitted only when there is something to register (hoist-free
+modules are unchanged). The registered set includes both:
+
+1. the synthetic hoists produced above, and
+2. **authored** non-exported top-level builder artifacts — `const foo =
+   lift(...)` / `pattern(...)` / `handler(...)` etc. — detected on the original
+   statement so an import/alias (`const x = imported`) is never mis-attributed
+   to this module's identity.
+
+`__cfReg` is a free identifier supplied by the module wrapper (the 4th factory
+parameter under the runtime's ESM loader; a no-op global on the legacy/AMD
+path). The runtime registrar pairs each `{ symbol -> live value }` entry with
+the module's content identity, populating the content-addressed reverse index
+that backs builder-artifact identity resolution. A single trailing call (rather
+than per-artifact export/registration) keeps the runtime verifier's obligation
+to "exactly one top-level `__cfReg` call," with a run-once trap rejecting
+injected duplicates. Runtime side:
+`packages/runner/src/sandbox/module-record-compiler.ts` and
+`packages/runner/src/pattern-manager.ts`.
+
+This registration is current, shipped behavior: `__cfReg({...})` appears in the
+expected output of the large majority of builder-bearing fixtures.
+
+Note: the design comments frame this stage as Phase 2 of a
+"derive→lift→selfcontained" arc. Phase 3 (`selfcontained(...)` wrapping of the
+hoisted consts) is **not** implemented on `main` — see the design-deltas doc.
+
+## 12. Schema Generation
 
 `SchemaGeneratorTransformer` replaces `toSchema<T>(options?)` calls with JSON
 schema literals.
@@ -775,7 +1064,7 @@ Special path:
   behavior on `main`; those contracts are described separately in the draft CFC
   docs listed above
 
-## 12. Diagnostics Message Transformation (Optional Consumer Layer)
+## 13. Diagnostics Message Transformation (Optional Consumer Layer)
 
 Diagnostic message transformers are exported separately from AST transform
 pipeline. Current built-in behavior:
@@ -787,7 +1076,7 @@ pipeline. Current built-in behavior:
 - `CompositeDiagnosticTransformer` returns the first matching transformer
   result.
 
-## 13. Current Known Limits (Observed)
+## 14. Current Known Limits (Observed)
 
 1. Generic helper functions with uninstantiated type-parameter lift-applied
    result types can degrade schema precision (type arguments may be
@@ -805,22 +1094,45 @@ pipeline. Current built-in behavior:
    declaration is analyzable in-proc (arrow/function
    expression/declaration/method); external/unresolved calls remain
    conservative.
-6. The CFC authoring and trusted-UI helper contracts now documented under
-   `docs/specs/ts-transformer/cfc_*.md` are draft contracts only; the current
-   implemented pipeline on `main` does not yet lower those forms.
+6. The CFC authoring and trusted-UI helper contracts under
+   `docs/specs/ts-transformer/cfc_*.md` are draft **lowering** contracts: the
+   current pipeline on `main` does not lower those forms (no `ifc.*` schema
+   metadata emission). The one landed exception is **`WriteAuthorizedBy`
+   validation** (§6.8) — usage is validated (`cfc-write-authorized-by`) even
+   though the wrapper is not yet lowered. The canonical CFC alias names are
+   re-exported but otherwise inert. Note: the authoring draft says the schema
+   generator validates `WriteAuthorizedBy`; on `main` that validation is a
+   separate stage-10 `WriteAuthorizedByValidationTransformer`, not the schema
+   generator.
 
-## 14. Test Coverage Snapshot
+## 15. Test Coverage Snapshot
 
-Primary fixture suites executed by `fixture-based.test.ts`:
+The fixture suites driven by `fixture-based.test.ts` live under
+`test/fixtures/<suite>/` as `*.input.*` / `*.expected.*` pairs. The driver
+currently runs these suites:
 
-- `ast-transform`: 28 fixtures
-- `handler-schema`: 8 fixtures
-- `jsx-expressions`: 39 fixtures
-- `schema-transform`: 8 fixtures
-- `closures`: 141 fixtures
-- `schema-injection`: 19 fixtures
+- `ast-transform`
+- `handler-schema`
+- `jsx-expressions`
+- `schema-transform`
+- `closures` (the largest suite by a wide margin)
+- `kitchensink`
+- `schema-injection`
 
-Total active fixture inputs in these suites: **237**.
+(The `bug-repro` directory exists but is not an input/expected fixture suite.)
+
+Exact counts are intentionally not pinned here — they churn with every fixture
+addition. The fixture corpus is in the high hundreds of input files overall, of
+which `closures` is the largest single suite. To get current numbers:
+
+```bash
+# per suite
+for d in test/fixtures/*/; do
+  printf '%s: %s\n' "$(basename "$d")" "$(ls "$d"*.input.* 2>/dev/null | wc -l)"
+done
+# total input fixtures
+find test/fixtures -name '*.input.*' | wc -l
+```
 
 Additional non-fixture unit suites cover:
 
@@ -831,8 +1143,28 @@ Additional non-fixture unit suites cover:
 - pipeline regression and policy/capability-analysis behavior
 - lift-applied call helper and identifier utilities
 
-## 15. Stability Statement
+## 16. Stability Statement
 
 This specification is a snapshot of current behavior. Any transformer code or
 fixture expectation changes should be treated as spec changes and reflected in
 this document.
+
+### 16.1 Keeping This Spec Current (Sources Of Truth)
+
+Several facts in this document are enumerations the implementation already
+centralizes. When they change, update the spec from the canonical source rather
+than hand-maintaining a parallel list — and prefer pointing at the source over
+re-listing it. The enforced sources of truth:
+
+| Spec content | Canonical source | Guard / note |
+| --- | --- | --- |
+| Pipeline stage set + order (§3) | `CFC_TRANSFORMER_STAGE_SPECS` / `CFC_TRANSFORMER_STAGE_NAMES` (`src/cf-pipeline.ts`) | the array literal is the order |
+| Cross-stage registries (§2.2) | `CrossStageState` (`src/core/cross-stage-state.ts`) | NodeLinks-shaped families |
+| Recognized runtime exports + which are reactive origins (§5, §6.3) | `COMMONFABRIC_RUNTIME_EXPORT_REGISTRY` (`src/core/commonfabric-runtime-registry.ts`) | `test/core/commonfabric-runtime-registry.test.ts` asserts coverage of the runner builder factory |
+| SES self-contained callback boundaries (§6.5) | `SES_SELF_CONTAINED_CALLBACK_BOUNDARIES` (`src/transformers/pattern-context-validation.ts`) | excludes `sqlite-row-label-rule` by design |
+| Lowerable expression-site container kinds (§6.7) | `getExpressionContainerKind` (`expression-site-policy.ts`) | — |
+| Diagnostic `type:` strings | the emitting transformer's `reportDiagnostic` calls | grep `type: "…"` per validator |
+
+A drift-resistant habit: when a section enumerates a set, cite the constant /
+function that defines it so a reader can confirm the live set, and keep prose
+lists explicitly labeled "as of this writing."

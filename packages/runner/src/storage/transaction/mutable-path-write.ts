@@ -32,6 +32,17 @@ export type MutableWriteResult = {
   changed: boolean;
 };
 
+export type MutablePathWriteOptions = {
+  /**
+   * When true, the write removes the slot at the address path — deleting an
+   * object key or punching an array hole — instead of storing a value.
+   * `value` is ignored (callers pass `undefined`). Without this flag,
+   * writing `undefined` stores `undefined` as a real value:
+   * present-but-undefined is distinct from absent.
+   */
+  delete?: boolean;
+};
+
 export const isContainerValue = (
   value: FabricValue | undefined,
 ): value is Record<string, FabricValue> | FabricValue[] =>
@@ -55,12 +66,21 @@ export const getValueTypeName = (value: FabricValue | undefined): string => {
  * Delegates spine descent + thaw + missing-intermediate creation to
  * `cloneForMutation` (with `createMissing: true`), which exposes the
  * parent container at `address.path.slice(0, -1)` as a mutable handle.
- * The function then performs the leaf write -- a property set/delete on
- * an object, an element set/delete on an array, or the legacy
- * length-write coercion when the parent is an array and the leaf key is
- * `"length"`. Subtrees off the spine are preserved by identity, so a
- * subsequent re-freeze short-circuits on everything except the freshly
- * thawed spine.
+ * The function then performs the leaf write -- a property set on an
+ * object, an element set on an array, or the legacy length-write
+ * coercion when the parent is an array and the leaf key is `"length"`.
+ * Subtrees off the spine are preserved by identity, so a subsequent
+ * re-freeze short-circuits on everything except the freshly thawed
+ * spine.
+ *
+ * Writing `undefined` stores `undefined` (present-but-undefined is a
+ * real state, distinct from absent) and materializes missing
+ * intermediates like any other value. Removal is requested explicitly
+ * via `options.delete`, which deletes the leaf slot (object key removal
+ * or array hole) and never materializes intermediates for a slot that
+ * wasn't there. A delete with leaf key `"length"` funnels through the
+ * legacy length coercion (undefined → NaN → truncate), matching the
+ * historical `tx.write(path/length, undefined)` behavior.
  *
  * `force: false` is passed to `cloneForMutation` because the root, by
  * this point, is either (a) freshly allocated by us (in the
@@ -72,19 +92,25 @@ export const applyMutablePathWrite = (
   currentRoot: FabricValue | undefined,
   address: IMemoryAddress,
   value: FabricValue | undefined,
+  options?: MutablePathWriteOptions,
 ): Result<MutableWriteResult, ITypeMismatchError> => {
+  const isDelete = options?.delete === true;
   if (address.path.length === 0) {
+    const nextRoot = isDelete ? undefined : value;
     return {
       ok: {
-        root: value,
+        root: nextRoot,
         previousValue: currentRoot,
-        changed: !deepEqual(currentRoot, value),
+        changed: !deepEqual(currentRoot, nextRoot),
       },
     };
   }
 
   if (currentRoot === undefined) {
-    if (value === undefined) {
+    if (isDelete) {
+      // Delete-of-nonexistent stays a no-op: don't materialize intermediates
+      // just to remove a slot that wasn't there. A non-delete write — even of
+      // `undefined` — materializes the path below.
       return {
         ok: {
           root: currentRoot,
@@ -157,28 +183,37 @@ export const applyMutablePathWrite = (
     }
     const slot = Number(leafKey);
     const previousValue = parent[slot];
-    if (deepEqual(previousValue, value)) {
+    if (isDelete) {
+      if (!(slot in parent)) {
+        return { ok: { root: newRoot, previousValue, changed: false } };
+      }
+      delete parent[slot];
+      return { ok: { root: newRoot, previousValue, changed: true } };
+    }
+    // Presence-aware no-op detection: a hole and a stored `undefined` are
+    // different states, so equal values only short-circuit when the slot
+    // actually exists.
+    if (slot in parent && deepEqual(previousValue, value)) {
       return { ok: { root: newRoot, previousValue, changed: false } };
     }
-    if (value === undefined) {
-      delete parent[slot];
-    } else {
-      parent[slot] = value;
-    }
+    parent[slot] = value;
     return { ok: { root: newRoot, previousValue, changed: true } };
   }
 
   // Object branch.
   const obj = parent as Record<string, FabricValue>;
   const previousValue = obj[leafKey];
-  if (deepEqual(previousValue, value)) {
+  if (isDelete) {
+    if (!(leafKey in obj)) {
+      return { ok: { root: newRoot, previousValue, changed: false } };
+    }
+    delete obj[leafKey];
+    return { ok: { root: newRoot, previousValue, changed: true } };
+  }
+  if (leafKey in obj && deepEqual(previousValue, value)) {
     return { ok: { root: newRoot, previousValue, changed: false } };
   }
-  if (value === undefined) {
-    delete obj[leafKey];
-  } else {
-    obj[leafKey] = value;
-  }
+  obj[leafKey] = value as FabricValue;
   return { ok: { root: newRoot, previousValue, changed: true } };
 };
 

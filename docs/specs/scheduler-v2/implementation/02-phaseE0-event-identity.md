@@ -8,6 +8,10 @@
 Spec: §7.5 (event identity), §7.6 (taxonomy), decisions 7/8.
 Paths relative to `packages/runner/` unless noted.
 
+Execution correction: Step 3 must be completed before Step 2, because Step 2
+sets `tx.dispatchedEventId` and Step 3 declares that transaction field. Execute
+this order: Step 1 → Step 3 → Step 2 → Step 4.
+
 ## Step 1 — Event identity module
 
 New file: `src/scheduler/event-identity.ts`

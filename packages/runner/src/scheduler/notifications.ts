@@ -3,7 +3,6 @@ import type {
   ChangeGroup,
   IMemoryChange,
   IMemorySpaceAddress,
-  IStorageTransaction,
 } from "../storage/interface.ts";
 import type { TriggerIndexState } from "./trigger-index.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
@@ -135,6 +134,10 @@ function planSkippedTriggeredAction(
     return { decision: "skip-own-commit-source", operation: "none" };
   }
 
+  // changeGroup is a user-facing suppression feature: external
+  // subscribers (e.g. cf-code-editor sinks) group their own writes so
+  // their subscription ignores them. It is NOT scheduler-internal
+  // self-suppression — that is tx.sourceAction (spec scheduler-v2 P5).
   if (
     state.hasSourceChangeGroup &&
     state.actionChangeGroup !== undefined &&
@@ -263,7 +266,6 @@ export interface StorageNotificationState {
   readonly effects: ReadonlySet<Action>;
   readonly pending: ReadonlySet<Action>;
   readonly dirty: ReadonlySet<Action>;
-  readonly inFlightSources: WeakMap<Action, Set<IStorageTransaction>>;
   readonly conditionallyScheduledEffects: Map<Action, number>;
   readonly getActionId: (action: Action) => string;
   readonly recordCellUpdate: (change: IMemoryChange) => void;

@@ -242,12 +242,16 @@ Deno.test("memory v2 transactions emit add and remove patch drafts for safe obje
     drafts.length = 0;
 
     const removeTx = storage.edit();
-    const removeWrite = removeTx.write({
-      space,
-      id: "of:memory-v2-native-add-remove",
-      type,
-      path: ["value", "profile", "title"],
-    }, undefined);
+    const removeWrite = removeTx.write(
+      {
+        space,
+        id: "of:memory-v2-native-add-remove",
+        type,
+        path: ["value", "profile", "title"],
+      },
+      undefined,
+      { delete: true },
+    );
     assert(removeWrite.ok);
     const removeCommit = await removeTx.commit();
     assert(removeCommit.ok);
@@ -390,12 +394,16 @@ Deno.test("memory v2 transactions drop same-tx add-then-remove paths from patch 
       path: ["value", "profile", "subtitle"],
     }, "Analyst");
     assert(addWrite.ok);
-    const removeWrite = tx.write({
-      space,
-      id: "of:memory-v2-native-elide-noop-remove",
-      type,
-      path: ["value", "profile", "subtitle"],
-    }, undefined);
+    const removeWrite = tx.write(
+      {
+        space,
+        id: "of:memory-v2-native-elide-noop-remove",
+        type,
+        path: ["value", "profile", "subtitle"],
+      },
+      undefined,
+      { delete: true },
+    );
     assert(removeWrite.ok);
     const renameWrite = tx.write({
       space,

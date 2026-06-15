@@ -1,6 +1,7 @@
 import type { Immutable } from "@commonfabric/utils/types";
 import type { CellScope } from "@commonfabric/api";
 import type {
+  CommitPrecondition,
   EntityDocument,
   PatchOp,
   SchedulerActionSnapshotQuery,
@@ -465,9 +466,25 @@ export interface IResetNotification {
 export interface IMergedChanges extends Iterable<IMemoryChange> {
 }
 
+/**
+ * Options accepted by transaction write operations.
+ */
+export interface IWriteOptions {
+  /**
+   * When true, the write removes the slot at the address path — deleting an
+   * object key or punching an array hole — instead of storing a value.
+   * `value` must be `undefined`. Without this flag, writing `undefined`
+   * stores `undefined` as a real value: present-but-undefined is distinct
+   * from absent. A root-path delete retracts the document.
+   */
+  delete?: boolean;
+}
+
 export interface ITransactionWriteRequest {
   address: IMemorySpaceAddress;
   value: FabricValue;
+  /** See {@link IWriteOptions.delete}. */
+  delete?: boolean;
 }
 
 export interface IMemoryChange {
@@ -517,6 +534,13 @@ export interface IStorageTransaction {
    * immediately. Set for user-interactive paths (editWithRetry, events).
    */
   immediate?: boolean;
+  /**
+   * The scheduler action whose run opened this transaction (spec scheduler-v2
+   * P5). Change records derived from this transaction must not re-trigger this
+   * action. Compared by OBJECT IDENTITY — diagnostic action ids may collide
+   * across instances.
+   */
+  sourceAction?: object;
   /**
    * Opt the transaction into writing to more than one memory space. By default
    * a transaction may write to a single space only. When enabled, commit()
@@ -573,6 +597,28 @@ export interface IStorageTransaction {
    */
   setSchedulerObservation?(observation: unknown): void;
   getSchedulerObservation?(): unknown;
+
+  /**
+   * Optional commit-time preconditions attached to this transaction's commit in
+   * the given space. Storage backends that support v2 native commits read these
+   * during commit construction.
+   */
+  addCommitPrecondition?(
+    space: MemorySpace,
+    precondition: CommitPrecondition,
+  ): void;
+  getCommitPreconditions?(
+    space: MemorySpace,
+  ): readonly CommitPrecondition[] | undefined;
+
+  /**
+   * Mark an entity this transaction creates as create-only: the commit fails
+   * with PreconditionFailedError("receipt-exists") if the entity already has a
+   * head (scheduler-v2 §7.6 receipts).
+   */
+  markCreateOnly?(
+    link: { space: MemorySpace; id: string; scope?: unknown },
+  ): void;
 
   /**
    * Optional: record a folded SQLite write onto this transaction so it commits
@@ -655,11 +701,13 @@ export interface IStorageTransaction {
    *
    * @param address - Memory address to write to.
    * @param value - Value to write.
+   * @param options - Optional write options (e.g. explicit delete intent).
    * @returns Result containing the written value or an error.
    */
   write(
     address: IMemorySpaceAddress,
     value?: FabricValue,
+    options?: IWriteOptions,
   ): Result<IAttestation, WriterError | WriteError>;
 
   /**
@@ -721,6 +769,35 @@ export interface IStorageTransaction {
 export interface IExtendedStorageTransaction
   extends Omit<IStorageTransaction, "reader" | "writer"> {
   tx: IStorageTransaction;
+
+  /**
+   * The durable id of the event whose dispatch opened this transaction
+   * (spec §7.5). Set by the scheduler's event dispatch; consumed by the
+   * runner to derive the handler result cell's cause (spec §7.6).
+   */
+  dispatchedEventId?: string;
+
+  /**
+   * Commit-time preconditions attached to this transaction's commit in
+   * the given space (scheduler-v2 §7.6). Violations surface as
+   * IPreconditionFailedError (permanent — never retried).
+   */
+  addCommitPrecondition?(
+    space: MemorySpace,
+    precondition: CommitPrecondition,
+  ): void;
+  getCommitPreconditions?(
+    space: MemorySpace,
+  ): readonly CommitPrecondition[] | undefined;
+
+  /**
+   * Mark an entity this transaction creates as create-only: the commit fails
+   * with PreconditionFailedError("receipt-exists") if the entity already has a
+   * head (scheduler-v2 §7.6 receipts).
+   */
+  markCreateOnly?(
+    link: { space: MemorySpace; id: string; scope?: unknown },
+  ): void;
 
   getCfcState(): Readonly<CfcTxState>;
   setCfcEnforcementMode(mode: CfcEnforcementMode): void;
@@ -891,10 +968,12 @@ export interface IExtendedStorageTransaction
    *
    * @param address - Memory address to write to.
    * @param value - Value to write.
+   * @param options - Optional write options (e.g. explicit delete intent).
    */
   writeOrThrow(
     address: IMemorySpaceAddress,
     value: FabricValue,
+    options?: IWriteOptions,
   ): void;
 
   /**
@@ -911,10 +990,12 @@ export interface IExtendedStorageTransaction
    *
    * @param address - Memory address to write to.
    * @param value - Value to write.
+   * @param options - Optional write options (e.g. explicit delete intent).
    */
   writeValueOrThrow(
     address: NormalizedFullLink,
     value: FabricValue,
+    options?: IWriteOptions,
   ): void;
 
   /**
@@ -922,7 +1003,9 @@ export interface IExtendedStorageTransaction
    * `["value", ...path]` helper semantics on top of `writeBatch`.
    */
   writeValuesOrThrow?(
-    writes: Iterable<{ address: NormalizedFullLink; value: FabricValue }>,
+    writes: Iterable<
+      { address: NormalizedFullLink; value: FabricValue; delete?: boolean }
+    >,
   ): void;
 
   /**
@@ -1007,6 +1090,7 @@ export interface ITransactionWriter extends ITransactionReader {
   write(
     address: IMemoryAddress,
     value?: FabricValue,
+    options?: IWriteOptions,
   ): Result<IAttestation, WriteError>;
 }
 
@@ -1035,6 +1119,18 @@ export interface IStorageTransactionInconsistent extends IStorageError {
 }
 
 /**
+ * A commit-time precondition failed (spec scheduler-v2 §7.6). Unlike
+ * optimistic conflicts, this class is PERMANENT: the client must not
+ * retry. `origin-committed` — the transaction that caused this work
+ * never committed. `receipt-exists` — another handling of the same
+ * event already committed (lost race).
+ */
+export interface IPreconditionFailedError extends Error {
+  name: "PreconditionFailedError";
+  precondition: "origin-committed" | "receipt-exists";
+}
+
+/**
  * Error that indicating that no change could be made to a transaction is it is
  * no longer active.
  */
@@ -1049,6 +1145,7 @@ export type StorageTransactionFailed =
 
 export type StorageTransactionRejected =
   | IConflictError
+  | IPreconditionFailedError
   | IStoreError
   | TransactionError
   | IConnectionError
@@ -1211,6 +1308,7 @@ export type PushError =
   | IStoreError
   | IConnectionError
   | IConflictError
+  | IPreconditionFailedError
   | TransactionError
   | IAuthorizationError;
 
@@ -1283,6 +1381,7 @@ export type NativeStorageCommitOperation =
 export interface NativeStorageCommit {
   operations: readonly NativeStorageCommitOperation[];
   schedulerObservation?: unknown;
+  preconditions?: readonly CommitPrecondition[];
   /**
    * Folded SQLite write ops, applied in the same wire commit as `operations`
    * (appended last). They are NOT entity revisions and stay out of the

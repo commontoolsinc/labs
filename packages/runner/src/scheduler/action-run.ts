@@ -2,12 +2,13 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
 import type { Runtime } from "../runtime.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
+import { normalizeCellScope } from "../scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
-  IStorageTransaction,
 } from "../storage/interface.ts";
+import { isPermanentRejection } from "../storage/rejection.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import {
   MAX_ACTION_RUN_TRACE_HISTORY,
@@ -22,11 +23,8 @@ import { RetryImmediately } from "./retry-immediately.ts";
 import { toActionRunTraceAddress } from "./diagnostics.ts";
 import { buildSchedulerActionObservation } from "./persistent-observation.ts";
 import { filterIgnoredAddresses, txToReactivityLog } from "./reactivity.ts";
-import {
-  buildKnownSchedulingWrites,
-  pruneStructuralAncestorWrites,
-} from "./scheduling-writes.ts";
 import { type ActionTimingState, recordActionTime } from "./timing.ts";
+import type { NodeRegistry } from "./node-record.ts";
 import type {
   Action,
   ActionRunTraceEntry,
@@ -44,36 +42,6 @@ const logger = getLogger("scheduler", {
 export type ActionInvocationResult =
   | { ok: true; result: any }
   | { ok: false; error: unknown };
-
-export interface InFlightSourceState {
-  readonly inFlightSources: WeakMap<Action, Set<IStorageTransaction>>;
-}
-
-export function addInFlightSource(
-  state: InFlightSourceState,
-  action: Action,
-  source: IStorageTransaction,
-): void {
-  let sources = state.inFlightSources.get(action);
-  if (!sources) {
-    sources = new Set<IStorageTransaction>();
-    state.inFlightSources.set(action, sources);
-  }
-  sources.add(source);
-}
-
-export function removeInFlightSource(
-  state: InFlightSourceState,
-  action: Action,
-  source: IStorageTransaction,
-): void {
-  const sources = state.inFlightSources.get(action);
-  if (!sources) return;
-  sources.delete(source);
-  if (sources.size === 0) {
-    state.inFlightSources.delete(action);
-  }
-}
 
 export function invokeReactiveAction(state: {
   readonly runtime: Runtime;
@@ -140,10 +108,6 @@ export function watchReactiveActionCommit(state: {
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
   readonly markDirectDirty: (action: Action) => void;
   readonly queueExecution: () => void;
-  readonly removeInFlightSource: (
-    action: Action,
-    tx: IExtendedStorageTransaction["tx"],
-  ) => void;
   readonly restoreCfcTriggerReads: () => void;
 }): void {
   state.commitPromise.then(({ error }) => {
@@ -160,7 +124,9 @@ export function watchReactiveActionCommit(state: {
 
       const retries = (state.retries.get(state.action) ?? 0) + 1;
       state.retries.set(state.action, retries);
-      if (retries < MAX_RETRIES_FOR_REACTIVE) {
+      if (
+        retries < MAX_RETRIES_FOR_REACTIVE && !isPermanentRejection(error)
+      ) {
         // Re-schedule the action to run again on conflict failure.
         // Use resubscribe to set up dependencies/triggers from the log,
         // then mark as dirty/pending to ensure it runs again.
@@ -171,13 +137,14 @@ export function watchReactiveActionCommit(state: {
         state.markDirectDirty(state.action);
         state.pending.add(state.action);
         state.queueExecution();
+      } else {
+        // WATCH(scheduler-v2): exhausted retries can leave a piece registered
+        // against rolled-back data (accepted zombie — spec §15 decision 9).
       }
     } else {
       // Clear retries after successful commit.
       state.retries.delete(state.action);
     }
-  }).finally(() => {
-    state.removeInFlightSource(state.action, state.tx.tx);
   }).catch((error) => {
     logger.error(
       "schedule-error",
@@ -189,8 +156,7 @@ export function watchReactiveActionCommit(state: {
 
 export function appendActionRunTrace(state: {
   readonly actionRunTrace: ActionRunTraceEntry[];
-  readonly actionParent: WeakMap<Action, Action>;
-  readonly isEffectAction: WeakMap<Action, boolean>;
+  readonly nodes: NodeRegistry;
   readonly getActionId: (action: Action | EventHandler) => string;
   readonly getSchedulingWrites: (
     action: Action,
@@ -203,7 +169,7 @@ export function appendActionRunTrace(state: {
   readonly recordedAt?: number;
   readonly maxHistory?: number;
 }): void {
-  const parentAction = state.actionParent.get(args.action);
+  const parentAction = state.nodes.parentActionOf(args.action);
   const declaredWrites = (state.getSchedulingWrites(args.action) ?? []).map(
     toActionRunTraceAddress,
   );
@@ -214,7 +180,7 @@ export function appendActionRunTrace(state: {
   state.actionRunTrace.push({
     recordedAt: args.recordedAt ?? performance.now(),
     actionId: args.actionId,
-    actionType: state.isEffectAction.get(args.action)
+    actionType: state.nodes.isKnownEffect(args.action)
       ? "effect"
       : "computation",
     parentActionId: parentAction ? state.getActionId(parentAction) : undefined,
@@ -246,15 +212,11 @@ export interface SchedulerActionRunState {
     addresses: readonly IMemorySpaceAddress[],
   ) => void;
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
-  readonly inFlightSourceState: InFlightSourceState;
   readonly actionTimingState: ActionTimingState;
-  readonly pullDemandedFirstRunComputations: WeakSet<Action>;
-  readonly pullDemandedContinuationComputations: WeakSet<Action>;
   readonly retries: WeakMap<Action, number>;
   readonly pending: Set<Action>;
   readonly actionRunTrace: ActionRunTraceEntry[];
-  readonly actionParent: WeakMap<Action, Action>;
-  readonly isEffectAction: WeakMap<Action, boolean>;
+  readonly nodes: NodeRegistry;
   readonly diagnosisHistory: Map<string, DiagnosisRecord[]>;
   readonly diagnosisNonIdempotent: NonIdempotentReport[];
   readonly idempotencyViolations: NonIdempotentReport[];
@@ -271,12 +233,6 @@ export interface SchedulerActionRunState {
   readonly getSchedulingWrites: (
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;
-  readonly getCurrentKnownSchedulingWrites: (
-    action: Action,
-  ) => readonly IMemorySpaceAddress[] | undefined;
-  readonly getHistoricalMightWrite: (
-    action: Action,
-  ) => readonly IMemorySpaceAddress[] | undefined;
   readonly getMaterializerWriteEnvelopes: (
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;
@@ -285,6 +241,7 @@ export interface SchedulerActionRunState {
   readonly getThrottle: (action: Action) => number | undefined;
   readonly maybeAutoDebounce: (action: Action) => void;
   readonly markActionHasRun: (action: Action) => void;
+  readonly markNodeHasRun: (action: Action) => void;
   readonly handleError: (error: Error, action: Action) => void;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
   readonly markDirectDirty: (action: Action) => void;
@@ -335,7 +292,7 @@ export async function runSchedulerAction(
     tx.addCfcTriggerReads(cfcTriggerReads);
   }
   (tx.tx as { debugActionId?: string }).debugActionId = actionId;
-  addInFlightSource(state.inFlightSourceState, action, tx.tx);
+  tx.tx.sourceAction = action;
   const actionStartTime = performance.now();
 
   let result: any;
@@ -401,8 +358,7 @@ function finalizeSchedulerAction(
   recordActionTime(state.actionTimingState, args.action, elapsed);
   state.maybeAutoDebounce(args.action);
   state.markActionHasRun(args.action);
-  state.pullDemandedFirstRunComputations.delete(args.action);
-  state.pullDemandedContinuationComputations.delete(args.action);
+  state.markNodeHasRun(args.action);
 
   // A RetryImmediately signal means the action referenced an inSpace("name")
   // target that has now been resolved into the runtime cache. Abort this run's
@@ -437,7 +393,6 @@ function rescheduleActionForImmediateRetry(
   },
 ): void {
   if (args.tx.status().status === "ready") args.tx.abort(args.error);
-  removeInFlightSource(state.inFlightSourceState, args.action, args.tx.tx);
   const retries = (state.retries.get(args.action) ?? 0) + 1;
   state.retries.set(args.action, retries);
   if (retries < MAX_RETRIES_FOR_REACTIVE) {
@@ -450,6 +405,8 @@ function rescheduleActionForImmediateRetry(
     state.pending.add(args.action);
     state.queueExecution();
   } else {
+    // WATCH(scheduler-v2): exhausted retries can leave a piece registered
+    // against rolled-back data (accepted zombie — spec §15 decision 9).
     state.retries.delete(args.action);
     logger.error(
       "schedule-error",
@@ -490,6 +447,7 @@ function finalizeReactiveActionCommit(
   }, {
     beforeCommit: () => {
       log = txToReactivityLog(args.tx);
+      warnOnWriteSurfaceViolations(state, args, log);
       attachSchedulerActionObservation(state, args, log);
     },
   });
@@ -512,12 +470,6 @@ function finalizeReactiveActionCommit(
     resubscribe: state.resubscribe,
     markDirectDirty: state.markDirectDirty,
     queueExecution: state.queueExecution,
-    removeInFlightSource: (target, source) =>
-      removeInFlightSource(
-        state.inFlightSourceState,
-        target,
-        source,
-      ),
     restoreCfcTriggerReads: () => {
       if (
         args.cfcTriggerReads !== undefined && args.cfcTriggerReads.length > 0
@@ -549,6 +501,57 @@ function finalizeReactiveActionCommit(
   args.resolve(args.result);
 }
 
+function warnOnWriteSurfaceViolations(
+  state: SchedulerActionRunState,
+  args: {
+    readonly action: Action;
+    readonly actionId: string;
+  },
+  log: ReactivityLog,
+): void {
+  if (state.nodes.isKnownEffect(args.action)) return;
+  if ((state.getMaterializerWriteEnvelopes(args.action) ?? []).length > 0) {
+    return;
+  }
+
+  const surface = state.getSchedulingWrites(args.action) ?? [];
+  for (const write of log.writes) {
+    // Per-user/per-session slots are runtime-mediated writes (scope-default
+    // initialization, UI state) that authored surfaces do not declare —
+    // exempt them so this declaration-gap diagnostic tracks authored
+    // space-scoped writes only.
+    // WATCH(scheduler-v2): re-include once scoped-slot writes are declared.
+    if (normalizeCellScope(write.scope) !== "space") {
+      continue;
+    }
+    if (
+      surface.some((surfaceWrite) => surfaceCoversWrite(surfaceWrite, write))
+    ) {
+      continue;
+    }
+    // Declaration-gap diagnostics, not enforcement (work order 05 step 5) —
+    // debug level because known gaps remain (builtins minting cause-keyed
+    // internal docs inside their run, e.g. ifElse/unless/fetchData) and
+    // cf test fails tests on console warnings. Counted regardless of level:
+    // assert via getLoggerCountsBreakdown().scheduler["write-surface-violation"].
+    logger.debug("write-surface-violation", () => [
+      `Action ${args.actionId} wrote outside its declared surface`,
+      write,
+    ]);
+  }
+}
+
+function surfaceCoversWrite(
+  surface: IMemorySpaceAddress,
+  write: IMemorySpaceAddress,
+): boolean {
+  return surface.space === write.space &&
+    surface.id === write.id &&
+    normalizeCellScope(surface.scope) === normalizeCellScope(write.scope) &&
+    surface.path.length <= write.path.length &&
+    surface.path.every((segment, index) => segment === write.path[index]);
+}
+
 function attachSchedulerActionObservation(
   state: SchedulerActionRunState,
   args: {
@@ -576,23 +579,6 @@ function attachSchedulerActionObservation(
     (annotated.writes ?? []).map(toMemorySpaceAddress),
     ignoredSchedulingWrites,
   ));
-  const { newCurrentKnownWrites } = buildKnownSchedulingWrites({
-    writes: pruneStructuralAncestorWrites(
-      sortAndCompactPaths(
-        filterIgnoredAddresses(log.writes, ignoredSchedulingWrites),
-        false,
-      ),
-    ),
-    declaredWrites,
-    existingCurrentWrites: filterIgnoredAddresses(
-      state.getCurrentKnownSchedulingWrites(args.action) ?? [],
-      ignoredSchedulingWrites,
-    ),
-    existingHistoricalWrites: filterIgnoredAddresses(
-      state.getHistoricalMightWrite(args.action) ?? [],
-      ignoredSchedulingWrites,
-    ),
-  });
   const telemetry = state.getActionTelemetryInfo(args.action);
   const actionOptions = schedulerActionOptions(state, args.action);
   const observationIdentity = annotated.schedulerObservationIdentity;
@@ -605,7 +591,7 @@ function attachSchedulerActionObservation(
       schedulerObservationPieceId(args.actionId, telemetry),
     processGeneration: observationIdentity?.processGeneration ?? 0,
     actionId: args.actionId,
-    actionKind: state.isEffectAction.get(args.action)
+    actionKind: state.nodes.isKnownEffect(args.action)
       ? "effect"
       : "computation",
     implementationFingerprint: schedulerImplementationFingerprint(
@@ -618,7 +604,11 @@ function attachSchedulerActionObservation(
     observedAtSeq: 0,
     transactionKind: "action-run",
     transactionLog: log,
-    currentKnownWrites: newCurrentKnownWrites,
+    // The live registered surface — for actions without a `.writes`
+    // annotation it came from subscribe's ReactivityLog, which
+    // declaredWrites (annotation-only) does not capture.
+    currentKnownWrites: state.getSchedulingWrites(args.action) ??
+      declaredWrites,
     declaredWrites,
     materializerWriteEnvelopes:
       state.getMaterializerWriteEnvelopes(args.action) ?? [],
@@ -726,8 +716,7 @@ function recordOptionalActionRunDiagnostics(
   if (state.getCollectActionRunTrace()) {
     appendActionRunTrace({
       actionRunTrace: state.actionRunTrace,
-      actionParent: state.actionParent,
-      isEffectAction: state.isEffectAction,
+      nodes: state.nodes,
       getActionId: state.getActionId,
       getSchedulingWrites: state.getSchedulingWrites,
     }, {
@@ -756,11 +745,11 @@ function recordOptionalActionRunDiagnostics(
   // Inline idempotency re-run: when the mode is on, every
   // computation gets a second synchronous run against post-commit
   // state. An idempotent computation produces the same writes
-  // both times. Uses isEffectAction (persists past unsubscribe)
+  // both times. Uses the registry's known kind (persists past unsubscribe)
   // since execute() calls unsubscribe() before run().
   if (
     state.getIdempotencyCheckMode() &&
-    !state.isEffectAction.get(args.action)
+    !state.nodes.isKnownEffect(args.action)
   ) {
     logger.timeStart("scheduler", "run", "idempotencyRecheck");
     try {

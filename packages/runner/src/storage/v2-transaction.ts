@@ -1,7 +1,11 @@
 import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { unclaimed } from "@commonfabric/memory/fact";
-import type { PatchOp, SqliteOperation } from "@commonfabric/memory/v2";
+import type {
+  CommitPrecondition,
+  PatchOp,
+  SqliteOperation,
+} from "@commonfabric/memory/v2";
 import { encodePointer, pathsOverlap } from "../../../memory/v2/path.ts";
 import { PathKeyMap } from "@commonfabric/utils/path-key-map";
 import type { FabricValue } from "@commonfabric/memory/interface";
@@ -25,6 +29,7 @@ import type {
   ITransactionReader,
   ITransactionWriter,
   ITransactionWriteRequest,
+  IWriteOptions,
   MediaType,
   MemorySpace,
   NativeStorageCommit,
@@ -65,7 +70,7 @@ import {
   isReadIgnoredForScheduling,
   isReadMarkedAsAttemptedWrite,
 } from "./reactivity-log.ts";
-import { readValueAtPath } from "./v2-path.ts";
+import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type { CellScope } from "../builder/types.ts";
@@ -123,6 +128,11 @@ const logger = getLogger("storage.v2.transaction", {
   enabled: false,
   level: "error",
 });
+
+const createOnlyMarkKey = (
+  id: string,
+  scope?: unknown,
+): string => `${normalizeCellScope(scope as CellScope | undefined)}\0${id}`;
 
 // Enabled so cross-space partial-commit failures (no rollback) are visible.
 const multiSpaceCommitLogger = getLogger("storage.v2.multi-space-commit", {
@@ -340,9 +350,11 @@ const schedulerObservationCommitSpace = (
 const findMaterializedParentPath = (
   currentRoot: FabricValue | undefined,
   path: readonly string[],
-  value: FabricValue | undefined,
+  isDelete: boolean,
 ): readonly string[] | undefined => {
-  if (value === undefined) {
+  // Deletes never materialize intermediates; value writes (including
+  // explicit `undefined`) do.
+  if (isDelete) {
     return undefined;
   }
 
@@ -434,24 +446,38 @@ const findDeepestArrayPath = (
     : path.slice(0, firstArrayLikeSegment);
 };
 
+/**
+ * Builds a patch op from before/after state at `path`. Presence (slot
+ * exists) is distinct from value: a slot holding `undefined` is present,
+ * so add/remove are chosen from presence transitions, and a stored
+ * `undefined` travels as a `replace`/`add` whose value is `undefined`.
+ * When presence flags are omitted they are inferred from value
+ * definedness (legacy callers in the array fast-path, where presence
+ * parity was already established via `in` checks).
+ */
 const buildValuePatchCandidate = (
   path: readonly string[],
   value: FabricValue | undefined,
   previousValue: FabricValue | undefined,
+  valuePresent: boolean = value !== undefined,
+  previousPresent: boolean = previousValue !== undefined,
 ): PatchDraftCandidate | null => {
-  if (deepEqual(value, previousValue)) {
+  if (valuePresent === previousPresent && deepEqual(value, previousValue)) {
     return null;
   }
 
   const pointer = encodePointer(path);
-  if (value === undefined) {
+  if (!valuePresent) {
+    if (!previousPresent) {
+      return null;
+    }
     return {
       patch: { op: "remove", path: pointer },
       path,
       coversDescendants: true,
     };
   }
-  if (previousValue === undefined) {
+  if (!previousPresent) {
     return {
       patch: { op: "add", path: pointer, value },
       path,
@@ -481,26 +507,42 @@ const buildArrayPatchCandidates = (
   path: readonly string[],
   before: FabricValue | undefined,
   after: FabricValue | undefined,
+  beforePresent: boolean = before !== undefined,
+  afterPresent: boolean = after !== undefined,
 ): PatchDraftCandidate[] => {
-  if (deepEqual(before, after)) {
+  if (beforePresent === afterPresent && deepEqual(before, after)) {
     return [];
   }
 
   if (!Array.isArray(before) || !Array.isArray(after)) {
-    const candidate = buildValuePatchCandidate(path, after, before);
+    const candidate = buildValuePatchCandidate(
+      path,
+      after,
+      before,
+      afterPresent,
+      beforePresent,
+    );
     return candidate ? [candidate] : [];
   }
 
+  // Both sides are arrays from here on, so the array slot itself is present
+  // in both states; fallbacks below replace the whole array.
   const overlappingLength = Math.min(before.length, after.length);
   for (let index = 0; index < overlappingLength; index += 1) {
     if ((index in before) !== (index in after)) {
-      const fallback = buildValuePatchCandidate(path, after, before);
+      const fallback = buildValuePatchCandidate(
+        path,
+        after,
+        before,
+        true,
+        true,
+      );
       return fallback ? [fallback] : [];
     }
   }
 
   if (after.length > before.length && !arrayTailIsDense(after, before.length)) {
-    const fallback = buildValuePatchCandidate(path, after, before);
+    const fallback = buildValuePatchCandidate(path, after, before, true, true);
     return fallback ? [fallback] : [];
   }
 
@@ -556,7 +598,7 @@ const buildArrayPatchCandidates = (
   }
 
   if (candidates.length === 0) {
-    const fallback = buildValuePatchCandidate(path, after, before);
+    const fallback = buildValuePatchCandidate(path, after, before, true, true);
     return fallback ? [fallback] : [];
   }
 
@@ -725,8 +767,9 @@ class V2Writer extends V2Reader implements ITransactionWriter {
   write(
     address: IMemoryAddress,
     value?: FabricValue,
+    options?: IWriteOptions,
   ): Result<IAttestation, WriteError> {
-    return this.tx.writeWithinSpace(this.did(), address, value);
+    return this.tx.writeWithinSpace(this.did(), address, value, options);
   }
 }
 
@@ -741,6 +784,11 @@ export class V2StorageTransaction implements IStorageTransaction {
   #readActivities: IReadActivity[] = [];
   #reactivityLogCache?: TransactionReactivityLog;
   #schedulerObservation?: unknown;
+  #commitPreconditions = new Map<MemorySpace, CommitPrecondition[]>();
+  #createOnlyMarks = new Map<
+    MemorySpace,
+    Map<string, { id: string; scope: CellScope }>
+  >();
   // Folded SQLite write ops per space, applied in the same commit as cell ops.
   #sqliteOps = new Map<MemorySpace, SqliteOperation[]>();
   #writeSpace?: MemorySpace;
@@ -825,6 +873,60 @@ export class V2StorageTransaction implements IStorageTransaction {
     return this.#schedulerObservation;
   }
 
+  addCommitPrecondition(
+    space: MemorySpace,
+    precondition: CommitPrecondition,
+  ): void {
+    this.assertWritable("addCommitPrecondition()");
+    const ready = this.editable();
+    if (ready.error) {
+      throw ready.error;
+    }
+    // Claim `space` as a write target (sets #writeSpace, enforces single-space
+    // write isolation) so a precondition-only commit is still sent and
+    // validated instead of resolving ok without a write space.
+    const claimed = this.claimWriteSpace(space);
+    if (claimed.error) {
+      throw claimed.error;
+    }
+    const preconditions = this.#commitPreconditions.get(space);
+    if (preconditions) {
+      preconditions.push(precondition);
+    } else {
+      this.#commitPreconditions.set(space, [precondition]);
+    }
+  }
+
+  getCommitPreconditions(
+    space: MemorySpace,
+  ): readonly CommitPrecondition[] | undefined {
+    return this.#commitPreconditions.get(space);
+  }
+
+  markCreateOnly(
+    link: { space: MemorySpace; id: string; scope?: unknown },
+  ): void {
+    this.assertWritable("markCreateOnly()");
+    const ready = this.editable();
+    if (ready.error) {
+      throw ready.error;
+    }
+    const claim = this.claimWriteSpace(link.space);
+    if (claim.error) {
+      throw claim.error;
+    }
+    let marks = this.#createOnlyMarks.get(link.space);
+    if (!marks) {
+      marks = new Map();
+      this.#createOnlyMarks.set(link.space, marks);
+    }
+    const scope = normalizeCellScope(link.scope as CellScope | undefined);
+    marks.set(createOnlyMarkKey(link.id, scope), {
+      id: link.id,
+      scope,
+    });
+  }
+
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
     this.assertWritable("recordSqliteWrite()");
     const ready = this.editable();
@@ -850,8 +952,24 @@ export class V2StorageTransaction implements IStorageTransaction {
     const schedulerObservation = this.schedulerObservationForNativeCommit(
       space,
     );
+    const preconditions = this.#commitPreconditions.get(space);
+    const createOnlyMarks = this.#createOnlyMarks.get(space);
+    const createOnlyPreconditions = [...(createOnlyMarks?.values() ?? [])].map(
+      ({ id, scope }) => ({
+        kind: "entity-absent" as const,
+        id,
+        scope,
+      }),
+    );
+    const nativePreconditions = [
+      ...(preconditions ?? []),
+      ...createOnlyPreconditions,
+    ];
     const sqliteOps = this.#sqliteOps.get(space);
-    if (!branch && schedulerObservation === undefined && !sqliteOps?.length) {
+    if (
+      !branch && schedulerObservation === undefined &&
+      nativePreconditions.length === 0 && !sqliteOps?.length
+    ) {
       return undefined;
     }
 
@@ -875,15 +993,22 @@ export class V2StorageTransaction implements IStorageTransaction {
       }
 
       operations.push(
-        doc.current.value === undefined
-          ? { op: "delete", id, type, scope }
-          : { op: "set", id, type, scope, value: doc.current.value },
+        doc.current.value === undefined ? { op: "delete", id, type, scope } : {
+          op: "set",
+          id,
+          type,
+          scope,
+          value: doc.current.value,
+        },
       );
     }
 
     return {
       operations,
       ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
+      ...(nativePreconditions.length
+        ? { preconditions: nativePreconditions }
+        : {}),
       ...(sqliteOps?.length ? { sqliteOps: [...sqliteOps] } : {}),
     };
   }
@@ -1058,12 +1183,19 @@ export class V2StorageTransaction implements IStorageTransaction {
   write(
     address: IMemorySpaceAddress,
     value?: FabricValue,
+    options?: IWriteOptions,
   ): Result<IAttestation, WriterError | WriteError> {
     const ready = this.prepareWriteSpace(address.space);
     if (ready.error) {
       return { error: ready.error };
     }
-    return this.writeWithinBranch(ready.ok, address.space, address, value);
+    return this.writeWithinBranch(
+      ready.ok,
+      address.space,
+      address,
+      value,
+      options,
+    );
   }
 
   writeBatch(
@@ -1116,9 +1248,16 @@ export class V2StorageTransaction implements IStorageTransaction {
     space: MemorySpace,
     address: IMemoryAddress,
     value?: FabricValue,
+    options?: IWriteOptions,
   ): Result<IAttestation, WriteError> {
     this.assertWritable("write()");
-    return this.writeWithinBranch(this.branch(space), space, address, value);
+    return this.writeWithinBranch(
+      this.branch(space),
+      space,
+      address,
+      value,
+      options,
+    );
   }
 
   /**
@@ -1129,34 +1268,44 @@ export class V2StorageTransaction implements IStorageTransaction {
    * subtrees stay deep-frozen and structurally shared with the prior
    * `doc.current.value`.
    *
-   * No-op short-circuits:
-   *   - If the leaf is already deep-equal to `value`, return the unchanged
-   *     attestation.
-   *   - If `value === undefined` and the leaf doesn't exist (path not
-   *     found), return the unchanged attestation -- don't allocate
-   *     intermediate containers just to delete a slot that wasn't there.
+   * No-op short-circuits (presence-aware: a stored `undefined` is a real
+   * state, distinct from an absent slot):
+   *   - For a value write, if the leaf exists and is already deep-equal to
+   *     `value`, return the unchanged attestation. A write of `undefined`
+   *     to an absent leaf is NOT a no-op — it stores `undefined`,
+   *     materializing intermediates if needed.
+   *   - For a delete (`options.delete`), if the leaf doesn't exist —
+   *     whether the leaf slot is absent or an intermediate is missing —
+   *     return the unchanged attestation; don't allocate intermediate
+   *     containers just to delete a slot that wasn't there.
    */
   private writeWithinBranch(
     branch: SpaceBranch,
     space: MemorySpace,
     address: IMemoryAddress,
     value?: FabricValue,
+    options?: IWriteOptions,
   ): Result<IAttestation, WriteError> {
     if (address.id.startsWith("data:")) {
       return { error: ReadOnlyAddressError(address).from(space) };
     }
+    const isDelete = options?.delete === true;
 
     const { doc: readDoc } = this.document(branch, address);
     const doc = ensureWritableDocument(readDoc);
     const current = doc.current;
     const previous = inspectPath(current.value, address.path);
-    if (previous.kind === "ok" && deepEqual(previous.value, value)) {
-      return { ok: current };
+    if (previous.kind === "ok") {
+      const present = hasValueAtPath(current.value, address.path, {
+        allowArrayLength: true,
+      });
+      if (
+        isDelete ? !present : (present && deepEqual(previous.value, value))
+      ) {
+        return { ok: current };
+      }
     }
-    // Delete-of-nonexistent: don't create intermediate containers just to
-    // express "remove a slot that wasn't there." This preserves the
-    // previous `writeWithinSpaceCreatingParents` short-circuit.
-    if (previous.kind === "notFound" && value === undefined) {
+    if (previous.kind === "notFound" && isDelete) {
       return { ok: current };
     }
 
@@ -1179,7 +1328,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     const activityPath = findMaterializedParentPath(
       current.value,
       address.path,
-      isolatedValue,
+      isDelete,
     ) ?? address.path;
     const previousActivityValue = cloneIfNecessary(
       readValueAtPath(current.value, activityPath, {
@@ -1191,6 +1340,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       current.value,
       address,
       isolatedValue,
+      isDelete ? { delete: true } : undefined,
     );
     if (result.error) {
       return { error: result.error.from(space) };
@@ -1240,8 +1390,13 @@ export class V2StorageTransaction implements IStorageTransaction {
       // Singleton-batch / data:URI fallback: route each write through the
       // unified single-write entry, which itself handles
       // create-missing-intermediates.
-      for (const { address, value } of writes) {
-        const result = this.writeWithinSpace(space, address, value);
+      for (const { address, value, delete: isDelete } of writes) {
+        const result = this.writeWithinSpace(
+          space,
+          address,
+          value,
+          isDelete ? { delete: true } : undefined,
+        );
         if (result.error) {
           return { error: result.error };
         }
@@ -1271,27 +1426,42 @@ export class V2StorageTransaction implements IStorageTransaction {
     // reading it AFTER the call would observe the post-write state.
     // (See `writeWithinBranch` for the same invariant and a regression
     // test.)
-    for (const { address, value } of writes) {
+    for (const { address, value, delete: isDelete } of writes) {
       const isolatedValue = value === undefined
         ? undefined
         : cloneIfNecessary(value) as FabricValue;
       const previousValue = readValueAtPath(nextRoot, address.path, {
         allowArrayLength: true,
       });
-      if (deepEqual(previousValue, isolatedValue)) {
+      // Presence-aware no-op detection (also keeps no-op deletes from
+      // reaching `applyMutablePathWrite`, which would materialize
+      // intermediates into `nextRoot` before the changed check).
+      const present = hasValueAtPath(nextRoot, address.path, {
+        allowArrayLength: true,
+      });
+      if (
+        isDelete
+          ? !present
+          : (present && deepEqual(previousValue, isolatedValue))
+      ) {
         continue;
       }
       const activityPath = findMaterializedParentPath(
         nextRoot,
         address.path,
-        isolatedValue,
+        isDelete === true,
       ) ?? address.path;
       const previousActivityValue = cloneIfNecessary(
         readValueAtPath(nextRoot, activityPath, {
           allowArrayLength: true,
         }) as FabricValue,
       ) as FabricValue | undefined;
-      const result = applyMutablePathWrite(nextRoot, address, isolatedValue);
+      const result = applyMutablePathWrite(
+        nextRoot,
+        address,
+        isolatedValue,
+        isDelete ? { delete: true } : undefined,
+      );
       if (result.error) {
         if (changed) {
           doc.current = {
@@ -1465,8 +1635,12 @@ export class V2StorageTransaction implements IStorageTransaction {
     );
     const operations = native?.operations ?? [];
     const hasSchedulerObservation = native?.schedulerObservation !== undefined;
+    const hasCommitPreconditions = (native?.preconditions?.length ?? 0) > 0;
     const hasSqliteOps = (native?.sqliteOps?.length ?? 0) > 0;
-    if (operations.length === 0 && !hasSchedulerObservation && !hasSqliteOps) {
+    if (
+      operations.length === 0 && !hasSchedulerObservation &&
+      !hasCommitPreconditions && !hasSqliteOps
+    ) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
       this.#state = { status: "done", result };
       return result;
@@ -1520,10 +1694,12 @@ export class V2StorageTransaction implements IStorageTransaction {
       const operations = native?.operations ?? [];
       const hasSchedulerObservation =
         native?.schedulerObservation !== undefined;
+      const hasCommitPreconditions = (native?.preconditions?.length ?? 0) > 0;
       const hasSqliteOps = (native?.sqliteOps?.length ?? 0) > 0;
       if (
         !native ||
-        (operations.length === 0 && !hasSchedulerObservation && !hasSqliteOps)
+        (operations.length === 0 && !hasSchedulerObservation &&
+          !hasCommitPreconditions && !hasSqliteOps)
       ) {
         continue;
       }
@@ -1915,6 +2091,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       path: readonly string[];
       value: FabricValue | undefined;
       previousValue: FabricValue | undefined;
+      valuePresent: boolean;
+      previousPresent: boolean;
     }>();
     const arrayGroups = new Map<string, readonly string[]>();
     for (const detail of details) {
@@ -1928,7 +2106,22 @@ export class V2StorageTransaction implements IStorageTransaction {
         detail.address.path,
         { allowArrayLength: true },
       );
-      if (deepEqual(value, previousValue)) {
+      // Presence-aware change detection: present-but-undefined and absent
+      // both read as `undefined`, but transitions between them are real
+      // changes (add/remove of an `undefined`-valued slot).
+      const valuePresent = hasValueAtPath(
+        doc.current.value,
+        detail.address.path,
+        { allowArrayLength: true },
+      );
+      const previousPresent = hasValueAtPath(
+        doc.initial.value,
+        detail.address.path,
+        { allowArrayLength: true },
+      );
+      if (
+        valuePresent === previousPresent && deepEqual(value, previousValue)
+      ) {
         continue;
       }
 
@@ -1946,6 +2139,8 @@ export class V2StorageTransaction implements IStorageTransaction {
         path: detail.address.path,
         value,
         previousValue,
+        valuePresent,
+        previousPresent,
       });
     }
 
@@ -1955,6 +2150,8 @@ export class V2StorageTransaction implements IStorageTransaction {
         detail.path,
         detail.value,
         detail.previousValue,
+        detail.valuePresent,
+        detail.previousPresent,
       );
       if (candidate) {
         fullCoverCandidates.push(candidate);
@@ -1974,6 +2171,12 @@ export class V2StorageTransaction implements IStorageTransaction {
           arrayPath,
           beforeValue,
           afterValue,
+          hasValueAtPath(doc.initial.value, arrayPath, {
+            allowArrayLength: true,
+          }),
+          hasValueAtPath(doc.current.value, arrayPath, {
+            allowArrayLength: true,
+          }),
         )
       ) {
         if (candidate.coversDescendants) {

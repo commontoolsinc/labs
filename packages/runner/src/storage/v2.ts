@@ -19,8 +19,10 @@ import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
   type CellScope,
   type ClientCommit,
+  type CommitPrecondition,
   type DocumentPath,
   type EntityDocument,
+  getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   type PatchOp,
   type SchedulerActionSnapshotQuery,
@@ -50,10 +52,12 @@ import {
   parseLinkPrimitive,
 } from "../link-types.ts";
 import type { Cancel } from "../cancel.ts";
+import { recordCommitLocalSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import type {
   IMemoryAddress,
   IMergedChanges,
+  IPreconditionFailedError,
   IRemoteStorageProviderSettings,
   ISpaceReplica,
   IStorageManager,
@@ -1001,7 +1005,12 @@ type WatchRefreshBatch = {
 };
 
 type NativeCommitOperation =
-  | { op: "set"; id: URI; scope?: CellScope; value: EntityDocument }
+  | {
+    op: "set";
+    id: URI;
+    scope?: CellScope;
+    value: EntityDocument;
+  }
   | {
     op: "patch";
     id: URI;
@@ -1363,6 +1372,9 @@ class SpaceReplica implements ISpaceReplica {
     const schedulerObservation = getPersistentSchedulerStateConfig()
       ? transaction.schedulerObservation
       : undefined;
+    const preconditions = getCommitPreconditionsConfig()
+      ? transaction.preconditions
+      : undefined;
     const operations = withCommitTiming(
       ["commitNative", "normalize"],
       () =>
@@ -1396,6 +1408,7 @@ class SpaceReplica implements ISpaceReplica {
 
     if (
       operations.length === 0 && schedulerObservation === undefined &&
+      !preconditions?.length &&
       sqliteOps.length === 0
     ) {
       return { ok: {} };
@@ -1408,6 +1421,7 @@ class SpaceReplica implements ISpaceReplica {
           operations,
           source,
           schedulerObservation,
+          preconditions,
           sqliteOps,
         ),
     );
@@ -1644,9 +1658,17 @@ class SpaceReplica implements ISpaceReplica {
     operations: NativeCommitOperation[],
     source?: IStorageTransaction,
     schedulerObservation?: unknown,
+    preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    if (operations.length === 0 && sqliteOps.length === 0) {
+    const emitCommitPreconditions = getCommitPreconditionsConfig();
+    const activePreconditions = emitCommitPreconditions
+      ? (preconditions ?? [])
+      : [];
+    if (
+      operations.length === 0 && sqliteOps.length === 0 &&
+      activePreconditions.length === 0
+    ) {
       if (schedulerObservation === undefined) {
         return { ok: {} };
       }
@@ -1657,6 +1679,9 @@ class SpaceReplica implements ISpaceReplica {
     }
 
     const localSeq = this.#nextLocalSeq++;
+    if (source !== undefined) {
+      recordCommitLocalSeq(source, this.#space, localSeq);
+    }
     const commit = withCommitTiming(
       ["commitOperations", "buildCommit"],
       (): ClientCommit => ({
@@ -1688,6 +1713,9 @@ class SpaceReplica implements ISpaceReplica {
           ...sqliteOps,
         ],
         ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
+        ...(activePreconditions.length > 0
+          ? { preconditions: [...activePreconditions] }
+          : {}),
       }),
     );
     const touched = operations.map((operation) => ({
@@ -2190,8 +2218,24 @@ const toRejectedError = (
   commit: unknown,
 ): StorageTransactionRejected => {
   const message = error instanceof Error ? error.message : String(error);
+  const name = error instanceof Error
+    ? error.name
+    : (error as { name?: unknown })?.name;
+  // `error` may be a primitive or null — never throw while normalizing a
+  // commit failure, that would mask the real rejection.
+  const precondition = (error as { precondition?: unknown })?.precondition;
   if (
-    (error instanceof Error && error.name === "ConflictError") ||
+    name === "PreconditionFailedError" &&
+    (precondition === "origin-committed" || precondition === "receipt-exists")
+  ) {
+    return {
+      name: "PreconditionFailedError",
+      message,
+      precondition,
+    } as IPreconditionFailedError;
+  }
+  if (
+    name === "ConflictError" ||
     message.includes("stale confirmed read") ||
     message.includes("pending dependency")
   ) {

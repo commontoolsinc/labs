@@ -129,6 +129,18 @@ export interface SchedulerObservationCommit {
   schedulerObservation: unknown;
 }
 
+export type CommitPrecondition =
+  | {
+    kind: "origin-committed";
+    /** localSeq of a commit from the SAME session in this space. */
+    originLocalSeq: number;
+  }
+  | {
+    kind: "entity-absent";
+    id: EntityId;
+    scope?: CellScope;
+  };
+
 export interface ClientCommit {
   localSeq: number;
   reads: {
@@ -136,6 +148,7 @@ export interface ClientCommit {
     pending: PendingRead[];
   };
   operations: Operation[];
+  preconditions?: CommitPrecondition[];
   schedulerObservation?: unknown;
   schedulerObservationBatch?: SchedulerObservationCommit[];
   codeCID?: Reference;
@@ -172,6 +185,7 @@ export interface SessionOpenResult {
 export interface MemoryProtocolFlags {
   modernCellRep: boolean;
   persistentSchedulerState: boolean;
+  commitPreconditions: boolean;
 }
 
 /**
@@ -180,6 +194,7 @@ export interface MemoryProtocolFlags {
 export type WireMemoryProtocolFlags = {
   modernCellRep?: boolean;
   persistentSchedulerState?: boolean;
+  commitPreconditions?: boolean;
 };
 
 export interface HelloMessage {
@@ -503,6 +518,7 @@ export interface SessionRevokedMessage {
 export interface V2Error {
   name: string;
   message: string;
+  precondition?: string;
 }
 
 export type V2Result<Value> = { ok: Value } | { error: V2Error };
@@ -539,6 +555,7 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
 );
 
 let persistentSchedulerStateEnabled = false;
+let commitPreconditionsEnabled = false;
 
 /**
  * Ambient runtime flag for persistent scheduler observations and rehydration.
@@ -557,16 +574,33 @@ export function resetPersistentSchedulerStateConfig(): void {
   persistentSchedulerStateEnabled = false;
 }
 
+/**
+ * Ambient runtime flag for commit preconditions. The runner owns the feature,
+ * but the memory protocol needs the value during client/server handshakes.
+ */
+export function setCommitPreconditionsConfig(enabled?: boolean): void {
+  commitPreconditionsEnabled = enabled ?? false;
+}
+
+export function getCommitPreconditionsConfig(): boolean {
+  return commitPreconditionsEnabled;
+}
+
+export function resetCommitPreconditionsConfig(): void {
+  commitPreconditionsEnabled = false;
+}
+
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernCellRep: getModernCellRepConfig(),
   persistentSchedulerState: getPersistentSchedulerStateConfig(),
+  commitPreconditions: getCommitPreconditionsConfig(),
 });
 
 /**
- * Scheduler-state persistence is an optional capability, not a data-model wire
- * contract. Peers with different scheduler flags can still share memory data;
- * the server's flag controls whether scheduler observation rows are accepted
- * and served on that connection.
+ * Scheduler-state persistence and commit preconditions are optional
+ * capabilities, not data-model wire contracts. Peers with different scheduler
+ * flags can still share memory data; the server's flags control whether
+ * scheduler rows and precondition checks are accepted on that connection.
  */
 export const compatibleMemoryProtocolFlags = (
   left: MemoryProtocolFlags,
@@ -592,6 +626,14 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const commitPreconditions = value.commitPreconditions;
+  if (
+    commitPreconditions !== undefined &&
+    typeof commitPreconditions !== "boolean"
+  ) {
+    return null;
+  }
+
   const modernCellRep = value.modernCellRep;
   if (
     modernCellRep !== undefined &&
@@ -603,6 +645,7 @@ export const parseMemoryProtocolFlags = (
   return {
     modernCellRep: modernCellRep === true,
     persistentSchedulerState: persistentSchedulerState === true,
+    commitPreconditions: commitPreconditions === true,
   };
 };
 
@@ -614,6 +657,7 @@ export const wireMemoryProtocolFlags = (
 ): WireMemoryProtocolFlags => ({
   modernCellRep: flags.modernCellRep,
   persistentSchedulerState: flags.persistentSchedulerState,
+  commitPreconditions: flags.commitPreconditions,
 });
 
 export const encodeMemoryBoundary = (value: unknown): string =>

@@ -1,5 +1,7 @@
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import { entityKey } from "./keys.ts";
+import type { MaterializerIndexState } from "./materializers.ts";
+import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
 import { readsOverlapWrites } from "./scheduling-writes.ts";
 import type { SchedulerStaleness } from "./staleness.ts";
 import type { TriggerIndexState } from "./trigger-index.ts";
@@ -17,12 +19,64 @@ export interface DependencyGraphState {
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly reverseDependencies: WeakMap<Action, Set<Action>>;
   readonly staleness: SchedulerStaleness;
+  readonly nodes: NodeRegistry;
+  readonly materializerIndex: Pick<MaterializerIndexState, "isMaterializer">;
   readonly getSchedulingWrites: (
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;
   readonly isStale: (action: Action) => boolean;
-  readonly isDemandedPullComputation: (action: Action) => boolean;
   readonly queueExecution: () => void;
+}
+
+export type SchedulerLivenessState = Pick<
+  DependencyGraphState,
+  "nodes" | "reverseDependencies" | "materializerIndex"
+>;
+
+export function isLive(
+  state: SchedulerLivenessState,
+  node: SchedulerNode,
+): boolean {
+  if (!isRegisteredNode(state, node)) return false;
+
+  return state.nodes.isEffect(node.action) ||
+    node.liveRefs > 0 ||
+    node.provisionalDemand ||
+    state.materializerIndex.isMaterializer(node.action);
+}
+
+export function notifyNodeLivenessChange(
+  state: SchedulerLivenessState,
+  action: Action,
+  wasLive: boolean,
+): void {
+  const node = state.nodes.get(action);
+  if (!node) return;
+
+  const nowLive = isLive(state, node);
+  if (wasLive === nowLive) return;
+
+  if (nowLive) {
+    addLiveRefsFromWriters(state, node, new Set<Action>());
+  } else {
+    dropLiveRefsFromWriters(state, node, new Set<Action>());
+  }
+}
+
+export function setNodeProvisionalDemand(
+  state: SchedulerLivenessState,
+  node: SchedulerNode,
+  provisionalDemand: boolean,
+  passId?: number,
+): void {
+  const wasLive = isLive(state, node);
+  node.provisionalDemand = provisionalDemand;
+  if (provisionalDemand) {
+    node.provisionalDemandPass = passId;
+  } else {
+    node.provisionalDemandPass = undefined;
+  }
+  notifyNodeLivenessChange(state, node.action, wasLive);
 }
 
 export function groupReadsByEntity(
@@ -39,6 +93,28 @@ export function groupReadsByEntity(
     entityReads.push(read);
   }
   return readsByEntity;
+}
+
+export function hasDependentPath(
+  dependentsByAction: WeakMap<Action, Set<Action>>,
+  from: Action,
+  to: Action,
+  visited = new Set<Action>(),
+): boolean {
+  if (from === to) return true;
+  if (visited.has(from)) return false;
+  visited.add(from);
+
+  const dependents = dependentsByAction.get(from);
+  if (!dependents) return false;
+
+  for (const dependent of dependents) {
+    if (hasDependentPath(dependentsByAction, dependent, to, visited)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export function collectDirectWritersForLog(state: {
@@ -190,45 +266,30 @@ export function registerDependentEdge(
   }
   reverse.add(writer);
 
+  if (!alreadyDependent) {
+    const dependentRecord = state.nodes.get(dependent);
+    if (dependentRecord && isLive(state, dependentRecord)) {
+      addLiveRef(state, writer, new Set<Action>());
+    }
+  }
+
   if (!alreadyDependent && state.isStale(writer)) {
     state.staleness.addStaleUpstream(writer, dependent);
-    if (state.isDemandedPullComputation(writer)) {
+    const writerRecord = state.nodes.get(writer);
+    if (
+      writerRecord?.kind === "computation" &&
+      isLive(state, writerRecord)
+    ) {
       state.queueExecution();
     }
   }
 }
 
-export function unregisterDependentEdge(
-  state: DependencyGraphState,
-  writer: Action,
-  dependent: Action,
-): void {
-  const dependents = state.dependents.get(writer);
-  const hadDependent = dependents?.delete(dependent) ?? false;
-  if (dependents && dependents.size === 0) {
-    state.dependents.delete(writer);
-  }
-
-  const reverse = state.reverseDependencies.get(dependent);
-  reverse?.delete(writer);
-  if (reverse && reverse.size === 0) {
-    state.reverseDependencies.delete(dependent);
-  }
-
-  if (hadDependent) {
-    state.staleness.removeStaleUpstream(writer, dependent);
-  }
-}
-
-export function backfillDependentsForNewWrites(
+export function registerDependentsForWriterSurface(
   state: DependencyGraphState,
   writer: Action,
   writes: readonly IMemorySpaceAddress[],
 ): void {
-  // Caller must ensure writes is non-empty.
-  if (writes.length === 0) {
-    throw new Error("backfillDependentsForNewWrites requires non-empty writes");
-  }
   const readers = new Set<Action>();
   for (const write of writes) {
     for (const action of state.triggerIndex.collectReadersForWrite(write)) {
@@ -242,25 +303,128 @@ export function backfillDependentsForNewWrites(
   }
 }
 
-export function pruneDependentsForCurrentWrites(
+export function unregisterDependentEdge(
   state: DependencyGraphState,
   writer: Action,
-  writes: readonly IMemorySpaceAddress[],
+  dependent: Action,
 ): void {
+  const dependentRecord = state.nodes.get(dependent);
+  const dependentWasLive = dependentRecord
+    ? isLive(state, dependentRecord)
+    : false;
   const dependents = state.dependents.get(writer);
-  if (!dependents) return;
-
-  for (const dependent of [...dependents]) {
-    const log = state.dependencies.get(dependent);
-    if (
-      log &&
-      readsOverlapWrites(log.reads, log.shallowReads, writes)
-    ) {
-      continue;
-    }
-
-    unregisterDependentEdge(state, writer, dependent);
+  const hadDependent = dependents?.delete(dependent) ?? false;
+  if (dependents && dependents.size === 0) {
+    state.dependents.delete(writer);
   }
+
+  const reverse = state.reverseDependencies.get(dependent);
+  reverse?.delete(writer);
+  if (reverse && reverse.size === 0) {
+    state.reverseDependencies.delete(dependent);
+  }
+
+  if (hadDependent) {
+    if (dependentWasLive) {
+      dropLiveRef(state, writer, new Set<Action>());
+    }
+    state.staleness.removeStaleUpstream(writer, dependent);
+  }
+}
+
+// Spec §5.2: refcount deltas propagate upstream with a visited-set cycle
+// guard — each node is updated AT MOST ONCE per propagation pass. Guarding
+// the increment itself (not just the recursion) keeps a cycle's back edge
+// from double-counting its origin, which would leave the cycle live forever
+// once its only root unsubscribes. Caveat (recorded in PROGRESS.md): this
+// per-pass dedup undercounts multi-path (diamond) graphs relative to
+// per-edge accounting when an individual edge is later unregistered while
+// its reader stays live.
+function addLiveRef(
+  state: SchedulerLivenessState,
+  action: Action,
+  visited: Set<Action>,
+): void {
+  if (visited.has(action)) return;
+  visited.add(action);
+
+  const node = state.nodes.get(action);
+  if (!node || !isRegisteredNode(state, node)) return;
+
+  const wasLive = isLive(state, node);
+  node.liveRefs++;
+  if (!wasLive && isLive(state, node)) {
+    addLiveRefsFromWriters(state, node, visited);
+  }
+}
+
+function dropLiveRef(
+  state: SchedulerLivenessState,
+  action: Action,
+  visited: Set<Action>,
+): void {
+  if (visited.has(action)) return;
+  visited.add(action);
+
+  const node = state.nodes.get(action);
+  if (!node || !isRegisteredNode(state, node) || node.liveRefs === 0) {
+    return;
+  }
+
+  const wasLive = isLive(state, node);
+  node.liveRefs--;
+  if (wasLive && !isLive(state, node)) {
+    dropLiveRefsFromWriters(state, node, visited);
+  }
+}
+
+function addLiveRefsFromWriters(
+  state: SchedulerLivenessState,
+  node: SchedulerNode,
+  visited: Set<Action>,
+): void {
+  updateLiveRefsFromWriters(state, node, visited, addLiveRef);
+}
+
+function dropLiveRefsFromWriters(
+  state: SchedulerLivenessState,
+  node: SchedulerNode,
+  visited: Set<Action>,
+): void {
+  updateLiveRefsFromWriters(state, node, visited, dropLiveRef);
+}
+
+function updateLiveRefsFromWriters(
+  state: SchedulerLivenessState,
+  node: SchedulerNode,
+  visited: Set<Action>,
+  update: (
+    state: SchedulerLivenessState,
+    action: Action,
+    visited: Set<Action>,
+  ) => void,
+): void {
+  // Direction convention: `dependents` is writer -> readers, and
+  // `reverseDependencies` is reader -> writers. Liveness therefore propagates
+  // from a live reader upstream through `reverseDependencies`. Mark the
+  // origin so cyclic back edges cannot update it again this pass; the
+  // per-node guard lives in addLiveRef/dropLiveRef.
+  visited.add(node.action);
+
+  const writers = state.reverseDependencies.get(node.action);
+  if (!writers) return;
+
+  for (const writer of writers) {
+    update(state, writer, visited);
+  }
+}
+
+function isRegisteredNode(
+  state: SchedulerLivenessState,
+  node: SchedulerNode,
+): boolean {
+  return state.nodes.isEffect(node.action) ||
+    state.nodes.isComputation(node.action);
 }
 
 export function pendingDependencyCollectionMightAffect(

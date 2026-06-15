@@ -260,7 +260,10 @@ describe("pull-based scheduling", () => {
 
     expect(effectRuns).toBe(1);
     expect(effectResult.get()).toBe(1);
-    expect(unrelatedRuns).toBe(0);
+    // v2 (spec §5.3): children created during a live effect's run get
+    // provisional first-run demand; the v1 writeful-effect exception
+    // keyed on run-learned writes, which no longer exist.
+    expect(unrelatedRuns).toBe(1);
   });
 
   it("should re-run an effect for transitively related pending dependency collection", async () => {
@@ -653,7 +656,7 @@ describe("pull-based scheduling", () => {
       derived.withTx(actionTx).get();
     };
     const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
-    schedulerInternal.isEffectAction.set(effect, true);
+    schedulerInternal.registerEffect(effect);
     const { log } = schedulerInternal.setDependencies(effect, {
       reads: [toMemorySpaceAddress(derived.getAsNormalizedFullLink())],
       shallowReads: [],
@@ -830,7 +833,7 @@ describe("pull-based scheduling", () => {
     expect(childRuns).toBe(1);
   });
 
-  it("should clear pull continuation demand when unsubscribing", async () => {
+  it("should clear provisional continuation demand when unsubscribing", async () => {
     const source = runtime.getCell<number>(
       space,
       "pull-continuation-unsubscribe-source",
@@ -864,9 +867,9 @@ describe("pull-based scheduling", () => {
     expect(runs).toBe(0);
 
     const schedulerInternals = runtime.scheduler as unknown as {
-      pullDemandedContinuationComputations: WeakSet<Action>;
+      markPullDemandContinuation: (action: Action) => void;
     };
-    schedulerInternals.pullDemandedContinuationComputations.add(action);
+    schedulerInternals.markPullDemandContinuation(action);
 
     runtime.scheduler.unsubscribe(action);
     runtime.scheduler.subscribe(action, log);

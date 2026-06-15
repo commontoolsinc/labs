@@ -20,8 +20,11 @@ import {
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import {
+  getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
+  resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
+  setCommitPreconditionsConfig,
   setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
@@ -183,8 +186,8 @@ export interface ExperimentalOptions {
   modernCellRep?: boolean | undefined;
   /** Persist scheduler observations and use them for scheduler rehydration. */
   persistentSchedulerState?: boolean | undefined;
-  /** Preserve cumulative scheduler write history instead of using current-known writes. */
-  schedulerHistoricalMightWrite?: boolean | undefined;
+  /** Attach origin-committed preconditions to scheduler-v2 lineage commits. */
+  commitPreconditions?: boolean | undefined;
 }
 
 export interface RuntimeOptions {
@@ -350,7 +353,7 @@ export class Runtime {
     this.experimental = {
       modernCellRep: undefined,
       persistentSchedulerState: undefined,
-      schedulerHistoricalMightWrite: undefined,
+      commitPreconditions: undefined,
       ...options.experimental,
     };
 
@@ -376,6 +379,8 @@ export class Runtime {
     );
     this.experimental.persistentSchedulerState =
       getPersistentSchedulerStateConfig();
+    setCommitPreconditionsConfig(this.experimental.commitPreconditions);
+    this.experimental.commitPreconditions = getCommitPreconditionsConfig();
 
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
@@ -582,6 +587,7 @@ export class Runtime {
     // Reset experimental config to defaults.
     resetModernCellRepConfig();
     resetPersistentSchedulerStateConfig();
+    resetCommitPreconditionsConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

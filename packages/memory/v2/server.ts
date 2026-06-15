@@ -192,6 +192,26 @@ const toError = (name: string, message: string): V2Error => ({
   message,
 });
 
+const toPreconditionFailedError = (
+  error: unknown,
+  message: string,
+): V2Error | undefined => {
+  if (
+    error instanceof Engine.PreconditionFailedError ||
+    (error instanceof Error &&
+      error.name === "PreconditionFailedError" &&
+      typeof (error as { precondition?: unknown }).precondition === "string")
+  ) {
+    return {
+      name: "PreconditionFailedError",
+      message,
+      precondition: (error as unknown as { precondition: string })
+        .precondition,
+    };
+  }
+  return undefined;
+};
+
 export type MemoryAclMode = "off" | "observe" | "enforce";
 
 /** Engine doc id of a space's ACL document: the doc whose entity id is the
@@ -1532,15 +1552,19 @@ export class Server {
         this.stageConflictRefreshDirtyIds(message.space, message.commit);
         await this.flushSessions([message.space]);
       }
+      const messageText = error instanceof Error
+        ? error.message
+        : String(error);
+      const preconditionError = toPreconditionFailedError(error, messageText);
       return respondTypedError<Engine.AppliedCommit>(
         message.requestId,
-        toError(
+        preconditionError ? preconditionError : toError(
           error instanceof Engine.ConflictError
             ? "ConflictError"
             : error instanceof Engine.ProtocolError
             ? "ProtocolError"
             : "TransactionError",
-          error instanceof Error ? error.message : String(error),
+          messageText,
         ),
       );
     }
