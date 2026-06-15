@@ -108,6 +108,7 @@ session-scoped catch-up sync.
 | 5       | [05-queries.md](./05-queries.md)                                   | One-shot queries, schema traversal, point-in-time reads, watch sets, and session-scoped catch-up sync                             |
 | 6       | [06-branching.md](./06-branching.md)                               | Branch lifecycle, isolation, merging, conflict resolution, point-in-time reads on branches, and branch diffs                      |
 | 7       | [07-op-views-and-annotations.md](./07-op-views-and-annotations.md) | Future work for collaborative field projections, storage-derived side-data, and user-level anchored annotations                   |
+| 8       | [08-view-plans-and-aggregates.md](./08-view-plans-and-aggregates.md) | Future work for helper-authored view plans, runtime-maintained aggregates, and backend lowering without exposing raw storage      |
 
 ## Implementation Materials
 
