@@ -305,28 +305,22 @@ export function emptySchemaObject() {
 }
 
 /**
- * Returns a deep-frozen `SchemaPathSelector` whose `schema` (if any) is the
- * canonical interned instance and whose `path` array is frozen.
- *
- * Usually the input reference itself is canonicalized in place — its `schema`
- * replaced with the interned instance if needed, then it and its `path` frozen
- * — and returned. The one exception: when the input is **already frozen** and
- * its `schema` is not the canonical interned instance, the schema cannot be
- * written back, so a new deep-frozen selector is allocated and returned.
- * Therefore the result is NOT guaranteed to be `===` to the input. (It is `===`
- * whenever the input is mutable, or its `schema` is already interned or
- * `undefined`.)
- *
- * Idempotent: re-interning a result returns that same result
- * (`internPathSelector(internPathSelector(x)) === internPathSelector(x)`),
- * since a returned selector's `schema` is already canonical.
- *
- * Exists so that callers who feed selectors into `MapSetStringToPathSelectors`
- * (or any other cache keyed on `hashStringOf()` of a selector) can hand in an
- * already-interned, deep-frozen selector. That satisfies the `isDeepFrozen()`
- * guard internal to `hashOf()` and lets its `WeakMap` cache retain its hash
- * across repeat calls.
+ * Common shape of the two canonical-selector maps. Its key type spans both
+ * maps' keys, so a single variable selected between the object `WeakMap` and the
+ * primitive `Map` accepts the un-narrowed interned schema as a key — without
+ * TypeScript collapsing the two maps' key types to `never` (which is what a bare
+ * `WeakMap | Map` union does).
  */
+type CanonicalSelectorMap = {
+  get(
+    key: JSONSchema | undefined,
+  ): Map<string, WeakRef<SchemaPathSelector>> | undefined;
+  set(
+    key: JSONSchema | undefined,
+    value: Map<string, WeakRef<SchemaPathSelector>>,
+  ): unknown;
+};
+
 /**
  * Canonical selector instances per (interned schema identity, path content).
  * A `SchemaPathSelector` is just `{ path, schema? }`, so structurally-equal
@@ -340,28 +334,38 @@ export function emptySchemaObject() {
  * Inner values are `WeakRef`s: a selector held strongly here would strongly
  * reference its schema — the outer `WeakMap` key — pinning both forever.
  * Dead refs are dropped lazily on lookup.
+ *
+ * As a `WeakMap`, this can only map from GC-able objects, so {@link
+ * #canonicalSelectorsByPrimitiveSchema} handles primitives.
  */
-const canonicalSelectorsBySchema = new WeakMap<
+const canonicalSelectorsByObjectSchema = new WeakMap<
   object,
   Map<string, WeakRef<SchemaPathSelector>>
 >();
-// `WeakMap` keys must be objects; sentinels stand in for non-object schemas.
-const NO_SCHEMA_KEY: Record<never, never> = {};
-const TRUE_SCHEMA_KEY: Record<never, never> = {};
-const FALSE_SCHEMA_KEY: Record<never, never> = {};
+
+/**
+ * Like {@link #canonicalSelectorsByObjectSchema}, except for primitive-valued schemas
+ * including the "schema" `undefined`.
+ */
+const canonicalSelectorsByPrimitiveSchema = new Map<
+  boolean | undefined,
+  Map<string, WeakRef<SchemaPathSelector>>
+>();
+
+/**
+ * Path-key strings per (frozen) path array identity. `internPathSelector()`
+ * computes the key on EVERY call -- including idempotent re-interning of an
+ * already-canonical selector, the common repeat case -- and that string build
+ * showed up with >100ms self time in remount profiles. Canonical selectors
+ * carry frozen, identity-stable path arrays, so a `WeakMap` hits.
+ */
+const selectorPathKeyCache = new WeakMap<readonly string[], string>();
 
 /**
  * Injective string key for a path: each component is length-prefixed, so a
  * component containing the separator cannot collide with a differently-split
  * path.
  */
-// Path-key strings per (frozen) path array identity. internPathSelector
-// computes the key on EVERY call — including idempotent re-interning of an
-// already-canonical selector, the common repeat case — and that string
-// build showed up with >100ms self time in remount profiles. Canonical
-// selectors carry frozen, identity-stable path arrays, so a WeakMap hits.
-const selectorPathKeyCache = new WeakMap<readonly string[], string>();
-
 const selectorPathKey = (path: readonly string[]): string => {
   if (path.length === 0) return "";
   const cached = selectorPathKeyCache.get(path);
@@ -375,34 +379,52 @@ const selectorPathKey = (path: readonly string[]): string => {
 };
 
 /**
- * Sweep threshold for a per-schema path map: schemas that never die (interned
- * canonical schemas, the boolean/no-schema sentinels) would otherwise
- * accumulate `pathKey -> dead WeakRef` entries forever, since the lazy
- * cleanup below only fires when the exact same path is looked up again.
+ * Sweep threshold for a per-schema path map: schemas that never die -- interned
+ * canonical schemas, primitive schemas, or `undefined` (no schama) -- would
+ * otherwise accumulate `pathKey -> dead WeakRef` entries forever, since the
+ * lazy cleanup below only fires when the exact same path is looked up again.
  * Sweeping on insert once the map is large bounds growth to live selectors
  * (plus the threshold).
  */
 const SELECTOR_CACHE_SWEEP_THRESHOLD = 2048;
 
+/**
+ * Returns a deep-frozen `SchemaPathSelector` whose `schema` (if any) is the
+ * canonical interned instance and whose `path` array is frozen.
+ *
+ * Usually the input reference itself is canonicalized in place — its `schema`
+ * replaced with the interned instance if needed, then it and its `path` frozen
+ * — and returned. The one exception: when the input is **already frozen** and
+ * its `schema` is not the canonical interned instance, the schema cannot be
+ * written back, so a new deep-frozen selector is allocated and returned.
+ * Therefore the result is NOT guaranteed to be `===` to the input. (It is `===`
+ * when the input is mutable _and_ there is no already-interned equivalent.)
+ *
+ * Idempotent: re-interning a result returns that same result
+ * (`internPathSelector(internPathSelector(x)) === internPathSelector(x)`),
+ * since a returned selector's `schema` is already canonical.
+ *
+ * Exists so that callers who feed selectors into `MapSetStringToPathSelectors`
+ * (or any other cache keyed on `hashStringOf()` of a selector) can hand in an
+ * already-interned, deep-frozen selector. That satisfies the `isDeepFrozen()`
+ * guard internal to `hashOf()` and lets its `WeakMap` cache retain its hash
+ * across repeat calls.
+ */
 export function internPathSelector(
   selector: SchemaPathSelector,
 ): SchemaPathSelector {
   const { path, schema } = selector;
 
   const interned = schema === undefined ? undefined : internSchema(schema);
-  const schemaKey = interned === undefined
-    ? NO_SCHEMA_KEY
-    : interned === true
-    ? TRUE_SCHEMA_KEY
-    : interned === false
-    ? FALSE_SCHEMA_KEY
-    : (interned as object);
-
-  let byPath = canonicalSelectorsBySchema.get(schemaKey);
+  const topMap: CanonicalSelectorMap = (typeof interned === "object")
+    ? canonicalSelectorsByObjectSchema
+    : canonicalSelectorsByPrimitiveSchema;
+  let byPath = topMap.get(interned);
   if (byPath === undefined) {
     byPath = new Map();
-    canonicalSelectorsBySchema.set(schemaKey, byPath);
+    topMap.set(interned, byPath);
   }
+
   const pathK = selectorPathKey(path);
   const existingRef = byPath.get(pathK);
   if (existingRef !== undefined) {

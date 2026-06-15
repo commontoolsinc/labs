@@ -926,7 +926,7 @@ describe("schema-utils", () => {
   describe("internPathSelector", () => {
     // Content-unique markers guarantee no prior interning has seen these
     // schemas — avoids the flake shape Dan flagged on PR #3335.
-    const uniqueSchema = (): JSONSchema => ({
+    const uniqueSchema = (): JSONSchemaObj => ({
       type: "object",
       title: `internPathSelectorTestAt${Date.now()}-${Math.random()}`,
     });
@@ -1042,6 +1042,74 @@ describe("schema-utils", () => {
       const second = internPathSelector(selector);
       expect(first).toBe(second);
       expect(first).toBe(selector);
+    });
+
+    it("canonicalizes two distinct equal selectors (object schema) to one instance", () => {
+      const schema = uniqueSchema();
+      const a = internPathSelector({ path: ["x"], schema });
+      // A *distinct* selector object carrying a structurally-equal (but
+      // separate) schema object must resolve to the very same canonical
+      // instance — not merely the same-object idempotency the test above checks.
+      const b = internPathSelector({ path: ["x"], schema: { ...schema } });
+      expect(b).toBe(a);
+    });
+
+    it("canonicalizes two distinct equal selectors with primitive/absent schemas", () => {
+      // Exercises the primitive-schema map (booleans and the `undefined`
+      // "schema") rather than the object `WeakMap`. Fresh unique paths keep
+      // prior interning in this process from pre-populating the cache.
+      const base = `prim-${Date.now()}-${Math.random()}`;
+      for (const schema of [undefined, true, false] as const) {
+        const path = [`${base}-${String(schema)}`];
+        const a = internPathSelector({ path: [...path], schema });
+        const b = internPathSelector({ path: [...path], schema });
+        expect(b).toBe(a);
+      }
+    });
+
+    it("keeps the same path distinct across schema kinds", () => {
+      // Same path, schema ∈ {undefined, true, false, object}. Each kind must
+      // get its own canonical instance: this guards routing between the object
+      // `WeakMap` and the primitive `Map`, plus the per-key separation of
+      // `undefined`/`true`/`false` within the primitive map.
+      const path = [`kinds-${Date.now()}-${Math.random()}`];
+      const results = [
+        internPathSelector({ path: [...path] }),
+        internPathSelector({ path: [...path], schema: true }),
+        internPathSelector({ path: [...path], schema: false }),
+        internPathSelector({ path: [...path], schema: uniqueSchema() }),
+      ];
+      expect(new Set(results).size).toBe(4);
+    });
+
+    it("does not conflate paths that share a naive concatenation", () => {
+      // Same canonical schema, so path is the only discriminator. A separator
+      // join would collide `["a","b"]` with `["a.b"]`; the length-prefixed key
+      // keeps all three apart.
+      const schema = internSchema(uniqueSchema());
+      const s1 = internPathSelector({ path: ["a", "b"], schema });
+      const s2 = internPathSelector({ path: ["ab"], schema });
+      const s3 = internPathSelector({ path: ["a.b"], schema });
+      expect(s1).not.toBe(s2);
+      expect(s1).not.toBe(s3);
+      expect(s2).not.toBe(s3);
+    });
+
+    it("freezes and canonicalizes a mutable input in place even on a cache hit", () => {
+      const schema = uniqueSchema();
+      const canonical = internPathSelector({ path: ["x"], schema });
+      // A distinct, still-mutable selector with equal content. The canonical
+      // already exists, so the return value is that canonical (not this input) —
+      // but per the pre-cache contract, the input is nonetheless frozen and its
+      // schema canonicalized in place, for callers that keep using their object.
+      const dup: SchemaPathSelector = { path: ["x"], schema: { ...schema } };
+      expect(Object.isFrozen(dup)).toBe(false);
+      const result = internPathSelector(dup);
+      expect(result).toBe(canonical);
+      expect(result).not.toBe(dup);
+      expect(Object.isFrozen(dup)).toBe(true);
+      expect(Object.isFrozen(dup.path)).toBe(true);
+      expect(dup.schema).toBe(canonical.schema);
     });
   });
 });
