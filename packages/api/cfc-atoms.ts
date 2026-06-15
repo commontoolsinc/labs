@@ -13,7 +13,6 @@ export type {
   CfcUserSurfaceInputAtom,
 } from "./cfc.ts";
 export {
-  CFC_ATOM_BASE,
   CFC_ATOM_TYPE,
   CFC_COMPILED_BY_ATOM,
   CFC_COMPILED_BY_ATOM_PREFIX,

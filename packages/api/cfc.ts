@@ -24,25 +24,23 @@ export interface CfcAtomObject extends Readonly<Record<string, CfcJsonValue>> {}
 
 export type CfcAtom = CfcJsonValue;
 
-export const CFC_ATOM_BASE = "https://commonfabric.org/cfc/atom/" as const;
-
 export const CFC_ATOM_TYPE = {
-  Builtin: `${CFC_ATOM_BASE}Builtin`,
-  Caveat: `${CFC_ATOM_BASE}Caveat`,
-  InjectionSafe: `${CFC_ATOM_BASE}InjectionSafe`,
-  LinkReference: `${CFC_ATOM_BASE}LinkReference`,
-  Origin: `${CFC_ATOM_BASE}Origin`,
+  Builtin: "https://commonfabric.org/cfc/atom/Builtin",
+  Caveat: "https://commonfabric.org/cfc/atom/Caveat",
+  InjectionSafe: "https://commonfabric.org/cfc/atom/InjectionSafe",
+  LinkReference: "https://commonfabric.org/cfc/atom/LinkReference",
+  Origin: "https://commonfabric.org/cfc/atom/Origin",
   // Hereditary certification (spec §15.1.1 / §3.1.6.1): survives combination
   // via the class-aware meet — present on an output only when present on
   // every input.
-  PolicyCertified: `${CFC_ATOM_BASE}PolicyCertified`,
-  PromptSlotBound: `${CFC_ATOM_BASE}PromptSlotBound`,
-  PromptSlotInfluence: `${CFC_ATOM_BASE}PromptSlotInfluence`,
-  Resource: `${CFC_ATOM_BASE}Resource`,
+  PolicyCertified: "https://commonfabric.org/cfc/atom/PolicyCertified",
+  PromptSlotBound: "https://commonfabric.org/cfc/atom/PromptSlotBound",
+  PromptSlotInfluence: "https://commonfabric.org/cfc/atom/PromptSlotInfluence",
+  Resource: "https://commonfabric.org/cfc/atom/Resource",
   // Runtime-minted derivation provenance (spec §8.9.3): which implementation
   // produced this value. Evidence — not authorable in schemas.
-  TransformedBy: `${CFC_ATOM_BASE}TransformedBy`,
-  UserSurfaceInput: `${CFC_ATOM_BASE}UserSurfaceInput`,
+  TransformedBy: "https://commonfabric.org/cfc/atom/TransformedBy",
+  UserSurfaceInput: "https://commonfabric.org/cfc/atom/UserSurfaceInput",
 } as const;
 
 export const CFC_RUNTIME_SUBJECT = "did:web:commonfabric.org#runtime";
@@ -66,8 +64,7 @@ export const CFC_COMPILED_BY_ATOM_PREFIX = "cf-compiled-by:" as const;
  * real attestation data; until then minting is gated to builtin-authored
  * writes (see prefix doc above).
  */
-export const CFC_COMPILED_BY_ATOM =
-  `${CFC_COMPILED_BY_ATOM_PREFIX}cf-compiler` as const;
+export const CFC_COMPILED_BY_ATOM = "cf-compiled-by:cf-compiler" as const;
 
 export const CFC_CONCEPT_KIND = {
   PromptInfluence: "https://commonfabric.org/cfc/concepts/prompt-influence",
