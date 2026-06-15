@@ -1323,6 +1323,25 @@ export class PatternManager {
   }
 
   /**
+   * Best-effort authored source files for a live pattern by its content
+   * `{ identity, symbol }` — the source-viewing debug surface
+   * (`getPatternSources`). Returns undefined when the pattern is not live in
+   * this session or carries no program (e.g. a source-free by-identity
+   * reload); callers degrade gracefully (omit the pattern). Source-bearing
+   * cross-session recovery is the source-doc closure's job, not this.
+   */
+  getPatternFilesBySync(
+    identity: string,
+    symbol: string,
+  ): { name: string; contents: string }[] | undefined {
+    const pattern = this.artifactFromIdentitySync(identity, symbol) as
+      | Pattern
+      | undefined;
+    if (!pattern) return undefined;
+    return getPatternProgram(pattern)?.files;
+  }
+
+  /**
    * Reuse a module already evaluated in-memory (as part of any bundle) for a
    * by-identity load, skipping the storage closure read + SES re-evaluation.
    * Returns undefined on a miss so the caller falls back to the cache path.

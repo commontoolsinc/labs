@@ -2299,10 +2299,10 @@ export class Scheduler {
         this.isDemandedPullComputation(action),
       isLiveEffect: (action) => this.isLiveEffect(action),
       isPullDemandRootEffect: (action) => this.isPullDemandRootEffect(action),
-      getPatternId: (action) => {
+      getPatternIdentity: (action) => {
         const annotated = action as Partial<TelemetryAnnotations>;
         return annotated.pattern
-          ? this.runtime.patternManager.getPatternId(annotated.pattern)
+          ? this.runtime.patternManager.getArtifactEntryRef(annotated.pattern)
           : undefined;
       },
     };

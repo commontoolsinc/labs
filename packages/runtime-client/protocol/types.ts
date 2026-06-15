@@ -389,8 +389,8 @@ export interface PatternSourceFile {
 }
 
 export interface PatternSourceInfo {
-  patternId: string;
-  patternName?: string;
+  /** Content identity of the pattern's entry module (`cf:module/<hash>`). */
+  identity: string;
   files: PatternSourceFile[];
 }
 

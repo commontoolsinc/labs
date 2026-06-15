@@ -126,7 +126,7 @@ import {
   WorkerReconciler,
 } from "@commonfabric/html/worker";
 import type { VDomOp } from "../protocol/types.ts";
-import type { JSONValue, RuntimeOptions, URI } from "@commonfabric/runner";
+import type { JSONValue, RuntimeOptions } from "@commonfabric/runner";
 
 const MAX_SERIALIZATION_DEPTH = 5;
 const blobUploadEncoding = new JsonEncodingContext();
@@ -1095,30 +1095,23 @@ export class RuntimeProcessor {
     const patterns: PatternSourcesResponse["patterns"] = [];
 
     for (const node of snapshot.nodes) {
-      if (node.patternId && !seen.has(node.patternId)) {
-        seen.add(node.patternId);
-        try {
-          const meta = this.runtime.patternManager.getPatternMeta({
-            patternId: node.patternId as URI,
-          });
-          if (meta?.program && typeof meta.program === "object") {
-            const program = meta.program as {
-              files?: Array<{ name: string; contents: string }>;
-            };
-            if (program.files) {
-              patterns.push({
-                patternId: node.patternId,
-                patternName: meta.patternName,
-                files: program.files.map((f) => ({
-                  name: f.name,
-                  contents: f.contents,
-                })),
-              });
-            }
-          }
-        } catch {
-          // Pattern not found or no metadata available
-        }
+      const ref = node.patternIdentity;
+      if (!ref || seen.has(ref.identity)) continue;
+      seen.add(ref.identity);
+      // Best-effort source view for LIVE patterns: resolve the running
+      // pattern by identity and read its authored files (source is per
+      // module, so the symbol only selects a representative artifact). A
+      // source-free by-identity reload carries no program — omit it (same
+      // graceful degradation as the prior meta-cell read's try/catch).
+      const files = this.runtime.patternManager.getPatternFilesBySync(
+        ref.identity,
+        ref.symbol,
+      );
+      if (files) {
+        patterns.push({
+          identity: ref.identity,
+          files: files.map((f) => ({ name: f.name, contents: f.contents })),
+        });
       }
     }
     return { patterns };
