@@ -52,15 +52,15 @@ nobody suggests the same place three days running.
     2. _(worked around, test-runner only)_ `reactOn: db` left the `recentVisits`
        query stale after writes in the emulated test runner; reacting on a
        `PerSpace<number>` `sqliteRev` counter the handlers bump is reliable.
-    3. **⚠️ OPEN, blocks live deploy:** on a _deployed_ piece, `db.exec` in the
-       mutating handlers throws "invalid database handle" — the `SqliteDb`
-       handle isn't materialized on the deployed handler-input path (works fine
-       in the emulated `cf test` runner). Reliably reproduced; root cause not
-       yet isolated (it is NOT the cfLink column, NOT any single query — likely
-       an emergent interaction in this scoped pattern). **Filed for the
-       sqlite-builtin owner; the live canonical piece stays on the previous
-       array-based history until this is fixed.** The migration here is complete
-       and green in tests, ready to deploy once the bug is resolved.
+    3. _(resolved by runtime PR #3967)_ On a _deployed_ piece, `db.exec` in the
+       mutating handlers threw "invalid database handle" — the `SqliteDb` handle
+       wasn't materialized on the deployed handler-input path (worked fine in
+       the emulated `cf test` runner). Root cause was a **client-side dispatch
+       race**: `cf piece call` dispatched the handler before its asCell input
+       docs had synced into the local replica, so the synchronous handle read
+       saw an empty doc. Fixed in the runtime by #3967 (merged) and verified
+       end-to-end on a deployed prod piece — `db.exec` writes land and the
+       migration is fully live. Full writeup in `SQLITE-DEPLOY-BUG.md`.
 
 ### 1b. Durable vote-history snapshot ✅ (shipped)
 
