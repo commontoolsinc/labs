@@ -81,7 +81,8 @@ not a style reference.
 
 ## fixture
 
-`gideon-tests/`, `integration/`, `test/`, `scope-bug-computed-vnode-blank/`,
+`gideon-tests/`, `integration/`, `keyed-collections/` (collection/aggregate POC
+and perf fixture; not a public API), `test/`, `scope-bug-computed-vnode-blank/`,
 `scope-bug-ct1597-forward/`, `scope-bug-ct1597-reduce/`, `cell-link.tsx`
 (suggestion tester), `nested-map-ifelse-test.tsx`, `render-test.tsx`,
 `self-reference-test.tsx`, and every `*.test.ts(x)` file anywhere in this
