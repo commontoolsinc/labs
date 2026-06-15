@@ -230,11 +230,11 @@ export const resolveCfcSchemaRefs = (
     if (cached !== undefined) {
       return cached === RESOLVED_UNDEFINED ? undefined : cached;
     }
-    // Intern record results so the cached instance is canonical and frozen —
-    // downstream identity-keyed caches then hit, and sharing it across
-    // callers is safe.
+    // Intern the result so the cached instance is canonical and frozen —
+    // downstream identity-keyed caches then hit, and sharing it across callers
+    // is safe. Primitive and `undefined` results intern to themselves.
     const raw = resolveCfcSchemaRefsUncached(schemaObj, fullSchema);
-    const result = raw !== undefined && isRecord(raw) ? internSchema(raw) : raw;
+    const result = internSchema(raw);
     byFull.set(fullKey, result === undefined ? RESOLVED_UNDEFINED : result);
     return result;
   }
