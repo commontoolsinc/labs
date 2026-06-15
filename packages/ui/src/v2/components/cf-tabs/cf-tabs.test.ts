@@ -77,9 +77,18 @@ class FakeTab {
   value: string;
   disabled = false;
   selected = false;
+  // A real <cf-tab> is a custom element; handleKeydown gates on tagName and
+  // calls focus()/click() on the next tab. click() must dispatch the bubbling
+  // `tab-click` the real element emits — wired per-instance in makeTabs.
+  tagName = "CF-TAB";
+  onClickDispatch: (() => void) | null = null;
   attributes = new Map<string, string>();
   constructor(value: string) {
     this.value = value;
+  }
+  focus(): void {}
+  click(): void {
+    this.onClickDispatch?.();
   }
   setAttribute(name: string, value: string): void {
     this.attributes.set(name, value);
@@ -174,11 +183,34 @@ function makeTabs(cell: CellHandle<string>, tabValues: string[]) {
     return orig(e);
   };
 
+  // Reach the component's real private handlers. handleKeydown does the arrow
+  // math and calls nextTab.focus()/click(); a real <cf-tab>.click() emits a
+  // tab-click the component listens for, so we route FakeTab.click() →
+  // handleTabClick to mirror that hop. (The literal addEventListener wiring in
+  // connectedCallback can't run under the headless DOM shim — Lit's base
+  // EventTarget doesn't use FakeHTMLElement's listener store — so we invoke the
+  // handlers directly; the keyboard ROUTE and its index math are still
+  // exercised end to end.)
+  const handleTabClick = (tabs as unknown as {
+    handleTabClick: (e: { detail: { tab: unknown } }) => void;
+  }).handleTabClick;
+  const handleKeydown = (tabs as unknown as {
+    handleKeydown: (e: unknown) => void;
+  }).handleKeydown;
+  fakeTabs.forEach((t) => {
+    t.onClickDispatch = () => handleTabClick({ detail: { tab: t } });
+  });
+
   const clickTab = (value: string) => {
     const tab = fakeTabs.find((t) => t.value === value);
-    (tabs as unknown as {
-      handleTabClick: (e: { detail: { tab: unknown } }) => void;
-    }).handleTabClick({ detail: { tab } });
+    handleTabClick({ detail: { tab } });
+  };
+
+  // Keyboard: drive the real handleKeydown with the focused tab as target; it
+  // computes the next tab and calls nextTab.click() → handleTabClick.
+  const pressKey = (key: string, fromValue: string) => {
+    const target = fakeTabs.find((t) => t.value === fromValue);
+    handleKeydown({ key, target, preventDefault() {} });
   };
 
   const selectedTab = () => fakeTabs.find((t) => t.selected)?.value;
@@ -190,6 +222,7 @@ function makeTabs(cell: CellHandle<string>, tabValues: string[]) {
     fakePanels,
     changes,
     clickTab,
+    pressKey,
     selectedTab,
     visiblePanel,
   };
@@ -249,6 +282,37 @@ describe("CFTabs cf-change emission contract (CT-1746)", () => {
 
     expect(h.changes.length).toBe(0);
     expect(cell.get()).toBe("active");
+  });
+
+  it("emits exactly ONE cf-change via the real keyboard route (keydown → nextTab.click() → tab-click → handleTabClick)", () => {
+    // Guards the PR's keyboard-parity claim through the ACTUAL route — the
+    // wired `keydown`/`tab-click` listeners — not a direct handler call, so a
+    // future regression that stops keyboard nav routing through the click path
+    // would fail here.
+    const cell = createMockCellHandle<string>("active");
+    const h = makeTabs(cell, ["active", "progress", "pending", "feed"]);
+    h.changes.length = 0;
+
+    h.pressKey("ArrowRight", "active"); // active → next enabled tab = progress
+
+    expect(h.changes.length).toBe(1);
+    expect(h.changes[0].value).toBe("progress");
+    expect(h.changes[0].oldValue).toBe("active");
+    expect(cell.get()).toBe("progress");
+    expect(h.selectedTab()).toBe("progress");
+  });
+
+  it("keyboard nav wraps and still emits exactly one cf-change (ArrowLeft from first tab → last)", () => {
+    const cell = createMockCellHandle<string>("active");
+    const h = makeTabs(cell, ["active", "progress", "pending", "feed"]);
+    h.changes.length = 0;
+
+    h.pressKey("ArrowLeft", "active"); // wraps to last enabled tab = feed
+
+    expect(h.changes.length).toBe(1);
+    expect(h.changes[0].value).toBe("feed");
+    expect(cell.get()).toBe("feed");
+    expect(h.selectedTab()).toBe("feed");
   });
 
   it("ignores clicks on disabled tabs", () => {
