@@ -609,14 +609,25 @@ function numberArg(name: string, fallback: number): number {
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
-function numberListArg(name: string, fallback: readonly number[]): number[] {
+function numberListArg(
+  name: string,
+  fallback: readonly number[],
+  minimum = 0,
+): number[] {
   const prefix = `--${name}=`;
   const arg = Deno.args.find((entry) => entry.startsWith(prefix));
   if (!arg) return [...fallback];
-  const parsed = arg.slice(prefix.length).split(",")
-    .map((entry) => Number(entry.trim()))
-    .filter((entry) => Number.isInteger(entry) && entry >= 0);
-  return parsed.length > 0 ? parsed : [...fallback];
+  const values = arg.slice(prefix.length).split(",")
+    .map((entry) => Number(entry.trim()));
+  const invalid = values.find((entry) =>
+    !Number.isInteger(entry) || entry < minimum
+  );
+  if (invalid !== undefined) {
+    throw new Error(
+      `--${name} must be comma-separated integers >= ${minimum}; got ${arg}`,
+    );
+  }
+  return values;
 }
 
 function stringArg(name: string, fallback: string): string {
@@ -636,6 +647,7 @@ function explicitCasesArg(
     if (!match) return [];
     const optionCount = Number(match[1]);
     const userCount = Number(match[2]);
+    validateUserCount(userCount, entry.trim());
     return [{
       optionCount,
       userCount,
@@ -646,12 +658,21 @@ function explicitCasesArg(
   return cases.length > 0 ? cases : undefined;
 }
 
+function validateUserCount(userCount: number, source: string): void {
+  if (!Number.isInteger(userCount) || userCount < 1) {
+    throw new Error(
+      `lunch-poll diagnostics require at least 1 user for ${source}; ` +
+        `got ${userCount}`,
+    );
+  }
+}
+
 function matrixConfigFromArgs(): MatrixConfig {
   const quick = Deno.args.includes("--quick");
   return {
     program: stringArg("program", "main.tsx"),
     optionCounts: numberListArg("options", quick ? [1, 3] : [1, 3, 10]),
-    userCounts: numberListArg("users", quick ? [2] : [2, 5]),
+    userCounts: numberListArg("users", quick ? [2] : [2, 5], 1),
     voteRounds: numberArg("rounds", quick ? 1 : 3),
     includeHomepageRefresh: !Deno.args.includes("--skip-refresh"),
   };
@@ -663,6 +684,7 @@ function casesFromConfig(config: MatrixConfig): CaseConfig[] {
   const cases: CaseConfig[] = [];
   for (const optionCount of config.optionCounts) {
     for (const userCount of config.userCounts) {
+      validateUserCount(userCount, `${optionCount}x${userCount}`);
       cases.push({
         optionCount,
         userCount,
@@ -715,4 +737,11 @@ async function run(): Promise<void> {
   ));
 }
 
-if (import.meta.main) await run();
+if (import.meta.main) {
+  try {
+    await run();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    Deno.exit(1);
+  }
+}

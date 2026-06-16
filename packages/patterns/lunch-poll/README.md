@@ -10,7 +10,9 @@ By default, diagnostics run against `main.tsx` so runtime changes are measured
 against the product lunch-poll graph instead of a comparison fixture.
 
 Run a single lunch-poll scenario with `N` options, `M` voters, and `X` vote
-cycles by setting one option count, one user count, and one round count:
+cycles by setting one option count, one user count, and one round count. `M`
+must be at least `1` because one user is the host that creates options and
+drives refreshes:
 
 ```bash
 deno run -A packages/patterns/tools/lunch-poll-diagnose.ts \
