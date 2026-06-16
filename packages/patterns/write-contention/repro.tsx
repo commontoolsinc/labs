@@ -67,8 +67,20 @@ const setKey = handler<SetKeyEvent, { map: MapCell }>(
   },
 );
 
+// SECOND INDEPENDENT shared-list cell, disjoint from `list`. For the space-level
+// granularity test: if writers pushing ONLY `listB` raise the drop rate of a
+// disjoint writer group pushing ONLY `list`, the serialization unit is broader
+// than the document (independent cells in one space collide).
+const appendB = handler<AppendEvent, { listB: ListCell }>(
+  ({ marker }, { listB }) => {
+    if (!marker) return;
+    listB.push(marker);
+  },
+);
+
 export interface ContentionInput {
   list?: PerSpace<MarkerList | Default<typeof EMPTY_LIST>>;
+  listB?: PerSpace<MarkerList | Default<typeof EMPTY_LIST>>;
   map?: PerSpace<MarkerMap | Default<typeof EMPTY_MAP>>;
 }
 
@@ -76,31 +88,41 @@ export interface ContentionOutput {
   [NAME]: string;
   [UI]: VNode;
   list: readonly string[];
+  listB: readonly string[];
   mapKeys: readonly string[];
   listCount: number;
+  listBCount: number;
   mapCount: number;
   append: Stream<AppendEvent>;
+  appendB: Stream<AppendEvent>;
   setKey: Stream<SetKeyEvent>;
 }
 
-export default pattern<ContentionInput, ContentionOutput>(({ list, map }) => {
-  const listSnapshot = computed(() => list ?? EMPTY_LIST);
-  const mapKeys = computed(() => Object.keys(map ?? EMPTY_MAP));
-  const listCount = computed(() => (list ?? EMPTY_LIST).length);
-  const mapCount = computed(() => Object.keys(map ?? EMPTY_MAP).length);
+export default pattern<ContentionInput, ContentionOutput>(
+  ({ list, listB, map }) => {
+    const listSnapshot = computed(() => list ?? EMPTY_LIST);
+    const listBSnapshot = computed(() => listB ?? EMPTY_LIST);
+    const mapKeys = computed(() => Object.keys(map ?? EMPTY_MAP));
+    const listCount = computed(() => (list ?? EMPTY_LIST).length);
+    const listBCount = computed(() => (listB ?? EMPTY_LIST).length);
+    const mapCount = computed(() => Object.keys(map ?? EMPTY_MAP).length);
 
-  return {
-    [NAME]: "write-contention repro",
-    [UI]: (
-      <div>
-        list={listCount} · map={mapCount}
-      </div>
-    ),
-    list: listSnapshot,
-    mapKeys,
-    listCount,
-    mapCount,
-    append: append({ list }),
-    setKey: setKey({ map }),
-  };
-});
+    return {
+      [NAME]: "write-contention repro",
+      [UI]: (
+        <div>
+          list={listCount} · listB={listBCount} · map={mapCount}
+        </div>
+      ),
+      list: listSnapshot,
+      listB: listBSnapshot,
+      mapKeys,
+      listCount,
+      listBCount,
+      mapCount,
+      append: append({ list }),
+      appendB: appendB({ listB }),
+      setKey: setKey({ map }),
+    };
+  },
+);
