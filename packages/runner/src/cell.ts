@@ -2900,8 +2900,8 @@ export function internCellLinkSchema(
 export function internCellLinkSchema(
   schema?: JSONSchema,
 ): JSONSchema | undefined {
-  if (schema === undefined) return undefined;
-  // Already canonical (covers boolean schemas): skip the proxy scan.
+  // Already canonical (covers `undefined` and boolean schemas): skip the proxy
+  // scan and return as-is.
   if (isInternedSchema(schema)) return schema;
   if (containsCellResult(schema)) {
     return internSchema(JSON.parse(JSON.stringify(schema)) as JSONSchema);
