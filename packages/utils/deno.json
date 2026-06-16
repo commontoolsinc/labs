@@ -10,6 +10,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./arrays": "./src/arrays.ts",
+    "./async-local-store": "./src/async-local-store.ts",
     "./base64url": "./src/base64url.ts",
     "./bigint": "./src/bigint.ts",
     "./cache": "./src/cache.ts",

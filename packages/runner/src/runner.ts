@@ -3487,9 +3487,9 @@ export class Runner {
     const implRef =
       (module as { $implRef?: { identity: string; symbol: string } }).$implRef;
     if (implRef) {
-      // The module carries a content-addressed `$implRef` and/or a legacy
-      // `implementationRef` — it was expected to resolve through the verified
-      // registries — yet resolution fell through to here. The action will run
+      // The module carries a content-addressed `$implRef` — it was expected to
+      // resolve through the verified registry — yet resolution fell through to
+      // here. The action will run
       // SES-recompiled and CFC-unverified (`writeAuthorizedBy` sees
       // `unsupported`), so leave a breadcrumb for enforcement-mode debugging.
       logger.debug("verified-fallback-downgrade", () => [
