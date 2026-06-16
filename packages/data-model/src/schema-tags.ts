@@ -1,10 +1,13 @@
 /**
- * Discovery-tag extraction for schema doc text.
+ * Discovery-tag utilities for JSONSchema values.
  *
- * This module is a dependency-free leaf so that the schema generator (which
- * type-checks its import graph under stricter compiler options) can share
- * the hashtag definition with runtime consumers.
+ * This module is a dependency-free leaf (only the `JSONSchema` type) so that
+ * the schema generator — which type-checks its import graph under stricter
+ * compiler options — and client-side consumers can share the tag definition
+ * with the runtime.
  */
+
+import type { JSONSchema } from "@commonfabric/api";
 
 const HASHTAG_PATTERN = /#([a-z0-9-]+)/gi;
 
@@ -19,4 +22,88 @@ export function extractHashtags(text: string): string[] {
     if (!tags.includes(tag)) tags.push(tag);
   }
   return tags;
+}
+
+/**
+ * Schema keywords whose values are themselves schemas (or collections of
+ * schemas). Used to walk the schema tree without descending into data
+ * positions such as `default` or `examples`.
+ */
+const SCHEMA_CHILD_KEYWORDS = [
+  "properties",
+  "additionalProperties",
+  "items",
+  "anyOf",
+  "allOf",
+  "oneOf",
+  "not",
+  "contentSchema",
+  "$defs",
+  "definitions",
+] as const;
+
+const RECORD_VALUED_KEYWORDS = new Set<string>([
+  "properties",
+  "$defs",
+  "definitions",
+]);
+
+/**
+ * Collect the discovery tags of a schema.
+ *
+ * Reads the structured `tags` fields emitted by the schema generator,
+ * aggregated across the schema tree (root and nested schemas), lowercased
+ * and deduplicated.
+ *
+ * Schemas generated before structured tags carry hashtags only in
+ * description text. When no structured `tags` field is present anywhere in
+ * the tree, falls back to extracting hashtags from the serialized schema.
+ * TODO(remove-legacy-tags): drop the serialized-text fallback once stored
+ * schemas predating structured tags have been regenerated.
+ */
+export function tagsFromSchema(
+  schema: JSONSchema | undefined | null,
+): string[] {
+  if (schema === null || typeof schema !== "object") return [];
+
+  const tags: string[] = [];
+  const visited = new Set<object>();
+
+  const visit = (node: unknown): void => {
+    if (node === null || typeof node !== "object" || Array.isArray(node)) {
+      return;
+    }
+    if (visited.has(node)) return;
+    visited.add(node);
+
+    const record = node as Record<string, unknown>;
+    if (Array.isArray(record.tags)) {
+      for (const tag of record.tags) {
+        if (typeof tag !== "string") continue;
+        const lowered = tag.toLowerCase();
+        if (!tags.includes(lowered)) tags.push(lowered);
+      }
+    }
+
+    for (const keyword of SCHEMA_CHILD_KEYWORDS) {
+      const child = record[keyword];
+      if (child === null || typeof child !== "object") continue;
+      if (Array.isArray(child)) {
+        for (const entry of child) visit(entry);
+      } else if (RECORD_VALUED_KEYWORDS.has(keyword)) {
+        for (const value of Object.values(child)) visit(value);
+      } else {
+        visit(child);
+      }
+    }
+  };
+
+  visit(schema);
+  if (tags.length > 0) return tags;
+
+  // Legacy fallback: hashtags embedded in description text of schemas that
+  // predate the structured `tags` field.
+  // TODO(remove-legacy-tags): remove once stored schemas have been
+  // regenerated with structured tags.
+  return extractHashtags(JSON.stringify(schema));
 }

@@ -7,6 +7,7 @@ import {
 } from "@commonfabric/api";
 import { h } from "@commonfabric/html";
 import { favoriteListSchema } from "@commonfabric/home-schemas";
+import { extractHashtags } from "@commonfabric/data-model/schema-tags";
 import { HttpProgramResolver } from "@commonfabric/js-compiler";
 import { type Cell } from "../cell.ts";
 import { type Action, type ReactivityLog } from "../scheduler.ts";
@@ -459,8 +460,14 @@ function searchFavoritesForHashtag(
         for (const t of userTags) {
           if (t.toLowerCase() === searchTermWithoutHash) return true;
         }
-        // Search schema tag for hashtags
-        return tagMatchesHashtag(entry.tag, searchTermWithoutHash);
+        // Match the discovery tags snapshotted when favorited.
+        // TODO(remove-legacy-tags): favorites created before `tags` carry
+        // only the serialized-schema `tag`; extract hashtags from it until
+        // stored favorites have been rewritten.
+        const entryTags = entry.tags?.length
+          ? entry.tags
+          : extractHashtags(entry.tag ?? "");
+        return entryTags.includes(searchTermWithoutHash);
       }),
   );
 
@@ -748,19 +755,14 @@ function resolveHomeSpaceTarget(
           if (t.toLowerCase().includes(searchTerm)) return true;
         }
 
-        let tag = entry.tag;
-        if (!tag) {
-          try {
-            const { schema } = entry.cell.asSchemaFromLinks()
-              .getAsNormalizedFullLink();
-            if (schema !== undefined) {
-              tag = JSON.stringify(schema);
-            }
-          } catch {
-            // Schema not available yet
-          }
-        }
-        return tag?.toLowerCase().includes(searchTerm);
+        // Match the discovery tags snapshotted when favorited.
+        // TODO(remove-legacy-tags): favorites created before `tags` carry
+        // only the serialized-schema `tag`; extract hashtags from it until
+        // stored favorites have been rewritten.
+        const entryTags = entry.tags?.length
+          ? entry.tags
+          : extractHashtags(entry.tag ?? "");
+        return entryTags.some((t) => t.includes(searchTerm));
       });
 
       if (!match) {

@@ -15,6 +15,7 @@ import {
   Home,
   homeSchema,
 } from "@commonfabric/home-schemas";
+import { tagsFromSchema } from "@commonfabric/data-model/schema-tags";
 import { isRuntimeDisposedError } from "./shared/disposed-error.ts";
 
 type HandlerName = "addFavorite" | "removeFavorite";
@@ -29,9 +30,16 @@ export class FavoritesManager {
 
   /**
    * Add a piece to favorites (stored in the home space).
+   *
+   * Discovery tags are derived here, on the client, from the piece's result
+   * schema — which the backend surfaces on the piece's resolved cell ref.
+   * Deriving before the handler avoids the handler's event typing shadowing
+   * the piece's authored schema. An explicit `tag` overrides the derived
+   * tags.
+   *
    * @param space - The space the piece lives in (part of its address)
    * @param pieceId - The entity ID of the piece to add
-   * @param tag - Optional tag/category for the favorite
+   * @param tag - Optional explicit discovery tag (overrides schema tags)
    * @param spaceName - Optional human-readable name of the space
    */
   async addFavorite(
@@ -42,7 +50,35 @@ export class FavoritesManager {
   ): Promise<void> {
     const handler = await this.#getHandler("addFavorite");
     const pieceCellRef = this.#createPieceRef(space, pieceId);
-    await handler.send({ piece: pieceCellRef, tag: tag || "", spaceName });
+    const tags = await this.#deriveTags(space, pieceId, tag);
+    await handler.send({ piece: pieceCellRef, tags, spaceName });
+  }
+
+  /**
+   * Derive the discovery tags for a piece. An explicit tag wins; otherwise
+   * read the piece's result schema (carried on its resolved cell ref) and
+   * extract its tags. Returns `[]` when no schema is available — a tagless
+   * favorite that later code can heal.
+   */
+  async #deriveTags(
+    space: DID,
+    pieceId: string,
+    explicitTag?: string,
+  ): Promise<string[]> {
+    if (explicitTag) return [explicitTag.toLowerCase().replace(/^#/, "")];
+    try {
+      // `getPage` resolves the piece's cell ref, which the backend serializes
+      // with its result schema (`getAsLink({ includeSchema: true })`). It does
+      // not start the piece (runIt defaults to false), so a piece that is not
+      // already running may resolve without a schema and yield no tags — a
+      // tagless favorite that later code can heal.
+      const page = await this.#rt.getPage(pieceId, space);
+      const schema = page?.cell().ref().schema;
+      return schema ? tagsFromSchema(schema) : [];
+    } catch {
+      // A missing or unreadable piece schema yields no tags, not a failure.
+      return [];
+    }
   }
 
   /**

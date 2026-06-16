@@ -1076,6 +1076,97 @@ describe("wish built-in", () => {
       expect(data.type).toBe("favorite");
     });
 
+    it("matches favorites by structured tags", async () => {
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultPatternCell = runtime.getCell(
+        userIdentity.did(),
+        "default-pattern-structured",
+        undefined,
+        tx,
+      );
+      const favoritesCell = homeDefaultPatternCell.key("favorites");
+      const favoriteItem = runtime.getCell(
+        userIdentity.did(),
+        "favorite-item-structured",
+        undefined,
+        tx,
+      );
+      favoriteItem.set({ type: "favorite" });
+      favoritesCell.set([{ cell: favoriteItem, tags: ["structured-tag"] }]);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultPatternCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => {
+        return { result: wish({ query: "#structured-tag", scope: ["~"] }) };
+      });
+      const resultCell = runtime.getCell<{ result?: { result?: unknown } }>(
+        patternSpace.did(),
+        "structured-tags-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+      await result.pull();
+
+      const data = (() => {
+        const r = result.key("result").get()?.result;
+        return (r as any)?.get?.() ?? r;
+      })();
+      expect(data?.type).toBe("favorite");
+    });
+
+    it("falls back to the legacy tag when tags is empty", async () => {
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultPatternCell = runtime.getCell(
+        userIdentity.did(),
+        "default-pattern-legacy",
+        undefined,
+        tx,
+      );
+      const favoritesCell = homeDefaultPatternCell.key("favorites");
+      const favoriteItem = runtime.getCell(
+        userIdentity.did(),
+        "favorite-item-legacy",
+        undefined,
+        tx,
+      );
+      favoriteItem.set({ type: "favorite" });
+      // An empty tags array must not mask the legacy serialized-schema tag.
+      favoritesCell.set([
+        { cell: favoriteItem, tags: [], tag: "#legacy-fallback" },
+      ]);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultPatternCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => {
+        return { result: wish({ query: "#legacy-fallback", scope: ["~"] }) };
+      });
+      const resultCell = runtime.getCell<{ result?: { result?: unknown } }>(
+        patternSpace.did(),
+        "legacy-fallback-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+      await result.pull();
+
+      const data = (() => {
+        const r = result.key("result").get()?.result;
+        return (r as any)?.get?.() ?? r;
+      })();
+      expect(data?.type).toBe("favorite");
+    });
+
     it('searches both favorites and mentionables with scope: ["~", "."]', async () => {
       // Setup: Add favorites to home space
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
