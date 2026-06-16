@@ -1155,8 +1155,9 @@ describe("link-resolution", () => {
       expect(() => cellB.get()).toThrow();
     });
 
-    it("detects cycle when resolving link to its own subpath", async () => {
-      // Test case: A -> A/foo creates an infinite growing path
+    it("detects cycle when resolving link to its own subpath", () => {
+      // Test case: A -> A/foo creates an infinite growing path. The
+      // self-subpath shape is detected on the first hop.
       const cellA = runtime.getCell<any>(
         space,
         "self-subpath-cycle",
@@ -1167,32 +1168,100 @@ describe("link-resolution", () => {
       // Create a link from A to A/foo
       cellA.setRaw(cellA.key("foo").getAsLink());
 
-      // Race the resolution against a 1 second timeout to ensure it doesn't hang
-      let timeoutId: ReturnType<typeof setTimeout> | undefined;
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(
-          () => reject(new Error("Resolution timed out after 1 second")),
-          1000,
-        );
-      });
+      expect(() => resolveLink(runtime, tx, cellA.getAsNormalizedFullLink()))
+        .toThrow("Link cycle detected");
+    });
 
-      const resolutionPromise = new Promise<any>((resolve) => {
-        // When we resolve this link, it should detect the growing path cycle
-        // and return the empty document with a data: URI
-        resolve(resolveLink(runtime, tx, cellA.getAsNormalizedFullLink()));
-      });
+    it("detects cycle for a self-subpath link below the document root", () => {
+      // Test case: A/a -> A/a/b
+      const cellA = runtime.getCell<any>(
+        space,
+        "nested-self-subpath-cycle",
+        undefined,
+        tx,
+      );
 
-      try {
-        await expect(Promise.race([resolutionPromise, timeoutPromise])).rejects
-          .toThrow(
-            "Link resolution iteration limit reached",
-          );
-      } finally {
-        // Clean up the timeout if it was set
-        if (timeoutId !== undefined) {
-          clearTimeout(timeoutId);
-        }
-      }
+      cellA.setRaw({ a: cellA.key("a").key("b").getAsLink() });
+
+      expect(() =>
+        resolveLink(runtime, tx, cellA.key("a").getAsNormalizedFullLink())
+      )
+        .toThrow("Link cycle detected");
+    });
+
+    it("reads of a self-subpath link fail deterministically", () => {
+      // The Cell Inspector wedge shape: every read fails immediately with a
+      // cycle error rather than burning the resolution iteration budget.
+      const cellA = runtime.getCell<any>(
+        space,
+        "wedge-read-cycle",
+        undefined,
+        tx,
+      );
+
+      cellA.setRaw(cellA.key("x").getAsLink());
+
+      expect(() => cellA.get()).toThrow("Link cycle detected");
+    });
+
+    it("follows same-document links to sibling paths", () => {
+      // A link within a document targeting a non-overlapping path resolves.
+      const cellA = runtime.getCell<any>(
+        space,
+        "same-doc-sibling-link",
+        undefined,
+        tx,
+      );
+
+      cellA.setRaw({ x: cellA.key("y").getAsLink(), y: 5 });
+
+      expect(cellA.key("x").get()).toBe(5);
+    });
+
+    it("resolves same-document links to an ancestor path", () => {
+      // A link at a deeper path targeting its own ancestor is not the
+      // self-subpath shape (the target does not pass through the link's
+      // position); resolution terminates at the ancestor.
+      const cellA = runtime.getCell<any>(
+        space,
+        "same-doc-ancestor-link",
+        undefined,
+        tx,
+      );
+
+      cellA.setRaw({ a: { b: cellA.key("a").getAsLink() } });
+
+      const resolved = resolveLink(
+        runtime,
+        tx,
+        cellA.key("a").key("b").getAsNormalizedFullLink(),
+      );
+      expect(resolved.id).toBe(cellA.getAsNormalizedFullLink().id);
+      expect(resolved.path).toEqual(["a"]);
+    });
+
+    it("bounds cross-document growing-path cycles by the iteration limit", () => {
+      // Test case: A -> B, B -> A/foo. The path grows through two documents,
+      // so the first-hop self-subpath check does not apply; the iteration
+      // limit still backstops it.
+      const cellA = runtime.getCell<any>(
+        space,
+        "cross-doc-growing-A",
+        undefined,
+        tx,
+      );
+      const cellB = runtime.getCell<any>(
+        space,
+        "cross-doc-growing-B",
+        undefined,
+        tx,
+      );
+
+      cellA.setRaw(cellB.getAsLink());
+      cellB.setRaw(cellA.key("foo").getAsLink());
+
+      expect(() => resolveLink(runtime, tx, cellA.getAsNormalizedFullLink()))
+        .toThrow("Link resolution iteration limit reached");
     });
 
     it("detects cycles in nested paths", () => {
