@@ -516,6 +516,32 @@ export function createQueryResultProxy<T>(
       }
       return prop in value;
     },
+    // A query-result proxy is a live, transaction-backed view: reads resolve
+    // through the get trap on every access. Structural mutations (freeze, seal,
+    // defineProperty, delete) cannot be honored without either corrupting the
+    // backing store (when the proxy fronts the live value) or defeating live
+    // resolution (a non-configurable target property forces [[Get]] to return
+    // the target's own value, bypassing the trap). So we refuse them outright;
+    // callers that need an immutable/structurally-edited form must snapshot the
+    // proxy to a plain value first.
+    preventExtensions: () => {
+      throw new Error(
+        "Cannot freeze or seal a live cell-result proxy; snapshot it to a " +
+          "plain value first.",
+      );
+    },
+    defineProperty: () => {
+      throw new Error(
+        "Cannot define properties on a live cell-result proxy; assign through " +
+          "a transaction, or snapshot to a plain value first.",
+      );
+    },
+    deleteProperty: () => {
+      throw new Error(
+        "Cannot delete properties on a live cell-result proxy; mutate through " +
+          "a transaction, or snapshot to a plain value first.",
+      );
+    },
   }) as T;
 
   // Cache the proxy in the appropriate cache before returning
