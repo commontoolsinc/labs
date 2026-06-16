@@ -15,7 +15,12 @@ import {
   updatePageTitle,
 } from "../../shared/mod.ts";
 import { KeyboardController } from "../lib/keyboard-router.ts";
-import { type Cancel, NAME, PageHandle } from "@commonfabric/runtime-client";
+import {
+  type Cancel,
+  isRuntimeDisposedError,
+  NAME,
+  PageHandle,
+} from "@commonfabric/runtime-client";
 
 export class XAppView extends BaseView {
   static override styles = css`
@@ -91,7 +96,9 @@ export class XAppView extends BaseView {
       try {
         return await rt.getSpaceRootPattern(space);
       } catch (err) {
-        console.error("[AppView] Failed to load space root pattern:", err);
+        if (!isRuntimeDisposedError(err)) {
+          console.error("[AppView] Failed to load space root pattern:", err);
+        }
         throw err;
       }
     },
@@ -232,9 +239,14 @@ export class XAppView extends BaseView {
         void this.#refreshSlugTarget(rt, space, slug, token, key, true);
       });
     }).catch((error) => {
-      if (this.slugSubscriptionToken === token) {
-        console.error("[AppView] Failed to watch slug cell:", error);
+      if (this.slugSubscriptionToken !== token) return;
+      if (isRuntimeDisposedError(error)) {
+        // Reset the subscription key so a replacement runtime for the
+        // same space/slug re-subscribes instead of matching the stale key.
+        this.#clearSlugSubscription();
+        return;
       }
+      console.error("[AppView] Failed to watch slug cell:", error);
     });
   }
 
@@ -273,6 +285,18 @@ export class XAppView extends BaseView {
       );
       targetKey = pattern.id();
     } catch (error) {
+      if (isRuntimeDisposedError(error)) {
+        // The runtime this subscription polls was disposed (logout,
+        // teardown, worker replacement) — stop polling it; a new runtime
+        // re-subscribes via #syncSlugSubscription.
+        if (
+          this.slugSubscriptionToken === token &&
+          this.slugSubscriptionKey === key
+        ) {
+          this.#clearSlugSubscription();
+        }
+        return;
+      }
       if (notify) {
         console.error("[AppView] Failed to refresh slug target:", error);
       }

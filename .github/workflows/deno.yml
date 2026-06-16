@@ -43,11 +43,31 @@ jobs:
       - name: 🔎 Type check codebase
         run: deno task check
 
-      - name: 🔎 Check Common Fabric patterns
-        run: deno task cfcheck
-
       - name: 🧭 Check cf-review skill facts
         run: deno task check-skill-facts
+
+  cfcheck:
+    name: "CFC Pattern Check (${{ matrix.shard }}/${{ matrix.total }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+        total: [4]
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        run: deno install --frozen=true
+
+      - name: 🔎 Check Common Fabric patterns
+        env:
+          CFCHECK_SHARD: "${{ matrix.shard }}/${{ matrix.total }}"
+        run: deno task cfcheck
 
   test:
     name: "Test"

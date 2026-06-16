@@ -388,6 +388,111 @@ export class TypeScriptCompiler {
     }
     return result;
   }
+
+  /**
+   * Like {@link compileToModules}, but COLLECTS type/declaration/transformer
+   * diagnostics per file instead of throwing on the first one. Returns the
+   * emitted bodies plus every error-severity diagnostic, each attributed to its
+   * source file. For batch callers (cfcheck over the whole pattern corpus) that
+   * must report all failing patterns by name, not abort on the first.
+   */
+  compileToModulesCollecting(
+    program: Program,
+    inputOptions: TypeScriptCompilerOptions = {},
+  ): {
+    modules: Map<string, { js: string; sourceMap?: SourceMap }>;
+    diagnostics: { file: string; message: string }[];
+  } {
+    const runtimeModules = inputOptions.runtimeModules ?? [];
+    validateSource(program);
+    const sourceNames = program.files.map(({ name }) => name);
+    const tsOptions = getCompilerOptions();
+    tsOptions.skipLibCheck = true;
+
+    const host = new TypeScriptHost(
+      program,
+      this.typeLibs,
+      runtimeModules,
+      inputOptions.specifierAliases,
+    );
+    const tsProgram = ts.createProgram(sourceNames, tsOptions, host);
+
+    const authored = new Set(
+      program.files.filter((f) => !f.name.endsWith(".d.ts")).map((f) => f.name),
+    );
+    const diagnostics: { file: string; message: string }[] = [];
+    const pushTs = (d: ts.Diagnostic) => {
+      const message = ts.flattenDiagnosticMessageText(d.messageText, "\n");
+      if (d.file) {
+        const { line } = d.file.getLineAndCharacterOfPosition(d.start ?? 0);
+        diagnostics.push({
+          file: d.file.fileName,
+          message: `${line + 1}: ${message}`,
+        });
+      } else {
+        diagnostics.push({ file: "", message });
+      }
+    };
+
+    // Type + declaration diagnostics for authored files only (skipLibCheck
+    // already excludes the declaration libs).
+    for (const sourceFile of tsProgram.getSourceFiles()) {
+      if (!authored.has(sourceFile.fileName)) continue;
+      for (const d of tsProgram.getSemanticDiagnostics(sourceFile)) pushTs(d);
+      for (const d of tsProgram.getSyntacticDiagnostics(sourceFile)) pushTs(d);
+    }
+
+    // Transform + emit, collecting (not throwing) transformer diagnostics.
+    const { beforeTransformers, getDiagnostics } = createTransformers(
+      tsProgram,
+      inputOptions,
+    );
+    const { diagnostics: emitDiagnostics } = tsProgram.emit(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { before: beforeTransformers },
+    );
+    for (const d of emitDiagnostics) pushTs(d);
+    if (getDiagnostics) {
+      for (const d of getDiagnostics()) {
+        if (d.severity !== "error") continue;
+        diagnostics.push({
+          file: d.fileName,
+          message: `${d.line}: ${d.message}`,
+        });
+      }
+    }
+
+    const sourceByStem = new Map<string, string>();
+    for (const name of sourceNames) {
+      if (name.endsWith(".d.ts")) continue;
+      const stem = name.replace(/\.[^./]+$/, "");
+      const existing = sourceByStem.get(stem);
+      if (existing !== undefined) {
+        // Two sources emit to the same `<stem>.js` (e.g. `/a.ts` and `/a.tsx`).
+        // The output→source mapping would be ambiguous; fail loudly rather than
+        // silently drop one (parity with compileToModules).
+        throw new Error(
+          `Ambiguous emit target: '${existing}' and '${name}' both compile to '${stem}.js'`,
+        );
+      }
+      sourceByStem.set(stem, name);
+    }
+    const writes = host.getWrites();
+    const modules = new Map<string, { js: string; sourceMap?: SourceMap }>();
+    for (const [outName, contents] of Object.entries(writes)) {
+      if (!outName.endsWith(".js")) continue;
+      const sourceName = sourceByStem.get(outName.replace(/\.js$/, ""));
+      if (sourceName === undefined) continue;
+      modules.set(sourceName, {
+        js: contents,
+        sourceMap: parseSourceMap(writes[`${outName}.map`]),
+      });
+    }
+    return { modules, diagnostics };
+  }
 }
 
 function validateSource(artifact: Program) {

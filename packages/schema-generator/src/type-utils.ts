@@ -893,3 +893,171 @@ function followAliasToWrapperNode(
 
   return undefined;
 }
+
+/**
+ * Convert a purely literal-shaped Type to its JSON value: string/number/
+ * boolean literals, null, literal tuples, and object-literal types whose
+ * members are themselves literal-shaped. Returns the value wrapped (so a
+ * legitimate `null` is distinguishable from "not extractable") or undefined
+ * when any part of the type is not a literal.
+ *
+ * Used to read `Default<T, V>`'s V back out of the DEFAULT_MARKER brand
+ * payload once the checker has resolved the alias away — the payload is the
+ * only place V survives at the type level (see Default<> in
+ * packages/api/index.ts). Deliberately type-structural only: payloads that
+ * resolve to non-literal types (e.g. a widened `typeof CONST`) bail to
+ * undefined, and the caller falls back to existing behavior.
+ */
+export function extractValueFromLiteralType(
+  type: ts.Type,
+  typeChecker: ts.TypeChecker,
+): { value: unknown } | undefined {
+  if (type.flags & ts.TypeFlags.StringLiteral) {
+    return { value: (type as ts.StringLiteralType).value };
+  }
+  if (type.flags & ts.TypeFlags.NumberLiteral) {
+    return { value: (type as ts.NumberLiteralType).value };
+  }
+  if (type.flags & ts.TypeFlags.BooleanLiteral) {
+    return {
+      value: (type as unknown as { intrinsicName?: string }).intrinsicName ===
+        "true",
+    };
+  }
+  if (type.flags & ts.TypeFlags.Null) {
+    return { value: null };
+  }
+
+  if (typeChecker.isTupleType(type)) {
+    const elements = typeChecker.getTypeArguments(type as ts.TypeReference);
+    const values: unknown[] = [];
+    for (const element of elements) {
+      const extracted = extractValueFromLiteralType(element, typeChecker);
+      if (!extracted) return undefined;
+      values.push(extracted.value);
+    }
+    return { value: values };
+  }
+
+  if (
+    (type.flags & ts.TypeFlags.Object) !== 0 &&
+    !typeChecker.isArrayType(type) &&
+    type.getCallSignatures().length === 0 &&
+    type.getConstructSignatures().length === 0
+  ) {
+    const props = typeChecker.getPropertiesOfType(type);
+    const result: Record<string, unknown> = {};
+    for (const prop of props) {
+      const name = String(prop.escapedName as string);
+      // Symbol-keyed members (`__@...`) mean this is a brand, not data.
+      if (name.startsWith("__@")) return undefined;
+      const propType = typeChecker.getTypeOfSymbol(prop);
+      const extracted = extractValueFromLiteralType(propType, typeChecker);
+      if (!extracted) return undefined;
+      result[name] = extracted.value;
+    }
+    return { value: result };
+  }
+
+  return undefined;
+}
+
+/**
+ * True for a "brand-only" object type that carries only symbol-keyed markers
+ * (e.g. `{ readonly [DEFAULT_MARKER]: V }`) — no string-keyed data
+ * properties. TypeScript encodes unique-symbol property names as "__@..."
+ * internally; a type with only such properties is a brand, not data.
+ */
+export function isBrandOnlyMarkerType(
+  type: ts.Type,
+  typeChecker: ts.TypeChecker,
+): boolean {
+  if ((type.flags & ts.TypeFlags.Object) === 0) return false;
+  const props = typeChecker.getPropertiesOfType(type);
+  if (props.length === 0) return true;
+  return props.every((prop) =>
+    String(prop.escapedName as string).startsWith("__@")
+  );
+}
+
+/**
+ * Read `Default<T, V>`'s V back out of the DEFAULT_MARKER brand payload of an
+ * expanded type: `T | (T & DefaultMarker<V>)`, a bare `T & DefaultMarker<V>`
+ * intersection, or a standalone `DefaultMarker<V>` (the nullish arm). Returns
+ * the extracted JSON value wrapped, or undefined when the type carries no
+ * brand, more than one branded member, or a payload that is not
+ * literal-shaped. The payload is the only place V survives once the checker
+ * resolves the alias away — see Default<> in packages/api/index.ts.
+ */
+export function isDefaultBrandedMember(
+  member: ts.Type,
+  typeChecker: ts.TypeChecker,
+): boolean {
+  if (isBrandOnlyMarkerType(member, typeChecker)) return true;
+  if ((member.flags & ts.TypeFlags.Intersection) === 0) return false;
+  const parts = (member as ts.IntersectionType).types ?? [];
+  return parts.some((part) => isBrandOnlyMarkerType(part, typeChecker));
+}
+
+function extractPayloadFromBrandedMember(
+  member: ts.Type,
+  typeChecker: ts.TypeChecker,
+): { value: unknown } | undefined {
+  const brandParts = (member.flags & ts.TypeFlags.Intersection) !== 0
+    ? ((member as ts.IntersectionType).types ?? []).filter((part) =>
+      isBrandOnlyMarkerType(part, typeChecker)
+    )
+    : [member];
+  const markerProp = brandParts
+    .flatMap((part) => typeChecker.getPropertiesOfType(part))
+    .find((prop) =>
+      String(prop.escapedName as string).startsWith("__@DEFAULT_MARKER")
+    );
+  if (!markerProp) return undefined;
+  const payload = typeChecker.getTypeOfSymbol(markerProp);
+  const extracted = extractValueFromLiteralType(payload, typeChecker);
+  if (!extracted || extracted.value === undefined) return undefined;
+  return extracted;
+}
+
+/**
+ * Extract the agreed default value from one or more branded members.
+ *
+ * A union-valued default distributes the brand across several members that
+ * all carry the SAME payload — `Default<boolean, true>` expands to
+ * `true & DefaultMarker<true> | false & DefaultMarker<true> | boolean`, two
+ * branded members both paying `true`; likewise `Default<"a" | "b", "a">`.
+ * Require every branded member to yield the same literal value and return it;
+ * bail (undefined) on genuine disagreement — two distinct defaults in one
+ * union is ambiguous and must never resolve to a guess.
+ */
+export function extractDefaultValueFromBrandedMembers(
+  branded: readonly ts.Type[],
+  typeChecker: ts.TypeChecker,
+): { value: unknown } | undefined {
+  if (branded.length === 0) return undefined;
+  let agreed: { value: unknown } | undefined;
+  for (const member of branded) {
+    const extracted = extractPayloadFromBrandedMember(member, typeChecker);
+    if (!extracted) return undefined;
+    if (agreed === undefined) {
+      agreed = extracted;
+    } else if (
+      JSON.stringify(agreed.value) !== JSON.stringify(extracted.value)
+    ) {
+      return undefined;
+    }
+  }
+  return agreed;
+}
+
+export function extractDefaultBrandPayloadValue(
+  type: ts.Type,
+  typeChecker: ts.TypeChecker,
+): { value: unknown } | undefined {
+  const members = type.isUnion() ? type.types : [type];
+  const branded = members.filter((member) =>
+    isDefaultBrandedMember(member, typeChecker)
+  );
+  return extractDefaultValueFromBrandedMembers(branded, typeChecker);
+}

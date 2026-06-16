@@ -23,12 +23,14 @@
 import { Identity } from "@commonfabric/identity";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
 import type {
+  RuntimeDiagnosticsSnapshot,
   TrustedUiDescriptor,
   WorkerRequest,
   WorkerResponse,
 } from "./multi-runtime-worker.ts";
 
 export type { TrustedUiDescriptor };
+export type { RuntimeDiagnosticsSnapshot };
 
 export interface MultiRuntimeSessionSpec {
   /** Label used in error messages and as the identity passphrase seed. */
@@ -45,6 +47,10 @@ export interface MultiRuntimeHarnessOptions {
   programPath: string;
   /** Module-resolution root, usually the `packages/patterns` directory. */
   rootPath: string;
+  /** Optional initial pattern input for the bootstrap-created piece. */
+  input?: Record<string, unknown>;
+  /** Enable scheduler graph/stats/action diagnostics for this harness run. */
+  diagnostics?: boolean;
   sessions: (string | MultiRuntimeSessionSpec)[];
   spaceName?: string;
   /**
@@ -173,6 +179,11 @@ export class MultiRuntimeSession {
     await this.#client.call("idle");
   }
 
+  /** Capture scheduler graph, settle stats history, and action run trace. */
+  async diagnostics(): Promise<RuntimeDiagnosticsSnapshot> {
+    return await this.#client.call("diagnostics") as RuntimeDiagnosticsSnapshot;
+  }
+
   async disposeSession(): Promise<void> {
     try {
       await this.#client.call("dispose");
@@ -229,6 +240,7 @@ export class MultiRuntimeHarness {
           rawIdentity: identity.serialize(),
           spaceName,
           apiUrl,
+          diagnostics: options.diagnostics === true,
         });
         sessions.push(
           new MultiRuntimeSession(normalized.label, identity, client),
@@ -245,10 +257,12 @@ export class MultiRuntimeHarness {
         rawIdentity: sessions[0].identity.serialize(),
         spaceName,
         apiUrl,
+        diagnostics: options.diagnostics === true,
       });
       const { pieceId } = await bootstrap.call("createPiece", {
         programPath: options.programPath,
         rootPath: options.rootPath,
+        input: options.input,
       }) as { pieceId: string };
       await bootstrap.call("dispose");
       bootstrap.terminate();
