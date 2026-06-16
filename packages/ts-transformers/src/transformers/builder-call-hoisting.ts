@@ -398,7 +398,15 @@ function collectTopLevelBuilderArtifactNames(
   for (const decl of statement.declarationList.declarations) {
     if (!ts.isIdentifier(decl.name)) continue;
     if (exportedLocalNames.has(decl.name.text)) continue;
-    const init = decl.initializer;
+    // Unwrap `as` / `satisfies` / parenthesized / type-assertion wrappers before
+    // the call check: a cast-typed builder const (`const x = handler(...) as
+    // XFactory`) has an AsExpression initializer, not a CallExpression. Without
+    // this it is silently excluded from `__cfReg`, so a non-exported handler/lift
+    // gets no content-addressed provenance and falls to the SES-source fallback at
+    // resolve time — `navigateTo`/SubPattern imports then read undefined (CT-1743).
+    const init = decl.initializer
+      ? unwrapTypeWrappers(decl.initializer)
+      : undefined;
     if (!init || !ts.isCallExpression(init)) continue;
     if (detectCallKind(init, context.checker)?.kind === "builder") {
       out.push(decl.name.text);
@@ -406,15 +414,13 @@ function collectTopLevelBuilderArtifactNames(
   }
 }
 
-/**
- * The set of LOCAL binding names that are exported from the module by any form:
- * `export const foo`, `export { foo }` / `export { foo as bar }` (the local name
- * `foo`), and `export default foo`. Used to keep exported builder artifacts out
- * of `__cfReg` (they are addressable through the module namespace instead).
- */
-/** Strip parentheses and `as` / `satisfies` wrappers to reach the underlying
- * `export default` expression (so a wrapped identifier is still recognized). */
-function unwrapDefaultExportExpression(expr: ts.Expression): ts.Expression {
+/** Strip parentheses and `as` / `satisfies` / type-assertion wrappers to reach
+ * the underlying builder/identifier expression. Used both for `export default x`
+ * recognition and for top-level `const foo = handler(...) as XFactory`
+ * registration — without unwrapping, a cast-wrapped builder const is excluded
+ * from `__cfReg`, loses content-addressed provenance, and falls to the SES
+ * fallback at resolve time (CT-1743). */
+function unwrapTypeWrappers(expr: ts.Expression): ts.Expression {
   let current = expr;
   while (
     ts.isParenthesizedExpression(current) || ts.isAsExpression(current) ||
@@ -425,6 +431,12 @@ function unwrapDefaultExportExpression(expr: ts.Expression): ts.Expression {
   return current;
 }
 
+/**
+ * The set of LOCAL binding names that are exported from the module by any form:
+ * `export const foo`, `export { foo }` / `export { foo as bar }` (the local name
+ * `foo`), and `export default foo`. Used to keep exported builder artifacts out
+ * of `__cfReg` (they are addressable through the module namespace instead).
+ */
 function collectExportedLocalNames(sourceFile: ts.SourceFile): Set<string> {
   const names = new Set<string>();
   for (const statement of sourceFile.statements) {
@@ -448,7 +460,7 @@ function collectExportedLocalNames(sourceFile: ts.SourceFile): Set<string> {
       // `export default foo` — unwrap parens / `as` / `satisfies` so a wrapped
       // identifier (`export default (foo)`, `export default foo satisfies T`) is
       // still recognized as exporting the local `foo`.
-      const expr = unwrapDefaultExportExpression(statement.expression);
+      const expr = unwrapTypeWrappers(statement.expression);
       if (ts.isIdentifier(expr)) names.add(expr.text);
     }
   }
