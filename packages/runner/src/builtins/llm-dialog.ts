@@ -14,7 +14,10 @@ import type {
   JSONSchema,
 } from "commonfabric";
 import type { Schema } from "@commonfabric/api/schema";
-import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
+import {
+  isNontrivialSchema,
+  toDeepFrozenSchema,
+} from "@commonfabric/data-model/schema-utils";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   LLMDialogResultSchema,
@@ -757,7 +760,7 @@ type DialogMessageObservationMap = Record<string, unknown[]>;
 type DialogRequestSnapshot = {
   llmParams: LLMRequest;
   toolCatalog: ToolCatalog;
-  userResultSchema: unknown;
+  userResultSchema: JSONSchema | undefined;
   queueName?: string;
   observationMaxConfidentiality?: readonly unknown[];
   systemObservedConfidentiality: readonly unknown[];
@@ -1312,13 +1315,18 @@ function materializeDialogRequestSnapshot(
   >;
   const builtinTools = inputs.key("builtinTools").withTx(tx).get() !== false;
   const toolCatalog = buildToolCatalog(toolsCell, builtinTools);
-  const userResultSchema = inputs.key("resultSchema").withTx(tx).get();
+  // TODO(danfuzz): `resultSchema` is untrusted input, so this `as` is an
+  // unchecked assertion. Replace with a runtime validating guard, e.g.
+  // `asSchemaOrThrow(schema: unknown): schema is JSONSchema`.
+  const userResultSchema = inputs.key("resultSchema").withTx(tx).get() as
+    | JSONSchema
+    | undefined;
   if (userResultSchema) {
     toolCatalog.llmTools[PRESENT_RESULT_TOOL_NAME] = {
       description:
         "Call this tool to present a structured result. This stores the result for the caller.",
       inputSchema: prepareSchemaForLLM(
-        JSON.parse(JSON.stringify(userResultSchema)),
+        toDeepFrozenSchema(userResultSchema),
       ),
     };
   }
@@ -2151,9 +2159,10 @@ function handleSchema(
   resolved: ResolvedToolCall & { type: "schema" },
 ): { type: string; value: any } {
   const schema = getCellSchema(resolved.cellRef) ?? {};
-  // TODO(danfuzz): Replace JSON.parse(JSON.stringify(...)) with
-  // cloneSchemaMutable() here.
-  const value = JSON.parse(JSON.stringify(schema));
+  // Deep-frozen clone: `schema` may be a query-result proxy, so de-proxy and
+  // preserve `FabricValue` leaves rather than mangling them through JSON. The
+  // result is a read-only `"json"` tool payload, so freezing is fine.
+  const value = toDeepFrozenSchema(schema);
   return { type: "json", value };
 }
 
@@ -2930,17 +2939,18 @@ async function startRequest(
     builtinTools,
   );
 
-  // If resultSchema is provided, inject presentResult built-in tool
+  // If resultSchema is provided, inject presentResult built-in tool.
+  // TODO(danfuzz): `resultSchema` is untrusted input, so this `as` is an
+  // unchecked assertion. Replace with a runtime validating guard, e.g.
+  // `asSchemaOrThrow(schema: unknown): schema is JSONSchema`.
   const userResultSchema = capturedRequest?.userResultSchema ??
-    inputs.key("resultSchema").get();
+    (inputs.key("resultSchema").get() as JSONSchema | undefined);
   if (userResultSchema && capturedRequest === undefined) {
     toolCatalog.llmTools[PRESENT_RESULT_TOOL_NAME] = {
       description:
         "Call this tool to present a structured result. This stores the result for the caller.",
-      // TODO(danfuzz): Replace JSON.parse(JSON.stringify(...)) with
-      // cloneSchemaMutable() here.
       inputSchema: prepareSchemaForLLM(
-        JSON.parse(JSON.stringify(userResultSchema)),
+        toDeepFrozenSchema(userResultSchema),
       ),
     };
   }
