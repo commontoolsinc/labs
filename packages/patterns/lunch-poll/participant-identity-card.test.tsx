@@ -1,19 +1,23 @@
 import { action, computed, Default, pattern, Writable } from "commonfabric";
-import UserDirectoryCard from "./user-directory-card.tsx";
+import ParticipantIdentityCard from "./participant-identity-card.tsx";
 import type { User } from "./main.tsx";
 
 export default pattern(() => {
   const users = new Writable<User[] | Default<[]>>([]);
   const myName = new Writable<string | Default<"">>("");
   const adminName = new Writable<string | Default<"">>("");
-  const directory = UserDirectoryCard({ users, myName, adminName });
+  const participantIdentity = ParticipantIdentityCard({
+    users,
+    myName,
+    adminName,
+  });
 
   const action_join_as_alex = action(() => {
-    directory.joinAs.send({ name: "Alex" });
+    participantIdentity.joinAs.send({ name: "Alex" });
   });
 
   const action_try_rejoin_as_alex_two = action(() => {
-    directory.joinAs.send({ name: "Alex Two" });
+    participantIdentity.joinAs.send({ name: "Alex Two" });
   });
 
   const action_switch_to_blair = action(() => {
@@ -27,14 +31,14 @@ export default pattern(() => {
   });
 
   const action_claim_host_as_blair = action(() => {
-    directory.claimHost.send({});
+    participantIdentity.claimHost.send({});
   });
 
   const assert_initial = computed(() =>
     users.get().length === 0 &&
-    directory.me === "" &&
-    directory.isJoined === false &&
-    directory.isAdmin === false
+    participantIdentity.me === "" &&
+    participantIdentity.isJoined === false &&
+    participantIdentity.isAdmin === false
   );
 
   const assert_joined_as_alex = computed(() => {
@@ -43,9 +47,9 @@ export default pattern(() => {
       currentUsers[0]?.name === "Alex" &&
       myName.get() === "Alex" &&
       adminName.get() === "Alex" &&
-      directory.me === "Alex" &&
-      directory.isJoined === true &&
-      directory.isAdmin === true;
+      participantIdentity.me === "Alex" &&
+      participantIdentity.isJoined === true &&
+      participantIdentity.isAdmin === true;
   });
 
   const assert_rejoin_noop = computed(() => {
@@ -57,16 +61,16 @@ export default pattern(() => {
 
   const assert_blair_is_not_host = computed(() =>
     users.get().length === 2 &&
-    directory.me === "Blair" &&
+    participantIdentity.me === "Blair" &&
     adminName.get() === "Alex" &&
-    directory.isJoined === true &&
-    directory.isAdmin === false
+    participantIdentity.isJoined === true &&
+    participantIdentity.isAdmin === false
   );
 
   const assert_blair_claimed_host = computed(() =>
     adminName.get() === "Blair" &&
-    directory.me === "Blair" &&
-    directory.isAdmin === true
+    participantIdentity.me === "Blair" &&
+    participantIdentity.isAdmin === true
   );
 
   return {
@@ -81,6 +85,6 @@ export default pattern(() => {
       { action: action_claim_host_as_blair },
       { assertion: assert_blair_claimed_host },
     ],
-    directory,
+    participantIdentity,
   };
 });

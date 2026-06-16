@@ -14,10 +14,10 @@ import {
 import type { ClaimHostEvent, JoinEvent, User } from "./main.tsx";
 
 /** Parent-owned roster cell shared by all viewers. */
-export type UserDirectoryUsersCell = Writable<User[] | Default<[]>>;
+export type ParticipantIdentityUsersCell = Writable<User[] | Default<[]>>;
 
 /** Parent-owned viewer/admin name cell. */
-export type UserDirectoryNameCell = Writable<string | Default<"">>;
+export type ParticipantIdentityNameCell = Writable<string | Default<"">>;
 
 const PLAYER_COLORS = [
   "#2f8a64",
@@ -32,10 +32,10 @@ const trimmedName = (n: string | undefined) => (n ?? "").trim();
 const colorForIndex = (i: number) => PLAYER_COLORS[i % PLAYER_COLORS.length];
 
 const joinAs = handler<JoinEvent, {
-  users: UserDirectoryUsersCell;
-  myName: UserDirectoryNameCell;
-  adminName: UserDirectoryNameCell;
-  joinName: UserDirectoryNameCell;
+  users: ParticipantIdentityUsersCell;
+  myName: ParticipantIdentityNameCell;
+  adminName: ParticipantIdentityNameCell;
+  joinName: ParticipantIdentityNameCell;
   profileName: string;
   profileAvatar: string;
 }>(
@@ -66,8 +66,8 @@ const joinAs = handler<JoinEvent, {
 );
 
 const claimHost = handler<ClaimHostEvent, {
-  myName: UserDirectoryNameCell;
-  adminName: UserDirectoryNameCell;
+  myName: ParticipantIdentityNameCell;
+  adminName: ParticipantIdentityNameCell;
 }>((_, { myName, adminName }) => {
   const me = trimmedName(myName.get());
   if (!me) return;
@@ -76,44 +76,45 @@ const claimHost = handler<ClaimHostEvent, {
 });
 
 /**
- * UserDirectoryCard renders a participant identity and roster surface.
+ * ParticipantIdentityCard renders a participant join and admin-claim surface.
  *
  * Use it when a parent pattern owns the roster, current viewer, and admin cells
- * and needs composed UI for joining, viewing participants, and taking over
- * admin duties. The resolved identity outputs (`me`, `isJoined`, and `isAdmin`)
- * are intended for downstream sub-patterns such as per-option cards.
+ * and needs composed UI for joining, resolving the current participant, and
+ * taking over admin duties. The resolved identity outputs (`me`, `isJoined`,
+ * and `isAdmin`) are intended for downstream sub-patterns such as per-option
+ * cards.
  */
 
 /**
- * Inputs for the join/roster/admin controls.
+ * Inputs for the participant identity/admin controls.
  *
  * The parent owns the durable user directory and viewer identity cells. This
  * pattern only owns local per-session UI state for the join draft and admin
  * takeover reveal.
  */
-export interface UserDirectoryCardInput {
+export interface ParticipantIdentityCardInput {
   /** Shared roster of participants who have joined. */
-  users: UserDirectoryUsersCell;
+  users: ParticipantIdentityUsersCell;
 
   /** Per-user current viewer name cell. */
-  myName: UserDirectoryNameCell;
+  myName: ParticipantIdentityNameCell;
 
   /** Shared admin name cell. */
-  adminName: UserDirectoryNameCell;
+  adminName: ParticipantIdentityNameCell;
 }
 
 /**
- * Outputs for the join/roster/admin controls.
+ * Outputs for the participant identity/admin controls.
  *
  * Instantiate this sub-pattern by function call when the parent needs `me`,
  * `isJoined`, `isAdmin`, or the bound streams. The `[UI]` value may then be
  * embedded in the parent's layout.
  */
-export interface UserDirectoryCardOutput {
+export interface ParticipantIdentityCardOutput {
   /** Human-readable pattern name. */
   [NAME]: string;
 
-  /** Static VNode rendering the join form, roster, and admin controls. */
+  /** Static VNode rendering the join form and admin controls. */
   [UI]: VNode;
 
   /** Trimmed current viewer name resolved once for downstream sub-patterns. */
@@ -132,7 +133,10 @@ export interface UserDirectoryCardOutput {
   claimHost: Stream<ClaimHostEvent>;
 }
 
-export default pattern<UserDirectoryCardInput, UserDirectoryCardOutput>(
+export default pattern<
+  ParticipantIdentityCardInput,
+  ParticipantIdentityCardOutput
+>(
   ({ users, myName, adminName }) => {
     const joinName = Writable.perSession.of<string>("");
     const claimHostRevealed = Writable.perSession.of<boolean>(false);
@@ -169,7 +173,7 @@ export default pattern<UserDirectoryCardInput, UserDirectoryCardOutput>(
     const isClaimHostRevealed = computed(() => claimHostRevealed.get());
 
     return {
-      [NAME]: "Lunch poll directory",
+      [NAME]: "Participant identity",
       [UI]: (
         <div style="display:contents">
           {isJoined ? null : (

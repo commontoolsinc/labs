@@ -63,7 +63,7 @@ import {
   Writable,
 } from "commonfabric";
 import PollOptionCard from "./poll-option-card.tsx";
-import UserDirectoryCard from "./user-directory-card.tsx";
+import ParticipantIdentityCard from "./participant-identity-card.tsx";
 
 export interface User {
   name: string;
@@ -821,7 +821,11 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // Shared marker that retriggers the host's reactive homepage lookup nodes.
     // Missing homepage links are also looked up on first host load.
     const homePageRefresh = Writable.perSpace.of<number>(0);
-    const userDirectory = UserDirectoryCard({ users, myName, adminName });
+    const participantIdentity = ParticipantIdentityCard({
+      users,
+      myName,
+      adminName,
+    });
     const boundAddOption = addOption({
       options,
       myName,
@@ -938,16 +942,17 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       voteHistoryCountQuery.result?.[0]?.n ?? 0
     );
     // Resolve the viewer's name ONCE here at the top level through the
-    // directory child. PerUser `myName` does not resolve inside the per-option
-    // `options.map(...)` lift; passing this resolved value down avoids that.
-    const me = userDirectory.me;
+    // participant identity child. PerUser `myName` does not resolve inside the
+    // per-option `options.map(...)` lift; passing this resolved value down
+    // avoids that.
+    const me = participantIdentity.me;
     // Resolve the poll's city ONCE here (same reason as `me`): the raw ref
     // doesn't resolve inside the per-option `options.map` lift where the menu
     // search query is built. Blank → Berkeley, CA.
     const cityLabel = trimmedName(city) || "Berkeley, CA";
     const searchEndpoint = trimmedName(webSearchUrl) || WEB_SEARCH_URL;
-    const isJoined = userDirectory.isJoined;
-    const isAdmin = userDirectory.isAdmin;
+    const isJoined = participantIdentity.isJoined;
+    const isAdmin = participantIdentity.isAdmin;
     // Hoist a boolean cell for the reset-confirm JSX ternary so TS doesn't
     // narrow `resetConfirmPending` itself and lose the `.set` method in
     // the false branch.
@@ -1103,7 +1108,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   margin: "0 auto",
                 }}
               >
-                {userDirectory}
+                {participantIdentity}
 
                 {/* Top choice — only when there are votes */}
                 {computed(() => {
@@ -1689,7 +1694,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       votes: computed(() => votes ?? EMPTY_VOTES),
       users: computed(() => users ?? EMPTY_USERS),
       adminName: computed(() => trimmedName(adminName)),
-      myName: userDirectory.me,
+      myName: participantIdentity.me,
       userCount,
       optionCount,
       voteCount,
@@ -1698,11 +1703,11 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       mostRecentTitle,
       voteHistoryCount,
       placeStats: placeStatsRows,
-      isJoined: userDirectory.isJoined,
-      isAdmin: userDirectory.isAdmin,
+      isJoined: participantIdentity.isJoined,
+      isAdmin: participantIdentity.isAdmin,
       homePageLookupUrls,
-      joinAs: userDirectory.joinAs,
-      claimHost: userDirectory.claimHost,
+      joinAs: participantIdentity.joinAs,
+      claimHost: participantIdentity.claimHost,
       addOption: boundAddOption,
       removeOption: boundRemoveOption,
       castVote: boundCastVote,
