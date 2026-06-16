@@ -114,6 +114,54 @@ describe("CFC writeAuthorizedBy policy applies when its value-condition $ref is 
     ).toBe(true);
   });
 
+  it("resolves a value-condition $ref against the threaded document root", () => {
+    // The real walkIfcSchema shape: the captured ifc node is the bare array
+    // envelope WITHOUT `$defs` (those live on the outer document the walk
+    // descended from). The policy matcher only resolves `#/$defs/Element` when
+    // that document root is threaded in (the `root` argument), so a legitimate
+    // generated policy must NOT be treated as unevaluable. Without the threaded
+    // root the same ref is spuriously unresolvable and the entry would fail
+    // closed on a perfectly valid write (the default-app notebook reload
+    // regression).
+    const ifcNode = {
+      type: "array",
+      items: { $ref: "#/$defs/Element" },
+      ifc: { writeAuthorizedBy: ["trusted-handler"] },
+    } as const satisfies JSONSchema;
+    const documentRoot = {
+      type: "object",
+      properties: { elements: ifcNode },
+      $defs: {
+        Element: {
+          type: "object",
+          properties: { cell: true, tag: { type: "string" } },
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    // Threaded root => ref resolves => the matcher evaluates the real items and
+    // the entry applies for a matching value.
+    expect(
+      wildcardPolicyMatchesValue(tx, target, ifcNode, [
+        { cell: { some: "link" }, tag: "note" },
+      ], documentRoot),
+    ).toBe(true);
+    // A value that violates the resolved items schema does NOT match — proving
+    // the ref actually resolved (rather than short-circuiting to "applies").
+    expect(
+      wildcardPolicyMatchesValue(tx, target, ifcNode, [
+        { cell: { some: "link" }, tag: 42 },
+      ], documentRoot),
+    ).toBe(false);
+    // Same node WITHOUT the threaded root: the bare node has no `$defs`, so the
+    // ref is genuinely unevaluable and the entry fails closed (applies).
+    expect(
+      wildcardPolicyMatchesValue(tx, target, ifcNode, [
+        { cell: { some: "link" }, tag: 42 },
+      ]),
+    ).toBe(true);
+  });
+
   it("does not let an unresolvable branch suppress a matched oneOf entry", () => {
     // Regression guard for the matcher's oneOf arm specifically: returning a
     // plain `true` for the unresolvable branch would make two branches "match"

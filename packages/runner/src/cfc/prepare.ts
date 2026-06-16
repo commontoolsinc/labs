@@ -1463,7 +1463,15 @@ const walkIfcSchema = (
   schema: JSONSchema,
   path: readonly string[] = [],
   entries: Array<
-    { path: readonly string[]; label: IFCLabel; schema: JSONSchema }
+    {
+      path: readonly string[];
+      label: IFCLabel;
+      schema: JSONSchema;
+      // Document carrying the `$defs` that resolves refs inside `schema`.
+      // `schema` is the bare ifc node (no `$defs` of its own), so value-condition
+      // refs only resolve against this root — thread it to the policy matcher.
+      root: JSONSchema;
+    }
   > = [],
   root: JSONSchema = schema,
   active: Set<JSONSchema> = new Set(),
@@ -1498,6 +1506,7 @@ const walkIfcSchema = (
             : undefined,
         },
         schema: resolved,
+        root: childRoot,
       });
     }
 
@@ -2096,17 +2105,26 @@ export const wildcardPolicyMatchesValue = (
   },
   schema: JSONSchema | undefined,
   value: unknown,
+  // Schema document that resolves `$ref`s inside `schema`. walkIfcSchema
+  // captures an ifc node WITHOUT the document's `$defs` (those live on the
+  // outer root), so a value-condition ref like `items: {$ref: "#/$defs/X"}`
+  // only resolves when the root carrying `$defs` is threaded in. Without it the
+  // ref is spuriously unevaluable and the entry would fail closed on a perfectly
+  // valid policy. Defaults to `schema` for callers whose schema is already
+  // self-contained (e.g. the unit-test surface).
+  root?: JSONSchema,
 ): boolean => {
   if (schema === undefined) {
     return true;
   }
+  const resolutionRoot = root ?? schema;
 
   // An unevaluable policy `$ref` (UnevaluablePolicyRefError) fails closed:
   // treat the entry as applying rather than letting a broken/poisoned schema
   // envelope silently exclude its writeAuthorizedBy/maxConfidentiality checks.
   const matches = (candidate: unknown): boolean => {
     try {
-      return policySchemaMatchesValue(schema, candidate);
+      return policySchemaMatchesValue(schema, candidate, resolutionRoot);
     } catch (error) {
       if (error instanceof UnevaluablePolicyRefError) {
         return true;
@@ -2140,6 +2158,10 @@ const ifcEntryAppliesToAttemptedWrite = (
   },
   path: readonly string[],
   schema?: JSONSchema,
+  // Document root that resolves `$ref`s inside `schema` (see
+  // wildcardPolicyMatchesValue). Threaded from walkIfcSchema entries, whose
+  // captured ifc node lacks the document's `$defs`.
+  root?: JSONSchema,
 ): boolean => {
   const wildcardIndex = path.indexOf("*");
   if (wildcardIndex === -1) {
@@ -2190,13 +2212,13 @@ const ifcEntryAppliesToAttemptedWrite = (
     })();
     if (path.length === 0) {
       return value === undefined ||
-        wildcardPolicyMatchesValue(tx, target, schema, value);
+        wildcardPolicyMatchesValue(tx, target, schema, value, root);
     }
     if (value === undefined) {
       return previousWriteValueForTarget(tx, pathTarget) !== undefined;
     }
     return value !== undefined &&
-      wildcardPolicyMatchesValue(tx, target, schema, value);
+      wildcardPolicyMatchesValue(tx, target, schema, value, root);
   }
 
   const exactAttemptedPaths = [
@@ -2219,6 +2241,7 @@ const ifcEntryAppliesToAttemptedWrite = (
         target,
         schema,
         writeValueForTarget(tx, { ...target, path: writePath }),
+        root,
       )
     );
   }
@@ -2234,7 +2257,7 @@ const ifcEntryAppliesToAttemptedWrite = (
     const writePath = write.address.path.slice(1).map((entry) => String(entry));
     if (pathPatternMatches(path, writePath)) {
       return !deepEqual(write.value, write.previousValue) &&
-        wildcardPolicyMatchesValue(tx, target, schema, write.value);
+        wildcardPolicyMatchesValue(tx, target, schema, write.value, root);
     }
     if (concretePathHasPrefix(prefix, writePath)) {
       const relativePrefix = prefix.slice(writePath.length);
@@ -2249,7 +2272,7 @@ const ifcEntryAppliesToAttemptedWrite = (
       );
       if (
         matches.some((match) =>
-          wildcardPolicyMatchesValue(tx, target, schema, match)
+          wildcardPolicyMatchesValue(tx, target, schema, match, root)
         )
       ) {
         return true;
@@ -2267,7 +2290,7 @@ const ifcEntryAppliesToAttemptedWrite = (
   }
   const matches = valuesAtPatternPath(value, path.slice(wildcardIndex));
   return matches.some((match) =>
-    wildcardPolicyMatchesValue(tx, target, schema, match)
+    wildcardPolicyMatchesValue(tx, target, schema, match, root)
   );
 };
 
@@ -2369,7 +2392,7 @@ const verifyInputRequirements = (
 
   for (const entry of walkIfcSchema(schema)) {
     if (
-      !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
+      !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema, entry.root)
     ) {
       continue;
     }
@@ -2496,7 +2519,13 @@ const verifyExactCopyRequirements = (
     // Without this gate an untouched entry compares undefined to undefined and
     // passes vacuously, accepting the claim (and copying its label) unverified.
     if (
-      !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
+      !ifcEntryAppliesToAttemptedWrite(
+        tx,
+        target,
+        entry.path,
+        entry.schema,
+        entry.root,
+      )
     ) {
       continue;
     }
@@ -3246,7 +3275,13 @@ export const prepareBoundaryCommit = (
     const persistedLabelEntries: LabelMapEntry[] = mergedSchemaEntries
       .flatMap((entry) => {
         if (
-          !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
+          !ifcEntryAppliesToAttemptedWrite(
+            tx,
+            target,
+            entry.path,
+            entry.schema,
+            entry.root,
+          )
         ) {
           return [];
         }
