@@ -417,24 +417,13 @@ async function main() {
     if (pr) {
       prInfoBySha.set(run.head_sha, pr);
       if (pr.body) {
-        let overrides: BaselineOverrides;
-        try {
-          overrides = parseBaselineOverrides(pr.body);
-        } catch (error) {
-          console.warn(
-            `  Warning: ignoring invalid baseline override in PR #${pr.number}: ${error}`,
-          );
-          return;
-        }
-        if (overrides.metrics.size > 0 || overrides.coverageBaselineReset) {
+        const overrides = parseBaselineOverrides(pr.body);
+        if (overrides.metrics.size > 0) {
           overridesBySha.set(run.head_sha, overrides);
-          const reset = overrides.coverageBaselineReset
-            ? ", coverage reset"
-            : "";
           console.log(
             `  Found baseline override in PR #${pr.number} (${
               run.head_sha.slice(0, 8)
-            }) [${overrides.metrics.size} metric(s)${reset}]`,
+            }) [${overrides.metrics.size} metric(s)]`,
           );
         }
       }
