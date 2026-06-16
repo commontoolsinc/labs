@@ -7,6 +7,7 @@
  */
 
 import type { Cell } from "@commonfabric/runner";
+import type { SchedulerGraphSnapshot } from "@commonfabric/runner";
 import { markRendererTrustedEvent } from "@commonfabric/runner/cfc";
 import { Identity, type KeyPairRaw } from "@commonfabric/identity";
 import {
@@ -30,6 +31,12 @@ export interface TrustedUiDescriptor {
   surface: string;
   /** `data-ui-action` of the control inside the surface. */
   action: string;
+}
+
+export interface RuntimeDiagnosticsSnapshot {
+  graph: SchedulerGraphSnapshot;
+  settleStatsHistory: unknown[];
+  actionRunTrace: unknown[];
 }
 
 let cc: PiecesController | undefined;
@@ -85,24 +92,32 @@ const handlers: Record<
   string,
   (args: Record<string, unknown>) => Promise<unknown>
 > = {
-  async init({ rawIdentity, spaceName, apiUrl }) {
+  async init({ rawIdentity, spaceName, apiUrl, diagnostics }) {
     const identity = await Identity.deserialize(rawIdentity as KeyPairRaw);
     cc = await PiecesController.initialize({
       apiUrl: new URL(apiUrl as string),
       identity,
       spaceName: spaceName as string,
     });
+    if (diagnostics === true) {
+      const scheduler = controller().manager().runtime.scheduler;
+      scheduler.enableSettleStats();
+      scheduler.setActionRunTraceEnabled(true);
+    }
     return { did: identity.did() };
   },
 
-  async createPiece({ programPath, rootPath }) {
+  async createPiece({ programPath, rootPath, input }) {
     const program = await controller().manager().runtime.harness.resolve(
       new FileSystemProgramResolver(
         programPath as string,
         rootPath as string,
       ),
     );
-    const created = await controller().create(program, { start: true });
+    const created = await controller().create(program, {
+      input: isRecord(input) ? input : undefined,
+      start: true,
+    });
     await attachPiece(created);
     await idle();
     return { pieceId: created.id };
@@ -184,6 +199,18 @@ const handlers: Record<
   async idle() {
     await idle();
     return {};
+  },
+
+  async diagnostics() {
+    await idle();
+    const scheduler = controller().manager().runtime.scheduler;
+    return sanitizeForTransfer(
+      {
+        graph: scheduler.getGraphSnapshot(),
+        settleStatsHistory: scheduler.getSettleStatsHistory(),
+        actionRunTrace: scheduler.getActionRunTrace(),
+      } satisfies RuntimeDiagnosticsSnapshot,
+    );
   },
 
   async dispose() {
