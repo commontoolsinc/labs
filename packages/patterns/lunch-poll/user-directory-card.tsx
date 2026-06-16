@@ -13,7 +13,7 @@ import {
 } from "commonfabric";
 import type { ClaimHostEvent, JoinEvent, User } from "./main.tsx";
 
-/** Parent-owned roster cell shared by all viewers in the poll space. */
+/** Parent-owned roster cell shared by all viewers. */
 export type UserDirectoryUsersCell = Writable<User[] | Default<[]>>;
 
 /** Parent-owned viewer/admin name cell. */
@@ -76,34 +76,34 @@ const claimHost = handler<ClaimHostEvent, {
 });
 
 /**
- * UserDirectoryCard renders the lunch-poll identity and roster surface.
+ * UserDirectoryCard renders a participant identity and roster surface.
  *
- * Use it when a parent pattern owns the roster, current viewer, and host cells
+ * Use it when a parent pattern owns the roster, current viewer, and admin cells
  * and needs composed UI for joining, viewing participants, and taking over
- * host duties. The resolved identity outputs (`me`, `isJoined`, and `isAdmin`)
+ * admin duties. The resolved identity outputs (`me`, `isJoined`, and `isAdmin`)
  * are intended for downstream sub-patterns such as per-option cards.
  */
 
 /**
- * Inputs for the join/roster/host controls.
+ * Inputs for the join/roster/admin controls.
  *
  * The parent owns the durable user directory and viewer identity cells. This
- * pattern only owns local per-session UI state for the join draft and host
+ * pattern only owns local per-session UI state for the join draft and admin
  * takeover reveal.
  */
 export interface UserDirectoryCardInput {
-  /** Shared roster of people who have joined this lunch poll. */
+  /** Shared roster of participants who have joined. */
   users: UserDirectoryUsersCell;
 
   /** Per-user current viewer name cell. */
   myName: UserDirectoryNameCell;
 
-  /** Shared host/admin name cell. */
+  /** Shared admin name cell. */
   adminName: UserDirectoryNameCell;
 }
 
 /**
- * Outputs for the join/roster/host controls.
+ * Outputs for the join/roster/admin controls.
  *
  * Instantiate this sub-pattern by function call when the parent needs `me`,
  * `isJoined`, `isAdmin`, or the bound streams. The `[UI]` value may then be
@@ -113,22 +113,22 @@ export interface UserDirectoryCardOutput {
   /** Human-readable pattern name. */
   [NAME]: string;
 
-  /** Static VNode rendering the join form, roster, and host controls. */
+  /** Static VNode rendering the join form, roster, and admin controls. */
   [UI]: VNode;
 
   /** Trimmed current viewer name resolved once for downstream sub-patterns. */
   me: string;
 
-  /** Whether the current viewer has joined the poll. */
+  /** Whether the current viewer has joined the participant roster. */
   isJoined: boolean;
 
-  /** Whether the current viewer currently owns host actions. */
+  /** Whether the current viewer currently owns admin actions. */
   isAdmin: boolean;
 
-  /** Bound stream that joins the current viewer and claims host if first. */
+  /** Bound stream that joins the current viewer and claims admin if first. */
   joinAs: Stream<JoinEvent>;
 
-  /** Bound stream that transfers host/admin ownership to the current viewer. */
+  /** Bound stream that transfers admin ownership to the current viewer. */
   claimHost: Stream<ClaimHostEvent>;
 }
 

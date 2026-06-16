@@ -28,10 +28,10 @@ export type PollOptionLinkTargetCell = Writable<string | null>;
 /** Shared per-session draft text cell used by the option link editor. */
 export type PollOptionNameCell = Writable<string | Default<"">>;
 
-/** Parent-owned counter cell that retriggers host homepage lookup. */
+/** Parent-owned counter cell that retriggers admin homepage lookup. */
 export type PollOptionHomePageRefreshCell = Writable<number>;
 
-/** Host-side generated art persistence state exposed for tests and observers. */
+/** Admin-side generated art persistence state exposed for tests and observers. */
 export type PollOptionArtSyncState = GeneratedArtFetchState;
 
 interface WebSearchResponse {
@@ -125,17 +125,17 @@ const myVoteFor = (
 };
 
 /**
- * PollOptionCard renders one complete option row in a lunch poll.
+ * PollOptionCard renders one complete ranked restaurant option row.
  *
- * Use it when a parent pattern already owns option, vote, viewer, and host
- * state and wants composed UI for voting, homepage display/edit/lookup, host
- * remove/history actions, and generated-art persistence. This is not a
- * standalone poll or vote engine; durable mutations happen through the input
+ * Use it when a parent pattern already owns option, vote, viewer, and admin
+ * state and wants composed UI for voting, homepage display/edit/lookup,
+ * admin-only remove/history actions, and generated-art persistence. This is
+ * not a standalone vote engine; durable mutations happen through the input
  * streams supplied by the parent.
  */
 
 /**
- * Inputs for one rendered lunch option row.
+ * Inputs for one rendered ranked option row.
  *
  * The parent owns all durable and shared UI state. This pattern receives one
  * option, current viewer/admin facts, shared per-session editor state, and the
@@ -153,10 +153,10 @@ export interface PollOptionCardInput {
   /** Resolved current viewer name; required for per-option vote styling. */
   me: string;
 
-  /** Whether the current viewer has joined the poll. */
+  /** Whether the current viewer is allowed to vote and edit links. */
   isJoined: boolean;
 
-  /** Whether the current viewer is the host/admin. */
+  /** Whether the current viewer owns admin-only actions. */
   isAdmin: boolean;
 
   /** Shared vote list used to compute this viewer's selected vote. */
@@ -165,7 +165,7 @@ export interface PollOptionCardInput {
   /** Human-readable city label used for homepage lookup and map fallback. */
   cityLabel: string;
 
-  /** Endpoint used by the host to search for official restaurant homepages. */
+  /** Endpoint used by admins to search for official restaurant homepages. */
   searchEndpoint: string;
 
   /** Parent-owned counter cell; increments force homepage lookup to rerun. */
@@ -177,30 +177,30 @@ export interface PollOptionCardInput {
   /** Per-session homepage URL draft shared across option editors. */
   linkDraft: PollOptionNameCell;
 
-  /** Per-session option id awaiting host remove confirmation. */
+  /** Per-session option id awaiting admin remove confirmation. */
   removeConfirmTarget: PollOptionLinkTargetCell;
 
   /** Parent-owned stream that toggles or records this viewer's vote. */
   castVote: Stream<CastVoteEvent>;
 
-  /** Parent-owned host stream that removes this option after confirmation. */
+  /** Parent-owned admin stream that removes this option after confirmation. */
   removeOption: Stream<RemoveOptionEvent>;
 
-  /** Parent-owned host stream that records this option in lunch history. */
+  /** Parent-owned admin stream that records this option in visit history. */
   logVisit: Stream<LogVisitEvent>;
 
   /** Parent-owned stream that saves a viewer-edited homepage override. */
   setOptionUrl: Stream<SetOptionUrlEvent>;
 
-  /** Parent-owned host stream that persists an auto-discovered homepage. */
+  /** Parent-owned admin stream that persists an auto-discovered homepage. */
   setOptionHomePageUrl: Stream<SetOptionUrlEvent>;
 
-  /** Parent-owned host stream that persists generated art for other viewers. */
+  /** Parent-owned admin stream that persists generated art for other viewers. */
   setOptionImage: Stream<SetOptionImageEvent>;
 }
 
 /**
- * Outputs for one rendered lunch option row.
+ * Outputs for one rendered ranked option row.
  *
  * Parents normally embed this sub-pattern with JSX. Use function-call
  * instantiation only when reading `artSyncState` or `homePageUrl`.
@@ -212,7 +212,7 @@ export interface PollOptionCardOutput {
   /** Static VNode rendering the complete option row. */
   [UI]: VNode;
 
-  /** Host-side generated art persistence state. */
+  /** Admin-side generated art persistence state. */
   artSyncState: PollOptionArtSyncState;
 
   /** Display homepage URL after stored, edited, or verified lookup resolution. */

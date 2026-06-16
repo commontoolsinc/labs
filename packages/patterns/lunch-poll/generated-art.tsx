@@ -8,9 +8,9 @@ import {
   type VNode,
 } from "commonfabric";
 
-// Cuisine illustration for each option. Only the host asks the local image
-// generator for an image; the returned data URL can then be stored on the
-// shared option so other viewers render the host-written result.
+// Cuisine illustration thumbnail. Callers can disable generation and pass a
+// stored source URL; a parent that owns item state can persist the returned
+// data URL for other viewers.
 const GENERATE_IMAGE_PATH = "/api/ai/img";
 const GENERATED_IMAGE_SIZE = 128;
 
@@ -59,12 +59,11 @@ const generatedImageUrlFor = (title: string): string =>
   "&height=" + GENERATED_IMAGE_SIZE;
 
 /**
- * GeneratedArt renders the lunch-poll thumbnail box for a restaurant option.
+ * GeneratedArt renders a fallback-backed food illustration thumbnail.
  *
- * Use it when a parent pattern needs a fixed-size food illustration with a
- * static fallback, optional generated image fetch, and observable generated
- * URL. This sub-pattern owns no shared state; callers pass a persisted source
- * URL and decide whether this instance may generate.
+ * Use it when a parent pattern needs fixed-size generated-or-stored image UI
+ * from a text prompt. This sub-pattern owns no shared state; callers pass any
+ * persisted source URL and decide whether this instance may generate.
  */
 
 /**
@@ -80,14 +79,14 @@ export type GeneratedArtFetchState =
   | "";
 
 /**
- * Inputs for the lunch thumbnail sub-pattern.
+ * Inputs for the generated thumbnail sub-pattern.
  *
  * Use JSX when embedding only the UI: `<GeneratedArt prompt={title} />`.
  * Instantiate with a function call when the parent needs `url` or
  * `fetchState`.
  */
 export interface GeneratedArtInput {
-  /** Restaurant or dish text used to build the art-director prompt. */
+  /** Text used to build the food-illustration art-director prompt. */
   prompt: string;
 
   /** Safe persisted image URL or data URI; when present, generation is skipped. */
@@ -98,7 +97,7 @@ export interface GeneratedArtInput {
 }
 
 /**
- * Outputs for the lunch thumbnail sub-pattern.
+ * Outputs for the generated thumbnail sub-pattern.
  *
  * `[UI]` is a static VNode. The fallback image remains a static CSS
  * `background-image`; the generated or stored `<img>` overlays it only after
