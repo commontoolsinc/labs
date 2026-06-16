@@ -3,7 +3,6 @@ import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
 import {
   Cell,
-  getMetaLink,
   getPatternIdentityRef,
   NAME,
   Runtime,
