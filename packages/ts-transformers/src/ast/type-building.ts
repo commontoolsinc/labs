@@ -5,8 +5,11 @@ import { createPropertyName } from "../utils/identifiers.ts";
 import {
   ensureTypeNodeRegistered,
   inferWidenedTypeFromExpression,
+  isUnknownType,
+  unwrapCellLikeType,
 } from "./type-inference.ts";
 import {
+  getExpressionText,
   isOptionalMemberSymbol,
   isOptionalSymbol,
   setParentPointers,
@@ -651,6 +654,53 @@ export function cloneTypeNodeDeepForEmission<T extends ts.TypeNode>(
 }
 
 /**
+ * Warns when a reactive value consumed across a boundary has inferred type
+ * `unknown`. That type lowers to `{ type: "unknown" }`, which the runner reads
+ * back as `undefined` rather than materializing the value (see
+ * `runner/src/traverse.ts`, `_traverseWithSchemaInner`: a
+ * `TypeValidity.Unknown` field short-circuits to `undefined`). `any` lowers to
+ * a permissive `true` schema and materializes, so it is not flagged.
+ *
+ * Both reactive-input sites share this: closure-captured inputs (the capture
+ * leaves below — `computed`/`lift`, `handler`/`action`, reactive array methods,
+ * `patternTool`) and the condition of `ifElse`/`when`/`unless` (checked where
+ * their schemas are built). `reportDiagnosticOnce` keeps the same value from
+ * being warned about twice when more than one stage walks it.
+ */
+export function warnIfUnknownReactiveType(
+  context: TransformationContext,
+  expression: ts.Expression,
+  type: ts.Type | undefined,
+  label: string,
+): void {
+  if (!isUnknownType(unwrapCellLikeType(type, context.checker))) {
+    return;
+  }
+  context.reportDiagnosticOnce({
+    severity: "warning",
+    type: "reactive-capture:unknown-type",
+    message:
+      `Reactive value \`${describeCapture(expression, label)}\` has inferred ` +
+      `type \`unknown\`, so its schema is \`{ type: "unknown" }\`, which the ` +
+      `runner reads back as \`undefined\` instead of materializing it. Add an ` +
+      `explicit type so it can be inferred (e.g. ` +
+      `\`fetchData<{ /* result shape */ }>({ ... })\`).`,
+    node: expression,
+  });
+}
+
+/** Single-line rendering of a reactive value for the message; falls back to the
+ * given label when there is no usable text. Uses getExpressionText, which
+ * prints synthetic nodes safely — `getText()` throws on them. */
+function describeCapture(expression: ts.Expression, fallback: string): string {
+  const text = getExpressionText(expression).replace(/\s+/g, " ").trim();
+  if (!text) {
+    return fallback;
+  }
+  return text.length > 48 ? `${text.slice(0, 45)}...` : text;
+}
+
+/**
  * Builds TypeScript type elements from a capture tree structure.
  * Works for both nested properties within a tree node and root-level entries.
  * Recursively builds nested type literals for hierarchical captures.
@@ -689,7 +739,21 @@ export function buildTypeElementsFromCaptureTree(
     if (childNode.expression) {
       // Leaf node with source expression - use it directly
       typeNode = expressionToTypeNode(childNode.expression, context);
-      currentType = checker.getTypeAtLocation(childNode.expression);
+
+      // Judge unknown-ness from the type that drives the emitted schema — the
+      // same one expressionToTypeNode uses. A bare getTypeAtLocation would skip
+      // the typeRegistry lookup and initializer fallback; literal widening here
+      // can't change whether the type is unknown.
+      warnIfUnknownReactiveType(
+        context,
+        childNode.expression,
+        inferWidenedTypeFromExpression(
+          childNode.expression,
+          checker,
+          context.options.state?.typeRegistry,
+        ),
+        propName,
+      );
 
       // Check optionality from source expression
       if (ts.isPropertyAccessExpression(childNode.expression)) {

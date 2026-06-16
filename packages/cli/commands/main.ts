@@ -43,10 +43,11 @@ LOCAL DEVELOPMENT:
   ./scripts/stop-local-dev.sh       # Stop local servers
 ${envStatus()}
 LOGGING:
-  Only errors are shown by default. Enable more with:
+  Warnings and errors are shown by default. Adjust with:
     cf --log-level info check ./pattern.tsx
+    cf --log-level error check ./pattern.tsx   # quieter: errors only
     CF_LOG_LEVEL=debug cf piece ls
-  Valid levels: debug, info, warn, error (default), silent
+  Valid levels: debug, info, warn (default), error, silent
 
 Run 'cf <command> --help' for command-specific help.`);
 

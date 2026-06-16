@@ -4,6 +4,7 @@ import {
   createRegisteredTypeLiteral,
   getDeclaredTypeNodeForBindingElement,
   shouldPreserveBindingDeclaredTypeNode,
+  warnIfUnknownReactiveType,
 } from "../ast/type-building.ts";
 import { FUNCTION_HARDENING_HELPER_NAME } from "@commonfabric/utils/sandbox-contract";
 
@@ -1480,6 +1481,59 @@ function visitPrependedWidenedSchemaCall(
   return ts.visitEachChild(updated, visit, transformation);
 }
 
+/**
+ * Rewrites a reactive conditional (`when`/`unless`/`ifElse`), authored as
+ * `fn(condition, ...branches)`, to carry a generated schema for each argument
+ * plus the call's result type, inserted ahead of the original arguments (what
+ * visitPrependedWidenedSchemaCall does). The first argument is the reactive
+ * condition, so it gets the unknown-capture check.
+ *
+ * `arity` is the authored argument count (2 for when/unless, 3 for ifElse). A
+ * call that already has the schemas added has more arguments; an earlier marker
+ * keeps it from being processed twice, so this length check just skips that
+ * already-rewritten form.
+ */
+function visitReactiveConditional(
+  node: ts.CallExpression,
+  arity: number,
+  context: TransformationContext,
+  visit: (node: ts.Node) => ts.Node,
+  transformation: ts.TransformationContext,
+  checker: ts.TypeChecker,
+  typeRegistry?: TypeRegistry,
+): ts.Node {
+  const args = node.arguments;
+  if (args.length !== arity) {
+    // Other arities are the already-rewritten form (schemas prepended).
+    return ts.visitEachChild(node, visit, transformation);
+  }
+
+  // getTypeAtLocationWithFallback handles synthetic nodes (e.g. lift-applied
+  // calls) whose types live in the typeRegistry rather than at a source range.
+  const typeOf = (expr: ts.Node): ts.Type =>
+    getTypeAtLocationWithFallback(expr, checker, typeRegistry) ??
+      checker.getTypeAtLocation(expr);
+
+  const argTypes = args.map(typeOf);
+  // Only the condition is checked. It is materialized here to choose a branch,
+  // so an unknown condition silently reads back as undefined at this boundary.
+  // The branches are result values that flow outward unmaterialized — an unknown
+  // branch is not lost here; it propagates as the call's unknown result and is
+  // warned about where that result is consumed (captured).
+  warnIfUnknownReactiveType(context, args[0]!, argTypes[0], "condition");
+
+  return visitPrependedWidenedSchemaCall(
+    node,
+    args,
+    [...argTypes, typeOf(node)],
+    context,
+    visit,
+    transformation,
+    checker,
+    typeRegistry,
+  );
+}
+
 function inferLiftFactoryResultType(
   node: ts.Expression,
   checker: ts.TypeChecker,
@@ -2539,6 +2593,73 @@ function reportAnyResultSchema(
   });
 }
 
+/**
+ * Reports on a pattern's inferred result schema. A top-level `any`/`unknown`
+ * result is an error (the whole output is permissive). A concrete result that
+ * nests `unknown` fields is a warning: those fields lower to
+ * `{ type: "unknown" }`, which a consumer reading them back materializes as
+ * `undefined` — the producer-side form of the unknown-capture bug.
+ */
+function reportUnknownPatternResult(
+  context: TransformationContext,
+  node: ts.CallExpression,
+  resultNode: ts.TypeNode | undefined,
+  resultType: ts.Type | undefined,
+): void {
+  if (shouldReportPermissiveInferredPatternResult(resultNode, resultType)) {
+    reportAnyResultSchema(context, node);
+    return;
+  }
+  if (!resultNode) return;
+  const paths = collectUnknownResultPaths(resultNode);
+  if (paths.length === 0) return;
+  const fields = paths.map((p) => `\`${p}\``).join(", ");
+  context.reportDiagnosticOnce({
+    severity: "warning",
+    type: "pattern-result:unknown-type",
+    message:
+      `pattern() output ${paths.length > 1 ? "fields" : "field"} ${fields} ` +
+      `${
+        paths.length > 1 ? "have" : "has"
+      } inferred type \`unknown\`, so the ` +
+      `output schema carries \`{ type: "unknown" }\` there. A consumer that ` +
+      `reads such a field back materializes it as \`undefined\`. Add an ` +
+      `explicit Output type, e.g. pattern<Input, { /* shape */ }>(...).`,
+    node: node.expression,
+  });
+}
+
+/**
+ * Collects dotted paths to `unknown`-typed leaves within a result type node,
+ * descending object literals and array element types. A top-level `unknown` is
+ * handled by the error path above, so this only sees nested occurrences.
+ */
+function collectUnknownResultPaths(resultNode: ts.TypeNode): string[] {
+  const paths: string[] = [];
+  const walk = (typeNode: ts.TypeNode, path: string): void => {
+    const unwrapped = unwrapParenthesizedTypeNode(typeNode);
+    if (unwrapped.kind === ts.SyntaxKind.UnknownKeyword) {
+      paths.push(path || "(result)");
+      return;
+    }
+    if (ts.isTypeLiteralNode(unwrapped)) {
+      for (const member of unwrapped.members) {
+        if (
+          ts.isPropertySignature(member) && member.type && member.name &&
+          (ts.isIdentifier(member.name) || ts.isStringLiteral(member.name))
+        ) {
+          const name = member.name.text;
+          walk(member.type, path ? `${path}.${name}` : name);
+        }
+      }
+    } else if (ts.isArrayTypeNode(unwrapped)) {
+      walk(unwrapped.elementType, `${path}[]`);
+    }
+  };
+  walk(resultNode, "");
+  return paths;
+}
+
 function isMapWithPatternCallbackPatternCall(node: ts.CallExpression): boolean {
   const parent = node.parent;
   if (!parent || !ts.isCallExpression(parent)) {
@@ -2660,14 +2781,12 @@ function handlePatternSchemaInjection(
       argumentCapabilityMode,
       context,
     );
-    if (
-      shouldReportPermissiveInferredPatternResult(
-        inferred.result,
-        inferred.resultType,
-      )
-    ) {
-      reportAnyResultSchema(context, node);
-    }
+    reportUnknownPatternResult(
+      context,
+      node,
+      inferred.result,
+      inferred.resultType,
+    );
     resultTypeNode = inferred.result ??
       factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
     resultType = getTypeFromRegistryOrFallback(
@@ -2701,14 +2820,12 @@ function handlePatternSchemaInjection(
         argumentCapabilityMode,
         context,
       );
-      if (
-        shouldReportPermissiveInferredPatternResult(
-          inferred.result,
-          inferred.resultType,
-        )
-      ) {
-        reportAnyResultSchema(context, node);
-      }
+      reportUnknownPatternResult(
+        context,
+        node,
+        inferred.result,
+        inferred.resultType,
+      );
       resultTypeNode = inferred.result ??
         factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
       resultType = getTypeFromRegistryOrFallback(
@@ -2760,14 +2877,12 @@ function handlePatternSchemaInjection(
         argumentCapabilityMode,
         context,
       );
-      if (
-        shouldReportPermissiveInferredPatternResult(
-          inferred.result,
-          inferred.resultType,
-        )
-      ) {
-        reportAnyResultSchema(context, node);
-      }
+      reportUnknownPatternResult(
+        context,
+        node,
+        inferred.result,
+        inferred.resultType,
+      );
 
       inputTypeNode = inferred.argument ??
         getParameterSchemaType(factory, inputParam);
@@ -3866,44 +3981,13 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         }
       }
 
-      // Handler for when(condition, value) - prepends 3 schemas (condition, value, result)
-      if (callKind?.kind === "when") {
-        const args = node.arguments;
-
-        // Idempotency is owned by the top-of-visit schema-injected marker; no
-        // arg-count "already has schemas" guard needed. (The public
-        // WhenFunction type is exactly 2-arity, so the 5-arg withSchemas form
-        // can ONLY be our own injected output — never user source.)
-        // This stays a DISPATCH guard: only the 2-arg form is the injectable shape.
-        if (args.length !== 2) {
-          return ts.visitEachChild(node, visit, transformation);
-        }
-
-        const [conditionExpr, valueExpr] = args;
-
-        // Infer types for each argument
-        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g.,
-        // lift-applied calls) which have their types registered in the typeRegistry
-        const conditionType = getTypeAtLocationWithFallback(
-          conditionExpr!,
-          checker,
-          typeRegistry,
-        ) ??
-          checker.getTypeAtLocation(conditionExpr!);
-        const valueType =
-          getTypeAtLocationWithFallback(valueExpr!, checker, typeRegistry) ??
-            checker.getTypeAtLocation(valueExpr!);
-
-        // Get the result type from TypeScript's inferred return type of the call
-        // This will be the union type (e.g., boolean | string for when(enabled, message))
-        const resultType =
-          getTypeAtLocationWithFallback(node, checker, typeRegistry) ??
-            checker.getTypeAtLocation(node);
-
-        return visitPrependedWidenedSchemaCall(
+      // Reactive conditionals prepend a widened schema per argument plus the
+      // result. when/unless are 2-arity (condition, value/fallback); ifElse is
+      // 3-arity (condition, ifTrue, ifFalse).
+      if (callKind?.kind === "when" || callKind?.kind === "unless") {
+        return visitReactiveConditional(
           node,
-          args,
-          [conditionType, valueType, resultType],
+          2,
           context,
           visit,
           transformation,
@@ -3911,90 +3995,10 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           typeRegistry,
         );
       }
-
-      // Handler for unless(condition, fallback) - prepends 3 schemas (condition, fallback, result)
-      if (callKind?.kind === "unless") {
-        const args = node.arguments;
-
-        // Idempotency owned by the schema-injected marker (see `when` above).
-        // UnlessFunction is exactly 2-arity, so the 5-arg form is only ever
-        // our injected output. DISPATCH guard: only the 2-arg form is injectable.
-        if (args.length !== 2) {
-          return ts.visitEachChild(node, visit, transformation);
-        }
-
-        const [conditionExpr, fallbackExpr] = args;
-
-        // Infer types for each argument
-        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g.,
-        // lift-applied calls) which have their types registered in the typeRegistry
-        const conditionType = getTypeAtLocationWithFallback(
-          conditionExpr!,
-          checker,
-          typeRegistry,
-        ) ??
-          checker.getTypeAtLocation(conditionExpr!);
-        const fallbackType =
-          getTypeAtLocationWithFallback(fallbackExpr!, checker, typeRegistry) ??
-            checker.getTypeAtLocation(fallbackExpr!);
-
-        // Get the result type from TypeScript's inferred return type of the call
-        // This will be the union type (e.g., boolean | string for unless(enabled, fallback))
-        const resultType =
-          getTypeAtLocationWithFallback(node, checker, typeRegistry) ??
-            checker.getTypeAtLocation(node);
-
-        return visitPrependedWidenedSchemaCall(
-          node,
-          args,
-          [conditionType, fallbackType, resultType],
-          context,
-          visit,
-          transformation,
-          checker,
-          typeRegistry,
-        );
-      }
-
-      // Handler for ifElse(condition, ifTrue, ifFalse) - prepends 4 schemas (condition, ifTrue, ifFalse, result)
       if (callKind?.kind === "ifElse") {
-        const args = node.arguments;
-
-        // Idempotency owned by the schema-injected marker (see `when` above).
-        // IfElseFunction is exactly 3-arity, so the 7-arg form is only ever
-        // our injected output. DISPATCH guard: only the 3-arg form is injectable.
-        if (args.length !== 3) {
-          return ts.visitEachChild(node, visit, transformation);
-        }
-
-        const [conditionExpr, ifTrueExpr, ifFalseExpr] = args;
-
-        // Infer types for each argument
-        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g.,
-        // lift-applied calls) which have their types registered in the typeRegistry
-        const conditionType = getTypeAtLocationWithFallback(
-          conditionExpr!,
-          checker,
-          typeRegistry,
-        ) ??
-          checker.getTypeAtLocation(conditionExpr!);
-        const ifTrueType =
-          getTypeAtLocationWithFallback(ifTrueExpr!, checker, typeRegistry) ??
-            checker.getTypeAtLocation(ifTrueExpr!);
-        const ifFalseType =
-          getTypeAtLocationWithFallback(ifFalseExpr!, checker, typeRegistry) ??
-            checker.getTypeAtLocation(ifFalseExpr!);
-
-        // Get the result type from TypeScript's inferred return type of the call
-        // This will be the union type (e.g., string | number for ifElse(cond, str, num))
-        const resultType =
-          getTypeAtLocationWithFallback(node, checker, typeRegistry) ??
-            checker.getTypeAtLocation(node);
-
-        return visitPrependedWidenedSchemaCall(
+        return visitReactiveConditional(
           node,
-          args,
-          [conditionType, ifTrueType, ifFalseType, resultType],
+          3,
           context,
           visit,
           transformation,

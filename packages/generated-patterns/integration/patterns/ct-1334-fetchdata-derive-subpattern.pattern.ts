@@ -24,14 +24,11 @@ import { computed, fetchData, pattern } from "commonfabric";
 // unknown types properly; `{type:"unknown"}` is the CORRECT behavior (confirmed
 // w/ Berni), so typing the call is the right fix, not restoring `true`.
 //
-// The remaining systemic gap — that an `unknown`-inferred capture fails SILENTLY
-// (undefined at runtime) instead of at compile time — is a separate follow-up:
-// add a transform-time diagnostic for unknown-typed captures + audit existing
-// untyped fetchData/streamData capture sites. See
-// session_outputs/2026-05-27_remove-derive/18-IAN-ONBOARDING-unknown-capture-diagnostic.md
-// (slated as a starter project; a Linear ticket will supersede this pointer).
-//
-// Typing the call supplies the schema the assertion semantically requires.
+// An `unknown`-inferred capture fails this way silently — undefined at runtime
+// rather than a compile error. The transformer now emits a
+// `reactive-capture:unknown-type` warning for such captures, so the silent case
+// surfaces at build time; typing the call (as below) is the fix and supplies the
+// schema the assertion semantically requires.
 
 const FetchPage = pattern<
   { token: string },
