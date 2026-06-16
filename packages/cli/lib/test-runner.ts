@@ -1317,9 +1317,9 @@ export async function runTestPattern(
                 });
               }
             }
-            // Helper to shorten cell paths: did:key:z6Mk.../of:baedrei.../value/foo → …rei.../value/foo
+            // Helper to shorten cell paths: did:key:z6Mk.../of:fid1:abc.../value/foo → …abc.../value/foo
             const shortenPath = (r: string): string => {
-              // Format: did:key:.../of:baedrei.../path/parts
+              // Format: did:key:.../of:fid1:abc.../path/parts
               const ofIdx = r.indexOf("/of:");
               if (ofIdx < 0) return r.length > 40 ? "…" + r.slice(-39) : r;
               const afterOf = r.slice(ofIdx + 4);

@@ -48,7 +48,7 @@ Charms must be registered before they receive polling:
 curl -X POST http://localhost:8000/api/integrations/bg \
   -H "Content-Type: application/json" \
   -d '{
-    "pieceId": "baedrei...",
+    "pieceId": "fid1:abc...",
     "space": "did:key:z6Mk...",
     "integration": "my-test"
   }'
@@ -67,7 +67,7 @@ Space DID = Identity.fromPassphrase("common user").derive(spaceName).did()
 Watch the service output for:
 
 ```
-Successfully executed charm did:key:.../baedrei...
+Successfully executed charm did:key:.../fid1:abc...
 ```
 
 ### Troubleshooting

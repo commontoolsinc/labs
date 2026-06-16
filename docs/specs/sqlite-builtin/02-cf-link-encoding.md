@@ -67,7 +67,7 @@ so `id`, `space`, and `scope` are always present:
 {
   "/": {
     "link@1": {
-      "id":    "of:bafy2bzace…",                 // entity id, always present
+      "id":    "of:fid1:abc…",                    // entity id, always present
       "space": "did:key:z6Mk…",                   // owning space DID, always present
       "scope": "space",                            // resolved scope, always present
       "path":  ["author", "name"]                  // optional value-relative path

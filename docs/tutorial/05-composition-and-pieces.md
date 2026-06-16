@@ -59,7 +59,7 @@ another piece) does roughly this (see `packages/piece/src/manager.ts`):
    pattern graph is re-instantiated over the argument cell, and the result
    (including `[UI]`) flows from there.
 
-A piece is identified by an entity id (a hash, e.g. `bafy...`) and can carry
+A piece is identified by an entity id (a hash, e.g. `fid1:abc...`) and can carry
 a human **slug** for URLs. In the shell, `/{spaceName}/{pieceIdOrSlug}` shows
 a piece's UI.
 

@@ -159,7 +159,7 @@ export function runtimeOptionsFromInitializationData(
 
 /**
  * Formats a cell link for display in console output.
- * Returns a string like "[Cell: of:bafy.../path/to/prop]"
+ * Returns a string like "[Cell: of:fid1:abc.../path/to/prop]"
  */
 function formatCellLink(cell: Cell<unknown>): string {
   try {

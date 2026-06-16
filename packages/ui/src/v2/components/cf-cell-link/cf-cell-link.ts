@@ -34,12 +34,12 @@ import {
  *
  * @element cf-cell-link
  *
- * @property {string} link - The serialized path to a cell (e.g. /of:bafy.../path)
+ * @property {string} link - The serialized path to a cell (e.g. /of:fid1:abc.../path)
  * @property {CellHandle} cell - The live Cell reference
  * @property {boolean} static - Suppress drag behavior
  *
  * @example
- * <cf-cell-link .link=${"/of:bafy.../path"}></cf-cell-link>
+ * <cf-cell-link .link=${"/of:fid1:abc.../path"}></cf-cell-link>
  * <cf-cell-link .cell=${myCell}></cf-cell-link>
  * <cf-cell-link .cell=${myCell} static></cf-cell-link>
  */

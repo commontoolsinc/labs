@@ -249,7 +249,7 @@ export function createOAuth2Routes(providerName: string) {
               })
               .openapi({
                 example: {
-                  pieceId: "bafy...",
+                  pieceId: "fid1:abc...",
                   space: "did:",
                   integration: "rss",
                 },
