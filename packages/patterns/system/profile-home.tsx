@@ -43,7 +43,7 @@ export type ProfileElement = {
   tag: string;
   userTags: readonly string[];
   title?: string;
-  source?: "catalog" | "url";
+  source?: "catalog" | "url" | "piece";
 };
 
 export type AddProfileElementEvent = {
@@ -72,6 +72,12 @@ export type MutateProfileElementsEvent = {
   tag?: string;
   userTags?: readonly string[];
   cell?: any;
+  // "addPiece" inputs: a link to an EXISTING deployed piece (CT-1755). The
+  // card becomes a followable reference to the live piece rather than a local
+  // title-only placeholder. `pieceSpace` is the target space DID; `pieceId` is
+  // the piece id (with or without the `of:` prefix).
+  pieceSpace?: string;
+  pieceId?: string;
 };
 
 export type SetProfileNameEvent = {
@@ -101,6 +107,8 @@ export type ProfileHomeOutput = {
   // `RemoveProfileElementEvent` remain the documented per-stream subsets.
   addElement: Stream<MutateProfileElementsEvent>;
   removeElement: Stream<MutateProfileElementsEvent>;
+  // Pin an existing deployed piece as a followable card (CT-1755).
+  addPiece: Stream<MutateProfileElementsEvent>;
   // Flips the rendered profile view (CT-1748) between the read-only
   // presentation and the edit form. UI state — not owner-protected.
   toggleEditing: Stream<unknown>;
@@ -144,6 +152,17 @@ const UrlPatternReference = pattern<
   }),
 );
 
+// Build a link to an EXISTING deployed piece in (possibly) another space
+// (CT-1755). This is the canonical serialized cross-space link shape
+// (`createSigilLinkFromParsedLink`'s output): a `link@1` sigil carrying the
+// target piece id (URI form, `of:` prefix) and space DID. Stored as a
+// `ProfileElement.cell`, it resolves to the live piece and renders as a
+// followable `<cf-cell-link>` exactly like a `profiles[]` roster entry.
+const pieceReferenceLink = (space: string, pieceId: string): unknown => {
+  const id = pieceId.startsWith("of:") ? pieceId : `of:${pieceId}`;
+  return { "/": { "link@1": { id, space, path: [] } } };
+};
+
 const appendElement = (
   element: ProfileElement,
   elements: Writable<ProfileElement[]>,
@@ -175,7 +194,7 @@ const mutateElements = handler<
     //               without a URL.
     //   "remove"  — the exported remove stream / per-row button: removes
     //               `event.cell ?? state.cell`; no-op without one.
-    mode: "add" | "addCard" | "addLink" | "remove";
+    mode: "add" | "addCard" | "addLink" | "addPiece" | "remove";
     // Per-row remove binding ("remove" mode).
     cell?: any;
     // Link form binding ("addLink" mode).
@@ -183,6 +202,9 @@ const mutateElements = handler<
     title?: Writable<string>;
     tag?: Writable<string>;
     userTags?: string[];
+    // Pin-a-piece form binding ("addPiece" mode, CT-1755).
+    pieceSpace?: Writable<string>;
+    pieceId?: Writable<string>;
   }
 >((event, state) => {
   const userTags = event.userTags ?? state.userTags ?? [];
@@ -212,6 +234,41 @@ const mutateElements = handler<
       state.patternUrl?.set("");
       state.title?.set("");
       state.tag?.set("");
+      return;
+    }
+    case "addPiece": {
+      // Prefer event fields (e.g. a "pin from the piece" flow that passes the
+      // target directly); fall back to the bound form cells (the edit-mode
+      // "Pin a piece" inputs).
+      let space = (event.pieceSpace ?? state.pieceSpace?.get() ?? "").trim();
+      let rawId = (event.pieceId ?? state.pieceId?.get() ?? "").trim();
+      // Convenience: a full piece URL/path pasted into the space field is split
+      // into space + id (the last two path segments). Only a DID-spaced URL
+      // resolves cross-space — a space *name* can't be resolved to a DID from
+      // pattern code, so paste the `did:key:…` form for another space.
+      if (rawId.length === 0 && space.includes("/")) {
+        const segments = space.replace(/^https?:\/\/[^/]+/, "").split("/")
+          .filter((segment) => segment.length > 0);
+        if (segments.length >= 2) {
+          space = segments[segments.length - 2];
+          rawId = segments[segments.length - 1];
+        }
+      }
+      if (space.length === 0 || rawId.length === 0) return;
+      const title = (event.title ?? state.title?.get() ?? "").trim() || rawId;
+      // Tag by the piece id so the same piece can't be pinned twice (dedup in
+      // appendElement is by `cell`; a stable tag keeps the row label sane).
+      const tag = rawId;
+      appendElement({
+        cell: pieceReferenceLink(space, rawId),
+        source: "piece",
+        title,
+        tag,
+        userTags,
+      }, state.elements);
+      state.pieceSpace?.set("");
+      state.pieceId?.set("");
+      state.title?.set("");
       return;
     }
     case "addCard": {
@@ -305,15 +362,23 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
     const elementTitle = new Writable("").for("elementTitle");
     const elementTag = new Writable("").for("elementTag");
     const userTagsText = new Writable("").for("userTagsText");
+    // "Pin a piece" form (CT-1755): a link to an existing deployed piece by
+    // its space DID + piece id.
+    const pieceSpaceForm = new Writable("").for("pieceSpaceForm");
+    const pieceIdForm = new Writable("").for("pieceIdForm");
+    const pieceTitleForm = new Writable("").for("pieceTitleForm");
     // Rendered profile view (CT-1748): the cell view shows a read-only
     // presentation by default; the owner flips this to reveal the edit form.
     const editing = new Writable<boolean>(false).for("editing");
     const isEditing = computed(() => editing.get() === true);
     // Self-view cell for <cf-profile-badge>: the badge resolves name/avatar from
-    // a bound profile cell. Bound to this derived self-cell it renders in the
-    // "presented" state. TODO(CT-1748 follow-up): bind the actual profile result
-    // cell so the runtime-attested represents-principal label drives the
-    // verified identity seal (needs owner-protection restored + CT-1740).
+    // a bound profile cell. Bound to this DERIVED self-cell (a computed
+    // projection, not the profile's own root piece), so the badge is marked
+    // `no-navigate` — a click would otherwise resolve to this non-piece cell id
+    // and route to an invalid URL. TODO(CT-1748 follow-up): bind the actual
+    // profile result cell so the badge can navigate to the canonical profile
+    // page AND the runtime-attested represents-principal label drives the
+    // verified identity seal.
     const selfProfile = computed(() => ({
       [NAME]: name.get(),
       name: name.get(),
@@ -347,6 +412,16 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       // pinned to their declared purpose via the bound mode.
       addElement: mutateElements({ elements, mode: "add" }),
       removeElement: mutateElements({ elements, mode: "remove" }),
+      // Pin an existing deployed piece as a followable card (CT-1755). Reads
+      // the bound form cells; an event may also pass { pieceSpace, pieceId,
+      // title } directly (e.g. a future "pin from the piece" flow).
+      addPiece: mutateElements({
+        elements,
+        mode: "addPiece",
+        pieceSpace: pieceSpaceForm,
+        pieceId: pieceIdForm,
+        title: pieceTitleForm,
+      }),
       toggleEditing: toggleProfileEditing({ editing }),
       isEditing,
       initialNameApplied,
@@ -374,6 +449,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
                   id="profile-badge"
                   $profile={selfProfile}
                   size="xl"
+                  noNavigate
                 />
 
                 <cf-vstack gap="2">
@@ -482,6 +558,38 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
                   <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     Links are saved as reference cards. They are not deployed or
                     run.
+                  </span>
+                </cf-vstack>
+
+                <cf-vstack gap="2">
+                  <label>Pin a piece</label>
+                  <cf-input
+                    $value={pieceSpaceForm}
+                    placeholder="Space DID (or paste a /space/piece URL)"
+                  />
+                  <cf-input
+                    $value={pieceIdForm}
+                    placeholder="Piece id (fid1:…)"
+                  />
+                  <cf-input
+                    $value={pieceTitleForm}
+                    placeholder="Card title (optional)"
+                  />
+                  <cf-button
+                    onClick={mutateElements({
+                      elements,
+                      mode: "addPiece",
+                      pieceSpace: pieceSpaceForm,
+                      pieceId: pieceIdForm,
+                      title: pieceTitleForm,
+                      userTags: parsedUserTags,
+                    })}
+                  >
+                    Pin piece
+                  </cf-button>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
+                    Pins a link to an existing deployed piece. Click the card to
+                    open the live piece.
                   </span>
                 </cf-vstack>
 

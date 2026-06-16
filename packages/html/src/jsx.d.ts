@@ -4255,6 +4255,14 @@ interface CFProfileBadgeAttributes<T> extends CFHTMLAttributes<T> {
   /** A cell containing a profile (ProfileHomeOutput): renders avatar + name. */
   "$profile"?: CellLike<any>;
   "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
+  /**
+   * Suppress click-to-navigate. Set when the badge is bound to a derived view
+   * of a profile (e.g. the self-badge on a profile-home page) rather than the
+   * profile's own root piece, so a click would route to an invalid URL.
+   * (Camel-cased to match the element property — the renderer assigns JSX props
+   * as properties, so a lower-cased name would miss the reactive property.)
+   */
+  "noNavigate"?: boolean;
 }
 
 interface CFChipAttributes<T> extends CFHTMLAttributes<T> {

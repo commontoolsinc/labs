@@ -306,6 +306,16 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
   @property({ attribute: false })
   accessor space: DID | undefined = undefined;
 
+  /**
+   * Suppress click-to-navigate. Set this when the badge is bound to a derived
+   * view of the profile rather than the profile's own root piece — e.g. the
+   * self-badge on a profile-home page, whose bound cell is a `computed()`
+   * projection (not a navigable piece), so a click would otherwise resolve to a
+   * non-piece cell id and route to an invalid URL.
+   */
+  @property({ type: Boolean, reflect: true, attribute: "nonavigate" })
+  accessor noNavigate = false;
+
   @state()
   private accessor _name: string | undefined = undefined;
 
@@ -472,7 +482,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
       // piece (only root cells map to a profile page; sub-path/derived cells
       // don't).
       this._resolvedCell = resolved;
-      this._navigable = resolved.ref().path.length === 0;
+      this._navigable = !this.noNavigate && resolved.ref().path.length === 0;
 
       // Subscribe with a minimal schema so the runtime only resolves the fields
       // we render, rather than walking the whole profile output graph (mirrors
@@ -505,6 +515,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
    * opens in a new tab.
    */
   private _navigateToProfile(openInNewTab: boolean): void {
+    if (this.noNavigate) return;
     const cell = this._resolvedCell;
     if (!cell || cell.ref().path.length > 0) return;
     const view = { spaceDid: cell.space(), pieceId: cell.id() };
