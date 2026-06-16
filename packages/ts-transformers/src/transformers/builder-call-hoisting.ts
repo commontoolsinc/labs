@@ -414,12 +414,6 @@ function collectTopLevelBuilderArtifactNames(
   }
 }
 
-/**
- * The set of LOCAL binding names that are exported from the module by any form:
- * `export const foo`, `export { foo }` / `export { foo as bar }` (the local name
- * `foo`), and `export default foo`. Used to keep exported builder artifacts out
- * of `__cfReg` (they are addressable through the module namespace instead).
- */
 /** Strip parentheses and `as` / `satisfies` / type-assertion wrappers to reach
  * the underlying builder/identifier expression. Used both for `export default x`
  * recognition and for top-level `const foo = handler(...) as XFactory`
@@ -437,6 +431,12 @@ function unwrapTypeWrappers(expr: ts.Expression): ts.Expression {
   return current;
 }
 
+/**
+ * The set of LOCAL binding names that are exported from the module by any form:
+ * `export const foo`, `export { foo }` / `export { foo as bar }` (the local name
+ * `foo`), and `export default foo`. Used to keep exported builder artifacts out
+ * of `__cfReg` (they are addressable through the module namespace instead).
+ */
 function collectExportedLocalNames(sourceFile: ts.SourceFile): Set<string> {
   const names = new Set<string>();
   for (const statement of sourceFile.statements) {
