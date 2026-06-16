@@ -87,8 +87,8 @@ const MAX_SERIALIZE_DEPTH = 100;
  * advertise it as an input parameter.
  */
 function stripInjectedResult(
-  schema: unknown,
-): unknown {
+  schema: JSONSchema,
+): JSONSchema {
   if (!schema || typeof schema !== "object") return schema;
   const obj = schema as Record<string, unknown>;
   if (obj.type !== "object") return schema;
@@ -135,7 +135,7 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
     };
   }
   if (!isObject(inputSchema)) inputSchema = { type: "object" };
-  const stripped = stripInjectedResult(inputSchema) as JSONSchema;
+  const stripped = stripInjectedResult(inputSchema);
   return prepareSchemaForLLM(stripped);
 }
 
