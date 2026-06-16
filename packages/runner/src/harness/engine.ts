@@ -498,6 +498,100 @@ export class Engine extends EventTarget implements Harness {
   }
 
   /**
+   * PROTOTYPE (cfcheck #2): type-check + SES-verify many authored programs in a
+   * SINGLE TypeScript program.
+   *
+   * Each program is resolved with the runtime `.d.ts` type environment injected
+   * exactly as {@link compileToRecordGraph} does (pretransform → resolve), then
+   * every resolved file is unioned and compiled as roots of one `ts.Program`.
+   * The expensive lib/API parse+bind+typecheck is therefore paid ONCE for the
+   * whole batch instead of once per program — the amortization the per-pattern
+   * cfcheck path (≈330 separate programs) throws away.
+   *
+   * Returns the batch's transformer/type diagnostics rather than throwing, so a
+   * caller can attribute failures. NOT wired into anything yet; measures the
+   * ceiling and surfaces cross-program hazards (e.g. duplicate `declare global`).
+   */
+  async typeCheckBatch(
+    programs: RuntimeProgram[],
+    options: { transform?: boolean } = {},
+  ): Promise<{
+    patternCount: number;
+    fileCount: number;
+    diagnostics: readonly { file?: string; message: string }[];
+  }> {
+    // Nothing to check (e.g. an empty CI shard, or every program failed to
+    // resolve upstream) — there is no entry to compile, so return cleanly.
+    if (programs.length === 0) {
+      return { patternCount: 0, fileCount: 0, diagnostics: [] };
+    }
+
+    const runTransform = options.transform ?? true;
+    const unioned = new Map<string, Source>();
+    const mains: string[] = [];
+    for (const program of programs) {
+      const id = computeId(program);
+      const mapped = pretransformProgramForModules(program, id);
+      const resolver = new EngineProgramResolver(
+        mapped,
+        this.ctRuntime.staticCache,
+      );
+      const resolved = await this.resolve(resolver);
+      for (const file of uniqueSourcesByName(resolved.files)) {
+        if (!unioned.has(file.name)) unioned.set(file.name, file);
+      }
+      mains.push(mapped.main);
+    }
+
+    const merged: RuntimeProgram = {
+      main: mains[0]!,
+      files: [...unioned.values()],
+    };
+
+    const { compiler } = await this.getCompilerInternals();
+    const { modules, diagnostics: compileDiagnostics } = compiler
+      .compileToModulesCollecting(merged, {
+        runtimeModules: Engine.runtimeModuleNames(),
+        beforeTransformers: runTransform
+          ? (program) => {
+            const pipeline = new CommonFabricTransformerPipeline();
+            return {
+              factories: pipeline.toFactories(program),
+              getDiagnostics: () => pipeline.getDiagnostics(),
+            };
+          }
+          : undefined,
+      });
+    const diagnostics: { file?: string; message: string }[] = [
+      ...compileDiagnostics,
+    ];
+
+    // SES-verify each emitted body. compileToRecordGraph runs this per module
+    // (verifyCompiledModuleBody); compileToModules does not, so the batch must
+    // run it explicitly or it would silently lose cfcheck's SES coverage. Body
+    // verification is per-body AST work (no type-checking), so it stays cheap.
+    if (runTransform) {
+      for (const [name, body] of modules) {
+        if (name.endsWith(".d.ts")) continue;
+        try {
+          verifyCompiledModuleBody(body.js, name);
+        } catch (error) {
+          diagnostics.push({
+            file: name,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+
+    return {
+      patternCount: programs.length,
+      fileCount: unioned.size,
+      diagnostics,
+    };
+  }
+
+  /**
    * Cold-recovery path: recompile cacheable modules from the AUTHORED source
    * already stored in the content-addressed **source set** (`pattern:<identity>`
    * cells), loaded by identity — i.e. recreate the pattern from its stored

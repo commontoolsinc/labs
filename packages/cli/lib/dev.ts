@@ -19,7 +19,7 @@ import { experimentalOptionsFromEnv } from "./utils.ts";
 const FABRIC_IMPORTS_REQUIRE_SPACE_MESSAGE =
   "fabric imports require a space context (options.fabricImports)";
 
-async function createRuntime() {
+export async function createRuntime() {
   const { StorageManager } = await import(
     "@commonfabric/runner/storage/cache.deno"
   );
