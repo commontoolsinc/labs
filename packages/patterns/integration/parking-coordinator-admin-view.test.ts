@@ -6,7 +6,7 @@ import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import {
-  clickCfButton,
+  clickCfButtonAndWaitForText,
   waitForDisabled,
   waitForRuntimeIdle,
   waitForText,
@@ -108,15 +108,23 @@ describe("parking coordinator admin view integration test", () => {
     await waitForDisabled(page, "#parking-admin-mode-toggle", true);
     await waitForTextAbsent(page, "#parking-admin-people-section", "People");
 
-    await clickCfButton(page, "#parking-enable-admin-manager");
+    await clickCfButtonAndWaitForText(
+      page,
+      "#parking-enable-admin-manager",
+      "#parking-admin-access",
+      "Can manage admins",
+    );
     await waitForRuntimeIdle(page);
-    await waitForText(page, "#parking-admin-access", "Can manage admins");
     await waitForDisabled(page, "#parking-enable-admin-manager", true);
     await waitForDisabled(page, '[data-parking-admin-toggle="Alice"]', false);
 
-    await clickCfButton(page, '[data-parking-admin-toggle="Alice"]');
+    await clickCfButtonAndWaitForText(
+      page,
+      '[data-parking-admin-toggle="Alice"]',
+      '[data-parking-admin-row="Alice"]',
+      "Admin",
+    );
     await waitForRuntimeIdle(page);
-    await waitForText(page, '[data-parking-admin-row="Alice"]', "Admin");
     await waitForText(
       page,
       '[data-parking-admin-toggle="Alice"]',
@@ -125,9 +133,13 @@ describe("parking coordinator admin view integration test", () => {
     await waitForDisabled(page, "#parking-admin-mode-toggle", false);
     await waitForText(page, "#parking-admin-mode-toggle", "Admin: OFF");
 
-    await clickCfButton(page, "#parking-admin-mode-toggle");
+    await clickCfButtonAndWaitForText(
+      page,
+      "#parking-admin-mode-toggle",
+      "#parking-admin-mode-toggle",
+      "Admin: ON",
+    );
     await waitForRuntimeIdle(page);
-    await waitForText(page, "#parking-admin-mode-toggle", "Admin: ON");
     await waitForText(page, "#parking-admin-people-section", "People");
     await waitForText(page, "#parking-admin-add-person-open", "+ Add Person");
   });

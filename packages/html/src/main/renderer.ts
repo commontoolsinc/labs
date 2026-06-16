@@ -233,6 +233,13 @@ export class VDomRenderer {
         this.rootNodeId = notification.rootId > 0 ? notification.rootId : null;
       }
 
+      if (notification.mountId !== undefined) {
+        this.connection.ackVDomBatch(
+          notification.mountId,
+          notification.batchId,
+        );
+      }
+
       const elapsed = logger.timeEnd("batch", String(notification.batchId));
       logger.debug("vdom-batch", () => [
         `Batch ${notification.batchId}: ${notification.ops.length} ops in ${

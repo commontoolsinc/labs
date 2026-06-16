@@ -97,6 +97,7 @@ import {
   type TriggerTraceResponse,
   type UploadBlobRequest,
   type UploadBlobResponse,
+  type VDomBatchAppliedRequest,
   type VDomEventRequest,
   type VDomMountRequest,
   type VDomMountResponse,
@@ -1349,6 +1350,8 @@ export class RuntimeProcessor {
         return this.handleVDomMount(request);
       case RequestType.VDomUnmount:
         return this.handleVDomUnmount(request);
+      case RequestType.VDomBatchApplied:
+        return this.handleVDomBatchApplied(request);
       default:
         throw new Error(`Unknown message type: ${(request as any).type}`);
     }
@@ -1403,6 +1406,7 @@ export class RuntimeProcessor {
           mountId,
           rootId: reconciler.getRootNodeId(),
         });
+        return batchId;
       },
       onError: (error: Error) => {
         self.postMessage({
@@ -1440,6 +1444,14 @@ export class RuntimeProcessor {
     mount.cancel();
     mount.reconciler.unmount();
     this.vdomMounts.delete(mountId);
+  }
+
+  handleVDomBatchApplied(request: VDomBatchAppliedRequest): void {
+    const mount = this.vdomMounts.get(request.mountId);
+    if (!mount) {
+      return;
+    }
+    mount.reconciler.acknowledgeBatchApplied(request.batchId);
   }
 }
 

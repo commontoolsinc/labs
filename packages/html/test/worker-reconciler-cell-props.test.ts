@@ -14,9 +14,17 @@ import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
  */
 function createOpsCollector() {
   const allOps: VDomOp[] = [];
+  const batchIds: number[] = [];
+  let nextBatchId = 0;
   return {
-    onOps: (ops: VDomOp[]) => allOps.push(...ops),
+    onOps: (ops: VDomOp[]) => {
+      const batchId = nextBatchId++;
+      allOps.push(...ops);
+      batchIds.push(batchId);
+      return batchId;
+    },
     getOps: () => allOps,
+    getLastBatchId: () => batchIds.at(-1),
     clear: () => {
       allOps.length = 0;
     },
@@ -80,7 +88,9 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
      * When sunk, emits the props object. key() returns a MockPropCell for that key.
      */
     class MockPropsCell extends MockCell {
+      static nextId = 0;
       private propCells = new Map<string, MockPropCell>();
+      private readonly linkId = `test-props-${++MockPropsCell.nextId}`;
       private rawValue: any;
 
       constructor(value: any, rawValue: any = value) {
@@ -100,6 +110,10 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
 
       getRawUntyped() {
         return this.rawValue;
+      }
+
+      getAsNormalizedFullLink() {
+        return { space: "test-space", id: this.linkId, path: [] };
       }
 
       override set(newValue: any) {
@@ -159,7 +173,9 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
      * MockStream: a Cell-like object that isStream() returns true for.
      */
     class MockStream extends MockCell {
+      static nextId = 0;
       public sent: unknown[] = [];
+      private readonly linkId = `test-stream-${++MockStream.nextId}`;
 
       constructor() {
         super(undefined);
@@ -176,6 +192,10 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
 
       send(event: unknown) {
         this.sent.push(event);
+      }
+
+      getAsNormalizedFullLink() {
+        return { space: "test-space", id: this.linkId, path: [] };
       }
 
       public usedTx: unknown;
@@ -509,6 +529,277 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
 
           assertEquals(mockStream.usedTx, undefined);
           assertEquals(mockStream.sent, [{ type: "click" }]);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "Cell<Props> event handler remains available during listener updates",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const firstStream = new MockStream();
+        const secondStream = new MockStream();
+        const propsCell = new MockPropsCell({
+          onclick: firstStream,
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "button",
+          props: propsCell,
+          children: ["Click"],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const firstEventOps = collector.getOpsOfType("set-event");
+          const firstEventOp = firstEventOps[0] as Extract<
+            VDomOp,
+            { op: "set-event" }
+          >;
+          collector.clear();
+
+          propsCell.set({ onclick: secondStream });
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const secondEventOps = collector.getOpsOfType("set-event");
+          const secondEventOp = secondEventOps[0] as Extract<
+            VDomOp,
+            { op: "set-event" }
+          >;
+
+          assertEquals(
+            reconciler.dispatchEvent(
+              firstEventOp.handlerId,
+              { type: "click", phase: "old-listener" },
+            ),
+            true,
+          );
+          assertEquals(
+            reconciler.dispatchEvent(
+              secondEventOp.handlerId,
+              { type: "click", phase: "new-listener" },
+            ),
+            true,
+          );
+          assertEquals(firstStream.sent, [
+            { type: "click", phase: "old-listener" },
+          ]);
+          assertEquals(secondStream.sent, [
+            { type: "click", phase: "new-listener" },
+          ]);
+
+          const appliedBatchId = collector.getLastBatchId();
+          if (appliedBatchId === undefined) {
+            throw new Error("expected listener update batch");
+          }
+          reconciler.acknowledgeBatchApplied(appliedBatchId);
+          assertEquals(
+            reconciler.dispatchEvent(
+              firstEventOp.handlerId,
+              { type: "click", phase: "after-ack" },
+            ),
+            false,
+          );
+          assertEquals(
+            reconciler.dispatchEvent(
+              secondEventOp.handlerId,
+              { type: "click", phase: "after-ack" },
+            ),
+            true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "Cell<Props> event handler remains available during node replacement",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const stream = new MockStream();
+        const propsCell = new MockPropsCell({
+          onclick: stream,
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "button",
+          props: propsCell,
+          children: ["Click"],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const eventOps = collector.getOpsOfType("set-event");
+          const eventOp = eventOps[0] as Extract<
+            VDomOp,
+            { op: "set-event" }
+          >;
+          collector.clear();
+
+          rootCell.set("Replaced");
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          assertEquals(
+            reconciler.dispatchEvent(
+              eventOp.handlerId,
+              { type: "click", phase: "removed-node" },
+            ),
+            true,
+          );
+          assertEquals(stream.sent, [
+            { type: "click", phase: "removed-node" },
+          ]);
+
+          const appliedBatchId = collector.getLastBatchId();
+          if (appliedBatchId === undefined) {
+            throw new Error("expected node replacement batch");
+          }
+          reconciler.acknowledgeBatchApplied(appliedBatchId);
+          assertEquals(
+            reconciler.dispatchEvent(
+              eventOp.handlerId,
+              { type: "click", phase: "after-ack" },
+            ),
+            false,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "Cell<Props> event handler is removed when a new props cell omits it",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const stream = new MockStream();
+        const firstPropsCell = new MockPropsCell({ onclick: stream });
+        const secondPropsCell = new MockPropsCell({ title: "plain" });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "button",
+          props: firstPropsCell,
+          children: ["Click"],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const eventOp = collector.getOpsOfType("set-event")[0] as Extract<
+            VDomOp,
+            { op: "set-event" }
+          >;
+          collector.clear();
+
+          rootCell.set({
+            type: "vnode",
+            name: "button",
+            props: secondPropsCell,
+            children: ["Click"],
+          });
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          assertEquals(
+            collector.getOpsOfType("remove-event").some((op: any) =>
+              op.eventType === "click"
+            ),
+            true,
+          );
+          assertEquals(
+            reconciler.dispatchEvent(
+              eventOp.handlerId,
+              { type: "click", phase: "props-cell-swap" },
+            ),
+            true,
+          );
+
+          const appliedBatchId = collector.getLastBatchId();
+          if (appliedBatchId === undefined) {
+            throw new Error("expected props cell replacement batch");
+          }
+          reconciler.acknowledgeBatchApplied(appliedBatchId);
+          assertEquals(
+            reconciler.dispatchEvent(
+              eventOp.handlerId,
+              { type: "click", phase: "after-ack" },
+            ),
+            false,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "Cell<Props> event handler is removed after unmount acknowledgement",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const stream = new MockStream();
+        const propsCell = new MockPropsCell({ onclick: stream });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "button",
+          props: propsCell,
+          children: ["Click"],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const eventOp = collector.getOpsOfType("set-event")[0] as Extract<
+            VDomOp,
+            { op: "set-event" }
+          >;
+          collector.clear();
+
+          reconciler.unmount();
+
+          assertEquals(
+            reconciler.dispatchEvent(
+              eventOp.handlerId,
+              { type: "click", phase: "unmount-before-ack" },
+            ),
+            true,
+          );
+
+          const appliedBatchId = collector.getLastBatchId();
+          if (appliedBatchId === undefined) {
+            throw new Error("expected unmount batch");
+          }
+          reconciler.acknowledgeBatchApplied(appliedBatchId);
+          assertEquals(
+            reconciler.dispatchEvent(
+              eventOp.handlerId,
+              { type: "click", phase: "unmount-after-ack" },
+            ),
+            false,
+          );
         } finally {
           cancel();
         }

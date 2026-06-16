@@ -6,6 +6,7 @@ import { VDomRenderer } from "../src/main/renderer.ts";
 class MockConnection {
   private listeners = new Map<string, Set<(payload: unknown) => void>>();
   public unmountCalls: number[] = [];
+  public acknowledgedBatches: Array<{ mountId: number; batchId: number }> = [];
   public sentEvents: Array<{
     mountId: number;
     handlerId: number;
@@ -46,6 +47,16 @@ class MockConnection {
       number,
     ];
     this.sentEvents.push({ mountId, handlerId, event, nodeId });
+  }
+
+  ackVDomBatch(mountId: number, batchId: number): void {
+    this.acknowledgedBatches.push({ mountId, batchId });
+  }
+
+  emit(event: string, payload: unknown): void {
+    for (const listener of this.listeners.get(event) ?? []) {
+      listener(payload);
+    }
   }
 }
 
@@ -135,6 +146,44 @@ Deno.test("VDomRenderer - forwards trusted event provenance through delivery", a
       provenance: { origin: "dom", trusted: true },
     },
   });
+
+  await renderer.dispose();
+});
+
+Deno.test("VDomRenderer - acknowledges applied batches", async () => {
+  const connection = new MockConnection();
+  const mock = new MockDoc(
+    '<!DOCTYPE html><html><body><div id="root"></div></body></html>',
+  );
+  const renderer = new VDomRenderer({
+    runtimeClient: {} as any,
+    connection: connection as any,
+    document: mock.document,
+  });
+
+  const cellRef = {
+    space: "did:key:test",
+    id: "cell-id",
+    path: [],
+    type: "application/json",
+  } as unknown as CellRef;
+
+  const container = mock.document.getElementById("root")!;
+  await renderer.render(container as unknown as HTMLElement, cellRef);
+  const mountId = renderer.getMountId();
+  if (mountId === null) {
+    throw new Error("expected renderer to have an active mount");
+  }
+
+  connection.emit("vdombatch", {
+    type: "vdom:batch",
+    batchId: 7,
+    mountId,
+    ops: [{ op: "create-element", nodeId: 1, tagName: "button" }],
+    rootId: 1,
+  });
+
+  assertEquals(connection.acknowledgedBatches, [{ mountId, batchId: 7 }]);
 
   await renderer.dispose();
 });

@@ -101,6 +101,8 @@ export class WorkerReconciler {
     number,
     (event: unknown) => void
   >();
+  private retiredHandlers = new Map<number, number>();
+  private pendingRetiredHandlers = new Set<number>();
   private batchIdCounter = 0;
   private pendingOps: VDomOp[] = [];
   private flushScheduled = false;
@@ -109,7 +111,7 @@ export class WorkerReconciler {
   private rootChildId: number | null = null;
   private rootCancel: Cancel | null = null;
 
-  private readonly onOps: (ops: VDomOp[]) => void;
+  private readonly onOps: (ops: VDomOp[]) => number | void;
   private readonly onError?: (error: Error) => void;
   private readonly renderDeclassificationPolicy: RenderDeclassificationPolicy;
   // Root-of-tree render policy: the host's default ceiling when configured
@@ -148,9 +150,6 @@ export class WorkerReconciler {
         const id = ++this.handlerIdCounter;
         this.handlers.set(id, handler);
         return id;
-      },
-      unregisterHandler: (id) => {
-        this.handlers.delete(id);
       },
       getHandler: (id) => this.handlers.get(id),
     };
@@ -301,6 +300,16 @@ export class WorkerReconciler {
     this.flushOps();
   }
 
+  acknowledgeBatchApplied(batchId: number): void {
+    for (const [handlerId, retiredAtBatch] of this.retiredHandlers) {
+      if (retiredAtBatch > batchId) {
+        continue;
+      }
+      this.retiredHandlers.delete(handlerId);
+      this.handlers.delete(handlerId);
+    }
+  }
+
   /**
    * Dispatch a DOM event to its handler.
    */
@@ -356,7 +365,8 @@ export class WorkerReconciler {
       const ops = this.pendingOps;
       logger.debug("flush-ops", () => ({ count: ops.length, ops }));
       this.pendingOps = [];
-      this.onOps(ops);
+      const batchId = this.onOps(ops) ?? this.batchIdCounter++;
+      this.assignPendingRetiredHandlers(batchId);
     }
   }
 
@@ -368,7 +378,7 @@ export class WorkerReconciler {
     const elementState = "elementState" in state ? state.elementState : state;
     if (elementState && "eventHandlers" in elementState) {
       for (const handlerId of elementState.eventHandlers.values()) {
-        this.handlers.delete(handlerId);
+        this.retireHandlerId(handlerId);
       }
       elementState.eventHandlers.clear();
 
@@ -379,6 +389,39 @@ export class WorkerReconciler {
         }
       }
     }
+  }
+
+  private retireHandlerId(handlerId: number): void {
+    if (!this.handlers.has(handlerId)) {
+      return;
+    }
+    if (
+      !this.retiredHandlers.has(handlerId) &&
+      !this.pendingRetiredHandlers.has(handlerId)
+    ) {
+      this.pendingRetiredHandlers.add(handlerId);
+    }
+  }
+
+  private assignPendingRetiredHandlers(batchId: number): void {
+    for (const handlerId of this.pendingRetiredHandlers) {
+      this.retiredHandlers.set(handlerId, batchId);
+    }
+    this.pendingRetiredHandlers.clear();
+  }
+
+  private retireEventHandler(
+    state: NodeState,
+    eventType: string,
+  ): number | undefined {
+    const handlerId = state.eventHandlers.get(eventType);
+    if (handlerId === undefined) {
+      return undefined;
+    }
+
+    state.eventHandlers.delete(eventType);
+    this.retireHandlerId(handlerId);
+    return handlerId;
   }
 
   /**
@@ -1395,10 +1438,7 @@ export class WorkerReconciler {
         return;
       }
       // Different Cell - cancel all old subscriptions
-      for (const [, propState] of state.propSubscriptions) {
-        propState.cancel();
-      }
-      state.propSubscriptions.clear();
+      this.removeAllProps(state);
 
       // Set up new Cell<Props> binding
       this.bindCellProps(ctx, state, newProps as Cell<WorkerProps>);
@@ -1408,7 +1448,7 @@ export class WorkerReconciler {
     // Handle static props object
     if (!newProps || typeof newProps !== "object") {
       // No props - remove all existing
-      this.removeAllProps(ctx, state);
+      this.removeAllProps(state);
       return;
     }
 
@@ -1421,7 +1461,7 @@ export class WorkerReconciler {
         // Prop removed - cancel subscription and remove from DOM
         propState.cancel();
         state.propSubscriptions.delete(key);
-        this.removeSingleProp(ctx, state, key);
+        this.removeSingleProp(state, key);
       }
     }
 
@@ -1494,11 +1534,11 @@ export class WorkerReconciler {
   /**
    * Remove all props from a node.
    */
-  private removeAllProps(ctx: ReconcileContext, state: NodeState): void {
+  private removeAllProps(state: NodeState): void {
     for (const [key, propState] of state.propSubscriptions) {
       propState.cancel();
       if (key === CELL_PROPS_KEY) continue;
-      this.removeSingleProp(ctx, state, key);
+      this.removeSingleProp(state, key);
     }
     state.propSubscriptions.clear();
   }
@@ -1575,12 +1615,7 @@ export class WorkerReconciler {
       existingState.cancel();
     }
 
-    // Unregister old handler and remove listener from DOM.
-    // We always emit remove-event here so transitions to null/undefined
-    // correctly clear the listener in the main-thread applicator.
-    if (state.eventHandlers.has(eventType)) {
-      ctx.unregisterHandler(state.eventHandlers.get(eventType)!);
-      state.eventHandlers.delete(eventType);
+    if (this.retireEventHandler(state, eventType) !== undefined) {
       this.queueOps([{
         op: "remove-event",
         nodeId: state.nodeId,
@@ -1626,10 +1661,7 @@ export class WorkerReconciler {
 
       const cancel = (value as Cell<(event: unknown) => void>).sink(
         (handler) => {
-          const previousHandlerId = state.eventHandlers.get(eventType);
-          if (previousHandlerId !== undefined) {
-            ctx.unregisterHandler(previousHandlerId);
-            state.eventHandlers.delete(eventType);
+          if (this.retireEventHandler(state, eventType) !== undefined) {
             this.queueOps([{
               op: "remove-event",
               nodeId: state.nodeId,
@@ -1732,7 +1764,7 @@ export class WorkerReconciler {
         for (const [key, propState] of state.propSubscriptions) {
           if (key === CELL_PROPS_KEY) continue;
           propState.cancel();
-          this.removeSingleProp(ctx, state, key);
+          this.removeSingleProp(state, key);
         }
         // Keep only the Cell<Props> subscription itself
         const cellPropsSub = state.propSubscriptions.get(CELL_PROPS_KEY);
@@ -1752,7 +1784,7 @@ export class WorkerReconciler {
         if (key === CELL_PROPS_KEY) continue;
         if (!newKeys.has(key)) {
           propState.cancel();
-          this.removeSingleProp(ctx, state, key);
+          this.removeSingleProp(state, key);
           state.propSubscriptions.delete(key);
         }
       }
@@ -1785,11 +1817,7 @@ export class WorkerReconciler {
 
           const eventType = getEventType(key);
 
-          // Clean up old handler
-          const oldHandlerId = state.eventHandlers.get(eventType);
-          if (oldHandlerId !== undefined) {
-            ctx.unregisterHandler(oldHandlerId);
-            state.eventHandlers.delete(eventType);
+          if (this.retireEventHandler(state, eventType) !== undefined) {
             this.queueOps([{
               op: "remove-event",
               nodeId: state.nodeId,
@@ -2086,18 +2114,10 @@ export class WorkerReconciler {
   /**
    * Remove a single prop from a node (DOM side + handler cleanup).
    */
-  private removeSingleProp(
-    ctx: ReconcileContext,
-    state: NodeState,
-    key: string,
-  ): void {
+  private removeSingleProp(state: NodeState, key: string): void {
     if (isEventProp(key)) {
       const eventType = getEventType(key);
-      const handlerId = state.eventHandlers.get(eventType);
-      if (handlerId !== undefined) {
-        ctx.unregisterHandler(handlerId);
-        state.eventHandlers.delete(eventType);
-      }
+      this.retireEventHandler(state, eventType);
       this.queueOps([{
         op: "remove-event",
         nodeId: state.nodeId,
@@ -2310,6 +2330,7 @@ export class WorkerReconciler {
       sourceChildren: sanitized.children,
       sourceProps: sanitized.props,
     };
+    addCancel(() => this.cleanupNodeHandlers(state));
     this.initializeTextIntegrityBoundary(childPolicy, nodeId);
 
     // Bind props. Cell<Props> can synchronously resolve boundary policy props;
@@ -2490,6 +2511,7 @@ export class WorkerReconciler {
       childRenderPolicy: policy,
       childrenBlockedByPolicy: false,
     };
+    addCancel(() => this.cleanupNodeHandlers(state));
 
     // Render each child and insert it
     for (const childNode of nodes) {
@@ -2616,10 +2638,7 @@ export class WorkerReconciler {
           const eventType = getEventType(key);
           const sinkCancel = (value as Cell<(event: unknown) => void>).sink(
             (handler) => {
-              const previousHandlerId = state.eventHandlers.get(eventType);
-              if (previousHandlerId !== undefined) {
-                ctx.unregisterHandler(previousHandlerId);
-                state.eventHandlers.delete(eventType);
+              if (this.retireEventHandler(state, eventType) !== undefined) {
                 this.queueOps([{
                   op: "remove-event",
                   nodeId: state.nodeId,
