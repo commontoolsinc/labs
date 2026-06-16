@@ -5,12 +5,12 @@ love it / 🟡 OK / 🔴 veto, fewest-reds-wins). The next evolution turns it in
 full **Lunch Coordinator** — the poll stays at the core, but it grows the
 context a group actually needs to pick a place and go.
 
-This doc tracks the features we plan to add. Feature #1 below is now built; the
-rest are still backlog.
+This doc separates shipped work from the remaining backlog so the roadmap stays
+useful as the pattern evolves.
 
-## Planned features
+## Completed work
 
-### 1. "Last days we went" history ✅ (shipped; reworked onto SQLite)
+### 1. "Last days we went" history
 
 Keep a per-space log of where the group actually ended up eating, with dates, so
 nobody suggests the same place three days running.
@@ -62,7 +62,7 @@ nobody suggests the same place three days running.
        end-to-end on a deployed prod piece — `db.exec` writes land and the
        migration is fully live. Full writeup in `SQLITE-DEPLOY-BUG.md`.
 
-### 1b. Durable vote-history snapshot ✅ (shipped)
+### 2. Durable vote-history snapshot
 
 When the host logs a visit, snapshot **who voted what** at that moment into a
 SQLite `vote_history` table tied to the visit. Live voting stays on the in-cell
@@ -76,8 +76,60 @@ SQLite `vote_history` table tied to the visit. Live voting stays on the in-cell
   INSERTs fold into the one handler commit.
 - ✅ Surfaced as a read-only **"📊 Lunch stats"** card (a `GROUP BY` query):
   per-place visit count + green/red tallies across the whole record.
-- Future: a per-option "last N times we did X: 🟢🟢🟡" inline recap (needs a
-  per-option query inside `options.map`) — deferred.
+
+### 3. Pattern composition refactor and sub-pattern standards
+
+The lunch poll now exercises pattern-to-pattern composition by factoring the
+largest UI-bearing pieces out of `main.tsx` into sibling pattern modules:
+
+- ✅ `generated-art.tsx`: fallback-backed generated food thumbnail. It exposes
+  `[UI]`, `url`, and `fetchState`; callers can render it as JSX when they only
+  need UI, or instantiate by function call when they need the generated URL.
+- ✅ `poll-option-card.tsx`: one ranked restaurant option row, including vote
+  buttons, vote-state styling, homepage display/edit/lookup, host-only
+  remove/history actions, and generated-art persistence.
+- ✅ `participant-identity-card.tsx`: join/admin identity surface. It exposes
+  `me`, `isJoined`, `isAdmin`, `joinAs`, and `claimHost` for the parent to use
+  when gating add-option controls, per-option voting, and host-only actions.
+
+Standards established by this factoring:
+
+- Each UI-bearing sub-pattern is its own module with `export default pattern`
+  and exported `Input`/`Output` interfaces.
+- Public contracts include `[NAME]` and static `[UI]: VNode`; `[UI]` is never
+  wrapped in `computed`.
+- The parent owns durable/shared state (`PerSpace`/`PerUser`/`PerSession` cells)
+  and passes cells or resolved values down. Children may own only local
+  per-session UI state.
+- Use JSX instantiation when only embedding a child's UI; use function-call
+  instantiation when the parent reads child outputs or streams.
+- Field names are exact composition contracts, not auto-mapped. Imports are
+  direct sibling imports, not barrel exports.
+- Each factored pattern has an overview comment plus documented `Input` and
+  `Output` fields so future consumers can evaluate functionality and contract.
+
+Gotchas preserved during extraction:
+
+- `myName` is resolved once in `main.tsx` into `me` before `options.map(...)`;
+  per-option children receive that resolved value, not the raw `PerUser` cell.
+- The generated-art fallback remains a static CSS `background-image`; generated
+  or stored `<img>` content is only overlaid once a safe non-empty URL resolves.
+
+Verification added or run for this work:
+
+- Focused tests for `poll-option-card.tsx` and `participant-identity-card.tsx`.
+- Existing `main.test.tsx`, `multi-user.test.tsx`, and lunch-stats coverage kept
+  green.
+- Deployed locally to Toolshed and manually verified that the composed pattern
+  loads and the extracted UI still runs.
+
+## Todo work
+
+### 1. Per-option vote-history recap
+
+Show a compact per-option history such as "last N times we did X: 🟢🟢🟡". This
+likely needs a per-option query inside `options.map`, so it was deferred from
+the durable vote-history snapshot work.
 
 ### 2. People's favorite foods
 
@@ -144,5 +196,4 @@ poll picking a place that's closed when you walk over.
   admin checks to CFC integrity claims — favorites and history writes are good
   candidates for the same authorship-claim treatment.
 - Map, calendar, and explorer mode all imply external data sources; sequence
-  those after the local-only features (history, favorites) which need no new
-  capabilities.
+  those after local-only features that need no new capabilities.
