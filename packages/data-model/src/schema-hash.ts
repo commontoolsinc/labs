@@ -194,7 +194,7 @@ export function internSchema<T extends JSONSchema | undefined>(
 
 /**
  * Like {@link #internSchema}, except that when given a non-deep-frozen `schema`
- * it makes a deep-frozen clone of it first instead ofy freezing it in place.
+ * it makes a deep-frozen clone of it first instead of freezing it in place.
  * This is for the rare cases where it is _not_ safe to do freezing in place.
  * _Do not reach for this function_ unless you are sure that you're in unsafe
  * territory, and strongly recommend commenting the use site with an explanation
