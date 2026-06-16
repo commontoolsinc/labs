@@ -64,6 +64,7 @@ export {
   getExpressionText,
   getMemberSymbol,
   getMethodCallTarget,
+  getNodeText,
   getTypeAtLocationWithFallback,
   getVariableInitializer,
   isFunctionParameter,

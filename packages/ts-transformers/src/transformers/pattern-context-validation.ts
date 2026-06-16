@@ -41,6 +41,7 @@ import {
   classifyArrayMethodCallSite,
   detectCallKind,
   detectDirectBuilderCall,
+  getNodeText,
   isInRestrictedReactiveContext,
   isInsideRestrictedContext,
   isInsideSafeCallbackWrapper,
@@ -254,7 +255,7 @@ export class PatternContextValidationTransformer
 
     const problemAccess = this.findProblematicAccess(node);
     const accessText = problemAccess
-      ? `'${problemAccess.getText()}'`
+      ? `'${getNodeText(problemAccess)}'`
       : "property access";
 
     context.reportDiagnostic({
@@ -386,7 +387,8 @@ export class PatternContextValidationTransformer
       context.reportDiagnostic({
         severity: "error",
         type: "compute-context:local-reactive-use",
-        message: `Reactive value '${culprit.getText()}' is created in this ` +
+        message:
+          `Reactive value '${getNodeText(culprit)}' is created in this ` +
           `computed()/lift() callback and cannot be used as a plain value ` +
           `here. Move this use into a nested computed(() => ...) or ` +
           `module-scope lift() callback.`,

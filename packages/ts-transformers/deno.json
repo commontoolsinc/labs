@@ -21,6 +21,9 @@
       "./test/fixtures/**/*.expected.jsx",
       "./test/fixtures/**/*.expected.ts",
       "./test/fixtures/**/*.expected.tsx"
+    ],
+    "plugins": [
+      "./lint-plugins/no-node-get-text.ts"
     ]
   }
 }

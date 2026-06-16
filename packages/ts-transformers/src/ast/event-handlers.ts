@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { getNodeText } from "./utils.ts";
 
 export function isSafeEventHandlerCall(node: ts.CallExpression): boolean {
   const expression = node.expression;
@@ -57,7 +58,7 @@ export function isEventHandlerJsxAttribute(
     return false;
   }
 
-  const attrName = jsxAttribute.name.getText();
+  const attrName = getNodeText(jsxAttribute.name);
 
   // Fast path: conventional "on*" naming
   if (attrName.startsWith("on")) {

@@ -13,6 +13,7 @@ import {
   detectNewExpressionKind,
   ensureTypeNodeRegistered,
   getLiftAppliedInnerCall,
+  getNodeText,
   getTypeAtLocationWithFallback,
   getTypeFromTypeNodeWithFallback,
   getVariableInitializer,
@@ -851,7 +852,7 @@ function isScopeBrandProperty(prop: ts.Symbol): boolean {
     const name = "name" in declaration
       ? (declaration as { name?: ts.Node }).name
       : undefined;
-    return !!name && name.getText().includes("SCOPE_BRAND");
+    return !!name && getNodeText(name).includes("SCOPE_BRAND");
   });
 }
 

@@ -6,6 +6,7 @@ import {
 } from "../core/mod.ts";
 import { createSchemaTransformerV2 } from "@commonfabric/schema-generator";
 import {
+  getNodeText,
   getTypeFromTypeNodeWithFallback,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
@@ -59,12 +60,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         }
 
         if (logger) {
-          let typeText = "unknown";
-          try {
-            typeText = schemaTypeArg.getText();
-          } catch {
-            // synthetic nodes may not support getText(); ignore
-          }
+          const typeText = getNodeText(schemaTypeArg);
           logger(`[SchemaTransformer] Found toSchema<${typeText}>() call`);
         }
 
@@ -520,7 +516,7 @@ function isToSchemaNode(node: ts.Node): node is ToSchemaNode {
   // Raw property access expression `__cfHelpers.toSchema<T>()`
   if (
     ts.isPropertyAccessExpression(expression) &&
-    expression.expression.getText() === CF_HELPERS_IDENTIFIER &&
+    getNodeText(expression.expression) === CF_HELPERS_IDENTIFIER &&
     expression.name.text === "toSchema"
   ) {
     return true;

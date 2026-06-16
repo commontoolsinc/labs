@@ -1,44 +1,53 @@
 import * as ts from "typescript";
 import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
 
-const expressionTextCache = new WeakMap<ts.Expression, string>();
-const syntheticExpressionPrinter = ts.createPrinter();
-const syntheticExpressionSourceFile = ts.createSourceFile(
+const nodeTextCache = new WeakMap<ts.Node, string>();
+const syntheticNodePrinter = ts.createPrinter();
+const syntheticNodeSourceFile = ts.createSourceFile(
   "",
   "",
   ts.ScriptTarget.Latest,
 );
 
 /**
- * Safely get text from an expression, handling both regular and synthetic nodes.
- * Synthetic nodes (created by transformers) don't have valid source positions,
- * so we use a printer instead of getText().
+ * Safely get the source text of any node, handling both regular and synthetic
+ * nodes. Synthetic nodes (created by transformers) have no valid source
+ * positions, so `node.getText()` throws on them; this prints them instead.
+ * Prefer this (or {@link getExpressionText}) over `getText()` in the
+ * transformer — a lint rule enforces it.
  */
-export function getExpressionText(expr: ts.Expression): string {
-  const cached = expressionTextCache.get(expr);
+export function getNodeText(node: ts.Node): string {
+  const cached = nodeTextCache.get(node);
   if (cached !== undefined) {
     return cached;
   }
 
   let text: string;
-  const sourceFile = expr.getSourceFile();
+  const sourceFile = node.getSourceFile();
   // Check both: no source file OR synthetic node (pos=-1)
-  if (!sourceFile || expr.pos === -1) {
+  if (!sourceFile || node.pos === -1) {
     // Synthetic node - use printer
     try {
-      text = syntheticExpressionPrinter.printNode(
+      text = syntheticNodePrinter.printNode(
         ts.EmitHint.Unspecified,
-        expr,
-        syntheticExpressionSourceFile,
+        node,
+        syntheticNodeSourceFile,
       );
     } catch {
-      text = `<error printing ${ts.SyntaxKind[expr.kind]}>`;
+      text = `<error printing ${ts.SyntaxKind[node.kind]}>`;
     }
   } else {
-    text = expr.getText(sourceFile);
+    // The sanctioned getText() call: guarded by the synthetic check above, and
+    // passes the source file (the form the no-node-get-text lint rule allows).
+    text = node.getText(sourceFile);
   }
-  expressionTextCache.set(expr, text);
+  nodeTextCache.set(node, text);
   return text;
+}
+
+/** Safe source text for an expression. See {@link getNodeText}. */
+export function getExpressionText(expr: ts.Expression): string {
+  return getNodeText(expr);
 }
 
 /**
@@ -342,7 +351,7 @@ function isBuilderOwnedFunctionLike(func: ts.FunctionLikeDeclaration): boolean {
     return false;
   }
 
-  const funcName = callExpr.parent.expression.getText();
+  const funcName = getNodeText(callExpr.parent.expression);
   return funcName.includes("pattern") ||
     funcName.includes("handler") ||
     funcName.includes("lift");
