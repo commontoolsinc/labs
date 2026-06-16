@@ -1,7 +1,7 @@
-import { process } from "../packages/cli/lib/dev.ts";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { createRuntime } from "../packages/cli/lib/dev.ts";
 
 const PATTERNS_DIR = "packages/patterns";
-const CHECK_BATCH_SIZE = 8;
 
 const NON_PATTERN_PREFIXES = [
   "packages/patterns/integration/",
@@ -147,26 +147,36 @@ console.log(
 );
 
 const failures: Array<{ file: string; error: string }> = [];
+const cwd = Deno.cwd();
 
-for (let i = 0; i < filesToCheck.length; i += CHECK_BATCH_SIZE) {
-  const batch = filesToCheck.slice(i, i + CHECK_BATCH_SIZE);
-  await Promise.all(
-    batch.map(async (file) => {
-      try {
-        await process({
-          main: `${Deno.cwd()}/${file}`,
-          rootPath: Deno.cwd(),
-          check: true,
-          run: false,
-        });
-      } catch (error) {
-        failures.push({
-          file,
-          error: formatError(error),
-        });
-      }
-    }),
-  );
+// Resolve every pattern's authored module graph (the pattern + its local
+// imports). A resolve failure — e.g. a malformed import — is a per-file
+// failure, reported like any other.
+const runtime = await createRuntime();
+const programs = [];
+for (const file of filesToCheck) {
+  try {
+    programs.push(
+      await runtime.harness.resolve(
+        new FileSystemProgramResolver(`${cwd}/${file}`, cwd),
+      ),
+    );
+  } catch (error) {
+    failures.push({ file, error: formatError(error) });
+  }
+}
+
+// Type-check + transform + SES-verify ALL patterns in ONE TypeScript program.
+// The lib/API parse+bind is paid once for the whole shard instead of once per
+// pattern (the per-program bind, not the type-check itself, was cfcheck's
+// dominant cost — measured). Diagnostics come back attributed per file.
+const result = await runtime.harness.typeCheckBatch(programs);
+for (const diagnostic of result.diagnostics) {
+  // Strip the engine's internal `/fid1:<hash>` path prefix back to a repo path.
+  const file = (diagnostic.file ?? "")
+    .replace(/^\/fid1:[^/]+\//, "")
+    .replace(`${cwd}/`, "") || "(batch)";
+  failures.push({ file, error: diagnostic.message });
 }
 
 if (failures.length > 0) {
