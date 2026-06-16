@@ -2392,7 +2392,13 @@ const verifyInputRequirements = (
 
   for (const entry of walkIfcSchema(schema)) {
     if (
-      !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema, entry.root)
+      !ifcEntryAppliesToAttemptedWrite(
+        tx,
+        target,
+        entry.path,
+        entry.schema,
+        entry.root,
+      )
     ) {
       continue;
     }
