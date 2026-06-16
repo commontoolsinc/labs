@@ -114,23 +114,6 @@ export class UnionFormatter implements TypeFormatter {
       return defaultUnionSchema;
     }
 
-    // CT-1639: when Default<[]> reaches us already EXPANDED by the checker (no
-    // intact `Default<>` alias node — e.g. via a synthesized handler/map context
-    // schema), the union looks like `RealArray | ([] & DefaultMarker<[]>) | []`.
-    // tryFormatDefaultUnion can't recognize it (no Default node), so it would
-    // fall through to a multi-branch anyOf that splits the real array from the
-    // empty-array branch — dropping per-element capabilities like
-    // asCell:["comparable"] from the consumer's view. Collapse the degenerate
-    // empty-array members into the real array member and carry an empty default.
-    const expandedEmptyDefault = this.tryFormatExpandedEmptyArrayDefault(
-      members,
-      orderedMemberNodes,
-      context,
-    );
-    if (expandedEmptyDefault !== undefined) {
-      return expandedEmptyDefault;
-    }
-
     // General expanded-Default recovery: when Default<T, V> reaches us
     // already resolved away by the checker (no intact alias node anywhere),
     // the union is `T | (T & DefaultMarker<V>)` and the brand payload
@@ -285,7 +268,28 @@ export class UnionFormatter implements TypeFormatter {
     const extracted = extractDefaultValueFromBrandedMembers(branded, checker);
     if (!extracted) return undefined;
 
-    const rest = members.filter((m) => !isDefaultBrandedMember(m, checker));
+    let rest = members.filter((m) => !isDefaultBrandedMember(m, checker));
+    // Degenerate empty-array members (the empty tuple `[]` / `never[]`) ride
+    // along with expanded array Defaults (historically the unbranded arm of
+    // `Default<[]>`, see CT-1639/CT-1640). When a real array member is
+    // present they contribute nothing — but formatted as members they would
+    // split the real array's schema into anyOf branches, dropping
+    // per-element capabilities like asCell:["comparable"] from the
+    // consumer's view. Collapse them into the real member.
+    //
+    // Safety: dropping the `[]`/`never[]` arm never narrows the accepted set
+    // because ArrayFormatter emits array/tuple schemas with no length bound
+    // (no minItems/prefixItems) — so `[]` is always a valid instance of the
+    // surviving real member, and a recovered `default: []` validates against
+    // it. If array length constraints are ever emitted, gate this pruning to
+    // the expanded-empty-default shape before relying on it.
+    const hasRealArray = rest.some((m) =>
+      (checker.isArrayType(m) || checker.isTupleType(m)) &&
+      !this.isEmptyArrayType(m, checker)
+    );
+    if (hasRealArray) {
+      rest = rest.filter((m) => !this.isEmptyArrayType(m, checker));
+    }
     if (rest.length === 0) return undefined;
     const schemas = rest.map((m) => {
       const memberNode = orderedMemberNodes?.[members.indexOf(m)];
@@ -376,93 +380,6 @@ export class UnionFormatter implements TypeFormatter {
     );
   }
 
-  /**
-   * CT-1639: collapse an EXPANDED `Default<[]>` array union.
-   *
-   * When `Default<[]>` is expanded by the checker (the intact alias node is
-   * gone), the union is `RealArray | ([] & DefaultMarker<[]>) | []` — one real
-   * (possibly element-capability-bearing) array member plus one or more
-   * degenerate empty-array members (the empty tuple `[]`/`never[]`, optionally
-   * intersected with the Default brand). Emitting these as separate `anyOf`
-   * branches loses the real array's per-element annotations from a consumer's
-   * view. Instead, format only the real array member and attach `default: []`.
-   *
-   * Returns undefined when the pattern doesn't apply (so the caller proceeds
-   * with its normal union handling) — notably when there is more than one real
-   * array member, or a non-array member is present.
-   */
-  private tryFormatExpandedEmptyArrayDefault(
-    members: readonly ts.Type[],
-    orderedMemberNodes: ReadonlyArray<ts.TypeNode | undefined> | undefined,
-    context: GenerationContext,
-  ): JSONSchemaMutable | undefined {
-    const checker = context.typeChecker;
-
-    let realArrayIndex = -1;
-    // Only the BRANDED empty member (`[] & DefaultMarker<[]>`) proves this is an
-    // expanded `Default<[]>`. A bare `[]` / `never[]` is the *unbranded* arm of
-    // that same Default union — but it also appears in ordinary unions like
-    // `string[] | []` that have nothing to do with defaults. So we require at
-    // least one branded empty member before collapsing + attaching `default:[]`;
-    // a bare empty member alone is left to normal union handling. (CT-1639)
-    let sawBrandedEmpty = false;
-
-    for (let i = 0; i < members.length; i++) {
-      const member = members[i]!;
-      if (this.isDegenerateEmptyArrayMember(member, checker)) {
-        if (this.hasDefaultBrand(member, checker)) {
-          sawBrandedEmpty = true;
-        }
-        continue;
-      }
-      if (!checker.isArrayType(member) && !checker.isTupleType(member)) {
-        // A non-array, non-degenerate member means this isn't the
-        // `RealArray | Default<[]>` shape we collapse here.
-        return undefined;
-      }
-      if (realArrayIndex === -1) {
-        realArrayIndex = i;
-      } else {
-        // More than one real array member — not the Default<[]> collapse shape.
-        return undefined;
-      }
-    }
-
-    if (realArrayIndex === -1 || !sawBrandedEmpty) {
-      return undefined;
-    }
-
-    const realArraySchema = this.schemaGenerator.formatChildType(
-      members[realArrayIndex]!,
-      context,
-      orderedMemberNodes?.[realArrayIndex],
-    );
-    return this.applySchemaDefault(realArraySchema, []);
-  }
-
-  /**
-   * True for a member that contributes only an empty array to the union: the
-   * empty tuple `[]` / `never[]`, optionally intersected with the Default brand
-   * (`[] & DefaultMarker<[]>`). For the intersection form we strip the brand
-   * constituents and check that the substantive remainder is an empty array.
-   */
-  private isDegenerateEmptyArrayMember(
-    member: ts.Type,
-    checker: ts.TypeChecker,
-  ): boolean {
-    if ((member.flags & ts.TypeFlags.Intersection) !== 0) {
-      const parts = (member as ts.IntersectionType).types ?? [];
-      const substantive = parts.filter(
-        (p) => !this.isBrandOnlyMarker(p, checker),
-      );
-      // Brand intersected with exactly one empty-array part (e.g.
-      // `[] & DefaultMarker<[]>`).
-      return substantive.length === 1 &&
-        this.isEmptyArrayType(substantive[0]!, checker);
-    }
-    return this.isEmptyArrayType(member, checker);
-  }
-
   /** Empty tuple `[]`, or `never[]`. */
   private isEmptyArrayType(type: ts.Type, checker: ts.TypeChecker): boolean {
     if (checker.isTupleType(type)) {
@@ -475,34 +392,6 @@ export class UnionFormatter implements TypeFormatter {
       return !!elementType && (elementType.flags & ts.TypeFlags.Never) !== 0;
     }
     return false;
-  }
-
-  /**
-   * True if `member` carries the Default brand — i.e. it is an intersection with
-   * a brand-only marker constituent (`X & DefaultMarker<V>`). This is what
-   * distinguishes the unbranded `[]` arm of an *expanded* `Default<[]>` union
-   * from a bare `[]` in an ordinary union like `string[] | []`.
-   */
-  private hasDefaultBrand(member: ts.Type, checker: ts.TypeChecker): boolean {
-    if ((member.flags & ts.TypeFlags.Intersection) === 0) return false;
-    const parts = (member as ts.IntersectionType).types ?? [];
-    return parts.some((p) => this.isBrandOnlyMarker(p, checker));
-  }
-
-  /**
-   * True for a "brand-only" object type that carries only symbol-keyed markers
-   * (e.g. `{ readonly [DEFAULT_MARKER]: T }`) — no string-keyed data properties.
-   * TypeScript encodes unique-symbol property names as "__@..." internally; a
-   * type with only such properties is a brand, not data. (Mirrors the same
-   * convention used by IntersectionFormatter.isBrandOnlyOrEmpty.)
-   */
-  private isBrandOnlyMarker(type: ts.Type, checker: ts.TypeChecker): boolean {
-    if ((type.flags & ts.TypeFlags.Object) === 0) return false;
-    const props = checker.getPropertiesOfType(type);
-    if (props.length === 0) return true; // empty object `{}`
-    return props.every((prop) =>
-      String(prop.escapedName as string).startsWith("__@")
-    );
   }
 
   private getUnionTypeNode(
