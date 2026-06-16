@@ -1408,7 +1408,7 @@ function unwrapAsCellSchema(schema: JSONSchemaObj): JSONSchemaObj {
   const result = internSchema({
     ...restSchema,
     ...(asCellValues.length > 1 && { asCell: asCellValues.slice(1) }),
-  }) as JSONSchemaObj;
+  });
   if (cacheable) {
     unwrappedAsCellSchemaCache.set(schema, result);
   }

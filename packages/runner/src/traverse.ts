@@ -331,7 +331,7 @@ function combinatorRestSchema(
   const cached = byKeyword.get(keyword);
   if (cached !== undefined) return cached;
   const { [keyword]: _dropped, ...rest } = schema;
-  const interned = internSchema(rest as JSONSchema) as JSONSchemaObj;
+  const interned = internSchema(rest);
   byKeyword.set(keyword, interned);
   return interned;
 }

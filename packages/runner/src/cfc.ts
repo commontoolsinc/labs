@@ -458,7 +458,7 @@ export class ContextualFlowControl {
           if (typeof optSchema !== "boolean" && typeof optSchema !== "object") {
             return optSchema;
           }
-          const subSchema = optSchema as JSONSchema | boolean;
+          const subSchema = optSchema as JSONSchema;
           if (subSchema === false) {
             continue;
           } else if (ContextualFlowControl.isTrueSchema(subSchema)) {
@@ -471,7 +471,7 @@ export class ContextualFlowControl {
             // `Set<JSONSchema>`, and correctly handles non-JSON-compatible
             // `FabricValue`s (e.g. `FabricEpochNsec`, `FabricBytes`,
             // `FabricHash`) that may appear in schema `default` fields.
-            subSchemas.add(internSchema(subSchema as JSONSchema));
+            subSchemas.add(internSchema(subSchema));
           }
         }
         // Only update cursor from subSchemas if the isTrueSchema branch
