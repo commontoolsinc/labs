@@ -8,6 +8,7 @@ import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { SchemaAndHash } from "./SchemaAndHash.ts";
 import { toDeepFrozenSchema } from "./schema-utils.ts";
+import { cloneIfNecessary } from "./value-clone.ts";
 import { hashOf, hashStringOf } from "./value-hash.ts";
 
 //
@@ -81,7 +82,8 @@ hashToRef.set(primInterns.true.taggedHashString, true);
 hashToRef.set(primInterns.undefined.taggedHashString, undefined);
 
 /**
- * Helper for `internSchema()`, which always returns a `SchemaAndHash`.
+ * Helper for `internSchema()` and friends, which always returns a
+ * `SchemaAndHash`.
  */
 function internSchemaReturningSchemaAndHash(
   schema: JSONSchema | undefined,
@@ -188,6 +190,24 @@ export function internSchema<T extends JSONSchema | undefined>(
 ): JSONSchema | undefined | SchemaAndHash {
   const sahResult = internSchemaReturningSchemaAndHash(schema);
   return wantSchemaAndHash ? sahResult : sahResult.schemaOrUndefined;
+}
+
+/**
+ * Like {@link #internSchema}, except that it makes a deep-frozen clone of the
+ * given `schema` first instead of possibly freezing it in place. This is for
+ * the rare cases where it is _not_ safe to do freezing in place. _Do not reach
+ * for this function_ unless you are sure that you're in unsafe territory, and
+ * strongly recommend commenting the use site with an explanation about why.
+ */
+export function deepFrozenCloneAndInternSchema<
+  T extends JSONSchema | undefined,
+>(
+  schema: T,
+): T {
+  const sahResult = internSchemaReturningSchemaAndHash(
+    cloneIfNecessary(schema),
+  );
+  return sahResult.schemaOrUndefined as T;
 }
 
 /**
