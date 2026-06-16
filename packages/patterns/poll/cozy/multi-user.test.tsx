@@ -7,7 +7,7 @@
  * worker-isolated runtimes and covers that gap: second-user join isolation,
  * the host gate rejecting a real non-host user, cross-runtime vote
  * visibility, and open host takeover. The deeper voting flows stay in
- * main.test.tsx; lunch-poll/multi-user.test.tsx covers the richer variant.
+ * main.test.tsx; poll/lunch/multi-user.test.tsx covers the richer variant.
  *
  * Joins go through the `joinAs` event-name override (the headless seam kept
  * by the profile migration); the profile-wish UI path needs a browser.

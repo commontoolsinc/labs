@@ -61,9 +61,9 @@ Capability and app demos (root files): `annotation.tsx`,
 
 App and integration directories: `activity-log/`, `agent/`, `airtable/`,
 `auth/`, `base/`, `battleship/`, `budget-tracker/`, `calendar/`, `card-piles/`,
-`contacts/`, `cozy-poll/`, `examples/`, `experimental/` (explicitly unhardened
+`contacts/`, `poll/`, `examples/`, `experimental/` (explicitly unhardened
 explorations), `github-activity/`, `google/` (the `core/` tree; `google/WIP/` is
-legacy), `habit-tracker/`, `lunch-poll/`, `profile-group-chat/`,
+legacy), `habit-tracker/`, `profile-group-chat/`,
 `project-list/`, `router/`, `scoped-group-chat/`, `scoped-user-directory/`,
 `scrabble/`, `shared-profile-demo/`, `shared-profile-roster/`, `suggestable/`,
 `weekly-calendar/`.

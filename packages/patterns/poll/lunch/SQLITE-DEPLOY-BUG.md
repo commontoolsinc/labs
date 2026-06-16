@@ -128,7 +128,7 @@ truth.)
 
 ### Reproduce
 
-`packages/patterns/lunch-poll/main.tsx` on this branch, deployed via
+`packages/patterns/poll/lunch/main.tsx` on this branch, deployed via
 `cf piece
 new` against a local toolshed **running #3896**, then
 `cf piece call … clearHistory` (or `logVisit`) → throws. Reducing to a single
@@ -194,7 +194,7 @@ handler-input materialization of the `SqliteDb` handle in a non-trivial scoped
 
 ## Exact symptom
 
-After deploying `packages/patterns/lunch-poll/main.tsx` and calling any
+After deploying `packages/patterns/poll/lunch/main.tsx` and calling any
 sqlite-mutating handler (`logVisit`, `removeHistoryEntry`, `clearHistory`):
 
 ```
@@ -348,7 +348,7 @@ export CF_API_URL=http://localhost:8000
 export CF_IDENTITY=./cf.key   # e.g. deno run -A packages/cli/mod.ts id derive "implicit trust" > cf.key
 SPACE=lunch-sqlite-repro
 
-PIECE=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx -s "$SPACE" | grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
+PIECE=$(deno task cf piece new packages/patterns/poll/lunch/main.tsx -s "$SPACE" | grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
 
 deno task cf piece call --piece "$PIECE" -s "$SPACE" joinAs '{"name":"Host"}'
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
@@ -358,7 +358,7 @@ deno task cf piece call --piece "$PIECE" -s "$SPACE" clearHistory '{}'
 # or, after addOption: logVisit '{"title":"Thai Kitchen"}'
 ```
 
-`cf test packages/patterns/lunch-poll/main.test.tsx` passes 17/17 on the same
+`cf test packages/patterns/poll/lunch/main.test.tsx --root packages/patterns/poll` passes 17/17 on the same
 source — the divergence is the deployed path only.
 
 ---

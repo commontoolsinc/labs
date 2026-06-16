@@ -200,7 +200,7 @@ Key points:
   `packages/patterns/cfc-group-chat-demo/multi-user.test.tsx`; for the
   output-snapshot and inline-read idioms see
   `packages/patterns/scrabble/multi-user.test.tsx` and
-  `packages/patterns/lunch-poll/multi-user.test.tsx`. The scope model
+  `packages/patterns/poll/lunch/multi-user.test.tsx`. The scope model
   background: `docs/common/patterns/multi-user-patterns.md` and
   `docs/development/debugging/gotchas/scoped-cell-pitfalls.md`.
 

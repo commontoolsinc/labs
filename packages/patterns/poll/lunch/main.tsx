@@ -66,13 +66,43 @@ import {
   Writable,
 } from "commonfabric";
 
-export interface User {
-  name: string;
-  /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
-  avatar?: string;
-  color: string;
-  joinedAt: number;
-}
+import {
+  clearFlagConfirm,
+  clearTargetConfirm,
+  isFlagConfirming,
+  isTargetConfirming,
+  requestTargetConfirm,
+  revealFlagConfirm,
+} from "../shared/confirm.tsx";
+import {
+  getInitials,
+  newOptionId,
+  trimmedName,
+  VOTE_SWATCH,
+} from "../shared/constants.tsx";
+import { claimHost, joinAs } from "../shared/identity.tsx";
+import type {
+  AddOptionEvent,
+  CastVoteEvent,
+  ClaimHostEvent,
+  ClearVoteEvent,
+  JoinEvent,
+  NameCell,
+  RemoveOptionEvent,
+  ResetVotesEvent,
+  User,
+  UsersCell,
+  Vote,
+  VoteColor,
+  VotesCell,
+} from "../shared/types.tsx";
+import {
+  castVote,
+  clearMyVote,
+  myVoteFor,
+  resetVotes,
+  tallyOptions,
+} from "../shared/voting.tsx";
 
 export interface Option {
   id: string;
@@ -124,35 +154,6 @@ const cuisineArtPrompt = (title: string) =>
   `and draw only the food — "${title}". One dish only, not a pair. Do not ` +
   "draw buildings, palaces, storefronts, logos, people, or text. Clean white " +
   "background, no border.";
-
-export type VoteColor = "green" | "yellow" | "red";
-
-export interface Vote {
-  voterName: string;
-  optionId: string;
-  voteType: VoteColor;
-}
-
-export interface JoinEvent {
-  name?: string;
-}
-
-export type ClaimHostEvent = Record<PropertyKey, never>;
-
-export interface AddOptionEvent {
-  title?: string;
-}
-
-export interface RemoveOptionEvent {
-  optionId: string;
-}
-
-export interface CastVoteEvent {
-  optionId: string;
-  voteType: VoteColor;
-}
-
-export type ResetVotesEvent = Record<PropertyKey, never>;
 
 /**
  * A place the group actually ate, logged by the host. Persisted in the SQLite
@@ -229,13 +230,9 @@ export interface RemoveHistoryEntryEvent {
 
 export type ClearHistoryEvent = Record<PropertyKey, never>;
 
-type QuestionCell = Writable<string | Default<"Where should we eat?">>;
 type CityCell = Writable<string | Default<"Berkeley, CA">>;
 type LinkTargetCell = Writable<string | null>;
 type OptionsCell = Writable<Option[] | Default<[]>>;
-type VotesCell = Writable<Vote[] | Default<[]>>;
-type UsersCell = Writable<User[] | Default<[]>>;
-type NameCell = Writable<string | Default<"">>;
 type HomePageRefreshCell = Writable<number>;
 // A monotonic write counter bumped by the sqlite-mutating handlers; the
 // db.query calls react on THIS rather than on `db`. In the test runner,
@@ -244,15 +241,6 @@ type HomePageRefreshCell = Writable<number>;
 // in-commit `rev`-bump model is meant to make `reactOn: db` work; until it does
 // here, the counter is the dependable trigger.)
 type RevCell = Writable<number | Default<0>>;
-
-const PLAYER_COLORS = [
-  "#2f8a64",
-  "#c2573a",
-  "#3b4a6b",
-  "#a33b35",
-  "#b27722",
-  "#7c3aed",
-];
 
 const POLL_THEME = {
   fontFamily:
@@ -282,14 +270,6 @@ const POLL_THEME = {
     warningForeground: "#ffffff",
   },
 };
-
-const VOTE_SWATCH: Record<VoteColor, string> = {
-  green: "#2f8a64",
-  yellow: "#d4a82f",
-  red: "#a33b35",
-};
-
-const trimmedName = (n: string | undefined) => (n ?? "").trim();
 
 // Normalize a human-entered link to a safe http(s) URL. Returns "" for anything
 // that isn't http/https — this is what keeps a pasted `javascript:`/`data:`
@@ -373,22 +353,6 @@ const homePageVerifierPrompt = (
   }\n\nReturn only the candidate number, or NONE.`;
 };
 
-const newOptionId = () =>
-  `o_${safeDateNow().toString(36)}_${
-    Math.floor(nonPrivateRandom() * 1e6).toString(36)
-  }`;
-
-const colorForIndex = (i: number) => PLAYER_COLORS[i % PLAYER_COLORS.length];
-
-const getInitials = (name: string): string => {
-  const trimmed = name.trim();
-  if (!trimmed) return "?";
-  return trimmed.split(/\s+/).map((w) => w[0]).join("").toUpperCase().slice(
-    0,
-    2,
-  );
-};
-
 const DAY_NAMES = [
   "Sunday",
   "Monday",
@@ -438,61 +402,6 @@ const visitLabel = (wentAt: number): string => {
     d.toLocaleDateString([], { month: "short", day: "numeric" })
   }`;
 };
-
-// `profileName`/`profileAvatar` arrive as plain strings resolved from the
-// viewer's shared profile (named `computed` values auto-unwrap as handler
-// state). An explicit `name` in the event (tests, headless drivers) overrides
-// the profile name — and then deliberately skips the profile avatar.
-const joinAs = handler<JoinEvent, {
-  users: UsersCell;
-  myName: NameCell;
-  adminName: NameCell;
-  joinName: NameCell;
-  profileName: string;
-  profileAvatar: string;
-}>(
-  (
-    { name },
-    { users, myName, adminName, joinName, profileName, profileAvatar },
-  ) => {
-    // Name priority: an explicit event `name` (tests/headless) wins, then the
-    // free-text join field, then the viewer's shared profile name as a graceful
-    // fallback for anyone who already made a profile and didn't type anything.
-    const override = trimmedName(name) || trimmedName(joinName.get());
-    const trimmed = override || trimmedName(profileName);
-    if (!trimmed) return;
-    const current = trimmedName(myName.get());
-    if (current) return;
-    const existing = users.get();
-    if (existing.some((u) => u.name === trimmed)) return;
-    const user: User = {
-      name: trimmed,
-      avatar: override ? "" : (profileAvatar ?? "").trim(),
-      color: colorForIndex(existing.length),
-      joinedAt: safeDateNow(),
-    };
-    users.push(user);
-    myName.set(trimmed);
-    if (trimmedName(adminName.get()) === "") {
-      adminName.set(trimmed);
-    }
-    joinName.set("");
-  },
-);
-
-// Open host takeover: any joined participant can claim the host role, which
-// transfers it away from the current host (isAdmin is derived from this). This
-// is deliberately ungated beyond "must be joined" — see ADMIN-FUTURE.md for the
-// kernel-level authority model this pattern-level check is a placeholder for.
-const claimHost = handler<ClaimHostEvent, {
-  myName: NameCell;
-  adminName: NameCell;
-}>((_, { myName, adminName }) => {
-  const me = trimmedName(myName.get());
-  if (!me) return;
-  if (trimmedName(adminName.get()) === me) return;
-  adminName.set(me);
-});
 
 const addOption = handler<AddOptionEvent, {
   options: OptionsCell;
@@ -650,56 +559,6 @@ const removeOption = handler<RemoveOptionEvent, {
   votes.set(votes.get().filter((v) => v.optionId !== optionId));
 });
 
-const castVote = handler<CastVoteEvent, {
-  votes: VotesCell;
-  myName: NameCell;
-}>(({ optionId, voteType }, { votes, myName }) => {
-  const me = trimmedName(myName.get());
-  if (!me) return;
-  const current = votes.get();
-  const existingIdx = current.findIndex(
-    (v) => v.voterName === me && v.optionId === optionId,
-  );
-  if (existingIdx >= 0) {
-    const existing = current[existingIdx];
-    if (existing.voteType === voteType) {
-      votes.remove(existing);
-      return;
-    }
-    votes.key(existingIdx).key("voteType").set(voteType);
-    return;
-  }
-  votes.push({ voterName: me, optionId, voteType });
-});
-
-const resetVotes = handler<ResetVotesEvent, {
-  votes: VotesCell;
-  myName: NameCell;
-  adminName: NameCell;
-}>((_, { votes, myName, adminName }) => {
-  const me = trimmedName(myName.get());
-  const admin = trimmedName(adminName.get());
-  if (!me || me !== admin) return;
-  votes.set([]);
-});
-
-export interface ClearVoteEvent {
-  optionId: string;
-}
-
-const clearMyVote = handler<ClearVoteEvent, {
-  votes: VotesCell;
-  myName: NameCell;
-}>(({ optionId }, { votes, myName }) => {
-  const me = trimmedName(myName.get());
-  if (!me) return;
-  votes.set(
-    votes.get().filter(
-      (v) => !(v.voterName === me && v.optionId === optionId),
-    ),
-  );
-});
-
 // Host-only, same gate as the other mutating admin actions. Logs where the
 // group actually ate — by option id (resolved to its title) or a free title —
 // into the SQLite `visits` table, and snapshots everyone's current vote into
@@ -807,51 +666,6 @@ const clearHistory = handler<ClearHistoryEvent, {
   db.exec("DELETE FROM vote_history", []);
   rev.set((rev.get() ?? 0) + 1);
 });
-
-interface OptionTally {
-  option: Option;
-  green: number;
-  yellow: number;
-  red: number;
-  voters: Array<{ name: string; voteType: VoteColor; color: string }>;
-}
-
-const tallyOptions = (
-  options: readonly Option[],
-  votes: readonly Vote[],
-  users: readonly User[],
-): OptionTally[] => {
-  const colorByName = new Map(users.map((u) => [u.name, u.color]));
-  const tallies = options.map((option): OptionTally => {
-    const optionVotes = votes.filter((v) => v.optionId === option.id);
-    return {
-      option,
-      green: optionVotes.filter((v) => v.voteType === "green").length,
-      yellow: optionVotes.filter((v) => v.voteType === "yellow").length,
-      red: optionVotes.filter((v) => v.voteType === "red").length,
-      voters: optionVotes.map((v) => ({
-        name: v.voterName,
-        voteType: v.voteType,
-        color: colorByName.get(v.voterName) ?? "#888",
-      })),
-    };
-  });
-  return [...tallies].sort((a, b) => {
-    if (a.red !== b.red) return a.red - b.red;
-    return b.green - a.green;
-  });
-};
-
-const myVoteFor = (
-  votes: readonly Vote[],
-  me: string,
-  optionId: string,
-): VoteColor | undefined => {
-  if (!me) return undefined;
-  return votes.find(
-    (v) => v.voterName === me && v.optionId === optionId,
-  )?.voteType;
-};
 
 export interface CozyPollInput {
   question?: PerSpace<string | Default<"Where should we eat?">>;
@@ -1152,11 +966,15 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // Hoist a boolean cell for the reset-confirm JSX ternary so TS doesn't
     // narrow `resetConfirmPending` itself and lose the `.set` method in
     // the false branch.
-    const isResetConfirm = computed(() => resetConfirmPending.get());
-    const isClearHistoryConfirm = computed(() =>
-      clearHistoryConfirmPending.get()
+    const isResetConfirm = computed(() =>
+      isFlagConfirming(resetConfirmPending.get())
     );
-    const isClaimHostRevealed = computed(() => claimHostRevealed.get());
+    const isClearHistoryConfirm = computed(() =>
+      isFlagConfirming(clearHistoryConfirmPending.get())
+    );
+    const isClaimHostRevealed = computed(() =>
+      isFlagConfirming(claimHostRevealed.get())
+    );
     const ranked = tallyOptions(options, votes, users);
     const homePageLookupUrls = options.map((option) =>
       homePageLookupUrlFor(
@@ -1395,7 +1213,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           variant="secondary"
                           onClick={() => {
                             boundClaimHost.send({});
-                            claimHostRevealed.set(false);
+                            clearFlagConfirm(claimHostRevealed);
                           }}
                         >
                           Become host
@@ -1403,7 +1221,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         <cf-button
                           size="sm"
                           variant="ghost"
-                          onClick={() => claimHostRevealed.set(false)}
+                          onClick={() => clearFlagConfirm(claimHostRevealed)}
                         >
                           Cancel
                         </cf-button>
@@ -1425,7 +1243,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                             textDecoration: "underline dotted",
                             textUnderlineOffset: "3px",
                           }}
-                          onClick={() => claimHostRevealed.set(true)}
+                          onClick={() => revealFlagConfirm(claimHostRevealed)}
                         >
                           {joinHint}
                         </button>
@@ -1639,7 +1457,10 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     );
                     return idx >= 0 ? idx + 1 : 0;
                   });
-                  const isRemoveConfirm = removeConfirmTarget.get() === oid;
+                  const isRemoveConfirm = isTargetConfirming(
+                    removeConfirmTarget.get(),
+                    oid,
+                  );
                   const storedArtUrl = computed(() =>
                     safeImageUrl(option.imageUrl)
                   );
@@ -2000,7 +1821,11 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                   textDecoration: "underline",
                                   cursor: "pointer",
                                 }}
-                                onClick={() => removeConfirmTarget.set(oid)}
+                                onClick={() =>
+                                  requestTargetConfirm(
+                                    removeConfirmTarget,
+                                    oid,
+                                  )}
                               >
                                 · remove
                               </button>
@@ -2059,7 +1884,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                 variant="primary"
                                 onClick={() => {
                                   boundRemoveOption.send({ optionId: oid });
-                                  removeConfirmTarget.set(null);
+                                  clearTargetConfirm(removeConfirmTarget);
                                 }}
                               >
                                 Yes, remove
@@ -2067,7 +1892,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                               <cf-button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => removeConfirmTarget.set(null)}
+                                onClick={() =>
+                                  clearTargetConfirm(removeConfirmTarget)}
                               >
                                 Cancel
                               </cf-button>
@@ -2196,7 +2022,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                   variant="primary"
                                   onClick={() => {
                                     boundClearHistory.send({});
-                                    clearHistoryConfirmPending.set(false);
+                                    clearFlagConfirm(
+                                      clearHistoryConfirmPending,
+                                    );
                                   }}
                                 >
                                   Clear all
@@ -2205,7 +2033,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                   size="sm"
                                   variant="ghost"
                                   onClick={() =>
-                                    clearHistoryConfirmPending.set(false)}
+                                    clearFlagConfirm(
+                                      clearHistoryConfirmPending,
+                                    )}
                                 >
                                   Cancel
                                 </cf-button>
@@ -2225,7 +2055,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                   cursor: "pointer",
                                 }}
                                 onClick={() =>
-                                  clearHistoryConfirmPending.set(true)}
+                                  revealFlagConfirm(
+                                    clearHistoryConfirmPending,
+                                  )}
                               >
                                 clear all
                               </button>
@@ -2434,14 +2266,15 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                 variant="primary"
                                 onClick={() => {
                                   boundResetVotes.send({});
-                                  resetConfirmPending.set(false);
+                                  clearFlagConfirm(resetConfirmPending);
                                 }}
                               >
                                 Yes, reset
                               </cf-button>
                               <cf-button
                                 variant="ghost"
-                                onClick={() => resetConfirmPending.set(false)}
+                                onClick={() =>
+                                  clearFlagConfirm(resetConfirmPending)}
                               >
                                 Cancel
                               </cf-button>
@@ -2449,7 +2282,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           )
                           : (
                             <cf-button
-                              onClick={() => resetConfirmPending.set(true)}
+                              onClick={() =>
+                                revealFlagConfirm(resetConfirmPending)}
                             >
                               Reset votes
                             </cf-button>

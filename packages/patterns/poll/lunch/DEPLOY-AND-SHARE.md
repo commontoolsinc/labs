@@ -81,7 +81,7 @@ instance.
 
 ```bash
 deno task cf piece setsrc --piece "$PIECE" -s "$SPACE" \
-  packages/patterns/lunch-poll/main.tsx
+  packages/patterns/poll/lunch/main.tsx
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
 ```
 
@@ -105,7 +105,7 @@ without touching the shared poll):
 
 ```bash
 # 1. Create your own empty piece (note the new ID it prints).
-MINE=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
+MINE=$(deno task cf piece new packages/patterns/poll/lunch/main.tsx \
   -s "$SPACE" | grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
 
 # 2. Copy each PerSpace field from the canonical piece into yours.
@@ -260,7 +260,7 @@ everyone sees, and direct `set` races anyone's live browser session.**
 ### Re-establishing (if it's lost / 404s)
 
 ```bash
-deno task cf piece new packages/patterns/lunch-poll/main.tsx -s "$SPACE"
+deno task cf piece new packages/patterns/poll/lunch/main.tsx -s "$SPACE"
 # → prints a new fid1:… — update the "canonical piece" block above.
 ```
 
@@ -277,7 +277,7 @@ once when a "reset votes" click wedged the running instance. `setsrc` does
 ```bash
 # 1. Confirm it's instance-specific: deploy the same code to a NEW piece. If the
 #    fresh piece works, the old one's process is wedged.
-NEW=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
+NEW=$(deno task cf piece new packages/patterns/poll/lunch/main.tsx \
   -s "$SPACE" | grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
 
 # 2. Copy the PerSpace state across with the Option B loop. (SQLite history will

@@ -205,7 +205,7 @@ into the shared entry on join. See `docs/specs/shared-profile-rosters.md`;
 worked examples: `packages/patterns/profile-group-chat/main.tsx`,
 `packages/patterns/scrabble/scrabble.tsx`,
 `packages/patterns/battleship/multiplayer/lobby.tsx`,
-`packages/patterns/lunch-poll/main.tsx`.
+`packages/patterns/poll/lunch/main.tsx`.
 
 Do not store user DIDs, session ids, or generated ids only to simulate scoped
 visibility. Let `PerUser<T>` and `PerSession<T>` select the right storage

@@ -41,7 +41,7 @@ empty instance.
 
 ```bash
 deno task cf piece setsrc --piece "$PIECE" -s "$SPACE" \
-  packages/patterns/cozy-poll/main.tsx
+  packages/patterns/poll/cozy/main.tsx
 ```
 
 Why this preserves state: cell ids are derived from the causal generation chain,
@@ -64,7 +64,7 @@ experiment without touching the shared poll):
 
 ```bash
 # 1. Create your own empty piece (note the new ID it prints).
-MINE=$(deno task cf piece new packages/patterns/cozy-poll/main.tsx \
+MINE=$(deno task cf piece new packages/patterns/poll/cozy/main.tsx \
   -s "$SPACE" | grep '^fid1:')
 
 # 2. Copy each PerSpace field from the canonical piece into yours.
@@ -128,7 +128,7 @@ browser identity.
 ## Re-establishing the canonical piece (if it's lost)
 
 ```bash
-deno task cf piece new packages/patterns/cozy-poll/main.tsx -s "$SPACE"
+deno task cf piece new packages/patterns/poll/cozy/main.tsx -s "$SPACE"
 # → prints a new fid1:… — update PIECE above and the "canonical piece" section.
 ```
 
@@ -148,7 +148,7 @@ cell, so the bad reactive state persists. The cure is a fresh process:
 ```bash
 # 1. Confirm it's instance-specific: deploy the same code to a NEW piece and
 #    open it. If the fresh piece works, the old one's process is wedged.
-NEW=$(deno task cf piece new packages/patterns/cozy-poll/main.tsx \
+NEW=$(deno task cf piece new packages/patterns/poll/cozy/main.tsx \
   -s "$SPACE" | grep '^fid1:')
 
 # 2. The data usually survives in the old piece's cells — copy it across with

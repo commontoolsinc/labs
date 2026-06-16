@@ -12,7 +12,7 @@ For solutions-oriented advice, see also
 
 ## 2026-05-14 — Cozy lunch poll build
 
-Built `packages/patterns/cozy-poll/` as a multi-user voting pattern.
+Built `packages/patterns/poll/cozy/` as a multi-user voting pattern.
 Established what works, what doesn't, and what looks broken in the runtime.
 
 ### What worked (validated end-to-end)
@@ -96,7 +96,7 @@ problem. Cherry-picking it locally did not fix this.
 **Verification after PR #3595:**
 
 ```bash
-deno task cf check packages/patterns/cozy-poll/main.tsx --show-transformed \
+deno task cf check packages/patterns/poll/cozy/main.tsx --show-transformed \
   | grep -c __cfModuleCallback
 # → 0 (was 4 pre-fix, 8 with PR #3582 cherry-picked)
 ```
@@ -183,7 +183,7 @@ split compound assertions into individual ones, or coerce with
   working? The architect's stated guidance was to use it; the scrabble
   pattern doesn't. Worth picking one and documenting.
 - The CFC-integrity admin direction in
-  `packages/patterns/cozy-poll/ADMIN-FUTURE.md` — what's the realistic
+  `packages/patterns/poll/cozy/ADMIN-FUTURE.md` — what's the realistic
   ETA, and what's the right way to design admin authority *now* if we ship
   patterns before CFC integrity is plumbed?
 
