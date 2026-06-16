@@ -716,6 +716,225 @@ type TimingRow = {
   max: number;
 };
 
+/**
+ * One timing-stats row distilled from a logger's `timeStats` (ms). Used to
+ * surface where wall-clock goes under multi-browser contention — chiefly the
+ * main-thread `runtime-client` IPC round-trips, which are what time out with
+ * "RuntimeClient request timed out" when the worker can't keep up.
+ */
+export interface TimingStatRow {
+  key: string;
+  count: number;
+  average: number;
+  p50: number;
+  p95: number;
+  max: number;
+  total: number;
+}
+
+/**
+ * Counters that quantify how much the worker re-ran and how often writes lost a
+ * conflict, read back from `getLoggerCounts().counts`. Conflicts that ratchet
+ * (a non-falling, bounded count) rather than storm is the healthy steady state:
+ * a stale-seq write is rejected, the optimistic value is dropped, the
+ * computation re-runs once against confirmed state, and settles.
+ */
+export interface ChurnCounters {
+  /** Total computation/effect runs (`scheduler/run/action`). */
+  actionRuns: number;
+  /** Commit conflicts — stale-seq-basis rejections (`storage.v2/commit-conflict`). */
+  commitConflicts: number;
+  /** Reverts emitted after a rejected commit (`storage.v2/commit-revert`). */
+  commitReverts: number;
+  /** Non-conflict commit rejections (`storage.v2/commit-rejected`). */
+  commitRejected: number;
+  /** Reactive-action commit errors that triggered a retry (`scheduler/schedule-run-error`). */
+  scheduleRunErrors: number;
+  /** Event handlers that lost the receipt race permanently (`scheduler/event-lost-race`). */
+  eventLostRaces: number;
+}
+
+export interface BrowserLoadSummary {
+  label: string;
+  /**
+   * Main-thread `runtime-client` IPC round-trip timing. p95/max here ballooning
+   * (and approaching the 60s request timeout) is the multi-browser-slowness
+   * signal: the main thread is waiting on a saturated worker.
+   */
+  ipc: TimingStatRow[];
+  /** Worker-side scheduler/runner/storage timing — where the work happens. */
+  worker: TimingStatRow[];
+  /** Conflict / re-run counters — see {@link ChurnCounters}. */
+  churn: ChurnCounters;
+}
+
+/**
+ * Collect aggregate timing stats from one browser: main-thread IPC round-trips
+ * (`commonfabric.getTimingStatsBreakdown()`) plus the worker's
+ * scheduler/runner/storage timing (`commonfabric.rt.getLoggerCounts()`). One
+ * IPC round-trip; safe to call in a `finally`/teardown (worker errors are
+ * swallowed). Reading these across all profiles after a run quantifies the
+ * cross-browser contention behind dual-browser slowness.
+ */
+export async function collectBrowserLoadSummary(
+  page: Page,
+  label: string,
+): Promise<BrowserLoadSummary> {
+  const collected = await page.evaluate(async () => {
+    type Stats = {
+      count?: number;
+      average?: number;
+      p50?: number;
+      p95?: number;
+      max?: number;
+      totalTime?: number;
+    };
+    const round = (value: number | undefined): number =>
+      Number((value ?? 0).toFixed(2));
+    const toRows = (
+      group: Record<string, Stats> | undefined,
+      limit: number,
+    ) =>
+      Object.entries(group ?? {})
+        .map(([key, stats]) => ({
+          key,
+          count: stats.count ?? 0,
+          average: round(stats.average),
+          p50: round(stats.p50),
+          p95: round(stats.p95),
+          max: round(stats.max),
+          total: round(stats.totalTime),
+        }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, limit);
+
+    type CountEntry = { total?: number } | number | undefined;
+    const cf = (globalThis as typeof globalThis & {
+      commonfabric?: {
+        getTimingStatsBreakdown?: () => Record<string, Record<string, Stats>>;
+        rt?: {
+          getLoggerCounts?: () => Promise<{
+            timing?: Record<string, Record<string, Stats>>;
+            counts?: Record<string, Record<string, CountEntry>>;
+          }>;
+        };
+      };
+    }).commonfabric;
+
+    const mainTiming = cf?.getTimingStatsBreakdown?.() ?? {};
+    const ipc = toRows(mainTiming["runtime-client"], 12);
+
+    let worker: ReturnType<typeof toRows> = [];
+    const churn = {
+      actionRuns: 0,
+      commitConflicts: 0,
+      commitReverts: 0,
+      commitRejected: 0,
+      scheduleRunErrors: 0,
+      eventLostRaces: 0,
+    };
+    try {
+      const workerCounts = await cf?.rt?.getLoggerCounts?.();
+      const workerTiming = workerCounts?.timing ?? {};
+      const selected: Record<string, Stats> = {};
+      for (const name of ["scheduler", "runner", "storage"]) {
+        const groupStats = workerTiming[name];
+        if (!groupStats) continue;
+        for (const [key, stats] of Object.entries(groupStats)) {
+          selected[`${name}/${key}`] = stats;
+        }
+      }
+      worker = toRows(selected, 12);
+
+      const counts: Record<string, Record<string, CountEntry>> =
+        workerCounts?.counts ?? {};
+      const countOf = (logger: string, key: string): number => {
+        const entry = counts[logger]?.[key];
+        return typeof entry === "number" ? entry : entry?.total ?? 0;
+      };
+      churn.actionRuns = countOf("scheduler", "schedule-run-start");
+      churn.commitConflicts = countOf("storage.v2", "commit-conflict");
+      churn.commitReverts = countOf("storage.v2", "commit-revert");
+      churn.commitRejected = countOf("storage.v2", "commit-rejected");
+      churn.scheduleRunErrors = countOf("scheduler", "schedule-run-error");
+      churn.eventLostRaces = countOf("scheduler", "event-lost-race");
+    } catch {
+      // Worker may be disposed during teardown — main-thread IPC still tells
+      // the contention story.
+    }
+
+    return { ipc, worker, churn };
+  });
+  return {
+    label,
+    ipc: collected.ipc,
+    worker: collected.worker,
+    churn: collected.churn,
+  };
+}
+
+/**
+ * Times labeled async steps so a run can report where its wall-clock went.
+ * `run` records the elapsed ms even when the wrapped step throws, so a timed-
+ * out propagation wait still shows up in the summary.
+ */
+export class StepTimer {
+  #rows: Array<{ label: string; ms: number }> = [];
+
+  async run<T>(label: string, fn: () => Promise<T>): Promise<T> {
+    const start = performance.now();
+    try {
+      return await fn();
+    } finally {
+      this.#rows.push({ label, ms: Math.round(performance.now() - start) });
+    }
+  }
+
+  rows(): ReadonlyArray<{ label: string; ms: number }> {
+    return this.#rows;
+  }
+}
+
+export function logStepTimings(label: string, timer: StepTimer): void {
+  const rows = timer.rows();
+  if (rows.length === 0) return;
+  const total = rows.reduce((sum, row) => sum + row.ms, 0);
+  const lines = rows.map((row) =>
+    `  ${String(row.ms).padStart(8)}ms  ${row.label}`
+  );
+  console.log(
+    `\n[${label}] step timings (total ${total}ms):\n${lines.join("\n")}`,
+  );
+}
+
+export function logBrowserLoadSummary(summary: BrowserLoadSummary): void {
+  const formatRows = (rows: TimingStatRow[]): string =>
+    rows.length === 0
+      ? "    (none)"
+      : rows.map((row) =>
+        `    ${row.key.padEnd(30)} n=${String(row.count).padStart(5)}` +
+        ` p50=${String(row.p50).padStart(8)} p95=${
+          String(row.p95).padStart(8)
+        }` +
+        ` max=${String(row.max).padStart(9)} total=${
+          String(row.total).padStart(10)
+        }`
+      ).join("\n");
+  const c = summary.churn;
+  const churnLine = `    actionRuns=${c.actionRuns}` +
+    ` commitConflicts=${c.commitConflicts} commitReverts=${c.commitReverts}` +
+    ` commitRejected=${c.commitRejected}` +
+    ` scheduleRunErrors=${c.scheduleRunErrors}` +
+    ` eventLostRaces=${c.eventLostRaces}`;
+  console.log(
+    `\n[${summary.label}] main-thread runtime-client IPC round-trips (ms):\n` +
+      `${formatRows(summary.ipc)}\n` +
+      `[${summary.label}] worker scheduler/runner/storage (ms):\n` +
+      `${formatRows(summary.worker)}\n` +
+      `[${summary.label}] churn / conflict counters:\n${churnLine}`,
+  );
+}
+
 type GraphNode = {
   id: string;
   type: "effect" | "computation" | "input" | "inactive";
