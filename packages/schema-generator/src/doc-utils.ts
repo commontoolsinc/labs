@@ -1,4 +1,19 @@
 import ts from "typescript";
+import { extractHashtags } from "@commonfabric/data-model/schema-tags";
+
+/**
+ * Mirror the hashtags found in a schema's description text into a structured
+ * `tags` field. Sets `tags` only when the text contains hashtags, leaving the
+ * field absent otherwise (the same omit-empty convention used for
+ * `description`, `required`, and `$comment`).
+ */
+export function attachDocTags(
+  schema: Record<string, unknown>,
+  text: string,
+): void {
+  const tags = extractHashtags(text);
+  if (tags.length > 0) schema.tags = tags;
+}
 
 /**
  * Extract plain-text JSDoc from a symbol. Filters out tag lines starting with
