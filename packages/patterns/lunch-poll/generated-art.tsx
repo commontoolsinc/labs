@@ -59,6 +59,15 @@ const generatedImageUrlFor = (title: string): string =>
   "&height=" + GENERATED_IMAGE_SIZE;
 
 /**
+ * GeneratedArt renders the lunch-poll thumbnail box for a restaurant option.
+ *
+ * Use it when a parent pattern needs a fixed-size food illustration with a
+ * static fallback, optional generated image fetch, and observable generated
+ * URL. This sub-pattern owns no shared state; callers pass a persisted source
+ * URL and decide whether this instance may generate.
+ */
+
+/**
  * Fetch lifecycle exposed by GeneratedArt for parents that need to observe or
  * persist generated image state.
  */

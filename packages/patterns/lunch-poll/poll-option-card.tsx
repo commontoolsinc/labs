@@ -125,6 +125,16 @@ const myVoteFor = (
 };
 
 /**
+ * PollOptionCard renders one complete option row in a lunch poll.
+ *
+ * Use it when a parent pattern already owns option, vote, viewer, and host
+ * state and wants composed UI for voting, homepage display/edit/lookup, host
+ * remove/history actions, and generated-art persistence. This is not a
+ * standalone poll or vote engine; durable mutations happen through the input
+ * streams supplied by the parent.
+ */
+
+/**
  * Inputs for one rendered lunch option row.
  *
  * The parent owns all durable and shared UI state. This pattern receives one

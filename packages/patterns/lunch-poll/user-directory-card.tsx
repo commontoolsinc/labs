@@ -76,6 +76,15 @@ const claimHost = handler<ClaimHostEvent, {
 });
 
 /**
+ * UserDirectoryCard renders the lunch-poll identity and roster surface.
+ *
+ * Use it when a parent pattern owns the roster, current viewer, and host cells
+ * and needs composed UI for joining, viewing participants, and taking over
+ * host duties. The resolved identity outputs (`me`, `isJoined`, and `isAdmin`)
+ * are intended for downstream sub-patterns such as per-option cards.
+ */
+
+/**
  * Inputs for the join/roster/host controls.
  *
  * The parent owns the durable user directory and viewer identity cells. This
