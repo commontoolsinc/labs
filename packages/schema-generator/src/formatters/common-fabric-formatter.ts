@@ -353,7 +353,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       "ComparableCell",
     ];
     for (const kind of wrapperKinds) {
-      const unwrappedType = this.recursivelyUnwrapOpaqueRef(
+      const unwrappedType = this.recursivelyUnwrapOpaqueCell(
         type,
         kind,
         context.typeChecker,
@@ -757,11 +757,13 @@ export class CommonFabricFormatter implements TypeFormatter {
   }
 
   /**
-   * Recursively unwrap OpaqueRef layers to find a wrapper type (Cell/Stream/OpaqueRef).
-   * This handles cases like FactoryInput<OpaqueRef<Stream<T>>> where the type is wrapped in
-   * multiple layers of OpaqueRef due to the FactoryInput type's recursive definition.
+   * Recursively unwrap opaque-branded (OpaqueCell) layers to find a wrapper
+   * type (Cell/Stream/etc.). This handles cases like
+   * FactoryInput<OpaqueCell<Stream<T>>> where the target is wrapped in multiple
+   * opaque-branded layers due to the recursive definition of the FactoryInput
+   * type.
    */
-  private recursivelyUnwrapOpaqueRef(
+  private recursivelyUnwrapOpaqueCell(
     type: ts.Type,
     targetWrapperKind: WrapperKind,
     checker: ts.TypeChecker,
@@ -787,7 +789,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       const unionType = type as ts.UnionType;
       for (const member of unionType.types) {
         // Try to unwrap this member
-        const result = this.recursivelyUnwrapOpaqueRef(
+        const result = this.recursivelyUnwrapOpaqueCell(
           member,
           targetWrapperKind,
           checker,
@@ -797,11 +799,11 @@ export class CommonFabricFormatter implements TypeFormatter {
       }
     }
 
-    // If this is an OpaqueRef type, extract its type argument and recurse
-    if (this.isOpaqueRefType(type, checker)) {
-      const innerType = this.extractOpaqueRefTypeArgument(type, checker);
+    // If this is an opaque-branded cell, extract its type argument and recurse
+    if (this.isOpaqueCellType(type, checker)) {
+      const innerType = this.extractOpaqueCellTypeArgument(type, checker);
       if (innerType) {
-        return this.recursivelyUnwrapOpaqueRef(
+        return this.recursivelyUnwrapOpaqueCell(
           innerType,
           targetWrapperKind,
           checker,
@@ -823,14 +825,18 @@ export class CommonFabricFormatter implements TypeFormatter {
       : undefined;
   }
 
-  private isOpaqueRefType(type: ts.Type, checker: ts.TypeChecker): boolean {
+  // Detects the "opaque" cell brand, carried by OpaqueCell<T>. Named for the
+  // brand it matches, not the `Reactive`/`OpaqueRef` annotation spelling: those
+  // are an identity alias for T (no runtime wrapper, no brand), so they cannot
+  // be detected structurally here — only OpaqueCell can.
+  private isOpaqueCellType(type: ts.Type, checker: ts.TypeChecker): boolean {
     return isCellBrand(type, checker, "opaque");
   }
 
   /**
-   * Extract the type argument T from OpaqueRef<T> or OpaqueCell<T>
+   * Extract the type argument T from an opaque-branded cell (OpaqueCell<T>).
    */
-  private extractOpaqueRefTypeArgument(
+  private extractOpaqueCellTypeArgument(
     type: ts.Type,
     checker: ts.TypeChecker,
   ): ts.Type | undefined {
