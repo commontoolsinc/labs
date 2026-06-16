@@ -23,6 +23,33 @@ router.use(
   }),
 );
 
+// Keep the served shell document NON-cross-origin-isolated.
+//
+// The shell hosts untrusted user programs ("patterns") inside this same page,
+// sandboxed with SES. A core Spectre-class defense is that pattern code cannot
+// build a high-resolution timer: SharedArrayBuffer / Atomics and an un-clamped
+// performance.now() are unavailable. In a browser those primitives are gated
+// behind `crossOriginIsolated === true`, which a page only earns when it is
+// served with both `Cross-Origin-Opener-Policy: same-origin` AND
+// `Cross-Origin-Embedder-Policy: require-corp` (or `credentialless`).
+//
+// We deliberately serve neither isolating combination so `crossOriginIsolated`
+// stays false. This is defense-in-depth on top of the SES taming: even if that
+// taming ever regressed, a non-isolated page still hands patterns no parallel
+// counter and no fine clock. We accept forgoing browser-process isolation
+// against cross-origin Spectre because our threat is untrusted code inside our
+// own origin, not other origins attacking us.
+//
+// COOP is set to the non-isolating `same-origin-allow-popups`, and COEP is
+// pinned to `unsafe-none`. These run after the handler so they override any
+// header an upstream change might set. See
+// docs/specs/sandboxing/cross-origin-isolation.md.
+router.use("/*", async (c, next) => {
+  await next();
+  c.header("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+  c.header("Cross-Origin-Embedder-Policy", "unsafe-none");
+});
+
 const dirname = import.meta?.dirname;
 if (!dirname) {
   throw new Error("File does not have dirname in toolshed.");
