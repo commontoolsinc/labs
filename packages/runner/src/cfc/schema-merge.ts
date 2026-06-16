@@ -64,13 +64,14 @@ type WriterIdentityClaim = {
 const isWriterIdentityClaim = (value: unknown): value is WriterIdentityClaim =>
   isRecord(value) && isRecord(value.__ctWriterIdentityOf);
 
-// The per-input provenance field a verified write stamps onto a
-// writer-identity claim — the content-addressed `moduleIdentity` (stamped at
-// evaluation time by prepare's rebind; see implementation-identity.ts
-// `resolveProvenanceImplementationIdentity`). The BINDING (file + path) is
-// what the claim means; this field only records which verified module
-// produced the input.
-const WRITER_CLAIM_STAMP_KEYS = ["moduleIdentity"] as const;
+// The per-input provenance fields a verified write may have stamped onto a
+// writer-identity claim. New claims carry only the content-addressed
+// `moduleIdentity` (prepare's rebind; see implementation-identity.ts
+// `resolveProvenanceImplementationIdentity`), but pre-migration stored/fixture
+// claims may still carry a legacy `bundleId` — so reconciliation strips BOTH.
+// The BINDING (file + path) is what the claim means; these fields only record
+// which verified module/load produced the input.
+const WRITER_CLAIM_STAMP_KEYS = ["bundleId", "moduleIdentity"] as const;
 
 const writerClaimIsStamped = (identity: Record<string, unknown>): boolean =>
   WRITER_CLAIM_STAMP_KEYS.some((key) => identity[key] !== undefined);
@@ -85,10 +86,11 @@ const writerClaimWithoutStamp = (
 
 /**
  * Reconcile two `writeAuthorizedBy` writer-identity claims that differ only
- * by the presence of the provenance stamp (`moduleIdentity` — one side
- * recorded under a verified identity, the other without one). Returns the
- * stamped claim, or `undefined` when the claims genuinely conflict (different
- * bindings, or two different stamps).
+ * by the presence of the provenance stamp (`moduleIdentity`, or a legacy
+ * `bundleId` on pre-migration claims — one side recorded under a verified
+ * identity, the other without one). Returns the stamped claim, or `undefined`
+ * when the claims genuinely conflict (different bindings, or two different
+ * stamps).
  */
 const reconcileWriterClaimStamp = (
   existing: unknown,

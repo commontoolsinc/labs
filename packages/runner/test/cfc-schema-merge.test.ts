@@ -222,6 +222,60 @@ describe("mergeCfcSchemaEnvelopes", () => {
     }
   });
 
+  it("strips a legacy bundleId stamp from pre-migration claims", () => {
+    // Backward compat: a pre-migration claim may carry a legacy `bundleId`
+    // (alongside, or instead of, `moduleIdentity`). `bundleId` is inert under
+    // verification (which reads `moduleIdentity`), but reconciliation must
+    // still strip it before comparing — otherwise a surviving `bundleId` on
+    // one side manufactures a false conflict and rejects an otherwise-matching
+    // protected write with "writeAuthorizedBy must remain stable".
+    const unstamped = {
+      __ctWriterIdentityOf: {
+        file: "/system/profile-home.tsx",
+        path: ["addElement"],
+      },
+    };
+    const legacyStamped = {
+      __ctWriterIdentityOf: {
+        file: "/system/profile-home.tsx",
+        path: ["addElement"],
+        bundleId: "fid1:bundle",
+        moduleIdentity: "module-identity-hash",
+      },
+    };
+
+    for (
+      const [left, right] of [
+        [legacyStamped, unstamped],
+        [unstamped, legacyStamped],
+      ]
+    ) {
+      const merged = mergeCfcSchemaEnvelopes({
+        type: "object",
+        properties: {
+          elements: {
+            type: "array",
+            ifc: { writeAuthorizedBy: left },
+          },
+        },
+      }, {
+        type: "object",
+        properties: {
+          elements: {
+            type: "array",
+            ifc: { writeAuthorizedBy: right },
+          },
+        },
+      });
+
+      expect(
+        (
+          (merged as JSONSchemaObj).properties?.elements as JSONSchemaObj
+        ).ifc?.writeAuthorizedBy,
+      ).toEqual(legacyStamped);
+    }
+  });
+
   it("rejects writeAuthorizedBy claims with conflicting identity stamps", () => {
     const claimFor = (moduleIdentity: string) => ({
       __ctWriterIdentityOf: {

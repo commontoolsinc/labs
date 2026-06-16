@@ -854,10 +854,12 @@ const linkWritesCoverCfcAffectedPaths = (
     })
   );
 
-// Strip the writer-identity provenance stamp (the content-addressed
-// `moduleIdentity`, stamped onto a binding's `{ file, path }` at evaluation
-// time) so schemas compare by BINDING, ignoring which verified module
-// produced the input.
+// Strip the writer-identity provenance stamp from a binding's `{ file, path }`
+// so schemas compare by BINDING, ignoring which verified module produced the
+// input. New claims stamp the content-addressed `moduleIdentity`, but
+// pre-migration stored/fixture claims may carry a legacy `bundleId` (inert
+// under verification, which reads `moduleIdentity`) — strip both so a
+// surviving `bundleId` can't manufacture a false schema difference.
 const stripWriterIdentityStamp = (value: unknown): unknown => {
   if (Array.isArray(value)) {
     return value.map(stripWriterIdentityStamp);
@@ -868,7 +870,10 @@ const stripWriterIdentityStamp = (value: unknown): unknown => {
 
   const next: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
-    if (key === "moduleIdentity" && typeof value.file === "string") {
+    if (
+      (key === "bundleId" || key === "moduleIdentity") &&
+      typeof value.file === "string"
+    ) {
       continue;
     }
     next[key] = stripWriterIdentityStamp(entry);
