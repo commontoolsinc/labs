@@ -10,7 +10,7 @@ import {
   type VNode,
   Writable,
 } from "commonfabric";
-import GeneratedArt from "./generated-art.tsx";
+import GeneratedArt, { type GeneratedArtFetchState } from "./generated-art.tsx";
 import type {
   CastVoteEvent,
   LogVisitEvent,
@@ -22,9 +22,17 @@ import type {
   VoteColor,
 } from "./main.tsx";
 
-type LinkTargetCell = Writable<string | null>;
-type NameCell = Writable<string | Default<"">>;
-type HomePageRefreshCell = Writable<number>;
+/** Shared per-session target cell used for one open option editor at a time. */
+export type PollOptionLinkTargetCell = Writable<string | null>;
+
+/** Shared per-session draft text cell used by the option link editor. */
+export type PollOptionNameCell = Writable<string | Default<"">>;
+
+/** Parent-owned counter cell that retriggers host homepage lookup. */
+export type PollOptionHomePageRefreshCell = Writable<number>;
+
+/** Host-side generated art persistence state exposed for tests and observers. */
+export type PollOptionArtSyncState = GeneratedArtFetchState;
 
 interface WebSearchResponse {
   results?: Array<{ title?: string; url?: string; description?: string }>;
@@ -116,31 +124,88 @@ const myVoteFor = (
   )?.voteType;
 };
 
+/**
+ * Inputs for one rendered lunch option row.
+ *
+ * The parent owns all durable and shared UI state. This pattern receives one
+ * option, current viewer/admin facts, shared per-session editor state, and the
+ * streams it should emit for mutations. When rendering inside `options.map()`,
+ * pass the resolved `me` value from the parent, not the raw `myName` PerUser
+ * cell.
+ */
 export interface PollOptionCardInput {
+  /** Option record to render and enrich. */
   option: Option;
+
+  /** One-based display rank supplied by the parent's ranking computation. */
   rank: number;
+
+  /** Resolved current viewer name; required for per-option vote styling. */
   me: string;
+
+  /** Whether the current viewer has joined the poll. */
   isJoined: boolean;
+
+  /** Whether the current viewer is the host/admin. */
   isAdmin: boolean;
+
+  /** Shared vote list used to compute this viewer's selected vote. */
   votes: readonly Vote[];
+
+  /** Human-readable city label used for homepage lookup and map fallback. */
   cityLabel: string;
+
+  /** Endpoint used by the host to search for official restaurant homepages. */
   searchEndpoint: string;
-  homePageRefresh: HomePageRefreshCell;
-  linkEditTarget: LinkTargetCell;
-  linkDraft: NameCell;
-  removeConfirmTarget: LinkTargetCell;
+
+  /** Parent-owned counter cell; increments force homepage lookup to rerun. */
+  homePageRefresh: PollOptionHomePageRefreshCell;
+
+  /** Per-session option id whose homepage editor is open. */
+  linkEditTarget: PollOptionLinkTargetCell;
+
+  /** Per-session homepage URL draft shared across option editors. */
+  linkDraft: PollOptionNameCell;
+
+  /** Per-session option id awaiting host remove confirmation. */
+  removeConfirmTarget: PollOptionLinkTargetCell;
+
+  /** Parent-owned stream that toggles or records this viewer's vote. */
   castVote: Stream<CastVoteEvent>;
+
+  /** Parent-owned host stream that removes this option after confirmation. */
   removeOption: Stream<RemoveOptionEvent>;
+
+  /** Parent-owned host stream that records this option in lunch history. */
   logVisit: Stream<LogVisitEvent>;
+
+  /** Parent-owned stream that saves a viewer-edited homepage override. */
   setOptionUrl: Stream<SetOptionUrlEvent>;
+
+  /** Parent-owned host stream that persists an auto-discovered homepage. */
   setOptionHomePageUrl: Stream<SetOptionUrlEvent>;
+
+  /** Parent-owned host stream that persists generated art for other viewers. */
   setOptionImage: Stream<SetOptionImageEvent>;
 }
 
+/**
+ * Outputs for one rendered lunch option row.
+ *
+ * Parents normally embed this sub-pattern with JSX. Use function-call
+ * instantiation only when reading `artSyncState` or `homePageUrl`.
+ */
 export interface PollOptionCardOutput {
+  /** Human-readable pattern name, matching the option title. */
   [NAME]: string;
+
+  /** Static VNode rendering the complete option row. */
   [UI]: VNode;
-  artSyncState: string;
+
+  /** Host-side generated art persistence state. */
+  artSyncState: PollOptionArtSyncState;
+
+  /** Display homepage URL after stored, edited, or verified lookup resolution. */
   homePageUrl: string;
 }
 

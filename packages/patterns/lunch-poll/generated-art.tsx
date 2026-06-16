@@ -58,17 +58,55 @@ const generatedImageUrlFor = (title: string): string =>
   "&width=" + GENERATED_IMAGE_SIZE +
   "&height=" + GENERATED_IMAGE_SIZE;
 
+/**
+ * Fetch lifecycle exposed by GeneratedArt for parents that need to observe or
+ * persist generated image state.
+ */
+export type GeneratedArtFetchState =
+  | "stored"
+  | "generated"
+  | "pending"
+  | "error"
+  | "requested"
+  | "";
+
+/**
+ * Inputs for the lunch thumbnail sub-pattern.
+ *
+ * Use JSX when embedding only the UI: `<GeneratedArt prompt={title} />`.
+ * Instantiate with a function call when the parent needs `url` or
+ * `fetchState`.
+ */
 export interface GeneratedArtInput {
+  /** Restaurant or dish text used to build the art-director prompt. */
   prompt: string;
+
+  /** Safe persisted image URL or data URI; when present, generation is skipped. */
   sourceUrl?: string | Default<"">;
+
+  /** Whether this instance may call the image generation endpoint. */
   shouldGenerate?: boolean | Default<true>;
 }
 
+/**
+ * Outputs for the lunch thumbnail sub-pattern.
+ *
+ * `[UI]` is a static VNode. The fallback image remains a static CSS
+ * `background-image`; the generated or stored `<img>` overlays it only after
+ * `url` resolves to a safe non-empty value.
+ */
 export interface GeneratedArtOutput {
+  /** Human-readable pattern name. */
   [NAME]: string;
+
+  /** Static VNode rendering the fallback-backed square thumbnail. */
   [UI]: VNode;
+
+  /** Safe persisted or generated image URL; empty while only the fallback shows. */
   url: string;
-  fetchState: string;
+
+  /** Current image source/generation state. */
+  fetchState: GeneratedArtFetchState;
 }
 
 export default pattern<GeneratedArtInput, GeneratedArtOutput>(

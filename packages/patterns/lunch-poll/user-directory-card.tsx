@@ -13,8 +13,11 @@ import {
 } from "commonfabric";
 import type { ClaimHostEvent, JoinEvent, User } from "./main.tsx";
 
-type UsersCell = Writable<User[] | Default<[]>>;
-type NameCell = Writable<string | Default<"">>;
+/** Parent-owned roster cell shared by all viewers in the poll space. */
+export type UserDirectoryUsersCell = Writable<User[] | Default<[]>>;
+
+/** Parent-owned viewer/admin name cell. */
+export type UserDirectoryNameCell = Writable<string | Default<"">>;
 
 const PLAYER_COLORS = [
   "#2f8a64",
@@ -29,10 +32,10 @@ const trimmedName = (n: string | undefined) => (n ?? "").trim();
 const colorForIndex = (i: number) => PLAYER_COLORS[i % PLAYER_COLORS.length];
 
 const joinAs = handler<JoinEvent, {
-  users: UsersCell;
-  myName: NameCell;
-  adminName: NameCell;
-  joinName: NameCell;
+  users: UserDirectoryUsersCell;
+  myName: UserDirectoryNameCell;
+  adminName: UserDirectoryNameCell;
+  joinName: UserDirectoryNameCell;
   profileName: string;
   profileAvatar: string;
 }>(
@@ -63,8 +66,8 @@ const joinAs = handler<JoinEvent, {
 );
 
 const claimHost = handler<ClaimHostEvent, {
-  myName: NameCell;
-  adminName: NameCell;
+  myName: UserDirectoryNameCell;
+  adminName: UserDirectoryNameCell;
 }>((_, { myName, adminName }) => {
   const me = trimmedName(myName.get());
   if (!me) return;
@@ -72,19 +75,51 @@ const claimHost = handler<ClaimHostEvent, {
   adminName.set(me);
 });
 
+/**
+ * Inputs for the join/roster/host controls.
+ *
+ * The parent owns the durable user directory and viewer identity cells. This
+ * pattern only owns local per-session UI state for the join draft and host
+ * takeover reveal.
+ */
 export interface UserDirectoryCardInput {
-  users: UsersCell;
-  myName: NameCell;
-  adminName: NameCell;
+  /** Shared roster of people who have joined this lunch poll. */
+  users: UserDirectoryUsersCell;
+
+  /** Per-user current viewer name cell. */
+  myName: UserDirectoryNameCell;
+
+  /** Shared host/admin name cell. */
+  adminName: UserDirectoryNameCell;
 }
 
+/**
+ * Outputs for the join/roster/host controls.
+ *
+ * Instantiate this sub-pattern by function call when the parent needs `me`,
+ * `isJoined`, `isAdmin`, or the bound streams. The `[UI]` value may then be
+ * embedded in the parent's layout.
+ */
 export interface UserDirectoryCardOutput {
+  /** Human-readable pattern name. */
   [NAME]: string;
+
+  /** Static VNode rendering the join form, roster, and host controls. */
   [UI]: VNode;
+
+  /** Trimmed current viewer name resolved once for downstream sub-patterns. */
   me: string;
+
+  /** Whether the current viewer has joined the poll. */
   isJoined: boolean;
+
+  /** Whether the current viewer currently owns host actions. */
   isAdmin: boolean;
+
+  /** Bound stream that joins the current viewer and claims host if first. */
   joinAs: Stream<JoinEvent>;
+
+  /** Bound stream that transfers host/admin ownership to the current viewer. */
   claimHost: Stream<ClaimHostEvent>;
 }
 
