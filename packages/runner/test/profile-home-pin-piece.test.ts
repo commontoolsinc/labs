@@ -16,8 +16,7 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 const signer = await Identity.fromPassphrase("profile-home-pin-piece");
 const space = signer.did();
 
-const TARGET_SPACE =
-  "did:key:z6MkkKEmheMPDZUr4YEkZrW6niR7Bn5FWAuQic5fUUzcGkfq";
+const TARGET_SPACE = "did:key:z6MkkKEmheMPDZUr4YEkZrW6niR7Bn5FWAuQic5fUUzcGkfq";
 const TARGET_PIECE = "fid1:cMVC_ZTgWedhTzHW8jWbz70xANFfmLmpL-dNU1842Ps";
 
 const sysDir = fromFileUrl(new URL("../../patterns/system/", import.meta.url));
@@ -75,7 +74,12 @@ describe("profile-home addPiece (followable piece card)", () => {
         tx,
       );
       // deno-lint-ignore no-explicit-any
-      const result = rt.run(tx, pattern as any, { initialName: "Ada" }, resultCell);
+      const result = rt.run(
+        tx,
+        pattern as any,
+        { initialName: "Ada" },
+        resultCell,
+      );
       rt.prepareTxForCommit(tx);
       const commit = await tx.commit();
       expect(commit.error).toBeUndefined();
