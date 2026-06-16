@@ -202,14 +202,24 @@ export class MultiRuntimeHarness {
   readonly sessions: MultiRuntimeSession[];
   readonly pieceId: string;
   #server?: StandaloneMemoryServer;
+  /** Resolved space + api url so late ("cold") sessions can join the same
+   *  storage after the original sessions were created. */
+  readonly spaceName: string;
+  readonly apiUrl: string;
+  /** Cold sessions added post-hoc via {@link addColdSession}; disposed too. */
+  readonly coldSessions: MultiRuntimeSession[] = [];
 
   private constructor(
     sessions: MultiRuntimeSession[],
     pieceId: string,
+    spaceName: string,
+    apiUrl: string,
     server?: StandaloneMemoryServer,
   ) {
     this.sessions = sessions;
     this.pieceId = pieceId;
+    this.spaceName = spaceName;
+    this.apiUrl = apiUrl;
     this.#server = server;
   }
 
@@ -272,7 +282,7 @@ export class MultiRuntimeHarness {
         await session.client().call("openPiece", { pieceId });
       }
 
-      return new MultiRuntimeHarness(sessions, pieceId, server);
+      return new MultiRuntimeHarness(sessions, pieceId, spaceName, apiUrl, server);
     } catch (error) {
       bootstrap?.terminate();
       for (const session of sessions) {
@@ -281,6 +291,41 @@ export class MultiRuntimeHarness {
       await server?.close().catch(() => {});
       throw error;
     }
+  }
+
+  /**
+   * Spawn a fresh runtime that opens the piece for the FIRST time, *after* the
+   * original sessions have already done their work, and return it. Unlike the
+   * pre-opened sessions, a cold session has never subscribed to the result
+   * graph, so its first reads (and its first `sqliteQuery` issuance) materialize
+   * directly from committed storage — bypassing any `reactOn` re-trigger / cross-
+   * runtime invalidation that a long-lived session depends on. This is the only
+   * way to observe canonical server truth (e.g. the real SQLite row count)
+   * independent of a runtime's reactive-read freshness.
+   *
+   * A distinct `identity` defaults to a fresh passphrase-derived one; pass an
+   * existing session's `identity` to cold-open as that same user.
+   */
+  async addColdSession(
+    label: string,
+    identity?: Identity,
+  ): Promise<MultiRuntimeSession> {
+    const id = identity ??
+      await Identity.fromPassphrase(
+        `multi-runtime-harness cold ${label}`,
+        { implementation: "noble" },
+      );
+    const client = new WorkerClient(label);
+    await client.call("init", {
+      rawIdentity: id.serialize(),
+      spaceName: this.spaceName,
+      apiUrl: this.apiUrl,
+      diagnostics: false,
+    });
+    await client.call("openPiece", { pieceId: this.pieceId });
+    const session = new MultiRuntimeSession(label, id, client);
+    this.coldSessions.push(session);
+    return session;
   }
 
   session(label: string): MultiRuntimeSession {
@@ -326,7 +371,7 @@ export class MultiRuntimeHarness {
   }
 
   async dispose(): Promise<void> {
-    for (const session of this.sessions) {
+    for (const session of [...this.sessions, ...this.coldSessions]) {
       await session.disposeSession().catch((error) => {
         console.warn(`Failed to dispose session "${session.label}":`, error);
       });
