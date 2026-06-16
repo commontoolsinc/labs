@@ -1314,7 +1314,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       votes={votes}
                       cityLabel={cityLabel}
                       searchEndpoint={searchEndpoint}
-                      homePageRefresh={Number(homePageRefresh.get() ?? 0)}
+                      homePageRefresh={homePageRefresh}
                       linkEditTarget={linkEditTarget}
                       linkDraft={linkDraft}
                       removeConfirmTarget={removeConfirmTarget}

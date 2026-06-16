@@ -24,6 +24,7 @@ import type {
 
 type LinkTargetCell = Writable<string | null>;
 type NameCell = Writable<string | Default<"">>;
+type HomePageRefreshCell = Writable<number>;
 
 interface WebSearchResponse {
   results?: Array<{ title?: string; url?: string; description?: string }>;
@@ -124,7 +125,7 @@ export interface PollOptionCardInput {
   votes: readonly Vote[];
   cityLabel: string;
   searchEndpoint: string;
-  homePageRefresh: number;
+  homePageRefresh: HomePageRefreshCell;
   linkEditTarget: LinkTargetCell;
   linkDraft: NameCell;
   removeConfirmTarget: LinkTargetCell;
@@ -170,7 +171,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
     const optionTitle = option.title;
     const myVote = computed(() => myVoteFor(votes, me, oid));
     const isRemoveConfirm = computed(() => removeConfirmTarget.get() === oid);
-    const refresh = computed(() => Number(homePageRefresh ?? 0));
+    const refresh = computed(() => Number(homePageRefresh.get() ?? 0));
     const generatedArt = GeneratedArt({
       prompt: option.title,
       sourceUrl: option.imageUrl,
