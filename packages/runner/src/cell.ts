@@ -14,6 +14,7 @@ import {
 import { codecOf } from "@commonfabric/data-model/codec-common";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import {
+  deepFrozenCloneAndInternSchema,
   internSchema,
   isInternedSchema,
 } from "@commonfabric/data-model/schema-hash";
@@ -2885,13 +2886,13 @@ function containsCellResult(value: unknown): boolean {
  * contract `resolveSchema()` already applies to cell schemas on every
  * read/write-policy path.
  *
- * Exception: schemas read through a query-result proxy (e.g. the wish
- * builtin's `schema` argument) must NOT be frozen in place — `Object.freeze`
- * forwards through the proxy and would freeze the underlying stored value,
- * breaking the proxy's object invariants (and any later `JSON.stringify` of
- * it). Those are round-tripped to a plain value first, the documented
- * convention for proxy-wrapped schemas (see `cloneSchemaMutable`'s note in
- * data-model's schema-utils).
+ * Exception: a schema that (transitively) contains a query-result proxy —
+ * e.g. the wish builtin's `schema` argument — must NOT be frozen in place,
+ * as that would push structural mutation through the proxy onto the live
+ * backing value (and trip the proxy's structural-mutation guard). Such schemas
+ * are interned via `deepFrozenCloneAndInternSchema()`, which deep-freezes a
+ * clone — de-proxying the containers and preserving `FabricValue` leaves —
+ * instead of freezing the argument in place.
  */
 export function internCellLinkSchema(schema: JSONSchema): JSONSchema;
 export function internCellLinkSchema(
@@ -2904,7 +2905,7 @@ export function internCellLinkSchema(
   // scan and return as-is.
   if (isInternedSchema(schema)) return schema;
   if (containsCellResult(schema)) {
-    return internSchema(JSON.parse(JSON.stringify(schema)) as JSONSchema);
+    return deepFrozenCloneAndInternSchema(schema);
   }
   return internSchema(schema);
 }

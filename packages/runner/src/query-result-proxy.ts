@@ -1,4 +1,5 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
 import { getTopFrame } from "./builder/pattern.ts";
 import { isStreamValue } from "./builder/types.ts";
@@ -168,7 +169,19 @@ export function createQueryResultProxy<T>(
     return createCell(runtime, link, tx, false, "stream", cfcLabelView) as T;
   }
 
-  if (!isRecord(value)) return value;
+  // `FabricPrimitive`s (byte sequences, temporal values, hashes, ...) are
+  // immutable leaves that behave like primitives -- there is no reactive
+  // substructure to resolve and they are already frozen. Hand back the value
+  // directly, exactly as for JS primitives above; wrapping one in a live proxy
+  // serves no purpose and would leak that proxy into any consumer that
+  // deep-clones or freezes the surrounding value (e.g. schema interning).
+  if (!isRecord(value) || value instanceof FabricPrimitive) return value;
+
+  // TODO(danfuzz): This may have to do something special to handle concrete
+  // instances of `FabricInstance` so that they get perceived as such by the
+  // proxy's clients. Unlike `FabricPrimitive`, `FabricInstance`s are not
+  // necessarily frozen and _do_ expose outgoing references (just as plain
+  // objects and arrays do).
 
   // Stored objects are deep-frozen during storage normalization
   // (fabricFromNativeValueModern). A frozen proxy target would force every

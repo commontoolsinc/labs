@@ -81,10 +81,12 @@ hashToRef.set(primInterns.true.taggedHashString, true);
 hashToRef.set(primInterns.undefined.taggedHashString, undefined);
 
 /**
- * Helper for `internSchema()`, which always returns a `SchemaAndHash`.
+ * Helper for `internSchema()` and friends, which always returns a
+ * `SchemaAndHash` and takes configurable sharing-or-not.
  */
 function internSchemaReturningSchemaAndHash(
   schema: JSONSchema | undefined,
+  canShare: boolean,
 ): SchemaAndHash {
   // Return prefab instances for primitives.
   switch (schema) {
@@ -108,7 +110,7 @@ function internSchemaReturningSchemaAndHash(
 
   // `toDeepFrozenSchema()` returns the same reference if already deep-frozen or
   // if no sub-properties needed to be cloned to achieve frozenness.
-  const frozen = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
+  const frozen = toDeepFrozenSchema(schema, canShare);
 
   // Check the hash-keyed reverse map (structurally-equal but different object).
   const hash = hashOf(frozen);
@@ -186,8 +188,25 @@ export function internSchema<T extends JSONSchema | undefined>(
   schema: T,
   wantSchemaAndHash: boolean = false,
 ): JSONSchema | undefined | SchemaAndHash {
-  const sahResult = internSchemaReturningSchemaAndHash(schema);
+  const sahResult = internSchemaReturningSchemaAndHash(schema, true);
   return wantSchemaAndHash ? sahResult : sahResult.schemaOrUndefined;
+}
+
+/**
+ * Like {@link #internSchema}, except that when given a non-deep-frozen `schema`
+ * it makes a deep-frozen clone of it first instead of freezing it in place.
+ * This is for the rare cases where it is _not_ safe to do freezing in place.
+ * _Do not reach for this function_ unless you are sure that you're in unsafe
+ * territory, and strongly recommend commenting the use site with an explanation
+ * about why.
+ */
+export function deepFrozenCloneAndInternSchema<
+  T extends JSONSchema | undefined,
+>(
+  schema: T,
+): T {
+  const sahResult = internSchemaReturningSchemaAndHash(schema, false);
+  return sahResult.schemaOrUndefined as T;
 }
 
 /**

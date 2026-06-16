@@ -24,18 +24,17 @@ import {
 import { internSchema, isInternedSchema } from "@/schema-hash.ts";
 
 describe("schema-utils", () => {
-  describe("toDeepFrozenSchema", () => {
-    describe("boolean schemas", () => {
-      it("returns boolean `true` as-is", () => {
-        const result = toDeepFrozenSchema(true, false);
-        expect(result).toBe(true);
+  describe("toDeepFrozenSchema()", () => {
+    for (const prim of [false, true, undefined]) {
+      describe(`on primitive \`${prim}\``, () => {
+        it("returns the value as-is given both values of `canShare`", () => {
+          const result1 = toDeepFrozenSchema(prim, false);
+          const result2 = toDeepFrozenSchema(prim, true);
+          expect(result1).toBe(prim);
+          expect(result2).toBe(prim);
+        });
       });
-
-      it("returns boolean `false` as-is", () => {
-        const result = toDeepFrozenSchema(false, true);
-        expect(result).toBe(false);
-      });
-    });
+    }
 
     describe("`canShare=true`", () => {
       it("freezes input in place", () => {
@@ -315,7 +314,7 @@ describe("schema-utils", () => {
     });
   });
 
-  describe("isNontrivialSchema", () => {
+  describe("isNontrivialSchema()", () => {
     describe("nullish inputs", () => {
       it("returns `false` for `undefined`", () => {
         expect(isNontrivialSchema(undefined)).toBe(false);
@@ -397,7 +396,7 @@ describe("schema-utils", () => {
     });
   });
 
-  describe("cloneSchemaMutable", () => {
+  describe("cloneSchemaMutable()", () => {
     it("returns `{}` for boolean `true`", () => {
       expect(cloneSchemaMutable(true)).toEqual({});
     });
@@ -515,7 +514,7 @@ describe("schema-utils", () => {
     });
   });
 
-  describe("schemaWithProperties", () => {
+  describe("schemaWithProperties()", () => {
     it("returns a new object with overrides applied", () => {
       const schema: JSONSchemaObj = { type: "object", description: "old" };
       const result = schemaWithProperties(schema, {
@@ -693,7 +692,7 @@ describe("schema-utils", () => {
     });
   });
 
-  describe("schemaWithoutProperties", () => {
+  describe("schemaWithoutProperties()", () => {
     it("removes a single named property", () => {
       const schema: JSONSchemaObj = { type: "object", asCell: ["cell"] };
       const result = schemaWithoutProperties(schema, "asCell") as JSONSchemaObj;
@@ -788,7 +787,7 @@ describe("schema-utils", () => {
     });
   });
 
-  describe("schemaForValueType", () => {
+  describe("schemaForValueType()", () => {
     function testType(
       typeName: JSONSchemaTypes,
       example: FabricValue,
@@ -923,7 +922,7 @@ describe("schema-utils", () => {
     });
   });
 
-  describe("internPathSelector", () => {
+  describe("internPathSelector()", () => {
     // Content-unique markers guarantee no prior interning has seen these
     // schemas — avoids the flake shape Dan flagged on PR #3335.
     const uniqueSchema = (): JSONSchemaObj => ({

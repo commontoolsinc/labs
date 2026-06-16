@@ -66,7 +66,8 @@ export function isNontrivialSchema(
 }
 
 /**
- * Returns a deep-frozen copy of (or reference to) a JSONSchema.
+ * Returns a deep-frozen copy of (or reference to) a JSONSchema, returning
+ * primitives as-is.
  *
  * - When `canShare` is `true`, the input `schema` is allowed to be modified,
  *   including freezing it in place and returning it directly. Use this when the
@@ -76,14 +77,14 @@ export function isNontrivialSchema(
  * - When `canShare` is `false`, the `schema` is cloned first if not already
  *   deep-frozen, so that the original is not modified.
  *
- * Boolean schemas (`true` / `false`) are primitives and therefore already
- * immutable — they are returned as-is regardless of `canShare`.
+ * As with other schema functions, this one accepts `undefined` for use when
+ * it's possible for a schema value to be missing or optional.
  *
  * Note: Use `internSchema()` in preference to this function, which can cost a
  * little more to run but which will save both time and memory when the schema
  * in question is reused.
  */
-export function toDeepFrozenSchema<T extends JSONSchema>(
+export function toDeepFrozenSchema<T extends JSONSchema | undefined>(
   schema: T,
   canShare: boolean = false,
 ): T {
@@ -120,14 +121,6 @@ export function toDeepFrozenSchema<T extends JSONSchema>(
  * @param deep When `true`, nested objects are recursively cloned (deep copy).
  *   Defaults to `false` (shallow copy). Pass `true` when the caller intends to
  *   mutate nested properties.
- *
- * Note: do not use this on proxy-wrapped schemas from the runtime — those
- * sites currently use `JSON.parse(JSON.stringify(...))` instead.
- *
- * TODO(danfuzz): Get those runtime sites off the
- * `JSON.parse(JSON.stringify(...))` round-trip — e.g. by teaching this
- * function to handle proxy-wrapped schemas — so nothing relies on a
- * stringify/parse round-trip to normalize a schema.
  */
 export function cloneSchemaMutable(
   schema: JSONSchema | undefined,

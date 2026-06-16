@@ -75,6 +75,11 @@ export class NativeTypeFormatter implements TypeFormatter {
   ): JSONSchemaMutable {
     const typeName = NativeTypeFormatter.getTypeName(type);
     const schema = NATIVE_TYPE_SCHEMAS[typeName!];
+    // TODO(danfuzz): `structuredClone()` mangles non-JSON `FabricValue`s —
+    // harmless while `NATIVE_TYPE_SCHEMAS` are plain JSON, but a problem once
+    // schema-generator covers the full `FabricValue` spectrum. See the matching
+    // note on `cloneSchemaDefinition()` re: a FabricValue-aware clone and
+    // whether mutability is even needed.
     return (typeof schema === "boolean" ? schema : structuredClone(schema!));
   }
 

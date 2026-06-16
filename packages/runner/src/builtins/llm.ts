@@ -15,10 +15,10 @@ import {
   BuiltInGenerateTextParams,
   BuiltInLLMMessage,
   BuiltInLLMParams,
-  JSONSchema,
 } from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { cfcLabelViewForCellFailClosed } from "../cfc/label-view.ts";
 import {
@@ -1166,7 +1166,7 @@ export function generateObject<T extends Record<string, unknown>>(
     // Determine whether to use the tool-calling path or the direct generateObject path
     const hasTools = isObject(tools) && Object.keys(tools).length > 0;
     const validationSchema = schemaSanitizePromptInjection
-      ? JSON.parse(JSON.stringify(schema)) as JSONSchema
+      ? toDeepFrozenSchema(schema)
       : undefined;
     const resultSchemaForObserved = (
       observedConfidentiality: readonly unknown[],
@@ -1225,10 +1225,8 @@ export function generateObject<T extends Record<string, unknown>>(
           [llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME]: {
             description:
               "Call this tool with the final structured result matching the required schema. This should be your last action.",
-            // TODO(danfuzz): Replace JSON.parse(JSON.stringify(...)) with
-            // cloneSchemaMutable() here.
             inputSchema: llmToolExecutionHelpers.prepareSchemaForLLM(
-              JSON.parse(JSON.stringify(schema)),
+              toDeepFrozenSchema(schema),
             ),
           },
         },
@@ -1557,10 +1555,8 @@ export function generateObject<T extends Record<string, unknown>>(
       const generateObjectParams: LLMGenerateObjectRequest = {
         messages: requestMessages,
         maxTokens: maxTokens ?? 8192,
-        // TODO(danfuzz): Replace JSON.parse(JSON.stringify(...)) with
-        // cloneSchemaMutable() here.
         schema: llmToolExecutionHelpers.prepareSchemaForLLM(
-          JSON.parse(JSON.stringify(schema)),
+          toDeepFrozenSchema(schema),
         ) as Record<string, unknown>,
         model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
         metadata: {

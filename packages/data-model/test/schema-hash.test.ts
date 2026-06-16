@@ -5,6 +5,7 @@ import { expect } from "@std/expect";
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 
 import {
+  deepFrozenCloneAndInternSchema,
   findInternedSchema,
   hashSchema,
   internSchema,
@@ -205,6 +206,38 @@ describe("schema-hash", () => {
         });
       });
     }
+  });
+
+  describe("deepFrozenCloneAndInternSchema()", () => {
+    it("interns a deep-frozen clone without freezing the input in place", () => {
+      const input: JSONSchema = {
+        type: "object",
+        properties: { name: { type: "string" } },
+      };
+      expect(Object.isFrozen(input)).toBe(false); // precondition
+
+      const result = deepFrozenCloneAndInternSchema(input);
+
+      expect(result).not.toBe(input); // a clone, not the same object
+      expect(result).toEqual(input); // structurally equal
+      expect(isInternedSchema(result)).toBe(true);
+      expect(isDeepFrozen(result)).toBe(true);
+      // The whole point of this function: the caller's object is untouched,
+      // unlike `internSchema()`, which would deep-freeze it in place.
+      expect(Object.isFrozen(input)).toBe(false);
+    });
+
+    it("interns by content (equal inputs collapse to one instance)", () => {
+      const a = deepFrozenCloneAndInternSchema({ type: "number", title: "x" });
+      const b = deepFrozenCloneAndInternSchema({ type: "number", title: "x" });
+      expect(a).toBe(b);
+    });
+
+    it("passes `undefined` and boolean schemas through", () => {
+      expect(deepFrozenCloneAndInternSchema(undefined)).toBe(undefined);
+      expect(deepFrozenCloneAndInternSchema(true)).toBe(true);
+      expect(deepFrozenCloneAndInternSchema(false)).toBe(false);
+    });
   });
 
   describe("isInternedSchema()", () => {
