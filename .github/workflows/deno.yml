@@ -99,21 +99,7 @@ jobs:
       - name: 🧪 Run parallel workspace tests
         run: deno task test
         env:
-          DENO_COVERAGE_DIR: coverage/raw/workspace
           TEST_DISABLED_PACKAGES: runner
-
-      - name: 🧾 Write coverage report
-        if: always()
-        run: deno run --allow-read --allow-write --allow-run tasks/write-coverage-lcov.ts coverage/raw/workspace coverage/lcov/workspace.lcov
-
-      - name: 📤 Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-profile-workspace
-          path: coverage/lcov/workspace.lcov
-          retention-days: 90
-          if-no-files-found: ignore
 
   runner-test:
     name: "Runner Tests (${{ matrix.shard }}/${{ matrix.total }})"
@@ -138,8 +124,6 @@ jobs:
 
       - name: 🧪 Run runner tests
         working-directory: packages/runner
-        env:
-          DENO_COVERAGE_DIR: ../../coverage/raw/runner-${{ matrix.shard }}
         run: |
           TEST_FILES=$(deno run --allow-read ../../tasks/select-runner-test-files.ts ${{ matrix.shard }}/${{ matrix.total }})
           if [ -z "$TEST_FILES" ]; then
@@ -155,19 +139,6 @@ jobs:
             --allow-write=/tmp,/var/folders \
             --allow-run=git \
             $TEST_FILES
-
-      - name: 🧾 Write coverage report
-        if: always()
-        run: deno run --allow-read --allow-write --allow-run tasks/write-coverage-lcov.ts coverage/raw/runner-${{ matrix.shard }} coverage/lcov/runner-${{ matrix.shard }}.lcov
-
-      - name: 📤 Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-profile-runner-${{ matrix.shard }}
-          path: coverage/lcov/runner-${{ matrix.shard }}.lcov
-          retention-days: 90
-          if-no-files-found: ignore
 
   build-binaries:
     name: "Build Binaries"
@@ -221,8 +192,6 @@ jobs:
 
       - name: 🧪 Run generated patterns integration tests
         working-directory: packages/generated-patterns
-        env:
-          DENO_COVERAGE_DIR: ../../coverage/raw/generated-patterns-${{ matrix.shard }}
         run: |
           TEST_FILES=$(deno run --allow-read ../../tasks/select-generated-pattern-files.ts ${{ matrix.shard }}/${{ matrix.total }})
           if [ -z "$TEST_FILES" ]; then
@@ -235,19 +204,6 @@ jobs:
           LOG_LEVEL=warn deno test --trace-leaks -A --parallel \
             --junit-path=../../test-results/generated-patterns-${{ matrix.shard }}.xml \
             $TEST_FILES
-
-      - name: 🧾 Write coverage report
-        if: always()
-        run: deno run --allow-read --allow-write --allow-run tasks/write-coverage-lcov.ts coverage/raw/generated-patterns-${{ matrix.shard }} coverage/lcov/generated-patterns-${{ matrix.shard }}.lcov
-
-      - name: 📤 Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-profile-generated-patterns-${{ matrix.shard }}
-          path: coverage/lcov/generated-patterns-${{ matrix.shard }}.lcov
-          retention-days: 90
-          if-no-files-found: ignore
 
       - name: 📤 Upload test timing data
         if: always()
@@ -312,7 +268,6 @@ jobs:
       - name: 🧪 Run ${{ matrix.step_name }}
         working-directory: ${{ matrix.package_dir }}
         env:
-          DENO_COVERAGE_DIR: ../../coverage/raw/package-${{ matrix.suite_name }}
           HEADLESS_ENABLED: ${{ matrix.headless }}
           JUNIT_NAME: ${{ matrix.junit_name }}
           TOOLSHED_PORT: 8000
@@ -324,19 +279,6 @@ jobs:
           API_URL="http://localhost:${TOOLSHED_PORT}/" \
           INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/${JUNIT_NAME}.xml" \
           deno task integration
-
-      - name: 🧾 Write coverage report
-        if: always()
-        run: deno run --allow-read --allow-write --allow-run tasks/write-coverage-lcov.ts coverage/raw/package-${{ matrix.suite_name }} coverage/lcov/package-${{ matrix.suite_name }}.lcov
-
-      - name: 📤 Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-profile-package-${{ matrix.suite_name }}
-          path: coverage/lcov/package-${{ matrix.suite_name }}.lcov
-          retention-days: 90
-          if-no-files-found: ignore
 
       - name: 📤 Upload test timing data
         if: always()
@@ -509,23 +451,9 @@ jobs:
           mkdir -p ../../test-results
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
-          DENO_COVERAGE_DIR=../../coverage/raw/pattern-integration-${{ matrix.shard }} \
           deno test --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
             --junit-path=../../test-results/patterns-${{ matrix.shard }}.xml \
             "${TEST_FILES[@]}"
-
-      - name: 🧾 Write coverage report
-        if: always()
-        run: deno run --allow-read --allow-write --allow-run tasks/write-coverage-lcov.ts coverage/raw/pattern-integration-${{ matrix.shard }} coverage/lcov/pattern-integration-${{ matrix.shard }}.lcov
-
-      - name: 📤 Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-profile-pattern-integration-${{ matrix.shard }}
-          path: coverage/lcov/pattern-integration-${{ matrix.shard }}.lcov
-          retention-days: 90
-          if-no-files-found: ignore
 
       - name: 📤 Upload test timing data
         if: always()
@@ -558,21 +486,7 @@ jobs:
           HEADLESS=1 \
           EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true \
           CF_EXPECT_PERSISTENT_SCHEDULER_STATE=1 \
-          DENO_COVERAGE_DIR=coverage/raw/pattern-reload \
           deno task integration --junit-dir=test-results patterns-reload
-
-      - name: 🧾 Write coverage report
-        if: always()
-        run: deno run --allow-read --allow-write --allow-run tasks/write-coverage-lcov.ts coverage/raw/pattern-reload coverage/lcov/pattern-reload.lcov
-
-      - name: 📤 Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-profile-pattern-reload
-          path: coverage/lcov/pattern-reload.lcov
-          retention-days: 90
-          if-no-files-found: ignore
 
       - name: 📤 Upload test timing data
         if: always()
@@ -611,20 +525,7 @@ jobs:
         run: |
           chmod +x ./common-binaries/cf
           mkdir -p test-results
-          DENO_COVERAGE_DIR=coverage/raw/pattern-unit-${{ matrix.chunk }} CF_BINARY=./common-binaries/cf deno task integration --junit-dir=test-results pattern-tests ${{ matrix.chunk }}/${{ matrix.total }}
-
-      - name: 🧾 Write coverage report
-        if: always()
-        run: deno run --allow-read --allow-write --allow-run tasks/write-coverage-lcov.ts coverage/raw/pattern-unit-${{ matrix.chunk }} coverage/lcov/pattern-unit-${{ matrix.chunk }}.lcov
-
-      - name: 📤 Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-profile-pattern-unit-${{ matrix.chunk }}
-          path: coverage/lcov/pattern-unit-${{ matrix.chunk }}.lcov
-          retention-days: 90
-          if-no-files-found: ignore
+          CF_BINARY=./common-binaries/cf deno task integration --junit-dir=test-results pattern-tests ${{ matrix.chunk }}/${{ matrix.total }}
 
       - name: 📤 Upload test timing data
         if: always()
