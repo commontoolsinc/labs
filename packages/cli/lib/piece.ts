@@ -4,6 +4,7 @@ import { loadIdentity } from "./identity.ts";
 import {
   Cell,
   getMetaLink,
+  getPatternIdentityRef,
   NAME,
   Runtime,
   RuntimeProgram,
@@ -816,8 +817,9 @@ export async function linkPieces(
           options?.sourceScope,
         ),
     );
-    const sourcePatternLink = getMetaLink(sourcePiece.getCell(), "pattern");
-    if (sourcePatternLink === undefined) {
+    const sourceHasPattern =
+      getPatternIdentityRef(sourcePiece.getCell()) !== undefined;
+    if (!sourceHasPattern) {
       errors.push(`Source piece ${sourcePieceId} does not have pattern`);
     } else if (sourcePath.length > 0) {
       const sourceData = await timeCliPhase(
@@ -857,8 +859,9 @@ export async function linkPieces(
           options?.targetScope,
         ),
     );
-    const targetPatternLink = getMetaLink(targetPiece.getCell(), "pattern");
-    if (targetPatternLink === undefined) {
+    const targetHasPattern =
+      getPatternIdentityRef(targetPiece.getCell()) !== undefined;
+    if (!targetHasPattern) {
       errors.push(`Target piece ${targetPieceId} does not have pattern`);
     } else if (targetPath.length > 0) {
       // Check target path resolves on the input cell

@@ -1220,12 +1220,20 @@ export class PatternManager {
     if (sourceDocs === undefined) return undefined;
     const entry = sourceDocs.get(entryIdentity);
     if (entry === undefined) return undefined;
+    // Return only the AUTHORED files — the faithful replacement for the old
+    // meta-cell `program`. The verified source closure also contains
+    // runtime-INJECTED helper modules (e.g. `cfc.ts`), which the compiler
+    // resolves WITHOUT the `/<id>/` prefix (see Engine), so authored files are
+    // exactly the grounded (`/`-prefixed) ones. The full closure is used for
+    // recompilation via `loadVerifiedSourceClosure` directly, not here.
     return {
       main: entry.filename,
-      files: [...sourceDocs.values()].map((doc) => ({
-        name: doc.filename,
-        contents: doc.code,
-      })),
+      files: [...sourceDocs.values()]
+        .filter((doc) => doc.filename.startsWith("/"))
+        .map((doc) => ({
+          name: doc.filename,
+          contents: doc.code,
+        })),
     };
   }
 

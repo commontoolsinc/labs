@@ -177,7 +177,7 @@ export class PieceManager {
     );
     if (
       defaultPattern.getRaw() === undefined &&
-      defaultPattern.getMetaRaw("pattern") === undefined
+      getPatternIdentityRef(defaultPattern) === undefined
     ) {
       return undefined;
     }
