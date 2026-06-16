@@ -139,7 +139,6 @@ export default pattern<
 >(
   ({ users, myName, adminName }) => {
     const joinName = Writable.perSession.of<string>("");
-    const claimHostRevealed = Writable.perSession.of<boolean>(false);
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
 
@@ -170,7 +169,6 @@ export default pattern<
       const viewer = trimmedName(myName.get());
       return viewer !== "" && viewer !== trimmedName(adminName.get());
     });
-    const isClaimHostRevealed = computed(() => claimHostRevealed.get());
 
     return {
       [NAME]: "Participant identity",
@@ -227,65 +225,33 @@ export default pattern<
           )}
 
           {canClaimHost
-            ? (isClaimHostRevealed
-              ? (
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    flexWrap: "wrap",
-                    padding: "8px 12px",
-                    marginBottom: "16px",
-                    backgroundColor: "#eef2ff",
-                    border: "1px solid #c7d2fe",
-                    borderRadius: "8px",
-                    fontSize: "13px",
-                    color: "#3730a3",
-                  }}
+            ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  flexWrap: "wrap",
+                  padding: "8px 12px",
+                  marginBottom: "16px",
+                  backgroundColor: "#eef2ff",
+                  border: "1px solid #c7d2fe",
+                  borderRadius: "8px",
+                  fontSize: "13px",
+                  color: "#3730a3",
+                }}
+              >
+                <span>{joinHint}</span>
+                <cf-button
+                  size="sm"
+                  variant="secondary"
+                  aria-label="Become host"
+                  onClick={() => boundClaimHost.send({})}
                 >
-                  <span>{joinHint}</span>
-                  <cf-button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => {
-                      boundClaimHost.send({});
-                      claimHostRevealed.set(false);
-                    }}
-                  >
-                    Become host
-                  </cf-button>
-                  <cf-button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => claimHostRevealed.set(false)}
-                  >
-                    Cancel
-                  </cf-button>
-                </div>
-              )
-              : (
-                <div style={{ marginBottom: "16px" }}>
-                  <button
-                    type="button"
-                    aria-label="Hosting info — click to take over as host"
-                    title="Click to take over as host"
-                    style={{
-                      background: "none",
-                      border: "none",
-                      padding: 0,
-                      fontSize: "13px",
-                      color: "#6b7280",
-                      cursor: "pointer",
-                      textDecoration: "underline dotted",
-                      textUnderlineOffset: "3px",
-                    }}
-                    onClick={() => claimHostRevealed.set(true)}
-                  >
-                    {joinHint}
-                  </button>
-                </div>
-              ))
+                  Become host
+                </cf-button>
+              </div>
+            )
             : null}
         </div>
       ),
