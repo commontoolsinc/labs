@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
-import { ALL_PIECES_ID } from "../src/builtins/well-known.ts";
 import { NAME, UI } from "../src/builder/types.ts";
 import { parseWishTarget, tagMatchesHashtag } from "../src/builtins/wish.ts";
 import {
@@ -16,6 +16,11 @@ import {
 
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
+
+// Stable entity id used to address the test's "all pieces" cell. The value is
+// opaque to these tests, which set up the cell and the space link to it
+// directly; it's a real content-hash id so it stays well-formed.
+const allPiecesId = taggedHashStringOf("all-pieces");
 
 describe("wish built-in", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -46,7 +51,7 @@ describe("wish built-in", () => {
   it("resolves the well known all pieces cell", async () => {
     const allPiecesCell = runtime.getCellFromEntityId<unknown[]>(
       space,
-      { "/": ALL_PIECES_ID },
+      { "/": allPiecesId },
       [],
       undefined,
       tx,
@@ -100,13 +105,13 @@ describe("wish built-in", () => {
     expect(result.key("firstPieceTitle").get()?.result).toEqual(
       piecesData[0].title,
     );
-    expect(linkData?.id).toEqual(`of:${ALL_PIECES_ID}`);
+    expect(linkData?.id).toEqual(`of:${allPiecesId}`);
   });
 
   it("resolves semantic wishes with # prefixes", async () => {
     const allPiecesCell = runtime.getCellFromEntityId(
       space,
-      { "/": ALL_PIECES_ID },
+      { "/": allPiecesId },
       [],
       undefined,
       tx,
@@ -418,7 +423,7 @@ describe("wish built-in", () => {
     it("resolves allPieces using tag parameter", async () => {
       const allPiecesCell = runtime.getCellFromEntityId<unknown[]>(
         space,
-        { "/": ALL_PIECES_ID },
+        { "/": allPiecesId },
         [],
         undefined,
         tx,
@@ -466,7 +471,7 @@ describe("wish built-in", () => {
     it("resolves nested paths using tag and path parameters", async () => {
       const allPiecesCell = runtime.getCellFromEntityId<unknown[]>(
         space,
-        { "/": ALL_PIECES_ID },
+        { "/": allPiecesId },
         [],
         undefined,
         tx,
@@ -520,7 +525,7 @@ describe("wish built-in", () => {
     it("resolves slashed path embedded in tag query", async () => {
       const allPiecesCell = runtime.getCellFromEntityId<unknown[]>(
         space,
-        { "/": ALL_PIECES_ID },
+        { "/": allPiecesId },
         [],
         undefined,
         tx,
