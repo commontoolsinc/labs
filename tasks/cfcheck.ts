@@ -92,9 +92,37 @@ function formatError(error: unknown): string {
   return String(error);
 }
 
+// Optional sharding for CI fan-out: CFCHECK_SHARD="i/n" (1-based) checks only
+// the files where (index % n) == (i - 1). Pattern compiles are single-threaded
+// CPU work that doesn't parallelize within one process, so the way to use more
+// cores is more PROCESSES — run n shards as n parallel CI jobs (mirrors the
+// existing "Pattern Tests (1/4..4/4)" fan-out). Stale-exclusion validation
+// runs on shard 1 only (it needs the full file list).
+function parseShard(): { index: number; count: number } {
+  const raw = Deno.env.get("CFCHECK_SHARD");
+  if (!raw) return { index: 0, count: 1 };
+  const match = raw.match(/^(\d+)\/(\d+)$/);
+  if (!match) {
+    console.error(`Invalid CFCHECK_SHARD "${raw}"; expected "i/n" (1-based).`);
+    Deno.exit(1);
+  }
+  const index = Number(match[1]) - 1;
+  const count = Number(match[2]);
+  if (count < 1 || index < 0 || index >= count) {
+    console.error(`CFCHECK_SHARD "${raw}" out of range.`);
+    Deno.exit(1);
+  }
+  return { index, count };
+}
+
+const shard = parseShard();
+
 const allFiles = await collectPatternFiles(PATTERNS_DIR);
-const filesToCheck = allFiles.filter((file) =>
+const eligibleFiles = allFiles.filter((file) =>
   !EXCLUDED_PATTERN_FILES.has(file)
+);
+const filesToCheck = eligibleFiles.filter((_file, i) =>
+  i % shard.count === shard.index
 );
 const excludedPresent = allFiles.filter((file) =>
   EXCLUDED_PATTERN_FILES.has(file)
@@ -103,15 +131,19 @@ const staleExclusions = [...EXCLUDED_PATTERN_FILES].filter((file) =>
   !allFiles.includes(file)
 );
 
-if (staleExclusions.length > 0) {
+// Stale exclusions reference the full corpus, so only the first shard checks.
+if (shard.index === 0 && staleExclusions.length > 0) {
   console.error("Stale cfcheck exclusions:");
   for (const file of staleExclusions) console.error(`  ${file}`);
   Deno.exit(1);
 }
 
+const shardLabel = shard.count > 1
+  ? ` [shard ${shard.index + 1}/${shard.count}]`
+  : "";
 console.log(
   `Common Fabric checking ${filesToCheck.length} pattern files` +
-    ` (${excludedPresent.length} excluded).`,
+    ` (${excludedPresent.length} excluded)${shardLabel}.`,
 );
 
 const failures: Array<{ file: string; error: string }> = [];
