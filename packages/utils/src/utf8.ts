@@ -1,5 +1,13 @@
 /**
- * UTF8 helper functions.
+ * UTF-8 helper functions.
+ *
+ * Note: UTF-8 sort order is the same as general Unicode code point sort order,
+ * whereas UTF-16 sort order is _different_ because of the existence of
+ * surrogate code points. Any time a string sort needs to be performed in a way
+ * that is consistent across language platforms (e.g. work the same in a
+ * JavaScript environment and a Rust environmentg), UTF-8 sorting is the way to
+ * go. The unfortunate fact is that native JavaScript string sorting (`string1 <
+ * string2`, etc.) is a UTF-16 sort.
  */
 
 /**
