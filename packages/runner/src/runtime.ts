@@ -493,16 +493,6 @@ export class Runtime {
   }
 
   /**
-   * Optional read-your-writes barrier provided by the embedding client
-   * (e.g. the runtime-client worker): resolves once the client's in-flight
-   * direct cell writes — including rebase retries of rejected commits — have
-   * settled. The scheduler awaits this before running a queued event so a
-   * handler can never observe the rollback window of a write the user
-   * already saw rendered.
-   */
-  clientWriteBarrier: (() => Promise<void>) | undefined;
-
-  /**
    * Proactively checks all computations for idempotency by force-dirtying
    * and re-executing them, then comparing write snapshots.
    */

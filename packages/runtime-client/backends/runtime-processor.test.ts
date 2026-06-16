@@ -2015,10 +2015,6 @@ describe("RuntimeProcessor cell set IPC", () => {
         string,
         { seq: number; value: unknown; retriesLeft: number }
       >(),
-      pendingCellWrites: new Set<Promise<unknown>>(),
-      // deno-lint-ignore no-explicit-any
-      awaitPendingCellWrites: (RuntimeProcessor.prototype as any)
-        .awaitPendingCellWrites,
       runtime: {
         edit: () => ({
           commit: () => {
@@ -2112,51 +2108,5 @@ describe("RuntimeProcessor cell set IPC", () => {
     await flushAsync();
     // The next reapply must write "new", not "old".
     expect(setValues).toEqual(["old", "old", "new", "new"]);
-  });
-
-  it("holds the client write barrier until rejected writes finish repairing", async () => {
-    const { processor, setValues, commits, set } = makeProcessor();
-    set("Bob");
-    let released = false;
-    // deno-lint-ignore no-explicit-any
-    const barrier = (RuntimeProcessor.prototype as any).awaitPendingCellWrites
-      .call(processor)
-      .then(() => {
-        released = true;
-      });
-    commits[0].resolve(REJECTED);
-    await flushAsync();
-    expect(released).toBe(false); // reapply still in flight
-    commits[1].resolve({});
-    await flushAsync();
-    await barrier;
-    expect(released).toBe(true);
-    expect(setValues).toEqual(["Bob", "Bob"]);
-  });
-
-  it("barrier holds until the final budgeted reapply settles (no off-by-one)", async () => {
-    const { processor, commits, set } = makeProcessor();
-    set("Bob");
-    let released = false;
-    // deno-lint-ignore no-explicit-any
-    const barrier = (RuntimeProcessor.prototype as any).awaitPendingCellWrites
-      .call(processor)
-      .then(() => {
-        released = true;
-      });
-    // Exhaust the budget: 1 initial + CELL_SET_COMMIT_RETRIES (5) reapplies =
-    // 6 attempts. Reject the first 5; the barrier must stay held while the
-    // final reapply is still in flight. The off-by-one bug released it one
-    // generation early, before that last commit settled.
-    for (let i = 0; i < 5; i++) {
-      commits[i].resolve(REJECTED);
-      await flushAsync();
-      expect(released).toBe(false);
-    }
-    expect(commits.length).toBe(6); // final reapply queued, not yet settled
-    commits[5].resolve({});
-    await flushAsync();
-    await barrier;
-    expect(released).toBe(true);
   });
 });

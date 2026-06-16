@@ -304,30 +304,6 @@ export class RuntimeProcessor {
     string,
     { seq: number; value: unknown; retriesLeft: number }
   >();
-  // Read-your-writes for UI events: confirmations (incl. rebase retries) of
-  // direct cell writes still in flight. The scheduler consumes these through
-  // `runtime.clientWriteBarrier` before running a queued event — otherwise a
-  // handler can observe the rollback window of a rejected commit, i.e. state
-  // older than what the user already saw rendered (the second half of the
-  // two-browser wedge: the click consumed against a rolled-back draft no-ops
-  // cleanly).
-  private pendingCellWrites = new Set<Promise<unknown>>();
-
-  private async awaitPendingCellWrites(): Promise<void> {
-    // Re-check after each settle: a rejected write registers its rebase
-    // commit while we wait, so each iteration drains one reapply generation.
-    // A write that exhausts its budget produces 1 initial commit +
-    // CELL_SET_COMMIT_RETRIES reapplies, so we need that many iterations + 1
-    // to settle the final attempt. Still bounded, to avoid live-lock under
-    // write storms.
-    for (
-      let i = 0;
-      i <= CELL_SET_COMMIT_RETRIES && this.pendingCellWrites.size > 0;
-      i++
-    ) {
-      await Promise.allSettled([...this.pendingCellWrites]);
-    }
-  }
   private telemetry: RuntimeTelemetry;
   #telemetryEnabled = false;
 
@@ -359,10 +335,6 @@ export class RuntimeProcessor {
     this.identity = identity;
     this.telemetry = telemetry;
     this.telemetry.addEventListener("telemetry", this.#onTelemetry);
-    // Read-your-writes: the scheduler awaits this before running a queued
-    // event, so a handler can never observe the rollback window of a
-    // rejected-and-rebasing direct cell write (see handleCellSet).
-    this.runtime.clientWriteBarrier = () => this.awaitPendingCellWrites();
   }
 
   static async initialize(data: InitializationData): Promise<RuntimeProcessor> {
@@ -749,14 +721,14 @@ export class RuntimeProcessor {
         );
         apply();
       });
-      const observed = confirmation.catch((error) => {
+      confirmation.catch((error) => {
+        // A rejected confirmation promise (transport/storage throw) must not
+        // become an unhandled rejection.
         console.error(
           "[RuntimeProcessor] cell set confirmation rejected",
           error,
         );
       });
-      this.pendingCellWrites.add(observed);
-      observed.finally(() => this.pendingCellWrites.delete(observed));
     };
     apply();
   }
@@ -768,10 +740,9 @@ export class RuntimeProcessor {
     this.runtime.prepareTxForCommit(tx);
     // Local visibility is established by commit(); the promise tracks remote
     // confirmation/rollback and must not block cell IPC. The event itself is
-    // queued through the scheduler (which has its own bounded retry on
-    // commit rejection and awaits `runtime.clientWriteBarrier` before the
-    // handler runs), so a failed commit here is not retried — re-sending
-    // would double-fire the event — but it must not fail silently either.
+    // queued through the scheduler (which has its own bounded retry on commit
+    // rejection), so a failed commit here is not retried — re-sending would
+    // double-fire the event — but it must not fail silently either.
     tx.commit().then((result) => {
       if (result.error) {
         console.error(
