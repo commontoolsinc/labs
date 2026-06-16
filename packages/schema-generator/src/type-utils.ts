@@ -352,6 +352,12 @@ export function getPrimarySymbol(type: ts.Type): ts.Symbol | undefined {
 export function cloneSchemaDefinition<T extends JSONSchemaMutable>(
   schema: T,
 ): T {
+  // TODO(danfuzz): `structuredClone()` mangles non-JSON `FabricValue`s —
+  // harmless while generated schemas are plain JSON, but a problem once
+  // schema-generator covers the full `FabricValue` spectrum. It then needs a
+  // FabricValue-aware clone; also revisit whether a freely-mutable result is
+  // required at all (callers just return it), since an immutable base plus
+  // `cloneForMutation()` for scoped edits is a safer pattern.
   return (typeof schema === "boolean" ? schema : structuredClone(schema)) as T;
 }
 
