@@ -1303,6 +1303,16 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                 {/* Interactive options — vote per option */}
                 {options.map((option) => {
                   const oid = option.id;
+                  // Touch the full option shape here so the mapWithPattern
+                  // element schema includes every field the child reads.
+                  const cardOption: Option = {
+                    id: option.id,
+                    title: option.title,
+                    addedByName: option.addedByName,
+                    homePageUrl: option.homePageUrl,
+                    homePageUrlOverride: option.homePageUrlOverride,
+                    imageUrl: option.imageUrl,
+                  };
                   const rank = computed(() => {
                     const idx = ranked.findIndex(
                       (t) => t.option.id === oid,
@@ -1311,7 +1321,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   });
                   return (
                     <PollOptionCard
-                      option={option}
+                      option={cardOption}
                       rank={rank}
                       me={me}
                       isJoined={isJoined}
