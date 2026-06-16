@@ -413,11 +413,13 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       mountId,
       batchId,
     }).catch((error) => {
-      console.error(
-        "[RuntimeClient] VDom batch acknowledgement failed:",
-        error instanceof Error ? error.message : String(error),
-        error,
-      );
+      if (!isRuntimeDisposedError(error)) {
+        console.error(
+          "[RuntimeClient] VDom batch acknowledgement failed:",
+          error instanceof Error ? error.message : String(error),
+          error,
+        );
+      }
     });
   }
 
