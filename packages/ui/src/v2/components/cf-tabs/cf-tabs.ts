@@ -227,15 +227,33 @@ export class CFTabs extends BaseElement {
       return;
     }
 
-    // Track if any tab matches the current value
-    let hasMatch = false;
+    // Decide which tab to show. If the bound value matches no tab (an empty or
+    // stale initial value), fall back to the first enabled tab — but VISUALLY
+    // ONLY. We must NOT write the cell from here.
+    //
+    // cf-tabs is bound through `$value` and may be instantiated inside a render
+    // `computed()` that reads the same cell. Writing the cell during
+    // mount/selection-sync would re-trigger that computed, which re-mounts
+    // cf-tabs, which writes again — a non-settling "Too many iterations" spin
+    // (the CT-1677 settle class). So selection-sync stays a pure read: the cell
+    // is committed only on a genuine user gesture (handleTabClick /
+    // handleKeydown via emitUserChange). This mirrors cf-input, which writes
+    // only on input events and never on bind. A consumer that needs the cell to
+    // carry the default should initialize it (e.g. `Writable.of("active")`).
+    const tabValues = Array.from(tabs, (tab) => (tab as CFTab).value);
+    let effectiveValue = currentValue;
+    if (!tabValues.includes(currentValue) && tabs.length > 0) {
+      const firstEnabled = Array.from(tabs).find(
+        (tab) => !(tab as CFTab).disabled,
+      ) as CFTab | undefined;
+      if (firstEnabled) effectiveValue = firstEnabled.value;
+    }
 
     // Update tabs - use property access instead of getAttribute
     // because JSX sets properties, not attributes
     tabs.forEach((tab) => {
       const tabValue = (tab as CFTab).value;
-      if (tabValue === currentValue) {
-        hasMatch = true;
+      if (tabValue === effectiveValue) {
         tab.setAttribute("aria-selected", "true");
         tab.setAttribute("data-selected", "true");
         (tab as CFTab).selected = true;
@@ -250,7 +268,7 @@ export class CFTabs extends BaseElement {
     // because JSX sets properties, not attributes
     panels.forEach((panel) => {
       const panelValue = (panel as CFTabPanel).value;
-      if (panelValue === currentValue) {
+      if (panelValue === effectiveValue) {
         panel.removeAttribute("hidden");
         panel.setAttribute("data-selected", "true");
         (panel as CFTabPanel).hidden = false;
@@ -260,11 +278,6 @@ export class CFTabs extends BaseElement {
         (panel as CFTabPanel).hidden = true;
       }
     });
-
-    // If no tab matched the current value, default to first enabled tab
-    if (!hasMatch && tabs.length > 0) {
-      this.selectFirst();
-    }
   }
 
   private handleSlotChange = () => {
