@@ -19,7 +19,11 @@ import {
   type Pattern,
   UI,
 } from "../builder/types.ts";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import {
+  deepFrozenCloneAndInternSchema,
+  hashSchema,
+  internSchema,
+} from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getPatternEnvironment } from "../env.ts";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -1259,21 +1263,27 @@ function createWishCandidatesCell(
   return runtime.getImmutableCell(space, values, undefined, tx);
 }
 
-// asCell-wrapped schemas per serialized content. The stringify itself is one
-// unavoidable walk (through the query-result proxy when the input is one),
-// but parse + intern repeat for the same content on every wish send.
+// asCell-wrapped schemas keyed by content hash. `hashSchema()` is one
+// unavoidable walk (through the query-result proxy when the input is one) and
+// is the cache key: it is `FabricValue`-aware, so schemas that differ only in
+// non-JSON `FabricValue` content (e.g. a `FabricBytes` default) get distinct
+// keys — a `JSON.stringify()` key would collide them. The clone-and-intern
+// repeats for the same content on every wish send, so cache it.
 const schemaAsCellCache = new LRUCache<string, JSONSchema>({ capacity: 256 });
 
 function schemaAsCell(schema: unknown): JSONSchema {
   if (schema && typeof schema === "object") {
-    const json = JSON.stringify(schema);
-    let result = schemaAsCellCache.get(json);
+    const key = hashSchema(schema as JSONSchema);
+    let result = schemaAsCellCache.get(key);
     if (result === undefined) {
-      result = internSchema({
-        ...(JSON.parse(json) as Record<string, unknown>),
+      // `schema` may be a query-result proxy, so deep-frozen-clone rather than
+      // freeze in place; the clone de-proxies and preserves `FabricValue`
+      // leaves that a JSON round-trip would mangle.
+      result = deepFrozenCloneAndInternSchema({
+        ...(schema as Record<string, unknown>),
         asCell: ["cell"],
       });
-      schemaAsCellCache.put(json, result);
+      schemaAsCellCache.put(key, result);
     }
     return result;
   }
