@@ -520,6 +520,12 @@ export class Engine extends EventTarget implements Harness {
     fileCount: number;
     diagnostics: readonly { file?: string; message: string }[];
   }> {
+    // Nothing to check (e.g. an empty CI shard, or every program failed to
+    // resolve upstream) — there is no entry to compile, so return cleanly.
+    if (programs.length === 0) {
+      return { patternCount: 0, fileCount: 0, diagnostics: [] };
+    }
+
     const runTransform = options.transform ?? true;
     const unioned = new Map<string, Source>();
     const mains: string[] = [];
