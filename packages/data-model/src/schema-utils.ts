@@ -121,14 +121,6 @@ export function toDeepFrozenSchema<T extends JSONSchema | undefined>(
  * @param deep When `true`, nested objects are recursively cloned (deep copy).
  *   Defaults to `false` (shallow copy). Pass `true` when the caller intends to
  *   mutate nested properties.
- *
- * Note: do not use this on proxy-wrapped schemas from the runtime — those
- * sites currently use `JSON.parse(JSON.stringify(...))` instead.
- *
- * TODO(danfuzz): Get those runtime sites off the
- * `JSON.parse(JSON.stringify(...))` round-trip — e.g. by teaching this
- * function to handle proxy-wrapped schemas — so nothing relies on a
- * stringify/parse round-trip to normalize a schema.
  */
 export function cloneSchemaMutable(
   schema: JSONSchema | undefined,
