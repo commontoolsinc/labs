@@ -2904,7 +2904,7 @@ export function internCellLinkSchema(
   // scan and return as-is.
   if (isInternedSchema(schema)) return schema;
   if (containsCellResult(schema)) {
-    return internSchema(JSON.parse(JSON.stringify(schema)) as JSONSchema);
+    return internSchema(cloneIfNecessary(schema));
   }
   return internSchema(schema);
 }
